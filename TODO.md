@@ -1,6 +1,6 @@
-1. Split `/home/xor/vextest/decompile.py` into SRP modules under a real package boundary, starting with:
-   `cache.py`, `sidecar_metadata.py`, `project_loading.py`, `function_recovery.py`, `fallback_rendering.py`, and `postprocess_text.py`.
-   Done when `decompile.py` becomes an orchestration entrypoint instead of a kitchen-sink implementation file.
+1. Continue splitting `/home/xor/vextest/inertia_decompiler/cli.py` into SRP modules under the existing package boundary, starting with:
+   `sidecar_metadata.py`, `function_recovery.py`, `fallback_rendering.py`, `postprocess_text.py`, `interrupt_wrappers.py`, and `structured_codegen.py`.
+   Done when `cli.py` becomes an orchestration entrypoint instead of the new kitchen-sink implementation file.
 2. Cap repo-owned Python modules at roughly 300-500 lines unless a file is data-driven or generated.
    Done when every hand-maintained Python file in the root repo is either within that size band or has an explicit generated/vendor exception.
 3. Remove ladder effect from control flow in the decompiler pipeline.

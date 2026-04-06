@@ -11,6 +11,7 @@ DECOMPILATION_CACHE_SCHEMA = 1
 DECOMPILATION_CACHE_DIR = _ROOT / ".inertia_decomp_cache"
 RECOVERY_CACHE_SOURCE_FILES = (
     _ROOT / "decompile.py",
+    _ROOT / "inertia_decompiler" / "cli.py",
     _ROOT / "inertia_decompiler" / "cache.py",
     _ROOT / "inertia_decompiler" / "project_loading.py",
     _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "analysis_helpers.py",
@@ -20,6 +21,7 @@ RECOVERY_CACHE_SOURCE_FILES = (
 )
 DECOMPILATION_CACHE_SOURCE_FILES = (
     _ROOT / "decompile.py",
+    _ROOT / "inertia_decompiler" / "cli.py",
     _ROOT / "inertia_decompiler" / "cache.py",
     _ROOT / "inertia_decompiler" / "project_loading.py",
     _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "analysis_helpers.py",
@@ -144,4 +146,3 @@ def _recovery_cache_key(
     if extra:
         payload.update(extra)
     return payload
-
