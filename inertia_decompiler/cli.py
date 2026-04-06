@@ -34,6 +34,7 @@ from inertia_decompiler.project_loading import (
     _describe_exception,
 )
 from inertia_decompiler.sidecar_metadata import (
+    _exact_function_span_matches,
     _load_lst_metadata,
     _lst_code_label,
     _lst_code_region,
@@ -1105,6 +1106,60 @@ def _try_emit_trivial_sidecar_c(
     lines = [line.strip() for line in asm.splitlines() if line.strip()]
     if len(lines) == 1 and lines[0].endswith(": ret"):
         return f"void {name}(void)\n{{\n}}\n"
+    return None
+
+
+def _try_decompile_peer_sidecar_slice(
+    project: angr.Project,
+    lst_metadata: LSTMetadata | None,
+    addr: int,
+    name: str,
+    *,
+    timeout: int,
+    api_style: str,
+    binary_path: Path | None,
+) -> str | None:
+    if lst_metadata is None or "peer_exe" not in getattr(lst_metadata, "source_format", ""):
+        return None
+    region = _lst_code_region(lst_metadata, addr)
+    if region is None:
+        return None
+    peer_paths = tuple(
+        Path(path)
+        for path in getattr(project, "_inertia_peer_exe_paths", ())
+        if isinstance(path, (str, Path))
+    )
+    if not peer_paths:
+        return None
+    linked_base = getattr(getattr(project.loader, "main_object", None), "linked_base", 0) or 0
+    for peer_path in peer_paths:
+        try:
+            peer_project = _build_project(
+                peer_path,
+                force_blob=False,
+                base_addr=linked_base,
+                entry_point=getattr(project, "entry", 0),
+            )
+            peer_metadata = _load_lst_metadata(peer_path, peer_project, allow_peer_exe=False)
+        except Exception:
+            continue
+        if peer_metadata is None:
+            continue
+        if not _exact_function_span_matches(project, peer_project, start=addr, span=region):
+            continue
+        peer_name = _lst_code_label(peer_metadata, addr, getattr(peer_project, "entry", None)) or name
+        slice_result = _try_decompile_sidecar_slice(
+            peer_project,
+            peer_metadata,
+            addr,
+            peer_name,
+            timeout=timeout,
+            api_style=api_style,
+            binary_path=peer_path,
+        )
+        if slice_result is not None:
+            print(f"[dbg] peer sidecar fallback recovered {addr:#x} {peer_name} from {peer_path.name}")
+            return slice_result[1]
     return None
 
 
@@ -13094,27 +13149,70 @@ def _rank_labeled_function_entries(
     metadata: LSTMetadata | None = None,
 ) -> list[tuple[int, str]]:
     entry_addr = getattr(project, "entry", None)
+    preferred_app_prefix_buckets = (
+        ("init_", 1),
+        ("draw_", 2),
+        ("clear_", 3),
+        ("proc_", 4),
+        ("generation", 5),
+        ("pause_", 6),
+        ("rand_", 7),
+        ("timer", 8),
+        ("refresh", 9),
+    )
+    runtime_helper_names = {
+        "astart",
+        "_astart",
+        "start",
+        "_start",
+        "chkstk",
+        "_chkstk",
+        "atol",
+        "_atol",
+        "strlen",
+        "_strlen",
+        "srand",
+        "_srand",
+        "exit",
+        "_exit",
+        "amsg_exit",
+        "_amsg_exit",
+        "nullcheck",
+        "_nullcheck",
+        "cintdiv",
+        "_cintdiv",
+        "dosret0",
+        "_dosret0",
+        "dosretax",
+        "_dosretax",
+    }
 
     def _priority(item: tuple[int, str]) -> tuple[int, int, int]:
         addr, name = item
         lowered = name.lower()
         region = _lst_code_region(metadata, addr)
         size = (region[1] - region[0]) if region is not None else None
-        if addr == entry_addr:
-            return (0, 0, addr)
-        if lowered in {"start", "_start"} or lowered.endswith("_start"):
-            return (1, abs(addr - entry_addr), addr)
         if lowered in {"main", "_main"} or lowered.endswith("main"):
-            return (2, abs(addr - entry_addr), addr)
+            return (0, abs(addr - entry_addr), addr)
+        for prefix, bucket in preferred_app_prefix_buckets:
+            if lowered.startswith(prefix):
+                return (bucket, abs(addr - entry_addr), addr)
+        if addr == entry_addr:
+            return (10, 0, addr)
+        if lowered in {"start", "_start"} or lowered.endswith("_start"):
+            return (11, abs(addr - entry_addr), addr)
+        if lowered in runtime_helper_names:
+            helper_bucket = 15 if size is not None and size <= 0x20 else 16
+            return (helper_bucket, abs(addr - entry_addr), addr)
         if size is not None and size <= 0x20:
-            return (3, abs(addr - entry_addr), addr)
+            return (12, abs(addr - entry_addr), addr)
         if size is not None and size <= 0x80:
-            return (4, abs(addr - entry_addr), addr)
+            return (13, abs(addr - entry_addr), addr)
         if "padding" in lowered or lowered.startswith("align_"):
-            return (8, abs(addr - entry_addr), addr)
+            return (18, abs(addr - entry_addr), addr)
         if _is_zero_filled_region(project, addr):
-            return (7, abs(addr - entry_addr), addr)
-        return (5, abs(addr - entry_addr), addr)
+            return (17, abs(addr - entry_addr), addr)
+        return (14, abs(addr - entry_addr), addr)
 
     return sorted(labeled_entries, key=_priority)
 
@@ -13594,6 +13692,19 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n/* == c (sidecar slice fallback) == */")
                 print(slice_result[1])
                 return 0
+            peer_slice_c = _try_decompile_peer_sidecar_slice(
+                project,
+                lst_metadata,
+                func.addr,
+                func.name,
+                timeout=args.timeout,
+                api_style=args.api_style,
+                binary_path=args.binary,
+            )
+            if peer_slice_c is not None:
+                print("\n/* == c (peer sidecar fallback) == */")
+                print(peer_slice_c)
+                return 0
             trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, func.addr, func.name)
             if trivial_c is not None:
                 print("\n/* == c (trivial sidecar fallback) == */")
@@ -13945,6 +14056,21 @@ def main(argv: list[str] | None = None) -> int:
             decompiled_local += 1
             print("/* -- c (sidecar slice fallback) -- */")
             print(slice_result[1])
+            return decompiled_local, failed_local
+
+        peer_slice_c = _try_decompile_peer_sidecar_slice(
+            project,
+            lst_metadata,
+            function.addr,
+            function.name,
+            timeout=args.timeout,
+            api_style=args.api_style,
+            binary_path=args.binary,
+        )
+        if peer_slice_c is not None:
+            decompiled_local += 1
+            print("/* -- c (peer sidecar fallback) -- */")
+            print(peer_slice_c)
             return decompiled_local, failed_local
 
         trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, function.addr, function.name)
