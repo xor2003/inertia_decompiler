@@ -1488,6 +1488,7 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
         code = bytes(main_object.memory.load(0, max_addr + 1))
     except Exception:
         return []
+    metadata = getattr(project, "_inertia_lst_metadata", None)
     seed_windows = _seed_scan_windows(project)
     neighbor_targets: set[int] = set()
     entry_window_targets = _entry_window_seed_targets(project, code, linked_base=linked_base)
@@ -1529,6 +1530,12 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
         candidate = (priority, distance)
         if existing is None or candidate < existing:
             ranked[addr] = candidate
+
+    metadata_labels = _visible_code_labels(metadata) if metadata is not None else {}
+    for addr, _name in metadata_labels.items():
+        if _lst_code_region(metadata, addr) is None:
+            continue
+        _consider(addr, 0)
 
     for target in entry_window_targets:
         _consider(target, 0)

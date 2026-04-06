@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import angr
 from angr_platforms.X86_16.lst_extract import LSTMetadata, extract_lst_metadata
 from angr_platforms.X86_16.turbo_debug_tdinfo import parse_tdinfo_exe
 
-from inertia_decompiler.project_loading import _probe_ida_base_linear
+from inertia_decompiler.project_loading import _build_project, _probe_ida_base_linear
 from inertia_decompiler.sidecar_parsers import (
     _detect_flair_metadata,
     _parse_cod_sidecar_metadata,
     _parse_codeview_nb00_metadata,
+    _parse_codeview_nb0204_metadata,
     _parse_ida_lst_proc_metadata,
     _parse_ida_map_metadata,
     _parse_idc_metadata,
@@ -19,6 +21,9 @@ from inertia_decompiler.sidecar_parsers import (
     _reconcile_cod_listing_with_codeview,
     _synthesize_code_ranges,
 )
+
+
+_TRAILING_DIGITS_RE = re.compile(r"\d+$")
 
 
 def _signature_matched_code_addrs(metadata: LSTMetadata | None) -> frozenset[int]:
@@ -37,12 +42,109 @@ def _visible_code_labels(metadata: LSTMetadata | None) -> dict[int, str]:
     return {addr: name for addr, name in metadata.code_labels.items() if addr not in skipped}
 
 
+def _peer_exe_family_candidates(binary: Path) -> tuple[Path, ...]:
+    if binary.suffix.lower() != ".exe":
+        return ()
+    family_stem = _TRAILING_DIGITS_RE.sub("", binary.stem).lower()
+    if not family_stem:
+        return ()
+    binary_suffix = binary.stem[len(family_stem) :]
+    binary_index = int(binary_suffix) if binary_suffix.isdigit() else 0
+    candidates: list[tuple[tuple[int, str], Path]] = []
+    for candidate in sorted(binary.parent.iterdir()):
+        if candidate == binary or candidate.suffix.lower() != ".exe" or not candidate.is_file():
+            continue
+        candidate_family = _TRAILING_DIGITS_RE.sub("", candidate.stem).lower()
+        if candidate_family != family_stem:
+            continue
+        suffix = candidate.stem[len(family_stem) :]
+        candidate_index = int(suffix) if suffix.isdigit() else 0
+        distance = abs(candidate_index - binary_index)
+        candidates.append(((distance, candidate.name.lower()), candidate))
+    return tuple(candidate for _meta, candidate in sorted(candidates))
+
+
+def _exact_function_span_matches(
+    project: angr.Project,
+    peer_project: angr.Project,
+    *,
+    start: int,
+    span: tuple[int, int],
+) -> bool:
+    end = span[1]
+    if end <= start:
+        return False
+    size = end - start
+    try:
+        current_bytes = bytes(project.loader.memory.load(start, size))
+        peer_bytes = bytes(peer_project.loader.memory.load(start, size))
+    except Exception:
+        return False
+    return bool(current_bytes) and current_bytes == peer_bytes
+
+
+def _merge_peer_function_catalog(
+    project: angr.Project,
+    peer_project: angr.Project,
+    peer_metadata: LSTMetadata,
+) -> tuple[dict[int, str], dict[int, tuple[int, int]]]:
+    imported_labels: dict[int, str] = {}
+    imported_ranges: dict[int, tuple[int, int]] = {}
+    for addr, name in sorted(_visible_code_labels(peer_metadata).items()):
+        span = _lst_code_region(peer_metadata, addr)
+        if span is None:
+            continue
+        if not _exact_function_span_matches(project, peer_project, start=addr, span=span):
+            continue
+        imported_labels[addr] = name
+        imported_ranges[addr] = span
+    return imported_labels, imported_ranges
+
+
+def _discover_peer_exe_catalog_matches(
+    binary: Path,
+    project: angr.Project,
+    *,
+    pat_backend: str | None = None,
+    signature_catalog: Path | None = None,
+) -> tuple[dict[int, str], dict[int, tuple[int, int]], tuple[str, ...]]:
+    linked_base = getattr(getattr(project.loader, "main_object", None), "linked_base", 0) or 0
+    peer_titles: list[str] = []
+    for peer_binary in _peer_exe_family_candidates(binary):
+        try:
+            peer_project = _build_project(
+                peer_binary,
+                force_blob=False,
+                base_addr=linked_base,
+                entry_point=getattr(project, "entry", 0),
+            )
+        except Exception:
+            continue
+        peer_metadata = _load_lst_metadata(
+            peer_binary,
+            peer_project,
+            pat_backend=pat_backend,
+            signature_catalog=signature_catalog,
+            allow_peer_exe=False,
+        )
+        if peer_metadata is None or not _visible_code_labels(peer_metadata):
+            continue
+        imported_labels, imported_ranges = _merge_peer_function_catalog(project, peer_project, peer_metadata)
+        if not imported_labels:
+            continue
+        peer_titles.append(peer_binary.name)
+        setattr(project, "_inertia_peer_exe_titles", tuple(peer_titles))
+        return imported_labels, imported_ranges, ("peer_exe",)
+    return {}, {}, ()
+
+
 def _load_lst_metadata(
     binary: Path,
     project: angr.Project,
     *,
     pat_backend: str | None = None,
     signature_catalog: Path | None = None,
+    allow_peer_exe: bool = True,
 ) -> LSTMetadata | None:
     load_base_linear = _probe_ida_base_linear(binary, getattr(project.loader.main_object, "linked_base", 0))
     code_labels: dict[int, str] = {}
@@ -127,8 +229,27 @@ def _load_lst_metadata(
             binary,
             load_base_linear=load_base_linear,
         )
+        codeview_format = "codeview_nb00" if codeview_code else None
     except Exception as exc:
+        codeview_code, codeview_data, codeview_ranges = {}, {}, {}
+        codeview_format = None
         print(f"[dbg] failed to parse CodeView NB00 metadata from {binary}: {exc}")
+
+    # Try NB02/NB04 (CV2/CV4) if NB00 didn't yield results
+    if not codeview_code:
+        try:
+            cv_code, cv_data, cv_ranges = _parse_codeview_nb0204_metadata(
+                binary,
+                load_base_linear=load_base_linear,
+            )
+            if cv_code or cv_data or cv_ranges:
+                codeview_code = cv_code
+                codeview_data = cv_data
+                codeview_ranges = cv_ranges
+                codeview_format = "codeview_nb0204"
+        except Exception as exc:
+            print(f"[dbg] failed to parse CodeView NB02/NB04 metadata from {binary}: {exc}")
+
 
     try:
         tdinfo = parse_tdinfo_exe(binary, load_base_linear=load_base_linear)
@@ -170,7 +291,10 @@ def _load_lst_metadata(
             data_labels.setdefault(addr, name)
         for addr, span in codeview_ranges.items():
             code_ranges.setdefault(addr, span)
-        source_formats.append("codeview_nb00")
+        if codeview_format:
+            source_formats.append(codeview_format)
+        else:
+            source_formats.append("codeview_nb00")  # fallback
 
     external_mzre_map = Path("/home/xor/games/f15se2-re/map") / f"{binary.stem}.map"
     if external_mzre_map.exists():
@@ -206,6 +330,29 @@ def _load_lst_metadata(
         source_formats.extend(flair_formats)
     except Exception as exc:
         print(f"[dbg] failed to inspect FLAIR metadata for {binary}: {exc}")
+
+    if allow_peer_exe and not _visible_code_labels(
+        LSTMetadata(
+            data_labels={},
+            code_labels=code_labels,
+            code_ranges=code_ranges,
+            signature_code_addrs=frozenset(signature_code_addrs),
+            absolute_addrs=True,
+        )
+    ) and not data_labels:
+        try:
+            peer_code, peer_ranges, peer_formats = _discover_peer_exe_catalog_matches(
+                binary,
+                project,
+                pat_backend=pat_backend,
+                signature_catalog=signature_catalog,
+            )
+            if peer_code or peer_ranges:
+                code_labels.update(peer_code)
+                code_ranges.update(peer_ranges)
+                source_formats.extend(peer_formats)
+        except Exception as exc:
+            print(f"[dbg] failed to inspect peer EXE metadata for {binary}: {exc}")
 
     if not code_labels and not data_labels and not struct_names:
         return None

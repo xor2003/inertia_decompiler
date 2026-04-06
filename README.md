@@ -14,6 +14,54 @@ The project priorities are:
 
 The project is not aiming to become a transpiler.
 
+## Features
+
+- **DOS MZ loader** — In-tree loader with relocation handling instead of treating every sample like a flat blob
+- **DOS/BIOS interrupt modeling** — Turns `int 0x21` and friends into synthetic helper calls
+- **Far-call-aware CFG** — Extended CFG analysis that stays narrow without losing obvious callees
+- **COD and LST sidecar ingestion** — Names, procedure slicing, and evidence-backed annotations from compiler output
+- **Confidence and assumption reporting** — Uncertain recovery is visible instead of hidden
+- **Recompilable-subset ratchet** — Focus on producing output that can round-trip back to working code
+- **Region-based structuring pipeline** — Loops, ifs, gotos, and future switch recovery
+- **Corpus-first harnessing** — Regressions, bounded scans, and real-binary progress tracking
+- **FLAIR pattern extraction** — Library function identification from `.lib` and `.obj` inputs
+- **CodeView NB00 debug info** — Symbol and type recovery from CodeView debug sections
+- **Turbo Debugger TDINFO parsing** — Symbol extraction from Borland debug formats
+- **Peer-EXE catalog borrowing** — Exact byte-identical sibling executables can donate function catalogs when native sidecars are absent
+
+## Supported Formats
+
+### Binary formats
+
+| Format | Description | Loading method |
+|--------|-------------|----------------|
+| `.COM` | DOS COM files (raw executable, loads at 0x100) | `backend="blob"` or `simos="DOS"` |
+| `.EXE` | DOS MZ executables with relocations | DOS MZ loader |
+| `.EXE` (NE) | 16-bit Windows New Executable files | DOS NE loader (smoke-level support) |
+| `.BIN` | Raw binary blobs | `angr.load_shellcode()` |
+| OMF `.OBJ` | Object Module Format object files | FLAIR pattern extraction |
+| OMF `.LIB` | Object Module Format libraries | FLAIR pattern extraction |
+
+### Sidecar/debug formats
+
+| Format | Description | Usage |
+|--------|-------------|-------|
+| `.COD` | Microsoft compiler assembly listings | Procedure metadata, call names, source correlation |
+| `.LST` | Assembler listing files | Labels, procedures, symbols, segments |
+| CodeView NB00 | CodeView debug information | Symbol names, types, code/data classification |
+| TDINFO | Turbo Debugger debug information | Symbol tables, code labels |
+| `.MAP` | Linker map files | Segment ranges, symbol addresses |
+
+### Architecture modes
+
+| Mode | Status | Description |
+|------|--------|-------------|
+| Real mode (16-bit) | Supported | Primary target — full x86 real-mode semantics |
+| Real mode (32-bit) | Planned | 32-bit operands and addressing in real mode (operand-size override) |
+| Unreal mode | Planned | 32-bit segment limits via descriptor tricks while staying in real mode |
+| MZ/NE | Smoke-level supported | New Executable format (16-bit Windows) |
+| Protected mode (32-bit) | Not planned | Outside scope — focus is real-mode DOS |
+
 ## Why This Repo Is Interesting
 
 This is not just "angr pointed at 16-bit DOS." The repo already contains several pieces that are unusual enough to be fun to work on:
@@ -24,6 +72,7 @@ This is not just "angr pointed at 16-bit DOS." The repo already contains several
 - DOS and BIOS interrupt modeling that turns `int 0x21`/friends into synthetic helper calls
 - far-call-aware CFG extension so recovery can stay narrow without losing obvious callees
 - `COD` and `LST` sidecar ingestion for names, procedure slicing, and evidence-backed annotations
+- exact-span peer executable matching so stripped sibling builds can reuse verified function catalogs without guessing
 - explicit `confidence` and `assumption` reporting so uncertain recovery is visible instead of hidden
 - a recompilable-subset ratchet, not just “pretty pseudocode”
 - an in-progress region-based structuring pipeline for loops, ifs, gotos, and future switch recovery
@@ -150,6 +199,8 @@ For legacy script usage:
 ./decompile.py test.bin
 ```
 
+When native sidecars such as `.COD`, `.LST`, `.MAP`, or embedded debug info are absent, Inertia can also reuse function labels/ranges from a nearby sibling executable in the same family only when the bytes at the same function entry and across the full claimed function span match exactly. This peer-derived evidence is reported as `peer_exe` and is kept separate from native sidecar sources.
+
 ## Project docs and current status
 
 **Main roadmap** (deterministic, actionable):
@@ -185,6 +236,14 @@ Focused commands:
 cd /home/xor/vextest/angr_platforms && ../.venv/bin/python -m pytest -q tests/test_x86_16_smoketest.py tests/test_x86_16_cod_samples.py tests/test_x86_16_dos_mz_loader.py tests/test_x86_16_sample_matrix.py tests/test_x86_16_runtime_samples.py
 cd /home/xor/vextest/angr_platforms && ../.venv/bin/python scripts/scan_cod_dir.py ../cod --mode scan-safe --timeout-sec 5 --max-memory-mb 1024
 ```
+
+## Failure Handling
+
+When recovery fails, prefer an honest fallback over silence:
+
+- If the lifter crashes or lifting breaks, dump assembly around the first failing address and investigate the lifter.
+- If the decompiler times out, emit a non-optimized decompilation fallback before dropping to raw assembly, then investigate the timeout.
+- If the decompiler crashes, report the failure clearly, preserve the best available assembly or non-optimized output, and investigate the crash instead of masking it.
 
 
 ## x86-16 Quick Start
