@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import re
+import struct
 from functools import lru_cache
 from pathlib import Path
 
 import angr
 from angr_platforms.X86_16.cod_extract import CODListingMetadata, extract_cod_listing_metadata
 from angr_platforms.X86_16.codeview_nb00 import parse_codeview_nb00
+from angr_platforms.X86_16.codeview_nb02_nb04 import parse_codeview_nb0204_bytes
 from angr_platforms.X86_16.flair_extract import list_flair_sig_libraries, match_flair_startup_entry
+from angr_platforms.X86_16.ne_exe_parse import parse_ne_exe
 
 from omf_pat import PatModule, discover_local_pat_matches, match_pat_modules, parse_pat_file
 from signature_catalog import match_signature_catalog
@@ -166,6 +169,77 @@ def _parse_codeview_nb00_metadata(
     code_labels = {addr: name for addr, name in parsed.code_labels.items() if _label_looks_like_code(name)}
     data_labels = {addr: name for addr, name in parsed.data_labels.items() if addr not in code_labels}
     code_ranges = {addr: span for addr, span in parsed.code_ranges.items() if addr in code_labels and span[0] < span[1]}
+    return code_labels, data_labels, code_ranges
+
+
+def _parse_codeview_nb0204_metadata(
+    binary: Path,
+    *,
+    load_base_linear: int,
+) -> tuple[dict[int, str], dict[int, str], dict[int, tuple[int, int]]]:
+    """
+    Parse CodeView NB02/NB04 debug information.
+    
+    Extracts:
+    - Function names (from S_GPROC16, SST_PUBLIC)
+    - Global/local data (from S_GDATA16, S_LDATA16)
+    - Stack variables (from S_BPREL16, available via procedures dict)
+    """
+    try:
+        data = binary.read_bytes()
+        parsed = parse_codeview_nb0204_bytes(data, load_base_linear=load_base_linear)
+    except (OSError, ValueError):
+        parsed = None
+    
+    if parsed is None:
+        return {}, {}, {}
+    
+    code_labels = {addr: name for addr, name in parsed.code_labels.items() if _label_looks_like_code(name)}
+    data_labels = {addr: name for addr, name in parsed.data_labels.items() if addr not in code_labels}
+    
+    # Synthesize code ranges from procedures if available
+    code_ranges: dict[int, tuple[int, int]] = {}
+    for proc in parsed.procedures:
+        if proc.is_procedure() and proc.name:
+            linear_start = load_base_linear + (proc.segment << 4) + proc.offset if proc.segment is not None else load_base_linear + proc.offset
+            if proc.length and proc.length > 0:
+                linear_end = linear_start + proc.length
+                if linear_start in code_labels:
+                    code_ranges[linear_start] = (linear_start, linear_end)
+    
+    return code_labels, data_labels, code_ranges
+
+
+def _parse_ne_exe_metadata(
+    binary: Path,
+    *,
+    load_base_linear: int,
+    project: angr.Project | None = None,
+) -> tuple[dict[int, str], dict[int, str], dict[int, tuple[int, int]]]:
+    """
+    Parse NE (New Executable) format Windows/OS2 16-bit binaries.
+    
+    Integrates with CLE DOSNE loader for accurate segment-to-linear address mapping.
+    
+    Extracts:
+    - Function names from resident names table
+    - Entry point addresses from entry table + segment table
+    - Uses loader's segment mappings if project available
+    """
+    try:
+        ne_info = parse_ne_exe(binary, load_base_linear=load_base_linear, project=project)
+    except (OSError, ValueError, struct.error):
+        ne_info = None
+    
+    if ne_info is None or not ne_info.code_labels:
+        return {}, {}, {}
+    
+    code_labels = {addr: name for addr, name in ne_info.code_labels.items() if _label_looks_like_code(name)}
+    data_labels = {addr: name for addr, name in ne_info.data_labels.items() if addr not in code_labels}
+    
+    # NE format doesn't provide code range info directly, would need debug tables
+    code_ranges: dict[int, tuple[int, int]] = {}
+    
     return code_labels, data_labels, code_ranges
 
 

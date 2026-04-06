@@ -18,6 +18,7 @@ from inertia_decompiler.sidecar_parsers import (
     _parse_idc_metadata,
     _parse_inc_struct_names,
     _parse_mzre_map_metadata,
+    _parse_ne_exe_metadata,
     _reconcile_cod_listing_with_codeview,
     _synthesize_code_ranges,
 )
@@ -256,6 +257,28 @@ def _load_lst_metadata(
         except Exception as exc:
             print(f"[dbg] failed to parse CodeView NB02/NB04 metadata from {binary}: {exc}")
 
+    # Try NE/Win16 format if CodeView didn't yield results
+    ne_format = None
+    if not codeview_code:
+        try:
+            ne_code, ne_data, ne_ranges = _parse_ne_exe_metadata(
+                binary,
+                load_base_linear=load_base_linear,
+                project=project,
+            )
+            if ne_code or ne_data or ne_ranges:
+                codeview_code = ne_code
+                codeview_data = ne_data
+                codeview_ranges = ne_ranges
+                ne_format = "ne_exe"
+        except Exception as exc:
+            print(f"[dbg] failed to parse NE format metadata from {binary}: {exc}")
+
+    if codeview_code or codeview_data or codeview_ranges:
+        code_labels.update(codeview_code)
+        data_labels.update(codeview_data)
+        code_ranges.update(codeview_ranges)
+        source_formats.append(ne_format or codeview_format or "codeview_unknown")
 
     try:
         tdinfo = parse_tdinfo_exe(binary, load_base_linear=load_base_linear)
@@ -289,18 +312,6 @@ def _load_lst_metadata(
                 source_formats.append("cod_listing")
         except Exception as exc:
             print(f"[dbg] failed to parse COD listing {sibling_cod_path}: {exc}")
-
-    if codeview_code or codeview_data or codeview_ranges:
-        for addr, name in codeview_code.items():
-            code_labels.setdefault(addr, name)
-        for addr, name in codeview_data.items():
-            data_labels.setdefault(addr, name)
-        for addr, span in codeview_ranges.items():
-            code_ranges.setdefault(addr, span)
-        if codeview_format:
-            source_formats.append(codeview_format)
-        else:
-            source_formats.append("codeview_nb00")  # fallback
 
     external_mzre_map = Path("/home/xor/games/f15se2-re/map") / f"{binary.stem}.map"
     if external_mzre_map.exists():
