@@ -135,6 +135,11 @@ def _discover_peer_exe_catalog_matches(
         peer_titles.append(peer_binary.name)
         setattr(project, "_inertia_peer_exe_titles", tuple(peer_titles))
         setattr(project, "_inertia_peer_exe_paths", (str(peer_binary),))
+        peer_cache = getattr(project, "_inertia_peer_sidecar_cache", None)
+        if not isinstance(peer_cache, dict):
+            peer_cache = {}
+            setattr(project, "_inertia_peer_sidecar_cache", peer_cache)
+        peer_cache[str(peer_binary)] = (peer_project, peer_metadata)
         return imported_labels, imported_ranges, ("peer_exe",)
     return {}, {}, ()
 

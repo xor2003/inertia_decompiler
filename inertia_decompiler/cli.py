@@ -1172,18 +1172,11 @@ def _try_decompile_peer_sidecar_slice(
     )
     if not peer_paths:
         return None
-    linked_base = getattr(getattr(project.loader, "main_object", None), "linked_base", 0) or 0
     for peer_path in peer_paths:
-        try:
-            peer_project = _build_project(
-                peer_path,
-                force_blob=False,
-                base_addr=linked_base,
-                entry_point=getattr(project, "entry", 0),
-            )
-            peer_metadata = _load_lst_metadata(peer_path, peer_project, allow_peer_exe=False)
-        except Exception:
+        peer_bundle = _load_peer_sidecar_bundle(project, peer_path)
+        if peer_bundle is None:
             continue
+        peer_project, peer_metadata = peer_bundle
         if peer_metadata is None:
             continue
         if not _exact_function_span_matches(project, peer_project, start=addr, span=region):
@@ -1202,6 +1195,33 @@ def _try_decompile_peer_sidecar_slice(
             print(f"[dbg] peer sidecar fallback recovered {addr:#x} {peer_name} from {peer_path.name}")
             return slice_result[1]
     return None
+
+
+def _load_peer_sidecar_bundle(
+    project: angr.Project,
+    peer_path: Path,
+) -> tuple[angr.Project, LSTMetadata | None] | None:
+    cache = getattr(project, "_inertia_peer_sidecar_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        setattr(project, "_inertia_peer_sidecar_cache", cache)
+    cache_key = str(peer_path)
+    if cache_key in cache:
+        return cache[cache_key]
+    linked_base = getattr(getattr(project.loader, "main_object", None), "linked_base", 0) or 0
+    try:
+        peer_project = _build_project(
+            peer_path,
+            force_blob=False,
+            base_addr=linked_base,
+            entry_point=getattr(project, "entry", 0),
+        )
+        peer_metadata = _load_lst_metadata(peer_path, peer_project, allow_peer_exe=False)
+    except Exception:
+        cache[cache_key] = None
+        return None
+    cache[cache_key] = (peer_project, peer_metadata)
+    return cache[cache_key]
 
 
 def _function_skip_reason(function):
