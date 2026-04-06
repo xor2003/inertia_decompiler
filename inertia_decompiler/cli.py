@@ -13846,19 +13846,6 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n/* == c (sidecar slice fallback) == */")
                 print(slice_result[1])
                 return 0
-            peer_slice_c = _try_decompile_peer_sidecar_slice(
-                project,
-                lst_metadata,
-                func.addr,
-                func.name,
-                timeout=args.timeout,
-                api_style=args.api_style,
-                binary_path=args.binary,
-            )
-            if peer_slice_c is not None:
-                print("\n/* == c (peer sidecar fallback) == */")
-                print(peer_slice_c)
-                return 0
             trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, func.addr, func.name)
             if trivial_c is not None:
                 print("\n/* == c (trivial sidecar fallback) == */")
@@ -14210,21 +14197,6 @@ def main(argv: list[str] | None = None) -> int:
             decompiled_local += 1
             print("/* -- c (sidecar slice fallback) -- */")
             print(slice_result[1])
-            return decompiled_local, failed_local
-
-        peer_slice_c = _try_decompile_peer_sidecar_slice(
-            project,
-            lst_metadata,
-            function.addr,
-            function.name,
-            timeout=args.timeout,
-            api_style=args.api_style,
-            binary_path=args.binary,
-        )
-        if peer_slice_c is not None:
-            decompiled_local += 1
-            print("/* -- c (peer sidecar fallback) -- */")
-            print(peer_slice_c)
             return decompiled_local, failed_local
 
         trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, function.addr, function.name)

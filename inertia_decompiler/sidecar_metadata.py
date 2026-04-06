@@ -337,29 +337,6 @@ def _load_lst_metadata(
     except Exception as exc:
         print(f"[dbg] failed to inspect FLAIR metadata for {binary}: {exc}")
 
-    if allow_peer_exe and not _visible_code_labels(
-        LSTMetadata(
-            data_labels={},
-            code_labels=code_labels,
-            code_ranges=code_ranges,
-            signature_code_addrs=frozenset(signature_code_addrs),
-            absolute_addrs=True,
-        )
-    ) and not data_labels:
-        try:
-            peer_code, peer_ranges, peer_formats = _discover_peer_exe_catalog_matches(
-                binary,
-                project,
-                pat_backend=pat_backend,
-                signature_catalog=signature_catalog,
-            )
-            if peer_code or peer_ranges:
-                code_labels.update(peer_code)
-                code_ranges.update(peer_ranges)
-                source_formats.extend(peer_formats)
-        except Exception as exc:
-            print(f"[dbg] failed to inspect peer EXE metadata for {binary}: {exc}")
-
     if not code_labels and not data_labels and not struct_names:
         return None
 
