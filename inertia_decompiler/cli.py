@@ -1265,6 +1265,19 @@ def _recovery_score_good_enough(score: tuple[int, int]) -> bool:
     return total_bytes >= 0x40 or blocks >= 4
 
 
+def _exact_region_recovery_looks_truncated(
+    function,
+    exact_region: tuple[int, int] | None,
+) -> bool:
+    if exact_region is None:
+        return False
+    region_size = max(0, exact_region[1] - exact_region[0])
+    if region_size < 0x40:
+        return False
+    _blocks, total_bytes = _function_recovery_score(function)
+    return total_bytes < max(0x20, region_size // 3)
+
+
 def _recover_candidate_function_pair(
     candidate_project,
     *,
@@ -13126,7 +13139,27 @@ def _recover_lst_function(
                 func = None
 
             if cfg is not None and func is not None:
-                pass
+                if _exact_region_recovery_looks_truncated(func, exact_region):
+                    best_cfg = cfg
+                    best_func = func
+                    best_score = _function_recovery_score(func)
+                    for data_refs in (False, True):
+                        try:
+                            retried_cfg, retried_func = _pick_function(
+                                project,
+                                addr,
+                                regions=[exact_region],
+                                data_references=data_refs,
+                                force_smart_scan=False,
+                            )
+                        except KeyError:
+                            continue
+                        retried_score = _function_recovery_score(retried_func)
+                        if retried_score > best_score:
+                            best_cfg = retried_cfg
+                            best_func = retried_func
+                            best_score = retried_score
+                    cfg, func = best_cfg, best_func
             else:
                 last_error = None
                 for candidate_window in candidate_windows:
