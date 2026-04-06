@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from pathlib import Path
 
 import angr
@@ -8,7 +9,7 @@ from angr_platforms.X86_16.cod_extract import CODListingMetadata, extract_cod_li
 from angr_platforms.X86_16.codeview_nb00 import parse_codeview_nb00
 from angr_platforms.X86_16.flair_extract import list_flair_sig_libraries, match_flair_startup_entry
 
-from omf_pat import discover_local_pat_matches
+from omf_pat import PatModule, discover_local_pat_matches, match_pat_modules, parse_pat_file
 from signature_catalog import match_signature_catalog
 
 
@@ -255,7 +256,18 @@ def _detect_flair_metadata(
     code_ranges: dict[int, tuple[int, int]] = {}
     source_parts: list[str] = []
     startup_matches = match_flair_startup_entry(entry_bytes, flair_root)
-    if startup_matches:
+    startup_pat_labels, startup_pat_ranges = _match_flair_startup_pat_functions(
+        project,
+        flair_root,
+        backend=pat_backend,
+    )
+    if startup_pat_labels or startup_pat_ranges:
+        source_parts.append("flair_pat")
+        for addr, name in startup_pat_labels.items():
+            code_labels.setdefault(addr, name)
+        for addr, span in startup_pat_ranges.items():
+            code_ranges.setdefault(addr, span)
+    elif startup_matches:
         source_parts.append("flair_pat")
         first = startup_matches[0]
         for offset, name in first.public_names:
@@ -292,6 +304,42 @@ def _detect_flair_metadata(
         source_parts.extend(local_pat_matches.source_formats)
         setattr(project, "_inertia_flair_local_pat_sources", tuple(dict.fromkeys(local_pat_matches.source_formats)))
     return code_labels, code_ranges, tuple(source_parts)
+
+
+@lru_cache(maxsize=1)
+def _load_flair_startup_pat_modules(flair_root: str) -> tuple[PatModule, ...]:
+    root = Path(flair_root)
+    modules: list[PatModule] = []
+    for pat_path in sorted((root / "startup").rglob("*.pat")):
+        try:
+            modules.extend(parse_pat_file(pat_path))
+        except OSError:
+            continue
+    return tuple(modules)
+
+
+def _match_flair_startup_pat_functions(
+    project: angr.Project,
+    flair_root: Path,
+    *,
+    backend: str | None = None,
+) -> tuple[dict[int, str], dict[int, tuple[int, int]]]:
+    main_object = getattr(project.loader, "main_object", None)
+    memory = getattr(project.loader, "memory", None)
+    if main_object is None or memory is None:
+        return {}, {}
+    min_addr = getattr(main_object, "min_addr", None)
+    max_addr = getattr(main_object, "max_addr", None)
+    if not isinstance(min_addr, int) or not isinstance(max_addr, int) or max_addr < min_addr:
+        return {}, {}
+    try:
+        image_bytes = bytes(memory.load(min_addr, max_addr - min_addr + 1))
+    except Exception:
+        return {}, {}
+    modules = _load_flair_startup_pat_modules(str(flair_root))
+    if not modules:
+        return {}, {}
+    return match_pat_modules(image_bytes, min_addr, modules, backend=backend)
 
 
 def _parse_mzre_map_metadata(
