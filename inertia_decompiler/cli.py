@@ -966,25 +966,55 @@ def _try_decompile_sidecar_slice(
         return None
 
     def _recover_and_decompile():
-        slice_project = _build_project_from_bytes(code, base_addr=start, entry_point=start)
-        cfg, func = _pick_function_lean(
-            slice_project,
-            start,
-            regions=[(start, end)],
-            data_references=False,
-            extend_far_calls=False,
+        recovery_attempts = (
+            ("lean", lambda slice_project: _pick_function_lean(
+                slice_project,
+                start,
+                regions=[(start, end)],
+                data_references=False,
+                extend_far_calls=False,
+            )),
+            ("full-no-refs", lambda slice_project: _pick_function(
+                slice_project,
+                start,
+                regions=[(start, end)],
+                data_references=False,
+                force_smart_scan=False,
+            )),
+            ("full-with-refs", lambda slice_project: _pick_function(
+                slice_project,
+                start,
+                regions=[(start, end)],
+                data_references=True,
+                force_smart_scan=False,
+            )),
         )
-        func.name = name
-        status, payload, *_ = _decompile_function_with_stats(
-            slice_project,
-            cfg,
-            func,
-            max(1, min(timeout, 6)),
-            api_style,
-            binary_path,
-            lst_metadata=lst_metadata,
-        )
-        return status, payload
+        last_failure: tuple[str, str] | None = None
+        for attempt_name, recover in recovery_attempts:
+            try:
+                slice_project = _build_project_from_bytes(code, base_addr=start, entry_point=start)
+                cfg, func = recover(slice_project)
+            except Exception as ex:  # noqa: BLE001
+                last_failure = ("error", f"{attempt_name} recovery: {_describe_exception(ex)}")
+                continue
+            func.name = name
+            status, payload, *_ = _decompile_function_with_stats(
+                slice_project,
+                cfg,
+                func,
+                max(1, min(timeout, 6)),
+                api_style,
+                binary_path,
+                lst_metadata=lst_metadata,
+            )
+            if status == "ok":
+                if attempt_name != "lean":
+                    print(f"[dbg] sidecar slice fallback recovered {addr:#x} {name} via {attempt_name}")
+                return status, payload
+            last_failure = (status, payload)
+        if last_failure is None:
+            return "error", "sidecar slice recovery did not run"
+        return last_failure
 
     try:
         status, payload = _run_with_timeout_in_daemon_thread(
