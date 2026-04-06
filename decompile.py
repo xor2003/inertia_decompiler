@@ -22,6 +22,19 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+from inertia_decompiler.cache import (
+    _function_decompilation_cache_key,
+    _load_cache_json,
+    _recovery_cache_key,
+    _store_cache_json,
+)
+from inertia_decompiler.project_loading import (
+    _build_project,
+    _build_project_from_bytes,
+    _describe_exception,
+    _probe_ida_base_linear,
+)
+
 
 _ROOT = Path(__file__).resolve().parent
 _VENV_PYTHON = _ROOT / "venv" / "bin" / "python"
@@ -176,7 +189,6 @@ except Exception:
 
 import angr_platforms.X86_16  # noqa: F401
 
-from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.analysis_helpers import (
     DOS_SERVICE_BASE_ADDR,
     InterruptCall,
@@ -259,7 +271,6 @@ def _parse_int(value: str) -> int:
     return int(value, 0)
 
 
-_IDA_BASE_ADDRESS_RE = re.compile(r"Base Address:\s*([0-9A-Fa-f]+)h", re.IGNORECASE)
 _IDA_MAP_SEGMENT_RE = re.compile(
     r"^\s*([0-9A-Fa-f]+)H\s+[0-9A-Fa-f]+H\s+[0-9A-Fa-f]+H\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*$"
 )
@@ -324,24 +335,6 @@ def _label_looks_like_function(name: str) -> bool:
         if any(token in prefix for token in _CONTROL_FLOW_LABEL_TOKENS):
             return False
     return True
-
-
-def _probe_ida_base_linear(binary: Path, fallback_linear: int) -> int:
-    lst_path = binary.with_suffix(".lst")
-    if not lst_path.exists():
-        return fallback_linear
-    try:
-        with lst_path.open("r", encoding="utf-8", errors="ignore") as fp:
-            for _ in range(64):
-                line = fp.readline()
-                if not line:
-                    break
-                match = _IDA_BASE_ADDRESS_RE.search(line)
-                if match is not None:
-                    return int(match.group(1), 16) << 4
-    except OSError:
-        return fallback_linear
-    return fallback_linear
 
 
 def _parse_ida_map_metadata(
@@ -748,6 +741,50 @@ def _entry_window_seed_targets(
     return entry_targets
 
 
+def _linear_function_seed_targets(
+    project: angr.Project,
+    start_addr: int,
+    *,
+    max_scan: int = 0x200,
+    include_jumps: bool = True,
+) -> set[int]:
+    try:
+        code = bytes(project.loader.memory.load(start_addr, max_scan))
+    except Exception:
+        return set()
+    if not code:
+        return set()
+
+    targets: set[int] = set()
+    offset = 0
+    while offset < len(code):
+        window = code[offset : offset + 16]
+        if not window:
+            break
+        insn = next(project.arch.capstone.disasm(window, start_addr + offset, 1), None)
+        if insn is None or insn.size <= 0:
+            break
+        opcode = code[offset]
+        if opcode == 0xE8 and offset + 2 < len(code):
+            rel = int.from_bytes(code[offset + 1 : offset + 3], "little", signed=True)
+            targets.add(insn.address + 3 + rel)
+        elif opcode == 0x9A and offset + 4 < len(code):
+            off = int.from_bytes(code[offset + 1 : offset + 3], "little")
+            seg = int.from_bytes(code[offset + 3 : offset + 5], "little")
+            linked_base = getattr(getattr(project.loader, "main_object", None), "linked_base", 0)
+            targets.add(linked_base + (seg << 4) + off)
+        elif include_jumps and opcode == 0xE9 and offset + 2 < len(code):
+            rel = int.from_bytes(code[offset + 1 : offset + 3], "little", signed=True)
+            targets.add(insn.address + 3 + rel)
+        elif include_jumps and opcode == 0xEB and offset + 1 < len(code):
+            rel = int.from_bytes(code[offset + 1 : offset + 2], "little", signed=True)
+            targets.add(insn.address + 2 + rel)
+        offset += insn.size
+        if insn.mnemonic.lower() in {"ret", "retf", "iret"}:
+            break
+    return targets
+
+
 def _load_lst_metadata(
     binary: Path,
     project: angr.Project,
@@ -755,6 +792,13 @@ def _load_lst_metadata(
     pat_backend: str | None = None,
     signature_catalog: Path | None = None,
 ) -> LSTMetadata | None:
+    # Helper metadata precedence:
+    # 1. local sidecars next to the binary (.map/.lst/.idc/.inc/.COD)
+    # 2. embedded debug info inside the binary (CodeView / TDInfo)
+    # 3. synthesized signature matches (FLAIR/PAT)
+    #
+    # Nearby helper files should stay authoritative because they are the easiest for the user to inspect
+    # and are usually closer to the exact build than generic signature catalogs.
     load_base_linear = _probe_ida_base_linear(binary, getattr(project.loader.main_object, "linked_base", 0))
     code_labels: dict[int, str] = {}
     data_labels: dict[int, str] = {}
@@ -1130,115 +1174,6 @@ def _lst_code_region(metadata: LSTMetadata | None, addr: int | None) -> tuple[in
     return None
 
 
-def _build_project(path: Path, *, force_blob: bool, base_addr: int, entry_point: int) -> angr.Project:
-    suffix = path.suffix.lower()
-
-    print(f"[dbg] build_project: path={path} suffix={suffix} force_blob={force_blob}")
-    sys.stdout.flush()
-    if force_blob or suffix in {".bin", ".raw"}:
-        return angr.Project(
-            path,
-            auto_load_libs=False,
-            main_opts={
-                "backend": "blob",
-                "arch": Arch86_16(),
-                "base_addr": base_addr,
-                "entry_point": entry_point,
-            },
-        )
-
-    if suffix == ".com":
-        return angr.Project(
-            path,
-            auto_load_libs=False,
-            main_opts={
-                "backend": "blob",
-                "arch": Arch86_16(),
-                "base_addr": base_addr,
-                "entry_point": entry_point,
-            },
-            simos="DOS",
-        )
-
-    packed_exe = _detect_packed_mz_executable(path)
-    if packed_exe and suffix == ".exe":
-        unpacked = _unpack_lzexe_image(path.read_bytes(), base_addr=base_addr)
-        project = angr.Project(
-            io.BytesIO(unpacked.code),
-            auto_load_libs=False,
-            main_opts={
-                "backend": "blob",
-                "arch": Arch86_16(),
-                "base_addr": base_addr,
-                "entry_point": unpacked.entry_point,
-            },
-            simos="DOS",
-        )
-        project._inertia_packed_exe = packed_exe
-        print(
-            f"[dbg] unpacked {packed_exe}: entry={hex(unpacked.entry_point)} size={len(unpacked.code)}"
-        )
-        sys.stdout.flush()
-        return project
-
-    if suffix == ".exe":
-        explicit_base = _probe_ida_base_linear(path, base_addr << 4 if base_addr < 0x10000 else base_addr)
-        try:
-            proj = angr.Project(
-                path,
-                auto_load_libs=False,
-                main_opts={
-                    "backend": "dos_mz",
-                    "base_addr": explicit_base,
-                },
-                simos="DOS",
-            )
-            print(f"[dbg] DOS MZ load base={hex(explicit_base)}")
-            sys.stdout.flush()
-            print(f"[dbg] project built: arch={proj.arch.name} entry={hex(proj.entry)}")
-            sys.stdout.flush()
-            return proj
-        except Exception as ex:
-            print(f"[dbg] explicit DOS MZ load failed at {hex(explicit_base)}: {_describe_exception(ex)}")
-            sys.stdout.flush()
-
-    try:
-        proj = angr.Project(path, auto_load_libs=False)
-    except Exception as ex:
-        if suffix == ".exe" and "Position-DEPENDENT object" in str(ex):
-            explicit_base = _probe_ida_base_linear(path, base_addr << 4 if base_addr < 0x10000 else base_addr)
-            print(f"[dbg] retrying DOS MZ load with explicit base_addr={hex(explicit_base)} after {type(ex).__name__}")
-            sys.stdout.flush()
-            proj = angr.Project(
-                path,
-                auto_load_libs=False,
-                main_opts={
-                    "backend": "dos_mz",
-                    "base_addr": explicit_base,
-                },
-            )
-        else:
-            raise
-    print(f"[dbg] project built: arch={proj.arch.name} entry={hex(proj.entry)}")
-    sys.stdout.flush()
-    return proj
-
-
-def _build_project_from_bytes(code: bytes, *, base_addr: int, entry_point: int) -> angr.Project:
-    arch = Arch86_16()
-    arch.bits = max(arch.bits, 32)
-    return angr.Project(
-        io.BytesIO(code),
-        auto_load_libs=False,
-        main_opts={
-            "backend": "blob",
-            "arch": arch,
-            "base_addr": base_addr,
-            "entry_point": entry_point,
-        },
-    )
-
-
 def _infer_x86_16_linear_region(project: angr.Project, start_addr: int, *, window: int) -> tuple[int, int]:
     end_limit = start_addr + max(window, 1)
     current = start_addr
@@ -1488,144 +1423,6 @@ def _recover_cfg(
         patch_interrupt_service_call_sites(cfg.functions[project.entry], binary_path)
     seed_calling_conventions(cfg)
     return cfg
-
-
-def _describe_exception(ex: Exception) -> str:
-    detail = str(ex).strip()
-    ex_type = type(ex).__name__
-    if detail:
-        return f"{ex_type}: {detail}"
-    rep = repr(ex).strip()
-    if rep and rep != f"{ex_type}()":
-        return f"{ex_type}: {rep}"
-    return ex_type
-
-
-def _detect_packed_mz_executable(path: Path) -> str | None:
-    try:
-        header = path.read_bytes()[:0x40]
-    except OSError:
-        return None
-    if len(header) < 0x20 or header[:2] != b"MZ":
-        return None
-    signature = header[0x1C:0x20]
-    if signature == b"LZ90":
-        return "LZEXE 0.90"
-    if signature == b"LZ91":
-        return "LZEXE 0.91"
-    if signature[:2] == b"PK":
-        return "PKLITE"
-    return None
-
-
-@dataclass(frozen=True)
-class _UnpackedLZEXEImage:
-    kind: str
-    code: bytes
-    entry_point: int
-
-
-class _LZEXEBitStream:
-    def __init__(self, data: bytes, offset: int):
-        self._data = data
-        self._pos = offset
-        self._count = 0
-        self._buffer = 0
-        self._load_word()
-
-    def _load_word(self) -> None:
-        self._count = 0x10
-        self._buffer = self._data[self._pos] | (self._data[self._pos + 1] << 8)
-        self._pos += 2
-
-    def bit(self) -> int:
-        value = self._buffer & 1
-        self._buffer >>= 1
-        self._count -= 1
-        if self._count == 0:
-            self._load_word()
-        return value
-
-    def byte(self) -> int:
-        value = self._data[self._pos]
-        self._pos += 1
-        return value
-
-
-def _unpack_lzexe_image(data: bytes, *, base_addr: int) -> _UnpackedLZEXEImage:
-    if len(data) < 0x40 or data[:2] != b"MZ":
-        raise ValueError("Not a DOS MZ executable.")
-    signature = data[0x1C:0x20]
-    if signature != b"LZ91":
-        raise ValueError(f"Unsupported packed executable format: {signature!r}")
-
-    header_paragraphs = int.from_bytes(data[0x08:0x0A], "little")
-    initial_cs = int.from_bytes(data[0x16:0x18], "little")
-    initial_ip = int.from_bytes(data[0x14:0x16], "little")
-    lz_header_offset = (header_paragraphs + initial_cs) << 4
-    lz_entry = lz_header_offset + initial_ip
-    if data[lz_entry : lz_entry + 4] != b"\x06\x0e\x1f\x8b":
-        raise ValueError("Packed executable entry does not match LZEXE 0.91 stub.")
-
-    unpacked_ip = int.from_bytes(data[lz_header_offset : lz_header_offset + 2], "little")
-    unpacked_cs = int.from_bytes(data[lz_header_offset + 2 : lz_header_offset + 4], "little")
-    packed_paragraphs = int.from_bytes(data[lz_header_offset + 8 : lz_header_offset + 10], "little")
-    unpacked_paragraphs = int.from_bytes(data[lz_header_offset + 10 : lz_header_offset + 12], "little")
-    packed_stream_offset = lz_header_offset - (packed_paragraphs << 4)
-    output = bytearray((unpacked_paragraphs * 2) << 4)
-
-    stream = _LZEXEBitStream(data, packed_stream_offset)
-    out_pos = 0
-    while True:
-        if stream.bit():
-            output[out_pos] = stream.byte()
-            out_pos += 1
-            continue
-
-        if stream.bit() == 0:
-            length = (stream.bit() << 1) | stream.bit()
-            length += 2
-            span = stream.byte() | ~0xFF
-        else:
-            span = stream.byte()
-            length = stream.byte()
-            span |= ((length & ~0x07) << 5) | ~0x1FFF
-            length = (length & 0x07) + 2
-            if length == 2:
-                length = stream.byte()
-                if length == 0:
-                    break
-                if length == 1:
-                    continue
-                length += 1
-
-        for _ in range(length):
-            output[out_pos] = output[out_pos + span]
-            out_pos += 1
-
-    relocation_offset = lz_header_offset + 0x158
-    rel_off = 0
-    load_segment = base_addr >> 4
-    while True:
-        span = data[relocation_offset]
-        relocation_offset += 1
-        if span == 0:
-            span = int.from_bytes(data[relocation_offset : relocation_offset + 2], "little")
-            relocation_offset += 2
-            if span == 0:
-                rel_off += 0x0FFF0
-                continue
-            if span == 1:
-                break
-        rel_off += span
-        patched = (int.from_bytes(output[rel_off : rel_off + 2], "little") + load_segment) & 0xFFFF
-        output[rel_off : rel_off + 2] = patched.to_bytes(2, "little")
-
-    return _UnpackedLZEXEImage(
-        kind="LZEXE 0.91",
-        code=bytes(output[:out_pos]),
-        entry_point=base_addr + (unpacked_cs << 4) + unpacked_ip,
-    )
 
 
 def _recover_partial_cfg(
@@ -1932,55 +1729,87 @@ def _try_decompile_non_optimized_slice(
     lst_metadata: LSTMetadata | None,
     cod_metadata: CODProcMetadata | None = None,
 ) -> str | None:
-    region = _lst_code_region(lst_metadata, addr)
-    if region is None:
-        region = _infer_linear_disassembly_window(project, addr, max_window=0x240)
-    start, end = region
-    if end <= start:
-        return None
-    try:
-        code = bytes(project.loader.memory.load(start, end - start))
-    except Exception:
-        return None
+    # Non-optimized fallback output is intentionally never cached. It is a best-effort rescue path,
+    # not a stable primary decompilation result.
+    def _attempt(slice_source_project: angr.Project, *, label: str) -> tuple[str | None, str | None]:
+        region = _lst_code_region(lst_metadata, addr)
+        if region is None:
+            region = _infer_linear_disassembly_window(slice_source_project, addr, max_window=0x240)
+        start, end = region
+        if end <= start:
+            return None, f"{label}: invalid slice window {start:#x}-{end:#x}"
+        try:
+            code = bytes(slice_source_project.loader.memory.load(start, end - start))
+        except Exception as ex:  # noqa: BLE001
+            return None, f"{label}: unable to read bytes: {_describe_exception(ex)}"
 
-    def _recover_and_decompile():
-        slice_project = _build_project_from_bytes(code, base_addr=start, entry_point=start)
-        cfg, func = _pick_function_lean(
-            slice_project,
-            start,
-            regions=[(start, end)],
-            data_references=False,
-            extend_far_calls=False,
-        )
-        func.name = name
-        effective_cod_metadata = cod_metadata
-        if effective_cod_metadata is None:
-            effective_cod_metadata = _sidecar_cod_metadata_for_function(slice_project, func, binary_path, lst_metadata)
-        status, payload, *_ = _decompile_function_with_stats(
-            slice_project,
-            cfg,
-            func,
-            max(1, min(timeout, 4)),
-            api_style,
-            binary_path,
-            cod_metadata=effective_cod_metadata,
-            lst_metadata=lst_metadata,
-            enable_structured_simplify=False,
-            enable_postprocess=False,
-        )
-        return status, payload
+        def _recover_and_decompile():
+            slice_project = _build_project_from_bytes(code, base_addr=start, entry_point=start)
+            cfg, func = _pick_function_lean(
+                slice_project,
+                start,
+                regions=[(start, end)],
+                data_references=False,
+                extend_far_calls=False,
+            )
+            func.name = name
+            effective_cod_metadata = cod_metadata
+            if effective_cod_metadata is None:
+                effective_cod_metadata = _sidecar_cod_metadata_for_function(slice_project, func, binary_path, lst_metadata)
+            status, payload, *_ = _decompile_function_with_stats(
+                slice_project,
+                cfg,
+                func,
+                max(1, min(timeout, 4)),
+                api_style,
+                binary_path,
+                cod_metadata=effective_cod_metadata,
+                lst_metadata=lst_metadata,
+                enable_structured_simplify=False,
+                enable_postprocess=False,
+            )
+            return status, payload
 
-    try:
-        status, payload = _run_with_timeout_in_daemon_thread(
-            _recover_and_decompile,
-            timeout=max(2, min(timeout, 6)),
-            thread_name_prefix="nonopt-fallback",
-        )
-    except Exception:
-        return None
-    if status != "ok":
-        return None
-    return payload
+        try:
+            status, payload = _run_with_timeout_in_daemon_thread(
+                _recover_and_decompile,
+                timeout=max(2, min(timeout, 6)),
+                thread_name_prefix="nonopt-fallback",
+            )
+        except Exception as ex:  # noqa: BLE001
+            return None, f"{label}: retry crashed: {_describe_exception(ex)}"
+        if status != "ok":
+            return None, f"{label}: {status}: {payload}"
+        return payload, None
+
+    rendered, failure_detail = _attempt(project, label="shared-project slice")
+    if rendered is not None:
+        return rendered
+
+    retry_failures: list[str] = []
+    if failure_detail is not None:
+        retry_failures.append(failure_detail)
+    if binary_path is not None:
+        try:
+            fresh_project = _build_project(
+                Path(binary_path),
+                force_blob=False,
+                base_addr=getattr(getattr(project.loader, "main_object", None), "linked_base", 0) or 0,
+                entry_point=getattr(project, "entry", 0),
+            )
+        except Exception as ex:  # noqa: BLE001
+            retry_failures.append(f"fresh-project setup failed: {_describe_exception(ex)}")
+        else:
+            rendered, failure_detail = _attempt(fresh_project, label="fresh-project slice")
+            if rendered is not None:
+                print(f"[dbg] non-optimized fallback recovered {addr:#x} {name} after rebuilding a fresh project")
+                return rendered
+            if failure_detail is not None:
+                retry_failures.append(failure_detail)
+
+    if retry_failures:
+        print(f"[dbg] non-optimized fallback unavailable for {addr:#x} {name}: {'; '.join(retry_failures[:3])}")
+    return None
 
 
 def _try_emit_trivial_sidecar_c(
@@ -2008,6 +1837,137 @@ def _function_skip_reason(function):
     return None
 
 
+def _function_recovery_score(function) -> tuple[int, int]:
+    blocks = tuple(getattr(function, "blocks", ()) or ())
+    if not blocks:
+        return (0, 0)
+    total_bytes = sum(max(0, getattr(block, "size", 0)) for block in blocks)
+    return (len(blocks), total_bytes)
+
+
+def _function_covered_ranges(function) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    for block in tuple(getattr(function, "blocks", ()) or ()):
+        addr = getattr(block, "addr", None)
+        size = max(0, getattr(block, "size", 0))
+        if not isinstance(addr, int) or size <= 0:
+            continue
+        ranges.append((addr, addr + size))
+    if not ranges:
+        addr = getattr(function, "addr", None)
+        score = _function_recovery_score(function)
+        if isinstance(addr, int) and score[1] > 0:
+            ranges.append((addr, addr + score[1]))
+    if not ranges:
+        return []
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(ranges):
+        if not merged or start > merged[-1][1]:
+            merged.append((start, end))
+        else:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+    return merged
+
+
+def _addr_in_ranges(addr: int, ranges: list[tuple[int, int]]) -> bool:
+    return any(start <= addr < end for start, end in ranges)
+
+
+def _candidate_recovery_regions(
+    metadata: LSTMetadata | None,
+    addr: int,
+    *,
+    image_end: int,
+    region_span: int,
+    project_entry: int,
+) -> list[tuple[int, int]]:
+    exact_region = _lst_code_region(metadata, addr)
+    if exact_region is not None:
+        return [exact_region]
+    regions: list[tuple[int, int]] = []
+    candidate_windows = _x86_16_fast_recovery_windows(region_span)
+    if addr < project_entry:
+        candidate_windows = (candidate_windows[-1],)
+    for candidate_window in candidate_windows:
+        region = (addr, min(addr + candidate_window, image_end))
+        if region not in regions:
+            regions.append(region)
+    return regions
+
+
+def _recovery_score_good_enough(score: tuple[int, int]) -> bool:
+    blocks, total_bytes = score
+    return total_bytes >= 0x40 or blocks >= 4
+
+
+def _recover_candidate_function_pair(
+    candidate_project,
+    *,
+    candidate_addr: int,
+    image_end: int,
+    metadata: LSTMetadata | None,
+    project_entry: int,
+    region_span: int,
+):
+    block = candidate_project.factory.block(candidate_addr, size=8, opt_level=0)
+    insns = block.capstone.insns
+    if len(insns) < 1:
+        raise KeyError(f"Function {candidate_addr:#x} does not have a valid first instruction.")
+    candidate_regions = _candidate_recovery_regions(
+        metadata,
+        candidate_addr,
+        image_end=image_end,
+        region_span=region_span,
+        project_entry=project_entry,
+    )
+    best_pair: tuple[object, object] | None = None
+    best_score = (-1, -1)
+    last_error: Exception | None = None
+    for candidate_region in candidate_regions:
+        try:
+            recovered_pair = _pick_function_lean(
+                candidate_project,
+                candidate_addr,
+                regions=[candidate_region],
+                data_references=False,
+                extend_far_calls=False,
+            )
+            score = _function_recovery_score(recovered_pair[1])
+            if score > best_score:
+                best_pair = recovered_pair
+                best_score = score
+            if _recovery_score_good_enough(score):
+                break
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            continue
+    if (
+        best_pair is not None
+        and candidate_addr < project_entry
+        and best_score[1] <= 0x20
+        and candidate_regions
+    ):
+        try:
+            richer_pair = _pick_function(
+                candidate_project,
+                candidate_addr,
+                regions=[candidate_regions[-1]],
+                data_references=False,
+                force_smart_scan=False,
+            )
+            richer_score = _function_recovery_score(richer_pair[1])
+            if richer_score > best_score:
+                best_pair = richer_pair
+                best_score = richer_score
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+    if best_pair is not None:
+        return best_pair
+    if last_error is not None:
+        raise last_error
+    raise KeyError(f"Function {candidate_addr:#x} was not recovered.")
+
+
 def _interesting_functions(cfg, *, limit: int | None):
     functions = []
     skipped = 0
@@ -2024,6 +1984,88 @@ def _interesting_functions(cfg, *, limit: int | None):
     if limit is not None and limit > 0:
         functions = functions[:limit]
     return functions, total
+
+
+def _rank_function_cfg_pairs_for_display(
+    project: angr.Project,
+    function_cfg_pairs: list[tuple[object, object]],
+) -> list[tuple[object, object]]:
+    if not function_cfg_pairs:
+        return []
+    entry_addr = getattr(project, "entry", None)
+    direct_entry_targets = _linear_function_seed_targets(project, entry_addr, max_scan=0x180, include_jumps=False)
+    primary_body_seed = next(
+        (function.addr for _cfg, function in function_cfg_pairs if isinstance(function.addr, int) and function.addr < entry_addr),
+        None,
+    )
+    body_targets = (
+        _linear_function_seed_targets(project, primary_body_seed, include_jumps=False)
+        if isinstance(primary_body_seed, int)
+        else set()
+    )
+
+    def _priority(item: tuple[object, object]) -> tuple[int, int, int, int]:
+        _cfg, function = item
+        addr = getattr(function, "addr", 0)
+        block_count, byte_count = _function_complexity(function)
+        tiny_wrapper_like = int(block_count <= 3 and byte_count <= 0x20)
+        if addr == entry_addr:
+            bucket = 0
+        elif isinstance(primary_body_seed, int) and addr == primary_body_seed:
+            bucket = 1
+        elif addr in body_targets:
+            bucket = 2
+        elif addr in direct_entry_targets:
+            bucket = 3
+        elif isinstance(addr, int) and addr < entry_addr:
+            bucket = 4
+        else:
+            bucket = 5
+        distance = abs(addr - entry_addr) if isinstance(addr, int) and isinstance(entry_addr, int) else 0
+        return (bucket, tiny_wrapper_like, -byte_count, distance)
+
+    return sorted(function_cfg_pairs, key=_priority)
+
+
+def _store_catalog_address_cache(
+    project: angr.Project,
+    binary_path: Path,
+    function_cfg_pairs: list[tuple[object, object]],
+) -> None:
+    cache_key = _recovery_cache_key(
+        binary_path=binary_path,
+        kind="display_catalog_addrs",
+        extra={
+            "entry": getattr(project, "entry", None),
+            "arch": getattr(getattr(project, "arch", None), "name", None),
+        },
+    )
+    if cache_key is None:
+        return
+    addrs = [
+        getattr(function, "addr", None)
+        for _cfg, function in function_cfg_pairs
+        if isinstance(getattr(function, "addr", None), int)
+    ]
+    _store_cache_json("recovery", cache_key, {"addrs": addrs})
+
+
+def _load_catalog_address_cache(project: angr.Project, binary_path: Path) -> list[int]:
+    cache_key = _recovery_cache_key(
+        binary_path=binary_path,
+        kind="display_catalog_addrs",
+        extra={
+            "entry": getattr(project, "entry", None),
+            "arch": getattr(getattr(project, "arch", None), "name", None),
+        },
+    )
+    cached = _load_cache_json("recovery", cache_key) if cache_key is not None else None
+    if not isinstance(cached, dict):
+        return []
+    addrs = cached.get("addrs")
+    if not isinstance(addrs, list) or not all(isinstance(addr, int) for addr in addrs):
+        return []
+    return addrs
 
 
 def _supplement_functions_from_prologue_scan(
@@ -2142,10 +2184,25 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
     main_object = getattr(project.loader, "main_object", None)
     if main_object is None:
         return []
+    binary_path = getattr(main_object, "binary", None)
     max_addr = getattr(main_object, "max_addr", None)
     linked_base = getattr(main_object, "linked_base", None)
     if not isinstance(max_addr, int) or not isinstance(linked_base, int):
         return []
+    cache_key = _recovery_cache_key(
+        binary_path=Path(binary_path) if isinstance(binary_path, (str, Path)) else None,
+        kind="exe_seed_ranking",
+        extra={
+            "entry": getattr(project, "entry", None),
+            "linked_base": linked_base,
+            "max_addr": max_addr,
+        },
+    )
+    cached_ranking = _load_cache_json("recovery", cache_key) if cache_key is not None else None
+    if isinstance(cached_ranking, dict):
+        cached_addrs = cached_ranking.get("addrs")
+        if isinstance(cached_addrs, list) and all(isinstance(addr, int) for addr in cached_addrs):
+            return cached_addrs
 
     try:
         code = bytes(main_object.memory.load(0, max_addr + 1))
@@ -2159,12 +2216,16 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
         return any(start <= addr < end for start, end in seed_windows)
 
     try:
-        _entry_cfg, entry_function = _pick_function_lean(
-            project,
-            project.entry,
-            regions=[(project.entry, min(project.entry + 0x200, linked_base + len(code)))],
-            data_references=False,
-            extend_far_calls=True,
+        _entry_cfg, entry_function = _run_with_timeout_in_daemon_thread(
+            lambda: _pick_function_lean(
+                project,
+                project.entry,
+                regions=[(project.entry, min(project.entry + 0x200, linked_base + len(code)))],
+                data_references=False,
+                extend_far_calls=True,
+            ),
+            timeout=1,
+            thread_name_prefix="seed-rank",
         )
         for target in collect_neighbor_call_targets(entry_function):
             neighbor_targets.add(target.target_addr)
@@ -2267,7 +2328,10 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
             final_priority = 7
         reranked.append(((final_priority, distance), addr))
 
-    return [addr for _meta, addr in sorted(reranked)]
+    ranked_addrs = [addr for _meta, addr in sorted(reranked)]
+    if cache_key is not None:
+        _store_cache_json("recovery", cache_key, {"addrs": ranked_addrs})
+    return ranked_addrs
 
 
 def _recover_fast_seed_functions(
@@ -2280,8 +2344,178 @@ def _recover_fast_seed_functions(
         return []
     recovered = _recover_seeded_exe_functions(project, timeout=timeout, limit=limit)
     if recovered:
-        print("/* fast seed scan: using call/prologue/epilog heuristics without helper metadata. */")
+        print("/* quick function-entry scan found likely functions using call/prologue/epilogue patterns without helper metadata. */")
     return recovered
+
+
+def _recover_fast_exe_catalog(
+    project: angr.Project,
+    *,
+    timeout: int,
+    window: int,
+    low_memory: bool,
+    limit: int | None,
+) -> list[tuple[object, object]]:
+    recovered: list[tuple[object, object]] = []
+    seen_addrs: set[int] = set()
+
+    entry_start = time.perf_counter()
+    try:
+        entry_pair = _run_with_timeout_in_daemon_thread(
+            lambda: _fallback_entry_function(
+                project,
+                timeout=max(1, min(timeout, 6)),
+                window=window,
+                low_memory=low_memory,
+                prefer_fast_recovery=True,
+            ),
+            timeout=max(1, min(timeout, 6)),
+            thread_name_prefix="fast-entry",
+        )
+    except Exception:
+        entry_pair = None
+    print(f"[dbg] quick EXE function-list pass: entry-function recovery {time.perf_counter() - entry_start:.2f}s")
+    sys.stdout.flush()
+    if entry_pair is not None:
+        entry_cfg, entry_function = entry_pair
+        if _function_skip_reason(entry_function) is None:
+            recovered.append((entry_cfg, entry_function))
+            seen_addrs.add(entry_function.addr)
+
+    seed_limit = None if limit is None else max(limit * 2, limit + 4)
+    seed_start = time.perf_counter()
+    seeded = _recover_fast_seed_functions(
+        project,
+        timeout=max(1, min(timeout, 8)),
+        limit=seed_limit,
+    )
+    print(
+        f"[dbg] quick EXE function-list pass: candidate-function recovery {time.perf_counter() - seed_start:.2f}s "
+        f"(seed limit {seed_limit if seed_limit is not None else 'all'})"
+    )
+    sys.stdout.flush()
+    for function_cfg, function in seeded:
+        if function.addr in seen_addrs:
+            continue
+        recovered.append((function_cfg, function))
+        seen_addrs.add(function.addr)
+
+    if recovered:
+        recovered = _rank_function_cfg_pairs_for_display(project, recovered)
+        if limit is not None:
+            recovered = recovered[:limit]
+        print("/* quick EXE function discovery found entry/body functions without needing whole-program control-flow recovery. */")
+    return recovered
+
+
+def _recover_cached_function_pairs(
+    project: angr.Project,
+    *,
+    addrs: list[int],
+    timeout: int,
+    limit: int | None,
+    region_span: int = 0x120,
+    per_function_timeout: int = 1,
+) -> list[tuple[object, object]]:
+    main_object = getattr(project.loader, "main_object", None)
+    if main_object is None:
+        return []
+    binary_path = getattr(main_object, "binary", None)
+    linked_base = getattr(main_object, "linked_base", None)
+    max_addr = getattr(main_object, "max_addr", None)
+    if binary_path is None or not isinstance(linked_base, int) or not isinstance(max_addr, int):
+        return []
+
+    deadline = time.monotonic() + max(1, timeout)
+    metadata = getattr(project, "_inertia_lst_metadata", None)
+    image_end = linked_base + max_addr + 1
+    recovered: list[tuple[object, object]] = []
+    seen_addrs: set[int] = set()
+
+    for addr in addrs:
+        if limit is not None and len(recovered) >= limit:
+            break
+        if not isinstance(addr, int) or addr in seen_addrs:
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+
+        try:
+            function_cfg, function = _recover_candidate_with_timeout(
+                project,
+                candidate_addr=addr,
+                image_end=image_end,
+                metadata=metadata,
+                project_entry=project.entry,
+                region_span=region_span,
+                timeout=min(per_function_timeout, max(1, int(remaining))),
+                binary_path=Path(binary_path),
+                linked_base=linked_base,
+            )
+        except (_AnalysisTimeout, KeyError):
+            continue
+        except Exception:
+            continue
+
+        if function.addr in seen_addrs:
+            continue
+        reason = _function_skip_reason(function)
+        if reason is not None:
+            continue
+        seen_addrs.add(function.addr)
+        recovered.append((function_cfg, function))
+
+    if recovered:
+        print(f"/* restored {len(recovered)} previously discovered function(s) from cache. */")
+    return recovered
+
+
+def _recover_candidate_with_timeout(
+    project: angr.Project,
+    *,
+    candidate_addr: int,
+    image_end: int,
+    metadata,
+    project_entry: int,
+    region_span: int,
+    timeout: int,
+    binary_path: Path,
+    linked_base: int,
+):
+    def _recover_candidate(candidate_project):
+        return _recover_candidate_function_pair(
+            candidate_project,
+            candidate_addr=candidate_addr,
+            image_end=image_end,
+            metadata=metadata,
+            project_entry=project_entry,
+            region_span=region_span,
+        )
+
+    def _recover_once():
+        try:
+            return _recover_candidate(project)
+        except KeyError:
+            raise
+        except Exception:
+            candidate_project = _build_project(
+                binary_path,
+                force_blob=False,
+                base_addr=linked_base,
+                entry_point=project_entry,
+            )
+            return _recover_candidate(candidate_project)
+
+    timeout = max(1, int(timeout))
+    if threading.current_thread() is threading.main_thread():
+        with _analysis_timeout(timeout):
+            return _recover_once()
+    return _run_with_timeout_in_daemon_thread(
+        _recover_once,
+        timeout=timeout,
+        thread_name_prefix="recover-candidate",
+    )
 
 
 def _recover_seeded_exe_functions(
@@ -2310,64 +2544,57 @@ def _recover_seeded_exe_functions(
     seen_addrs: set[int] = {project.entry}
     queued_addrs: set[int] = set(ranked_seeds)
     pending_addrs: list[int] = list(ranked_seeds)
+    covered_ranges: list[tuple[int, int]] = []
     metadata = getattr(project, "_inertia_lst_metadata", None)
     image_end = linked_base + max_addr + 1
-
-    def _candidate_regions(addr: int) -> list[tuple[int, int]]:
-        exact_region = _lst_code_region(metadata, addr)
-        if exact_region is not None:
-            return [exact_region]
-        regions: list[tuple[int, int]] = []
-        for candidate_window in _x86_16_fast_recovery_windows(region_span):
-            region = (addr, min(addr + candidate_window, image_end))
-            if region not in regions:
-                regions.append(region)
-        return regions
+    cache_key = _recovery_cache_key(
+        binary_path=Path(binary_path),
+        kind="seeded_function_catalog",
+        extra={
+            "entry": getattr(project, "entry", None),
+            "linked_base": linked_base,
+            "max_addr": max_addr,
+            "limit": limit,
+            "region_span": region_span,
+        },
+    )
+    cached_payload = _load_cache_json("recovery", cache_key) if cache_key is not None else None
+    if isinstance(cached_payload, dict):
+        cached_addrs = cached_payload.get("addrs")
+        if isinstance(cached_addrs, list) and all(isinstance(addr, int) for addr in cached_addrs):
+            cached_recovered = _recover_cached_function_pairs(
+                project,
+                addrs=cached_addrs,
+                timeout=timeout,
+                limit=limit,
+                region_span=region_span,
+                per_function_timeout=per_function_timeout,
+            )
+            if cached_recovered:
+                return cached_recovered
 
     while pending_addrs:
         addr = pending_addrs.pop(0)
         if limit is not None and len(recovered) >= limit:
             break
+        if _addr_in_ranges(addr, covered_ranges):
+            continue
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
 
-        def _recover_candidate(candidate_project, candidate_addr=addr):
-            block = candidate_project.factory.block(candidate_addr, size=8, opt_level=0)
-            insns = block.capstone.insns
-            if len(insns) < 1:
-                raise KeyError(f"Function {candidate_addr:#x} does not have a valid first instruction.")
-            last_error: Exception | None = None
-            for candidate_region in _candidate_regions(candidate_addr):
-                try:
-                    return _pick_function_lean(
-                        candidate_project,
-                        candidate_addr,
-                        regions=[candidate_region],
-                        data_references=False,
-                        extend_far_calls=False,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    last_error = exc
-                    continue
-            if last_error is not None:
-                raise last_error
-            raise KeyError(f"Function {candidate_addr:#x} was not recovered.")
-
         try:
-            with _analysis_timeout(min(per_function_timeout, max(1, int(remaining)))):
-                try:
-                    function_cfg, function = _recover_candidate(project)
-                except KeyError:
-                    raise
-                except Exception:
-                    candidate_project = _build_project(
-                        Path(binary_path),
-                        force_blob=False,
-                        base_addr=linked_base,
-                        entry_point=project.entry,
-                    )
-                    function_cfg, function = _recover_candidate(candidate_project)
+            function_cfg, function = _recover_candidate_with_timeout(
+                project,
+                candidate_addr=addr,
+                image_end=image_end,
+                metadata=metadata,
+                project_entry=project.entry,
+                region_span=region_span,
+                timeout=min(per_function_timeout, max(1, int(remaining))),
+                binary_path=Path(binary_path),
+                linked_base=linked_base,
+            )
         except (_AnalysisTimeout, KeyError):
             continue
         except Exception:
@@ -2380,19 +2607,39 @@ def _recover_seeded_exe_functions(
             continue
         seen_addrs.add(function.addr)
         recovered.append((function_cfg, function))
+        covered_ranges.extend(_function_covered_ranges(function))
+        function_score = _function_recovery_score(function)
         for target in collect_neighbor_call_targets(function):
             target_addr = getattr(target, "target_addr", None)
             if not isinstance(target_addr, int):
                 continue
             if target_addr in seen_addrs or target_addr in queued_addrs:
                 continue
+            if _addr_in_ranges(target_addr, covered_ranges):
+                continue
             if not (linked_base <= target_addr < image_end):
                 continue
             pending_addrs.insert(0, target_addr)
             queued_addrs.add(target_addr)
+        if function.addr < project.entry and function_score[1] <= 0x20:
+            for target_addr in _linear_function_seed_targets(project, function.addr, include_jumps=False):
+                if target_addr in seen_addrs or target_addr in queued_addrs:
+                    continue
+                if _addr_in_ranges(target_addr, covered_ranges):
+                    continue
+                if not (linked_base <= target_addr < image_end):
+                    continue
+                pending_addrs.insert(0, target_addr)
+                queued_addrs.add(target_addr)
 
     if recovered:
-        print(f"/* seeded EXE catalog recovered {len(recovered)} additional function(s). */")
+        if cache_key is not None:
+            _store_cache_json(
+                "recovery",
+                cache_key,
+                {"addrs": [function.addr for _cfg, function in recovered]},
+            )
+        print(f"/* quick function-entry scan recovered {len(recovered)} additional function(s). */")
     return recovered
 
 
@@ -2408,6 +2655,7 @@ def _decompile_function(
     lst_metadata: LSTMetadata | None = None,
     enable_structured_simplify: bool = True,
     enable_postprocess: bool = True,
+    allow_isolated_retry: bool = True,
 ) -> tuple[str, str]:
     effective_cod_metadata = cod_metadata or _sidecar_cod_metadata_for_function(
         project,
@@ -2430,6 +2678,9 @@ def _decompile_function(
         if not function.normalized:
             print(f"[dbg] function {function.addr:#x} not normalized, normalizing...")
             function.normalize()
+        created_helper_stubs = _register_direct_call_target_function_stubs(project, function)
+        if created_helper_stubs:
+            print(f"[dbg] registered {created_helper_stubs} direct callee stub(s) for {function.addr:#x}")
         seed_calling_conventions(cfg)
         block_count, byte_count = _function_complexity(function)
         profile = _function_decompilation_profile(function, block_count, byte_count)
@@ -2442,6 +2693,66 @@ def _decompile_function(
             byte_count,
             wrapper_like=bool(profile.get("wrapper_like")),
         )
+    def _analysis_log_messages(dec_obj) -> list[str]:
+        messages: list[str] = []
+        for entry in getattr(dec_obj, "errors", ()) or ():
+            exc_type = getattr(entry, "exc_type", None)
+            exc_value = getattr(entry, "exc_value", None)
+            error = getattr(entry, "error", None)
+            if exc_type is not None and exc_value is not None:
+                text = f"{getattr(exc_type, '__name__', str(exc_type))}: {exc_value}"
+            elif error is not None:
+                text = f"{type(error).__name__}: {error}"
+            else:
+                text = str(entry)
+            if text and text not in messages:
+                messages.append(text)
+        return messages
+
+    def _should_retry_in_isolation(dec_obj) -> bool:
+        return any(message.startswith("KeyError:") for message in _analysis_log_messages(dec_obj))
+
+    def _retry_in_isolated_project() -> tuple[str, str] | None:
+        if not allow_isolated_retry or binary_path is None or project.arch.name != "86_16":
+            return None
+        main_object = getattr(project.loader, "main_object", None)
+        linked_base = getattr(main_object, "linked_base", None)
+        max_addr = getattr(main_object, "max_addr", None)
+        if not isinstance(linked_base, int) or not isinstance(max_addr, int):
+            return None
+        try:
+            isolated_project = _build_project(
+                Path(binary_path),
+                force_blob=False,
+                base_addr=linked_base,
+                entry_point=project.entry,
+            )
+            isolated_cfg, isolated_function = _recover_candidate_function_pair(
+                isolated_project,
+                candidate_addr=function.addr,
+                image_end=linked_base + max_addr + 1,
+                metadata=getattr(project, "_inertia_lst_metadata", None),
+                project_entry=project.entry,
+                region_span=max(0x180, _function_complexity(function)[1] + 0x80),
+            )
+        except Exception as ex:  # noqa: BLE001
+            return ("empty", f"Optimized decompilation produced no code. Isolated retry setup failed: {_describe_exception(ex)}")
+        print(f"[dbg] retrying {function.addr:#x} {function.name} in an isolated project after empty decompilation")
+        return _decompile_function(
+            isolated_project,
+            isolated_cfg,
+            isolated_function,
+            timeout,
+            api_style,
+            binary_path,
+            cod_metadata=effective_cod_metadata,
+            synthetic_globals=synthetic_globals,
+            lst_metadata=lst_metadata,
+            enable_structured_simplify=enable_structured_simplify,
+            enable_postprocess=enable_postprocess,
+            allow_isolated_retry=False,
+        )
+
     try:
         with _analysis_timeout(timeout):
             if decompiler_options is None:
@@ -2482,7 +2793,19 @@ def _decompile_function(
         return "error", str(ex)
 
     if dec.codegen is None:
-        return "empty", "Decompiler did not produce code."
+        messages = _analysis_log_messages(dec)
+        if _should_retry_in_isolation(dec):
+            retried = _retry_in_isolated_project()
+            if retried is not None and retried[0] == "ok":
+                return retried
+            if retried is not None and retried[0] != "empty":
+                return retried
+        detail = "Decompiler did not produce code."
+        if messages:
+            detail += " angr details: " + "; ".join(messages[:3])
+        if getattr(dec, "clinic", None) is None:
+            detail += " clinic=None."
+        return "empty", detail
     if not enable_postprocess:
         rendered_text, _ = _regenerate_codegen_text_safely(
             dec.codegen,
@@ -2693,8 +3016,11 @@ def _decompile_function(
 
 
 def _function_complexity(function):
-    project = function.project
+    project = getattr(function, "project", None)
     if project is None:
+        blocks = tuple(getattr(function, "blocks", ()) or ())
+        if blocks:
+            return len(blocks), sum(int(getattr(block, "size", 0) or 0) for block in blocks)
         return 0, 0
     block_addrs = sorted(getattr(function, "block_addrs_set", set()))
     total_bytes = 0
@@ -2705,6 +3031,45 @@ def _function_complexity(function):
             continue
         total_bytes += len(block.bytes)
     return len(block_addrs), total_bytes
+
+
+def _register_direct_call_target_function_stubs(project: angr.Project, function) -> int:
+    if getattr(getattr(project, "arch", None), "name", None) != "86_16":
+        return 0
+    main_object = getattr(getattr(project, "loader", None), "main_object", None)
+    linked_base = getattr(main_object, "linked_base", None)
+    max_addr = getattr(main_object, "max_addr", None)
+    image_end = linked_base + max_addr + 1 if isinstance(linked_base, int) and isinstance(max_addr, int) else None
+
+    created = 0
+    seen: set[int] = set()
+    for callsite in getattr(function, "get_call_sites", lambda: [])() or ():
+        try:
+            target = function.get_call_target(callsite)
+        except Exception:
+            continue
+        if not isinstance(target, int):
+            continue
+        candidates = {target}
+        if isinstance(linked_base, int):
+            if target < linked_base:
+                linked_target = linked_base + target
+                if image_end is None or linked_target < image_end:
+                    candidates.add(linked_target)
+            elif image_end is None or target < image_end:
+                unbased_target = target - linked_base
+                if 0 <= unbased_target < 0x10000:
+                    candidates.add(unbased_target)
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            try:
+                project.kb.functions.function(addr=candidate, create=True)
+                created += 1
+            except Exception:
+                continue
+    return created
 
 
 def _function_decompilation_profile(
@@ -4007,6 +4372,17 @@ def _choose_function_parallelism(function_count: int) -> int:
     return min(workers, function_count, workers_by_mem)
 
 
+def _should_force_serial_supplemental_decompilation(function_count: int) -> bool:
+    if function_count > 8:
+        return False
+    if _prefer_low_memory_path():
+        return True
+    available_mb = _memory_available_mb()
+    if available_mb is None:
+        return True
+    return available_mb < (DEFAULT_WORKER_MEMORY_FLOOR_MB * 4)
+
+
 @contextlib.contextmanager
 def _capture_thread_output():
     stdout_buf = io.StringIO()
@@ -4026,12 +4402,61 @@ def _run_function_work_item(
     lst_metadata: LSTMetadata | None,
     enable_structured_simplify: bool,
     enable_postprocess: bool = True,
+    force_isolated_project: bool = False,
 ) -> FunctionWorkResult:
+    cache_key = _function_decompilation_cache_key(
+        binary_path=binary_path,
+        function_addr=getattr(item.function, "addr", 0),
+        api_style=api_style,
+        enable_structured_simplify=enable_structured_simplify,
+        enable_postprocess=enable_postprocess,
+    )
+    cached_result = _load_cache_json("function_decompile", cache_key) if cache_key is not None else None
+    if cached_result is not None:
+        return FunctionWorkResult(
+            index=item.index,
+            status=str(cached_result.get("status", "error")),
+            payload=str(cached_result.get("payload", "")),
+            debug_output=f"[dbg] cache hit for {getattr(item.function, 'addr', 0):#x} {getattr(item.function, 'name', 'sub')}\n",
+            function=item.function,
+            function_cfg=item.function_cfg,
+        )
+
+    decompile_project = item.function.project
+    decompile_cfg = item.function_cfg
+    decompile_function = item.function
+    if force_isolated_project and binary_path is not None and isinstance(getattr(item.function, "addr", None), int):
+        main_object = getattr(getattr(item.function, "project", None), "loader", None)
+        main_object = getattr(main_object, "main_object", None)
+        linked_base = getattr(main_object, "linked_base", None)
+        max_addr = getattr(main_object, "max_addr", None)
+        if isinstance(linked_base, int) and isinstance(max_addr, int):
+            try:
+                isolated_project = _build_project(
+                    binary_path,
+                    force_blob=False,
+                    base_addr=linked_base,
+                    entry_point=getattr(item.function.project, "entry", linked_base),
+                )
+                isolated_cfg, isolated_function = _recover_candidate_function_pair(
+                    isolated_project,
+                    candidate_addr=item.function.addr,
+                    image_end=linked_base + max_addr + 1,
+                    metadata=lst_metadata,
+                    project_entry=isolated_project.entry,
+                    region_span=max(0x180, _function_complexity(item.function)[1] + 0x80),
+                )
+                decompile_project = isolated_project
+                decompile_cfg = isolated_cfg
+                decompile_function = isolated_function
+            except Exception:
+                pass
+
     with _capture_thread_output() as (stdout_buf, stderr_buf):
         status, payload, *_ = _decompile_function_with_stats(
-            item.function.project,
-            item.function_cfg,
-            item.function,
+            decompile_project,
+            decompile_cfg,
+            decompile_function,
             timeout,
             api_style,
             binary_path,
@@ -4045,6 +4470,15 @@ def _run_function_work_item(
     err_output = stderr_buf.getvalue()
     if err_output:
         debug_output += err_output
+    if cache_key is not None and status == "ok":
+        _store_cache_json(
+            "function_decompile",
+            cache_key,
+            {
+                "status": status,
+                "payload": payload,
+            },
+        )
     return FunctionWorkResult(
         index=item.index,
         status=status,
@@ -13660,7 +14094,7 @@ def main(argv: list[str] | None = None) -> int:
             synthetic_globals=synthetic_globals,
         )
         if lst_metadata is None:
-            print("/* helper metadata: none detected; proceeding with raw recovery and fast seed scan fallbacks. */")
+            print("/* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */")
     low_memory_path = _prefer_low_memory_path()
     if args.addr is not None:
         print("/* recovering function... */", flush=True)
@@ -13910,7 +14344,7 @@ def main(argv: list[str] | None = None) -> int:
         print(payload)
         return 0
 
-    print("/* recovering functions... */", flush=True)
+    print("/* discovering likely functions... */", flush=True)
     cfg = None
     function_cfg_pairs: list[tuple[object, object]] = []
     labeled_offsets: list[tuple[int, str]] = []
@@ -13919,7 +14353,7 @@ def main(argv: list[str] | None = None) -> int:
         len(getattr(lst_metadata, "code_labels", {})) - len(visible_code_labels) if lst_metadata is not None else 0
     )
     if low_memory_path:
-        print("/* Low-memory mode: using conservative catalog recovery. */")
+        print("/* Low-memory mode: using a smaller, safer function-discovery pass. */")
     packed_exe = None if args.proc is not None else getattr(project, "_inertia_packed_exe", None)
     if lst_metadata is not None and visible_code_labels:
         try:
@@ -13942,26 +14376,65 @@ def main(argv: list[str] | None = None) -> int:
             and project.arch.name == "86_16"
             and args.binary.suffix.lower() == ".exe"
         )
-        if prefer_bounded_catalog:
-            print(
-                "/* No helper metadata for x86-16 EXE; preferring bounded entry-window recovery before whole-binary CFG. */"
+        cached_catalog_addrs = (
+            _load_catalog_address_cache(project, args.binary)
+            if prefer_bounded_catalog
+            else []
+        )
+        if cached_catalog_addrs:
+            print("/* using cached discovered function addresses before running new control-flow recovery. */")
+            function_cfg_pairs = _recover_cached_function_pairs(
+                project,
+                addrs=cached_catalog_addrs,
+                timeout=min(max(4, args.timeout), 8),
+                limit=args.max_functions if args.max_functions > 0 else None,
             )
+            if function_cfg_pairs:
+                total_functions = len(function_cfg_pairs)
+                shown_total = len(function_cfg_pairs)
+
+        if prefer_bounded_catalog and not function_cfg_pairs:
             try:
-                cfg = _run_with_timeout_in_daemon_thread(
-                    lambda: _recover_partial_cfg(
+                function_cfg_pairs = _run_with_timeout_in_daemon_thread(
+                    lambda: _recover_fast_exe_catalog(
                         project,
+                        timeout=args.timeout,
                         window=args.window,
                         low_memory=low_memory_path,
+                        limit=args.max_functions if args.max_functions > 0 else 16,
                     ),
-                    timeout=args.timeout,
-                    thread_name_prefix="catalog-fallback",
+                    timeout=min(max(2, args.timeout), 8),
+                    thread_name_prefix="fast-catalog",
                 )
             except Exception as ex:  # noqa: BLE001
                 catalog_error = ex
+                print("/* Quick EXE function discovery timed out; falling back to a bounded control-flow recovery pass. */")
+                function_cfg_pairs = []
+            if function_cfg_pairs:
+                total_functions = len(function_cfg_pairs)
+                shown_total = len(function_cfg_pairs)
 
-        if cfg is None:
+        if prefer_bounded_catalog and not function_cfg_pairs:
+            print(
+                "/* No helper metadata for this x86-16 EXE; first trying a small scan near program entry before whole-program control-flow recovery. */"
+            )
+            if not function_cfg_pairs:
+                try:
+                    cfg = _run_with_timeout_in_daemon_thread(
+                        lambda: _recover_partial_cfg(
+                            project,
+                            window=args.window,
+                            low_memory=low_memory_path,
+                        ),
+                        timeout=args.timeout,
+                        thread_name_prefix="catalog-fallback",
+                    )
+                except Exception as ex:  # noqa: BLE001
+                    catalog_error = ex
+
+        if cfg is None and not function_cfg_pairs:
             if prefer_bounded_catalog:
-                print("/* Bounded entry-window recovery failed; attempting whole-binary CFG as a last resort. */")
+                print("/* Small entry-area recovery failed; attempting whole-program control-flow recovery as a last resort. */")
             try:
                 cfg = _run_with_timeout_in_daemon_thread(
                     lambda: _recover_cfg(
@@ -13977,9 +14450,9 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as ex:  # noqa: BLE001
                 catalog_error = ex
 
-        if cfg is None and project.arch.name == "86_16" and not prefer_bounded_catalog:
+        if cfg is None and not function_cfg_pairs and project.arch.name == "86_16" and not prefer_bounded_catalog:
             print(
-                "/* Whole-binary catalog recovery failed; attempting bounded entry-window recovery. */"
+                "/* Whole-program function discovery failed; attempting a smaller entry-area recovery pass. */"
             )
             try:
                 cfg = _run_with_timeout_in_daemon_thread(
@@ -13994,10 +14467,10 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as ex:  # noqa: BLE001
                 catalog_error = ex
 
-        if cfg is None:
+        if cfg is None and not function_cfg_pairs:
             fast_seed_pairs: list[tuple[object, object]] = []
             if lst_metadata is None:
-                print("/* Whole-binary CFG recovery failed; attempting fast seed scan without helper metadata. */")
+                print("/* Whole-program control-flow recovery failed; attempting a quick function-entry scan without helper metadata. */")
                 fast_seed_pairs = _recover_fast_seed_functions(
                     project,
                     timeout=min(max(4, args.timeout), 8),
@@ -14039,14 +14512,19 @@ def main(argv: list[str] | None = None) -> int:
         shown_total = len(labeled_offsets)
     elif not function_cfg_pairs:
         limit = args.max_functions if args.max_functions > 0 else None
-        functions, total_functions = _interesting_functions(cfg, limit=limit)
+        defer_limit_until_after_seed_ranking = (
+            args.addr is None
+            and args.binary.suffix.lower() == ".exe"
+            and lst_metadata is None
+        )
+        functions, total_functions = _interesting_functions(cfg, limit=None if defer_limit_until_after_seed_ranking else limit)
         shown_total = len(functions)
         function_cfg_pairs = [(cfg, function) for function in functions]
         if args.addr is None and args.binary.suffix.lower() == ".exe":
             seeded_pairs = _recover_seeded_exe_functions(
                 project,
                 timeout=min(max(4, args.timeout // 2), 8),
-                limit=None if limit is None else max(0, limit - shown_total),
+                limit=None if (limit is None or defer_limit_until_after_seed_ranking) else max(0, limit - shown_total),
             )
             if seeded_pairs:
                 seen_existing = {function.addr for function in functions}
@@ -14055,9 +14533,15 @@ def main(argv: list[str] | None = None) -> int:
                         continue
                     function_cfg_pairs.append((function_cfg, function))
                     seen_existing.add(function.addr)
+                function_cfg_pairs = _rank_function_cfg_pairs_for_display(project, function_cfg_pairs)
+                if limit is not None and defer_limit_until_after_seed_ranking:
+                    function_cfg_pairs = function_cfg_pairs[:limit]
                 shown_total = len(function_cfg_pairs)
                 total_functions = max(total_functions, shown_total)
                 project._inertia_supplemental_scan_used = True
+            elif limit is not None and defer_limit_until_after_seed_ranking:
+                function_cfg_pairs = function_cfg_pairs[:limit]
+                shown_total = len(function_cfg_pairs)
         if (
             args.addr is None
             and args.binary.suffix.lower() == ".exe"
@@ -14069,6 +14553,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             if supplemental_pairs:
                 function_cfg_pairs.extend(supplemental_pairs)
+                function_cfg_pairs = _rank_function_cfg_pairs_for_display(project, function_cfg_pairs)
                 shown_total = len(function_cfg_pairs)
                 total_functions = max(total_functions, shown_total)
                 project._inertia_supplemental_scan_used = True
@@ -14103,6 +14588,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_functions > 0 and total_functions > shown_total:
         print(f"/* showing first {shown_total} functions; use --max-functions to raise the cap */")
 
+    if (
+        args.addr is None
+        and args.binary.suffix.lower() == ".exe"
+        and lst_metadata is None
+        and function_cfg_pairs
+    ):
+        _store_catalog_address_cache(project, args.binary, function_cfg_pairs)
+
     function_tasks: list[FunctionWorkItem] = []
     result_map: dict[int, FunctionWorkResult] = {}
     if lst_metadata is not None and visible_code_labels:
@@ -14116,12 +14609,23 @@ def main(argv: list[str] | None = None) -> int:
     workers = _choose_function_parallelism(len(function_tasks))
     if lst_metadata is not None and visible_code_labels:
         workers = 1
-    if getattr(project, "_inertia_supplemental_scan_used", False) and len(function_tasks) <= 8:
+    if (
+        getattr(project, "_inertia_supplemental_scan_used", False)
+        and _should_force_serial_supplemental_decompilation(len(function_tasks))
+    ):
         workers = 1
     if workers > 1:
         print(f"/* parallel function decompilation: {workers} workers, shared imports */")
     else:
         print("/* parallel function decompilation: disabled (RAM pressure or single function) */")
+    force_isolated_function_projects = (
+        workers > 1
+        and lst_metadata is None
+        and args.binary.suffix.lower() == ".exe"
+        and project.arch.name == "86_16"
+    )
+    if force_isolated_function_projects:
+        print("/* parallel x86-16 decompilation: using one fresh analysis project per shown function for stability. */")
 
     def _emit_function_result(item: FunctionWorkItem, result: FunctionWorkResult) -> tuple[int, int]:
         decompiled_local = 0
@@ -14252,16 +14756,31 @@ def main(argv: list[str] | None = None) -> int:
                 if result is None:
                     if active_item.function_cfg is None:
                         continue
-                    result = _run_function_work_item(
-                        active_item,
-                        timeout=args.timeout,
-                        api_style=args.api_style,
-                        binary_path=args.binary,
-                        cod_metadata=cod_metadata,
-                        synthetic_globals=synthetic_globals,
-                        lst_metadata=lst_metadata,
-                        enable_structured_simplify=args.addr is not None,
-                    )
+                    try:
+                        result = _run_with_timeout_in_daemon_thread(
+                            lambda: _run_function_work_item(
+                                active_item,
+                                timeout=args.timeout,
+                                api_style=args.api_style,
+                            binary_path=args.binary,
+                            cod_metadata=cod_metadata,
+                            synthetic_globals=synthetic_globals,
+                            lst_metadata=lst_metadata,
+                            enable_structured_simplify=args.addr is not None,
+                            force_isolated_project=force_isolated_function_projects,
+                        ),
+                            timeout=max(1, args.timeout) + 1,
+                            thread_name_prefix="func-serial",
+                        )
+                    except FuturesTimeoutError:
+                        result = FunctionWorkResult(
+                            index=item.index,
+                            status="timeout",
+                            payload=f"Timed out after {args.timeout}s.",
+                            debug_output="",
+                            function=active_item.function,
+                            function_cfg=active_item.function_cfg,
+                        )
                 result_map[item.index] = result
             d, f = _emit_function_result(item, result)
             decompiled += d
@@ -14285,12 +14804,14 @@ def main(argv: list[str] | None = None) -> int:
                     synthetic_globals=synthetic_globals,
                     lst_metadata=lst_metadata,
                     enable_structured_simplify=args.addr is not None,
+                    force_isolated_project=force_isolated_function_projects,
                 ): item
                 for item in function_tasks
                 if item.function_cfg is not None
             }
             pending = set(future_map)
             deadlines = {future: time.monotonic() + max(1, args.timeout) for future in future_map}
+            expired_futures: set[Future] = set()
             while pending:
                 done, _ = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
                 if done:
@@ -14320,9 +14841,24 @@ def main(argv: list[str] | None = None) -> int:
                         function=item.function,
                         function_cfg=item.function_cfg,
                     )
+                    expired_futures.add(future)
                     pending.discard(future)
         finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            # Wait for any in-flight worker to finish so no late decompiler logs appear after the final summary.
+            executor.shutdown(wait=True, cancel_futures=True)
+        for future in expired_futures:
+            if not future.done() or future.cancelled():
+                continue
+            item = future_map[future]
+            current = result_map.get(item.index)
+            if current is None or current.status != "timeout":
+                continue
+            try:
+                late_result = future.result()
+            except Exception:
+                continue
+            if getattr(late_result, "status", None) == "ok":
+                result_map[item.index] = late_result
 
     decompiled = 0
     failed = 0
