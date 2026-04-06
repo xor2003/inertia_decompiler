@@ -134,6 +134,7 @@ def _discover_peer_exe_catalog_matches(
             continue
         peer_titles.append(peer_binary.name)
         setattr(project, "_inertia_peer_exe_titles", tuple(peer_titles))
+        setattr(project, "_inertia_peer_exe_paths", (str(peer_binary),))
         return imported_labels, imported_ranges, ("peer_exe",)
     return {}, {}, ()
 

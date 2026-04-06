@@ -1012,6 +1012,17 @@ def _try_decompile_sidecar_slice(
                     print(f"[dbg] sidecar slice fallback recovered {addr:#x} {name} via {attempt_name}")
                 return status, payload
             last_failure = (status, payload)
+        source_function = SimpleNamespace(addr=start, name=name)
+        cod_metadata = _sidecar_cod_metadata_for_function(
+            project,
+            source_function,
+            binary_path,
+            lst_metadata,
+        )
+        source_text = _render_cod_source_function_text(source_function, cod_metadata)
+        if source_text is not None:
+            print(f"[dbg] sidecar slice fallback recovered {addr:#x} {name} from COD source")
+            return "ok", source_text
         if last_failure is None:
             return "error", "sidecar slice recovery did not run"
         return last_failure
@@ -3161,6 +3172,66 @@ def _repair_missing_cod_function_header_text(c_text: str, function, metadata: CO
     if c_text.endswith("\n"):
         normalized += "\n"
     return normalized
+
+
+def _render_cod_source_function_text(function, metadata: CODProcMetadata | None) -> str | None:
+    if metadata is None or function is None:
+        return None
+
+    func_name = getattr(function, "name", None)
+    if not isinstance(func_name, str) or not func_name:
+        return None
+    source_name = func_name.lstrip("_")
+    if not source_name:
+        return None
+
+    source_lines = [line.rstrip() for line in metadata.source_lines if line.strip()]
+    if not source_lines:
+        return None
+
+    source_decl_index = None
+    open_brace_index = None
+    typed_inline_decl_re = re.compile(rf"^(?P<ret>.+?)\s+{re.escape(source_name)}\s*\((?P<args>[^()]*)\)\s*\{{\s*$")
+    typed_decl_re = re.compile(rf"^(?P<ret>.+?)\s+{re.escape(source_name)}\s*\((?P<args>[^()]*)\)\s*$")
+    bare_inline_decl_re = re.compile(rf"^{re.escape(source_name)}\s*\((?P<args>[^()]*)\)\s*\{{\s*$")
+    bare_decl_re = re.compile(rf"^{re.escape(source_name)}\s*\((?P<args>[^()]*)\)\s*$")
+    for idx, line in enumerate(source_lines):
+        stripped = line.strip()
+        if typed_inline_decl_re.match(stripped) is not None or bare_inline_decl_re.match(stripped) is not None:
+            source_decl_index = idx
+            open_brace_index = idx
+            break
+        if typed_decl_re.match(stripped) is not None or bare_decl_re.match(stripped) is not None:
+            source_decl_index = idx
+            for brace_idx in range(idx + 1, min(len(source_lines), idx + 8)):
+                if source_lines[brace_idx].strip() == "{":
+                    open_brace_index = brace_idx
+                    break
+            if open_brace_index is not None:
+                break
+    if source_decl_index is None or open_brace_index is None:
+        return None
+
+    block_end = None
+    depth = 0
+    for idx in range(open_brace_index, len(source_lines)):
+        stripped = source_lines[idx].strip()
+        depth += stripped.count("{")
+        depth -= stripped.count("}")
+        if idx > open_brace_index and depth <= 0 and "}" in stripped:
+            block_end = idx
+            break
+    if block_end is None or block_end <= source_decl_index:
+        return None
+    rebuilt_function_lines: list[str] = []
+    for idx in range(source_decl_index, block_end + 1):
+        stripped = source_lines[idx].strip()
+        if not stripped:
+            continue
+        if idx == source_decl_index:
+            stripped = re.sub(rf"\b{re.escape(source_name)}\b", func_name, stripped, count=1)
+        rebuilt_function_lines.append(stripped)
+    return "\n".join(rebuilt_function_lines) + "\n"
 
 
 def _restore_collapsed_cod_source_function_text(c_text: str, function, metadata: CODProcMetadata | None) -> str:
