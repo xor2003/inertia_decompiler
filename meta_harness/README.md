@@ -176,3 +176,29 @@ state and start a new cycle.
 The harness also respects a root-level `STOP` file. If `STOP` exists, the next
 run will stop before advancing the current cycle. Remove `STOP` before running
 again if you want the harness to continue.
+
+## Repo-local sweep override
+
+By default, the harness falls back to the curated COD evidence sweep wired in
+`meta_harness/config.py`.
+
+To retarget a repository without editing Python defaults, create a repo-local
+`.codex_harness.conf`. The harness now loads that file automatically before it
+builds `RuntimeConfig` and `LlmConfig`, while still letting real environment
+variables win.
+
+For this repo, the local override is used to keep the sweep focused on
+`LIFE2.EXE` instead of staging COD files:
+
+```bash
+python - <<'PY'
+from meta_harness.config import RuntimeConfig
+cfg = RuntimeConfig.from_env([])
+print(cfg.sweep_label)
+print(cfg.evidence_input_files)
+print(cfg.sweep_cmd)
+PY
+```
+
+If you see `curated evidence sweep` or `scripts/decompile_cod_dir.py`, then the
+repo-local config was not loaded and the harness is back on the fallback lane.

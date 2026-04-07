@@ -1393,12 +1393,24 @@ class MetaHarness:
             items.append("\n".join(current).strip())
         return [item for item in items if item]
 
+    @staticmethod
+    def _plan_item_is_finished(item: str) -> bool:
+        first_line = item.splitlines()[0].strip() if item.strip() else ""
+        match = re.match(r"^\d+\.\s+\[([^\]]+)\]", first_line)
+        if not match:
+            return False
+        status = match.group(1).strip().lower()
+        return status.startswith("completed") or status == "superseded"
+
+    def unfinished_plan_items(self) -> list[str]:
+        return [item for item in self.plan_items() if not self._plan_item_is_finished(item)]
+
     def first_plan_item_text(self) -> str:
-        items = self.plan_items()
+        items = self.unfinished_plan_items() or self.plan_items()
         return items[0] if items else ""
 
     def current_plan_item_text(self) -> str:
-        items = self.plan_items()
+        items = self.unfinished_plan_items() or self.plan_items()
         if not items:
             return ""
         if self.current_plan_item and self.current_plan_item in items:

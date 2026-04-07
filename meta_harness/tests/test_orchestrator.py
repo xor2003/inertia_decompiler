@@ -407,6 +407,22 @@ def test_sync_current_plan_item_populates_task_packet(monkeypatch, tmp_path):
     assert harness.current_task_packet["acceptance_tests"]
 
 
+def test_sync_current_plan_item_skips_completed_items(monkeypatch, tmp_path):
+    cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
+    cfg.plan_path.write_text(
+        "1. [completed] `done.py`: already landed.\n"
+        "2. [pending] `decompile.py:10-20`, `tests/test_byteops.py:1-20`: fix byteops. Done when pytest tests/test_byteops.py -k byteops passes.\n",
+        encoding="utf-8",
+    )
+    harness = MetaHarness(cfg, llm_cfg)
+
+    harness.sync_current_plan_item()
+
+    assert harness.current_plan_item.startswith("2. [pending]")
+    assert harness.current_task_packet["item_id"] == "2"
+    assert "decompile.py" in harness.current_task_packet["target_files"]
+
+
 def test_reviewer_step_updates_green_level(monkeypatch, tmp_path):
     cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
     harness = MetaHarness(cfg, llm_cfg)

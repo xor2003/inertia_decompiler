@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from meta_harness.config import (
     CORE_EVIDENCE_INPUT_FILES,
@@ -16,6 +17,36 @@ def test_runtime_config_reads_multiline_evidence_files(monkeypatch, tmp_path):
     monkeypatch.setenv("EVIDENCE_INPUT_FILES", "a.txt\nb.txt\n")
     cfg = RuntimeConfig.from_env([])
     assert cfg.evidence_input_files == ["a.txt", "b.txt"]
+
+
+def test_runtime_config_reads_repo_harness_config_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("ROOT_DIR", str(tmp_path))
+    harness_conf = tmp_path / ".codex_harness.conf"
+    harness_conf.write_text(
+        'SWEEP_LABEL="LIFE2 focused sweep"\n'
+        'EVIDENCE_INPUT_FILES=$\'LIFE2.EXE\\nPLAN.md\'\n'
+        'SWEEP_CMD="python -m demo life2"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("EVIDENCE_INPUT_FILES", raising=False)
+    monkeypatch.delenv("SWEEP_LABEL", raising=False)
+    monkeypatch.delenv("SWEEP_CMD", raising=False)
+
+    cfg = RuntimeConfig.from_env([])
+
+    assert cfg.sweep_label == "LIFE2 focused sweep"
+    assert cfg.evidence_input_files == ["LIFE2.EXE", "PLAN.md"]
+    assert cfg.sweep_cmd == "python -m demo life2"
+
+
+def test_environment_overrides_repo_harness_config(monkeypatch, tmp_path):
+    monkeypatch.setenv("ROOT_DIR", str(tmp_path))
+    (tmp_path / ".codex_harness.conf").write_text('SWEEP_LABEL="from-file"\n', encoding="utf-8")
+    monkeypatch.setenv("SWEEP_LABEL", "from-env")
+
+    cfg = RuntimeConfig.from_env([])
+
+    assert cfg.sweep_label == "from-env"
 
 
 def test_runtime_config_uses_default_evidence_files(monkeypatch, tmp_path):

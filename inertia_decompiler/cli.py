@@ -32,6 +32,7 @@ from inertia_decompiler.project_loading import (
     _build_project,
     _build_project_from_bytes,
     _describe_exception,
+    _is_blob_only_input,
 )
 from inertia_decompiler.sidecar_metadata import (
     _exact_function_span_matches,
@@ -39,6 +40,7 @@ from inertia_decompiler.sidecar_metadata import (
     _lst_code_label,
     _lst_code_region,
     _lst_data_label,
+    _recovery_code_labels,
     _signature_matched_code_addrs,
     _visible_code_labels,
 )
@@ -1115,7 +1117,7 @@ def _try_decompile_non_optimized_slice(
         try:
             fresh_project = _build_project(
                 Path(binary_path),
-                force_blob=False,
+                force_blob=_is_blob_only_input(Path(binary_path)),
                 base_addr=getattr(getattr(project.loader, "main_object", None), "linked_base", 0) or 0,
                 entry_point=getattr(project, "entry", 0),
             )
@@ -1598,6 +1600,17 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
     linked_base = getattr(main_object, "linked_base", None)
     if not isinstance(max_addr, int) or not isinstance(linked_base, int):
         return []
+    metadata = getattr(project, "_inertia_lst_metadata", None)
+    recovery_labels = {}
+    metadata_fingerprint = None
+    if metadata is not None:
+        recovery_labels = _recovery_code_labels(metadata)
+        code_ranges = getattr(metadata, "code_ranges", None) or {}
+        metadata_fingerprint = {
+            "source_format": getattr(metadata, "source_format", None),
+            "recovery_code_addrs": sorted(recovery_labels),
+            "bounded_code_range_count": sum(1 for span in code_ranges.values() if span is not None and span[1] > span[0]),
+        }
     cache_key = _recovery_cache_key(
         binary_path=Path(binary_path) if isinstance(binary_path, (str, Path)) else None,
         kind="exe_seed_ranking",
@@ -1605,6 +1618,7 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
             "entry": getattr(project, "entry", None),
             "linked_base": linked_base,
             "max_addr": max_addr,
+            "metadata": metadata_fingerprint,
         },
     )
     cached_ranking = _load_cache_json("recovery", cache_key) if cache_key is not None else None
@@ -1617,7 +1631,6 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
         code = bytes(main_object.memory.load(0, max_addr + 1))
     except Exception:
         return []
-    metadata = getattr(project, "_inertia_lst_metadata", None)
     seed_windows = _seed_scan_windows(project)
     neighbor_targets: set[int] = set()
     entry_window_targets = _entry_window_seed_targets(project, code, linked_base=linked_base)
@@ -1661,6 +1674,8 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
             ranked[addr] = candidate
 
     metadata_labels = _visible_code_labels(metadata) if metadata is not None else {}
+    if not metadata_labels and metadata is not None:
+        metadata_labels = recovery_labels
     for addr, _name in metadata_labels.items():
         if _lst_code_region(metadata, addr) is None:
             continue
@@ -13645,11 +13660,12 @@ def main(argv: list[str] | None = None) -> int:
                     and project.arch.name == "86_16"
                     and _lst_code_region(lst_metadata, args.addr) is not None
                 ):
-                    code_name = _lst_code_label(lst_metadata, args.addr, project.entry) or f"sub_{args.addr:x}"
+                    sidecar_addr = _lst_code_region(lst_metadata, args.addr)[0]
+                    code_name = _lst_code_label(lst_metadata, sidecar_addr, project.entry) or f"sub_{sidecar_addr:x}"
                     return _recover_lst_function(
                         project,
                         lst_metadata,
-                        args.addr if lst_metadata.absolute_addrs else args.addr - project.entry,
+                        sidecar_addr if lst_metadata.absolute_addrs else sidecar_addr - project.entry,
                         code_name,
                         timeout=args.timeout,
                         window=args.window,
@@ -13888,6 +13904,8 @@ def main(argv: list[str] | None = None) -> int:
     function_cfg_pairs: list[tuple[object, object]] = []
     labeled_offsets: list[tuple[int, str]] = []
     visible_code_labels = _visible_code_labels(lst_metadata)
+    recovery_code_labels = _recovery_code_labels(lst_metadata) if lst_metadata is not None else {}
+    seed_code_labels = visible_code_labels or recovery_code_labels
     skipped_signature_labels = (
         len(getattr(lst_metadata, "code_labels", {})) - len(visible_code_labels) if lst_metadata is not None else 0
     )
@@ -13898,7 +13916,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             labeled_offsets = _rank_labeled_function_entries(
                 project,
-                list(visible_code_labels.items()),
+                list(seed_code_labels.items()),
                 lst_metadata,
             )
             if args.max_functions > 0:
@@ -13910,6 +13928,26 @@ def main(argv: list[str] | None = None) -> int:
             return 5
     else:
         catalog_error: Exception | None = None
+        if lst_metadata is not None and not visible_code_labels:
+            if recovery_code_labels:
+                print("/* Signature-bounded sidecar labels available; trying seeded recovery before generic CFG recovery. */")
+            try:
+                function_cfg_pairs = _run_with_timeout_in_daemon_thread(
+                    lambda: _recover_seeded_exe_functions(
+                        project,
+                        timeout=min(max(4, args.timeout), 8),
+                        limit=args.max_functions if args.max_functions > 0 else 16,
+                    ),
+                    timeout=min(max(2, args.timeout), 8),
+                    thread_name_prefix="seed-catalog",
+                )
+            except Exception as ex:  # noqa: BLE001
+                catalog_error = ex
+                function_cfg_pairs = []
+            if function_cfg_pairs:
+                total_functions = len(function_cfg_pairs)
+                shown_total = len(function_cfg_pairs)
+
         prefer_bounded_catalog = (
             lst_metadata is None
             and project.arch.name == "86_16"
