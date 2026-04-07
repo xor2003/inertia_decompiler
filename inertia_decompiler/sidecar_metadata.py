@@ -43,6 +43,24 @@ def _visible_code_labels(metadata: LSTMetadata | None) -> dict[int, str]:
     return {addr: name for addr, name in metadata.code_labels.items() if addr not in skipped}
 
 
+def _recovery_code_labels(metadata: LSTMetadata | None) -> dict[int, str]:
+    if metadata is None:
+        return {}
+    labels = _visible_code_labels(metadata)
+    signature_addrs = _signature_matched_code_addrs(metadata)
+    if not signature_addrs:
+        return labels
+    for addr in sorted(signature_addrs):
+        if addr in labels:
+            continue
+        if _lst_code_region(metadata, addr) is None:
+            continue
+        name = metadata.code_labels.get(addr)
+        if name is not None:
+            labels[addr] = name
+    return labels
+
+
 def _peer_exe_family_candidates(binary: Path) -> tuple[Path, ...]:
     if binary.suffix.lower() != ".exe":
         return ()
@@ -392,11 +410,16 @@ def _lst_data_label(metadata: LSTMetadata | None, offset: int | None) -> str | N
 def _lst_code_label(metadata: LSTMetadata | None, addr: int | None, code_base: int | None) -> str | None:
     if metadata is None or addr is None:
         return None
-    if metadata.absolute_addrs:
-        return metadata.code_labels.get(addr)
-    if code_base is None:
+    lookup_addr = addr if metadata.absolute_addrs else addr - code_base if code_base is not None else None
+    if lookup_addr is None:
         return None
-    return metadata.code_labels.get(addr - code_base)
+    label = metadata.code_labels.get(lookup_addr)
+    if label is not None:
+        return label
+    region = _lst_code_region(metadata, lookup_addr)
+    if region is None:
+        return None
+    return metadata.code_labels.get(region[0])
 
 
 def _lst_code_region(metadata: LSTMetadata | None, addr: int | None) -> tuple[int, int] | None:

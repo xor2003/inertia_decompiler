@@ -70,6 +70,10 @@ def _detect_packed_mz_executable(path: Path) -> str | None:
     return None
 
 
+def _is_blob_only_input(path: Path) -> bool:
+    return path.suffix.lower() in {".bin", ".raw", ".cod"}
+
+
 @dataclass(frozen=True)
 class _UnpackedLZEXEImage:
     kind: str
@@ -184,7 +188,7 @@ def _build_project(path: Path, *, force_blob: bool, base_addr: int, entry_point:
     suffix = path.suffix.lower()
 
     print(f"[dbg] build_project: path={path} suffix={suffix} force_blob={force_blob}")
-    if force_blob or suffix in {".bin", ".raw"}:
+    if force_blob or _is_blob_only_input(path):
         return angr.Project(
             path,
             auto_load_libs=False,

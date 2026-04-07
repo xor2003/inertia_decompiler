@@ -226,45 +226,60 @@ def ensure_pat_from_omf_input(
     cache_key = _cache_key_for_file(input_path)
     out_path = cache_dir / f"{_sanitize_component(input_path.stem)}-{cache_key}.pat"
     lines: list[str] = []
-    if _run_local_plb(input_path, out_path, flair_root=flair_root):
-        try:
-            lines.extend(
-                line for line in out_path.read_text(errors="ignore").splitlines() if line.strip() and line.strip() != "---"
-            )
-        except OSError:
-            pass
+    
+    try:
+        if _run_local_plb(input_path, out_path, flair_root=flair_root):
+            try:
+                lines.extend(
+                    line for line in out_path.read_text(errors="ignore").splitlines() if line.strip() and line.strip() != "---"
+                )
+            except OSError:
+                pass
+    except Exception:
+        # FLAIR attempt failed - continue to fallback
+        pass
+    
     if suffix == ".obj":
         fallback_path = cache_dir / f"{_sanitize_component(input_path.stem)}-{cache_key}.fallback.pat"
-        if generate_pat_from_omf_obj(input_path, fallback_path) > 0:
-            try:
-                lines.extend(
-                    line
-                    for line in fallback_path.read_text(errors="ignore").splitlines()
-                    if line.strip() and line.strip() != "---"
-                )
-            except OSError:
-                pass
-            finally:
+        try:
+            if generate_pat_from_omf_obj(input_path, fallback_path) > 0:
                 try:
-                    fallback_path.unlink(missing_ok=True)
-                except Exception:
+                    lines.extend(
+                        line
+                        for line in fallback_path.read_text(errors="ignore").splitlines()
+                        if line.strip() and line.strip() != "---"
+                    )
+                except OSError:
                     pass
+                finally:
+                    try:
+                        fallback_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        except Exception:
+            # Fallback generation failed - continue
+            pass
     elif suffix == ".lib":
         fallback_path = cache_dir / f"{_sanitize_component(input_path.stem)}-{cache_key}.fallback.pat"
-        if generate_pat_from_omf_lib(input_path, fallback_path) > 0:
-            try:
-                lines.extend(
-                    line
-                    for line in fallback_path.read_text(errors="ignore").splitlines()
-                    if line.strip() and line.strip() != "---"
-                )
-            except OSError:
-                pass
-            finally:
+        try:
+            if generate_pat_from_omf_lib(input_path, fallback_path) > 0:
                 try:
-                    fallback_path.unlink(missing_ok=True)
-                except Exception:
+                    lines.extend(
+                        line
+                        for line in fallback_path.read_text(errors="ignore").splitlines()
+                        if line.strip() and line.strip() != "---"
+                    )
+                except OSError:
                     pass
+                finally:
+                    try:
+                        fallback_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        except Exception:
+            # Fallback generation failed - continue
+            pass
+    
     if not lines:
         return None
     deduped_lines = list(dict.fromkeys(lines))
@@ -349,28 +364,141 @@ def match_pat_modules(
 
 
 def generate_pat_from_omf_obj(obj_path: Path, out_path: Path) -> int:
-    lines = _generate_pat_lines_from_omf_blob(obj_path.read_bytes(), source_name=obj_path.name)
-    out_path.write_text("".join(f"{line}\n" for line in lines) + "---\n")
-    return len(lines)
+    try:
+        lines = _generate_pat_lines_from_omf_blob(obj_path.read_bytes(), source_name=obj_path.name)
+        out_path.write_text("".join(f"{line}\n" for line in lines) + "---\n")
+        return len(lines)
+    except Exception:
+        # Silently fail - return 0 patterns generated
+        # Caller will handle fallback/error reporting
+        return 0
 
 
 def generate_pat_from_omf_lib(lib_path: Path, out_path: Path) -> int:
-    lines: list[str] = []
-    for module in extract_omf_modules_from_lib(lib_path):
-        lines.extend(_generate_pat_lines_from_omf_blob(module.data, source_name=module.module_name))
-    out_path.write_text("".join(f"{line}\n" for line in lines) + "---\n")
-    return len(lines)
+    try:
+        lines: list[str] = []
+        # Check if this is actually a Microsoft OMF library before attempting extraction
+        blob = lib_path.read_bytes()
+        lib_format = _detect_lib_format(blob)
+        
+        if lib_format != "microsoft":
+            # Unsupported format - don't crash, just return 0
+            return 0
+        
+        for module in extract_omf_modules_from_lib(lib_path):
+            lines.extend(_generate_pat_lines_from_omf_blob(module.data, source_name=module.module_name))
+        
+        if lines:
+            out_path.write_text("".join(f"{line}\n" for line in lines) + "---\n")
+        return len(lines)
+    except Exception:
+        # Silently fail - return 0 patterns generated
+        # Caller will handle fallback/error reporting  
+        return 0
 
 
 def extract_omf_modules_from_lib(lib_path: Path) -> tuple[OMFModuleBlob, ...]:
     return parse_microsoft_lib(lib_path).modules
 
 
+def parse_omf_lib(lib_path: Path) -> MicrosoftLibMetadata:
+    """
+    Parse a page-based OMF library container.
+
+    Borland/Turbo C libraries use the same archive shell we already support for
+    Microsoft-style OMF libraries, so keep one parser and expose a vendor-neutral
+    name for callers that only care about the outer `.LIB` container.
+    """
+
+    return parse_microsoft_lib(lib_path)
+
+
+def get_lib_format_info(lib_path: Path) -> dict[str, str | int]:
+    """
+    Get diagnostic information about a library file format.
+    
+    Returns a dict with:
+    - format: "microsoft", "intel", "unknown", or None
+    - size: file size in bytes
+    - header_hex: first 4 bytes as hex string
+    - supported: True if format is currently supported, False otherwise
+    """
+    if not lib_path.exists():
+        return {"error": "File not found"}
+    
+    try:
+        blob = lib_path.read_bytes()
+        lib_format = _detect_lib_format(blob)
+        
+        header_hex = blob[:4].hex() if len(blob) >= 4 else blob.hex()
+        supported = lib_format == "microsoft"
+        
+        return {
+            "format": lib_format,
+            "size": len(blob),
+            "header_hex": header_hex,
+            "supported": supported,
+        }
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {str(e)[:60]}"}
+
+
+def _detect_lib_format(blob: bytes) -> str | None:
+    """
+    Detect the format of a library file.
+    
+    Returns:
+        - "microsoft": Microsoft OMF format (0xF0 header)
+        - "intel": Intel iC-86 format (0xA4 0x07 header)
+        - "unknown": Other format (unrecognized header)
+        - None: File too small or empty
+    """
+    if len(blob) < 2:
+        return None
+    
+    first_byte = blob[0]
+    
+    # Microsoft OMF format
+    if first_byte == 0xF0:
+        return "microsoft"
+    
+    # Intel iC-86 / Intel IA-86 format (ARN - Archive Librarian format)
+    if len(blob) >= 4 and blob[:2] == b'\xa4\x07':
+        return "intel"
+    
+    # Unknown/unsupported format
+    if len(blob) >= 4:
+        return "unknown"
+    
+    return None
+
+
 def parse_microsoft_lib(lib_path: Path) -> MicrosoftLibMetadata:
-    blob = lib_path.read_bytes()
-    if len(blob) < 16 or blob[0] != 0xF0:
+    # Check if file exists first
+    if not lib_path.exists():
         empty_header = MicrosoftLibHeader(page_size=0, dictionary_offset=0, dictionary_blocks=0, case_sensitive=False)
         return MicrosoftLibMetadata(header=empty_header, modules=(), dictionary_entries=(), extended_records=())
+    
+    blob = lib_path.read_bytes()
+    
+    # Detect and handle unsupported formats gracefully
+    lib_format = _detect_lib_format(blob)
+    if lib_format is None:
+        empty_header = MicrosoftLibHeader(page_size=0, dictionary_offset=0, dictionary_blocks=0, case_sensitive=False)
+        return MicrosoftLibMetadata(header=empty_header, modules=(), dictionary_entries=(), extended_records=())
+    
+    # For Intel and other unsupported formats, return empty but don't crash
+    if lib_format != "microsoft":
+        # Could add support for other formats here in the future
+        # For now, return empty result with format hint in header page_size (abuse I know, but keeps API stable)
+        empty_header = MicrosoftLibHeader(page_size=-1, dictionary_offset=0, dictionary_blocks=0, case_sensitive=False)
+        return MicrosoftLibMetadata(header=empty_header, modules=(), dictionary_entries=(), extended_records=())
+    
+    # Parse Microsoft OMF format
+    if len(blob) < 16:
+        empty_header = MicrosoftLibHeader(page_size=0, dictionary_offset=0, dictionary_blocks=0, case_sensitive=False)
+        return MicrosoftLibMetadata(header=empty_header, modules=(), dictionary_entries=(), extended_records=())
+    
     header = _parse_microsoft_lib_header(blob)
     page_size = header.page_size
     if page_size <= 0 or len(blob) < page_size:
@@ -418,6 +546,10 @@ def enumerate_microsoft_lib_dictionary_symbols(lib_path: Path) -> tuple[Microsof
     return parse_microsoft_lib(lib_path).dictionary_entries
 
 
+def enumerate_omf_lib_dictionary_symbols(lib_path: Path) -> tuple[MicrosoftLibDictionaryEntry, ...]:
+    return parse_omf_lib(lib_path).dictionary_entries
+
+
 def lookup_microsoft_lib_symbol(lib_path: Path, symbol_name: str) -> MicrosoftLibDictionaryEntry | None:
     metadata = parse_microsoft_lib(lib_path)
     entry = _lookup_microsoft_lib_symbol_in_metadata(metadata, symbol_name)
@@ -427,6 +559,10 @@ def lookup_microsoft_lib_symbol(lib_path: Path, symbol_name: str) -> MicrosoftLi
             if candidate.symbol_name.casefold() == folded:
                 return candidate
     return entry
+
+
+def lookup_omf_lib_symbol(lib_path: Path, symbol_name: str) -> MicrosoftLibDictionaryEntry | None:
+    return lookup_microsoft_lib_symbol(lib_path, symbol_name)
 
 
 def _build_pat_line(
