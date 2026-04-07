@@ -21,9 +21,15 @@ def test_runtime_config_reads_multiline_evidence_files(monkeypatch, tmp_path):
 
 def test_runtime_config_reads_repo_harness_config_file(monkeypatch, tmp_path):
     monkeypatch.setenv("ROOT_DIR", str(tmp_path))
+    monkeypatch.delenv("HARNESS_CONFIG", raising=False)
     harness_conf = tmp_path / ".codex_harness.conf"
     harness_conf.write_text(
         'SWEEP_LABEL="LIFE2 focused sweep"\n'
+        'COMPARE_INPUT_DESCRIPTION="LIFE2 direct decompilation outputs, focused harness logs, and the current code state, treating LIFE.EXE as the same program without helper metadata: compare behavior, recovered functions, and output quality against LIFE.EXE, but do not import or reuse LIFE.EXE helper metadata"\n'
+        'PRIMARY_PRIORITY="raise LIFE2.EXE decompilation toward LIFE.EXE output quality while treating LIFE.EXE and LIFE2.EXE as the same code without helpers from LIFE.EXE"\n'
+        'SECONDARY_PRIORITY="recover roughly the same function count and comparable decompiled output for LIFE2.EXE as for LIFE.EXE, and prefer fully optimized output, but emit partially optimized decompiled functions instead of dropping to raw failure when a timeout happens"\n'
+        'GENERAL_IMPROVEMENT_RULE="Never add hacks specific to one source file or one sample; fixes must be general-purpose improvements, and for this repo treat LIFE.EXE as the same codebase oracle for LIFE2.EXE while never using LIFE.EXE as a source of helper metadata."\n'
+        'REPO_STANDING_TASKS=$\'task one\\ntask two\'\n'
         'EVIDENCE_INPUT_FILES=$\'LIFE2.EXE\\nPLAN.md\'\n'
         'SWEEP_CMD="python -m demo life2"\n',
         encoding="utf-8",
@@ -37,6 +43,23 @@ def test_runtime_config_reads_repo_harness_config_file(monkeypatch, tmp_path):
     assert cfg.sweep_label == "LIFE2 focused sweep"
     assert cfg.evidence_input_files == ["LIFE2.EXE", "PLAN.md"]
     assert cfg.sweep_cmd == "python -m demo life2"
+    assert (
+        cfg.compare_input_description
+        == "LIFE2 direct decompilation outputs, focused harness logs, and the current code state, treating LIFE.EXE as the same program without helper metadata: compare behavior, recovered functions, and output quality against LIFE.EXE, but do not import or reuse LIFE.EXE helper metadata"
+    )
+    assert (
+        cfg.primary_priority
+        == "raise LIFE2.EXE decompilation toward LIFE.EXE output quality while treating LIFE.EXE and LIFE2.EXE as the same code without helpers from LIFE.EXE"
+    )
+    assert (
+        cfg.secondary_priority
+        == "recover roughly the same function count and comparable decompiled output for LIFE2.EXE as for LIFE.EXE, and prefer fully optimized output, but emit partially optimized decompiled functions instead of dropping to raw failure when a timeout happens"
+    )
+    assert (
+        cfg.general_improvement_rule
+        == "Never add hacks specific to one source file or one sample; fixes must be general-purpose improvements, and for this repo treat LIFE.EXE as the same codebase oracle for LIFE2.EXE while never using LIFE.EXE as a source of helper metadata."
+    )
+    assert cfg.repo_standing_tasks == ["task one", "task two"]
 
 
 def test_environment_overrides_repo_harness_config(monkeypatch, tmp_path):

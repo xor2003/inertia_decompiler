@@ -24,6 +24,13 @@ def _token_discipline() -> str:
     )
 
 
+def _repo_standing_tasks(cfg: RuntimeConfig) -> str:
+    tasks = [task.strip() for task in getattr(cfg, "repo_standing_tasks", ()) if isinstance(task, str) and task.strip()]
+    if not tasks:
+        return ""
+    return "Repo standing tasks:\n" + "".join(f"- {task}\n" for task in tasks) + "\n"
+
+
 def build_master_prompt(cfg: RuntimeConfig) -> str:
     if cfg.compact_prompts:
         return (
@@ -34,6 +41,7 @@ def build_master_prompt(cfg: RuntimeConfig) -> str:
             f"Compare against: {cfg.compare_input_description}.\n"
             "Always state current quality for correctness and recompilation.\n"
             "Use concrete repository evidence, not vague claims.\n\n"
+            + _repo_standing_tasks(cfg)
             + _style_contract()
             + _token_discipline()
         )
@@ -59,6 +67,7 @@ def build_master_prompt(cfg: RuntimeConfig) -> str:
         "- correctness\n"
         "- recompilation\n\n"
         "Use concrete evidence from the project, not vague claims.\n\n"
+        + _repo_standing_tasks(cfg)
         + _style_contract()
         + _token_discipline()
     )
@@ -88,6 +97,11 @@ def build_planner_prompt(
         "- Analyze the current difference between relevant inputs and generated outputs.\n"
         "- Inspect the current code state.\n"
         f"- Do not rerun the evidence sweep; the sweep step already produced {cfg.evidence_log_file} and the checker step reviewed it for this cycle.\n"
+        f"- Read the current evidence and debug logs first, especially {cfg.evidence_log_file}, recent stderr/debug output, and any tail-validation summary or detail-artifact paths already recorded by the sweep.\n"
+        "- When tail validation is in scope, identify the concrete failing family from the logs before writing plan items; do not plan from verdict headlines alone.\n"
+        "- Use the logs to determine where the problem lives: validator noise, structuring, postprocess, fallback path, or cache/policy behavior.\n"
+        "- Cite the specific log file, artifact path, function name, or warning/error family that motivated each new plan item.\n"
+        "- Do not claim a root cause unless the current logs or artifacts support it; otherwise plan the missing debug signal first.\n"
         f"- Create or update {cfg.plan_path} as a flat numbered checklist.\n"
         "- The plan is an execution specification, not a roadmap, status memo, or theme list.\n"
         "- Each top-level numbered item must be small enough for one focused worker cycle, not a whole theme.\n"
@@ -110,6 +124,7 @@ def build_planner_prompt(
         "- Remove any done items from the plan and leave only unfinished work.\n"
         "- Avoid spending tokens on implementation, long code excerpts, or repeated repo tours in this step.\n"
         "- Do not run pytest, corpus scans, or large validation commands in this step; use the existing evidence and repository state.\n"
+        "- If the existing logs do not explain the current tail-validation failure family well enough, say that explicitly and create a plan item to improve or collect the missing debug signal.\n"
         "- Print current quality of correctness and recompilation.\n"
         "- Print exactly one line at the end as: Green level: red\n"
         "- If there is nothing meaningful left to do, say that clearly.\n"

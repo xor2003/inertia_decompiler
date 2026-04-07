@@ -125,6 +125,7 @@ _HARNESS_CONFIG_KEYS = (
     "ARCHITECTURE_GUIDANCE",
     "EVIDENCE_KIND",
     "COMPARE_INPUT_DESCRIPTION",
+    "REPO_STANDING_TASKS",
     "PLANNER_MODEL",
     "CHECKER_MODEL",
     "WORKER_MODEL",
@@ -320,6 +321,7 @@ class RuntimeConfig:
     architecture_guidance: str
     evidence_kind: str
     compare_input_description: str
+    repo_standing_tasks: list[str]
     planner_model: str
     checker_model: str
     worker_model: str
@@ -419,6 +421,7 @@ class RuntimeConfig:
             compare_input_description=env.get(
                 "COMPARE_INPUT_DESCRIPTION", "the relevant source inputs, generated outputs, and the current code state"
             ),
+            repo_standing_tasks=[line for line in env.get("REPO_STANDING_TASKS", "").splitlines() if line.strip()],
             planner_model=env.get("PLANNER_MODEL", "gpt-5.4"),
             checker_model=env.get("CHECKER_MODEL", "gpt-5.4-mini"),
             worker_model=env.get("WORKER_MODEL", "gpt-5.4-mini"),
@@ -461,6 +464,7 @@ class RuntimeConfig:
                 "WORKER_STALL_FAILURE_LIMIT": str(self.worker_stall_failure_limit),
                 "WORKER_STALL_MODEL": str(self.worker_stall_model),
                 "WORKER_STALL_ESCALATION_THRESHOLD": str(self.worker_stall_escalation_threshold),
+                "REPO_STANDING_TASKS": "\n".join(self.repo_standing_tasks),
                 "COMPACT_PROMPTS": "1" if self.compact_prompts else "0",
                 "DELTA_RESUME_PROMPTS": "1" if self.delta_resume_prompts else "0",
                 "HARNESS_CONFIG": str(self.harness_config),

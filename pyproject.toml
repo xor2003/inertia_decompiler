@@ -15,6 +15,7 @@ dependencies = [
     "claripy==9.2.205",
     "pyvex==9.2.205",
     "capstone==5.0.6",
+    "textual==8.2.1",
     "z3-solver==4.13.0.0",
 ]
 

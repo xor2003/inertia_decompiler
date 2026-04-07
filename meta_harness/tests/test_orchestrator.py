@@ -256,6 +256,49 @@ def test_run_fresh_uses_persisted_planner_handoff_for_stuck_item(monkeypatch, tm
     assert calls == ["planner", "worker"]
 
 
+def test_worker_cycle_stalls_when_repeated_failed_test_is_outside_current_task_packet(monkeypatch, tmp_path):
+    cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
+    cfg.plan_path.write_text(
+        "1. `scripts/repro_decompiler_boundary.py:11-140`, `angr_platforms/tests/test_x86_16_cli.py:2103-2178`: "
+        "fix far pointer boundary. Required tests: pytest /home/xor/vextest/angr_platforms/tests/test_x86_16_cli.py "
+        "-k 'far_pointer_stack_local_width or far_pointer_store'.\n",
+        encoding="utf-8",
+    )
+    harness = MetaHarness(cfg, llm_cfg)
+    harness.prepare_cycle_workspace()
+    harness.sync_current_plan_item()
+
+    recent_a = harness.current_cycle_dir / "worker.iter01.log"
+    recent_b = harness.current_cycle_dir / "worker.iter02.log"
+    repeated_failure = "angr_platforms/tests/test_x86_16_cli.py::test_main_uses_cached_exe_catalog_addresses_before_cfg"
+    log_text = f"FAILED {repeated_failure}\nGlobal Remaining steps: 1\n"
+    recent_a.write_text(log_text, encoding="utf-8")
+    recent_b.write_text(log_text, encoding="utf-8")
+
+    monkeypatch.setattr(harness, "check_stop_file", lambda: None)
+    monkeypatch.setattr(harness, "preflight_resource_check", lambda _context: None)
+    monkeypatch.setattr(harness, "run_role", lambda *args, **kwargs: pytest.fail("worker should not run once drift is detected"))
+
+    harness.worker_cycle()
+
+    assert harness.cycle_step_status("worker") == "stalled"
+    assert harness.current_task_packet_status == "rewrite"
+    assert harness.plan_rewrite_target == harness.current_plan_item_text()
+    assert harness.last_policy_decision["decision"] == "worker_out_of_packet_scope"
+    assert repeated_failure in str(harness.last_policy_decision["details"]["reason_detail"])
+
+
+def test_current_plan_item_requires_replan_when_rewrite_target_matches_item(monkeypatch, tmp_path):
+    cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
+    harness = MetaHarness(cfg, llm_cfg)
+    current_item = "1. `decompile.py:10` fix boundary.\n"
+    cfg.plan_path.write_text(current_item, encoding="utf-8")
+    harness.sync_current_plan_item()
+    harness.plan_rewrite_target = harness.current_plan_item_text()
+
+    assert harness.current_plan_item_requires_replan() is True
+
+
 def test_run_role_uses_delta_resume_prompt_for_codex_sessions(monkeypatch, tmp_path):
     cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
     harness = MetaHarness(cfg, llm_cfg)
@@ -828,6 +871,76 @@ def test_sweep_step_allows_completed_sweep_with_failures(monkeypatch, tmp_path):
     assert state["steps"]["full-sweep"]["status"] == "done-with-failures"
 
 
+def test_sweep_step_retries_thread_exhaustion_in_forced_serial_mode(monkeypatch, tmp_path):
+    cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
+    harness = MetaHarness(cfg, llm_cfg)
+    harness.prepare_cycle_workspace()
+    cfg.evidence_log_file.parent.mkdir(parents=True, exist_ok=True)
+
+    for rel in cfg.evidence_input_files:
+        path = cfg.root_dir / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("stub\n", encoding="utf-8")
+
+    popen_envs: list[dict[str, str]] = []
+
+    class DummyProc:
+        def __init__(self, lines: list[str], rc: int, pid: int):
+            self.pid = pid
+            self.stdout = iter(lines)
+            self._rc = rc
+
+        def wait(self):
+            return self._rc
+
+    attempts = [
+        DummyProc(
+            [
+                "/* parallel function decompilation: 2 workers, shared imports */\n",
+                "RuntimeError: can't start new thread\n",
+            ],
+            1,
+            4322,
+        ),
+        DummyProc(
+            [
+                "/* parallel function decompilation: disabled (forced serial) */\n",
+                "done in 1.0s; failures=0/2\n",
+            ],
+            0,
+            4323,
+        ),
+    ]
+
+    def fake_popen(cmd, cwd=None, env=None, stdout=None, stderr=None, **kwargs):
+        popen_envs.append(dict(env))
+        return attempts.pop(0)
+
+    class RunResult:
+        def __init__(self):
+            self.stdout = ""
+            self.returncode = 0
+
+    monkeypatch.setattr(harness, "check_stop_file", lambda: None)
+    monkeypatch.setattr(harness, "preflight_resource_check", lambda _context: None)
+    monkeypatch.setattr(harness, "trim_old_logs", lambda: None)
+    monkeypatch.setattr("meta_harness.orchestrator.register_child_process", lambda *args, **kwargs: None)
+    monkeypatch.setattr("meta_harness.orchestrator.unregister_child_process", lambda *args, **kwargs: None)
+    monkeypatch.setattr("meta_harness.orchestrator.subprocess.run", lambda *args, **kwargs: RunResult())
+    monkeypatch.setattr("meta_harness.orchestrator.subprocess.Popen", fake_popen)
+
+    harness.sweep_step()
+
+    state = json.loads((harness.current_cycle_dir / "cycle.state.json").read_text(encoding="utf-8"))
+    assert state["steps"]["full-sweep"]["status"] == "done"
+    assert len(popen_envs) == 2
+    assert "INERTIA_FORCE_SERIAL_FUNCTION_DECOMPILATION" not in popen_envs[0]
+    assert popen_envs[1]["INERTIA_FORCE_SERIAL_FUNCTION_DECOMPILATION"] == "1"
+    evidence = cfg.evidence_log_file.read_text(encoding="utf-8")
+    assert "retry reason=thread-start failure; retrying full sweep with forced serial function decompilation" in evidence
+    assert "disabled (forced serial)" in evidence
+
+
 def test_finalize_run_marks_terminated_cycle_and_captures_snapshot(monkeypatch, tmp_path):
     cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
     harness = MetaHarness(cfg, llm_cfg)
@@ -1076,6 +1189,75 @@ def test_worker_cycle_stalls_after_consecutive_failures(monkeypatch, tmp_path):
     state = json.loads((harness.current_cycle_dir / "cycle.state.json").read_text(encoding="utf-8"))
     assert state["steps"]["worker"]["status"] == "stalled"
     assert "consecutive_failures=3" in state["steps"]["worker"]["extra"]
+
+
+def test_worker_cycle_stalls_after_repeated_no_progress_logs(monkeypatch, tmp_path):
+    cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
+    harness = MetaHarness(cfg, llm_cfg)
+    harness.prepare_cycle_workspace()
+
+    repeated_log = cfg.log_dir / "repeated_worker.log"
+    repeated_log.parent.mkdir(parents=True, exist_ok=True)
+    repeated_log.write_text(
+        "codex\n"
+        "Item 8 remains blocked. Local tree remains unchanged.\n\n"
+        "Global Remaining steps: 1\n"
+        "tokens used\n"
+        "1,234\n",
+        encoding="utf-8",
+    )
+
+    calls = {"count": 0}
+
+    def fake_run_role(role, model, prompt, resume=False, **_kwargs):
+        calls["count"] += 1
+        return repeated_log
+
+    monkeypatch.setattr(harness, "check_stop_file", lambda: None)
+    monkeypatch.setattr(harness, "preflight_resource_check", lambda _context: None)
+    monkeypatch.setattr(harness, "run_role", fake_run_role)
+    monkeypatch.setattr("meta_harness.orchestrator.time.sleep", lambda _secs: None)
+
+    harness.worker_cycle()
+
+    state = json.loads((harness.current_cycle_dir / "cycle.state.json").read_text(encoding="utf-8"))
+    assert state["steps"]["worker"]["status"] == "stalled"
+    assert "repeated_nonzero_result" in state["steps"]["worker"]["extra"]
+    assert calls["count"] == 3
+
+
+def test_worker_cycle_stalls_after_max_worker_iters(monkeypatch, tmp_path):
+    cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
+    cfg = cfg.__class__(**{**cfg.__dict__, "max_worker_iters": 2})
+    harness = MetaHarness(cfg, llm_cfg)
+    harness.prepare_cycle_workspace()
+
+    progress_log = cfg.log_dir / "progress_worker.log"
+    progress_log.parent.mkdir(parents=True, exist_ok=True)
+    progress_log.write_text(
+        "codex\n"
+        "Item 11 remains blocked; the upstream hook is still absent.\n"
+        "Global Remaining steps: 3\n",
+        encoding="utf-8",
+    )
+
+    calls = {"count": 0}
+
+    def fake_run_role(role, model, prompt, resume=False, **_kwargs):
+        calls["count"] += 1
+        return progress_log
+
+    monkeypatch.setattr(harness, "check_stop_file", lambda: None)
+    monkeypatch.setattr(harness, "preflight_resource_check", lambda _context: None)
+    monkeypatch.setattr(harness, "run_role", fake_run_role)
+    monkeypatch.setattr("meta_harness.orchestrator.time.sleep", lambda _secs: None)
+
+    harness.worker_cycle()
+
+    state = json.loads((harness.current_cycle_dir / "cycle.state.json").read_text(encoding="utf-8"))
+    assert state["steps"]["worker"]["status"] == "stalled"
+    assert "max_worker_iters_exhausted" in state["steps"]["worker"]["extra"]
+    assert calls["count"] == 2
 
 
 def test_reviewer_step_receives_worker_stall_context(monkeypatch, tmp_path):

@@ -132,6 +132,36 @@ Not allowed:
 - object inference
 - prototype inference
 
+### Validation boundary
+
+When adding semantic validation for decompiler quality, start above `VEX` and below final generated `C`.
+
+Preferred first boundary:
+
+- compare whole-tail x86-16 structured-codegen effects before and after late `structuring`/`postprocess`
+- validate end-to-end late-pipeline behavior before splitting into per-pass proofs
+- use lower-layer `VEX` equivalence only for lift/IR correctness, not as the default validator for late cleanup passes
+
+What to compare first:
+
+- helper calls
+- live-out register effects
+- observable stack/global/segmented memory writes
+- return values
+- control-flow exits and guards
+
+What to ignore first:
+
+- temporary names
+- dead internal rewrites
+- non-live flag churn
+- formatting or declaration-only cleanup
+
+Default policy:
+
+- prefer `live_out`-aware whole-tail validation over raw shape comparison
+- only escalate to per-pass validation or SMT when whole-tail checks find a real semantic delta or when a pass is known to be risky
+
 ## Direction of travel
 
 A change is good if it:

@@ -44,6 +44,13 @@ def test_planner_prompt_mentions_plan_and_remaining_steps(monkeypatch, tmp_path)
     assert "Minimal and actionable" in prompt
     assert "Avoid spending tokens on implementation" in prompt
     assert "Do not run pytest, corpus scans, or large validation commands" in prompt
+    assert "Read the current evidence and debug logs first" in prompt
+    assert "tail-validation summary or detail-artifact paths" in prompt
+    assert "identify the concrete failing family from the logs" in prompt
+    assert "Use the logs to determine where the problem lives" in prompt
+    assert "Cite the specific log file, artifact path, function name, or warning/error family" in prompt
+    assert "Do not claim a root cause unless the current logs or artifacts support it" in prompt
+    assert "If the existing logs do not explain the current tail-validation failure family well enough" in prompt
     assert "Green level: red" in prompt
 
 
@@ -93,6 +100,20 @@ def test_worker_and_planner_prompts_accept_task_packet(monkeypatch, tmp_path):
     assert "fix BYTEOPS" in worker
     assert "Current task packet" in planner
     assert "pytest test_byteops" in planner
+
+
+def test_master_prompts_include_repo_standing_tasks(monkeypatch, tmp_path):
+    monkeypatch.setenv("ROOT_DIR", str(tmp_path))
+    monkeypatch.setenv("REPO_STANDING_TASKS", "keep COD tail validation active\nfix remaining COD deltas")
+    cfg = RuntimeConfig.from_env([])
+
+    planner = build_planner_prompt(cfg)
+    worker = build_worker_prompt(cfg)
+
+    assert "Repo standing tasks" in planner
+    assert "keep COD tail validation active" in planner
+    assert "fix remaining COD deltas" in planner
+    assert "Repo standing tasks" in worker
 
 
 def test_reviewer_prompt_allows_harness_improvements(monkeypatch, tmp_path):

@@ -77,6 +77,7 @@ class MetaHarness:
     step_order = ("full-sweep", "checker", "planner", "worker", "reviewer")
     completed_step_statuses = {"done", "done-with-failures"}
     graceful_exit_codes = {124, 130, 143}
+    _SWEEP_THREAD_EXHAUSTION_MARKER = "RuntimeError: can't start new thread"
 
     def __init__(self, cfg: RuntimeConfig, llm_cfg: LlmConfig):
         self.cfg = cfg
@@ -874,6 +875,34 @@ class MetaHarness:
             return "recent-timeout"
         return ""
 
+    def repeated_failed_test_name(self) -> str:
+        logs = self.recent_worker_iteration_logs(limit=4)
+        if not logs:
+            return ""
+        failed_tests: Counter[str] = Counter()
+        for path in logs:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for test_name in re.findall(r"^FAILED\s+(\S+)", text, re.MULTILINE):
+                failed_tests[test_name] += 1
+        repeated_test, repeated_count = failed_tests.most_common(1)[0] if failed_tests else ("", 0)
+        return repeated_test if repeated_count >= 2 else ""
+
+    def worker_retry_out_of_packet_scope_reason(self) -> str:
+        packet = self.current_task_packet_obj()
+        if packet is None:
+            return ""
+        repeated_test = self.repeated_failed_test_name()
+        if not repeated_test:
+            return ""
+        packet_text = packet.raw_text
+        acceptance_tests = " ".join(packet.acceptance_tests)
+        if repeated_test in packet_text or repeated_test in acceptance_tests:
+            return ""
+        short_name = repeated_test.split("::", 1)[-1]
+        if short_name and (short_name in packet_text or short_name in acceptance_tests):
+            return ""
+        return f"repeated-failed-test-outside-packet={repeated_test}"
+
     def current_worker_model(self) -> str:
         self.refresh_runtime_overrides_from_state()
         if self.manual_worker_model_override:
@@ -925,7 +954,11 @@ class MetaHarness:
         item = self.current_plan_item_text()
         if not item:
             return False
-        return self.plan_item_needs_split(item) or self.current_plan_item_stall_count >= 2
+        return (
+            self.plan_item_needs_split(item)
+            or self.current_plan_item_stall_count >= 2
+            or (self.plan_rewrite_target.strip() == item.strip() and bool(item.strip()))
+        )
 
     def note_cycle_outcome(self, reviewer_remaining: str) -> None:
         decision = decide_cycle_followup(
@@ -1482,6 +1515,46 @@ class MetaHarness:
                 deduped.append(line)
         return "\n".join(deduped[:6])
 
+    def _normalize_worker_progress_text(self, text: str) -> str:
+        normalized_lines: list[str] = []
+        skip_next_numeric_line = False
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if skip_next_numeric_line and re.fullmatch(r"[\d,]+", line):
+                skip_next_numeric_line = False
+                continue
+            skip_next_numeric_line = False
+            if line.startswith("[") and (" start " in line or " end rc=" in line):
+                continue
+            if line.startswith("session id: "):
+                continue
+            if line == "tokens used":
+                skip_next_numeric_line = True
+                continue
+            if re.match(r"- worker\.iter\d+", line):
+                normalized_lines.append("- worker.iterN.log: prior-attempt")
+                continue
+            normalized_lines.append(line)
+        return "\n".join(normalized_lines)
+
+    def worker_iteration_is_repeated_no_progress(self, log_file: Path, *, threshold: int = 3) -> bool:
+        if self.current_cycle_dir is None or threshold <= 1 or not log_file.exists():
+            return False
+        current_text = self._normalize_worker_progress_text(log_file.read_text(encoding="utf-8", errors="replace"))
+        if not current_text:
+            return False
+        recent_logs = self.recent_worker_iteration_logs(limit=threshold - 1)
+        if len(recent_logs) < threshold - 1:
+            return False
+        normalized_recent = [
+            self._normalize_worker_progress_text(path.read_text(encoding="utf-8", errors="replace")) for path in recent_logs
+        ]
+        if any(not text for text in normalized_recent):
+            return False
+        return all(text == current_text for text in normalized_recent)
+
     def build_worker_focus_context(self) -> str:
         parts: list[str] = []
         current_packet = self.current_task_packet_block()
@@ -1778,6 +1851,7 @@ class MetaHarness:
             "-lc",
             self.cfg.sweep_cmd,
         ]
+        retry_reason = ""
         self.cfg.last_log_file.parent.mkdir(parents=True, exist_ok=True)
         with (
             self.cfg.evidence_log_file.open("w", encoding="utf-8") as out,
@@ -1786,27 +1860,17 @@ class MetaHarness:
             for fp in (out, mirror):
                 fp.write(header)
                 fp.flush()
-            proc = subprocess.Popen(
-                cmd,
-                cwd=self.cfg.root_dir,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
-            )
-            register_child_process(self.cfg.state_dir, proc.pid, self.cfg.sweep_cmd, str(self.cfg.root_dir), self.iso_now())
-            try:
-                assert proc.stdout is not None
-                for line in proc.stdout:
-                    for fp in (out, mirror):
-                        fp.write(line)
-                        fp.flush()
-                rc = proc.wait()
-            finally:
-                unregister_child_process(self.cfg.state_dir, proc.pid)
+            rc = self._run_logged_sweep_command(cmd, env, out, mirror)
+            log_text = self.cfg.evidence_log_file.read_text(encoding="utf-8", errors="replace")
+            if rc != 0 and self._SWEEP_THREAD_EXHAUSTION_MARKER in log_text:
+                retry_reason = "thread-start failure; retrying full sweep with forced serial function decompilation"
+                retry_header = f"[{self.iso_now()}] retry reason={retry_reason}\n"
+                for fp in (out, mirror):
+                    fp.write(retry_header)
+                    fp.flush()
+                retry_env = dict(env)
+                retry_env["INERTIA_FORCE_SERIAL_FUNCTION_DECOMPILATION"] = "1"
+                rc = self._run_logged_sweep_command(cmd, retry_env, out, mirror)
         footer = f"[{self.iso_now()}] end rc={rc}\n"
         with (
             self.cfg.evidence_log_file.open("a", encoding="utf-8") as out,
@@ -1817,6 +1881,14 @@ class MetaHarness:
                 fp.flush()
         log_text = self.cfg.evidence_log_file.read_text(encoding="utf-8", errors="replace") if self.cfg.evidence_log_file.exists() else ""
         completed_sweep = "done in" in log_text
+        if retry_reason:
+            self.record_event(
+                "sweep.finished",
+                "warning",
+                retry_reason,
+                failure_class="sweep_failure",
+                retry_mode="forced_serial_function_decompilation",
+            )
         if rc != 0 and completed_sweep:
             self.log(f"{self.cfg.sweep_label} completed with non-zero rc={rc}; continuing because evidence was produced")
             self.record_event(
@@ -1862,6 +1934,29 @@ class MetaHarness:
         self.capture_cycle_artifact(self.cfg.evidence_log_file, "evidence_sweep.log")
         self.capture_cycle_snapshot("sweep")
         self.trim_old_logs()
+
+    def _run_logged_sweep_command(self, cmd: list[str], env: dict[str, str], out, mirror) -> int:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=self.cfg.root_dir,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        register_child_process(self.cfg.state_dir, proc.pid, self.cfg.sweep_cmd, str(self.cfg.root_dir), self.iso_now())
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                for fp in (out, mirror):
+                    fp.write(line)
+                    fp.flush()
+            return proc.wait()
+        finally:
+            unregister_child_process(self.cfg.state_dir, proc.pid)
 
     def checker_step(self) -> None:
         self.check_stop_file()
@@ -1913,6 +2008,31 @@ class MetaHarness:
         for i in range(1, self.cfg.max_worker_iters + 1):
             self.check_stop_file()
             self.preflight_resource_check("worker")
+            packet_scope_reason = self.worker_retry_out_of_packet_scope_reason()
+            if packet_scope_reason:
+                self.plan_rewrite_target = self.current_plan_item_text()
+                self.current_task_packet_status = "rewrite"
+                self.update_policy_decision(
+                    "worker_out_of_packet_scope",
+                    "recent worker retries drifted outside the current task packet scope",
+                    reason_detail=packet_scope_reason,
+                    current_plan_item=self.current_plan_item_text(),
+                )
+                self.mark_cycle_step("worker", "stalled", f"iteration={i} {packet_scope_reason}")
+                self.log(
+                    "Worker retry context drifted outside the current task packet; "
+                    f"routing back to planner ({packet_scope_reason})"
+                )
+                self.record_event(
+                    "worker.stalled",
+                    "failed",
+                    "worker retries drifted outside the current task packet scope",
+                    failure_class="worker_no_progress",
+                    iteration=i,
+                    packet_scope_reason=packet_scope_reason,
+                    rewrite_target=self.plan_rewrite_target,
+                )
+                return
             worker_model = self.current_worker_model()
             failure_limit = self.current_worker_failure_limit()
             escalation_reason = self.recent_worker_escalation_reason()
@@ -2015,6 +2135,7 @@ class MetaHarness:
             if not remaining:
                 self.die("Worker did not print remaining step count")
             consecutive_failures = 0
+            repeated_no_progress = self.worker_iteration_is_repeated_no_progress(log_file)
             self.save_role_markers("worker", log_file, remaining)
             self.capture_cycle_artifact(log_file, f"worker.iter{i:02d}.log")
             self.capture_cycle_snapshot(f"worker-iter{i:02d}")
@@ -2036,8 +2157,40 @@ class MetaHarness:
                     continue
                 self.mark_cycle_step("worker", "done", f"remaining={remaining}")
                 return
+            if repeated_no_progress:
+                self.clear_role_session("worker")
+                self.log(
+                    f"Worker iteration {i} repeated the same non-zero result across recent attempts; "
+                    "marking worker stalled for reviewer follow-up"
+                )
+                self.write_status("worker", "stalled-no-progress", f"iteration={i} repeated_nonzero_result")
+                self.mark_cycle_step("worker", "stalled", f"iteration={i} repeated_nonzero_result")
+                return
             time.sleep(self.cfg.worker_sleep_secs)
-        self.die(f"Reached MAX_WORKER_ITERS={self.cfg.max_worker_iters} without finishing worker cycle")
+        self.clear_role_session("worker")
+        self.log(
+            f"Worker reached MAX_WORKER_ITERS={self.cfg.max_worker_iters} with non-zero remaining work; "
+            "marking worker stalled for reviewer follow-up"
+        )
+        self.write_status(
+            "worker",
+            "stalled-max-iters",
+            f"iterations={self.cfg.max_worker_iters} remaining={remaining}",
+        )
+        self.mark_cycle_step(
+            "worker",
+            "stalled",
+            f"iteration={self.cfg.max_worker_iters} max_worker_iters_exhausted remaining={remaining}",
+        )
+        self.record_event(
+            "worker.stalled",
+            "failed",
+            "worker exhausted max iterations; scheduled reviewer follow-up",
+            failure_class="worker_no_progress",
+            remaining=remaining,
+            max_worker_iters=self.cfg.max_worker_iters,
+        )
+        return
 
     def reviewer_step(self) -> str:
         self.check_stop_file()

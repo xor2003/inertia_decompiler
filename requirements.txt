@@ -4,3 +4,4 @@ capstone
 jsonpickle
 keystone-engine
 pyvex
+textual==8.2.1
