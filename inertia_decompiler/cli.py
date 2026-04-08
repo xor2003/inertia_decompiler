@@ -5,21 +5,14 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
-import io
 import logging
 import os
 import re
-import resource
-import signal
 import sys
 import time
-import threading
-import weakref
 from collections.abc import Mapping, Sequence
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, wait
-from concurrent.futures.thread import _threads_queues, _worker
+from concurrent.futures import FIRST_COMPLETED, Future, TimeoutError as FuturesTimeoutError, wait
 from dataclasses import dataclass, replace
-from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -54,21 +47,53 @@ from inertia_decompiler.disassembly_helpers import (
 )
 from inertia_decompiler.tail_validation import (
     TAIL_VALIDATION_ENABLE_ENV as _TAIL_VALIDATION_ENABLE_ENV,
-    collect_tail_validation_records as _collect_tail_validation_records,
     emit_tail_validation_console_summary as _emit_tail_validation_console_summary,
     inherit_tail_validation_runtime_policy as _inherit_tail_validation_runtime_policy,
     parse_env_bool as _parse_env_bool,
     set_tail_validation_runtime_enabled as _set_tail_validation_runtime_enabled,
-    tail_validation_cache_label as _tail_validation_cache_label,
     tail_validation_console_cache_path as _tail_validation_console_cache_path,
     tail_validation_detail_cache_path as _tail_validation_detail_cache_path,
-    tail_validation_display_status as _tail_validation_display_status,
     tail_validation_enabled_for_run as _tail_validation_enabled_for_run,
     tail_validation_fallback_allows_project_snapshot as _tail_validation_fallback_allows_project_snapshot,
-    tail_validation_record_for_result as _tail_validation_record_for_result,
     tail_validation_runtime_enabled as _tail_validation_runtime_enabled,
     tail_validation_snapshot_for_fallback as _tail_validation_snapshot_for_fallback,
     tail_validation_snapshot_for_function_run as _tail_validation_snapshot_for_function_run,
+)
+from inertia_decompiler.runtime_support import (
+    AnalysisTimeout as _AnalysisTimeout,
+    DaemonThreadPoolExecutor,
+    DECOMPILATION_PREP_LOCK,
+    FORCE_SERIAL_FUNCTION_DECOMP_ENV as _FORCE_SERIAL_FUNCTION_DECOMP_ENV,
+    JumpkindLoggingHandler,
+    apply_memory_limit as _apply_memory_limit,
+    analysis_timeout as _analysis_timeout,
+    capture_thread_output as _capture_thread_output,
+    choose_function_parallelism as _choose_function_parallelism,
+    default_exe_showcase_cap as _default_exe_showcase_cap,
+    emit_timeout_and_exit as _emit_timeout_and_exit,
+    format_address as _format_address,
+    guard_angr_peephole_expr_bitwidth_assertion as _guard_angr_peephole_expr_bitwidth_assertion,
+    guard_angr_variable_recovery_binop_sub_size_mismatch as _guard_angr_variable_recovery_binop_sub_size_mismatch,
+    install_angr_peephole_expr_bitwidth_guard as _install_angr_peephole_expr_bitwidth_guard,
+    install_angr_variable_recovery_binop_sub_size_guard as _install_angr_variable_recovery_binop_sub_size_guard,
+    log_step,
+    lower_process_priority as _lower_process_priority,
+    memory_available_mb as _memory_available_mb,
+    prefer_low_memory_path as _prefer_low_memory_path,
+    run_with_timeout_in_daemon_thread as _run_with_timeout_in_daemon_thread,
+    raise_timeout as _raise_timeout,
+    should_force_serial_supplemental_decompilation as _should_force_serial_supplemental_decompilation,
+)
+from inertia_decompiler.work_items import (
+    FunctionDecompileResult,
+    FunctionDecompileTask,
+    FunctionWorkItem,
+    FunctionWorkResult,
+    emit_tail_validation_for_function_run_or_uncollected as _emit_tail_validation_for_function_run_or_uncollected,
+    emit_tail_validation_snapshot_or_uncollected as _emit_tail_validation_snapshot_or_uncollected,
+    function_attempt_display_status as _function_attempt_display_status,
+    print_function_attempt_status as _print_function_attempt_status,
+    recovery_evidence_line as _recovery_evidence_line,
 )
 
 
@@ -77,253 +102,6 @@ _PROJECT_VENV_PYTHONS = (
     _ROOT / ".venv" / "bin" / "python",
     _ROOT / "venv" / "bin" / "python",
 )
-CURRENT_PROJECT: angr.Project | None = None
-START_TIME = time.perf_counter()
-LAST_STEP_TIME = START_TIME
-DECOMPILATION_PREP_LOCK = threading.Lock()
-_REAL_STDOUT = sys.stdout
-_REAL_STDERR = sys.stderr
-DEFAULT_FREE_RAM_BUDGET_FRACTION = 0.45
-DEFAULT_WORKER_MEMORY_FLOOR_MB = 1536
-_TAIL_VALIDATION_STDERR_PREFIX = "[tail-validation] "
-_TAIL_VALIDATION_METADATA_ENV = "INERTIA_TAIL_VALIDATION_STDERR_JSON"
-_TAIL_VALIDATION_METADATA_PREFIX = "@@INERTIA_TAIL_VALIDATION@@ "
-_TAIL_VALIDATION_CONSOLE_CACHE_DIR = _ROOT / "angr_platforms" / ".cache" / "decompile_cli"
-_TAIL_VALIDATION_DETAIL_CACHE_DIR = _ROOT / "angr_platforms" / ".cache" / "tail_validation_details"
-_FORCE_SERIAL_FUNCTION_DECOMP_ENV = "INERTIA_FORCE_SERIAL_FUNCTION_DECOMPILATION"
-_TAIL_VALIDATION_FALLBACK_PROJECT_SNAPSHOT_KINDS = frozenset(
-    {"sidecar_slice", "peer_sidecar", "partial_timeout"}
-)
-_TAIL_VALIDATION_ENABLE_ENV = "INERTIA_ENABLE_TAIL_VALIDATION"
-
-
-def _default_exe_showcase_cap(total_functions: int, timeout: int) -> int:
-    if total_functions > 256:
-        return 4
-    return min(24, max(8, timeout))
-
-
-def _install_angr_peephole_expr_bitwidth_guard(walker_cls) -> object:
-    original_handle_expr = walker_cls._handle_expr
-
-    def _guarded_handle_expr(self, expr_idx, expr, stmt_idx, stmt, block):
-        expr = super(walker_cls, self)._handle_expr(expr_idx, expr, stmt_idx, stmt, block)
-        old_expr = expr
-        redo = True
-        while redo:
-            redo = False
-            for expr_opt in self.expr_opts:
-                if isinstance(expr, expr_opt.expr_classes):
-                    replacement = expr_opt.optimize(expr, stmt_idx=stmt_idx, block=block)
-                    if replacement is not None and replacement is not expr:
-                        if getattr(expr, "bits", None) != getattr(replacement, "bits", None):
-                            continue
-                        expr = replacement
-                        redo = True
-                        break
-        if expr is not old_expr:
-            self.any_update = True
-        return expr
-
-    walker_cls._handle_expr = _guarded_handle_expr
-    return original_handle_expr
-
-
-def _enable_line_buffered_stdio() -> None:
-    for stream in (_REAL_STDOUT, _REAL_STDERR):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if callable(reconfigure):
-            try:
-                reconfigure(line_buffering=True)
-            except Exception:
-                pass
-
-
-_enable_line_buffered_stdio()
-
-
-def _install_angr_variable_recovery_binop_sub_size_guard(
-    engine_cls,
-    *,
-    richr_cls=None,
-    typevars_module=None,
-) -> object:
-    if richr_cls is None or typevars_module is None:
-        from angr.analyses.typehoon import typevars as angr_typevars
-        from angr.analyses.variable_recovery import engine_ail as variable_recovery_engine
-
-        richr_cls = variable_recovery_engine.RichR
-        typevars_module = angr_typevars
-
-    original_handle_binop_sub = engine_cls._handle_binop_Sub
-
-    def _guarded_handle_binop_sub(self, expr):
-        arg0, arg1 = expr.operands
-        r0, r1 = self._expr_pair(arg0, arg1)
-        compute = r0.data - r1.data if r0.data.size() == r1.data.size() else self.state.top(expr.bits)
-
-        type_constraints = set()
-        if r0.typevar is not None and r1.data.concrete and isinstance(r0.typevar, typevars_module.TypeVariable):
-            typevar = typevars_module.new_dtv(r0.typevar, label=typevars_module.SubN(r1.data.concrete_value))
-        else:
-            typevar = typevars_module.TypeVariable()
-            if r0.typevar is not None and r1.typevar is not None:
-                type_constraints.add(typevars_module.Sub(r0.typevar, r1.typevar, typevar))
-
-        return richr_cls(compute, typevar=typevar, type_constraints=type_constraints)
-
-    engine_cls._handle_binop_Sub = _guarded_handle_binop_sub
-    return original_handle_binop_sub
-
-
-@contextlib.contextmanager
-def _guard_angr_peephole_expr_bitwidth_assertion():
-    from angr.analyses.decompiler import utils as decompiler_utils
-
-    walker_cls = decompiler_utils._PeepholeExprsWalker
-    original_handle_expr = _install_angr_peephole_expr_bitwidth_guard(walker_cls)
-    try:
-        yield
-    finally:
-        walker_cls._handle_expr = original_handle_expr
-
-
-@contextlib.contextmanager
-def _guard_angr_variable_recovery_binop_sub_size_mismatch():
-    from angr.analyses.variable_recovery import engine_ail as variable_recovery_engine
-
-    engine_cls = variable_recovery_engine.SimEngineVRAIL
-    original_handle_binop_sub = _install_angr_variable_recovery_binop_sub_size_guard(engine_cls)
-    try:
-        yield
-    finally:
-        engine_cls._handle_binop_Sub = original_handle_binop_sub
-
-
-class _ThreadBoundTextIO(io.TextIOBase):
-    def __init__(self, fallback):
-        self._fallback = fallback
-        self._local = threading.local()
-
-    @contextlib.contextmanager
-    def target(self, stream):
-        previous = getattr(self._local, "stream", None)
-        self._local.stream = stream
-        try:
-            yield
-        finally:
-            if previous is None:
-                with contextlib.suppress(AttributeError):
-                    delattr(self._local, "stream")
-            else:
-                self._local.stream = previous
-
-    def _stream(self):
-        return getattr(self._local, "stream", self._fallback)
-
-    def write(self, data):
-        return self._stream().write(data)
-
-    def flush(self):
-        try:
-            return self._stream().flush()
-        except ValueError:
-            return None
-
-    def isatty(self):
-        target = self._stream()
-        return bool(getattr(target, "isatty", lambda: False)())
-
-    @property
-    def encoding(self):
-        return getattr(self._stream(), "encoding", getattr(self._fallback, "encoding", "utf-8"))
-
-    @property
-    def errors(self):
-        return getattr(self._stream(), "errors", getattr(self._fallback, "errors", "strict"))
-
-    def __getattr__(self, item):
-        return getattr(self._stream(), item)
-
-
-_THREAD_STDOUT = _ThreadBoundTextIO(_REAL_STDOUT)
-_THREAD_STDERR = _ThreadBoundTextIO(_REAL_STDERR)
-sys.stdout = _THREAD_STDOUT
-sys.stderr = _THREAD_STDERR
-
-
-class DaemonThreadPoolExecutor(ThreadPoolExecutor):
-    def _adjust_thread_count(self):  # noqa: D401
-        if self._idle_semaphore.acquire(timeout=0):
-            return
-
-        def weakref_cb(_, q=self._work_queue):
-            q.put(None)
-
-        num_threads = len(self._threads)
-        if num_threads < self._max_workers:
-            thread_name = "%s_%d" % (self._thread_name_prefix or self, num_threads)
-            t = threading.Thread(
-                name=thread_name,
-                target=_worker,
-                args=(
-                    weakref.ref(self, weakref_cb),
-                    self._create_worker_context(),
-                    self._work_queue,
-                ),
-                daemon=True,
-            )
-            t.start()
-            self._threads.add(t)
-            _threads_queues[t] = self._work_queue
-
-
-@dataclass(frozen=True)
-class FunctionDecompileTask:
-    index: int
-    cfg: object
-    function: object
-
-
-@dataclass(frozen=True)
-class FunctionDecompileResult:
-    index: int
-    status: str
-    payload: str
-    debug_output: str
-    elapsed: float
-
-
-def log_step(step: str) -> None:
-    global LAST_STEP_TIME
-    now = time.perf_counter()
-    elapsed_total = now - START_TIME
-    since_last = now - LAST_STEP_TIME
-    LAST_STEP_TIME = now
-    timestamp = datetime.utcnow().isoformat()
-    print(f"[dbg][{timestamp}] {step} (total {elapsed_total:.2f}s, +{since_last:.2f}s)")
-    sys.stdout.flush()
-
-
-def _format_address(addr: int) -> str:
-    return f"{addr:#x}"
-
-
-class JumpkindLoggingHandler(logging.Handler):
-    def emit(self, record: logging.LogRecord) -> None:
-        msg = record.getMessage()
-        if "Unsupported jumpkind" in msg and "address" in msg:
-            match = re.search(r"address\s+(0x[0-9a-fA-F]+|[0-9]+)", msg)
-            if match and CURRENT_PROJECT is not None:
-                try:
-                    addr = int(match.group(1), 0)
-                    asm = _format_first_block_asm(CURRENT_PROJECT, addr)
-                    print(f"[dbg][{datetime.utcnow().isoformat()}] NON-DECODED BLOCK {addr:#x}:\n{asm}")
-                except Exception as exc:
-                    print(f"[dbg] failed to format assembly for {msg}: {exc}")
-            else:
-                print(f"[dbg] {msg}")
-
 try:
     import angr
 except ModuleNotFoundError:
@@ -405,6 +183,7 @@ from angr_platforms.X86_16.alias_model import (
 from angr_platforms.X86_16.alias_domains import DomainKey, register_pair_name
 from angr_platforms.X86_16.alias_state import AliasState
 from angr_platforms.X86_16.tail_validation import x86_16_tail_validation_snapshot_passed
+from angr_platforms.X86_16.fast_tracer import trace_16bit_seed_candidates
 from angr_platforms.X86_16.widening_model import analyze_adjacent_storage_slices
 from angr_platforms.X86_16.widening_alias import can_join_adjacent_register_slices, join_adjacent_register_slices
 
@@ -542,6 +321,25 @@ def _linear_function_seed_targets(
         if insn.mnemonic.lower() in {"ret", "retf", "iret"}:
             break
     return targets
+
+
+def _looks_like_x86_16_function_prologue(code: bytes, offset: int) -> bool:
+    window = code[offset : offset + 4]
+    return window.startswith(b"\x55\x8B\xEC")
+
+
+def _resolve_x86_16_function_start(code: bytes, offset: int, *, max_padding: int = 0x10) -> int | None:
+    if offset < 0 or offset >= len(code):
+        return None
+    if _looks_like_x86_16_function_prologue(code, offset):
+        return offset
+    padded = offset
+    limit = min(len(code), offset + max_padding)
+    while padded < limit and code[padded] in {0x00, 0x90, 0xCC}:
+        padded += 1
+    if padded < len(code) and _looks_like_x86_16_function_prologue(code, padded):
+        return padded
+    return None
 
 
 def _apply_binary_specific_annotations(
@@ -1021,95 +819,6 @@ def _recover_partial_cfg(
     if last_error is not None:
         raise last_error
     raise KeyError(f"Function {project.entry:#x} was not recovered by bounded CFGFast.")
-
-
-class _AnalysisTimeout(Exception):
-    pass
-
-
-def _raise_timeout(_signum, _frame):
-    raise _AnalysisTimeout()
-
-
-@contextlib.contextmanager
-def _analysis_timeout(timeout: int):
-    if timeout <= 0 or threading.current_thread() is not threading.main_thread():
-        yield
-        return
-
-    old_handler = signal.signal(signal.SIGALRM, _raise_timeout)
-    signal.alarm(timeout)
-    try:
-        yield
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, old_handler)
-
-
-def _run_with_timeout_in_daemon_thread(
-    func,
-    *,
-    timeout: int,
-    thread_name_prefix: str,
-):
-    executor = DaemonThreadPoolExecutor(max_workers=1, thread_name_prefix=thread_name_prefix)
-    future = executor.submit(func)
-    try:
-        return future.result(timeout=max(1, timeout))
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
-
-
-def _emit_timeout_and_exit(args_timeout: int, recovery_detail: str | None) -> None:
-    if recovery_detail is None:
-        print(f"/* Timed out while recovering a function after {args_timeout}s. */")
-    else:
-        print(f"/* Timed out while recovering a function after {args_timeout}s {recovery_detail}. */")
-    print("/* Tip: try a larger --timeout for larger binaries. */")
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(3)
-
-
-def _apply_memory_limit(max_memory_mb: int | None) -> None:
-    if max_memory_mb is None or max_memory_mb <= 0:
-        return
-    limit = max_memory_mb * 1024 * 1024
-    try:
-        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
-    except (ValueError, OSError):
-        pass
-
-
-def _memory_available_mb() -> int | None:
-    try:
-        meminfo = {}
-        with open("/proc/meminfo", "r", encoding="utf-8") as fp:
-            for line in fp:
-                if ":" not in line:
-                    continue
-                key, value = line.split(":", 1)
-                parts = value.strip().split()
-                if parts:
-                    meminfo[key] = int(parts[0])
-        available = meminfo.get("MemAvailable")
-        if available:
-            return available // 1024
-    except OSError:
-        pass
-    return None
-
-
-def _prefer_low_memory_path() -> bool:
-    available_mb = _memory_available_mb()
-    return available_mb is not None and available_mb < 4096
-
-
-def _lower_process_priority() -> None:
-    try:
-        os.nice(10)
-    except (AttributeError, OSError):
-        pass
 
 
 def _try_decompile_sidecar_slice(
@@ -1739,7 +1448,7 @@ def _rank_function_cfg_pairs_for_display(
     def _meaningful_pre_entry_body(addr: int | None, byte_count: int, truncated: bool) -> bool:
         return isinstance(addr, int) and isinstance(entry_addr, int) and addr < entry_addr and (truncated or byte_count > 0x20)
 
-    def _priority(item: tuple[object, object]) -> tuple[int, int, int, int]:
+    def _priority(item: tuple[object, object]) -> tuple[int, int, int, int, int]:
         _cfg, function = item
         addr = getattr(function, "addr", 0)
         block_count, byte_count = _display_metrics(function)
@@ -1763,7 +1472,7 @@ def _rank_function_cfg_pairs_for_display(
         else:
             bucket = 7
         distance = abs(addr - entry_addr) if isinstance(addr, int) and isinstance(entry_addr, int) else 0
-        return (bucket, tiny_wrapper_like, -byte_count, distance)
+        return (bucket, tiny_wrapper_like, block_count, byte_count, distance)
 
     return sorted(function_cfg_pairs, key=_priority)
 
@@ -2155,6 +1864,41 @@ def _rank_prologue_scan_candidate_addrs(
     return [addr for _priority, _neg_offset, addr in sorted(ranked_candidates)]
 
 
+def _relocation_seed_targets(
+    project: angr.Project,
+    code: bytes,
+    *,
+    linked_base: int,
+) -> tuple[set[int], set[int]]:
+    main_object = getattr(project.loader, "main_object", None)
+    relocation_entries = getattr(main_object, "mz_relocation_entries", ()) if main_object is not None else ()
+    if not relocation_entries:
+        return set(), set()
+
+    strong_targets: set[int] = set()
+    weak_targets: set[int] = set()
+    image_end = linked_base + len(code)
+
+    for reloc_offset, reloc_segment in relocation_entries:
+        if not isinstance(reloc_offset, int) or not isinstance(reloc_segment, int):
+            continue
+        reloc_addr = linked_base + (reloc_segment << 4) + reloc_offset
+        seg_index = reloc_addr - linked_base
+        if seg_index < 0 or seg_index + 1 >= len(code):
+            continue
+        seg = int.from_bytes(code[seg_index : seg_index + 2], "little")
+        if seg_index >= 2:
+            off = int.from_bytes(code[seg_index - 2 : seg_index], "little")
+            target = linked_base + (seg << 4) + off
+            if linked_base <= target < image_end:
+                weak_targets.add(target)
+                opcode_index = seg_index - 3
+                if opcode_index >= 0 and code[opcode_index] in {0x9A, 0xEA}:
+                    strong_targets.add(target)
+    weak_targets.difference_update(strong_targets)
+    return strong_targets, weak_targets
+
+
 def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
     main_object = getattr(project.loader, "main_object", None)
     if main_object is None:
@@ -2224,6 +1968,8 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
     near_call_targets: set[int] = set()
     far_call_targets: set[int] = set()
     prologue_targets: set[int] = set()
+    relocation_control_targets: set[int] = set()
+    relocation_pointer_targets: set[int] = set()
 
     def _consider(addr: int, priority: int) -> None:
         if not (linked_base <= addr < linked_base + len(code)):
@@ -2249,8 +1995,23 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
             bounded_metadata_spans[addr] = span_len
         _consider(addr, 0)
 
+    tracer = trace_16bit_seed_candidates(
+        project,
+        code,
+        linked_base=linked_base,
+        windows=seed_windows,
+    )
     for target in entry_window_targets:
         _consider(target, 0)
+    for target in tracer.call_targets:
+        canonical = _resolve_x86_16_function_start(code, target - linked_base)
+        if canonical is not None:
+            _consider(linked_base + canonical, 0 if target in entry_window_targets else 1)
+    for target in tracer.jump_targets:
+        if target not in tracer.call_targets:
+            canonical = _resolve_x86_16_function_start(code, target - linked_base)
+            if canonical is not None:
+                _consider(linked_base + canonical, 2)
 
     for offset in range(len(code) - 2):
         opcode = code[offset]
@@ -2258,8 +2019,11 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
             rel = int.from_bytes(code[offset + 1 : offset + 3], "little", signed=True)
             callsite = linked_base + offset
             target = callsite + 3 + rel
-            near_call_targets.add(target)
-            _consider(target, 0)
+            canonical = _resolve_x86_16_function_start(code, target - linked_base)
+            if canonical is not None:
+                resolved = linked_base + canonical
+                near_call_targets.add(resolved)
+                _consider(resolved, 0)
         if code[offset : offset + 3] == b"\x55\x8b\xec":
             target = linked_base + offset
             prologue_targets.add(target)
@@ -2271,8 +2035,21 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
         off = int.from_bytes(code[offset + 1 : offset + 3], "little")
         seg = int.from_bytes(code[offset + 3 : offset + 5], "little")
         target = linked_base + (seg << 4) + off
-        far_call_targets.add(target)
-        _consider(target, 0)
+        canonical = _resolve_x86_16_function_start(code, target - linked_base)
+        if canonical is not None:
+            resolved = linked_base + canonical
+            far_call_targets.add(resolved)
+            _consider(resolved, 0)
+
+    relocation_control_targets, relocation_pointer_targets = _relocation_seed_targets(
+        project,
+        code,
+        linked_base=linked_base,
+    )
+    for target in relocation_control_targets:
+        _consider(target, 1)
+    for target in relocation_pointer_targets:
+        _consider(target, 4)
 
     try:
         insns = _linear_disassembly(project, linked_base, linked_base + len(code))
@@ -2286,11 +2063,16 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
         target = insn.address + insn.size
         if not (linked_base <= target < linked_base + len(code)):
             continue
-        next_byte = code[target - linked_base : target - linked_base + 1]
-        if next_byte in {b"\x00", b"\x90", b"\xcc"}:
+        next_offset = target - linked_base
+        while next_offset < len(code) and code[next_offset] in {0x00, 0x90, 0xCC}:
+            next_offset += 1
+        if next_offset >= len(code):
             continue
-        terminal_next_targets.add(target)
-        _consider(target, 2)
+        if not _looks_like_x86_16_function_prologue(code, next_offset):
+            continue
+        next_target = linked_base + next_offset
+        terminal_next_targets.add(next_target)
+        _consider(next_target, 2)
 
     reranked: list[tuple[tuple[int, int, int], int]] = []
     for addr, (_priority, distance) in ranked.items():
@@ -2301,6 +2083,8 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
         in_terminal_next = addr in terminal_next_targets
         in_neighbor = addr in neighbor_targets
         in_entry_window = addr in entry_window_targets
+        in_relocation_control = addr in relocation_control_targets
+        in_relocation_pointer = addr in relocation_pointer_targets
         entry_descends_from_stub = in_entry_window and addr < project.entry
         if metadata_span_len is not None:
             final_priority = 0
@@ -2310,6 +2094,10 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
             final_priority = 1
         elif in_entry_window and (in_neighbor or in_near_call or in_far_call):
             final_priority = 1
+        elif in_relocation_control and (in_prologue or in_near_call or in_far_call):
+            final_priority = 2
+        elif in_relocation_control:
+            final_priority = 3
         elif in_neighbor and in_prologue:
             final_priority = 2
         elif in_entry_window:
@@ -2320,6 +2108,10 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
             final_priority = 2
         elif in_prologue:
             final_priority = 3
+        elif in_relocation_pointer and (in_near_call or in_far_call or in_prologue):
+            final_priority = 4
+        elif in_relocation_pointer:
+            final_priority = 5
         elif in_terminal_next and (in_near_call or in_far_call):
             final_priority = 4
         elif in_terminal_next:
@@ -2551,7 +2343,9 @@ def _recover_seeded_exe_functions(
     recovered_addrs: list[int] = []
     seen_addrs: set[int] = {project.entry}
     queued_addrs: set[int] = set(ranked_seeds)
-    pending_addrs: list[int] = list(ranked_seeds)
+    pending_seed_addrs: list[int] = list(ranked_seeds)
+    pending_gap_addrs: list[int] = []
+    pending_neighbor_addrs: list[int] = []
     covered_ranges: list[tuple[int, int]] = []
     metadata = getattr(project, "_inertia_lst_metadata", None)
     image_end = linked_base + max_addr + 1
@@ -2604,11 +2398,16 @@ def _recover_seeded_exe_functions(
             if addr not in seen_addrs and addr not in queued_addrs and linked_base <= addr < image_end
         ]
         if initial_prologue_targets:
-            pending_addrs[:0] = initial_prologue_targets
+            pending_seed_addrs[:0] = initial_prologue_targets
             queued_addrs.update(initial_prologue_targets)
 
-    while pending_addrs:
-        addr = pending_addrs.pop(0)
+    while pending_seed_addrs or pending_gap_addrs or pending_neighbor_addrs:
+        if pending_seed_addrs:
+            addr = pending_seed_addrs.pop(0)
+        elif pending_gap_addrs:
+            addr = pending_gap_addrs.pop(0)
+        else:
+            addr = pending_neighbor_addrs.pop(0)
         if _addr_in_ranges(addr, covered_ranges):
             continue
         remaining = deadline - time.monotonic()
@@ -2645,7 +2444,7 @@ def _recover_seeded_exe_functions(
         function_score = _function_recovery_score(function)
         function_truncated = _function_recovery_truncated(function)
 
-        def _queue_targets(target_addrs: list[int]) -> None:
+        def _queue_targets(target_addrs: list[int], *, queue: str) -> None:
             queued_targets: list[int] = []
             for target_addr in target_addrs:
                 if target_addr in seen_addrs or target_addr in queued_addrs:
@@ -2656,7 +2455,10 @@ def _recover_seeded_exe_functions(
                     continue
                 queued_targets.append(target_addr)
             if queued_targets:
-                pending_addrs[:0] = queued_targets
+                if queue == "gap":
+                    pending_gap_addrs.extend(queued_targets)
+                else:
+                    pending_neighbor_addrs.extend(queued_targets)
                 queued_addrs.update(queued_targets)
 
         linear_targets = list(_linear_function_seed_targets(project, function.addr, include_jumps=False))
@@ -2673,10 +2475,11 @@ def _recover_seeded_exe_functions(
                     covered_ranges=covered_ranges,
                     existing_addrs=seen_addrs | queued_addrs,
                     image_end=image_end,
-                )
+                ),
+                queue="gap",
             )
         else:
-            _queue_targets(neighbor_targets)
+            _queue_targets(neighbor_targets, queue="neighbor")
 
     if recovered_addrs:
         if cache_key is not None:
@@ -2687,6 +2490,14 @@ def _recover_seeded_exe_functions(
             )
         print(f"/* quick function-entry scan recovered {len(recovered_addrs)} additional function(s). */")
     return (recovered, recovered_addrs) if return_addrs else recovered
+
+
+def _direct_recovery_inventory_count(project: angr.Project) -> int | None:
+    try:
+        ranked_seeds = _rank_exe_function_seeds(project)
+    except Exception:
+        return None
+    return len(ranked_seeds) if ranked_seeds else None
 
 
 def _decompile_function(
@@ -4548,113 +4359,63 @@ def _decompile_function_with_stats(
     return status, payload, partial_payload, block_count, byte_count, elapsed
 
 
-@dataclass(frozen=True)
-class FunctionWorkItem:
-    index: int
-    function_cfg: object
-    function: object
-
-
-@dataclass(frozen=True)
-class FunctionWorkResult:
-    index: int
-    status: str
-    payload: str
-    debug_output: str
-    function: object
-    function_cfg: object
-    partial_payload: str | None = None
-    tail_validation: dict[str, object] | None = None
-
-
-def _choose_function_parallelism(function_count: int) -> int:
-    if function_count <= 1:
-        return 1
-    if os.environ.get(_FORCE_SERIAL_FUNCTION_DECOMP_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
-        return 1
-    if _prefer_low_memory_path():
-        return 1
-    cpu_count = os.cpu_count() or 1
-    workers = max(1, cpu_count - 1)
-    available_mb = _memory_available_mb()
-    if available_mb is None:
-        return min(workers, function_count)
-    budget_mb = int(available_mb * DEFAULT_FREE_RAM_BUDGET_FRACTION)
-    if budget_mb < DEFAULT_WORKER_MEMORY_FLOOR_MB:
-        return 1
-    workers_by_mem = max(1, budget_mb // DEFAULT_WORKER_MEMORY_FLOOR_MB)
-    return min(workers, function_count, workers_by_mem)
-
-
-def _should_force_serial_supplemental_decompilation(function_count: int) -> bool:
-    if function_count > 8:
-        return False
-    if _prefer_low_memory_path():
-        return True
-    available_mb = _memory_available_mb()
-    if available_mb is None:
-        return True
-    return available_mb < (DEFAULT_WORKER_MEMORY_FLOOR_MB * 4)
-
-
-@contextlib.contextmanager
-def _capture_thread_output():
-    stdout_buf = io.StringIO()
-    stderr_buf = io.StringIO()
-    with _THREAD_STDOUT.target(stdout_buf), _THREAD_STDERR.target(stderr_buf):
-        yield stdout_buf, stderr_buf
-
-
-def _emit_tail_validation_for_function_run_or_uncollected(
-    project,
-    function_cfg,
-    function,
+def _prepare_ranked_binary_preview_items(
+    project: angr.Project,
+    ranked_binary_offsets: Sequence[int],
     *,
-    allow_project_fallback: bool = True,
-    binary_path: Path | None = None,
-) -> None:
-    if not _tail_validation_runtime_enabled(project):
-        return
-    snapshot = _tail_validation_snapshot_for_fallback(
-        project,
-        function,
-        allow_project_fallback=allow_project_fallback,
-    )
-    item = FunctionWorkItem(index=1, function_cfg=function_cfg, function=function)
-    result = FunctionWorkResult(
-        index=1,
-        status="ok" if snapshot else "uncollected",
-        payload="",
-        debug_output="",
-        function=function,
-        function_cfg=function_cfg,
-        tail_validation=snapshot,
-    )
-    _emit_tail_validation_console_summary([item], {1: result}, binary_path=binary_path)
+    max_count: int,
+    timeout: int,
+    window: int,
+    low_memory: bool,
+) -> list[FunctionWorkItem]:
+    if max_count <= 0 or not ranked_binary_offsets:
+        return []
 
+    preview_items: list[FunctionWorkItem] = []
+    selected_addrs: set[int] = set()
+    quick_timeout = min(timeout, 2)
+    probe_budget = min(len(ranked_binary_offsets), max(max_count * 6, 12))
 
-def _emit_tail_validation_snapshot_or_uncollected(
-    function_cfg,
-    function,
-    snapshot: Mapping[str, object] | None,
-    *,
-    binary_path: Path | None = None,
-) -> None:
-    project = getattr(function, "project", None)
-    if project is not None and not _tail_validation_runtime_enabled(project):
-        return
-    normalized_snapshot = dict(snapshot) if isinstance(snapshot, Mapping) else {}
-    item = FunctionWorkItem(index=1, function_cfg=function_cfg, function=function)
-    result = FunctionWorkResult(
-        index=1,
-        status="ok" if normalized_snapshot else "uncollected",
-        payload="",
-        debug_output="",
-        function=function,
-        function_cfg=function_cfg,
-        tail_validation=normalized_snapshot,
-    )
-    _emit_tail_validation_console_summary([item], {1: result}, binary_path=binary_path)
+    for addr in ranked_binary_offsets[:probe_budget]:
+        try:
+            function_cfg, function = _run_with_timeout_in_daemon_thread(
+                lambda addr=addr: _recover_ranked_binary_function(
+                    project,
+                    addr,
+                    f"sub_{addr:x}",
+                    timeout=quick_timeout,
+                    window=window,
+                    low_memory=low_memory,
+                ),
+                timeout=quick_timeout + 1,
+                thread_name_prefix="ranked-preview",
+            )
+        except Exception:
+            continue
+        preview_items.append(
+            FunctionWorkItem(
+                index=len(preview_items) + 1,
+                function_cfg=function_cfg,
+                function=function,
+            )
+        )
+        selected_addrs.add(addr)
+        if len(preview_items) >= max_count:
+            return preview_items
+
+    for addr in ranked_binary_offsets:
+        if addr in selected_addrs:
+            continue
+        preview_items.append(
+            FunctionWorkItem(
+                index=len(preview_items) + 1,
+                function_cfg=None,
+                function=_make_placeholder_function(project, addr, f"sub_{addr:x}"),
+            )
+        )
+        if len(preview_items) >= max_count:
+            break
+    return preview_items
 
 
 def _run_function_work_item(
@@ -14336,6 +14097,59 @@ def _recover_lst_function(
     return cfg, func
 
 
+def _recover_ranked_binary_function(
+    project: angr.Project,
+    addr: int,
+    name: str,
+    *,
+    timeout: int,
+    window: int,
+    low_memory: bool = False,
+):
+    with _analysis_timeout(max(1, timeout)):
+        if project.arch.name == "86_16":
+            fast_windows = _x86_16_fast_recovery_windows(window, low_memory=low_memory)
+            candidate_windows = _x86_16_recovery_windows(window, low_memory=low_memory)
+            last_error: Exception | None = None
+            for candidate_window in fast_windows:
+                try:
+                    cfg, func = _pick_function_lean(
+                        project,
+                        addr,
+                        regions=[_infer_x86_16_linear_region(project, addr, window=candidate_window)],
+                        data_references=False,
+                        extend_far_calls=False,
+                    )
+                    break
+                except KeyError as ex:
+                    last_error = ex
+            else:
+                cfg = None
+                func = None
+
+            if cfg is None or func is None:
+                last_error = None
+                for candidate_window in candidate_windows:
+                    try:
+                        cfg, func = _pick_function(
+                            project,
+                            addr,
+                            regions=[_infer_x86_16_linear_region(project, addr, window=candidate_window)],
+                        )
+                        break
+                    except KeyError as ex:
+                        last_error = ex
+                else:
+                    if last_error is not None:
+                        raise last_error
+                    raise KeyError(f"Function {addr:#x} was not recovered by CFGFast.")
+        else:
+            cfg, func = _pick_function(project, addr, regions=[(addr, addr + window)])
+
+    func.name = name
+    return cfg, func
+
+
 def _make_placeholder_function(project: angr.Project, addr: int, name: str):
     return SimpleNamespace(
         addr=addr,
@@ -14806,6 +14620,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if lst_metadata is None:
             print("/* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */")
+        print(_recovery_evidence_line(args.binary, lst_metadata))
     low_memory_path = _prefer_low_memory_path()
     if args.addr is not None:
         print("/* recovering function... */", flush=True)
@@ -15163,7 +14978,12 @@ def main(argv: list[str] | None = None) -> int:
     print("/* discovering likely functions... */", flush=True)
     cfg = None
     function_cfg_pairs: list[tuple[object, object]] = []
+    ranked_binary_offsets: list[int] = []
     labeled_offsets: list[tuple[int, str]] = []
+    ranked_labeled_total = 0
+    total_functions = 0
+    shown_total = 0
+    direct_inventory_total: int | None = None
     visible_code_labels = _visible_code_labels(lst_metadata)
     recovery_code_labels = _recovery_code_labels(lst_metadata) if lst_metadata is not None else {}
     seed_code_labels = visible_code_labels or recovery_code_labels
@@ -15186,6 +15006,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"/* sidecar label ranking prepared {len(labeled_offsets)} entries in "
                 f"{ranking_elapsed_ms:.1f}ms{' (cache hit)' if ranking_cache_hit else ''}. */"
             )
+            ranked_labeled_total = len(labeled_offsets)
             if args.max_functions > 0:
                 labeled_offsets = labeled_offsets[: args.max_functions]
         except Exception as ex:
@@ -15200,6 +15021,9 @@ def main(argv: list[str] | None = None) -> int:
             and args.binary.suffix.lower() == ".exe"
             and args.max_functions > 0
         )
+        if args.addr is None and args.binary.suffix.lower() == ".exe":
+            ranked_binary_offsets = _rank_exe_function_seeds(project)
+            direct_inventory_total = len(ranked_binary_offsets) if ranked_binary_offsets else None
         discovery_limit = (
             _expanded_exe_discovery_limit(args.max_functions)
             if deferred_exe_display_cap
@@ -15207,7 +15031,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         if lst_metadata is not None and not visible_code_labels:
             if recovery_code_labels:
-                print("/* Signature-bounded sidecar labels available; trying seeded recovery before generic CFG recovery. */")
+                print(
+                    "/* Signature-matched library labels available as bounded hints; "
+                    "recovering binary-owned functions from direct call/prologue evidence before generic CFG recovery. */"
+                )
             try:
                 function_cfg_pairs = _run_with_timeout_in_daemon_thread(
                     lambda: _recover_seeded_exe_functions(
@@ -15365,6 +15192,15 @@ def main(argv: list[str] | None = None) -> int:
                 total_functions = len(function_cfg_pairs)
                 shown_total = len(function_cfg_pairs)
                 cfg = None
+            elif (
+                args.addr is None
+                and args.binary.suffix.lower() == ".exe"
+                and ranked_binary_offsets
+            ):
+                print(
+                    "/* Falling back to ranked direct-binary function addresses; "
+                    "recovering only the shown subset lazily. */"
+                )
             else:
                 detail = "Timed out" if isinstance(catalog_error, FuturesTimeoutError) else _describe_exception(catalog_error) if catalog_error is not None else "Unknown failure"
                 print(f"/* Function catalog recovery failed: {detail} */")
@@ -15392,9 +15228,9 @@ def main(argv: list[str] | None = None) -> int:
                     func.name = code_name
 
     if lst_metadata is not None and visible_code_labels:
-        total_functions = len(labeled_offsets)
+        total_functions = ranked_labeled_total or len(labeled_offsets)
         shown_total = len(labeled_offsets)
-    elif not function_cfg_pairs:
+    elif not function_cfg_pairs and cfg is not None:
         limit = args.max_functions if args.max_functions > 0 else None
         defer_limit_until_after_seed_ranking = (
             args.addr is None
@@ -15442,13 +15278,34 @@ def main(argv: list[str] | None = None) -> int:
                 shown_total = len(function_cfg_pairs)
                 total_functions = max(total_functions, shown_total)
                 project._inertia_supplemental_scan_used = True
+    elif (
+        args.addr is None
+        and args.binary.suffix.lower() == ".exe"
+        and ranked_binary_offsets
+    ):
+        shown_total = len(ranked_binary_offsets)
+        if args.max_functions > 0:
+            shown_total = min(shown_total, args.max_functions)
+        elif shown_total > 24:
+            shown_total = _default_exe_showcase_cap(shown_total, args.timeout)
 
     print(f"/* binary: {args.binary} */")
     print(f"/* arch: {project.arch.name} */")
     print(f"/* entry: {project.entry:#x} */")
+    if direct_inventory_total is not None:
+        print(f"/* info: direct-binary recovery found {direct_inventory_total} likely function entries */")
+        total_functions = max(total_functions, direct_inventory_total)
     print(f"/* functions recovered: {total_functions} */")
+    print(f"/* info: selected {shown_total} function(s) for display */")
     sidecar_preview_limit = None
     if (
+        lst_metadata is not None
+        and visible_code_labels
+        and args.max_functions > 0
+        and total_functions > args.max_functions
+    ):
+        sidecar_preview_limit = args.max_functions
+    elif (
         lst_metadata is not None
         and visible_code_labels
         and args.max_functions <= 0
@@ -15474,7 +15331,6 @@ def main(argv: list[str] | None = None) -> int:
     if (
         args.addr is None
         and args.binary.suffix.lower() == ".exe"
-        and lst_metadata is None
         and args.max_functions > 0
         and len(function_cfg_pairs) > args.max_functions
     ):
@@ -15534,12 +15390,34 @@ def main(argv: list[str] | None = None) -> int:
         for index, (offset, name) in enumerate(labeled_offsets, start=1):
             placeholder = _make_placeholder_function(project, offset, name)
             function_tasks.append(FunctionWorkItem(index=index, function_cfg=None, function=placeholder))
+    elif (
+        args.addr is None
+        and args.binary.suffix.lower() == ".exe"
+        and not function_cfg_pairs
+        and ranked_binary_offsets
+    ):
+        preview_addrs = ranked_binary_offsets
+        if args.max_functions > 0:
+            preview_addrs = preview_addrs[: args.max_functions]
+        elif len(preview_addrs) > 24:
+            preview_addrs = preview_addrs[: _default_exe_showcase_cap(len(preview_addrs), args.timeout)]
+        shown_total = len(preview_addrs)
+        function_tasks = _prepare_ranked_binary_preview_items(
+            project,
+            ranked_binary_offsets,
+            max_count=shown_total,
+            timeout=args.timeout,
+            window=args.window,
+            low_memory=low_memory_path,
+        )
     else:
         for index, (function_cfg, function) in enumerate(function_cfg_pairs, start=1):
             function_tasks.append(FunctionWorkItem(index=index, function_cfg=function_cfg, function=function))
 
     workers = _choose_function_parallelism(len(function_tasks))
     if lst_metadata is not None and visible_code_labels:
+        workers = 1
+    if any(item.function_cfg is None for item in function_tasks):
         workers = 1
     if (
         getattr(project, "_inertia_supplemental_scan_used", False)
@@ -15576,13 +15454,15 @@ def main(argv: list[str] | None = None) -> int:
         *,
         function=None,
         allow_project_fallback: bool = True,
-    ) -> None:
+    ) -> dict[str, object]:
         target_function = function if function is not None else item.function
-        fallback_tail_validation_by_index[item.index] = _tail_validation_snapshot_for_fallback(
+        snapshot = _tail_validation_snapshot_for_fallback(
             project,
             target_function,
             allow_project_fallback=allow_project_fallback,
         )
+        fallback_tail_validation_by_index[item.index] = snapshot
+        return snapshot
 
     def _emit_function_result(item: FunctionWorkItem, result: FunctionWorkResult) -> tuple[int, int]:
         decompiled_local = 0
@@ -15596,12 +15476,14 @@ def main(argv: list[str] | None = None) -> int:
             print(_format_first_block_asm(project, function.addr))
         if result.status == "ok":
             decompiled_local += 1
+            _print_function_attempt_status(function, attempt="decompiled", validation_snapshot=result.tail_validation)
             print("/* -- c -- */")
             print(result.payload)
             return decompiled_local, failed_local
 
         emitted_problem = False
         if result.partial_payload:
+            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=result.tail_validation)
             print(f"/* problem: {result.status} */")
             print(result.payload)
             print("/* -- c (partial timeout) -- */")
@@ -15621,10 +15503,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         if slice_result is not None:
             decompiled_local += 1
-            _remember_fallback_tail_validation(
+            fallback_snapshot = _remember_fallback_tail_validation(
                 item,
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
             )
+            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
             print("/* -- c (sidecar slice fallback) -- */")
             print(slice_result[1])
             return decompiled_local, failed_local
@@ -15640,10 +15523,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         if peer_sidecar_c is not None:
             decompiled_local += 1
-            _remember_fallback_tail_validation(
+            fallback_snapshot = _remember_fallback_tail_validation(
                 item,
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("peer_sidecar"),
             )
+            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
             print("/* -- c (peer sidecar fallback) -- */")
             print(peer_sidecar_c)
             return decompiled_local, failed_local
@@ -15651,10 +15535,11 @@ def main(argv: list[str] | None = None) -> int:
         trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, function.addr, function.name)
         if trivial_c is not None:
             decompiled_local += 1
-            _remember_fallback_tail_validation(
+            fallback_snapshot = _remember_fallback_tail_validation(
                 item,
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("trivial_sidecar"),
             )
+            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
             print("/* -- c (trivial sidecar fallback) -- */")
             print(trivial_c)
             return decompiled_local, failed_local
@@ -15671,10 +15556,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         if nonopt_c is not None:
             decompiled_local += 1
-            _remember_fallback_tail_validation(
+            fallback_snapshot = _remember_fallback_tail_validation(
                 item,
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
             )
+            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
             if not emitted_problem:
                 print(f"/* problem: {result.status} */")
                 print(result.payload)
@@ -15683,6 +15569,11 @@ def main(argv: list[str] | None = None) -> int:
             return decompiled_local, failed_local
 
         failed_local += 1
+        _print_function_attempt_status(
+            function,
+            attempt=_function_attempt_display_status(result),
+            validation_snapshot=result.tail_validation,
+        )
         sidecar_region = _lst_code_region(lst_metadata, function.addr) if lst_metadata is not None else None
         asm_fallback = (
             _format_asm_range(project, sidecar_region[0], sidecar_region[1])
@@ -15728,21 +15619,35 @@ def main(argv: list[str] | None = None) -> int:
                 result = result_map.get(item.index)
                 if result is None:
                     active_item = item
-                    if item.function_cfg is None and lst_metadata is not None:
+                    if item.function_cfg is None:
                         try:
-                            function_cfg, function = _run_with_timeout_in_daemon_thread(
-                                lambda offset=item.function.addr, name=item.function.name: _recover_lst_function(
-                                    project,
-                                    lst_metadata,
-                                    offset,
-                                    name,
-                                    timeout=recover_timeout,
-                                    window=args.window,
-                                    low_memory=low_memory_path,
-                                ),
-                                timeout=recover_timeout + 1,
-                                thread_name_prefix="lst-recover",
-                            )
+                            if lst_metadata is not None:
+                                function_cfg, function = _run_with_timeout_in_daemon_thread(
+                                    lambda offset=item.function.addr, name=item.function.name: _recover_lst_function(
+                                        project,
+                                        lst_metadata,
+                                        offset,
+                                        name,
+                                        timeout=recover_timeout,
+                                        window=args.window,
+                                        low_memory=low_memory_path,
+                                    ),
+                                    timeout=recover_timeout + 1,
+                                    thread_name_prefix="lst-recover",
+                                )
+                            else:
+                                function_cfg, function = _run_with_timeout_in_daemon_thread(
+                                    lambda addr=item.function.addr, name=item.function.name: _recover_ranked_binary_function(
+                                        project,
+                                        addr,
+                                        name,
+                                        timeout=recover_timeout,
+                                        window=args.window,
+                                        low_memory=low_memory_path,
+                                    ),
+                                    timeout=recover_timeout + 1,
+                                    thread_name_prefix="ranked-recover",
+                                )
                             active_item = FunctionWorkItem(
                                 index=item.index,
                                 function_cfg=function_cfg,
@@ -15810,6 +15715,8 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if getattr(late_result, "status", None) == "ok" or getattr(late_result, "partial_payload", None):
                 result_map[item.index] = late_result
+        attempted = sum(1 for item in function_tasks if result_map.get(item.index) is not None)
+        print(f"/* info: decompilation attempted for {attempted}/{shown_total} displayed function(s) */")
         for item in function_tasks:
             result = result_map.get(item.index)
             if result is None:
@@ -15916,6 +15823,8 @@ def main(argv: list[str] | None = None) -> int:
 
     decompiled = 0
     failed = 0
+    attempted = sum(1 for item in function_tasks if result_map.get(item.index) is not None)
+    print(f"/* info: decompilation attempted for {attempted}/{shown_total} displayed function(s) */")
     for item in function_tasks:
         result = result_map.get(item.index)
         if result is None:
