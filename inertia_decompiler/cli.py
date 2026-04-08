@@ -5,9 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
-import hashlib
 import io
-import json
 import logging
 import os
 import re
@@ -54,6 +52,24 @@ from inertia_decompiler.disassembly_helpers import (
     _linear_disassembly,
     _probe_lift_break,
 )
+from inertia_decompiler.tail_validation import (
+    TAIL_VALIDATION_ENABLE_ENV as _TAIL_VALIDATION_ENABLE_ENV,
+    collect_tail_validation_records as _collect_tail_validation_records,
+    emit_tail_validation_console_summary as _emit_tail_validation_console_summary,
+    inherit_tail_validation_runtime_policy as _inherit_tail_validation_runtime_policy,
+    parse_env_bool as _parse_env_bool,
+    set_tail_validation_runtime_enabled as _set_tail_validation_runtime_enabled,
+    tail_validation_cache_label as _tail_validation_cache_label,
+    tail_validation_console_cache_path as _tail_validation_console_cache_path,
+    tail_validation_detail_cache_path as _tail_validation_detail_cache_path,
+    tail_validation_display_status as _tail_validation_display_status,
+    tail_validation_enabled_for_run as _tail_validation_enabled_for_run,
+    tail_validation_fallback_allows_project_snapshot as _tail_validation_fallback_allows_project_snapshot,
+    tail_validation_record_for_result as _tail_validation_record_for_result,
+    tail_validation_runtime_enabled as _tail_validation_runtime_enabled,
+    tail_validation_snapshot_for_fallback as _tail_validation_snapshot_for_fallback,
+    tail_validation_snapshot_for_function_run as _tail_validation_snapshot_for_function_run,
+)
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -85,43 +101,6 @@ def _default_exe_showcase_cap(total_functions: int, timeout: int) -> int:
     if total_functions > 256:
         return 4
     return min(24, max(8, timeout))
-
-
-def _parse_env_bool(value: str | None) -> bool | None:
-    if value is None:
-        return None
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return None
-
-
-def _tail_validation_runtime_enabled(project) -> bool:
-    return bool(getattr(project, "_inertia_tail_validation_enabled", True))
-
-
-def _set_tail_validation_runtime_enabled(project, enabled: bool) -> None:
-    setattr(project, "_inertia_tail_validation_enabled", bool(enabled))
-
-
-def _inherit_tail_validation_runtime_policy(project, source_project) -> None:
-    _set_tail_validation_runtime_enabled(project, _tail_validation_runtime_enabled(source_project))
-
-
-def _tail_validation_enabled_for_run(binary_path: Path | None, *, proc: str | None = None) -> bool:
-    forced = _parse_env_bool(os.environ.get(_TAIL_VALIDATION_ENABLE_ENV))
-    if forced is not None:
-        return forced
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        return True
-    if os.environ.get(_TAIL_VALIDATION_METADATA_ENV) == "1":
-        return True
-    suffix = binary_path.suffix.lower() if isinstance(binary_path, Path) else ""
-    if proc is not None or suffix == ".cod":
-        return True
-    return False
 
 
 def _install_angr_peephole_expr_bitwidth_guard(walker_cls) -> object:
@@ -425,15 +404,7 @@ from angr_platforms.X86_16.alias_model import (
 )
 from angr_platforms.X86_16.alias_domains import DomainKey, register_pair_name
 from angr_platforms.X86_16.alias_state import AliasState
-from angr_platforms.X86_16.milestone_report import (
-    cache_x86_16_tail_validation_detail_artifact,
-    render_x86_16_tail_validation_console_summary,
-)
-from angr_platforms.X86_16.tail_validation import (
-    build_x86_16_tail_validation_aggregate,
-    extract_x86_16_tail_validation_snapshot,
-    x86_16_tail_validation_snapshot_passed,
-)
+from angr_platforms.X86_16.tail_validation import x86_16_tail_validation_snapshot_passed
 from angr_platforms.X86_16.widening_model import analyze_adjacent_storage_slices
 from angr_platforms.X86_16.widening_alias import can_join_adjacent_register_slices, join_adjacent_register_slices
 
@@ -4634,68 +4605,6 @@ def _capture_thread_output():
         yield stdout_buf, stderr_buf
 
 
-def _tail_validation_record_for_result(item: FunctionWorkItem, result: FunctionWorkResult) -> dict[str, object] | None:
-    snapshot = result.tail_validation
-    if not isinstance(snapshot, dict) or not snapshot:
-        return None
-    function = result.function if result.function is not None else item.function
-    return {
-        "function_addr": getattr(function, "addr", 0),
-        "function_name": getattr(function, "name", "sub"),
-        **snapshot,
-    }
-
-
-def _collect_tail_validation_records(
-    function_tasks: list[FunctionWorkItem],
-    result_map: dict[int, FunctionWorkResult],
-) -> list[dict[str, object]]:
-    records: list[dict[str, object]] = []
-    for item in function_tasks:
-        result = result_map.get(item.index)
-        if result is None:
-            continue
-        record = _tail_validation_record_for_result(item, result)
-        if record is not None:
-            records.append(record)
-    return records
-
-
-def _tail_validation_snapshot_for_function_run(project, function) -> dict[str, object]:
-    snapshot = extract_x86_16_tail_validation_snapshot(getattr(function, "info", None))
-    if snapshot:
-        return snapshot
-    fallback_snapshot = getattr(project, "_inertia_last_tail_validation_snapshot", None)
-    if isinstance(fallback_snapshot, dict):
-        return dict(fallback_snapshot)
-    return {}
-
-
-def _tail_validation_snapshot_for_fallback(
-    project,
-    function,
-    *,
-    allow_project_fallback: bool,
-) -> dict[str, object]:
-    current_snapshot = getattr(project, "_inertia_partial_tail_validation_snapshot", None)
-    if isinstance(current_snapshot, dict):
-        setattr(project, "_inertia_partial_tail_validation_snapshot", None)
-        return dict(current_snapshot)
-    snapshot = extract_x86_16_tail_validation_snapshot(getattr(function, "info", None))
-    if snapshot:
-        return snapshot
-    if not allow_project_fallback:
-        return {}
-    fallback_snapshot = getattr(project, "_inertia_last_tail_validation_snapshot", None)
-    if isinstance(fallback_snapshot, dict):
-        return dict(fallback_snapshot)
-    return {}
-
-
-def _tail_validation_fallback_allows_project_snapshot(kind: str) -> bool:
-    return kind in _TAIL_VALIDATION_FALLBACK_PROJECT_SNAPSHOT_KINDS
-
-
 def _emit_tail_validation_for_function_run_or_uncollected(
     project,
     function_cfg,
@@ -4746,107 +4655,6 @@ def _emit_tail_validation_snapshot_or_uncollected(
         tail_validation=normalized_snapshot,
     )
     _emit_tail_validation_console_summary([item], {1: result}, binary_path=binary_path)
-
-
-def _emit_tail_validation_console_summary(
-    function_tasks: list[FunctionWorkItem],
-    result_map: dict[int, FunctionWorkResult],
-    *,
-    binary_path: Path | None = None,
-) -> None:
-    emitted_any = False
-    for item in function_tasks:
-        project = getattr(item.function, "project", None)
-        if project is not None:
-            if not _tail_validation_runtime_enabled(project):
-                return
-            break
-    records = _collect_tail_validation_records(function_tasks, result_map)
-    scanned = len(function_tasks)
-    aggregate = build_x86_16_tail_validation_aggregate(records, scanned=scanned)
-    surface = dict(aggregate.get("surface", {}) or {})
-    console_cache_path = _tail_validation_console_cache_path(binary_path, function_tasks)
-    detail_cache_path = _tail_validation_detail_cache_path(binary_path, function_tasks)
-    rendered = render_x86_16_tail_validation_console_summary(surface, cache_path=console_cache_path)
-    detail_artifact = cache_x86_16_tail_validation_detail_artifact(surface, cache_path=detail_cache_path)
-    for line in rendered.get("lines", ()):
-        if isinstance(line, str) and line:
-            print(f"{_TAIL_VALIDATION_STDERR_PREFIX}{line}", file=sys.stderr)
-            emitted_any = True
-    if surface.get("severity") != "clean":
-        if detail_cache_path is not None:
-            print(f"{_TAIL_VALIDATION_STDERR_PREFIX}detail artifact {detail_cache_path}", file=sys.stderr)
-            emitted_any = True
-        if rendered.get("cache_hit"):
-            print(f"{_TAIL_VALIDATION_STDERR_PREFIX}console summary cache hit", file=sys.stderr)
-            emitted_any = True
-        if detail_artifact.get("cache_hit"):
-            print(f"{_TAIL_VALIDATION_STDERR_PREFIX}detail artifact cache hit", file=sys.stderr)
-            emitted_any = True
-    if os.environ.get(_TAIL_VALIDATION_METADATA_ENV) == "1":
-        payload = {
-            "scanned": scanned,
-            "records": records,
-            "summary": dict(aggregate.get("summary", {}) or {}),
-            "surface": surface,
-            "console_cache_hit": bool(rendered.get("cache_hit")),
-            "console_cache_path": str(console_cache_path) if console_cache_path is not None else None,
-            "detail_cache_hit": bool(detail_artifact.get("cache_hit")),
-            "detail_cache_path": str(detail_cache_path) if detail_cache_path is not None else None,
-        }
-        print(
-            f"{_TAIL_VALIDATION_METADATA_PREFIX}{json.dumps(payload, sort_keys=True)}",
-            file=sys.stderr,
-        )
-        emitted_any = True
-    if emitted_any:
-        sys.stderr.flush()
-
-
-def _tail_validation_cache_label(binary_path: Path | None, function_tasks: Sequence[FunctionWorkItem]) -> str | None:
-    if binary_path is None:
-        return None
-    resolved = Path(binary_path).resolve()
-    base_name = resolved.stem or resolved.name or "binary"
-    labels: list[str] = []
-    for item in function_tasks:
-        function = item.function
-        name = getattr(function, "name", None)
-        addr = getattr(function, "addr", None)
-        if isinstance(name, str) and name:
-            label = name
-        elif isinstance(addr, int):
-            label = f"sub_{addr:x}"
-        else:
-            label = "function"
-        if isinstance(addr, int):
-            label = f"{label}@{addr:x}"
-        labels.append(label)
-    payload = f"{resolved}\n" + "\n".join(labels or ["whole-binary"])
-    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
-    if len(labels) == 1:
-        return f"{base_name}.{digest}"
-    return f"{base_name}.{max(len(labels), 1)}f.{digest}"
-
-
-def _tail_validation_console_cache_path(
-    binary_path: Path | None,
-    function_tasks: Sequence[FunctionWorkItem],
-) -> Path | None:
-    label = _tail_validation_cache_label(binary_path, function_tasks)
-    if label is None:
-        return None
-    return _TAIL_VALIDATION_CONSOLE_CACHE_DIR / f"{label}.tail_validation_console.json"
-
-
-def _tail_validation_detail_cache_path(
-    binary_path: Path | None,
-    function_tasks: Sequence[FunctionWorkItem],
-) -> Path | None:
-    label = _tail_validation_cache_label(binary_path, function_tasks)
-    if label is None:
-        return None
-    return _TAIL_VALIDATION_DETAIL_CACHE_DIR / f"{label}.tail_validation_surface.json"
 
 
 def _run_function_work_item(
