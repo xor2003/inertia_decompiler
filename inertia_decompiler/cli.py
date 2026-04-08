@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import atexit
+import builtins as _builtins
 import contextlib
 import copy
 import logging
 import os
 import re
 import sys
+import threading
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, TimeoutError as FuturesTimeoutError, wait
@@ -24,6 +27,7 @@ from inertia_decompiler.cache import (
 )
 from inertia_decompiler.project_loading import (
     _build_project,
+    _build_project_cached,
     _build_project_from_bytes,
     _describe_exception,
     _is_blob_only_input,
@@ -80,6 +84,7 @@ from inertia_decompiler.runtime_support import (
     lower_process_priority as _lower_process_priority,
     memory_available_mb as _memory_available_mb,
     prefer_low_memory_path as _prefer_low_memory_path,
+    run_with_timeout_in_fork as _run_with_timeout_in_fork,
     run_with_timeout_in_daemon_thread as _run_with_timeout_in_daemon_thread,
     raise_timeout as _raise_timeout,
     should_force_serial_supplemental_decompilation as _should_force_serial_supplemental_decompilation,
@@ -95,6 +100,84 @@ from inertia_decompiler.work_items import (
     print_function_attempt_status as _print_function_attempt_status,
     recovery_evidence_line as _recovery_evidence_line,
 )
+
+_RAW_PRINT = _builtins.print
+
+
+def _timestamp_prefix() -> str:
+    return time.strftime("[%H:%M:%S]")
+
+
+def _looks_like_diagnostic_line(line: str) -> bool:
+    stripped = line.lstrip()
+    if re.match(r"^\[\d{2}:\d{2}:\d{2}\]\s+", stripped):
+        stripped = re.sub(r"^\[\d{2}:\d{2}:\d{2}\]\s+", "", stripped, count=1)
+    return (
+        stripped.startswith("/*")
+        or stripped.startswith("[dbg]")
+        or stripped.startswith("summary:")
+        or stripped.startswith("WARNING")
+        or stripped.startswith("ERROR")
+    )
+
+
+def _timestamped_print(*args, **kwargs):
+    sep = kwargs.pop("sep", " ")
+    end = kwargs.pop("end", "\n")
+    file = kwargs.pop("file", None)
+    flush = kwargs.pop("flush", False)
+    text = sep.join(str(arg) for arg in args)
+    pytest_mode = "PYTEST_CURRENT_TEST" in os.environ
+    if pytest_mode:
+        return _RAW_PRINT(text, end=end, file=file, flush=flush)
+    if file is None and text:
+        lines = text.splitlines()
+        if lines and all((not line.strip()) or _looks_like_diagnostic_line(line) for line in lines):
+            target = sys.stderr
+            stamped = "\n".join(
+                (
+                    line
+                    if re.match(r"^\[\d{2}:\d{2}:\d{2}\]\s+", line.lstrip())
+                    else f"{_timestamp_prefix()} {line}"
+                )
+                if line.strip()
+                else line
+                for line in lines
+            )
+            return _RAW_PRINT(stamped, end=end, file=target, flush=flush)
+    return _RAW_PRINT(text, end=end, file=file, flush=flush)
+
+
+print = _timestamped_print
+
+
+def _print_diagnostic_text(text: str) -> None:
+    if not text:
+        return
+    pytest_mode = "PYTEST_CURRENT_TEST" in os.environ
+    for line in text.splitlines():
+        if pytest_mode:
+            _RAW_PRINT(line)
+        else:
+            stamped = line if re.match(r"^\[\d{2}:\d{2}:\d{2}\]\s+", line.lstrip()) else f"{_timestamp_prefix()} {line}"
+            _RAW_PRINT(stamped, file=sys.stderr)
+
+
+def _stdout_is_interactive() -> bool:
+    stream = getattr(sys, "stdout", None)
+    try:
+        return bool(stream is not None and hasattr(stream, "isatty") and stream.isatty())
+    except Exception:
+        return False
+
+
+def _emit_exit_marker() -> None:
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return
+    _RAW_PRINT(f"{_timestamp_prefix()} /* exiting cli */", file=sys.stderr)
+
+
+atexit.register(_emit_exit_marker)
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -328,6 +411,12 @@ def _looks_like_x86_16_function_prologue(code: bytes, offset: int) -> bool:
     return window.startswith(b"\x55\x8B\xEC")
 
 
+def _looks_like_x86_16_entry_byte(code: bytes, offset: int) -> bool:
+    if offset < 0 or offset >= len(code):
+        return False
+    return code[offset] not in {0x00, 0x90, 0xCC}
+
+
 def _resolve_x86_16_function_start(code: bytes, offset: int, *, max_padding: int = 0x10) -> int | None:
     if offset < 0 or offset >= len(code):
         return None
@@ -339,6 +428,15 @@ def _resolve_x86_16_function_start(code: bytes, offset: int, *, max_padding: int
         padded += 1
     if padded < len(code) and _looks_like_x86_16_function_prologue(code, padded):
         return padded
+    return None
+
+
+def _resolve_x86_16_call_target(code: bytes, offset: int) -> int | None:
+    canonical = _resolve_x86_16_function_start(code, offset)
+    if canonical is not None:
+        return canonical
+    if _looks_like_x86_16_entry_byte(code, offset):
+        return offset
     return None
 
 
@@ -884,6 +982,7 @@ def _try_decompile_sidecar_slice(
                 api_style,
                 binary_path,
                 lst_metadata=lst_metadata,
+                allow_isolated_retry=False,
             )
             if status == "ok":
                 snapshot = _tail_validation_snapshot_for_function_run(slice_project, func)
@@ -974,6 +1073,7 @@ def _try_decompile_non_optimized_slice(
                 lst_metadata=lst_metadata,
                 enable_structured_simplify=False,
                 enable_postprocess=False,
+                allow_isolated_retry=False,
             )
             partial_payload_holder["value"] = partial_payload
             snapshot = getattr(slice_project, "_inertia_last_tail_validation_snapshot", None)
@@ -1008,8 +1108,8 @@ def _try_decompile_non_optimized_slice(
         retry_failures.append(failure_detail)
     if binary_path is not None:
         try:
-            fresh_project = _build_project(
-                Path(binary_path),
+            fresh_project = _build_project_cached(
+                str(Path(binary_path)),
                 force_blob=_is_blob_only_input(Path(binary_path)),
                 base_addr=getattr(getattr(project.loader, "main_object", None), "linked_base", 0) or 0,
                 entry_point=getattr(project, "entry", 0),
@@ -1110,8 +1210,8 @@ def _load_peer_sidecar_bundle(
         return cache[cache_key]
     linked_base = getattr(getattr(project.loader, "main_object", None), "linked_base", 0) or 0
     try:
-        peer_project = _build_project(
-            peer_path,
+        peer_project = _build_project_cached(
+            str(peer_path),
             force_blob=False,
             base_addr=linked_base,
             entry_point=getattr(project, "entry", 0),
@@ -1644,8 +1744,8 @@ def _supplement_functions_from_prologue_scan(
         def _recover_candidate(candidate_addr=addr):
             candidate_project = project
             if binary_path is not None:
-                candidate_project = _build_project(
-                    Path(binary_path),
+                candidate_project = _build_project_cached(
+                    str(Path(binary_path)),
                     force_blob=False,
                     base_addr=linked_base,
                     entry_point=project.entry,
@@ -2004,7 +2104,7 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
     for target in entry_window_targets:
         _consider(target, 0)
     for target in tracer.call_targets:
-        canonical = _resolve_x86_16_function_start(code, target - linked_base)
+        canonical = _resolve_x86_16_call_target(code, target - linked_base)
         if canonical is not None:
             _consider(linked_base + canonical, 0 if target in entry_window_targets else 1)
     for target in tracer.jump_targets:
@@ -2019,7 +2119,7 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
             rel = int.from_bytes(code[offset + 1 : offset + 3], "little", signed=True)
             callsite = linked_base + offset
             target = callsite + 3 + rel
-            canonical = _resolve_x86_16_function_start(code, target - linked_base)
+            canonical = _resolve_x86_16_call_target(code, target - linked_base)
             if canonical is not None:
                 resolved = linked_base + canonical
                 near_call_targets.add(resolved)
@@ -2035,7 +2135,7 @@ def _rank_exe_function_seeds(project: angr.Project) -> list[int]:
         off = int.from_bytes(code[offset + 1 : offset + 3], "little")
         seg = int.from_bytes(code[offset + 3 : offset + 5], "little")
         target = linked_base + (seg << 4) + off
-        canonical = _resolve_x86_16_function_start(code, target - linked_base)
+        canonical = _resolve_x86_16_call_target(code, target - linked_base)
         if canonical is not None:
             resolved = linked_base + canonical
             far_call_targets.add(resolved)
@@ -2203,6 +2303,126 @@ def _recover_fast_exe_catalog(
     return recovered
 
 
+def _recover_hidden_sidecar_display_pairs(
+    project: angr.Project,
+    ranked_binary_offsets: Sequence[int],
+    *,
+    timeout: int,
+    window: int,
+    low_memory: bool,
+    limit: int,
+) -> list[tuple[object, object]]:
+    if limit <= 0 or not ranked_binary_offsets:
+        return []
+
+    recovered: list[tuple[object, object]] = []
+    seen_addrs: set[int] = set()
+
+    try:
+        entry_pair = _run_with_timeout_in_daemon_thread(
+            lambda: _fallback_entry_function(
+                project,
+                timeout=max(1, min(timeout, 4)),
+                window=window,
+                low_memory=low_memory,
+                prefer_fast_recovery=True,
+            ),
+            timeout=max(2, min(timeout, 5)),
+            thread_name_prefix="hidden-sidecar-entry",
+        )
+    except Exception:
+        entry_pair = None
+    if entry_pair is not None:
+        entry_cfg, entry_function = entry_pair
+        if _function_skip_reason(entry_function) is None:
+            recovered.append((entry_cfg, entry_function))
+            seen_addrs.add(entry_function.addr)
+
+    remaining_slots = max(0, limit - len(recovered))
+    if remaining_slots <= 0:
+        return recovered[:limit]
+
+    preview_probe_count = min(max(remaining_slots * 2, remaining_slots + 2), max(remaining_slots, 8))
+    preview_items = _prepare_ranked_binary_preview_items(
+        project,
+        ranked_binary_offsets,
+        max_count=preview_probe_count,
+        timeout=timeout,
+        window=window,
+        low_memory=low_memory,
+    )
+    for item in preview_items:
+        addr = getattr(item.function, "addr", None)
+        if item.function_cfg is None or not isinstance(addr, int) or addr in seen_addrs:
+            continue
+        recovered.append((item.function_cfg, item.function))
+        seen_addrs.add(addr)
+
+    if recovered:
+        recovered = _rank_hidden_sidecar_pairs_for_display_throughput(
+            project,
+            recovered,
+            limit=limit,
+        )
+        print("/* hidden-sidecar EXE: using ranked direct-binary preview for the capped display set before broad CFG recovery. */")
+    return recovered
+
+
+def _rank_hidden_sidecar_pairs_for_display_throughput(
+    project: angr.Project,
+    function_cfg_pairs: list[tuple[object, object]],
+    *,
+    limit: int,
+) -> list[tuple[object, object]]:
+    if not function_cfg_pairs:
+        return []
+
+    entry_addr = getattr(project, "entry", None)
+    indexed_pairs = list(enumerate(function_cfg_pairs))
+    entry_pair: tuple[int, tuple[object, object]] | None = None
+    non_entry_pairs: list[tuple[int, tuple[object, object]]] = []
+
+    for original_index, pair in indexed_pairs:
+        _cfg, function = pair
+        addr = getattr(function, "addr", None)
+        if isinstance(entry_addr, int) and addr == entry_addr and entry_pair is None:
+            entry_pair = (original_index, pair)
+            continue
+        non_entry_pairs.append((original_index, pair))
+
+    def _throughput_priority(indexed_pair: tuple[int, tuple[object, object]]) -> tuple[int, int, int, int, int]:
+        original_index, (_cfg, function) = indexed_pair
+        addr = getattr(function, "addr", None)
+        block_count, byte_count = _function_complexity(function)
+        truncated = _function_recovery_truncated(function)
+        far_pre_entry = int(
+            isinstance(addr, int)
+            and isinstance(entry_addr, int)
+            and addr < entry_addr
+            and (entry_addr - addr) > 0x200
+        )
+        pre_entry = int(isinstance(addr, int) and isinstance(entry_addr, int) and addr < entry_addr)
+        tiny_wrapper_like = int(block_count <= 1 and byte_count <= 8 and not truncated)
+        distance = abs(addr - entry_addr) if isinstance(addr, int) and isinstance(entry_addr, int) else 0
+        return (far_pre_entry, pre_entry, tiny_wrapper_like, block_count, byte_count, distance, original_index)
+
+    ordered_non_entry = [pair for _index, pair in sorted(non_entry_pairs, key=_throughput_priority)]
+    if entry_pair is None:
+        return ordered_non_entry[:limit] if limit > 0 else ordered_non_entry
+
+    if limit <= 1:
+        return [entry_pair[1]]
+
+    if limit == 2:
+        ordered = list(ordered_non_entry[:1])
+        ordered.append(entry_pair[1])
+        return ordered[:limit]
+
+    ordered_all = list(ordered_non_entry)
+    ordered_all.append(entry_pair[1])
+    return ordered_all[:limit]
+
+
 def _recover_cached_function_pairs(
     project: angr.Project,
     *,
@@ -2297,8 +2517,8 @@ def _recover_candidate_with_timeout(
         except KeyError:
             raise
         except Exception:
-            candidate_project = _build_project(
-                binary_path,
+            candidate_project = _build_project_cached(
+                str(binary_path),
                 force_blob=False,
                 base_addr=linked_base,
                 entry_point=project_entry,
@@ -2513,6 +2733,7 @@ def _decompile_function(
     enable_structured_simplify: bool = True,
     enable_postprocess: bool = True,
     allow_isolated_retry: bool = True,
+    deadline: float | None = None,
 ) -> tuple[str, str]:
     setattr(project, "_inertia_partial_codegen_text", None)
     setattr(project, "_inertia_last_tail_validation_snapshot", None)
@@ -2561,6 +2782,13 @@ def _decompile_function(
                 messages.append(text)
         return messages
 
+    def _remaining_timeout(default: int | None = None) -> int:
+        base = timeout if default is None else default
+        if deadline is None:
+            return max(1, base)
+        remaining = int(deadline - time.monotonic())
+        return max(1, min(base, remaining))
+
     def _should_retry_in_isolation(dec_obj) -> bool:
         return any(message.startswith("KeyError:") for message in _analysis_log_messages(dec_obj))
 
@@ -2578,7 +2806,7 @@ def _decompile_function(
         try:
             with _guard_angr_peephole_expr_bitwidth_assertion():
                 with _guard_angr_variable_recovery_binop_sub_size_mismatch():
-                    with _analysis_timeout(max(1, min(timeout, 2))):
+                    with _analysis_timeout(_remaining_timeout(max(1, min(timeout, 2)))):
                         clinic_analysis(function)
         except _AnalysisTimeout:
             return "clinic-failure=timeout"
@@ -2589,12 +2817,43 @@ def _decompile_function(
     def _retry_in_isolated_project() -> tuple[str, str] | None:
         if not allow_isolated_retry or binary_path is None or project.arch.name != "86_16":
             return None
+        if (
+            os.name == "posix"
+            and threading.current_thread() is threading.main_thread()
+            and threading.active_count() == 1
+        ):
+            try:
+                if deadline is not None and time.monotonic() >= deadline:
+                    return ("timeout", f"Timed out after {timeout}s before isolated retry.")
+                print(f"[dbg] retrying {function.addr:#x} {function.name} in a forked isolated project after empty decompilation")
+                return _run_with_timeout_in_fork(
+                    lambda: _decompile_function(
+                        project,
+                        cfg,
+                        function,
+                        timeout,
+                        api_style,
+                        binary_path,
+                        cod_metadata=effective_cod_metadata,
+                        synthetic_globals=synthetic_globals,
+                        lst_metadata=lst_metadata,
+                        enable_structured_simplify=enable_structured_simplify,
+                        enable_postprocess=enable_postprocess,
+                        allow_isolated_retry=False,
+                        deadline=deadline,
+                    ),
+                    timeout=max(1, timeout) + 1,
+                )
+            except Exception:
+                pass
         main_object = getattr(project.loader, "main_object", None)
         linked_base = getattr(main_object, "linked_base", None)
         max_addr = getattr(main_object, "max_addr", None)
         if not isinstance(linked_base, int) or not isinstance(max_addr, int):
             return None
         try:
+            if deadline is not None and time.monotonic() >= deadline:
+                return ("timeout", f"Timed out after {timeout}s before isolated retry.")
             isolated_project = _build_project(
                 Path(binary_path),
                 force_blob=False,
@@ -2626,13 +2885,14 @@ def _decompile_function(
             enable_structured_simplify=enable_structured_simplify,
             enable_postprocess=enable_postprocess,
             allow_isolated_retry=False,
+            deadline=deadline,
         )
 
     dec = None
     try:
         with _guard_angr_peephole_expr_bitwidth_assertion():
             with _guard_angr_variable_recovery_binop_sub_size_mismatch():
-                with _analysis_timeout(timeout):
+                with _analysis_timeout(_remaining_timeout()):
                     if decompiler_options is None:
                         dec = project.analyses.Decompiler(function, cfg=cfg)
                     else:
@@ -4332,6 +4592,7 @@ def _decompile_function_with_stats(
     lst_metadata: LSTMetadata | None = None,
     enable_structured_simplify: bool = True,
     enable_postprocess: bool = True,
+    allow_isolated_retry: bool = True,
 ):
     block_count, byte_count = _function_complexity(function)
     print(
@@ -4339,6 +4600,7 @@ def _decompile_function_with_stats(
     )
     sys.stdout.flush()
     start = time.perf_counter()
+    deadline = time.monotonic() + max(1, timeout)
     status, payload = _decompile_function(
         project,
         cfg,
@@ -4351,12 +4613,18 @@ def _decompile_function_with_stats(
         lst_metadata=lst_metadata,
         enable_structured_simplify=enable_structured_simplify,
         enable_postprocess=enable_postprocess,
+        allow_isolated_retry=allow_isolated_retry,
+        deadline=deadline,
     )
     partial_payload = getattr(project, "_inertia_partial_codegen_text", None)
     elapsed = time.perf_counter() - start
     print(f"[dbg] decompilation time for {function.addr:#x} {function.name}: {elapsed:.2f}s")
     sys.stdout.flush()
     return status, payload, partial_payload, block_count, byte_count, elapsed
+
+
+def _bounded_non_optimized_timeout(timeout: int) -> int:
+    return min(max(1, timeout), 2)
 
 
 def _prepare_ranked_binary_preview_items(
@@ -4418,6 +4686,76 @@ def _prepare_ranked_binary_preview_items(
     return preview_items
 
 
+def _supplement_function_cfg_pairs_with_ranked_preview(
+    project: angr.Project,
+    function_cfg_pairs: list[tuple[object, object]],
+    ranked_binary_offsets: Sequence[int],
+    *,
+    target_count: int,
+    timeout: int,
+    window: int,
+    low_memory: bool,
+) -> list[tuple[object, object]]:
+    if target_count <= 0 or len(function_cfg_pairs) >= target_count or not ranked_binary_offsets:
+        return function_cfg_pairs
+
+    supplemented = list(function_cfg_pairs)
+    seen_addrs = {
+        getattr(function, "addr", None)
+        for _cfg, function in supplemented
+        if isinstance(getattr(function, "addr", None), int)
+    }
+    preview_items = _prepare_ranked_binary_preview_items(
+        project,
+        ranked_binary_offsets,
+        max_count=target_count,
+        timeout=timeout,
+        window=window,
+        low_memory=low_memory,
+    )
+    for item in preview_items:
+        addr = getattr(item.function, "addr", None)
+        if item.function_cfg is None or not isinstance(addr, int) or addr in seen_addrs:
+            continue
+        supplemented.append((item.function_cfg, item.function))
+        seen_addrs.add(addr)
+        if len(supplemented) >= target_count:
+            break
+    return supplemented
+
+
+def _supplement_function_cfg_pairs_with_seeded_recovery(
+    project: angr.Project,
+    function_cfg_pairs: list[tuple[object, object]],
+    *,
+    timeout: int,
+    target_count: int,
+) -> list[tuple[object, object]]:
+    if target_count <= 0 or len(function_cfg_pairs) >= target_count:
+        return function_cfg_pairs
+
+    supplemented = list(function_cfg_pairs)
+    seen_addrs = {
+        getattr(function, "addr", None)
+        for _cfg, function in supplemented
+        if isinstance(getattr(function, "addr", None), int)
+    }
+    seeded_pairs = _recover_seeded_exe_functions(
+        project,
+        timeout=timeout,
+        limit=target_count,
+    )
+    for function_cfg, function in seeded_pairs:
+        addr = getattr(function, "addr", None)
+        if not isinstance(addr, int) or addr in seen_addrs:
+            continue
+        supplemented.append((function_cfg, function))
+        seen_addrs.add(addr)
+        if len(supplemented) >= target_count:
+            break
+    return supplemented
+
+
 def _run_function_work_item(
     item: FunctionWorkItem,
     *,
@@ -4430,6 +4768,7 @@ def _run_function_work_item(
     enable_structured_simplify: bool,
     enable_postprocess: bool = True,
     force_isolated_project: bool = False,
+    allow_isolated_retry: bool = True,
 ) -> FunctionWorkResult:
     function_project = getattr(item.function, "project", None)
     tail_validation_enabled = (
@@ -4480,7 +4819,47 @@ def _run_function_work_item(
     decompile_project = item.function.project
     decompile_cfg = item.function_cfg
     decompile_function = item.function
-    if force_isolated_project and binary_path is not None and isinstance(getattr(item.function, "addr", None), int):
+
+    def _run_local(project_obj, cfg_obj, function_obj) -> tuple[str, str, str | None, str, dict[str, object] | None]:
+        with _capture_thread_output() as (stdout_buf, stderr_buf):
+            status, payload, partial_payload, *_ = _decompile_function_with_stats(
+                project_obj,
+                cfg_obj,
+                function_obj,
+                timeout,
+                api_style,
+                binary_path,
+                cod_metadata=cod_metadata,
+                synthetic_globals=synthetic_globals,
+                lst_metadata=lst_metadata,
+                enable_structured_simplify=enable_structured_simplify,
+                enable_postprocess=enable_postprocess,
+                allow_isolated_retry=allow_isolated_retry,
+            )
+        debug_output_local = stdout_buf.getvalue()
+        err_output = stderr_buf.getvalue()
+        if err_output:
+            debug_output_local += err_output
+        tail_snapshot_local = _tail_validation_snapshot_for_function_run(project_obj, function_obj)
+        return status, payload, partial_payload, debug_output_local, tail_snapshot_local
+
+    fork_isolated_eligible = (
+        force_isolated_project
+        and os.name == "posix"
+        and threading.current_thread() is threading.main_thread()
+        and threading.active_count() == 1
+        and decompile_cfg is not None
+    )
+    if fork_isolated_eligible:
+        try:
+            status, payload, partial_payload, debug_output, tail_validation_snapshot = _run_with_timeout_in_fork(
+                lambda: _run_local(decompile_project, decompile_cfg, decompile_function),
+                timeout=max(1, timeout) + 1,
+            )
+        except Exception:
+            fork_isolated_eligible = False
+
+    if force_isolated_project and not fork_isolated_eligible and binary_path is not None and isinstance(getattr(item.function, "addr", None), int):
         main_object = getattr(getattr(item.function, "project", None), "loader", None)
         main_object = getattr(main_object, "main_object", None)
         linked_base = getattr(main_object, "linked_base", None)
@@ -4508,27 +4887,14 @@ def _run_function_work_item(
             except Exception:
                 pass
 
-    with _capture_thread_output() as (stdout_buf, stderr_buf):
-        status, payload, partial_payload, *_ = _decompile_function_with_stats(
+    if not fork_isolated_eligible:
+        status, payload, partial_payload, debug_output, tail_validation_snapshot = _run_local(
             decompile_project,
             decompile_cfg,
             decompile_function,
-            timeout,
-            api_style,
-            binary_path,
-            cod_metadata=cod_metadata,
-            synthetic_globals=synthetic_globals,
-            lst_metadata=lst_metadata,
-            enable_structured_simplify=enable_structured_simplify,
-            enable_postprocess=enable_postprocess,
         )
-    debug_output = stdout_buf.getvalue()
-    err_output = stderr_buf.getvalue()
-    if err_output:
-        debug_output += err_output
     if cache_bypass_debug:
         debug_output = f"{cache_bypass_debug}{debug_output}"
-    tail_validation_snapshot = _tail_validation_snapshot_for_function_run(decompile_project, decompile_function)
     tail_validation_passed = (not tail_validation_enabled) or x86_16_tail_validation_snapshot_passed(
         tail_validation_snapshot,
         expected_stages=expected_validation_stages,
@@ -14693,7 +15059,7 @@ def main(argv: list[str] | None = None) -> int:
                 project,
                 args.addr,
                 function_label or f"sub_{args.addr:x}",
-                timeout=args.timeout,
+                timeout=_bounded_non_optimized_timeout(args.timeout),
                 api_style=args.api_style,
                 binary_path=args.binary,
                 lst_metadata=lst_metadata,
@@ -14767,7 +15133,7 @@ def main(argv: list[str] | None = None) -> int:
                 project,
                 args.addr,
                 function_label or f"sub_{args.addr:x}",
-                timeout=args.timeout,
+                timeout=_bounded_non_optimized_timeout(args.timeout),
                 api_style=args.api_style,
                 binary_path=args.binary,
                 lst_metadata=lst_metadata,
@@ -14922,7 +15288,7 @@ def main(argv: list[str] | None = None) -> int:
                     project,
                     func.addr,
                     func.name,
-                    timeout=args.timeout,
+                    timeout=_bounded_non_optimized_timeout(args.timeout),
                     api_style=args.api_style,
                     binary_path=args.binary,
                     lst_metadata=lst_metadata,
@@ -15035,26 +15401,39 @@ def main(argv: list[str] | None = None) -> int:
                     "/* Signature-matched library labels available as bounded hints; "
                     "recovering binary-owned functions from direct call/prologue evidence before generic CFG recovery. */"
                 )
-            try:
-                function_cfg_pairs = _run_with_timeout_in_daemon_thread(
-                    lambda: _recover_seeded_exe_functions(
-                        project,
-                        timeout=min(max(4, args.timeout), 8),
-                        limit=discovery_limit if discovery_limit is not None else 16,
-                        return_addrs=True,
-                    ),
-                    timeout=min(max(4, args.timeout + 2), 8),
-                    thread_name_prefix="seed-catalog",
+            if deferred_exe_display_cap and ranked_binary_offsets:
+                function_cfg_pairs = _recover_hidden_sidecar_display_pairs(
+                    project,
+                    ranked_binary_offsets,
+                    timeout=args.timeout,
+                    window=args.window,
+                    low_memory=low_memory_path,
+                    limit=args.max_functions,
                 )
+                if function_cfg_pairs:
+                    total_functions = len(ranked_binary_offsets)
+                    shown_total = len(function_cfg_pairs)
+            try:
+                if not function_cfg_pairs:
+                    function_cfg_pairs = _run_with_timeout_in_daemon_thread(
+                        lambda: _recover_seeded_exe_functions(
+                            project,
+                            timeout=min(max(4, args.timeout), 8),
+                            limit=discovery_limit,
+                            return_addrs=True,
+                        ),
+                        timeout=min(max(4, args.timeout + 2), 8),
+                        thread_name_prefix="seed-catalog",
+                    )
             except Exception as ex:  # noqa: BLE001
                 catalog_error = ex
-                function_cfg_pairs = []
+                function_cfg_pairs = [] if not function_cfg_pairs else function_cfg_pairs
                 seeded_catalog_addrs = []
             else:
                 seeded_catalog_addrs = []
                 if isinstance(function_cfg_pairs, tuple):
                     function_cfg_pairs, seeded_catalog_addrs = function_cfg_pairs
-            if function_cfg_pairs:
+            if function_cfg_pairs and not total_functions:
                 total_functions = len(seeded_catalog_addrs)
                 shown_total = len(function_cfg_pairs)
 
@@ -15185,7 +15564,7 @@ def main(argv: list[str] | None = None) -> int:
                 fast_seed_pairs = _recover_fast_seed_functions(
                     project,
                     timeout=min(max(4, args.timeout), 8),
-                    limit=discovery_limit if discovery_limit is not None else 16,
+                    limit=discovery_limit,
                 )
             if fast_seed_pairs:
                 function_cfg_pairs = fast_seed_pairs
@@ -15226,6 +15605,8 @@ def main(argv: list[str] | None = None) -> int:
                 code_name = _lst_code_label(lst_metadata, addr, project.entry)
                 if code_name is not None:
                     func.name = code_name
+
+    interactive_stdout = _stdout_is_interactive()
 
     if lst_metadata is not None and visible_code_labels:
         total_functions = ranked_labeled_total or len(labeled_offsets)
@@ -15286,32 +15667,16 @@ def main(argv: list[str] | None = None) -> int:
         shown_total = len(ranked_binary_offsets)
         if args.max_functions > 0:
             shown_total = min(shown_total, args.max_functions)
-        elif shown_total > 24:
-            shown_total = _default_exe_showcase_cap(shown_total, args.timeout)
 
-    print(f"/* binary: {args.binary} */")
-    print(f"/* arch: {project.arch.name} */")
-    print(f"/* entry: {project.entry:#x} */")
-    if direct_inventory_total is not None:
-        print(f"/* info: direct-binary recovery found {direct_inventory_total} likely function entries */")
-        total_functions = max(total_functions, direct_inventory_total)
-    print(f"/* functions recovered: {total_functions} */")
-    print(f"/* info: selected {shown_total} function(s) for display */")
     sidecar_preview_limit = None
     if (
         lst_metadata is not None
         and visible_code_labels
+        and interactive_stdout
         and args.max_functions > 0
         and total_functions > args.max_functions
     ):
         sidecar_preview_limit = args.max_functions
-    elif (
-        lst_metadata is not None
-        and visible_code_labels
-        and args.max_functions <= 0
-        and shown_total > 24
-    ):
-        sidecar_preview_limit = _default_exe_showcase_cap(total_functions, args.timeout)
     if lst_metadata is not None and visible_code_labels:
         print("/* == known function catalog (sidecar-backed) == */")
         print(_format_sidecar_function_catalog(lst_metadata, limit=sidecar_preview_limit))
@@ -15325,8 +15690,40 @@ def main(argv: list[str] | None = None) -> int:
         and args.binary.suffix.lower() == ".exe"
         and function_cfg_pairs
         and len(function_cfg_pairs) > 1
+        and not (
+            lst_metadata is not None
+            and not visible_code_labels
+            and args.max_functions > 0
+        )
     ):
         function_cfg_pairs = _rank_function_cfg_pairs_for_display(project, function_cfg_pairs)
+    if (
+        args.addr is None
+        and args.binary.suffix.lower() == ".exe"
+        and lst_metadata is not None
+        and not visible_code_labels
+        and args.max_functions > 0
+        and function_cfg_pairs
+        and len(function_cfg_pairs) < args.max_functions
+        and ranked_binary_offsets
+    ):
+        function_cfg_pairs = _supplement_function_cfg_pairs_with_seeded_recovery(
+            project,
+            function_cfg_pairs,
+            timeout=args.timeout,
+            target_count=args.max_functions,
+        )
+        function_cfg_pairs = _supplement_function_cfg_pairs_with_ranked_preview(
+            project,
+            function_cfg_pairs,
+            ranked_binary_offsets,
+            target_count=args.max_functions,
+            timeout=args.timeout,
+            window=args.window,
+            low_memory=low_memory_path,
+        )
+        function_cfg_pairs = _rank_function_cfg_pairs_for_display(project, function_cfg_pairs)
+        shown_total = len(function_cfg_pairs)
     uncapped_function_cfg_pairs = list(function_cfg_pairs)
     if (
         args.addr is None
@@ -15337,40 +15734,13 @@ def main(argv: list[str] | None = None) -> int:
         function_cfg_pairs = function_cfg_pairs[: args.max_functions]
         shown_total = len(function_cfg_pairs)
 
-    if (
-        lst_metadata is not None
-        and visible_code_labels
-        and args.max_functions <= 0
-        and shown_total > 24
-    ):
-        auto_cap = _default_exe_showcase_cap(total_functions, args.timeout)
-        labeled_offsets = _select_sidecar_showcase_entries(
-            project,
-            lst_metadata,
-            labeled_offsets,
-            max_count=auto_cap,
-            ranked_entries=labeled_offsets,
-        )
-        shown_total = len(labeled_offsets)
-        print(
-            f"/* sidecar catalog detected {total_functions} functions; "
-            f"showing first {shown_total} by default for responsiveness. Use --max-functions to change the cap. */"
-        )
-
-    if (
-        args.addr is None
-        and args.binary.suffix.lower() == ".exe"
-        and lst_metadata is None
-        and args.max_functions <= 0
-        and shown_total > 24
-    ):
-        auto_cap = _default_exe_showcase_cap(total_functions, args.timeout)
-        function_cfg_pairs = function_cfg_pairs[:auto_cap]
-        shown_total = len(function_cfg_pairs)
-        print(
-            f"/* EXE discovery found {total_functions} functions; "
-            f"showing first {shown_total} by default for responsiveness. Use --max-functions to change the cap. */"
-        )
+    print(f"/* binary: {args.binary} */")
+    print(f"/* arch: {project.arch.name} */")
+    print(f"/* entry: {project.entry:#x} */")
+    if direct_inventory_total is not None:
+        print(f"/* info: direct-binary recovery found {direct_inventory_total} likely function entries */")
+        total_functions = max(total_functions, direct_inventory_total)
+    print(f"/* functions recovered: {total_functions} */")
 
     if args.max_functions > 0 and total_functions > shown_total:
         print(f"/* showing first {shown_total} functions; use --max-functions to raise the cap */")
@@ -15399,7 +15769,7 @@ def main(argv: list[str] | None = None) -> int:
         preview_addrs = ranked_binary_offsets
         if args.max_functions > 0:
             preview_addrs = preview_addrs[: args.max_functions]
-        elif len(preview_addrs) > 24:
+        elif interactive_stdout and len(preview_addrs) > 24:
             preview_addrs = preview_addrs[: _default_exe_showcase_cap(len(preview_addrs), args.timeout)]
         shown_total = len(preview_addrs)
         function_tasks = _prepare_ranked_binary_preview_items(
@@ -15413,11 +15783,125 @@ def main(argv: list[str] | None = None) -> int:
     else:
         for index, (function_cfg, function) in enumerate(function_cfg_pairs, start=1):
             function_tasks.append(FunctionWorkItem(index=index, function_cfg=function_cfg, function=function))
+        if (
+            args.addr is None
+            and args.binary.suffix.lower() == ".exe"
+            and lst_metadata is not None
+            and not visible_code_labels
+            and ranked_binary_offsets
+            and args.max_functions <= 0
+        ):
+            existing_by_addr = {
+                getattr(item.function, "addr", None): item
+                for item in function_tasks
+                if isinstance(getattr(item.function, "addr", None), int)
+            }
+            function_tasks = []
+            for index, addr in enumerate(ranked_binary_offsets, start=1):
+                existing = existing_by_addr.get(addr)
+                if existing is not None:
+                    function_tasks.append(
+                        FunctionWorkItem(
+                            index=index,
+                            function_cfg=existing.function_cfg,
+                            function=existing.function,
+                        )
+                    )
+                    continue
+                function_tasks.append(
+                    FunctionWorkItem(
+                        index=index,
+                        function_cfg=None,
+                        function=_make_placeholder_function(project, addr, f"sub_{addr:x}"),
+                    )
+                )
+            shown_total = len(function_tasks)
+        if (
+            args.addr is None
+            and args.binary.suffix.lower() == ".exe"
+            and lst_metadata is not None
+            and not visible_code_labels
+            and ranked_binary_offsets
+            and args.max_functions > 0
+            and len(function_tasks) < args.max_functions
+        ):
+            existing_task_addrs = {
+                getattr(item.function, "addr", None)
+                for item in function_tasks
+                if isinstance(getattr(item.function, "addr", None), int)
+            }
+            seen_addrs = {
+                addr for addr in existing_task_addrs
+            }
+            preview_items = _prepare_ranked_binary_preview_items(
+                project,
+                ranked_binary_offsets,
+                max_count=args.max_functions,
+                timeout=args.timeout,
+                window=args.window,
+                low_memory=low_memory_path,
+            )
+            retained_tasks: list[FunctionWorkItem] = []
+            if isinstance(getattr(project, "entry", None), int):
+                for item in function_tasks:
+                    if getattr(item.function, "addr", None) == project.entry:
+                        retained_tasks.append(item)
+                        break
+            replacement_tasks = list(retained_tasks)
+            for preview_item in preview_items:
+                addr = getattr(preview_item.function, "addr", None)
+                if not isinstance(addr, int) or addr in seen_addrs:
+                    continue
+                replacement_tasks.append(
+                    FunctionWorkItem(
+                        index=len(replacement_tasks) + 1,
+                        function_cfg=preview_item.function_cfg,
+                        function=preview_item.function,
+                    )
+                )
+                seen_addrs.add(addr)
+                if len(replacement_tasks) >= args.max_functions:
+                    break
+            if len(replacement_tasks) < args.max_functions:
+                for item in function_tasks:
+                    addr = getattr(item.function, "addr", None)
+                    if not isinstance(addr, int) or addr in seen_addrs:
+                        continue
+                    replacement_tasks.append(
+                        FunctionWorkItem(
+                            index=len(replacement_tasks) + 1,
+                            function_cfg=item.function_cfg,
+                            function=item.function,
+                        )
+                    )
+                    seen_addrs.add(addr)
+                    if len(replacement_tasks) >= args.max_functions:
+                        break
+            if replacement_tasks:
+                function_tasks = replacement_tasks
+            elif existing_task_addrs:
+                # Keep the original recovered tasks if no ranked preview item was usable.
+                for index, item in enumerate(function_tasks, start=1):
+                    function_tasks[index - 1] = FunctionWorkItem(
+                        index=index,
+                        function_cfg=item.function_cfg,
+                        function=item.function,
+                    )
+            shown_total = len(function_tasks)
+
+    print(f"/* info: selected {shown_total} function(s) for display */")
 
     workers = _choose_function_parallelism(len(function_tasks))
     if lst_metadata is not None and visible_code_labels:
         workers = 1
     if any(item.function_cfg is None for item in function_tasks):
+        workers = 1
+    if (
+        args.addr is None
+        and args.binary.suffix.lower() == ".exe"
+        and lst_metadata is not None
+        and not visible_code_labels
+    ):
         workers = 1
     if (
         getattr(project, "_inertia_supplemental_scan_used", False)
@@ -15449,6 +15933,12 @@ def main(argv: list[str] | None = None) -> int:
     if force_isolated_function_projects:
         print("/* parallel x86-16 decompilation: using one fresh analysis project per shown function for stability. */")
 
+    allow_heavy_fallbacks = (
+        interactive_stdout
+        or args.max_functions <= 0
+        or args.addr is not None
+    )
+
     def _remember_fallback_tail_validation(
         item: FunctionWorkItem,
         *,
@@ -15478,17 +15968,52 @@ def main(argv: list[str] | None = None) -> int:
             decompiled_local += 1
             _print_function_attempt_status(function, attempt="decompiled", validation_snapshot=result.tail_validation)
             print("/* -- c -- */")
-            print(result.payload)
+            print(result.payload, flush=True)
             return decompiled_local, failed_local
 
         emitted_problem = False
         if result.partial_payload:
             _print_function_attempt_status(function, attempt="fallback", validation_snapshot=result.tail_validation)
             print(f"/* problem: {result.status} */")
-            print(result.payload)
+            _print_diagnostic_text(result.payload)
             print("/* -- c (partial timeout) -- */")
-            print(result.partial_payload)
+            print(result.partial_payload, flush=True)
             emitted_problem = True
+
+        if not allow_heavy_fallbacks:
+            failed_local += 1
+            _print_function_attempt_status(
+                function,
+                attempt=_function_attempt_display_status(result),
+                validation_snapshot=result.tail_validation,
+            )
+            sidecar_region = _lst_code_region(lst_metadata, function.addr) if lst_metadata is not None else None
+            asm_fallback = (
+                _format_asm_range(project, sidecar_region[0], sidecar_region[1])
+                if sidecar_region is not None
+                else _format_asm_range(project, *_infer_linear_disassembly_window(project, function.addr))
+            )
+            if result.partial_payload is not None:
+                if emitted_problem:
+                    print("/* -- asm fallback -- */")
+                    _print_diagnostic_text(asm_fallback)
+                return decompiled_local, failed_local
+            if result.status == "empty":
+                if asm_fallback.startswith("<assembly unavailable") or asm_fallback == "<no instructions>":
+                    print(f"/* no bytes available for function at {function.addr:#x}; likely external or synthetic */")
+                else:
+                    print(f"/* -- {result.status} -- */")
+                    _print_diagnostic_text(result.payload)
+                    print("/* -- asm fallback -- */")
+                    _print_diagnostic_text(asm_fallback)
+                return decompiled_local, failed_local
+            print(f"/* -- {result.status} -- */")
+            _print_diagnostic_text(result.payload)
+            print("/* -- lift break probe -- */")
+            _print_diagnostic_text(_probe_lift_break(project, function.addr))
+            print("/* -- asm fallback -- */")
+            _print_diagnostic_text(asm_fallback)
+            return decompiled_local, failed_local
 
         slice_result = None
         if lst_metadata is not None:
@@ -15509,7 +16034,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
             print("/* -- c (sidecar slice fallback) -- */")
-            print(slice_result[1])
+            print(slice_result[1], flush=True)
             return decompiled_local, failed_local
 
         peer_sidecar_c = _try_decompile_peer_sidecar_slice(
@@ -15529,7 +16054,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
             print("/* -- c (peer sidecar fallback) -- */")
-            print(peer_sidecar_c)
+            print(peer_sidecar_c, flush=True)
             return decompiled_local, failed_local
 
         trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, function.addr, function.name)
@@ -15541,7 +16066,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
             print("/* -- c (trivial sidecar fallback) -- */")
-            print(trivial_c)
+            print(trivial_c, flush=True)
             return decompiled_local, failed_local
         nonopt_c = None
         if result.partial_payload is None:
@@ -15549,7 +16074,7 @@ def main(argv: list[str] | None = None) -> int:
                 project,
                 function.addr,
                 function.name,
-                timeout=args.timeout,
+                timeout=_bounded_non_optimized_timeout(args.timeout),
                 api_style=args.api_style,
                 binary_path=args.binary,
                 lst_metadata=lst_metadata,
@@ -15563,9 +16088,9 @@ def main(argv: list[str] | None = None) -> int:
             _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
             if not emitted_problem:
                 print(f"/* problem: {result.status} */")
-                print(result.payload)
+                _print_diagnostic_text(result.payload)
             print("/* -- c (non-optimized fallback) -- */")
-            print(nonopt_c)
+            print(nonopt_c, flush=True)
             return decompiled_local, failed_local
 
         failed_local += 1
@@ -15585,34 +16110,48 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"/* no bytes available for function at {function.addr:#x}; likely external or synthetic */")
             else:
                 if emitted_problem:
-                    print("-- asm fallback --")
-                    print(asm_fallback)
+                    print("/* -- asm fallback -- */")
+                    _print_diagnostic_text(asm_fallback)
                     return decompiled_local, failed_local
-                print(f"-- {result.status} --")
-                print(result.payload)
-                print("-- asm fallback --")
-                print(asm_fallback)
+                print(f"/* -- {result.status} -- */")
+                _print_diagnostic_text(result.payload)
+                print("/* -- asm fallback -- */")
+                _print_diagnostic_text(asm_fallback)
         else:
             if emitted_problem:
-                print("-- lift break probe --")
-                print(_probe_lift_break(project, function.addr))
-                print("-- asm fallback --")
-                print(asm_fallback)
+                print("/* -- lift break probe -- */")
+                _print_diagnostic_text(_probe_lift_break(project, function.addr))
+                print("/* -- asm fallback -- */")
+                _print_diagnostic_text(asm_fallback)
                 return decompiled_local, failed_local
-            print(f"-- {result.status} --")
-            print(result.payload)
-            print("-- lift break probe --")
-            print(_probe_lift_break(project, function.addr))
-            print("-- asm fallback --")
-            print(asm_fallback)
+            print(f"/* -- {result.status} -- */")
+            _print_diagnostic_text(result.payload)
+            print("/* -- lift break probe -- */")
+            _print_diagnostic_text(_probe_lift_break(project, function.addr))
+            print("/* -- asm fallback -- */")
+            _print_diagnostic_text(asm_fallback)
         return decompiled_local, failed_local
 
     if workers <= 1:
         decompiled = 0
         failed = 0
+        emitted_indexes: set[int] = set()
         recover_timeout = min(args.timeout, 2)
-        expired_futures: set[Future] = set()
-        future_map: dict[Future, FunctionWorkItem] = {}
+        direct_serial_hidden_sidecar_eligible = (
+            args.addr is None
+            and args.binary.suffix.lower() == ".exe"
+            and lst_metadata is not None
+            and not visible_code_labels
+            and args.max_functions > 0
+            and bool(function_tasks)
+            and all(item.function_cfg is not None for item in function_tasks)
+        )
+        allow_isolated_retry_in_function_tasks = (
+            interactive_stdout
+            or args.max_functions <= 0
+            or args.addr is not None
+        )
+        has_expired_futures = False
         executor = DaemonThreadPoolExecutor(max_workers=1, thread_name_prefix="func-serial")
         try:
             for item in function_tasks:
@@ -15674,50 +16213,58 @@ def main(argv: list[str] | None = None) -> int:
                     if result is None:
                         if active_item.function_cfg is None:
                             continue
-                        future = executor.submit(
-                            _run_function_work_item,
-                            active_item,
-                            timeout=args.timeout,
-                            api_style=args.api_style,
-                            binary_path=args.binary,
-                            cod_metadata=cod_metadata,
-                            synthetic_globals=synthetic_globals,
-                            lst_metadata=lst_metadata,
-                            enable_structured_simplify=True,
-                            force_isolated_project=force_isolated_function_projects,
-                        )
-                        future_map[future] = active_item
-                        try:
-                            result = future.result(timeout=max(1, args.timeout) + 1)
-                        except FuturesTimeoutError:
-                            result = FunctionWorkResult(
-                                index=item.index,
-                                status="timeout",
-                                payload=f"Timed out after {args.timeout}s.",
-                                debug_output="",
-                                function=active_item.function,
-                                function_cfg=active_item.function_cfg,
+                        if direct_serial_hidden_sidecar_eligible:
+                            result = _run_function_work_item(
+                                active_item,
+                                timeout=args.timeout,
+                                api_style=args.api_style,
+                                binary_path=args.binary,
+                                cod_metadata=cod_metadata,
+                                synthetic_globals=synthetic_globals,
+                                lst_metadata=lst_metadata,
+                                enable_structured_simplify=True,
+                                force_isolated_project=force_isolated_function_projects,
+                                allow_isolated_retry=allow_isolated_retry_in_function_tasks,
                             )
-                            expired_futures.add(future)
+                        else:
+                            future = executor.submit(
+                                _run_function_work_item,
+                                active_item,
+                                timeout=args.timeout,
+                                api_style=args.api_style,
+                                binary_path=args.binary,
+                                cod_metadata=cod_metadata,
+                                synthetic_globals=synthetic_globals,
+                                lst_metadata=lst_metadata,
+                                enable_structured_simplify=True,
+                                force_isolated_project=force_isolated_function_projects,
+                                allow_isolated_retry=allow_isolated_retry_in_function_tasks,
+                            )
+                            try:
+                                result = future.result(timeout=max(1, args.timeout) + 1)
+                            except FuturesTimeoutError:
+                                result = FunctionWorkResult(
+                                    index=item.index,
+                                    status="timeout",
+                                    payload=f"Timed out after {args.timeout}s.",
+                                    debug_output="",
+                                    function=active_item.function,
+                                    function_cfg=active_item.function_cfg,
+                                )
+                                has_expired_futures = True
                     result_map[item.index] = result
+                    if result is not None and result.status != "timeout":
+                        d, f = _emit_function_result(item, result)
+                        decompiled += d
+                        failed += f
+                        emitted_indexes.add(item.index)
         finally:
-            executor.shutdown(wait=not expired_futures, cancel_futures=True)
-        for future in expired_futures:
-            if not future.done() or future.cancelled():
-                continue
-            item = future_map[future]
-            current = result_map.get(item.index)
-            if current is None or current.status != "timeout":
-                continue
-            try:
-                late_result = future.result()
-            except Exception:
-                continue
-            if getattr(late_result, "status", None) == "ok" or getattr(late_result, "partial_payload", None):
-                result_map[item.index] = late_result
+            executor.shutdown(wait=not has_expired_futures, cancel_futures=True)
         attempted = sum(1 for item in function_tasks if result_map.get(item.index) is not None)
         print(f"/* info: decompilation attempted for {attempted}/{shown_total} displayed function(s) */")
         for item in function_tasks:
+            if item.index in emitted_indexes:
+                continue
             result = result_map.get(item.index)
             if result is None:
                 continue
@@ -15731,10 +16278,21 @@ def main(argv: list[str] | None = None) -> int:
         total_shown = shown_total
         _emit_tail_validation_console_summary(function_tasks, result_map, binary_path=args.binary)
         print(f"\nsummary: decompiled {decompiled}/{total_shown} shown functions")
+        timed_out = sum(1 for result in result_map.values() if getattr(result, "status", None) == "timeout")
+        if timed_out:
+            print(f"summary: {timed_out} discovered function(s) timed out during decompilation")
         if failed:
             print(f"summary: {failed} functions fell back to asm/details")
         return 0 if decompiled else 2
     else:
+        decompiled = 0
+        failed = 0
+        emitted_indexes: set[int] = set()
+        allow_isolated_retry_for_parallel_tasks = (
+            interactive_stdout
+            or args.max_functions <= 0
+            or args.addr is not None
+        )
         executor = DaemonThreadPoolExecutor(max_workers=workers, thread_name_prefix="func")
         try:
             future_map = {
@@ -15749,13 +16307,14 @@ def main(argv: list[str] | None = None) -> int:
                     lst_metadata=lst_metadata,
                     enable_structured_simplify=True,
                     force_isolated_project=force_isolated_function_projects,
+                    allow_isolated_retry=allow_isolated_retry_for_parallel_tasks,
                 ): item
                 for item in function_tasks
                 if item.function_cfg is not None
             }
             pending = set(future_map)
             deadlines = {future: time.monotonic() + max(1, args.timeout) for future in future_map}
-            expired_futures: set[Future] = set()
+            has_expired_futures = False
             while pending:
                 done, _ = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
                 if done:
@@ -15772,6 +16331,12 @@ def main(argv: list[str] | None = None) -> int:
                                 function=item.function,
                                 function_cfg=item.function_cfg,
                             )
+                        result = result_map.get(item.index)
+                        if result is not None and result.status != "timeout" and item.index not in emitted_indexes:
+                            d, f = _emit_function_result(item, result)
+                            decompiled += d
+                            failed += f
+                            emitted_indexes.add(item.index)
                         pending.discard(future)
                 now = time.monotonic()
                 expired = [future for future in pending if now >= deadlines[future]]
@@ -15789,6 +16354,12 @@ def main(argv: list[str] | None = None) -> int:
                                 function=item.function,
                                 function_cfg=item.function_cfg,
                             )
+                        result = result_map.get(item.index)
+                        if result is not None and result.status != "timeout" and item.index not in emitted_indexes:
+                            d, f = _emit_function_result(item, result)
+                            decompiled += d
+                            failed += f
+                            emitted_indexes.add(item.index)
                         pending.discard(future)
                         continue
                     result_map[item.index] = FunctionWorkResult(
@@ -15799,33 +16370,16 @@ def main(argv: list[str] | None = None) -> int:
                         function=item.function,
                         function_cfg=item.function_cfg,
                     )
-                    expired_futures.add(future)
+                    has_expired_futures = True
                     pending.discard(future)
         finally:
-            # Wait for any in-flight worker to finish so no late decompiler logs appear after the final summary.
-            executor.shutdown(wait=not expired_futures, cancel_futures=True)
-        if expired_futures:
-            # Give recently expired workers one bounded chance to finish before we emit the final result.
-            wait(expired_futures, timeout=1.0, return_when=FIRST_COMPLETED)
-        for future in expired_futures:
-            if not future.done() or future.cancelled():
-                continue
-            item = future_map[future]
-            current = result_map.get(item.index)
-            if current is None or current.status != "timeout":
-                continue
-            try:
-                late_result = future.result()
-            except Exception:
-                continue
-            if getattr(late_result, "status", None) == "ok" or getattr(late_result, "partial_payload", None):
-                result_map[item.index] = late_result
+            executor.shutdown(wait=not has_expired_futures, cancel_futures=True)
 
-    decompiled = 0
-    failed = 0
     attempted = sum(1 for item in function_tasks if result_map.get(item.index) is not None)
     print(f"/* info: decompilation attempted for {attempted}/{shown_total} displayed function(s) */")
     for item in function_tasks:
+        if item.index in emitted_indexes:
+            continue
         result = result_map.get(item.index)
         if result is None:
             continue
@@ -15840,6 +16394,9 @@ def main(argv: list[str] | None = None) -> int:
     total_shown = shown_total
     _emit_tail_validation_console_summary(function_tasks, result_map, binary_path=args.binary)
     print(f"\nsummary: decompiled {decompiled}/{total_shown} shown functions")
+    timed_out = sum(1 for result in result_map.values() if getattr(result, "status", None) == "timeout")
+    if timed_out:
+        print(f"summary: {timed_out} discovered function(s) timed out during decompilation")
     if failed:
         print(f"summary: {failed} functions fell back to asm/details")
     return 0 if decompiled else 2

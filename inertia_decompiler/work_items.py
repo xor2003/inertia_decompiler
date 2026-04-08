@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import os
 from pathlib import Path
+import sys
+import time
 
 from inertia_decompiler.tail_validation import (
     emit_tail_validation_console_summary,
@@ -10,6 +13,13 @@ from inertia_decompiler.tail_validation import (
     tail_validation_runtime_enabled,
     tail_validation_snapshot_for_fallback,
 )
+
+
+def _diagnostic_print(line: str) -> None:
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        print(line)
+        return
+    print(f"{time.strftime('[%H:%M:%S]')} {line}", file=sys.stderr)
 
 
 @dataclass(frozen=True)
@@ -117,7 +127,7 @@ def print_function_attempt_status(
     attempt: str,
     validation_snapshot: Mapping[str, object] | None,
 ) -> None:
-    print(
+    _diagnostic_print(
         f"/* info: function {getattr(function, 'addr', 0):#x} {getattr(function, 'name', 'sub')} "
         f"attempt={attempt} validation={tail_validation_display_status(validation_snapshot)} */"
     )

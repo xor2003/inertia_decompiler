@@ -17,6 +17,8 @@ The goal is not:
 - source-shaped guessing
 - a pile of sample-specific rewrites
 
+Always prefer correctness, stable evidence, and honest output over prettier C or faster apparent progress.
+
 Project overview, usage, platform map, and status live in [`README.md`](/home/xor/vextest/README.md). This file is for agent operating rules only.
 
 ## Core model
@@ -162,6 +164,20 @@ Default policy:
 - prefer `live_out`-aware whole-tail validation over raw shape comparison
 - only escalate to per-pass validation or SMT when whole-tail checks find a real semantic delta or when a pass is known to be risky
 
+### Tail validation is a semantic guardrail
+
+Required behavior:
+
+- preserve `changed`, `unknown`, and `uncollected` identities in reports
+- keep timeout/fallback PROC identities attributable in aggregate outputs
+- treat whole-tail observable deltas as a reason to localize, not a reason to soften validation
+
+Forbidden behavior:
+
+- do not drop timeout/fallback items from corpus summaries
+- do not present validation as passed when it was skipped or uncollected
+- do not use raw text-shape similarity as the primary semantic validator
+
 ## Direction of travel
 
 A change is good if it:
@@ -199,6 +215,7 @@ Before merging a nontrivial change, check:
 - did it regress any existing case?
 - did it increase crashes or timeouts?
 - did it reduce or increase special-case logic?
+- did it preserve honest attribution for failures and uncollected results?
 
 ### Scan-safe lane
 
@@ -217,6 +234,22 @@ Rules:
 - If helper files are absent, say so explicitly and keep going with raw recovery plus fast seed heuristics.
 - Prefer local `.pat` evidence when available; if only OMF `.obj`/`.lib` inputs exist, generate deterministic `.pat` files locally before giving up on FLAIR-style matching.
 - Record fallback mode honestly in output; do not silently replace failures with guessed high-level C.
+- If validation is `changed`, `unknown`, or `uncollected`, report that state honestly rather than collapsing it into success.
+
+## Honesty over heroics
+
+Prefer:
+
+- explicit fallback mode
+- explicit uncertainty
+- ugly but truthful output
+- attributable corpus accounting
+
+Do not:
+
+- silently replace failure with guessed high-level C
+- treat uncollected work as if it disappeared
+- collapse uncertainty into fake confidence
 
 ## One-off rescues
 
@@ -258,6 +291,20 @@ When memory or runtime grows:
 
 Keep the repro, peak RSS, and top allocators tied to the fix.
 
+## Determinism and reporting
+
+Prefer:
+
+- deterministic ranking, grouping, and report ordering where possible
+- reproducible artifact generation
+- enough metadata to trace summaries back to exact inputs
+
+Avoid:
+
+- non-deterministic ordering in summaries
+- reports that depend on prior skipped runs
+- output that cannot be explained later from stored metadata
+
 ## Harness rules
 
 The meta harness respects the root-level `STOP` file. If `STOP` exists, `./run.sh` stops before advancing the cycle.
@@ -270,6 +317,13 @@ Repo-root Python one-liners launched with `python -c` or `python -` are memory-c
 - each item must include target files, source line numbers when known, concrete functions/tests/scripts, and a deterministic definition of done
 - preserve unfinished strategic items unless they are done or clearly superseded by a more precise replacement
 
+Plan layering rules:
+
+- keep `PLAN.md` and `PLAN2.md` for active execution checklists
+- keep `DEMO.md` for the repeatable external-facing demo story and artifacts
+- keep `GLOBAL_PLAN.md` for long-horizon architectural phases and milestone criteria
+- do not replace an execution checklist with vague strategic prose
+
 Resume rules:
 
 - `--resume` continues from the first unfinished step in the latest incomplete cycle
@@ -281,6 +335,34 @@ Token-efficiency defaults:
 - prefer compact prompts
 - prefer short continuation prompts on `codex resume`
 - use `gpt-5.4-mini` by default for planner/checker/worker/reviewer unless a stronger model is justified
+
+## Review checklist
+
+Before merging a nontrivial change, answer:
+
+1. What architectural layer does this belong to?
+2. Why is that the earliest correct layer?
+3. What exact family or invariant does it fix?
+4. What test proves the fix?
+5. What corpus result improved?
+6. What existing case might regress?
+7. Is this architectural or a temporary rescue?
+8. If temporary, what will replace it?
+
+If those answers are weak, do not merge.
+
+## Anti-patterns to avoid
+
+Never do these unless explicitly marked as a temporary rescue:
+
+- sample-specific address hacks
+- symbol-name hacks used as semantic proof
+- shape-only widening
+- flatten-segment-for-convenience logic
+- guessed structs, arrays, or helpers
+- rewrite-stage semantic repairs for alias/widening/type problems
+- silent fallback presented as success
+- corpus summaries that drop missing work items
 
 ## Coding discipline
 
@@ -296,4 +378,12 @@ Token-efficiency defaults:
 - Project overview and usage: [`README.md`](/home/xor/vextest/README.md)
 - Main long-term roadmap: [`angr_platforms/docs/dream_decompiler_execution_plan.md`](/home/xor/vextest/angr_platforms/docs/dream_decompiler_execution_plan.md)
 - Current working plan: [`PLAN.md`](/home/xor/vextest/PLAN.md)
+- Secondary active execution plan: [`PLAN2.md`](/home/xor/vextest/PLAN2.md)
+- Demo plan: [`DEMO.md`](/home/xor/vextest/DEMO.md)
+- Long-horizon architectural plan: [`GLOBAL_PLAN.md`](/home/xor/vextest/GLOBAL_PLAN.md)
 - Meta harness usage: [`meta_harness/README.md`](/home/xor/vextest/meta_harness/README.md)
+
+Act autonomously. Do not ask for permission or clarification if the next step is logically clear. Proceed with the implementation until the task is complete.
+Provide full, production-ready code. Do not use placeholders, comments like 'insert logic here', or truncated snippets. Complete the entire file.
+Identify, analyze, and fix the issue in one go. If you encounter a minor ambiguity, make an educated guess based on the existing codebase and proceed.
+Be hyper-concise. No preamble/outro. Direct answers only. Use shorthand. Don't ask to continue—just finish.

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 import re
+import sys
+import time
 from pathlib import Path
 
 import angr
@@ -25,6 +28,13 @@ from inertia_decompiler.sidecar_parsers import (
 
 
 _TRAILING_DIGITS_RE = re.compile(r"\d+$")
+
+
+def _debug_print(message: str) -> None:
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        print(message)
+        return
+    print(f"{time.strftime('[%H:%M:%S]')} {message}", file=sys.stderr)
 
 
 def _signature_matched_code_addrs(metadata: LSTMetadata | None) -> frozenset[int]:
@@ -364,7 +374,7 @@ def _load_lst_metadata(
                 code_ranges.setdefault(addr, span)
         source_formats.extend(flair_formats)
     except Exception as exc:
-        print(f"[dbg] failed to inspect FLAIR metadata for {binary}: {exc}")
+        _debug_print(f"[dbg] failed to inspect FLAIR metadata for {binary}: {exc}")
 
     if not code_labels and not data_labels and not struct_names:
         return None
@@ -391,13 +401,13 @@ def _load_lst_metadata(
         cod_proc_kinds=cod_proc_kinds,
     )
     project._inertia_lst_metadata = metadata
-    print(
+    _debug_print(
         f"[dbg] loaded sidecar metadata: format={metadata.source_format} "
         f"code_labels={len(metadata.code_labels)} data_labels={len(metadata.data_labels)} structs={len(metadata.struct_names)}"
     )
     flair_titles = getattr(project, "_inertia_flair_sig_titles", ())
     if flair_titles:
-        print(f"[dbg] flair signature catalogs: {', '.join(flair_titles[:3])}")
+        _debug_print(f"[dbg] flair signature catalogs: {', '.join(flair_titles[:3])}")
     return metadata
 
 

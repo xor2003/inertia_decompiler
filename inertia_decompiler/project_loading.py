@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import io
+import os
 import re
+import sys
+import time
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import angr
@@ -10,6 +14,13 @@ from angr_platforms.X86_16.arch_86_16 import Arch86_16
 
 
 _IDA_BASE_ADDRESS_RE = re.compile(r"Base Address:\s*([0-9A-Fa-f]+)h", re.IGNORECASE)
+
+
+def _debug_print(message: str) -> None:
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        print(message)
+        return
+    print(f"{time.strftime('[%H:%M:%S]')} {message}", file=sys.stderr)
 
 
 def _describe_exception(ex: Exception) -> str:
@@ -187,7 +198,7 @@ def _unpack_lzexe_image(data: bytes, *, base_addr: int) -> _UnpackedLZEXEImage:
 def _build_project(path: Path, *, force_blob: bool, base_addr: int, entry_point: int) -> angr.Project:
     suffix = path.suffix.lower()
 
-    print(f"[dbg] build_project: path={path} suffix={suffix} force_blob={force_blob}")
+    _debug_print(f"[dbg] build_project: path={path} suffix={suffix} force_blob={force_blob}")
     if force_blob or _is_blob_only_input(path):
         return angr.Project(
             path,
@@ -228,7 +239,7 @@ def _build_project(path: Path, *, force_blob: bool, base_addr: int, entry_point:
             simos="DOS",
         )
         project._inertia_packed_exe = packed_exe
-        print(
+        _debug_print(
             f"[dbg] unpacked {packed_exe}: entry={hex(unpacked.entry_point)} size={len(unpacked.code)}"
         )
         return project
@@ -246,18 +257,18 @@ def _build_project(path: Path, *, force_blob: bool, base_addr: int, entry_point:
                 },
                 simos="DOS",
             )
-            print(f"[dbg] {exe_backend} load base={hex(explicit_base)}")
-            print(f"[dbg] project built: arch={proj.arch.name} entry={hex(proj.entry)}")
+            _debug_print(f"[dbg] {exe_backend} load base={hex(explicit_base)}")
+            _debug_print(f"[dbg] project built: arch={proj.arch.name} entry={hex(proj.entry)}")
             return proj
         except Exception as ex:
-            print(f"[dbg] explicit {exe_backend} load failed at {hex(explicit_base)}: {_describe_exception(ex)}")
+            _debug_print(f"[dbg] explicit {exe_backend} load failed at {hex(explicit_base)}: {_describe_exception(ex)}")
 
     try:
         proj = angr.Project(path, auto_load_libs=False)
     except Exception as ex:
         if suffix == ".exe" and "Position-DEPENDENT object" in str(ex):
             explicit_base = _probe_ida_base_linear(path, base_addr << 4 if base_addr < 0x10000 else base_addr)
-            print(f"[dbg] retrying DOS MZ load with explicit base_addr={hex(explicit_base)} after {type(ex).__name__}")
+            _debug_print(f"[dbg] retrying DOS MZ load with explicit base_addr={hex(explicit_base)} after {type(ex).__name__}")
             proj = angr.Project(
                 path,
                 auto_load_libs=False,
@@ -268,8 +279,24 @@ def _build_project(path: Path, *, force_blob: bool, base_addr: int, entry_point:
             )
         else:
             raise
-    print(f"[dbg] project built: arch={proj.arch.name} entry={hex(proj.entry)}")
+    _debug_print(f"[dbg] project built: arch={proj.arch.name} entry={hex(proj.entry)}")
     return proj
+
+
+@lru_cache(maxsize=16)
+def _build_project_cached(
+    path: str,
+    *,
+    force_blob: bool,
+    base_addr: int,
+    entry_point: int,
+) -> angr.Project:
+    return _build_project(
+        Path(path),
+        force_blob=force_blob,
+        base_addr=base_addr,
+        entry_point=entry_point,
+    )
 
 
 def _build_project_from_bytes(code: bytes, *, base_addr: int, entry_point: int) -> angr.Project:

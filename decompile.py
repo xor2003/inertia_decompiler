@@ -11,7 +11,6 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent
 _PROJECT_VENV_PYTHONS = (
     _ROOT / ".venv" / "bin" / "python",
-    _ROOT / "venv" / "bin" / "python",
 )
 
 

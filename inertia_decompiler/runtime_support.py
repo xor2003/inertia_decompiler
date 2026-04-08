@@ -4,8 +4,10 @@ import contextlib
 import io
 import logging
 import os
+import pickle
 import re
 import resource
+import select
 import signal
 import sys
 import threading
@@ -213,6 +215,14 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
             self._threads.add(t)
             _threads_queues[t] = self._work_queue
 
+    def shutdown(self, wait=True, *, cancel_futures=False):  # noqa: D401
+        try:
+            return super().shutdown(wait=wait, cancel_futures=cancel_futures)
+        finally:
+            if not wait:
+                for thread in list(self._threads):
+                    _threads_queues.pop(thread, None)
+
 
 def log_step(step: str) -> None:
     global LAST_STEP_TIME
@@ -280,6 +290,75 @@ def run_with_timeout_in_daemon_thread(
         return future.result(timeout=max(1, timeout))
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
+
+
+def run_with_timeout_in_fork(
+    func,
+    *,
+    timeout: int,
+) -> object:
+    if os.name != "posix" or not hasattr(os, "fork"):
+        raise RuntimeError("fork unavailable")
+    if threading.current_thread() is not threading.main_thread():
+        raise RuntimeError("fork-only supported from main thread")
+    if threading.active_count() != 1:
+        raise RuntimeError("fork-only supported without extra live threads")
+
+    read_fd, write_fd = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.close(read_fd)
+            try:
+                payload = ("ok", func())
+            except BaseException as ex:  # noqa: BLE001
+                payload = ("err", type(ex).__name__, str(ex))
+            data = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
+            os.write(write_fd, len(data).to_bytes(8, "little"))
+            os.write(write_fd, data)
+        finally:
+            with contextlib.suppress(OSError):
+                os.close(write_fd)
+            os._exit(0)
+
+    os.close(write_fd)
+    try:
+        ready, _, _ = select.select([read_fd], [], [], max(1, timeout))
+        if not ready:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            raise TimeoutError(f"Timed out after {timeout}s.")
+        header = b""
+        while len(header) < 8:
+            chunk = os.read(read_fd, 8 - len(header))
+            if not chunk:
+                break
+            header += chunk
+        if len(header) != 8:
+            os.waitpid(pid, 0)
+            raise RuntimeError("fork child exited without result")
+        expected = int.from_bytes(header, "little")
+        data = bytearray()
+        while len(data) < expected:
+            chunk = os.read(read_fd, min(65536, expected - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        os.waitpid(pid, 0)
+        if len(data) != expected:
+            raise RuntimeError("fork child returned incomplete result")
+        payload = pickle.loads(bytes(data))
+        if not isinstance(payload, tuple) or not payload:
+            raise RuntimeError("fork child returned invalid payload")
+        if payload[0] == "ok":
+            return payload[1]
+        if payload[0] == "err":
+            raise RuntimeError(f"{payload[1]}: {payload[2]}")
+        raise RuntimeError("fork child returned unknown status")
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(read_fd)
 
 
 def emit_timeout_and_exit(args_timeout: int, recovery_detail: str | None) -> None:

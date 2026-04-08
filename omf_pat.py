@@ -1348,6 +1348,7 @@ def _get_pat_module_regex(module: PatModule | CachedPatRegexSpec):
     return _compile_regex_bytes(regex_source)
 
 
+@lru_cache(maxsize=4096)
 def _build_pat_regex_source(module: PatModule) -> tuple[bytes, bytes, int]:
     checked_prefix_len = min(module.module_length, 32)
     python_parts = [_pattern_bytes_to_regex(module.pattern_bytes[:checked_prefix_len])]
@@ -1392,6 +1393,7 @@ def _get_pat_checked_match_length(module: PatModule | CachedPatRegexSpec) -> int
     return checked_match_length
 
 
+@lru_cache(maxsize=4096)
 def _get_pat_module_hyperscan_db(module: PatModule | CachedPatRegexSpec):
     if _hyperscan is None:
         raise RuntimeError("hyperscan unavailable")
