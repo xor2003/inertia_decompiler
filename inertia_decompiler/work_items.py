@@ -56,6 +56,8 @@ class FunctionWorkResult:
     partial_payload: str | None = None
     tail_validation: dict[str, object] | None = None
     skip_heavy_fallbacks: bool = False
+    elapsed: float | None = None
+    from_cache: bool = False
 
 
 def emit_tail_validation_for_function_run_or_uncollected(

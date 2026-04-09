@@ -366,6 +366,11 @@ def test_ensure_prereqs_writes_preflight_state(monkeypatch, tmp_path):
     harness = MetaHarness(cfg, llm_cfg)
 
     monkeypatch.setattr("meta_harness.orchestrator.shutil.which", lambda _cmd: "/usr/bin/fake")
+    monkeypatch.setattr(
+        harness,
+        "ensure_profiler_tools",
+        lambda: {"line_profiler": True, "memray": True, "py-spy": True, "install_attempted": False},
+    )
 
     harness.ensure_prereqs()
 
@@ -374,7 +379,38 @@ def test_ensure_prereqs_writes_preflight_state(monkeypatch, tmp_path):
     assert payload["ready"] is True
     assert payload["commands"]["timeout"] is True
     assert payload["providers"]["codex"] is True
+    assert payload["profilers"]["memray"] is True
     assert payload["python_ok"] is True
+
+
+def test_ensure_profiler_tools_installs_missing_tools(monkeypatch, tmp_path):
+    cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
+    harness = MetaHarness(cfg, llm_cfg)
+    probes = {"line_profiler": False, "memray": True}
+    install_calls: list[list[str]] = []
+
+    monkeypatch.setattr(harness, "python_module_available", lambda module: probes.get(module, False))
+    monkeypatch.setattr(harness, "py_spy_available", lambda: False)
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = "installed\n"
+        stderr = ""
+
+    def fake_run(cmd, **_kwargs):
+        install_calls.append([str(part) for part in cmd])
+        probes["line_profiler"] = True
+        return FakeCompleted()
+
+    monkeypatch.setattr("meta_harness.orchestrator.subprocess.run", fake_run)
+
+    status = harness.ensure_profiler_tools()
+
+    assert status["install_attempted"] is True
+    assert status["install_ok"] is True
+    assert status["line_profiler"] is True
+    assert install_calls
+    assert install_calls[0][-3:] == ["line_profiler", "memray", "py-spy"]
 
 
 def test_run_role_records_session_ledger_and_history(monkeypatch, tmp_path):

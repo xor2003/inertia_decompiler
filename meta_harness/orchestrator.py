@@ -255,6 +255,7 @@ class MetaHarness:
                 python_bin=str(self.cfg.python_bin),
             )
             self.die(f"Missing {self.cfg.python_bin}")
+        profiler_status = self.ensure_profiler_tools()
         providers = {
             self.llm_cfg.planner_provider,
             self.llm_cfg.checker_provider,
@@ -304,11 +305,87 @@ class MetaHarness:
             ready=True,
             commands=command_status,
             providers=provider_status,
+            profilers=profiler_status,
             python_bin=str(self.cfg.python_bin),
             python_ok=True,
             root_dir=str(self.cfg.root_dir),
             stop_file_present=self.cfg.stop_file.exists(),
         )
+
+    def python_module_available(self, module: str) -> bool:
+        try:
+            result = subprocess.run(
+                [str(self.cfg.python_bin), "-c", f"import {module}"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return False
+        return result.returncode == 0
+
+    def py_spy_available(self) -> bool:
+        candidates = [
+            self.cfg.python_bin.parent / "py-spy",
+            shutil.which("py-spy"),
+        ]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            try:
+                result = subprocess.run(
+                    [str(candidate), "--version"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            except OSError:
+                continue
+            if result.returncode == 0:
+                return True
+        return False
+
+    def ensure_profiler_tools(self) -> dict[str, object]:
+        required_modules = {"line_profiler": "line_profiler", "memray": "memray"}
+        status: dict[str, object] = {
+            "line_profiler": self.python_module_available(required_modules["line_profiler"]),
+            "memray": self.python_module_available(required_modules["memray"]),
+            "py-spy": self.py_spy_available(),
+            "install_attempted": False,
+            "install_ok": None,
+            "install_missing": [],
+        }
+        missing = [name for name in ("line_profiler", "memray", "py-spy") if not bool(status.get(name))]
+        if not missing:
+            return status
+        status["install_attempted"] = True
+        status["install_missing"] = missing
+        self.log(f"Installing missing profiler tools into active environment: {', '.join(missing)}")
+        install = subprocess.run(
+            [str(self.cfg.python_bin), "-m", "pip", "install", "line_profiler", "memray", "py-spy"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        status["install_ok"] = install.returncode == 0
+        status["install_rc"] = install.returncode
+        status["install_stdout_tail"] = install.stdout[-2000:]
+        status["install_stderr_tail"] = install.stderr[-2000:]
+        status["line_profiler"] = self.python_module_available(required_modules["line_profiler"])
+        status["memray"] = self.python_module_available(required_modules["memray"])
+        status["py-spy"] = self.py_spy_available()
+        still_missing = [name for name in ("line_profiler", "memray", "py-spy") if not bool(status.get(name))]
+        status["still_missing"] = still_missing
+        if still_missing:
+            self.record_event(
+                "preflight.profilers_missing",
+                "warning",
+                "one or more profiling tools remain unavailable after install attempt",
+                failure_class="resource_blocked",
+                missing=still_missing,
+                install_rc=install.returncode,
+            )
+        return status
 
     def acquire_lock(self) -> None:
         self.cfg.lock_file.parent.mkdir(parents=True, exist_ok=True)

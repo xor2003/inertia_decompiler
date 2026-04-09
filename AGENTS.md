@@ -295,6 +295,8 @@ Keep the repro, peak RSS, and top allocators tied to the fix.
 
 If these profiling tools are missing from the active environment, install them into the active virtualenv and continue:
 `python -m pip install line_profiler memray py-spy`.
+Prefer invoking profilers through the active interpreter or virtualenv, e.g. `python -m cProfile`,
+`python -m memray`, or `.venv/bin/py-spy`, so the profiling run uses the same dependencies as the repro.
 
 ## Determinism and reporting
 

@@ -48,6 +48,7 @@ def test_planner_prompt_mentions_plan_and_remaining_steps(monkeypatch, tmp_path)
     assert "tail-validation summary or detail-artifact paths" in prompt
     assert "identify the concrete failing family from the logs" in prompt
     assert "Use the logs to determine where the problem lives" in prompt
+    assert "plan the smallest repro and the profiling command before planning an optimization" in prompt
     assert "Cite the specific log file, artifact path, function name, or warning/error family" in prompt
     assert "Do not claim a root cause unless the current logs or artifacts support it" in prompt
     assert "If the existing logs do not explain the current tail-validation failure family well enough" in prompt
@@ -75,6 +76,9 @@ def test_worker_prompt_mentions_implementation_role(monkeypatch, tmp_path):
     assert "Never use source-specific hacks" in prompt
     assert "Run the smallest test that proves the touched behavior" in prompt
     assert "change code or the hypothesis before rerunning that same test" in prompt
+    assert "capture a concrete profile/trace/log snapshot before the first fix" in prompt
+    assert "Use cProfile/line_profiler/memray/py-spy through the active virtualenv" in prompt
+    assert "wall time, RSS, timeout behavior" in prompt
     assert "Green level: focused-item-green|cycle-green|merge-safe-green|red" in prompt
 
 
@@ -134,6 +138,7 @@ def test_reviewer_prompt_accepts_worker_stall_context(monkeypatch, tmp_path):
         task_packet="Task packet id: 1\nObjective: fix BYTEOPS",
     )
     assert "Worker stall diagnosis for this cycle" in prompt
+    assert "without profiling, route the next cycle to a smaller diagnostic plan item" in prompt
     assert "worker.iter01.log" in prompt
     assert "Active task packet" in prompt
 

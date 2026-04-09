@@ -23,6 +23,21 @@ RECOVERY_CACHE_SOURCE_FILES = (
     _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "load_dos_ne.py",
     _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "lift_86_16.py",
 )
+SIDECAR_METADATA_CACHE_SOURCE_FILES = (
+    _ROOT / "inertia_decompiler" / "cache.py",
+    _ROOT / "inertia_decompiler" / "sidecar_parsers.py",
+    _ROOT / "inertia_decompiler" / "sidecar_metadata.py",
+    _ROOT / "omf_pat.py",
+    _ROOT / "signature_catalog.py",
+    _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "cod_extract.py",
+    _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "codeview_nb00.py",
+    _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "codeview_nb02_nb04.py",
+    _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "flair_extract.py",
+    _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "load_dos_mz.py",
+    _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "load_dos_ne.py",
+    _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "lst_extract.py",
+    _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "turbo_debug_tdinfo.py",
+)
 DECOMPILATION_CACHE_SOURCE_FILES = (
     _ROOT / "decompile.py",
     _ROOT / "inertia_decompiler" / "cli.py",
@@ -115,6 +130,7 @@ def _function_decompilation_cache_key(
     *,
     binary_path: Path | None,
     function_addr: int,
+    function_name: str | None,
     api_style: str,
     enable_structured_simplify: bool,
     enable_postprocess: bool,
@@ -129,6 +145,7 @@ def _function_decompilation_cache_key(
         "sidecars": _cache_sidecar_fingerprints(binary_path),
         "components": _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES),
         "addr": function_addr,
+        "function_name": function_name,
         "api_style": api_style,
         "structured_simplify": enable_structured_simplify,
         "postprocess": enable_postprocess,
@@ -150,6 +167,27 @@ def _recovery_cache_key(
         "binary": binary_fingerprint,
         "sidecars": _cache_sidecar_fingerprints(binary_path),
         "components": _cache_source_digest(RECOVERY_CACHE_SOURCE_FILES),
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _sidecar_metadata_cache_key(
+    *,
+    binary_path: Path | None,
+    kind: str,
+    extra: dict[str, object] | None = None,
+) -> dict[str, object] | None:
+    binary_fingerprint = _cache_file_fingerprint(binary_path)
+    if binary_fingerprint is None:
+        return None
+    payload = {
+        "schema": DECOMPILATION_CACHE_SCHEMA,
+        "kind": kind,
+        "binary": binary_fingerprint,
+        "sidecars": _cache_sidecar_fingerprints(binary_path),
+        "components": _cache_source_digest(SIDECAR_METADATA_CACHE_SOURCE_FILES),
     }
     if extra:
         payload.update(extra)

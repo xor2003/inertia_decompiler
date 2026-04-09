@@ -13,7 +13,7 @@ from angr_platforms.X86_16.turbo_debug_tdinfo import parse_tdinfo_exe
 from inertia_decompiler.cache import (
     _cache_file_fingerprint,
     _load_cache_json,
-    _recovery_cache_key,
+    _sidecar_metadata_cache_key,
     _store_cache_json,
 )
 from inertia_decompiler.project_loading import _build_project, _probe_ida_base_linear
@@ -99,7 +99,7 @@ def _flair_metadata_cache_key(
 ) -> dict[str, object] | None:
     main_object = getattr(getattr(project, "loader", None), "main_object", None)
     signature_fingerprint = _cache_file_fingerprint(signature_catalog) if signature_catalog is not None else None
-    return _recovery_cache_key(
+    return _sidecar_metadata_cache_key(
         binary_path=binary,
         kind="flair_metadata",
         extra={

@@ -24,6 +24,18 @@ def _token_discipline() -> str:
     )
 
 
+def _diagnostic_discipline() -> str:
+    return (
+        "Diagnostic discipline:\n"
+        "- For timeouts, hangs, RAM growth, or ambiguous timestamp gaps, first capture what the process was doing before changing code.\n"
+        "- Use the smallest repro that shows the issue, then use `/usr/bin/time -v`, `cProfile`/`pstats`, `line_profiler`, `memray run --native`, or `py-spy` when the symptom calls for it.\n"
+        "- If `py-spy` cannot attach because of ptrace or Python-version support, say that and fall back to cProfile, memray, logs, `/proc`, or targeted instrumentation.\n"
+        "- Tie each optimization or cache change to a measured before/after result on the same target.\n"
+        "- Improve unclear logs/messages when they made the diagnosis harder, especially timeout, worker, and fallback attribution messages.\n"
+        "- Do not claim a root cause until an artifact, profile, trace, or targeted run supports it.\n\n"
+    )
+
+
 def _repo_standing_tasks(cfg: RuntimeConfig) -> str:
     tasks = [task.strip() for task in getattr(cfg, "repo_standing_tasks", ()) if isinstance(task, str) and task.strip()]
     if not tasks:
@@ -44,6 +56,7 @@ def build_master_prompt(cfg: RuntimeConfig) -> str:
             + _repo_standing_tasks(cfg)
             + _style_contract()
             + _token_discipline()
+            + _diagnostic_discipline()
         )
     return (
         f"You are working on {cfg.root_dir}, a {cfg.project_description}.\n\n"
@@ -70,6 +83,7 @@ def build_master_prompt(cfg: RuntimeConfig) -> str:
         + _repo_standing_tasks(cfg)
         + _style_contract()
         + _token_discipline()
+        + _diagnostic_discipline()
     )
 
 
@@ -100,6 +114,7 @@ def build_planner_prompt(
         f"- Read the current evidence and debug logs first, especially {cfg.evidence_log_file}, recent stderr/debug output, and any tail-validation summary or detail-artifact paths already recorded by the sweep.\n"
         "- When tail validation is in scope, identify the concrete failing family from the logs before writing plan items; do not plan from verdict headlines alone.\n"
         "- Use the logs to determine where the problem lives: validator noise, structuring, postprocess, fallback path, or cache/policy behavior.\n"
+        "- If evidence shows a runtime/RAM/hang issue, plan the smallest repro and the profiling command before planning an optimization.\n"
         "- Cite the specific log file, artifact path, function name, or warning/error family that motivated each new plan item.\n"
         "- Do not claim a root cause unless the current logs or artifacts support it; otherwise plan the missing debug signal first.\n"
         f"- Create or update {cfg.plan_path} as a flat numbered checklist.\n"
@@ -168,7 +183,11 @@ def build_worker_prompt(
         "- Work like an ongoing continuation: make real code changes, update tests, verify results, and commit often.\n"
         "- Never use source-specific hacks.\n"
         "- If the harness itself can be improved safely while you work, you may improve it too.\n"
-        "- Prefer one tight edit/verify loop over many exploratory reads.\n"
+        "- Prefer one tight diagnose/edit/verify loop over many exploratory reads.\n"
+        "- For timeout, hang, memory, or ambiguous-log tasks, capture a concrete profile/trace/log snapshot before the first fix unless recent evidence already proves the cause.\n"
+        "- Use cProfile/line_profiler/memray/py-spy through the active virtualenv when useful; install missing tools into the active virtualenv if absent.\n"
+        "- If a profile points elsewhere than the current plan item, stop and route back to planner/reviewer instead of papering over it.\n"
+        "- After a performance/cache/process-isolation change, rerun the same repro and record wall time, RSS, timeout behavior, and any remaining warning/error messages.\n"
         "- Run the smallest test that proves the touched behavior before considering broader validation.\n"
         "- If a focused test already failed, change code or the hypothesis before rerunning that same test.\n"
         "- Avoid repeating `git status`, large `sed`/`cat` dumps, or the same targeted test unless new changes justify it.\n"
@@ -216,6 +235,7 @@ def build_reviewer_prompt(cfg: RuntimeConfig, *, stall_context: str = "", task_p
             "\nWorker stall diagnosis for this cycle:\n"
             "- Review the recent worker timeout/failure logs listed below before deciding what remains.\n"
             "- If the worker loop is stuck, prefer tightening the plan, improving harness retry/model strategy, or both.\n"
+            "- If the worker stalled on runtime/RAM/hang evidence without profiling, route the next cycle to a smaller diagnostic plan item before more implementation attempts.\n"
             "- Keep the next cycle open only when there is a concrete better next step.\n"
             f"{stall_context.strip()}\n"
         )

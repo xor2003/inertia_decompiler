@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from types import ModuleType
 
 
 _ROOT = Path(__file__).resolve().parent
@@ -65,6 +66,23 @@ _enable_line_buffered_stdio()
 
 from inertia_decompiler import cli as _cli
 
+_THIS_MODULE = sys.modules[__name__]
+
+
+class _CliProxyModule(ModuleType):
+    def __getattr__(self, name: str):
+        return getattr(_cli, name)
+
+    def __setattr__(self, name: str, value):
+        ModuleType.__setattr__(self, name, value)
+        if name not in {"__class__", "__dict__"}:
+            setattr(_cli, name, value)
+
+    def __dir__(self) -> list[str]:
+        return sorted(set(ModuleType.__dir__(self)) | set(dir(_cli)))
+
+
+_THIS_MODULE.__class__ = _CliProxyModule
 sys.modules[__name__] = _cli
 
 

@@ -28,6 +28,7 @@ EVENT_NAMES = {
     "operator.comments_consumed",
     "operator.action_requested",
     "maintenance.scheduled",
+    "preflight.profilers_missing",
     "harness.restarting",
 }
 

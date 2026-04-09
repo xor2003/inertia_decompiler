@@ -290,7 +290,8 @@ def run_with_timeout_in_daemon_thread(
     try:
         return future.result(timeout=max(1, timeout))
     finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+        finished = future.done()
+        executor.shutdown(wait=finished, cancel_futures=not finished)
 
 
 def run_with_timeout_in_fork(
@@ -314,7 +315,11 @@ def run_with_timeout_in_fork(
                 payload = ("ok", func())
             except BaseException as ex:  # noqa: BLE001
                 payload = ("err", type(ex).__name__, str(ex))
-            data = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
+            try:
+                data = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
+            except BaseException as ex:  # noqa: BLE001
+                payload = ("err", type(ex).__name__, f"fork result is not pickleable: {ex}")
+                data = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
             os.write(write_fd, len(data).to_bytes(8, "little"))
             os.write(write_fd, data)
         finally:
