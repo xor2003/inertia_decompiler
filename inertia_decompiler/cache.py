@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -59,6 +60,7 @@ def _cache_sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+@lru_cache(maxsize=8)
 def _cache_source_digest(paths: tuple[Path, ...]) -> str:
     digest = hashlib.sha256()
     for path in paths:

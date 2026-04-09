@@ -286,10 +286,15 @@ When memory or runtime grows:
 
 1. reproduce on the smallest real corpus subset or PROC
 2. confirm RSS growth with `/proc`, `ps`, or `/usr/bin/time -v`
-3. use `memray run --native` on the exact repro once growth is real
-4. compare before/after on the same target
+3. use `cProfile`/`pstats` for Python call hot spots and `line_profiler` for focused line-level hot paths
+4. use `memray run --native` on the exact repro once growth is real
+5. use `py-spy record`/`py-spy dump` for live hangs or runaway processes when ptrace/toolchain support allows it
+6. compare before/after on the same target
 
 Keep the repro, peak RSS, and top allocators tied to the fix.
+
+If these profiling tools are missing from the active environment, install them into the active virtualenv and continue:
+`python -m pip install line_profiler memray py-spy`.
 
 ## Determinism and reporting
 

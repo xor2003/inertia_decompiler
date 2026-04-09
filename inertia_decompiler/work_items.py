@@ -55,6 +55,7 @@ class FunctionWorkResult:
     function_cfg: object
     partial_payload: str | None = None
     tail_validation: dict[str, object] | None = None
+    skip_heavy_fallbacks: bool = False
 
 
 def emit_tail_validation_for_function_run_or_uncollected(
@@ -127,9 +128,15 @@ def print_function_attempt_status(
     attempt: str,
     validation_snapshot: Mapping[str, object] | None,
 ) -> None:
+    project = getattr(function, "project", None)
+    validation_status = (
+        "disabled"
+        if project is not None and not tail_validation_runtime_enabled(project)
+        else tail_validation_display_status(validation_snapshot)
+    )
     _diagnostic_print(
         f"/* info: function {getattr(function, 'addr', 0):#x} {getattr(function, 'name', 'sub')} "
-        f"attempt={attempt} validation={tail_validation_display_status(validation_snapshot)} */"
+        f"attempt={attempt} validation={validation_status} */"
     )
 
 

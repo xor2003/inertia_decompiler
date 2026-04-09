@@ -41,6 +41,9 @@ def _install_early_log_levels() -> None:
         ("angr.analyses.decompiler.structured_codegen.c", logging.CRITICAL),
         ("angr.analyses.decompiler.decompiler", logging.ERROR),
         ("angr.project", logging.ERROR),
+        ("angr.analyses.cfg.cfg_fast", logging.ERROR),
+        ("angr.analyses.cfg.cfg_base", logging.ERROR),
+        ("angr.analyses.fcp.fcp.SimEngineFCPVEX", logging.CRITICAL),
     ):
         logging.getLogger(logger_name).setLevel(level)
 

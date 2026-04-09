@@ -10,6 +10,12 @@ import angr
 from angr_platforms.X86_16.lst_extract import LSTMetadata, extract_lst_metadata
 from angr_platforms.X86_16.turbo_debug_tdinfo import parse_tdinfo_exe
 
+from inertia_decompiler.cache import (
+    _cache_file_fingerprint,
+    _load_cache_json,
+    _recovery_cache_key,
+    _store_cache_json,
+)
 from inertia_decompiler.project_loading import _build_project, _probe_ida_base_linear
 from inertia_decompiler.sidecar_parsers import (
     _detect_flair_metadata,
@@ -35,6 +41,74 @@ def _debug_print(message: str) -> None:
         print(message)
         return
     print(f"{time.strftime('[%H:%M:%S]')} {message}", file=sys.stderr)
+
+
+def _serialize_addr_name_map(values: dict[int, str]) -> list[list[object]]:
+    return [[addr, name] for addr, name in sorted(values.items()) if isinstance(addr, int) and isinstance(name, str)]
+
+
+def _deserialize_addr_name_map(values) -> dict[int, str]:
+    result: dict[int, str] = {}
+    if not isinstance(values, list):
+        return result
+    for item in values:
+        if (
+            isinstance(item, list)
+            and len(item) == 2
+            and isinstance(item[0], int)
+            and isinstance(item[1], str)
+        ):
+            result[item[0]] = item[1]
+    return result
+
+
+def _serialize_addr_range_map(values: dict[int, tuple[int, int]]) -> list[list[int]]:
+    return [
+        [addr, span[0], span[1]]
+        for addr, span in sorted(values.items())
+        if isinstance(addr, int)
+        and isinstance(span, tuple)
+        and len(span) == 2
+        and isinstance(span[0], int)
+        and isinstance(span[1], int)
+    ]
+
+
+def _deserialize_addr_range_map(values) -> dict[int, tuple[int, int]]:
+    result: dict[int, tuple[int, int]] = {}
+    if not isinstance(values, list):
+        return result
+    for item in values:
+        if (
+            isinstance(item, list)
+            and len(item) == 3
+            and isinstance(item[0], int)
+            and isinstance(item[1], int)
+            and isinstance(item[2], int)
+        ):
+            result[item[0]] = (item[1], item[2])
+    return result
+
+
+def _flair_metadata_cache_key(
+    binary: Path,
+    project: angr.Project,
+    *,
+    pat_backend: str | None,
+    signature_catalog: Path | None,
+) -> dict[str, object] | None:
+    main_object = getattr(getattr(project, "loader", None), "main_object", None)
+    signature_fingerprint = _cache_file_fingerprint(signature_catalog) if signature_catalog is not None else None
+    return _recovery_cache_key(
+        binary_path=binary,
+        kind="flair_metadata",
+        extra={
+            "entry": getattr(project, "entry", None),
+            "linked_base": getattr(main_object, "linked_base", None),
+            "pat_backend": pat_backend or "",
+            "signature_catalog": signature_fingerprint,
+        },
+    )
 
 
 def _signature_matched_code_addrs(metadata: LSTMetadata | None) -> frozenset[int]:
@@ -360,12 +434,44 @@ def _load_lst_metadata(
             print(f"[dbg] failed to parse mzretools map {external_mzre_map}: {exc}")
 
     try:
-        flair_code, flair_ranges, flair_formats = _detect_flair_metadata(
+        flair_cache_key = _flair_metadata_cache_key(
             binary,
             project,
             pat_backend=pat_backend,
             signature_catalog=signature_catalog,
         )
+        flair_cached_payload = _load_cache_json("recovery", flair_cache_key) if flair_cache_key is not None else None
+        if isinstance(flair_cached_payload, dict):
+            flair_code = _deserialize_addr_name_map(flair_cached_payload.get("code_labels"))
+            flair_ranges = _deserialize_addr_range_map(flair_cached_payload.get("code_ranges"))
+            flair_formats_raw = flair_cached_payload.get("source_formats")
+            flair_formats = tuple(part for part in flair_formats_raw if isinstance(part, str)) if isinstance(flair_formats_raw, list) else ()
+            sig_titles = flair_cached_payload.get("sig_titles")
+            startup_matches = flair_cached_payload.get("startup_matches")
+            local_pat_sources = flair_cached_payload.get("local_pat_sources")
+            setattr(project, "_inertia_flair_sig_titles", tuple(title for title in sig_titles if isinstance(title, str)) if isinstance(sig_titles, list) else ())
+            setattr(project, "_inertia_flair_startup_matches", tuple(match for match in startup_matches if isinstance(match, str)) if isinstance(startup_matches, list) else ())
+            setattr(project, "_inertia_flair_local_pat_sources", tuple(source for source in local_pat_sources if isinstance(source, str)) if isinstance(local_pat_sources, list) else ())
+        else:
+            flair_code, flair_ranges, flair_formats = _detect_flair_metadata(
+                binary,
+                project,
+                pat_backend=pat_backend,
+                signature_catalog=signature_catalog,
+            )
+            if flair_cache_key is not None:
+                _store_cache_json(
+                    "recovery",
+                    flair_cache_key,
+                    {
+                        "code_labels": _serialize_addr_name_map(flair_code),
+                        "code_ranges": _serialize_addr_range_map(flair_ranges),
+                        "source_formats": list(flair_formats),
+                        "sig_titles": list(getattr(project, "_inertia_flair_sig_titles", ())),
+                        "startup_matches": list(getattr(project, "_inertia_flair_startup_matches", ())),
+                        "local_pat_sources": list(getattr(project, "_inertia_flair_local_pat_sources", ())),
+                    },
+                )
         if flair_code or flair_ranges:
             for addr, name in flair_code.items():
                 code_labels.setdefault(addr, name)
