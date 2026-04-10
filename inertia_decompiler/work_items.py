@@ -58,6 +58,9 @@ class FunctionWorkResult:
     skip_heavy_fallbacks: bool = False
     elapsed: float | None = None
     from_cache: bool = False
+    failure_stage: str | None = None
+    block_count: int | None = None
+    byte_count: int | None = None
 
 
 def emit_tail_validation_for_function_run_or_uncollected(

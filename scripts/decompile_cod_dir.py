@@ -264,9 +264,7 @@ def _success_cache_key(item: CodWorkItem, *, timeout: int, max_memory_mb: int) -
         "code_sha256": hashlib.sha256(item.code).hexdigest(),
         "timeout": timeout,
         "max_memory_mb": max_memory_mb,
-        "components": _cache_source_digest(
-            DECOMPILATION_CACHE_SOURCE_FILES + (REPO_ROOT / "scripts" / "decompile_cod_dir.py",)
-        ),
+        "components": _cache_source_digest(DECOMPILATION_CACHE_SOURCE_FILES),
     }
 
 
@@ -1224,6 +1222,7 @@ def main() -> int:
             print(f"/* batch {batch_index}/{len(task_batches)}: recycling worker pool */")
         future_map = {}
         executor = None
+        scheduler_timed_out = False
         try:
             for item in batch:
                 task_counter += 1
@@ -1249,6 +1248,7 @@ def main() -> int:
             while pending:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
+                    scheduler_timed_out = True
                     for future in pending:
                         item = future_map[future]
                         failures += 1
@@ -1285,7 +1285,7 @@ def main() -> int:
                     handle_result(item, result)
         finally:
             if executor is not None:
-                executor.shutdown(wait=False, cancel_futures=True)
+                executor.shutdown(wait=not scheduler_timed_out, cancel_futures=True)
 
     for cod_path, writer in file_writers.items():
         if not writer.closed:

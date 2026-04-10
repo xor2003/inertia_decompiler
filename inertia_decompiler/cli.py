@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import atexit
-import builtins as _builtins
 import contextlib
 import copy
 import logging
@@ -46,8 +45,21 @@ from inertia_decompiler.disassembly_helpers import (
     _format_asm_range,
     _format_first_block_asm,
     _infer_linear_disassembly_window,
-    _linear_disassembly,
     _probe_lift_break,
+)
+from inertia_decompiler.cli_output import (
+    _RAW_PRINT,
+    _asm_fallback_pattern_note,
+    _emit_exit_marker,
+    _print_asm_fallback_text,
+    _print_diagnostic_text,
+    _timestamp_prefix,
+    _timestamped_print,
+)
+from inertia_decompiler.cli_timeout import (
+    _AdaptivePerByteTimeoutModel,
+    _default_recovery_timeout,
+    _stdout_is_interactive,
 )
 from inertia_decompiler.tail_validation import (
     TAIL_VALIDATION_ENABLE_ENV as _TAIL_VALIDATION_ENABLE_ENV,
@@ -103,107 +115,15 @@ from inertia_decompiler.work_items import (
     tail_validation_display_status as _tail_validation_display_status,
 )
 
-_RAW_PRINT = _builtins.print
-
-
-def _timestamp_prefix() -> str:
-    return time.strftime("[%H:%M:%S]")
-
-
-def _looks_like_diagnostic_line(line: str) -> bool:
-    stripped = line.lstrip()
-    if re.match(r"^\[\d{2}:\d{2}:\d{2}\]\s+", stripped):
-        stripped = re.sub(r"^\[\d{2}:\d{2}:\d{2}\]\s+", "", stripped, count=1)
-    return (
-        stripped.startswith("/*")
-        or stripped.startswith("[dbg]")
-        or stripped.startswith("summary:")
-        or stripped.startswith("WARNING")
-        or stripped.startswith("ERROR")
-    )
-
-
-def _timestamped_print(*args, **kwargs):
-    sep = kwargs.pop("sep", " ")
-    end = kwargs.pop("end", "\n")
-    file = kwargs.pop("file", None)
-    flush = kwargs.pop("flush", False)
-    text = sep.join(str(arg) for arg in args)
-    pytest_mode = "PYTEST_CURRENT_TEST" in os.environ
-    if pytest_mode:
-        return _RAW_PRINT(text, end=end, file=file, flush=flush)
-    if file is None and text:
-        lines = text.splitlines()
-        if lines and all((not line.strip()) or _looks_like_diagnostic_line(line) for line in lines):
-            target = sys.stderr
-            stamped = "\n".join(
-                (
-                    line
-                    if re.match(r"^\[\d{2}:\d{2}:\d{2}\]\s+", line.lstrip())
-                    else f"{_timestamp_prefix()} {line}"
-                )
-                if line.strip()
-                else line
-                for line in lines
-            )
-            return _RAW_PRINT(stamped, end=end, file=target, flush=flush)
-    return _RAW_PRINT(text, end=end, file=file, flush=flush)
-
-
 print = _timestamped_print
 
 
-def _print_diagnostic_text(text: str) -> None:
-    if not text:
-        return
-    pytest_mode = "PYTEST_CURRENT_TEST" in os.environ
-    for line in text.splitlines():
-        if pytest_mode:
-            _RAW_PRINT(line)
-        else:
-            stamped = line if re.match(r"^\[\d{2}:\d{2}:\d{2}\]\s+", line.lstrip()) else f"{_timestamp_prefix()} {line}"
-            _RAW_PRINT(stamped, file=sys.stderr)
-
-
-def _asm_fallback_pattern_note(asm_text: str) -> str | None:
-    stripped = asm_text.strip()
-    if not stripped or stripped.startswith("<"):
-        return None
-    lowered = stripped.lower()
-    patterns: list[str] = []
-    if re.search(r"\brep(?:e|ne)?\s+movs[bdqw]?\b", lowered):
-        patterns.append("copy loop")
-    if re.search(r"\brep(?:e|ne)?\s+stos[bdqw]?\b", lowered):
-        patterns.append("fill loop")
-    if re.search(r"\brepne\s+scas[bdqw]?\b", lowered):
-        patterns.append("scan loop")
-    if re.search(r"\brepe\s+cmps[bdqw]?\b", lowered):
-        patterns.append("compare loop")
-    if not patterns:
-        return None
-    joined = ", ".join(patterns)
-    return f"assembly pattern: x86 string-instruction {joined}; evidence from asm, not guessed C"
-
-
-def _print_asm_fallback_text(asm_text: str) -> None:
-    note = _asm_fallback_pattern_note(asm_text)
-    if note is not None:
-        print(f"/* note: {note} */")
-    _print_diagnostic_text(asm_text)
-
-
-def _stdout_is_interactive() -> bool:
-    stream = getattr(sys, "stdout", None)
-    try:
-        return bool(stream is not None and hasattr(stream, "isatty") and stream.isatty())
-    except Exception:
-        return False
-
-
-def _emit_exit_marker() -> None:
-    if "PYTEST_CURRENT_TEST" in os.environ:
-        return
-    _RAW_PRINT(f"{_timestamp_prefix()} /* exiting cli */", file=sys.stderr)
+def _argument_was_explicit(name: str) -> bool:
+    flag = name.strip()
+    for token in sys.argv[1:]:
+        if token == flag or token.startswith(f"{flag}="):
+            return True
+    return False
 
 
 atexit.register(_emit_exit_marker)
@@ -5120,6 +5040,8 @@ def _function_work_cache_lookup(
                     tail_validation=dict(cached_tail_validation) if isinstance(cached_tail_validation, dict) else None,
                     elapsed=float(cached_result["elapsed"]) if isinstance(cached_result.get("elapsed"), (int, float)) else None,
                     from_cache=True,
+                    block_count=int(cached_result["block_count"]) if isinstance(cached_result.get("block_count"), int) else None,
+                    byte_count=int(cached_result["byte_count"]) if isinstance(cached_result.get("byte_count"), int) else None,
                 ),
                 "",
                 cache_key,
@@ -5182,9 +5104,9 @@ def _run_function_work_item(
     decompile_cfg = item.function_cfg
     decompile_function = item.function
 
-    def _run_local(project_obj, cfg_obj, function_obj) -> tuple[str, str, str | None, str, dict[str, object] | None, float]:
+    def _run_local(project_obj, cfg_obj, function_obj) -> tuple[str, str, str | None, str, dict[str, object] | None, float, int, int]:
         with _capture_thread_output() as (stdout_buf, stderr_buf):
-            status, payload, partial_payload, _block_count, _byte_count, elapsed = _decompile_function_with_stats(
+            status, payload, partial_payload, block_count, byte_count, elapsed = _decompile_function_with_stats(
                 project_obj,
                 cfg_obj,
                 function_obj,
@@ -5203,7 +5125,7 @@ def _run_function_work_item(
         if err_output:
             debug_output_local += err_output
         tail_snapshot_local = _tail_validation_snapshot_for_function_run(project_obj, function_obj)
-        return status, payload, partial_payload, debug_output_local, tail_snapshot_local, elapsed
+        return status, payload, partial_payload, debug_output_local, tail_snapshot_local, elapsed, block_count, byte_count
 
     fork_isolated_eligible = (
         force_isolated_project
@@ -5214,7 +5136,7 @@ def _run_function_work_item(
     )
     if fork_isolated_eligible:
         try:
-            status, payload, partial_payload, debug_output, tail_validation_snapshot, elapsed = _run_with_timeout_in_fork(
+            status, payload, partial_payload, debug_output, tail_validation_snapshot, elapsed, block_count, byte_count = _run_with_timeout_in_fork(
                 lambda: _run_local(decompile_project, decompile_cfg, decompile_function),
                 timeout=max(1, timeout) + 1,
             )
@@ -5250,7 +5172,7 @@ def _run_function_work_item(
                 pass
 
     if not fork_isolated_eligible:
-        status, payload, partial_payload, debug_output, tail_validation_snapshot, elapsed = _run_local(
+        status, payload, partial_payload, debug_output, tail_validation_snapshot, elapsed, block_count, byte_count = _run_local(
             decompile_project,
             decompile_cfg,
             decompile_function,
@@ -5271,6 +5193,8 @@ def _run_function_work_item(
                 "tail_validation": tail_validation_snapshot,
                 "tail_validation_passed": tail_validation_passed,
                 "elapsed": elapsed,
+                "block_count": block_count,
+                "byte_count": byte_count,
             },
         )
     return FunctionWorkResult(
@@ -5283,6 +5207,8 @@ def _run_function_work_item(
         function_cfg=item.function_cfg,
         tail_validation=tail_validation_snapshot,
         elapsed=elapsed,
+        block_count=block_count,
+        byte_count=byte_count,
     )
 
 
@@ -15341,6 +15267,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional deduplicated PAT catalog built from .pat/.obj/.lib inputs.",
     )
     args = parser.parse_args(argv)
+    timeout_was_explicit = _argument_was_explicit("--timeout")
 
     _lower_process_priority()
     _apply_memory_limit(args.max_memory_mb)
@@ -15425,7 +15352,11 @@ def main(argv: list[str] | None = None) -> int:
                     prefer_fast_recovery=prefer_fast_recovery,
                 )
 
-            direct_recovery_timeout = max(1, min(args.timeout, 6)) if args.proc is not None else args.timeout
+            direct_recovery_timeout = (
+                max(1, min(args.timeout, 6))
+                if args.proc is not None
+                else _default_recovery_timeout(args.timeout, explicit_timeout=timeout_was_explicit)
+            )
             cfg, func = _run_with_timeout_in_daemon_thread(
                 _recover_target_function,
                 timeout=direct_recovery_timeout,
@@ -15504,7 +15435,12 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n/* == c (non-optimized fallback) == */")
                 print(nonopt_c)
                 return 0
+            fallback_function = SimpleNamespace(addr=args.addr, name=function_label or f"sub_{args.addr:x}")
+            start, end = _infer_linear_disassembly_window(project, args.addr)
+            asm_fallback = _format_asm_range(project, start, end)
             recovery_detail = _function_recovery_detail(getattr(project, "_inertia_decompiler_stage", None))
+            if recovery_detail is None:
+                recovery_detail = "during x86-16 function recovery (direct-address path)"
             _emit_timeout_and_exit(args.timeout, recovery_detail)
         except FuturesTimeoutError:
             sidecar_region = _lst_code_region(lst_metadata, args.addr) if lst_metadata is not None else None
@@ -15579,7 +15515,12 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n/* == c (non-optimized fallback) == */")
                 print(nonopt_c)
                 return 0
+            fallback_function = SimpleNamespace(addr=args.addr, name=function_label or f"sub_{args.addr:x}")
+            start, end = _infer_linear_disassembly_window(project, args.addr)
+            asm_fallback = _format_asm_range(project, start, end)
             recovery_detail = _function_recovery_detail(getattr(project, "_inertia_decompiler_stage", None))
+            if recovery_detail is None:
+                recovery_detail = "during x86-16 function recovery (direct-address path)"
             _emit_timeout_and_exit(args.timeout, recovery_detail)
         except Exception as ex:
             recovery_detail = _function_recovery_detail(getattr(project, "_inertia_decompiler_stage", None))
@@ -15770,17 +15711,18 @@ def main(argv: list[str] | None = None) -> int:
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("asm"),
                 binary_path=args.binary,
             )
+            sidecar_region = _lst_code_region(lst_metadata, func.addr) if lst_metadata is not None else None
+            asm_fallback = (
+                _format_asm_range(project, sidecar_region[0], sidecar_region[1])
+                if sidecar_region is not None
+                else _format_asm_range(project, *_infer_linear_disassembly_window(project, func.addr))
+            )
             print(f"\n/* Decompilation {status}: {payload} */")
             print("/* Falling back to non-optimized disassembly. */")
             print("\n/* == lift break probe == */")
             print(_probe_lift_break(project, func.addr))
             print("\n/* == asm fallback == */")
-            sidecar_region = _lst_code_region(lst_metadata, func.addr) if lst_metadata is not None else None
-            if sidecar_region is not None:
-                print(_format_asm_range(project, sidecar_region[0], sidecar_region[1]))
-            else:
-                start, end = _infer_linear_disassembly_window(project, func.addr)
-                print(_format_asm_range(project, start, end))
+            print(asm_fallback)
             return 6 if status == "error" else 4
 
         _emit_tail_validation_console_summary([direct_item], {1: direct_result}, binary_path=args.binary)
@@ -16439,6 +16381,8 @@ def main(argv: list[str] | None = None) -> int:
             print(result.debug_output, end="" if result.debug_output.endswith("\n") else "\n")
         function = item.function
         print(f"\n/* == function {function.addr:#x} {function.name} == */")
+        if getattr(result, "failure_stage", None):
+            print(f"/* stage: {result.failure_stage} */")
         if args.show_asm:
             print("/* -- asm -- */")
             print(_format_first_block_asm(project, function.addr))
@@ -16483,17 +16427,17 @@ def main(argv: list[str] | None = None) -> int:
             return decompiled_local, failed_local
 
         if not allow_heavy_fallbacks or skip_heavy_fallbacks_for_result:
-            failed_local += 1
-            _print_function_attempt_status(
-                function,
-                attempt=_function_attempt_display_status(result),
-                validation_snapshot=result.tail_validation,
-            )
             sidecar_region = _lst_code_region(lst_metadata, function.addr) if lst_metadata is not None else None
             asm_fallback = (
                 _format_asm_range(project, sidecar_region[0], sidecar_region[1])
                 if sidecar_region is not None
                 else _format_asm_range(project, *_infer_linear_disassembly_window(project, function.addr))
+            )
+            failed_local += 1
+            _print_function_attempt_status(
+                function,
+                attempt=_function_attempt_display_status(result),
+                validation_snapshot=result.tail_validation,
             )
             if result.partial_payload is not None:
                 if emitted_problem:
@@ -16575,17 +16519,17 @@ def main(argv: list[str] | None = None) -> int:
             print(nonopt_c, flush=True)
             return decompiled_local, failed_local
 
-        failed_local += 1
-        _print_function_attempt_status(
-            function,
-            attempt=_function_attempt_display_status(result),
-            validation_snapshot=result.tail_validation,
-        )
         sidecar_region = _lst_code_region(lst_metadata, function.addr) if lst_metadata is not None else None
         asm_fallback = (
             _format_asm_range(project, sidecar_region[0], sidecar_region[1])
             if sidecar_region is not None
             else _format_asm_range(project, *_infer_linear_disassembly_window(project, function.addr))
+        )
+        failed_local += 1
+        _print_function_attempt_status(
+            function,
+            attempt=_function_attempt_display_status(result),
+            validation_snapshot=result.tail_validation,
         )
         if result.status == "empty":
             if asm_fallback.startswith("<assembly unavailable") or asm_fallback == "<no instructions>":
@@ -16618,7 +16562,12 @@ def main(argv: list[str] | None = None) -> int:
         decompiled = 0
         failed = 0
         emitted_indexes: set[int] = set()
-        recover_timeout = min(args.timeout, 2)
+        recover_timeout = _default_recovery_timeout(args.timeout, explicit_timeout=timeout_was_explicit)
+        adaptive_timeout_model = _AdaptivePerByteTimeoutModel(
+            args.timeout,
+            explicit_timeout=timeout_was_explicit,
+            margin=1.5,
+        )
         allow_isolated_retry_in_function_tasks = (
             interactive_stdout
             or args.max_functions <= 0
@@ -16665,6 +16614,10 @@ def main(argv: list[str] | None = None) -> int:
                         if result is not None:
                             pass
                         elif lst_metadata is not None and visible_code_labels:
+                            print(
+                                f"[dbg] recovery worker: start {item.function.addr:#x} {item.function.name} "
+                                f"mode=lst recovery_timeout={recover_timeout}s"
+                            )
                             if (
                                 os.name == "posix"
                                 and threading.current_thread() is threading.main_thread()
@@ -16714,6 +16667,10 @@ def main(argv: list[str] | None = None) -> int:
                                     thread_name_prefix="lst-recover",
                                 )
                         else:
+                            print(
+                                f"[dbg] recovery worker: start {item.function.addr:#x} {item.function.name} "
+                                f"mode=ranked recovery_timeout={recover_timeout}s"
+                            )
                             if (
                                 os.name == "posix"
                                 and threading.current_thread() is threading.main_thread()
@@ -16766,7 +16723,10 @@ def main(argv: list[str] | None = None) -> int:
                                 function=function,
                             )
                     except (FuturesTimeoutError, TimeoutError):
-                        payload = f"Timed out while recovering {item.function.name} at {item.function.addr:#x}."
+                        payload = (
+                            f"Timed out while recovering {item.function.name} at {item.function.addr:#x} "
+                            f"(stage=recovery timeout={recover_timeout}s mode={recovery_mode})."
+                        )
                         result = FunctionWorkResult(
                             index=item.index,
                             status="timeout",
@@ -16776,6 +16736,7 @@ def main(argv: list[str] | None = None) -> int:
                             function_cfg=None,
                             skip_heavy_fallbacks=True,
                             elapsed=float(recover_timeout),
+                            failure_stage=f"recovery:{recovery_mode}",
                         )
                     except Exception as ex:
                         result = FunctionWorkResult(
@@ -16785,19 +16746,22 @@ def main(argv: list[str] | None = None) -> int:
                             debug_output="",
                             function=item.function,
                             function_cfg=None,
+                            failure_stage=f"recovery:{recovery_mode}",
                         )
                 if result is None:
                     if active_item.function_cfg is None:
                         continue
+                    _block_count, byte_count = _function_complexity(active_item.function)
+                    decompile_timeout = adaptive_timeout_model.timeout_for_byte_count(byte_count)
                     if (
                         use_serial_fork_per_function
                         and threading.current_thread() is threading.main_thread()
                         and threading.active_count() == 1
                     ):
-                        hard_timeout = max(2, args.timeout + 2)
+                        hard_timeout = max(2, decompile_timeout + 2)
                         print(
                             f"[dbg] isolated function worker: start {active_item.function.addr:#x} "
-                            f"{active_item.function.name} requested_timeout={args.timeout}s hard_timeout={hard_timeout}s"
+                            f"{active_item.function.name} requested_timeout={decompile_timeout}s hard_timeout={hard_timeout}s"
                         )
                         isolated_start = time.perf_counter()
                         try:
@@ -16805,7 +16769,7 @@ def main(argv: list[str] | None = None) -> int:
                                 lambda active_item=active_item: _function_work_result_for_fork_ipc(
                                     _run_function_work_item(
                                         active_item,
-                                        timeout=args.timeout,
+                                        timeout=decompile_timeout,
                                         api_style=args.api_style,
                                         binary_path=args.binary,
                                         cod_metadata=cod_metadata,
@@ -16822,7 +16786,7 @@ def main(argv: list[str] | None = None) -> int:
                         except TimeoutError as ex:
                             payload = (
                                 f"Timed out while decompiling {item.function.name} at {item.function.addr:#x} "
-                                f"(requested_timeout={args.timeout}s hard_timeout={hard_timeout}s): "
+                                f"(stage=decompilation requested_timeout={decompile_timeout}s hard_timeout={hard_timeout}s): "
                                 f"{_describe_exception(ex)}"
                             )
                             result = FunctionWorkResult(
@@ -16834,6 +16798,7 @@ def main(argv: list[str] | None = None) -> int:
                                 function_cfg=active_item.function_cfg,
                                 skip_heavy_fallbacks=True,
                                 elapsed=time.perf_counter() - isolated_start,
+                                failure_stage="decompilation",
                             )
                         except Exception as ex:
                             result = FunctionWorkResult(
@@ -16844,6 +16809,7 @@ def main(argv: list[str] | None = None) -> int:
                                 function=active_item.function,
                                 function_cfg=active_item.function_cfg,
                                 elapsed=time.perf_counter() - isolated_start,
+                                failure_stage="decompilation",
                             )
                     elif use_serial_fork_per_function:
                         result = FunctionWorkResult(
@@ -16858,11 +16824,12 @@ def main(argv: list[str] | None = None) -> int:
                             function=active_item.function,
                             function_cfg=active_item.function_cfg,
                             skip_heavy_fallbacks=True,
+                            failure_stage="decompilation_setup",
                         )
                     else:
                         result = _run_function_work_item(
                             active_item,
-                            timeout=args.timeout,
+                            timeout=decompile_timeout,
                             api_style=args.api_style,
                             binary_path=args.binary,
                             cod_metadata=cod_metadata,
@@ -16872,6 +16839,8 @@ def main(argv: list[str] | None = None) -> int:
                             force_isolated_project=force_isolated_function_projects,
                             allow_isolated_retry=allow_isolated_retry_in_function_tasks,
                         )
+                if result is not None and result.status == "ok":
+                    adaptive_timeout_model.observe_success(getattr(result, "byte_count", None), getattr(result, "elapsed", None))
                 result_map[item.index] = result
                 if result is not None and item.index not in emitted_indexes:
                     d, f = _emit_function_result(item, result)

@@ -49,6 +49,8 @@ Current x86-16 shape also includes:
 - Do not solve widening by final expression shape alone.
 - Do not guess structs, arrays, or helpers before evidence is stable.
 - Do not use naming as a substitute for recovery.
+- Do not recover semantics from textual matches over rendered assembly or rendered C.
+- Do not use substring, regex, or line-text checks over disassembly text as semantic proof.
 
 ### Correctness over prettiness
 
@@ -66,6 +68,32 @@ Do not prefer:
 - guessed pointer lowering
 - guessed helper signatures
 - guessed high-level intent
+
+### No oracle cheating
+
+Recovery must be derived from internal program evidence, not from external hints that merely look correlated.
+
+Forbidden as semantic proof:
+
+- sample-specific address ranges
+- symbol-name families
+- compiler/runtime/library name matches
+- corpus-specific allowlists or deny-lists
+- string or regex matches over rendered assembly, rendered C, logs, or diagnostics
+- matching on emitted text instead of typed program state
+- "known sample" substitutions that skip recovery
+- replacing timeout/failure with guessed helper C because the pattern "looks familiar"
+- using validation diffs themselves as proof of the missing semantics
+
+Allowed only as temporary debugging aids, never as recovery logic:
+
+- log messages
+- pretty-printed assembly
+- pretty-printed C
+- corpus notes
+- manual sample annotations
+
+If a rule cannot be explained in terms of decoded instructions, CFG shape, lifted IR, alias state, typed pattern objects, or another structured intermediate representation, it is not an acceptable recovery rule.
 
 ### Alias-first
 
@@ -235,6 +263,8 @@ Rules:
 - Prefer local `.pat` evidence when available; if only OMF `.obj`/`.lib` inputs exist, generate deterministic `.pat` files locally before giving up on FLAIR-style matching.
 - Record fallback mode honestly in output; do not silently replace failures with guessed high-level C.
 - If validation is `changed`, `unknown`, or `uncollected`, report that state honestly rather than collapsing it into success.
+- Any fallback that emits C must be driven by structured evidence from recovered instructions, CFG, lifted IR, alias/type state, or another typed intermediate representation.
+- Pretty-printed assembly is diagnostic output only. It must not be the matching substrate for semantic recovery.
 
 ## Honesty over heroics
 
@@ -258,6 +288,7 @@ Special rewrites, allowlists, or source-backed rescues are allowed only if:
 - they protect an important real corpus case
 - they are clearly temporary
 - they do not block replacement by a general architectural layer
+- they are reported explicitly as temporary rescue logic rather than normal recovery
 
 Required follow-up:
 
@@ -370,12 +401,20 @@ Never do these unless explicitly marked as a temporary rescue:
 - rewrite-stage semantic repairs for alias/widening/type problems
 - silent fallback presented as success
 - corpus summaries that drop missing work items
+- semantic recovery via `if "...substring..." in asm_text`
+- semantic recovery via regexes over rendered assembly lines
+- semantic recovery from decompiler text output instead of structured program state
+- corpus-specific semantic allowlists
+- address-specific helper substitution presented as general recovery
+- name-based helper substitution presented as recovered semantics
+- using debug output as the decision substrate for recovery
 
 ## Coding discipline
 
 - Keep modules focused and small.
 - Split mixed-responsibility files before adding more logic.
 - Prefer SRP over convenience.
+- It is forbidden to add any code to file bigger when 400 lines.
 - Avoid hidden coupling and global state.
 - Keep data flow explicit.
 - Add comments only when they genuinely clarify non-obvious logic.
