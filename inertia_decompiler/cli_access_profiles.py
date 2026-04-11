@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Mapping, cast
+
+
+NamingCandidate = tuple[int, int, int]
 
 
 @dataclass(frozen=True)
@@ -18,16 +21,16 @@ class AccessTraitStrideEvidence:
 
 @dataclass(frozen=True)
 class AccessTraitEvidenceProfile:
-    member_like: tuple[tuple[int, int, int], ...] = ()
-    array_like: tuple[tuple[int, int, int], ...] = ()
-    induction_like: tuple[tuple[int, int, int], ...] = ()
-    stack_like: tuple[tuple[int, int, int], ...] = ()
+    member_like: tuple[NamingCandidate, ...] = ()
+    array_like: tuple[NamingCandidate, ...] = ()
+    induction_like: tuple[NamingCandidate, ...] = ()
+    stack_like: tuple[NamingCandidate, ...] = ()
     induction_evidence: tuple[AccessTraitStrideEvidence, ...] = ()
     stride_evidence: tuple[AccessTraitStrideEvidence, ...] = ()
 
-    def _structured_candidates(self) -> tuple[tuple[int, int, int], ...]:
-        candidates: list[tuple[int, int, int]] = []
-        seen: set[tuple[int, int, int]] = set()
+    def _structured_candidates(self) -> tuple[NamingCandidate, ...]:
+        candidates: list[NamingCandidate] = []
+        seen: set[NamingCandidate] = set()
         for evidence in sorted(
             self.induction_evidence + self.stride_evidence,
             key=lambda item: (-item.count, item.offset, item.width, item.stride, item.kind),
@@ -39,15 +42,15 @@ class AccessTraitEvidenceProfile:
             candidates.append(candidate)
         return tuple(candidates)
 
-    def naming_candidates(self, base_key: tuple[object, ...] | None = None) -> tuple[tuple[int, int, int], ...]:
+    def naming_candidates(self, base_key: tuple[object, ...] | None = None) -> tuple[NamingCandidate, ...]:
         structured = self._structured_candidates()
         if base_key is not None and base_key and base_key[0] == "stack":
             ordered = self.stack_like + structured + self.member_like + self.array_like + self.induction_like
         else:
             ordered = structured + self.member_like + self.array_like + self.induction_like + self.stack_like
 
-        deduped: list[tuple[int, int, int]] = []
-        seen: set[tuple[int, int, int]] = set()
+        deduped: list[NamingCandidate] = []
+        seen: set[NamingCandidate] = set()
         for candidate in ordered:
             if candidate in seen:
                 continue
@@ -160,9 +163,13 @@ def build_access_trait_evidence_profiles(
             if not isinstance(offset, int):
                 continue
             size = 1
-            if size_index is not None and len(key) > size_index and isinstance(key[size_index], int):
-                size = key[size_index]
+            if size_index is not None and len(key) > size_index:
+                raw_size = key[size_index]
+                if isinstance(raw_size, int):
+                    size = raw_size
             if size not in {1, 2}:
+                continue
+            if not isinstance(count, int):
                 continue
             profile = raw_profiles.setdefault(
                 base_key,
@@ -175,9 +182,9 @@ def build_access_trait_evidence_profiles(
                     "stride_evidence": [],
                 },
             )
-            profile[category].append((offset, size, count))
+            cast(list[NamingCandidate], profile[category]).append((offset, size, count))
             if category in {"member_like", "stack_like"} and base_key[0] == "stack":
-                profile["stack_like"].append((offset, size, count))
+                cast(list[NamingCandidate], profile["stack_like"]).append((offset, size, count))
 
     def add_structured_bucket(bucket_name: str, profile_bucket: str, category: str | None = None) -> None:
         bucket = traits.get(bucket_name, {})
@@ -201,8 +208,10 @@ def build_access_trait_evidence_profiles(
                 },
             )
             bucket_category = category or evidence.kind
-            profile[bucket_category].append((evidence.offset, evidence.width, evidence.count))
-            profile[profile_bucket].append(evidence)
+            cast(list[NamingCandidate], profile[bucket_category]).append(
+                (evidence.offset, evidence.width, evidence.count)
+            )
+            cast(list[AccessTraitStrideEvidence], profile[profile_bucket]).append(evidence)
 
     add_bucket("member_evidence", "member_like", 0, 1, 2)
     add_bucket("repeated_offset_widths", "member_like", 1, 2, 3)
@@ -216,20 +225,20 @@ def build_access_trait_evidence_profiles(
 
     return {
         base_key: AccessTraitEvidenceProfile(
-            member_like=tuple(data["member_like"]),
-            array_like=tuple(data["array_like"]),
-            induction_like=tuple(data["induction_like"]),
-            stack_like=tuple(data["stack_like"]),
-            induction_evidence=tuple(data["induction_evidence"]),
-            stride_evidence=tuple(data["stride_evidence"]),
+            member_like=tuple(cast(list[NamingCandidate], data["member_like"])),
+            array_like=tuple(cast(list[NamingCandidate], data["array_like"])),
+            induction_like=tuple(cast(list[NamingCandidate], data["induction_like"])),
+            stack_like=tuple(cast(list[NamingCandidate], data["stack_like"])),
+            induction_evidence=tuple(cast(list[AccessTraitStrideEvidence], data["induction_evidence"])),
+            stride_evidence=tuple(cast(list[AccessTraitStrideEvidence], data["stride_evidence"])),
         )
         for base_key, data in raw_profiles.items()
     }
 
 
 def access_trait_member_candidates(
-    traits: dict[str, dict[tuple[object, ...], int]]
-) -> dict[tuple[object, ...], list[tuple[int, int, int]]]:
+    traits: dict[str, dict[tuple[object, ...], object]]
+) -> dict[tuple[object, ...], list[NamingCandidate]]:
     profiles = build_access_trait_evidence_profiles(traits)
     return {
         base_key: list(profile.naming_candidates(base_key))

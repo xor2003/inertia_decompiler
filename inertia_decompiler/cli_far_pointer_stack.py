@@ -6,6 +6,11 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 
+from .cli_storage_objects import (
+    build_storage_object_artifact,
+    storage_object_record_for_key,
+)
+
 
 def _coalesce_far_pointer_stack_expressions(
     project,
@@ -15,8 +20,8 @@ def _coalesce_far_pointer_stack_expressions(
     segment_reg_name,
     iter_c_nodes_deep,
     resolve_stack_cvar_at_offset,
+    build_access_trait_evidence_profiles,
     build_stable_access_object_hints,
-    stable_access_object_hint_for_key,
     access_trait_variable_key,
     replace_c_children,
     describe_alias_storage,
@@ -88,23 +93,26 @@ def _coalesce_far_pointer_stack_expressions(
         return False
 
     traits_cache = getattr(project, "_inertia_access_traits", None)
-    stable_object_hints = None
+    storage_object_artifact = None
     if isinstance(traits_cache, dict):
         traits = traits_cache.get(getattr(codegen.cfunc, "addr", None))
         if isinstance(traits, dict):
-            stable_object_hints = build_stable_access_object_hints(traits)
-    if not stable_object_hints:
+            storage_object_artifact = build_storage_object_artifact(
+                traits,
+                build_access_trait_evidence_profiles=build_access_trait_evidence_profiles,
+                build_stable_access_object_hints=build_stable_access_object_hints,
+            )
+    if not storage_object_artifact or not storage_object_artifact.records:
         return False
 
     def member_offset_for_variable(variable) -> int | None:
         base_key = access_trait_variable_key(variable)
         if base_key is None:
             return None
-        hint = stable_access_object_hint_for_key(stable_object_hints, base_key)
-        if hint is None or hint.kind != "member" or not hint.candidates:
+        record = storage_object_record_for_key(storage_object_artifact, base_key)
+        if record is None:
             return None
-        offset, _size, _count = hint.candidates[0]
-        return offset
+        return record.primary_member_offset()
 
     copy_aliases: dict[int, object] = {}
     for _ in range(3):

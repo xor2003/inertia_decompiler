@@ -5,6 +5,10 @@ from typing import Any, Callable, TypeAlias
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 
 from .cli_access_object_hints import AccessTraitObjectHint, BaseKey
+from .cli_storage_objects import (
+    build_storage_object_artifact,
+    storage_object_record_for_key,
+)
 
 
 StableHints: TypeAlias = dict[BaseKey, AccessTraitObjectHint]
@@ -17,7 +21,8 @@ def _coalesce_cod_word_global_loads(
     synthetic_globals: Any,
     *,
     collect_access_traits: Callable[[Any, Any], Any],
-    build_stable_access_object_hints: Callable[[dict[BaseKey, object]], StableHints],
+    build_access_trait_evidence_profiles: Callable[[dict[str, dict[BaseKey, object]]], Any],
+    build_stable_access_object_hints: Callable[[dict[str, dict[BaseKey, object]]], StableHints],
     global_load_addr: Callable[[Any, Any], int | None],
     match_scaled_high_byte: Callable[[Any, Any], int | None],
     synthetic_word_global_variable: Callable[[Any, Any, int, dict[int, structured_c.CVariable]], structured_c.CVariable | None],
@@ -31,11 +36,15 @@ def _coalesce_cod_word_global_loads(
         collect_access_traits(project, codegen)
         traits_cache = getattr(project, "_inertia_access_traits", None)
 
-    stable_object_hints = None
+    storage_object_artifact = None
     if isinstance(traits_cache, dict):
         traits = traits_cache.get(getattr(codegen.cfunc, "addr", None))
         if isinstance(traits, dict):
-            stable_object_hints = build_stable_access_object_hints(traits)
+            storage_object_artifact = build_storage_object_artifact(
+                traits,
+                build_access_trait_evidence_profiles=build_access_trait_evidence_profiles,
+                build_stable_access_object_hints=build_stable_access_object_hints,
+            )
 
     created: dict[int, structured_c.CVariable] = {}
 
@@ -48,9 +57,9 @@ def _coalesce_cod_word_global_loads(
             if low_addr is None:
                 continue
 
-            if stable_object_hints is not None:
-                hint = stable_object_hints.get(("mem", low_addr))
-                if hint is not None and hint.kind == "member":
+            if storage_object_artifact is not None:
+                record = storage_object_record_for_key(storage_object_artifact, ("mem", low_addr))
+                if record is not None and record.object_kind == "member":
                     continue
 
             cvar = synthetic_word_global_variable(codegen, synthetic_globals, low_addr, created)

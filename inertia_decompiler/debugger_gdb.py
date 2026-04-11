@@ -351,11 +351,13 @@ class GDBServer:
 
     def _handle_command(self, cmd: str) -> None:
         """Dispatch GDB RSP command."""
+        print(f"[GDB] Received raw command: {repr(cmd)}")
         if not cmd or cmd.startswith('+'):
             return
 
         if cmd.startswith('$'):
             cmd = cmd[1:].split('#')[0]
+        print(f"[GDB] Parsed command: {repr(cmd)}")
 
         # === Cutter/rizin compatible queries ===
         # qSupported - feature negotiation
@@ -441,6 +443,8 @@ class GDBServer:
             self._handle_continue()
         elif cmd == 's':
             self._handle_step()
+        elif cmd == 'n':
+            self._handle_step_over()
         elif cmd == '?':
             self._send_packet("S05")  # Always stopped for now
 

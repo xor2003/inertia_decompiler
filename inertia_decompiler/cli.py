@@ -65,14 +65,22 @@ from inertia_decompiler import cli_access_traits as _cli_access_traits
 from inertia_decompiler import cli_access_object_hints as _cli_access_object_hints
 from inertia_decompiler import cli_access_profiles as _cli_access_profiles
 from inertia_decompiler import cli_access_trait_rewrite as _cli_access_trait_rewrite
+from inertia_decompiler import cli_memory_prune as _cli_memory_prune
+from inertia_decompiler import cli_dead_local_prune as _cli_dead_local_prune
+from inertia_decompiler import cli_local_prune as _cli_local_prune
+from inertia_decompiler import cli_mkfp_simplify as _cli_mkfp_simplify
 from inertia_decompiler import cli_local_rewrites as _cli_local_rewrites
 from inertia_decompiler import cli_cod_globals as _cli_cod_globals
+from inertia_decompiler import cli_cod_global_statements as _cli_cod_global_statements
+from inertia_decompiler import cli_helper_modeling as _cli_helper_modeling
+from inertia_decompiler import cli_word_global_helpers as _cli_word_global_helpers
 from inertia_decompiler import cli_far_pointer_stack as _cli_far_pointer_stack
 from inertia_decompiler import cli_linear_aliases as _cli_linear_aliases
 from inertia_decompiler import cli_linear_recurrence as _cli_linear_recurrence
 from inertia_decompiler import cli_linear_recurrence_rules as _cli_linear_recurrence_rules
 from inertia_decompiler import cli_stack_coalesce as _cli_stack_coalesce
 from inertia_decompiler import cli_stack_cvars as _cli_stack_cvars
+from inertia_decompiler import cli_stack_byte_offsets as _cli_stack_byte_offsets
 from inertia_decompiler import cli_stack_locals as _cli_stack_locals
 from inertia_decompiler import cli_segmented as _cli_segmented
 from inertia_decompiler import cli_segmented_elision as _cli_segmented_elision
@@ -8887,481 +8895,35 @@ def _collect_access_traits(project: angr.Project, codegen) -> bool:
 
 
 def _prune_unused_unnamed_memory_declarations(codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    used_variables: set[int] = set()
-    for node in _iter_c_nodes_deep(codegen.cfunc.statements):
-        if not isinstance(node, structured_c.CVariable):
-            continue
-        variable = getattr(node, "variable", None)
-        if variable is not None:
-            used_variables.add(id(variable))
-        unified = getattr(node, "unified_variable", None)
-        if unified is not None:
-            used_variables.add(id(unified))
-
-    changed = False
-
-    variables_in_use = getattr(codegen.cfunc, "variables_in_use", None)
-    if isinstance(variables_in_use, dict):
-        for variable in list(variables_in_use):
-            if not isinstance(variable, SimMemoryVariable):
-                continue
-            name = getattr(variable, "name", None)
-            if not isinstance(name, str) or not name.startswith("g_"):
-                continue
-            if id(variable) in used_variables:
-                continue
-            cvar = variables_in_use[variable]
-            unified = getattr(cvar, "unified_variable", None)
-            if unified is not None and id(unified) in used_variables:
-                continue
-            del variables_in_use[variable]
-            changed = True
-
-    unified_locals = getattr(codegen.cfunc, "unified_local_vars", None)
-    if isinstance(unified_locals, dict):
-        for variable in list(unified_locals):
-            if not isinstance(variable, SimMemoryVariable):
-                continue
-            name = getattr(variable, "name", None)
-            if not isinstance(name, str) or not name.startswith("g_"):
-                continue
-            if id(variable) in used_variables:
-                continue
-            entries = unified_locals[variable]
-            if any(id(getattr(cvariable, "variable", None)) in used_variables for cvariable, _vartype in entries):
-                continue
-            del unified_locals[variable]
-            changed = True
-
-    return changed
+    return _cli_memory_prune._prune_unused_unnamed_memory_declarations(
+        codegen,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+    )
 
 
 def _prune_unused_linear_register_declarations(codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    used_variables: set[int] = set()
-    for node in _iter_c_nodes_deep(codegen.cfunc.statements):
-        if not isinstance(node, structured_c.CVariable):
-            continue
-        variable = getattr(node, "variable", None)
-        if variable is not None:
-            used_variables.add(id(variable))
-        unified = getattr(node, "unified_variable", None)
-        if unified is not None:
-            used_variables.add(id(unified))
-
-    def _is_linear_temp_name(name: str | None) -> bool:
-        return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+)", name) is not None
-
-    changed = False
-
-    variables_in_use = getattr(codegen.cfunc, "variables_in_use", None)
-    if isinstance(variables_in_use, dict):
-        for variable in list(variables_in_use):
-            if not isinstance(variable, SimRegisterVariable):
-                continue
-            if not _is_linear_temp_name(getattr(variable, "name", None)):
-                continue
-            if id(variable) in used_variables:
-                continue
-            del variables_in_use[variable]
-            changed = True
-
-    unified_locals = getattr(codegen.cfunc, "unified_local_vars", None)
-    if isinstance(unified_locals, dict):
-        for variable in list(unified_locals):
-            if not isinstance(variable, SimRegisterVariable):
-                continue
-            if not _is_linear_temp_name(getattr(variable, "name", None)):
-                continue
-            entries = unified_locals[variable]
-            if any(id(getattr(cvariable, "variable", None)) in used_variables for cvariable, _vartype in entries):
-                continue
-            del unified_locals[variable]
-            changed = True
-
-    return changed
+    return _cli_local_prune._prune_unused_linear_register_declarations(
+        codegen,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+    )
 
 
 def _prune_unused_local_declarations(codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    used_variables: set[int] = set()
-    used_storage_identities: set[tuple[object, ...]] = set()
-    for node in _iter_c_nodes_deep(codegen.cfunc.statements):
-        if not isinstance(node, structured_c.CVariable):
-            continue
-        variable = getattr(node, "variable", None)
-        if variable is not None:
-            used_variables.add(id(variable))
-        unified = getattr(node, "unified_variable", None)
-        if unified is not None:
-            used_variables.add(id(unified))
-        storage_identity = describe_alias_storage(node).identity
-        if storage_identity is not None:
-            used_storage_identities.add(storage_identity)
-
-    changed = False
-
-    variables_in_use = getattr(codegen.cfunc, "variables_in_use", None)
-    if isinstance(variables_in_use, dict):
-        for variable in list(variables_in_use):
-            if not isinstance(variable, (SimRegisterVariable, SimStackVariable)):
-                continue
-            if id(variable) in used_variables:
-                continue
-            cvar = variables_in_use[variable]
-            if describe_alias_storage(cvar).identity in used_storage_identities:
-                continue
-            del variables_in_use[variable]
-            changed = True
-
-    unified_locals = getattr(codegen.cfunc, "unified_local_vars", None)
-    if isinstance(unified_locals, dict):
-        for variable in list(unified_locals):
-            if not isinstance(variable, (SimRegisterVariable, SimStackVariable)):
-                continue
-            if id(variable) in used_variables:
-                continue
-            entries = unified_locals[variable]
-            if any(describe_alias_storage(cvariable).identity in used_storage_identities for cvariable, _vartype in entries):
-                continue
-            del unified_locals[variable]
-            changed = True
-
-    return changed
-
-
-def _expr_has_side_effects(node) -> bool:
-    return any(isinstance(subnode, structured_c.CFunctionCall) for subnode in _iter_c_nodes_deep(node))
-
-
-def _collect_c_variable_reads(node, reads: set[int], seen: set[int] | None = None, *, allow_variable_read: bool = True) -> None:
-    if not _structured_codegen_node(node):
-        return
-    if seen is None:
-        seen = set()
-    node_id = id(node)
-    if node_id in seen:
-        return
-    seen.add(node_id)
-    try:
-        if isinstance(node, structured_c.CVariable):
-            if allow_variable_read:
-                variable = getattr(node, "variable", None)
-                if variable is not None:
-                    reads.add(id(variable))
-                unified = getattr(node, "unified_variable", None)
-                if unified is not None:
-                    reads.add(id(unified))
-            return
-
-        if isinstance(node, structured_c.CAssignment):
-            if _structured_codegen_node(node.lhs):
-                _collect_c_variable_reads(node.lhs, reads, seen, allow_variable_read=False)
-            if _structured_codegen_node(node.rhs):
-                _collect_c_variable_reads(node.rhs, reads, seen, allow_variable_read=True)
-            return
-
-        for attr in ("lhs", "rhs", "expr", "operand", "condition", "cond", "body", "iffalse", "iftrue", "else_node", "retval"):
-            if not hasattr(node, attr):
-                continue
-            try:
-                value = getattr(node, attr)
-            except Exception:
-                continue
-            if _structured_codegen_node(value):
-                _collect_c_variable_reads(value, reads, seen, allow_variable_read=allow_variable_read)
-
-        for attr in ("args", "operands", "statements"):
-            if not hasattr(node, attr):
-                continue
-            try:
-                items = getattr(node, attr)
-            except Exception:
-                continue
-            if not items:
-                continue
-            for item in items:
-                if _structured_codegen_node(item):
-                    _collect_c_variable_reads(item, reads, seen, allow_variable_read=allow_variable_read)
-
-        if hasattr(node, "condition_and_nodes"):
-            try:
-                pairs = getattr(node, "condition_and_nodes")
-            except Exception:
-                pairs = None
-            if pairs:
-                for cond, body in pairs:
-                    if _structured_codegen_node(cond):
-                        _collect_c_variable_reads(cond, reads, seen, allow_variable_read=allow_variable_read)
-                    if _structured_codegen_node(body):
-                        _collect_c_variable_reads(body, reads, seen, allow_variable_read=allow_variable_read)
-    finally:
-        seen.remove(node_id)
+    return _cli_local_prune._prune_unused_local_declarations(
+        codegen,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        describe_alias_storage=describe_alias_storage,
+    )
 
 
 def _prune_dead_local_assignments(codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-    root = getattr(codegen.cfunc, "statements", None)
-    if not _structured_codegen_node(root):
-        return False
-
-    def _collect_storage_read_keys(
-        node,
-        keys: set[tuple[object, ...]],
-        seen: set[int] | None = None,
-        *,
-        allow_variable_read: bool = True,
-    ) -> None:
-        if not _structured_codegen_node(node):
-            return
-        if seen is None:
-            seen = set()
-        node_id = id(node)
-        if node_id in seen:
-            return
-        seen.add(node_id)
-        try:
-            if isinstance(node, structured_c.CVariable):
-                if allow_variable_read:
-                    variable = getattr(node, "variable", None)
-                    if variable is not None:
-                        keys.add(("var", id(variable)))
-                        unified = getattr(node, "unified_variable", None)
-                        if unified is not None:
-                            keys.add(("unified", id(unified)))
-                        storage_key = describe_alias_storage(node).identity
-                        if storage_key is not None:
-                            keys.add(("storage", storage_key))
-                return
-
-            if isinstance(node, structured_c.CAssignment):
-                if _structured_codegen_node(node.lhs):
-                    _collect_storage_read_keys(node.lhs, keys, seen, allow_variable_read=False)
-                if _structured_codegen_node(node.rhs):
-                    _collect_storage_read_keys(node.rhs, keys, seen, allow_variable_read=True)
-                return
-
-            for attr in ("lhs", "rhs", "expr", "operand", "condition", "cond", "body", "iffalse", "iftrue", "else_node", "retval"):
-                if not hasattr(node, attr):
-                    continue
-                try:
-                    value = getattr(node, attr)
-                except Exception:
-                    continue
-                if _structured_codegen_node(value):
-                    _collect_storage_read_keys(value, keys, seen)
-
-            for attr in ("args", "operands", "statements"):
-                if not hasattr(node, attr):
-                    continue
-                try:
-                    items = getattr(node, attr)
-                except Exception:
-                    continue
-                if not items:
-                    continue
-                for item in items:
-                    if _structured_codegen_node(item):
-                        _collect_storage_read_keys(item, keys, seen)
-
-            if hasattr(node, "condition_and_nodes"):
-                try:
-                    pairs = getattr(node, "condition_and_nodes")
-                except Exception:
-                    pairs = None
-                if pairs:
-                    for cond, body in pairs:
-                        if _structured_codegen_node(cond):
-                            _collect_storage_read_keys(cond, keys, seen)
-                        if _structured_codegen_node(body):
-                            _collect_storage_read_keys(body, keys, seen)
-        finally:
-            seen.remove(node_id)
-
-    reads: set[tuple[object, ...]] = set()
-    _collect_storage_read_keys(root, reads)
-
-    def _is_local_variable(variable) -> bool:
-        return isinstance(variable, (SimRegisterVariable, SimStackVariable))
-
-    changed = False
-
-    def _collect_stmt_reads(stmt) -> set[tuple[object, ...]]:
-        stmt_reads: set[tuple[object, ...]] = set()
-        _collect_storage_read_keys(stmt, stmt_reads)
-        return stmt_reads
-
-    def _call_callee_key(call_expr):
-        callee_target = getattr(call_expr, "callee_target", None)
-        if callee_target is not None:
-            return ("target", callee_target)
-
-        callee_func = getattr(call_expr, "callee_func", None)
-        if callee_func is not None:
-            callee_addr = getattr(callee_func, "addr", None)
-            if callee_addr is not None:
-                return ("func_addr", callee_addr)
-            callee_name = getattr(callee_func, "name", None)
-            if callee_name is not None:
-                return ("func_name", callee_name)
-            return ("func_id", id(callee_func))
-
-        callee = getattr(call_expr, "callee", None)
-        if isinstance(callee, str):
-            return ("callee", callee)
-        return None
-
-    def _normalized_call_arg_key(expr):
-        expr = _unwrap_c_casts(expr)
-        storage_key = describe_alias_storage(expr).identity
-        if storage_key is not None:
-            return ("storage", storage_key)
-        if isinstance(expr, structured_c.CConstant):
-            return ("const", expr.value)
-        if isinstance(expr, structured_c.CVariable):
-            variable = getattr(expr, "variable", None)
-            if isinstance(variable, SimRegisterVariable):
-                return ("reg", getattr(variable, "reg", None), getattr(variable, "size", None))
-            if isinstance(variable, SimStackVariable):
-                return (
-                    "stack",
-                    getattr(variable, "base", None),
-                    getattr(variable, "offset", None),
-                    getattr(variable, "size", None),
-                )
-            if isinstance(variable, SimMemoryVariable):
-                return ("mem", getattr(variable, "addr", None), getattr(variable, "size", None))
-            return ("var", id(variable))
-        if isinstance(expr, structured_c.CUnaryOp):
-            return ("unary", expr.op, _normalized_call_arg_key(expr.operand))
-        if isinstance(expr, structured_c.CBinaryOp):
-            return ("binary", expr.op, _normalized_call_arg_key(expr.lhs), _normalized_call_arg_key(expr.rhs))
-        if isinstance(expr, structured_c.CFunctionCall):
-            return (
-                "call",
-                _call_callee_key(expr),
-                tuple(_normalized_call_arg_key(arg) for arg in getattr(expr, "args", ()) or ()),
-            )
-        return ("expr", type(expr).__name__)
-
-    def _same_call_signature(lhs, rhs) -> bool:
-        lhs_call = _unwrap_c_casts(lhs)
-        rhs_call = _unwrap_c_casts(rhs)
-        if not isinstance(lhs_call, structured_c.CFunctionCall) or not isinstance(rhs_call, structured_c.CFunctionCall):
-            return False
-
-        lhs_key = _call_callee_key(lhs_call)
-        rhs_key = _call_callee_key(rhs_call)
-        if lhs_key is None or rhs_key is None or lhs_key != rhs_key:
-            return False
-
-        lhs_args = tuple(_normalized_call_arg_key(arg) for arg in getattr(lhs_call, "args", ()) or ())
-        rhs_args = tuple(_normalized_call_arg_key(arg) for arg in getattr(rhs_call, "args", ()) or ())
-        if len(lhs_args) != len(rhs_args):
-            return False
-        return lhs_args == rhs_args
-
-    def prune(node) -> None:
-        nonlocal changed
-        if not _structured_codegen_node(node):
-            return
-
-        if isinstance(node, structured_c.CStatements):
-            new_statements = []
-            pending_assignment_indices: dict[tuple[object, ...], int] = {}
-            statements = list(node.statements)
-            for index, stmt in enumerate(statements):
-                call_expr = stmt if isinstance(stmt, structured_c.CFunctionCall) else getattr(stmt, "expr", None)
-                if isinstance(call_expr, structured_c.CFunctionCall):
-                    next_stmt = statements[index + 1] if index + 1 < len(statements) else None
-                    if (
-                        isinstance(next_stmt, structured_c.CReturn)
-                        and isinstance(getattr(next_stmt, "retval", None), structured_c.CFunctionCall)
-                        and _same_call_signature(call_expr, next_stmt.retval)
-                    ):
-                        changed = True
-                        continue
-                stmt_reads = _collect_stmt_reads(stmt)
-                if stmt_reads:
-                    for key in list(pending_assignment_indices):
-                        if key in stmt_reads:
-                            pending_assignment_indices.pop(key, None)
-                if (
-                    isinstance(stmt, structured_c.CAssignment)
-                    and isinstance(stmt.lhs, structured_c.CVariable)
-                    and _is_local_variable(getattr(stmt.lhs, "variable", None))
-                    and not _expr_has_side_effects(getattr(stmt, "rhs", None))
-                ):
-                    lhs_variable = getattr(stmt.lhs, "variable", None)
-                    lhs_unified = getattr(stmt.lhs, "unified_variable", None)
-                    lhs_keys: set[tuple[object, ...]] = set()
-                    if lhs_variable is not None:
-                        lhs_keys.add(("var", id(lhs_variable)))
-                    if lhs_unified is not None:
-                        lhs_keys.add(("unified", id(lhs_unified)))
-                    storage_key = describe_alias_storage(stmt.lhs).identity
-                    if storage_key is not None:
-                        lhs_keys.add(("storage", storage_key))
-                    if lhs_keys.isdisjoint(reads):
-                        changed = True
-                        continue
-                    for key in lhs_keys:
-                        if key in pending_assignment_indices:
-                            new_statements[pending_assignment_indices[key]] = None
-                            changed = True
-                        pending_assignment_indices[key] = len(new_statements)
-                prune(stmt)
-                new_statements.append(stmt)
-            if new_statements != list(node.statements):
-                node.statements = [stmt for stmt in new_statements if stmt is not None]
-                changed = True
-            return
-
-        for attr in ("lhs", "rhs", "expr", "operand", "condition", "cond", "body", "iffalse", "iftrue", "else_node", "retval"):
-            if not hasattr(node, attr):
-                continue
-            try:
-                value = getattr(node, attr)
-            except Exception:
-                continue
-            if _structured_codegen_node(value):
-                prune(value)
-
-        for attr in ("args", "operands", "statements"):
-            if not hasattr(node, attr):
-                continue
-            try:
-                items = getattr(node, attr)
-            except Exception:
-                continue
-            if not items:
-                continue
-            for item in items:
-                if _structured_codegen_node(item):
-                    prune(item)
-
-        if hasattr(node, "condition_and_nodes"):
-            try:
-                pairs = getattr(node, "condition_and_nodes")
-            except Exception:
-                pairs = None
-            if pairs:
-                for cond, body in pairs:
-                    if _structured_codegen_node(cond):
-                        prune(cond)
-                    if _structured_codegen_node(body):
-                        prune(body)
-
-    prune(root)
-    return changed
+    return _cli_dead_local_prune._prune_dead_local_assignments(
+        codegen,
+        structured_codegen_node=_structured_codegen_node,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        unwrap_c_casts=_unwrap_c_casts,
+        describe_alias_storage=describe_alias_storage,
+    )
 
 
 def _materialize_missing_stack_local_declarations(codegen) -> bool:
@@ -9404,11 +8966,11 @@ def _coalesce_far_pointer_stack_expressions(project: angr.Project, codegen) -> b
         segment_reg_name=_segment_reg_name,
         iter_c_nodes_deep=_iter_c_nodes_deep,
         resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
+        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
         build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
             traits,
             build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
         ),
-        stable_access_object_hint_for_key=_cli_access_object_hints._stable_access_object_hint_for_key,
         access_trait_variable_key=_access_trait_variable_key,
         replace_c_children=_replace_c_children,
         describe_alias_storage=describe_alias_storage,
@@ -9416,63 +8978,12 @@ def _coalesce_far_pointer_stack_expressions(project: angr.Project, codegen) -> b
 
 
 def _simplify_nested_mk_fp_calls(codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    changed = False
-
-    def _is_zero_offset_mk_fp(expr) -> bool:
-        expr = _unwrap_c_casts(expr)
-        if not isinstance(expr, structured_c.CFunctionCall) or getattr(expr, "callee_target", None) != "MK_FP":
-            return False
-        args = list(getattr(expr, "args", ()) or ())
-        if len(args) != 2:
-            return False
-        return _c_constant_value(_unwrap_c_casts(args[1])) == 0
-
-    def transform(node):
-        nonlocal changed
-        if not isinstance(node, structured_c.CFunctionCall) or getattr(node, "callee_target", None) != "MK_FP":
-            return node
-        args = list(getattr(node, "args", ()) or ())
-        if len(args) != 2:
-            return node
-
-        seg_expr = _unwrap_c_casts(args[0])
-        off_expr = _unwrap_c_casts(args[1])
-        if isinstance(seg_expr, structured_c.CFunctionCall) and getattr(seg_expr, "callee_target", None) == "MK_FP":
-            inner_args = list(getattr(seg_expr, "args", ()) or ())
-            if len(inner_args) == 2 and _is_zero_offset_mk_fp(off_expr):
-                changed = True
-                return structured_c.CFunctionCall(
-                    "MK_FP",
-                    None,
-                    [_unwrap_c_casts(inner_args[0]), _unwrap_c_casts(inner_args[1])],
-                    codegen=codegen,
-                )
-        if _is_zero_offset_mk_fp(off_expr):
-            inner_args = list(getattr(off_expr, "args", ()) or ())
-            if len(inner_args) == 2:
-                changed = True
-                return structured_c.CFunctionCall(
-                    "MK_FP",
-                    None,
-                    [seg_expr, _unwrap_c_casts(inner_args[0])],
-                    codegen=codegen,
-                )
-
-        return node
-
-    root = codegen.cfunc.statements
-    new_root = transform(root)
-    if new_root is not root:
-        codegen.cfunc.statements = new_root
-        root = new_root
-        changed = True
-    if _replace_c_children(root, transform):
-        changed = True
-
-    return changed
+    return _cli_mkfp_simplify._simplify_nested_mk_fp_calls(
+        codegen,
+        unwrap_c_casts=_unwrap_c_casts,
+        c_constant_value=_c_constant_value,
+        replace_c_children=_replace_c_children,
+    )
 
 
 def _attach_ss_stack_variables(project: angr.Project, codegen) -> bool:
@@ -9487,194 +8998,23 @@ def _attach_ss_stack_variables(project: angr.Project, codegen) -> bool:
 
 
 def _rewrite_ss_stack_byte_offsets(project: angr.Project, codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    binary_path = getattr(getattr(codegen.cfunc, "project", None), "loader", None)
-    binary_name = getattr(getattr(binary_path, "main_object", None), "binary_basename", "")
-    if isinstance(binary_name, str) and binary_name.lower().endswith(".cod"):
-        func_name = getattr(getattr(codegen.cfunc, "function", None), "name", "")
-        if func_name == "fold_values":
-            return False
-
-    changed = False
-    stack_pointer_aliases: dict[int, _StackPointerAliasState] = {}
-
-    def _is_linear_temp(cvar) -> bool:
-        return isinstance(cvar, structured_c.CVariable) and isinstance(getattr(cvar, "name", None), str) and re.fullmatch(
-            r"(?:v\d+|vvar_\d+)",
-            getattr(cvar, "name", ""),
-        ) is not None
-
-    def _resolve_stack_pointer_alias(node):
-        node = _unwrap_c_casts(node)
-        if isinstance(node, structured_c.CVariable):
-            variable = getattr(node, "variable", None)
-            if isinstance(variable, SimStackVariable):
-                identity = _stack_slot_identity_for_variable(variable)
-                if identity is not None and identity.base == "bp":
-                    return node, 0
-            alias = stack_pointer_aliases.get(id(variable))
-            if alias is not None:
-                return alias.base, alias.offset
-            return None
-        if isinstance(node, structured_c.CUnaryOp) and node.op == "Reference":
-            operand = _unwrap_c_casts(node.operand)
-            if isinstance(operand, structured_c.CVariable):
-                variable = getattr(operand, "variable", None)
-                if isinstance(variable, SimStackVariable):
-                    identity = _stack_slot_identity_for_variable(variable)
-                    if identity is not None and identity.base == "bp":
-                        return operand, 0
-                alias = stack_pointer_aliases.get(id(variable))
-                if alias is not None:
-                    return alias.base, alias.offset
-            return None
-        if isinstance(node, structured_c.CBinaryOp) and node.op in {"Add", "Sub"}:
-            lhs = _resolve_stack_pointer_alias(node.lhs)
-            rhs = _resolve_stack_pointer_alias(node.rhs)
-            lhs_const = _c_constant_value(_unwrap_c_casts(node.lhs))
-            rhs_const = _c_constant_value(_unwrap_c_casts(node.rhs))
-            if lhs is not None and rhs_const is not None:
-                base, offset = lhs
-                return base, offset + (rhs_const if node.op == "Add" else -rhs_const)
-            if rhs is not None and lhs_const is not None:
-                base, offset = rhs
-                return base, offset + lhs_const
-        return None
-
-    def _collect_stack_pointer_aliases() -> None:
-        aliases: dict[int, _StackPointerAliasState] = {}
-        for _ in range(3):
-            changed_local = False
-            for walk_node in _iter_c_nodes_deep(codegen.cfunc.statements):
-                if not isinstance(walk_node, structured_c.CAssignment) or not isinstance(walk_node.lhs, structured_c.CVariable):
-                    continue
-                if not _is_linear_temp(walk_node.lhs):
-                    continue
-                lhs_var = getattr(walk_node.lhs, "variable", None)
-                if lhs_var is None:
-                    continue
-                rhs = _unwrap_c_casts(walk_node.rhs)
-                resolved = _resolve_stack_pointer_alias(rhs)
-                if resolved is None:
-                    continue
-                resolved_state = _StackPointerAliasState(*resolved)
-                if aliases.get(id(lhs_var)) != resolved_state:
-                    aliases[id(lhs_var)] = resolved_state
-                    changed_local = True
-            if not changed_local:
-                break
-        stack_pointer_aliases.update(aliases)
-
-    _collect_stack_pointer_aliases()
-
-    def make_stack_deref(cvar, offset: int, bits: int):
-        element_type = SimTypeChar(False) if bits == 8 else SimTypeShort(False)
-        ptr_type = SimTypePointer(element_type).with_arch(project.arch)
-        base_ref = structured_c.CUnaryOp("Reference", cvar, codegen=codegen)
-        if offset > 0:
-            addr_expr = structured_c.CBinaryOp(
-                "Add",
-                base_ref,
-                structured_c.CConstant(offset, SimTypeShort(False), codegen=codegen),
-                codegen=codegen,
-            )
-        elif offset < 0:
-            addr_expr = structured_c.CBinaryOp(
-                "Add",
-                base_ref,
-                structured_c.CConstant(offset, SimTypeShort(True), codegen=codegen),
-                codegen=codegen,
-            )
-        else:
-            addr_expr = base_ref
-        return structured_c.CUnaryOp(
-            "Dereference",
-            structured_c.CTypeCast(None, ptr_type, addr_expr, codegen=codegen),
-            codegen=codegen,
-        )
-
-    def make_addr_deref(addr_expr, bits: int):
-        element_type = SimTypeChar(False) if bits == 8 else SimTypeShort(False)
-        ptr_type = SimTypePointer(element_type).with_arch(project.arch)
-        return structured_c.CUnaryOp(
-            "Dereference",
-            structured_c.CTypeCast(None, ptr_type, addr_expr, codegen=codegen),
-            codegen=codegen,
-        )
-
-    def _contains_large_unsigned_constant(node) -> bool:
-        for term in _flatten_c_add_terms(node):
-            value = _c_constant_value(_unwrap_c_casts(term))
-            if isinstance(value, int) and value > 0x7FFF:
-                return True
-        return False
-
-    def transform(node):
-        if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
-            return node
-        classified = _classify_segmented_dereference(node, project)
-        if classified is None or classified.kind != "stack" or classified.cvar is None:
-            if classified is None or classified.seg_name != "ss" or classified.extra_offset <= 0:
-                return node
-            addr_expr = _strip_segment_scale_from_addr_expr(getattr(classified, "addr_expr", None), project)
-            if addr_expr is None:
-                return node
-            if _contains_large_unsigned_constant(addr_expr):
-                return node
-            type_ = getattr(node, "type", None)
-            bits = getattr(type_, "size", None)
-            if bits not in {8, 16}:
-                return node
-            return make_addr_deref(addr_expr, bits)
-        else:
-            cvar = classified.cvar
-            extra_offset = classified.extra_offset
-            base_variable = getattr(cvar, "variable", None)
-            if isinstance(base_variable, SimStackVariable):
-                type_ = getattr(node, "type", None)
-                bits = getattr(type_, "size", None)
-                access_size = bits // project.arch.byte_width if isinstance(bits, int) and bits > 0 else None
-                target_offset = getattr(base_variable, "offset", 0) + extra_offset
-                resolved_cvar = _resolve_stack_cvar_at_offset(codegen, target_offset)
-                if resolved_cvar is not None:
-                    resolved_variable = getattr(resolved_cvar, "variable", None)
-                    resolved_offset = getattr(resolved_variable, "offset", None)
-                    resolved_size = getattr(resolved_variable, "size", None)
-                    if (
-                        isinstance(resolved_variable, SimStackVariable)
-                        and isinstance(access_size, int)
-                        and access_size >= 4
-                    ):
-                        if resolved_size is not None and resolved_size < access_size:
-                            _promote_direct_stack_cvariable(codegen, resolved_cvar, access_size, _stack_type_for_size(access_size))
-                        return resolved_cvar
-                    if (
-                        isinstance(resolved_variable, SimStackVariable)
-                        and isinstance(access_size, int)
-                        and resolved_offset == target_offset
-                        and resolved_size == access_size
-                    ):
-                        return resolved_cvar
-                if isinstance(access_size, int) and access_size >= 4:
-                    return _materialize_stack_cvar_at_offset(codegen, target_offset, access_size)
-        type_ = getattr(node, "type", None)
-        bits = getattr(type_, "size", None)
-        if bits not in {8, 16}:
-            return node
-        return make_stack_deref(cvar, extra_offset, bits)
-
-    root = codegen.cfunc.statements
-    new_root = transform(root)
-    if new_root is not root:
-        codegen.cfunc.statements = new_root
-        root = new_root
-        changed = True
-    if _replace_c_children(root, transform):
-        changed = True
-
-    return changed
+    return _cli_stack_byte_offsets._rewrite_ss_stack_byte_offsets(
+        project,
+        codegen,
+        unwrap_c_casts=_unwrap_c_casts,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        replace_c_children=_replace_c_children,
+        c_constant_value=_c_constant_value,
+        flatten_c_add_terms=_flatten_c_add_terms,
+        classify_segmented_dereference=_classify_segmented_dereference,
+        strip_segment_scale_from_addr_expr=_strip_segment_scale_from_addr_expr,
+        resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
+        promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
+        stack_type_for_size=_stack_type_for_size,
+        materialize_stack_cvar_at_offset=_materialize_stack_cvar_at_offset,
+        stack_slot_identity_for_variable=_stack_slot_identity_for_variable,
+        stack_pointer_alias_state=_StackPointerAliasState,
+    )
 
 
 def _promote_direct_stack_cvariable(codegen, cvar, size: int, type_) -> bool:
@@ -10014,33 +9354,17 @@ def _high_byte_store_addr(node, project: angr.Project) -> int | None:
     )
 
 
-def _make_word_global(codegen, addr: int, name: str):
-    return structured_c.CVariable(
-        SimMemoryVariable(addr, 2, name=name, region=codegen.cfunc.addr),
-        variable_type=SimTypeShort(False),
-        codegen=codegen,
-    )
-
-
 def _synthetic_word_global_variable(
     codegen, synthetic_globals: dict[int, tuple[str, int]] | None, addr: int, created: dict[int, structured_c.CVariable] | None = None
 ):
-    if created is not None:
-        existing = created.get(addr)
-        if existing is not None:
-            return existing
-
-    symbol = _synthetic_global_entry(synthetic_globals, addr)
-    if symbol is None:
-        return None
-
-    raw_name, width = symbol
-    if width < 2:
-        return None
-    cvar = _make_word_global(codegen, addr, _sanitize_cod_identifier(raw_name))
-    if created is not None:
-        created[addr] = cvar
-    return cvar
+    return _cli_word_global_helpers._synthetic_word_global_variable(
+        codegen,
+        synthetic_globals,
+        addr,
+        synthetic_global_entry=_synthetic_global_entry,
+        sanitize_cod_identifier=_sanitize_cod_identifier,
+        created=created,
+    )
 
 
 def _coalesce_cod_word_global_loads(
@@ -10051,6 +9375,7 @@ def _coalesce_cod_word_global_loads(
         codegen,
         synthetic_globals,
         collect_access_traits=_collect_access_traits,
+        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
         build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
             traits,
             build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
@@ -10083,114 +9408,65 @@ def _coalesce_segmented_word_load_expressions(project: angr.Project, codegen) ->
 def _coalesce_cod_word_global_statements(
     project: angr.Project, codegen, synthetic_globals: dict[int, tuple[str, int]] | None
 ) -> bool:
-    if not synthetic_globals or getattr(codegen, "cfunc", None) is None:
-        return False
-
-    changed = False
-
-    def visit(node):
-        nonlocal changed
-
-        if isinstance(node, structured_c.CStatements):
-            new_statements = []
-            i = 0
-            while i < len(node.statements):
-                stmt = node.statements[i]
-
-                if (
-                    i + 1 < len(node.statements)
-                    and isinstance(stmt, structured_c.CAssignment)
-                    and isinstance(node.statements[i + 1], structured_c.CAssignment)
-                ):
-                    next_stmt = node.statements[i + 1]
-                    base_addr = _global_memory_addr(stmt.lhs)
-                    next_addr = _high_byte_store_addr(next_stmt.lhs, project)
-                    word_global = (
-                        _synthetic_word_global_variable(codegen, synthetic_globals, base_addr)
-                        if base_addr is not None
-                        else None
-                    )
-
-                    if base_addr is not None and next_addr == base_addr + 1 and word_global is not None:
-                        if isinstance(stmt.rhs, structured_c.CConstant) and isinstance(next_stmt.rhs, structured_c.CConstant):
-                            value = (stmt.rhs.value & 0xFF) | ((next_stmt.rhs.value & 0xFF) << 8)
-                            new_statements.append(
-                                structured_c.CAssignment(
-                                    word_global,
-                                    structured_c.CConstant(value, SimTypeShort(False), codegen=codegen),
-                                    codegen=codegen,
-                                )
-                            )
-                            changed = True
-                            i += 2
-                            continue
-                        changed = True
-                        new_statements.append(stmt)
-                        i += 2
-                        continue
-
-                visit(stmt)
-                new_statements.append(stmt)
-                i += 1
-
-            if len(new_statements) != len(node.statements):
-                node.statements = new_statements
-
-        elif isinstance(node, structured_c.CIfElse):
-            for _, body in node.condition_and_nodes:
-                visit(body)
-            if node.else_node is not None:
-                visit(node.else_node)
-
-    visit(codegen.cfunc.statements)
-    return changed
+    return _cli_cod_global_statements._coalesce_cod_word_global_statements(
+        project,
+        codegen,
+        synthetic_globals,
+        global_memory_addr=_global_memory_addr,
+        high_byte_store_addr=_high_byte_store_addr,
+        synthetic_word_global_variable=_synthetic_word_global_variable,
+    )
 
 
 def _int21_call_replacements(project: angr.Project, function, api_style: str, binary_path: Path | None) -> list[str]:
-    return [
-        render_dos_int21_call(call, api_style)
-        for call in collect_dos_int21_calls(function, binary_path)
-    ]
+    return _cli_helper_modeling._int21_call_replacements(
+        project,
+        function,
+        api_style,
+        binary_path,
+        collect_dos_int21_calls=collect_dos_int21_calls,
+        render_dos_int21_call=render_dos_int21_call,
+    )
 
 
 def _interrupt_call_replacement_map(project: angr.Project, function, api_style: str, binary_path: Path | None) -> dict[str, str]:
-    replacements: dict[str, str] = {}
-    for call in collect_interrupt_service_calls(function, binary_path):
-        replacement = render_interrupt_call(call, api_style)
-        target_addr = getattr(function, "get_call_target", lambda _addr: None)(call.insn_addr)
-        if isinstance(target_addr, int):
-            replacements[str(target_addr)] = replacement
-            replacements[hex(target_addr)] = replacement
-            replacements[hex(target_addr).upper().replace("X", "x")] = replacement
-
-        helper_name = _helper_name(project, interrupt_service_addr(call))
-        if helper_name:
-            replacements[helper_name] = replacement
-            replacements[helper_name.lstrip("_")] = replacement
-    return replacements
+    return _cli_helper_modeling._interrupt_call_replacement_map(
+        project,
+        function,
+        api_style,
+        binary_path,
+        collect_interrupt_service_calls=collect_interrupt_service_calls,
+        render_interrupt_call=render_interrupt_call,
+        helper_name=_helper_name,
+        interrupt_service_addr=interrupt_service_addr,
+    )
 
 
 def _dos_helper_declarations(function, api_style: str, binary_path: Path | None) -> list[str]:
-    return dos_helper_declarations(collect_dos_int21_calls(function, binary_path), api_style)
+    return _cli_helper_modeling._dos_helper_declarations(
+        function,
+        api_style,
+        binary_path,
+        collect_dos_int21_calls=collect_dos_int21_calls,
+        dos_helper_declarations=dos_helper_declarations,
+    )
 
 
 def _interrupt_helper_declarations(function, api_style: str, binary_path: Path | None) -> list[str]:
-    return interrupt_service_declarations(collect_interrupt_service_calls(function, binary_path), api_style)
+    return _cli_helper_modeling._interrupt_helper_declarations(
+        function,
+        api_style,
+        binary_path,
+        collect_interrupt_service_calls=collect_interrupt_service_calls,
+        interrupt_service_declarations=interrupt_service_declarations,
+    )
 
 
 def _known_helper_declarations(cod_metadata: CODProcMetadata | None) -> list[str]:
-    if cod_metadata is None:
-        return []
-
-    declarations: list[str] = []
-    seen: set[str] = set()
-    for call_name in cod_metadata.call_names:
-        decl = preferred_known_helper_signature_decl(call_name)
-        if decl is None or decl in seen:
-            continue
-        seen.add(decl)
-        declarations.append(decl)
-    return declarations
+    return _cli_helper_modeling._known_helper_declarations(
+        cod_metadata,
+        preferred_known_helper_signature_decl=preferred_known_helper_signature_decl,
+    )
 
 
 def _split_top_level_binary(expr: str, op: str) -> tuple[str, str] | None:
