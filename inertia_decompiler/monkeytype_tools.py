@@ -26,8 +26,12 @@ DEFAULT_MONKEYTYPE_TEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_x86_16_access_trait_arrays.py",
     "angr_platforms/tests/test_x86_16_access_trait_policy.py",
     "angr_platforms/tests/test_x86_16_access_trait_strides.py",
+    "angr_platforms/tests/test_x86_16_decompiler_postprocess_utils.py",
+    "angr_platforms/tests/test_x86_16_segmented_memory.py",
     "angr_platforms/tests/test_x86_16_type_equivalence_classes.py",
     "angr_platforms/tests/test_x86_16_stack_prototype_promotion.py",
+    "angr_platforms/tests/test_x86_16_tail_validation.py",
+    "angr_platforms/tests/test_x86_16_widening_model.py",
 )
 
 DEFAULT_STUB_MODULE_PREFIXES: tuple[str, ...] = (

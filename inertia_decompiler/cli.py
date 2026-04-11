@@ -63,7 +63,9 @@ from inertia_decompiler.cli_timeout import (
 )
 from inertia_decompiler import cli_access_traits as _cli_access_traits
 from inertia_decompiler import cli_access_object_hints as _cli_access_object_hints
+from inertia_decompiler import cli_access_profiles as _cli_access_profiles
 from inertia_decompiler import cli_access_trait_rewrite as _cli_access_trait_rewrite
+from inertia_decompiler import cli_local_rewrites as _cli_local_rewrites
 from inertia_decompiler import cli_cod_globals as _cli_cod_globals
 from inertia_decompiler import cli_far_pointer_stack as _cli_far_pointer_stack
 from inertia_decompiler import cli_linear_aliases as _cli_linear_aliases
@@ -76,6 +78,7 @@ from inertia_decompiler import cli_segmented as _cli_segmented
 from inertia_decompiler import cli_segmented_elision as _cli_segmented_elision
 from inertia_decompiler import cli_segmented_compare as _cli_segmented_compare
 from inertia_decompiler import cli_segmented_lowering as _cli_segmented_lowering
+from inertia_decompiler import cli_segmented_load_coalesce as _cli_segmented_load_coalesce
 from inertia_decompiler import cli_segmented_store_coalesce as _cli_segmented_store_coalesce
 from inertia_decompiler import cli_word_loads as _cli_word_loads
 from inertia_decompiler.tail_validation import (
@@ -8314,103 +8317,11 @@ def _access_trait_profile_for_key(
     evidence_profiles: Mapping[tuple[object, ...], "_AccessTraitEvidenceProfile"],
     base_key: tuple[object, ...],
 ) -> "_AccessTraitEvidenceProfile | None":
-    profile = evidence_profiles.get(base_key)
-    if profile is not None:
-        return profile
-    if len(base_key) == 4 and base_key[0] == "stack":
-        return evidence_profiles.get(base_key[:3])
-    return None
+    return _cli_access_profiles.access_trait_profile_for_key(evidence_profiles, base_key)
 
 
-@dataclass(frozen=True)
-class _AccessTraitStrideEvidence:
-    segment: str
-    base_key: tuple[object, ...] | None
-    index_key: tuple[object, ...] | None
-    stride: int
-    offset: int
-    width: int
-    count: int
-    kind: str
-
-
-@dataclass(frozen=True)
-class _AccessTraitEvidenceProfile:
-    member_like: tuple[tuple[int, int, int], ...] = ()
-    array_like: tuple[tuple[int, int, int], ...] = ()
-    induction_like: tuple[tuple[int, int, int], ...] = ()
-    stack_like: tuple[tuple[int, int, int], ...] = ()
-    induction_evidence: tuple[_AccessTraitStrideEvidence, ...] = ()
-    stride_evidence: tuple[_AccessTraitStrideEvidence, ...] = ()
-
-    def _structured_candidates(self) -> tuple[tuple[int, int, int], ...]:
-        candidates: list[tuple[int, int, int]] = []
-        seen: set[tuple[int, int, int]] = set()
-        for evidence in sorted(
-            self.induction_evidence + self.stride_evidence,
-            key=lambda item: (-item.count, item.offset, item.width, item.stride, item.kind),
-        ):
-            candidate = (evidence.offset, evidence.width, evidence.count)
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            candidates.append(candidate)
-        return tuple(candidates)
-
-    def naming_candidates(self, base_key: tuple[object, ...] | None = None) -> tuple[tuple[int, int, int], ...]:
-        structured = self._structured_candidates()
-        if base_key is not None and base_key and base_key[0] == "stack":
-            ordered = self.stack_like + structured + self.member_like + self.array_like + self.induction_like
-        else:
-            ordered = structured + self.member_like + self.array_like + self.induction_like + self.stack_like
-
-        deduped: list[tuple[int, int, int]] = []
-        seen: set[tuple[int, int, int]] = set()
-        for candidate in ordered:
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            deduped.append(candidate)
-        return tuple(deduped)
-
-    def has_any_evidence(self) -> bool:
-        return bool(
-            self.member_like
-            or self.array_like
-            or self.induction_like
-            or self.stack_like
-            or self.induction_evidence
-            or self.stride_evidence
-        )
-
-    def best_rewrite_kind(self, base_key: tuple[object, ...] | None = None) -> str | None:
-        if base_key is not None and base_key and base_key[0] == "stack" and self.stack_like:
-            return "stack"
-        structured_counts: dict[str, int] = {}
-        for evidence in self.induction_evidence + self.stride_evidence:
-            structured_counts[evidence.kind] = structured_counts.get(evidence.kind, 0) + max(int(evidence.count), 1)
-        if structured_counts:
-            dominant_kind = max(
-                structured_counts.items(),
-                key=lambda item: (item[1], {"induction_like": 3, "array_like": 2, "member_like": 1}.get(item[0], 0), item[0]),
-            )[0]
-            if dominant_kind == "induction_like":
-                return "induction"
-            if dominant_kind == "array_like":
-                return "array"
-            if dominant_kind == "member_like":
-                return "member"
-        if self.member_like and self.array_like:
-            return None
-        if self.array_like:
-            return "array"
-        if self.member_like:
-            return "member"
-        if self.induction_like:
-            return "induction"
-        if self.stack_like:
-            return "stack"
-        return None
+_AccessTraitStrideEvidence = _cli_access_profiles.AccessTraitStrideEvidence
+_AccessTraitEvidenceProfile = _cli_access_profiles.AccessTraitEvidenceProfile
 
 
 @dataclass(frozen=True)
@@ -8425,119 +8336,23 @@ class _AccessTraitRewriteDecision:
     base_key: tuple[object, ...]
     profile: _AccessTraitEvidenceProfile
 
+    def _inner(self) -> _cli_access_profiles.AccessTraitRewriteDecision:
+        return _cli_access_profiles.AccessTraitRewriteDecision(self.base_key, self.profile)
+
     def should_rename_stack(self) -> bool:
-        return self.profile.best_rewrite_kind(self.base_key) in {"member", "array", "stack"}
+        return self._inner().should_rename_stack()
 
     def preferred_kind(self) -> str | None:
-        return self.profile.best_rewrite_kind(self.base_key)
+        return self._inner().preferred_kind()
 
     def candidate_field_names(self) -> tuple[str, ...]:
-        if self.preferred_kind() is None:
-            return ()
-        candidates = self.profile.naming_candidates(self.base_key)
-        if not candidates:
-            return ()
-        names: list[str] = []
-        seen: set[str] = set()
-        for offset, _size, _count in candidates:
-            field_name = _access_trait_field_name(offset, 1)
-            if field_name in seen:
-                continue
-            seen.add(field_name)
-            names.append(field_name)
-        return tuple(names)
+        return self._inner().candidate_field_names(_access_trait_field_name)
 
 
 def _build_access_trait_evidence_profiles(
     traits: dict[str, dict[tuple[object, ...], object]]
 ) -> dict[tuple[object, ...], _AccessTraitEvidenceProfile]:
-    raw_profiles: dict[tuple[object, ...], dict[str, list[object]]] = {}
-
-    def add_bucket(
-        bucket_name: str,
-        category: str,
-        base_index: int,
-        offset_index: int,
-        size_index: int | None = None,
-    ) -> None:
-        bucket = traits.get(bucket_name, {})
-        if not isinstance(bucket, dict):
-            return
-        for key, count in bucket.items():
-            if not isinstance(key, tuple) or len(key) <= max(base_index, offset_index):
-                continue
-            base_key = key[base_index]
-            if not isinstance(base_key, tuple):
-                continue
-            offset = key[offset_index]
-            if not isinstance(offset, int):
-                continue
-            size = 1
-            if size_index is not None and len(key) > size_index and isinstance(key[size_index], int):
-                size = key[size_index]
-            if size not in {1, 2}:
-                continue
-            profile = raw_profiles.setdefault(
-                base_key,
-                {
-                    "member_like": [],
-                    "array_like": [],
-                    "induction_like": [],
-                    "stack_like": [],
-                    "induction_evidence": [],
-                    "stride_evidence": [],
-                },
-            )
-            profile[category].append((offset, size, count))
-            if category in {"member_like", "stack_like"} and base_key[0] == "stack":
-                profile["stack_like"].append((offset, size, count))
-
-    def add_structured_bucket(bucket_name: str, profile_bucket: str, category: str | None = None) -> None:
-        bucket = traits.get(bucket_name, {})
-        if not isinstance(bucket, dict):
-            return
-        for evidence in bucket.values():
-            if not isinstance(evidence, _AccessTraitStrideEvidence):
-                continue
-            group_key = evidence.index_key
-            if not isinstance(group_key, tuple):
-                continue
-            profile = raw_profiles.setdefault(
-                group_key,
-                {
-                    "member_like": [],
-                    "array_like": [],
-                    "induction_like": [],
-                    "stack_like": [],
-                    "induction_evidence": [],
-                    "stride_evidence": [],
-                },
-            )
-            bucket_category = category or evidence.kind
-            profile[bucket_category].append((evidence.offset, evidence.width, evidence.count))
-            profile[profile_bucket].append(evidence)
-
-    add_bucket("member_evidence", "member_like", 0, 1, 2)
-    add_bucket("repeated_offset_widths", "member_like", 1, 2, 3)
-    add_bucket("repeated_offsets", "member_like", 1, 2, None)
-    add_bucket("base_const", "member_like", 1, 2, 3)
-    add_bucket("array_evidence", "array_like", 0, 3, 4)
-    add_bucket("base_stride_widths", "array_like", 1, 3, 4)
-    add_bucket("base_stride", "array_like", 1, 3, 4)
-    add_structured_bucket("induction_evidence", "induction_evidence", "induction_like")
-    add_structured_bucket("stride_evidence", "stride_evidence")
-
-    return {
-        base_key: _AccessTraitEvidenceProfile(
-            member_like=tuple(data["member_like"]),
-            array_like=tuple(data["array_like"]),
-            induction_like=tuple(data["induction_like"]),
-            stack_like=tuple(data["stack_like"]),
-            induction_evidence=tuple(data["induction_evidence"]),
-            stride_evidence=tuple(data["stride_evidence"]),
-        )
-        for base_key, data in raw_profiles.items()
-    }
+    return _cli_access_profiles.build_access_trait_evidence_profiles(traits)
 
 
 def _analyze_widening_expr(
@@ -8638,12 +8453,7 @@ def _analyze_widening_expr(
 
 
 def _access_trait_member_candidates(traits: dict[str, dict[tuple[object, ...], int]]) -> dict[tuple[object, ...], list[tuple[int, int, int]]]:
-    profiles = _build_access_trait_evidence_profiles(traits)
-    return {
-        base_key: list(profile.naming_candidates(base_key))
-        for base_key, profile in profiles.items()
-        if profile.has_any_evidence()
-    }
+    return _cli_access_profiles.access_trait_member_candidates(traits)
 
 
 def _should_attach_access_trait_names(codegen) -> bool:
@@ -9555,263 +9365,35 @@ def _prune_dead_local_assignments(codegen) -> bool:
 
 
 def _materialize_missing_stack_local_declarations(codegen) -> bool:
-    cfunc = getattr(codegen, "cfunc", None)
-    if cfunc is None:
-        return False
-
-    unified_locals = getattr(cfunc, "unified_local_vars", None)
-    if not isinstance(unified_locals, dict):
-        unified_locals = {}
-        setattr(cfunc, "unified_local_vars", unified_locals)
-
-    arg_variables = {
-        id(getattr(arg, "variable", None))
-        for arg in getattr(cfunc, "arg_list", ()) or ()
-        if getattr(arg, "variable", None) is not None
-    }
-    arg_identities = {
-        _stack_slot_identity_for_variable(getattr(arg, "variable", None))
-        for arg in getattr(cfunc, "arg_list", ()) or ()
-        if isinstance(getattr(arg, "variable", None), SimStackVariable)
-    }
-    arg_identities.discard(None)
-    existing_identities = {
-        identity
-        for variable in unified_locals
-        for identity in (_stack_slot_identity_for_variable(variable),)
-        if identity is not None
-    }
-
-    stack_local_candidates = getattr(codegen, "_inertia_stack_local_declaration_candidates", None)
-    source_variables = stack_local_candidates.values() if isinstance(stack_local_candidates, dict) else getattr(cfunc, "variables_in_use", {}).items()
-
-    changed = False
-    for variable, cvar in source_variables:
-        if not isinstance(variable, SimStackVariable):
-            continue
-        identity = _stack_slot_identity_for_variable(variable)
-        if id(variable) in arg_variables or identity in arg_identities:
-            continue
-        if identity is None or identity in existing_identities:
-            continue
-        variable_type = getattr(cvar, "variable_type", None)
-        if variable_type is None:
-            variable_type = _stack_type_for_size(getattr(variable, "size", 0) or 2)
-        unified_locals[variable] = {(cvar, variable_type)}
-        existing_identities.add(identity)
-        changed = True
-
-    if changed:
-        sort_local_vars = getattr(cfunc, "sort_local_vars", None)
-        if callable(sort_local_vars):
-            with contextlib.suppress(Exception):
-                sort_local_vars()
-    return changed
+    return _cli_local_rewrites._materialize_missing_stack_local_declarations(
+        codegen,
+        stack_slot_identity_for_variable=_stack_slot_identity_for_variable,
+        stack_type_for_size=_stack_type_for_size,
+    )
 
 
 def _dedupe_codegen_variable_names_8616(codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    variables_in_use = getattr(codegen.cfunc, "variables_in_use", None)
-    unified_locals = getattr(codegen.cfunc, "unified_local_vars", None)
-    if not isinstance(variables_in_use, dict) and not isinstance(unified_locals, dict):
-        return False
-
-    def is_generic_name(name: object) -> bool:
-        return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+)", name) is not None
-
-    def preferred_name(variable, cvar) -> str | None:
-        candidates = [
-            getattr(variable, "name", None),
-            getattr(cvar, "name", None),
-            getattr(getattr(cvar, "unified_variable", None), "name", None),
-        ]
-        for candidate in candidates:
-            if isinstance(candidate, str) and candidate and not is_generic_name(candidate):
-                return candidate
-        for candidate in candidates:
-            if isinstance(candidate, str) and candidate:
-                return candidate
-        return None
-
-    def sort_key(item):
-        variable, cvar = item
-        if isinstance(variable, SimStackVariable):
-            offset = getattr(variable, "offset", 0)
-            return (
-                0,
-                0 if isinstance(offset, int) and offset > 0 else 1,
-                offset if isinstance(offset, int) else 0,
-                getattr(variable, "size", 0) if isinstance(getattr(variable, "size", 0), int) else 0,
-                getattr(variable, "name", "") or "",
-            )
-        if isinstance(variable, SimRegisterVariable):
-            return (
-                1,
-                getattr(variable, "reg", 0),
-                getattr(variable, "size", 0) if isinstance(getattr(variable, "size", 0), int) else 0,
-                getattr(variable, "name", "") or "",
-            )
-        if isinstance(variable, SimMemoryVariable):
-            return (
-                2,
-                getattr(variable, "addr", 0),
-                getattr(variable, "size", 0) if isinstance(getattr(variable, "size", 0), int) else 0,
-                getattr(variable, "name", "") or "",
-            )
-        return (3, getattr(variable, "name", "") or "", getattr(cvar, "name", "") or "")
-
-    ordered_items = []
-    for arg in getattr(codegen.cfunc, "arg_list", ()) or ():
-        variable = getattr(arg, "variable", None)
-        if variable is not None:
-            ordered_items.append((variable, arg))
-    ordered_items.extend(list(variables_in_use.items()) if isinstance(variables_in_use, dict) else [])
-    if isinstance(unified_locals, dict):
-        for variable, cvars in unified_locals.items():
-            if variable not in variables_in_use and cvars:
-                ordered_items.append((variable, next(iter(cvars))[0]))
-
-    ordered_items.sort(key=sort_key)
-
-    used_names: set[str] = set()
-    seen_variables: set[int] = set()
-    changed = False
-
-    def apply_name(variable, cvar, new_name: str) -> None:
-        nonlocal changed
-        if getattr(variable, "name", None) != new_name:
-            variable.name = new_name
-            changed = True
-        if getattr(cvar, "name", None) != new_name:
-            try:
-                cvar.name = new_name
-            except Exception:
-                pass
-            else:
-                changed = True
-        unified = getattr(cvar, "unified_variable", None)
-        if unified is not None and getattr(unified, "name", None) != new_name:
-            unified.name = new_name
-            changed = True
-
-    for variable, cvar in ordered_items:
-        if id(variable) in seen_variables:
-            continue
-        seen_variables.add(id(variable))
-        name = preferred_name(variable, cvar)
-        if name is None:
-            continue
-        if name in used_names:
-            name = _make_unique_identifier(name, used_names)
-        else:
-            used_names.add(name)
-        apply_name(variable, cvar, name)
-
-    if changed:
-        sort_local_vars = getattr(codegen.cfunc, "sort_local_vars", None)
-        if callable(sort_local_vars):
-            with contextlib.suppress(Exception):
-                sort_local_vars()
-    return changed
+    return _cli_local_rewrites._dedupe_codegen_variable_names_8616(
+        codegen,
+        make_unique_identifier=_make_unique_identifier,
+    )
 
 
 def _materialize_missing_register_local_declarations(codegen) -> bool:
-    cfunc = getattr(codegen, "cfunc", None)
-    if cfunc is None:
-        return False
-
-    unified_locals = getattr(cfunc, "unified_local_vars", None)
-    if not isinstance(unified_locals, dict):
-        unified_locals = {}
-        setattr(cfunc, "unified_local_vars", unified_locals)
-
-    arg_variables = {
-        id(getattr(arg, "variable", None))
-        for arg in getattr(cfunc, "arg_list", ()) or ()
-        if getattr(arg, "variable", None) is not None
-    }
-    def _local_identity(variable) -> tuple[object, ...] | None:
-        if isinstance(variable, SimStackVariable):
-            identity = _stack_slot_identity_for_variable(variable)
-            if identity is not None:
-                return ("stack", identity.base, getattr(identity, "offset", None), getattr(variable, "size", None))
-            return ("stack", getattr(variable, "base", None), getattr(variable, "offset", None), getattr(variable, "size", None))
-        if isinstance(variable, SimRegisterVariable):
-            return ("reg", getattr(variable, "reg", None), getattr(variable, "size", None))
-        return None
-
-    existing_identities = {
-        identity
-        for variable in unified_locals
-        if (identity := _local_identity(variable)) is not None
-    }
-
-    desired_segment_regs = {"cs", "ds", "es", "ss", "fs", "gs", "flags"}
-    changed = False
-
-    register_candidates: dict[int, tuple[object, object]] = {}
-    for variable, cvar in getattr(cfunc, "variables_in_use", {}).items():
-        if isinstance(variable, (SimRegisterVariable, SimStackVariable)):
-            register_candidates[id(variable)] = (variable, cvar)
-
-    root = getattr(cfunc, "statements", None)
-    if _structured_codegen_node(root):
-        for node in _iter_c_nodes_deep(root):
-            if not isinstance(node, structured_c.CVariable):
-                continue
-            variable = getattr(node, "variable", None)
-            if not isinstance(variable, (SimRegisterVariable, SimStackVariable)):
-                continue
-            register_candidates.setdefault(id(variable), (variable, node))
-
-    for variable, cvar in register_candidates.values():
-        identity = _local_identity(variable)
-        if id(variable) in arg_variables or identity in existing_identities:
-            continue
-
-        reg_name = getattr(variable, "name", None)
-        if isinstance(reg_name, str) and reg_name in desired_segment_regs:
-            continue
-
-        variable_type = getattr(cvar, "variable_type", None)
-        if variable_type is None:
-            variable_type = _stack_type_for_size(getattr(variable, "size", 0) or 2)
-        if variable_type is None:
-            continue
-
-        unified_locals[variable] = {(cvar, variable_type)}
-        if identity is not None:
-            existing_identities.add(identity)
-        changed = True
-
-    if changed:
-        sort_local_vars = getattr(cfunc, "sort_local_vars", None)
-        if callable(sort_local_vars):
-            with contextlib.suppress(Exception):
-                sort_local_vars()
-    return changed
+    return _cli_local_rewrites._materialize_missing_register_local_declarations(
+        codegen,
+        stack_slot_identity_for_variable=_stack_slot_identity_for_variable,
+        stack_type_for_size=_stack_type_for_size,
+        structured_codegen_node=_structured_codegen_node,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+    )
 
 
 def _prune_void_function_return_values(codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    prototype = getattr(codegen.cfunc, "prototype", None)
-    if prototype is None or type(getattr(prototype, "returnty", None)) is not SimTypeBottom:
-        return False
-
-    changed = False
-    for node in _iter_c_nodes_deep(codegen.cfunc.statements):
-        if not isinstance(node, structured_c.CReturn):
-            continue
-        if getattr(node, "retval", None) is None:
-            continue
-        node.retval = None
-        changed = True
-
-    return changed
+    return _cli_local_rewrites._prune_void_function_return_values(
+        codegen,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+    )
 
 
 def _coalesce_far_pointer_stack_expressions(project: angr.Project, codegen) -> bool:
@@ -10481,90 +10063,21 @@ def _coalesce_cod_word_global_loads(
 
 
 def _coalesce_segmented_word_load_expressions(project: angr.Project, codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    dereferenced_variable_ids: set[int] = set()
-
-    def _collect_variable_ids(expr, ids: set[int]) -> None:
-        expr = _unwrap_c_casts(expr)
-        if isinstance(expr, structured_c.CVariable):
-            variable = getattr(expr, "variable", None)
-            if variable is not None:
-                ids.add(id(variable))
-            return
-        for attr in ("lhs", "rhs", "operand", "expr"):
-            if not hasattr(expr, attr):
-                continue
-            try:
-                value = getattr(expr, attr)
-            except Exception:
-                continue
-            if _structured_codegen_node(value):
-                _collect_variable_ids(value, ids)
-        for attr in ("args", "operands", "statements"):
-            if not hasattr(expr, attr):
-                continue
-            try:
-                items = getattr(expr, attr)
-            except Exception:
-                continue
-            for item in items or ():
-                if _structured_codegen_node(item):
-                    _collect_variable_ids(item, ids)
-
-    for walk_node in _iter_c_nodes_deep(codegen.cfunc.statements):
-        if isinstance(walk_node, structured_c.CUnaryOp) and walk_node.op == "Dereference":
-            _collect_variable_ids(getattr(walk_node, "operand", None), dereferenced_variable_ids)
-
-    def transform(node):
-        if not isinstance(node, structured_c.CBinaryOp) or node.op not in {"Or", "Add"}:
-            return node
-
-        for low_expr, high_expr in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-            low_addr_expr = _match_byte_load_addr_expr(_unwrap_c_casts(low_expr))
-            if low_addr_expr is None:
-                continue
-
-            high_addr_expr = _match_shifted_high_byte_addr_expr(high_expr)
-            if high_addr_expr is None:
-                continue
-
-            low_facts = describe_alias_storage(low_addr_expr)
-            high_facts = describe_alias_storage(high_addr_expr)
-            if low_facts.identity is None or high_facts.identity is None:
-                continue
-            if not low_facts.can_join(high_facts):
-                continue
-
-            low_addr_ids: set[int] = set()
-            high_addr_ids: set[int] = set()
-            _collect_variable_ids(low_addr_expr, low_addr_ids)
-            _collect_variable_ids(high_addr_expr, high_addr_ids)
-            if low_addr_ids & dereferenced_variable_ids or high_addr_ids & dereferenced_variable_ids:
-                continue
-
-            if _addr_exprs_are_byte_pair(low_addr_expr, high_addr_expr, project):
-                resolved_lhs = _resolve_stack_cvar_from_addr_expr(project, codegen, low_addr_expr)
-                low_class = _classify_segmented_addr_expr(low_addr_expr, project)
-                if resolved_lhs is not None and (low_class is None or low_class.kind != "stack"):
-                    return resolved_lhs
-                return _make_word_dereference_from_addr_expr(codegen, project, low_addr_expr)
-
-        return node
-
-    root = codegen.cfunc.statements
-    new_root = transform(root)
-    if new_root is not root:
-        codegen.cfunc.statements = new_root
-        root = new_root
-        changed = True
-    else:
-        changed = False
-
-    if _replace_c_children(root, transform):
-        changed = True
-    return changed
+    return _cli_segmented_load_coalesce._coalesce_segmented_word_load_expressions(
+        project,
+        codegen,
+        unwrap_c_casts=_unwrap_c_casts,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        replace_c_children=_replace_c_children,
+        structured_codegen_node=_structured_codegen_node,
+        match_byte_load_addr_expr=_match_byte_load_addr_expr,
+        match_shifted_high_byte_addr_expr=_match_shifted_high_byte_addr_expr,
+        addr_exprs_are_byte_pair=_addr_exprs_are_byte_pair,
+        classify_segmented_addr_expr=_classify_segmented_addr_expr,
+        resolve_stack_cvar_from_addr_expr=_resolve_stack_cvar_from_addr_expr,
+        make_word_dereference_from_addr_expr=_make_word_dereference_from_addr_expr,
+        describe_alias_storage=describe_alias_storage,
+    )
 
 
 def _coalesce_cod_word_global_statements(
