@@ -62,8 +62,13 @@ from inertia_decompiler.cli_timeout import (
     _stdout_is_interactive,
 )
 from inertia_decompiler import cli_access_traits as _cli_access_traits
+from inertia_decompiler import cli_access_object_hints as _cli_access_object_hints
 from inertia_decompiler import cli_access_trait_rewrite as _cli_access_trait_rewrite
+from inertia_decompiler import cli_cod_globals as _cli_cod_globals
+from inertia_decompiler import cli_far_pointer_stack as _cli_far_pointer_stack
 from inertia_decompiler import cli_linear_aliases as _cli_linear_aliases
+from inertia_decompiler import cli_linear_recurrence as _cli_linear_recurrence
+from inertia_decompiler import cli_linear_recurrence_rules as _cli_linear_recurrence_rules
 from inertia_decompiler import cli_stack_coalesce as _cli_stack_coalesce
 from inertia_decompiler import cli_stack_cvars as _cli_stack_cvars
 from inertia_decompiler import cli_stack_locals as _cli_stack_locals
@@ -71,6 +76,7 @@ from inertia_decompiler import cli_segmented as _cli_segmented
 from inertia_decompiler import cli_segmented_elision as _cli_segmented_elision
 from inertia_decompiler import cli_segmented_compare as _cli_segmented_compare
 from inertia_decompiler import cli_segmented_lowering as _cli_segmented_lowering
+from inertia_decompiler import cli_segmented_store_coalesce as _cli_segmented_store_coalesce
 from inertia_decompiler import cli_word_loads as _cli_word_loads
 from inertia_decompiler.tail_validation import (
     TAIL_VALIDATION_ENABLE_ENV as _TAIL_VALIDATION_ENABLE_ENV,
@@ -8643,7 +8649,10 @@ def _access_trait_member_candidates(traits: dict[str, dict[tuple[object, ...], i
 def _should_attach_access_trait_names(codegen) -> bool:
     return _cli_access_trait_rewrite._should_attach_access_trait_names(
         codegen,
-        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+        has_stable_access_object_hints=lambda current_codegen: _cli_access_object_hints._has_stable_access_object_hints(
+            current_codegen,
+            build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+        ),
     )
 
 
@@ -8652,10 +8661,12 @@ def _attach_access_trait_field_names(project: angr.Project, codegen) -> bool:
         project,
         codegen,
         should_attach_access_trait_names=_should_attach_access_trait_names,
-        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+        build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
+            traits,
+            build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+        ),
+        stable_access_object_hint_for_key=_cli_access_object_hints._stable_access_object_hint_for_key,
         access_trait_variable_key=_access_trait_variable_key,
-        access_trait_profile_for_key=_access_trait_profile_for_key,
-        AccessTraitRewriteDecision=_AccessTraitRewriteDecision,
         stack_object_name=_stack_object_name,
         access_trait_field_name=_access_trait_field_name,
         replace_c_children=_replace_c_children,
@@ -8667,11 +8678,13 @@ def _attach_pointer_member_names(project: angr.Project, codegen) -> bool:
         project,
         codegen,
         should_attach_access_trait_names=_should_attach_access_trait_names,
-        access_trait_member_candidates=_access_trait_member_candidates,
-        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
-        access_trait_profile_for_key=_access_trait_profile_for_key,
+        build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
+            traits,
+            build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+        ),
+        stable_access_object_hint_for_key=_cli_access_object_hints._stable_access_object_hint_for_key,
         access_trait_variable_key=_access_trait_variable_key,
-        AccessTraitRewriteDecision=_AccessTraitRewriteDecision,
+        access_trait_field_name=_access_trait_field_name,
         replace_c_children=_replace_c_children,
     )
 
@@ -9802,267 +9815,22 @@ def _prune_void_function_return_values(codegen) -> bool:
 
 
 def _coalesce_far_pointer_stack_expressions(project: angr.Project, codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    def _expr_is_safe_inline_candidate(expr):
-        expr = _unwrap_c_casts(expr)
-        if isinstance(expr, (structured_c.CConstant, structured_c.CVariable)):
-            if isinstance(expr, structured_c.CVariable):
-                variable = getattr(expr, "variable", None)
-                if isinstance(variable, SimStackVariable):
-                    return False
-                if _segment_reg_name(expr, project) is not None:
-                    return False
-            return True
-        if isinstance(expr, structured_c.CTypeCast):
-            return _expr_is_safe_inline_candidate(expr.expr)
-        if isinstance(expr, structured_c.CUnaryOp):
-            return expr.op in {"Neg", "Not"} and _expr_is_safe_inline_candidate(expr.operand)
-        if isinstance(expr, structured_c.CBinaryOp):
-            if expr.op not in {"Add", "Sub", "Mul", "And", "Or", "Xor", "Shl", "Shr"}:
-                return False
-            return _expr_is_safe_inline_candidate(expr.lhs) and _expr_is_safe_inline_candidate(expr.rhs)
-        return False
-
-    def _make_mk_fp(segment_expr, offset_expr):
-        return structured_c.CFunctionCall("MK_FP", None, [segment_expr, offset_expr], codegen=codegen)
-
-    def _expr_is_bare_storage_alias(expr) -> bool:
-        expr = _unwrap_c_casts(expr)
-        if not isinstance(expr, structured_c.CVariable):
-            return False
-        variable = getattr(expr, "variable", None)
-        if isinstance(variable, SimStackVariable):
-            return True
-        return _segment_reg_name(expr, project) is not None
-
-    def _expr_uses_promoted_stack_storage(expr, minimum_size: int = 4) -> bool:
-        for walk_node in _iter_c_nodes_deep(expr):
-            if not isinstance(walk_node, structured_c.CVariable):
-                continue
-            variable = getattr(walk_node, "variable", None)
-            if not isinstance(variable, SimStackVariable):
-                continue
-            if getattr(variable, "size", 0) >= minimum_size:
-                continue
-            offset = getattr(variable, "offset", None)
-            if isinstance(offset, int):
-                resolved = _resolve_stack_cvar_at_offset(codegen, offset)
-                resolved_variable = getattr(resolved, "variable", None)
-                if isinstance(resolved_variable, SimStackVariable) and getattr(resolved_variable, "size", 0) >= minimum_size:
-                    continue
-            return False
-        return True
-
-    def _stack_variable_is_promoted(variable, minimum_size: int = 4) -> bool:
-        if not isinstance(variable, SimStackVariable):
-            return False
-        if getattr(variable, "size", 0) >= minimum_size:
-            return True
-        offset = getattr(variable, "offset", None)
-        if isinstance(offset, int):
-            resolved = _resolve_stack_cvar_at_offset(codegen, offset)
-            resolved_variable = getattr(resolved, "variable", None)
-            if isinstance(resolved_variable, SimStackVariable) and getattr(resolved_variable, "size", 0) >= minimum_size:
-                return True
-        return False
-
-    traits_cache = getattr(project, "_inertia_access_traits", None)
-    evidence_profiles = None
-    if isinstance(traits_cache, dict):
-        traits = traits_cache.get(getattr(codegen.cfunc, "addr", None))
-        if isinstance(traits, dict):
-            evidence_profiles = _build_access_trait_evidence_profiles(traits)
-    if evidence_profiles is None or not any(profile.member_like for profile in evidence_profiles.values()):
-        return False
-
-    def _member_offset_for_variable(variable) -> int | None:
-        if evidence_profiles is None:
-            return None
-        base_key = _access_trait_variable_key(variable)
-        if base_key is None:
-            return None
-        profile = evidence_profiles.get(base_key)
-        if profile is None or not profile.member_like:
-            return None
-        offset, _size, _count = sorted(profile.member_like, key=lambda item: (-item[2], item[0], item[1]))[0]
-        return offset
-
-    copy_aliases: dict[int, object] = {}
-    for _ in range(3):
-        changed_alias = False
-        for walk_node in _iter_c_nodes_deep(codegen.cfunc.statements):
-            if not isinstance(walk_node, structured_c.CAssignment) or not isinstance(walk_node.lhs, structured_c.CVariable):
-                continue
-            lhs_var = getattr(walk_node.lhs, "variable", None)
-            if lhs_var is None:
-                continue
-            rhs = _unwrap_c_casts(walk_node.rhs)
-            resolved_rhs = None
-            if isinstance(rhs, structured_c.CVariable):
-                rhs_var = getattr(rhs, "variable", None)
-                if rhs_var is not None:
-                    resolved_rhs = copy_aliases.get(id(rhs_var))
-                    if resolved_rhs is None:
-                        resolved_rhs = rhs
-            elif _c_constant_value(rhs) is not None or _expr_is_safe_inline_candidate(rhs):
-                resolved_rhs = rhs
-            if resolved_rhs is not None and _expr_is_bare_storage_alias(resolved_rhs):
-                resolved_rhs = None
-            if resolved_rhs is None:
-                continue
-            lhs_member_offset = _member_offset_for_variable(lhs_var)
-            if lhs_member_offset is not None and not _stack_variable_is_promoted(lhs_var):
-                continue
-            if copy_aliases.get(id(lhs_var)) != resolved_rhs:
-                copy_aliases[id(lhs_var)] = resolved_rhs
-                changed_alias = True
-        if not changed_alias:
-            break
-
-    def _resolve_alias_expr(expr):
-        expr = _unwrap_c_casts(expr)
-        seen: set[int] = set()
-        while isinstance(expr, structured_c.CVariable):
-            variable = getattr(expr, "variable", None)
-            if variable is None:
-                break
-            key = id(variable)
-            if key in seen:
-                break
-            seen.add(key)
-            if key in far_pointer_aliases:
-                expr = far_pointer_aliases[key]
-                continue
-            alias_expr = copy_aliases.get(key)
-            if alias_expr is None:
-                break
-            expr = _unwrap_c_casts(alias_expr)
-        return expr
-
-    groups: dict[object, dict[str, list[tuple[structured_c.CVariable, object]]]] = {}
-    for walk_node in _iter_c_nodes_deep(codegen.cfunc.statements):
-        if not isinstance(walk_node, structured_c.CAssignment) or not isinstance(walk_node.lhs, structured_c.CVariable):
-            continue
-        lhs_var = getattr(walk_node.lhs, "variable", None)
-        if not isinstance(lhs_var, SimStackVariable):
-            continue
-        lhs_facts = describe_alias_storage(walk_node.lhs)
-        if lhs_facts.identity is None or lhs_facts.needs_synthesis():
-            continue
-        rhs = _unwrap_c_casts(walk_node.rhs)
-        if _c_constant_value(rhs) is None and not _expr_is_safe_inline_candidate(rhs):
-            continue
-        bucket = groups.setdefault(lhs_facts.identity, {"zero": [], "source": []})
-        if _c_constant_value(rhs) == 0:
-            bucket["zero"].append((walk_node.lhs, rhs))
-        else:
-            bucket["source"].append((walk_node.lhs, rhs))
-
-    def _source_score(_cvar, expr) -> tuple[int, int, int]:
-        expr = _unwrap_c_casts(expr)
-        variable = getattr(expr, "variable", None)
-        name = getattr(variable, "name", None) or getattr(expr, "name", None)
-        generic_name = isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+)", name) is not None
-        if isinstance(variable, SimStackVariable):
-            return (0 if not generic_name else 2, getattr(variable, "offset", 0), getattr(variable, "size", 0))
-        if isinstance(variable, SimMemoryVariable):
-            return (0 if not generic_name else 2, getattr(variable, "addr", 0), getattr(variable, "size", 0))
-        if isinstance(variable, SimRegisterVariable):
-            return (3 if generic_name else 1, getattr(variable, "reg", 0), getattr(variable, "size", 0))
-        if isinstance(expr, structured_c.CConstant):
-            return (4, int(expr.value) if isinstance(expr.value, int) else 0, 0)
-        return (4, 0, 0)
-
-    far_pointer_aliases: dict[int, object] = {}
-    for _storage_identity, parts in groups.items():
-        if not parts["source"]:
-            continue
-        candidate_exprs = [cvar for cvar, _rhs in parts["source"] + parts["zero"]]
-        if not candidate_exprs:
-            continue
-        candidate_facts = [describe_alias_storage(expr) for expr in candidate_exprs]
-        if any(facts.needs_synthesis() or facts.identity is None for facts in candidate_facts):
-            continue
-        if any(
-            not left.can_join(right)
-            for idx, left in enumerate(candidate_facts)
-            for right in candidate_facts[idx + 1 :]
-        ):
-            continue
-        source_expr = None
-        for cvar, rhs in sorted(parts["source"], key=lambda item: _source_score(item[0], item[1])):
-            variable = getattr(cvar, "variable", None)
-            if not isinstance(variable, SimStackVariable):
-                continue
-            source_expr = _resolve_alias_expr(rhs)
-            member_offset = _member_offset_for_variable(variable)
-            if member_offset is not None:
-                if not _stack_variable_is_promoted(variable):
-                    continue
-                if not _expr_uses_promoted_stack_storage(source_expr):
-                    continue
-                source_expr = _make_mk_fp(
-                    source_expr,
-                    structured_c.CConstant(member_offset, SimTypeShort(False), codegen=codegen),
-                )
-            break
-        if source_expr is None:
-            continue
-        for cvar, _rhs in parts["source"] + parts["zero"]:
-            variable = getattr(cvar, "variable", None)
-            if not isinstance(variable, SimStackVariable):
-                continue
-            far_pointer_aliases[id(variable)] = source_expr
-
-    if not far_pointer_aliases:
-        return False
-
-    changed = False
-
-    def transform(node):
-        nonlocal changed
-
-        if not isinstance(node, structured_c.CBinaryOp) or node.op != "Add":
-            return node
-
-        for lhs, rhs in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-            lhs_unwrapped = _resolve_alias_expr(lhs)
-            if _expr_is_bare_storage_alias(lhs_unwrapped):
-                continue
-            if (
-                lhs_unwrapped is not lhs
-                and _expr_is_safe_inline_candidate(rhs)
-                and not isinstance(lhs_unwrapped, (structured_c.CBinaryOp, structured_c.CFunctionCall))
-            ):
-                changed = True
-                return _make_mk_fp(lhs_unwrapped, rhs)
-
-            rhs_unwrapped = _resolve_alias_expr(rhs)
-            if _expr_is_bare_storage_alias(rhs_unwrapped):
-                continue
-            if (
-                rhs_unwrapped is not rhs
-                and _expr_is_safe_inline_candidate(lhs)
-                and not isinstance(rhs_unwrapped, (structured_c.CBinaryOp, structured_c.CFunctionCall))
-            ):
-                changed = True
-                return _make_mk_fp(rhs_unwrapped, lhs)
-
-        return node
-
-    root = codegen.cfunc.statements
-    new_root = transform(root)
-    if new_root is not root:
-        codegen.cfunc.statements = new_root
-        root = new_root
-        changed = True
-
-    if _replace_c_children(root, transform):
-        changed = True
-
-    return changed
+    return _cli_far_pointer_stack._coalesce_far_pointer_stack_expressions(
+        project,
+        codegen,
+        unwrap_c_casts=_unwrap_c_casts,
+        segment_reg_name=_segment_reg_name,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
+        build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
+            traits,
+            build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+        ),
+        stable_access_object_hint_for_key=_cli_access_object_hints._stable_access_object_hint_for_key,
+        access_trait_variable_key=_access_trait_variable_key,
+        replace_c_children=_replace_c_children,
+        describe_alias_storage=describe_alias_storage,
+    )
 
 
 def _simplify_nested_mk_fp_calls(codegen) -> bool:
@@ -10413,737 +10181,43 @@ def _seed_adjacent_byte_pair_aliases(project: angr.Project, codegen) -> dict[int
 
 
 def _coalesce_linear_recurrence_statements(project: angr.Project, codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    changed = False
-    linear_defs: dict[object, tuple[object, int]] = {}
-    protected_linear_defs: set[int] = set()
-    shift_defs: dict[int, tuple[object, int]] = {}
-    expr_aliases: dict[int, object] = {}
-    expr_aliases.update(_seed_adjacent_byte_pair_aliases(project, codegen))
-    dereferenced_variable_ids: set[int] = set()
-    protected_linear_alias_ids: set[int] = set()
-
-    def _collect_variable_ids(expr, ids: set[int]) -> None:
-        expr = _unwrap_c_casts(expr)
-        if isinstance(expr, structured_c.CVariable):
-            variable = getattr(expr, "variable", None)
-            if variable is not None:
-                ids.add(id(variable))
-            return
-        for attr in ("lhs", "rhs", "operand", "expr"):
-            if not hasattr(expr, attr):
-                continue
-            try:
-                value = getattr(expr, attr)
-            except Exception:
-                continue
-            if _structured_codegen_node(value):
-                _collect_variable_ids(value, ids)
-        for attr in ("args", "operands", "statements"):
-            if not hasattr(expr, attr):
-                continue
-            try:
-                items = getattr(expr, attr)
-            except Exception:
-                continue
-            for item in items or ():
-                if _structured_codegen_node(item):
-                    _collect_variable_ids(item, ids)
-
-    for walk_node in _iter_c_nodes_deep(codegen.cfunc.statements):
-        if isinstance(walk_node, structured_c.CUnaryOp) and walk_node.op == "Dereference":
-            _collect_variable_ids(getattr(walk_node, "operand", None), dereferenced_variable_ids)
-
-    for alias_var_id, alias_expr in expr_aliases.items():
-        alias_expr = _unwrap_c_casts(alias_expr)
-        if not isinstance(alias_expr, structured_c.CUnaryOp) or alias_expr.op != "Dereference":
-            continue
-        protected_linear_alias_ids.add(alias_var_id)
-        _collect_variable_ids(getattr(alias_expr, "operand", None), protected_linear_alias_ids)
-
-    def _is_linear_register_temp(cvar) -> bool:
-        if not isinstance(cvar, structured_c.CVariable):
-            return False
-        name = getattr(cvar, "name", None)
-        if not isinstance(name, str):
-            return False
-        if re.fullmatch(r"(?:v\d+|vvar_\d+|ir_\d+)", name) is not None:
-            return True
-        variable = getattr(cvar, "variable", None)
-        return isinstance(variable, SimRegisterVariable) and re.fullmatch(r"[A-Za-z]{1,3}_\d+", name) is not None
-
-    def _is_copy_alias_candidate(expr) -> bool:
-        expr = _unwrap_c_casts(expr)
-        return isinstance(expr, structured_c.CVariable)
-
-    variable_use_counts: dict[int, int] = {}
-    for walk_node in _iter_c_nodes_deep(codegen.cfunc.statements):
-        if isinstance(walk_node, structured_c.CVariable):
-            variable = getattr(walk_node, "variable", None)
-            if variable is not None:
-                key = id(variable)
-                variable_use_counts[key] = variable_use_counts.get(key, 0) + 1
-
-    def _extract_linear_delta(expr):
-        expr = _unwrap_c_casts(expr)
-        if isinstance(expr, structured_c.CConstant) and isinstance(expr.value, int):
-            return None, int(expr.value)
-        if isinstance(expr, structured_c.CBinaryOp) and expr.op == "Or":
-            duplicate_word_base = _match_duplicate_word_base_expr(expr, _resolve_known_copy_alias_expr)
-            if duplicate_word_base is not None:
-                return duplicate_word_base, 0
-        if not isinstance(expr, structured_c.CBinaryOp) or expr.op not in {"Add", "Sub"}:
-            return expr, 0
-        left_base, left_delta = _extract_linear_delta(expr.lhs)
-        right_base, right_delta = _extract_linear_delta(expr.rhs)
-        if left_base is not None and right_base is not None:
-            if _same_c_expression(left_base, right_base) and expr.op == "Add":
-                return left_base, left_delta + right_delta
-            return expr, 0
-        if left_base is not None:
-            if expr.op == "Add":
-                return left_base, left_delta + right_delta
-            return left_base, left_delta - right_delta
-        if right_base is not None:
-            if expr.op == "Add":
-                return right_base, left_delta + right_delta
-            return expr, 0
-        if expr.op == "Add":
-            return None, left_delta + right_delta
-        return None, left_delta - right_delta
-
-    def _build_linear_expr(base_expr, delta, codegen):
-        if delta == 0:
-            return base_expr
-        op = "Add" if delta > 0 else "Sub"
-        magnitude = delta if delta > 0 else -delta
-        return structured_c.CBinaryOp(
-            op,
-            base_expr,
-            structured_c.CConstant(magnitude, SimTypeShort(False), codegen=codegen),
-            codegen=codegen,
-        )
-
-    def _build_shift_expr(base_expr, count, codegen):
-        if count == 0:
-            return base_expr
-        return structured_c.CBinaryOp(
-            "Shr",
-            base_expr,
-            structured_c.CConstant(count, SimTypeShort(False), codegen=codegen),
-            codegen=codegen,
-        )
-
-    def _expr_is_safe_inline_candidate(expr):
-        expr = _unwrap_c_casts(expr)
-        if isinstance(expr, (structured_c.CConstant, structured_c.CVariable)):
-            return True
-        if isinstance(expr, structured_c.CTypeCast):
-            return _expr_is_safe_inline_candidate(expr.expr)
-        if isinstance(expr, structured_c.CUnaryOp):
-            return expr.op in {"Neg", "Not"} and _expr_is_safe_inline_candidate(expr.operand)
-        if isinstance(expr, structured_c.CBinaryOp):
-            if expr.op not in {"Add", "Sub", "Mul", "And", "Or", "Xor", "Shl", "Shr"}:
-                return False
-            return _expr_is_safe_inline_candidate(expr.lhs) and _expr_is_safe_inline_candidate(expr.rhs)
-        return False
-
-    def _inline_known_linear_defs(
-        expr,
-        seen_vars: set[int] | None = None,
-        seen_exprs: set[int] | None = None,
-        depth: int = 0,
-    ):
-        expr = _unwrap_c_casts(expr)
-        if depth > 64:
-            return expr
-        if seen_vars is None:
-            seen_vars = set()
-        if seen_exprs is None:
-            seen_exprs = set()
-        expr_key = id(expr)
-        if expr_key in seen_exprs:
-            return expr
-        seen_exprs.add(expr_key)
-        if isinstance(expr, structured_c.CVariable):
-            linear = None
-            variable = getattr(expr, "variable", None)
-            if variable is not None:
-                var_id = id(variable)
-                if var_id in dereferenced_variable_ids or var_id in protected_linear_alias_ids:
-                    return expr
-                if var_id in seen_vars:
-                    return expr
-                seen_vars.add(var_id)
-                alias = expr_aliases.get(var_id)
-                if alias is not None:
-                    aliased = _inline_known_linear_defs(alias, seen_vars, seen_exprs, depth + 1)
-                    if aliased is not expr:
-                        return aliased
-                linear = linear_defs.get(var_id)
-            if linear is not None:
-                base_expr, delta = linear
-                if id(variable) in protected_linear_defs:
-                    return expr
-                if _match_duplicate_word_base_expr(_resolve_known_copy_alias_expr(base_expr), _resolve_known_copy_alias_expr) is not None:
-                    return expr
-                return _build_linear_expr(base_expr, delta, codegen)
-            return expr
-        if isinstance(expr, structured_c.CBinaryOp):
-            lhs = _inline_known_linear_defs(expr.lhs, seen_vars, seen_exprs, depth + 1)
-            rhs = _inline_known_linear_defs(expr.rhs, seen_vars, seen_exprs, depth + 1)
-            if lhs is not expr.lhs or rhs is not expr.rhs:
-                expr = structured_c.CBinaryOp(expr.op, lhs, rhs, codegen=codegen)
-            linear_expr = _match_linear_word_delta_expr(expr)
-            if linear_expr is not None and not _same_c_expression(linear_expr, expr):
-                return linear_expr
-            return expr
-        if isinstance(expr, structured_c.CUnaryOp):
-            if expr.op == "Dereference":
-                return expr
-            operand = _inline_known_linear_defs(expr.operand, seen_vars, seen_exprs, depth + 1)
-            if operand is not expr.operand:
-                return structured_c.CUnaryOp(expr.op, operand, codegen=codegen)
-        return expr
-
-    def _extract_shift_delta(expr):
-        expr = _unwrap_c_casts(expr)
-        if isinstance(expr, structured_c.CConstant) and isinstance(expr.value, int):
-            return None, int(expr.value)
-        if not isinstance(expr, structured_c.CBinaryOp) or expr.op != "Shr":
-            return expr, 0
-        shift = _c_constant_value(_unwrap_c_casts(expr.rhs))
-        if not isinstance(shift, int):
-            return expr, 0
-        base = _unwrap_c_casts(expr.lhs)
-        if isinstance(base, structured_c.CVariable):
-            variable = getattr(base, "variable", None)
-            if variable is not None:
-                alias = shift_defs.get(id(variable))
-                if alias is not None:
-                    alias_base, alias_shift = alias
-                    return alias_base, alias_shift + shift
-        return base, shift
-
-    def _inline_known_shift_defs(expr):
-        expr = _unwrap_c_casts(expr)
-        if isinstance(expr, structured_c.CVariable):
-            variable = getattr(expr, "variable", None)
-            if variable is not None:
-                alias = shift_defs.get(id(variable))
-                if alias is not None:
-                    base_expr, count = alias
-                    return _build_shift_expr(base_expr, count, codegen)
-            return expr
-        if isinstance(expr, structured_c.CBinaryOp):
-            lhs = _inline_known_shift_defs(expr.lhs)
-            rhs = _inline_known_shift_defs(expr.rhs)
-            if lhs is not expr.lhs or rhs is not expr.rhs:
-                return structured_c.CBinaryOp(expr.op, lhs, rhs, codegen=codegen)
-        if isinstance(expr, structured_c.CUnaryOp):
-            operand = _inline_known_shift_defs(expr.operand)
-            if operand is not expr.operand:
-                return structured_c.CUnaryOp(expr.op, operand, codegen=codegen)
-        return expr
-
-    def _alias_storage_key(expr):
-        facts = describe_alias_storage(expr)
-        return facts.identity
-
-    def _resolve_known_copy_alias_expr(
-        expr,
-        active_expr_ids: set[int] | None = None,
-        seen_var_ids: set[int] | None = None,
-        seen_storage: set[object] | None = None,
-        depth: int = 0,
-    ):
-        expr = _unwrap_c_casts(expr)
-        if depth > 64:
-            return _canonicalize_stack_cvar_expr(expr, codegen)
-        if active_expr_ids is None:
-            active_expr_ids = set()
-        expr_id = id(expr)
-        if expr_id in active_expr_ids:
-            return _canonicalize_stack_cvar_expr(expr, codegen)
-        active_expr_ids.add(expr_id)
-        if seen_var_ids is None:
-            seen_var_ids = set()
-        if seen_storage is None:
-            seen_storage = set()
-        while isinstance(expr, structured_c.CVariable):
-            variable = getattr(expr, "variable", None)
-            if variable is None:
-                break
-            key = id(variable)
-            storage_key = _alias_storage_key(expr)
-            if key in seen_var_ids:
-                break
-            seen_var_ids.add(key)
-            if storage_key is not None:
-                if storage_key in seen_storage:
-                    break
-                seen_storage.add(storage_key)
-            alias = expr_aliases.get(key)
-            if alias is None and storage_key is not None:
-                alias = expr_aliases.get(storage_key)
-            if alias is None:
-                linear = linear_defs.get(key)
-                if linear is not None:
-                    base_expr, delta = linear
-                    alias = _build_linear_expr(base_expr, delta, codegen)
-            if alias is None:
-                break
-            expr = _unwrap_c_casts(alias)
-        if isinstance(expr, structured_c.CTypeCast):
-            inner = _resolve_known_copy_alias_expr(
-                expr.expr,
-                active_expr_ids,
-                seen_var_ids.copy(),
-                seen_storage.copy(),
-                depth + 1,
-            )
-            if inner is not expr.expr:
-                active_expr_ids.discard(expr_id)
-                return structured_c.CTypeCast(None, expr.type, inner, codegen=getattr(expr, "codegen", None))
-            active_expr_ids.discard(expr_id)
-            return _canonicalize_stack_cvar_expr(expr, codegen)
-        if isinstance(expr, structured_c.CUnaryOp):
-            operand = _resolve_known_copy_alias_expr(
-                expr.operand,
-                active_expr_ids,
-                seen_var_ids.copy(),
-                seen_storage.copy(),
-                depth + 1,
-            )
-            if operand is not expr.operand:
-                active_expr_ids.discard(expr_id)
-                return structured_c.CUnaryOp(expr.op, operand, codegen=getattr(expr, "codegen", None))
-            active_expr_ids.discard(expr_id)
-            return _canonicalize_stack_cvar_expr(expr, codegen)
-        if isinstance(expr, structured_c.CBinaryOp):
-            lhs = _resolve_known_copy_alias_expr(
-                expr.lhs,
-                active_expr_ids,
-                seen_var_ids.copy(),
-                seen_storage.copy(),
-                depth + 1,
-            )
-            rhs = _resolve_known_copy_alias_expr(
-                expr.rhs,
-                active_expr_ids,
-                seen_var_ids.copy(),
-                seen_storage.copy(),
-                depth + 1,
-            )
-            if lhs is not expr.lhs or rhs is not expr.rhs:
-                active_expr_ids.discard(expr_id)
-                return structured_c.CBinaryOp(expr.op, lhs, rhs, codegen=getattr(expr, "codegen", None))
-        active_expr_ids.discard(expr_id)
-        return _canonicalize_stack_cvar_expr(expr, codegen)
-
-    def _expr_contains_dereference(expr, active_expr_ids: set[int] | None = None) -> bool:
-        expr = _unwrap_c_casts(expr)
-        if active_expr_ids is None:
-            active_expr_ids = set()
-        expr_id = id(expr)
-        if expr_id in active_expr_ids:
-            return False
-        active_expr_ids.add(expr_id)
-        if isinstance(expr, structured_c.CUnaryOp):
-            if expr.op == "Dereference":
-                active_expr_ids.discard(expr_id)
-                return True
-            result = _expr_contains_dereference(expr.operand, active_expr_ids)
-            active_expr_ids.discard(expr_id)
-            return result
-        if isinstance(expr, structured_c.CBinaryOp):
-            result = _expr_contains_dereference(expr.lhs, active_expr_ids) or _expr_contains_dereference(
-                expr.rhs, active_expr_ids
-            )
-            active_expr_ids.discard(expr_id)
-            return result
-        if isinstance(expr, structured_c.CTypeCast):
-            result = _expr_contains_dereference(expr.expr, active_expr_ids)
-            active_expr_ids.discard(expr_id)
-            return result
-        if isinstance(expr, structured_c.CFunctionCall):
-            result = any(_expr_contains_dereference(arg, active_expr_ids) for arg in getattr(expr, "args", ()) or ())
-            active_expr_ids.discard(expr_id)
-            return result
-        active_expr_ids.discard(expr_id)
-        return False
-
-    for alias_var_id, alias_expr in expr_aliases.items():
-        resolved_alias = _resolve_known_copy_alias_expr(alias_expr)
-        if _expr_contains_dereference(resolved_alias):
-            protected_linear_alias_ids.add(alias_var_id)
-            _collect_variable_ids(resolved_alias, protected_linear_alias_ids)
-
-    def _match_linear_word_delta_expr(expr):
-        analysis = _analyze_widening_expr(
-            expr,
-            _resolve_known_copy_alias_expr,
-            _match_high_byte_projection_base,
-        )
-        if analysis is None or analysis.kind != "linear":
-            return None
-        resolved_base = _resolve_known_copy_alias_expr(analysis.base_expr)
-        if _match_duplicate_word_base_expr(resolved_base, _resolve_known_copy_alias_expr) is not None:
-            return None
-        if analysis.delta == 0:
-            return analysis.base_expr
-        return _build_linear_expr(analysis.base_expr, analysis.delta, codegen)
-
-    def visit(node):
-        nonlocal changed
-
-        if isinstance(node, structured_c.CStatements):
-            new_statements = []
-            i = 0
-            while i < len(node.statements):
-                stmt = node.statements[i]
-                next_stmt = node.statements[i + 1] if i + 1 < len(node.statements) else None
-
-                if isinstance(stmt, structured_c.CAssignment) and isinstance(stmt.lhs, structured_c.CVariable):
-                    stmt_var = getattr(stmt.lhs, "variable", None)
-                    if stmt_var is not None and id(stmt_var) in dereferenced_variable_ids:
-                        visit(stmt)
-                        new_statements.append(stmt)
-                        i += 1
-                        continue
-                    carry_base = _match_duplicate_word_increment_shift_expr(stmt.rhs, _resolve_known_copy_alias_expr, codegen)
-                    if carry_base is not None:
-                        replacement = structured_c.CAssignment(
-                            stmt.lhs,
-                            carry_base,
-                            codegen=codegen,
-                        )
-                        new_statements.append(replacement)
-                        changed = True
-                        i += 1
-                        continue
-
-                if (
-                    isinstance(stmt, structured_c.CAssignment)
-                    and isinstance(stmt.lhs, structured_c.CVariable)
-                    and isinstance(next_stmt, structured_c.CAssignment)
-                    and isinstance(next_stmt.lhs, structured_c.CVariable)
-                ):
-                    temp_var = getattr(stmt.lhs, "variable", None)
-                    next_var = getattr(next_stmt.lhs, "variable", None)
-                    temp_use_count = variable_use_counts.get(id(temp_var), 0) if temp_var is not None else 0
-                    if (
-                        (temp_var is not None and id(temp_var) in dereferenced_variable_ids)
-                        or (next_var is not None and id(next_var) in dereferenced_variable_ids)
-                        or (temp_var is not None and id(temp_var) in protected_linear_alias_ids)
-                        or (next_var is not None and id(next_var) in protected_linear_alias_ids)
-                    ):
-                        visit(stmt)
-                        new_statements.append(stmt)
-                        i += 1
-                        continue
-
-                    if (
-                        temp_use_count >= 2
-                        and _is_linear_register_temp(stmt.lhs)
-                        and _is_linear_register_temp(next_stmt.lhs)
-                    ):
-                        stmt_base, stmt_delta = _extract_linear_delta(stmt.rhs)
-                        next_rhs = _unwrap_c_casts(next_stmt.rhs)
-                        if isinstance(next_rhs, structured_c.CBinaryOp) and next_rhs.op in {"Add", "Sub"}:
-                            if _same_c_expression(_unwrap_c_casts(next_rhs.lhs), stmt.lhs):
-                                next_delta = _c_constant_value(_unwrap_c_casts(next_rhs.rhs))
-                                next_base = stmt_base
-                            elif _same_c_expression(_unwrap_c_casts(next_rhs.rhs), stmt.lhs):
-                                next_delta = _c_constant_value(_unwrap_c_casts(next_rhs.lhs))
-                                next_base = stmt_base
-                            else:
-                                next_delta = None
-                                next_base = None
-
-                            if next_base is not None and isinstance(next_delta, int):
-                                combined = stmt_delta + next_delta if next_rhs.op == "Add" else stmt_delta - next_delta
-                                replacement = structured_c.CAssignment(
-                                    next_stmt.lhs,
-                                    _build_linear_expr(next_base, combined, codegen),
-                                    codegen=codegen,
-                                )
-                                new_statements.append(replacement)
-                                changed = True
-                                i += 2
-                                continue
-
-                    if (
-                        temp_use_count >= 2
-                        and _is_linear_register_temp(stmt.lhs)
-                        and _is_linear_register_temp(next_stmt.lhs)
-                    ):
-                        stmt_shift_base, stmt_shift_count = _extract_shift_delta(stmt.rhs)
-                        next_shift_rhs = _unwrap_c_casts(next_stmt.rhs)
-                        if isinstance(next_shift_rhs, structured_c.CBinaryOp) and next_shift_rhs.op == "Shr":
-                            if _same_c_expression(_unwrap_c_casts(next_shift_rhs.lhs), stmt.lhs):
-                                next_shift_count = _c_constant_value(_unwrap_c_casts(next_shift_rhs.rhs))
-                                if isinstance(next_shift_count, int) and stmt_shift_count >= 0:
-                                    combined_shift = stmt_shift_count + next_shift_count
-                                    replacement = structured_c.CAssignment(
-                                        next_stmt.lhs,
-                                        _build_shift_expr(stmt_shift_base, combined_shift, codegen),
-                                        codegen=codegen,
-                                    )
-                                    shift_var = getattr(next_stmt.lhs, "variable", None)
-                                    if shift_var is not None:
-                                        shift_defs[id(shift_var)] = (stmt_shift_base, combined_shift)
-                                    new_statements.append(replacement)
-                                    changed = True
-                                    i += 2
-                                    continue
-
-                    if _is_linear_register_temp(stmt.lhs):
-                        stmt_base, stmt_delta = _extract_linear_delta(stmt.rhs)
-                        if stmt_base is not None:
-                            base_var = getattr(stmt_base, "variable", None) if isinstance(stmt_base, structured_c.CVariable) else None
-                            if base_var is not None and (
-                                id(base_var) in dereferenced_variable_ids or id(base_var) in protected_linear_alias_ids
-                            ):
-                                visit(stmt)
-                                new_statements.append(stmt)
-                                i += 1
-                                continue
-                            linear_defs[id(temp_var)] = (stmt_base, stmt_delta)
-                            resolved_base = _resolve_known_copy_alias_expr(stmt_base)
-                            if isinstance(resolved_base, structured_c.CVariable) and isinstance(
-                                getattr(resolved_base, "variable", None), SimStackVariable
-                            ):
-                                protected_linear_defs.add(id(temp_var))
-                            canonical_rhs = _build_linear_expr(stmt_base, stmt_delta, codegen)
-                            if not _same_c_expression(stmt.rhs, canonical_rhs):
-                                stmt = structured_c.CAssignment(stmt.lhs, canonical_rhs, codegen=codegen)
-                                changed = True
-                        rhs = _inline_known_linear_defs(stmt.rhs)
-                        inlined_base, inlined_delta = _extract_linear_delta(rhs)
-                        if inlined_base is not None and not _same_c_expression(rhs, stmt.rhs):
-                            stmt = structured_c.CAssignment(
-                                stmt.lhs,
-                                _build_linear_expr(inlined_base, inlined_delta, codegen),
-                                codegen=codegen,
-                            )
-                            rhs = stmt.rhs
-                            changed = True
-                        current_linear = None
-                        if temp_var is not None:
-                            current_linear = linear_defs.get(id(temp_var))
-                        if current_linear is not None and isinstance(rhs, structured_c.CBinaryOp) and rhs.op in {"Add", "Sub"}:
-                            if _same_c_expression(_unwrap_c_casts(rhs.lhs), stmt.lhs) or _same_c_expression(
-                                _unwrap_c_casts(rhs.rhs), stmt.lhs
-                            ):
-                                current_delta = _c_constant_value(_unwrap_c_casts(rhs.lhs))
-                                if current_delta is None:
-                                    current_delta = _c_constant_value(_unwrap_c_casts(rhs.rhs))
-                                if isinstance(current_delta, int):
-                                    base_expr, base_delta = current_linear
-                                    resolved_base = _resolve_known_copy_alias_expr(base_expr)
-                                    if isinstance(resolved_base, structured_c.CVariable) and isinstance(
-                                        getattr(resolved_base, "variable", None), SimStackVariable
-                                    ):
-                                        protected_linear_defs.add(id(temp_var))
-                                    combined = base_delta + current_delta if rhs.op == "Add" else base_delta - current_delta
-                                    stmt = structured_c.CAssignment(
-                                        stmt.lhs,
-                                        _build_linear_expr(base_expr, combined, codegen),
-                                        codegen=codegen,
-                                    )
-                                    changed = True
-                        if temp_var is not None and _is_copy_alias_candidate(stmt.rhs):
-                            alias = _unwrap_c_casts(stmt.rhs)
-                            alias_var = getattr(alias, "variable", None)
-                            if alias_var is not None and alias_var is not temp_var:
-                                expr_aliases[id(temp_var)] = alias
-                                storage_key = _alias_storage_key(stmt.lhs)
-                                if storage_key is not None:
-                                    expr_aliases[storage_key] = alias
-                        if isinstance(temp_var, SimStackVariable) and _is_copy_alias_candidate(stmt.rhs):
-                            alias = _unwrap_c_casts(stmt.rhs)
-                            alias_var = getattr(alias, "variable", None)
-                            if (
-                                isinstance(alias_var, SimStackVariable)
-                                and alias_var is not temp_var
-                                and _same_stack_slot_identity_var(temp_var, alias_var)
-                            ):
-                                expr_aliases[id(temp_var)] = alias
-                                storage_key = _alias_storage_key(stmt.lhs)
-                                if storage_key is not None:
-                                    expr_aliases[storage_key] = alias
-                visit(stmt)
-                new_statements.append(stmt)
-                i += 1
-
-            if changed or new_statements != node.statements:
-                node.statements = new_statements
-
-        elif isinstance(node, structured_c.CIfElse):
-            new_pairs = []
-            pair_changed = False
-            for cond, body in node.condition_and_nodes:
-                new_cond = cond
-                if _structured_codegen_node(cond):
-                    new_cond = _resolve_known_copy_alias_expr(new_cond)
-                    new_cond = _inline_known_linear_defs(new_cond)
-                if new_cond is not cond:
-                    pair_changed = True
-                visit(body)
-                new_pairs.append((new_cond, body))
-            if pair_changed:
-                node.condition_and_nodes = new_pairs
-                changed = True
-            if node.else_node is not None:
-                visit(node.else_node)
-        elif isinstance(node, structured_c.CWhileLoop):
-            condition = getattr(node, "condition", None)
-            if _structured_codegen_node(condition):
-                new_condition = _resolve_known_copy_alias_expr(condition)
-                new_condition = _inline_known_linear_defs(new_condition)
-                if new_condition is not condition:
-                    node.condition = new_condition
-                    changed = True
-            visit(getattr(node, "condition", None))
-            visit(getattr(node, "body", None))
-        elif hasattr(structured_c, "CDoWhileLoop") and isinstance(node, getattr(structured_c, "CDoWhileLoop")):
-            condition = getattr(node, "condition", None)
-            if _structured_codegen_node(condition):
-                new_condition = _resolve_known_copy_alias_expr(condition)
-                new_condition = _inline_known_linear_defs(new_condition)
-                if new_condition is not condition:
-                    node.condition = new_condition
-                    changed = True
-            visit(getattr(node, "condition", None))
-            visit(getattr(node, "body", None))
-        elif hasattr(structured_c, "CForLoop") and isinstance(node, getattr(structured_c, "CForLoop")):
-            init = getattr(node, "init", None)
-            if _structured_codegen_node(init):
-                new_init = _resolve_known_copy_alias_expr(init)
-                new_init = _inline_known_linear_defs(new_init)
-                if new_init is not init:
-                    node.init = new_init
-                    changed = True
-            condition = getattr(node, "condition", None)
-            if _structured_codegen_node(condition):
-                new_condition = _resolve_known_copy_alias_expr(condition)
-                new_condition = _inline_known_linear_defs(new_condition)
-                if new_condition is not condition:
-                    node.condition = new_condition
-                    changed = True
-            iteration = getattr(node, "iteration", None)
-            if _structured_codegen_node(iteration):
-                new_iteration = _resolve_known_copy_alias_expr(iteration)
-                new_iteration = _inline_known_linear_defs(new_iteration)
-                if new_iteration is not iteration:
-                    node.iteration = new_iteration
-                    changed = True
-            visit(getattr(node, "init", None))
-            visit(getattr(node, "condition", None))
-            visit(getattr(node, "iteration", None))
-            visit(getattr(node, "body", None))
-
-    visit(codegen.cfunc.statements)
-    return changed
+    return _cli_linear_recurrence._coalesce_linear_recurrence_statements(
+        project,
+        codegen,
+        unwrap_c_casts=_unwrap_c_casts,
+        structured_codegen_node=_structured_codegen_node,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        same_c_expression=_same_c_expression,
+        c_constant_value=_c_constant_value,
+        canonicalize_stack_cvar_expr=_canonicalize_stack_cvar_expr,
+        seed_adjacent_byte_pair_aliases=_seed_adjacent_byte_pair_aliases,
+        describe_alias_storage=describe_alias_storage,
+        analyze_widening_expr=_analyze_widening_expr,
+        match_high_byte_projection_base=_match_high_byte_projection_base,
+        match_duplicate_word_base_expr=_match_duplicate_word_base_expr,
+        match_duplicate_word_increment_shift_expr=_match_duplicate_word_increment_shift_expr,
+        same_stack_slot_identity_var=_same_stack_slot_identity_var,
+        rules=_cli_linear_recurrence_rules,
+    )
 
 
 def _coalesce_segmented_word_store_statements(project: angr.Project, codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    changed = False
-    target_type = SimTypeShort(False)
-
-    def visit(node):
-        nonlocal changed
-
-        if isinstance(node, structured_c.CStatements):
-            new_statements = []
-            i = 0
-            while i < len(node.statements):
-                stmt = node.statements[i]
-                next_stmt = node.statements[i + 1] if i + 1 < len(node.statements) else None
-
-                if isinstance(stmt, structured_c.CAssignment) and isinstance(next_stmt, structured_c.CAssignment):
-                    replacement = None
-
-                    if isinstance(stmt.lhs, structured_c.CVariable):
-                        matched = _match_ss_local_plus_const(next_stmt.lhs, project)
-                        if matched is not None:
-                            target_cvar, extra_offset = matched
-                            rhs_word = _match_word_rhs_from_byte_pair(stmt.rhs, next_stmt.rhs, codegen, project)
-                            if (
-                                extra_offset == 1
-                                and (_stack_slot_identity_can_join(target_cvar, stmt.lhs) or _same_c_storage(target_cvar, stmt.lhs))
-                                and rhs_word is not None
-                            ):
-                                replacement_lhs = _canonicalize_stack_cvar_expr(stmt.lhs, codegen)
-                                rhs_word = _canonicalize_stack_cvar_expr(rhs_word, codegen)
-                                if _promote_direct_stack_cvariable(codegen, replacement_lhs, 2, target_type):
-                                    changed = True
-                                replacement = structured_c.CAssignment(replacement_lhs, rhs_word, codegen=codegen)
-
-                    if replacement is None:
-                        low_addr_expr = _match_byte_store_addr_expr(stmt.lhs)
-                        high_addr_expr = _match_byte_store_addr_expr(next_stmt.lhs)
-                        rhs_word = _match_word_rhs_from_byte_pair(stmt.rhs, next_stmt.rhs, codegen, project)
-                        if (
-                            low_addr_expr is not None
-                            and high_addr_expr is not None
-                            and rhs_word is not None
-                            and _addr_exprs_are_byte_pair(low_addr_expr, high_addr_expr, project)
-                        ):
-                            low_facts = describe_alias_storage(low_addr_expr)
-                            high_facts = describe_alias_storage(high_addr_expr)
-                            if low_facts.identity is None or high_facts.identity is None or not low_facts.can_join(high_facts):
-                                visit(stmt)
-                                new_statements.append(stmt)
-                                i += 1
-                                continue
-                            low_class = _classify_segmented_addr_expr(low_addr_expr, project)
-                            if low_class is not None and low_class.kind == "stack":
-                                resolved_lhs = _resolve_stack_cvar_from_addr_expr(project, codegen, low_addr_expr)
-                                if resolved_lhs is None:
-                                    visit(stmt)
-                                    new_statements.append(stmt)
-                                    i += 1
-                                    continue
-                                replacement_lhs = _canonicalize_stack_cvar_expr(resolved_lhs, codegen)
-                                if _promote_direct_stack_cvariable(codegen, replacement_lhs, 2, target_type):
-                                    changed = True
-                                replacement = structured_c.CAssignment(replacement_lhs, rhs_word, codegen=codegen)
-                            else:
-                                resolved_lhs = _resolve_stack_cvar_from_addr_expr(project, codegen, low_addr_expr)
-                                replacement = structured_c.CAssignment(
-                                    resolved_lhs if resolved_lhs is not None else _make_word_dereference_from_addr_expr(codegen, project, low_addr_expr),
-                                    rhs_word,
-                                    codegen=codegen,
-                                )
-
-                    if replacement is not None:
-                        new_statements.append(replacement)
-                        changed = True
-                        i += 2
-                        continue
-
-                visit(stmt)
-                new_statements.append(stmt)
-                i += 1
-
-            if changed or new_statements != node.statements:
-                node.statements = new_statements
-
-        elif isinstance(node, structured_c.CIfElse):
-            for _cond, body in node.condition_and_nodes:
-                visit(body)
-            if node.else_node is not None:
-                visit(node.else_node)
-
-    visit(codegen.cfunc.statements)
-    return changed
+    return _cli_segmented_store_coalesce._coalesce_segmented_word_store_statements(
+        project,
+        codegen,
+        match_ss_local_plus_const=_match_ss_local_plus_const,
+        match_word_rhs_from_byte_pair=_match_word_rhs_from_byte_pair,
+        promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
+        stack_type_for_size=_stack_type_for_size,
+        stack_slot_identity_can_join=_stack_slot_identity_can_join,
+        canonicalize_stack_cvar_expr=_canonicalize_stack_cvar_expr,
+        match_byte_store_addr_expr=_match_byte_store_addr_expr,
+        addr_exprs_are_byte_pair=_addr_exprs_are_byte_pair,
+        resolve_stack_cvar_from_addr_expr=_resolve_stack_cvar_from_addr_expr,
+        make_word_dereference_from_addr_expr=_make_word_dereference_from_addr_expr,
+        classify_segmented_addr_expr=_classify_segmented_addr_expr,
+        describe_alias_storage=describe_alias_storage,
+    )
 
 
 def _global_memory_addr(node) -> int | None:
@@ -11390,59 +10464,20 @@ def _synthetic_word_global_variable(
 def _coalesce_cod_word_global_loads(
     project: angr.Project, codegen, synthetic_globals: dict[int, tuple[str, int]] | None
 ) -> bool:
-    if not synthetic_globals or getattr(codegen, "cfunc", None) is None:
-        return False
-
-    traits_cache = getattr(project, "_inertia_access_traits", None)
-    if not isinstance(traits_cache, dict) or getattr(codegen.cfunc, "addr", None) not in traits_cache:
-        _collect_access_traits(project, codegen)
-        traits_cache = getattr(project, "_inertia_access_traits", None)
-    evidence_profiles = None
-    if isinstance(traits_cache, dict):
-        traits = traits_cache.get(getattr(codegen.cfunc, "addr", None))
-        if isinstance(traits, dict):
-            evidence_profiles = _build_access_trait_evidence_profiles(traits)
-
-    created: dict[int, structured_c.CVariable] = {}
-
-    def transform(node):
-        if not isinstance(node, structured_c.CBinaryOp) or node.op not in {"Or", "Add"}:
-            return node
-
-        for low_expr, high_expr in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-            low_addr = _global_load_addr(low_expr, project)
-            if low_addr is None:
-                continue
-
-            cvar = _synthetic_word_global_variable(codegen, synthetic_globals, low_addr, created)
-            if cvar is None:
-                continue
-
-            if evidence_profiles is not None:
-                profile = evidence_profiles.get(("mem", low_addr))
-                if profile is not None and profile.member_like:
-                    continue
-
-            high_addr = _match_scaled_high_byte(high_expr, project)
-            if high_addr != low_addr + 1:
-                continue
-
-            return cvar
-
-        return node
-
-    root = codegen.cfunc.statements
-    new_root = transform(root)
-    if new_root is not root:
-        codegen.cfunc.statements = new_root
-        root = new_root
-        changed = True
-    else:
-        changed = False
-
-    if _replace_c_children(root, transform):
-        changed = True
-    return changed
+    return _cli_cod_globals._coalesce_cod_word_global_loads(
+        project,
+        codegen,
+        synthetic_globals,
+        collect_access_traits=_collect_access_traits,
+        build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
+            traits,
+            build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+        ),
+        global_load_addr=_global_load_addr,
+        match_scaled_high_byte=_match_scaled_high_byte,
+        synthetic_word_global_variable=_synthetic_word_global_variable,
+        replace_c_children=_replace_c_children,
+    )
 
 
 def _coalesce_segmented_word_load_expressions(project: angr.Project, codegen) -> bool:

@@ -1,41 +1,38 @@
 from __future__ import annotations
 
 import re
+from typing import Any, Callable, TypeAlias
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 
+from .cli_access_object_hints import AccessTraitObjectHint, BaseKey
 
-def _should_attach_access_trait_names(codegen, *, build_access_trait_evidence_profiles) -> bool:
-    cfunc = getattr(codegen, "cfunc", None)
-    if cfunc is None:
-        return False
-    project = getattr(codegen, "project", None)
-    if project is None:
-        return False
-    cache = getattr(project, "_inertia_access_traits", None)
-    if not isinstance(cache, dict):
-        return False
-    traits = cache.get(getattr(cfunc, "addr", None))
-    if not isinstance(traits, dict):
-        return False
-    profiles = build_access_trait_evidence_profiles(traits)
-    return any(profile.has_any_evidence() for profile in profiles.values())
+
+StableHints: TypeAlias = dict[BaseKey, AccessTraitObjectHint]
+ReplaceCChildren: TypeAlias = Callable[[Any, Callable[[Any], Any]], bool]
+
+
+def _should_attach_access_trait_names(
+    codegen: Any,
+    *,
+    has_stable_access_object_hints: Callable[[Any], bool],
+) -> bool:
+    return has_stable_access_object_hints(codegen)
 
 
 def _attach_access_trait_field_names(
-    project,
-    codegen,
+    project: Any,
+    codegen: Any,
     *,
-    should_attach_access_trait_names,
-    build_access_trait_evidence_profiles,
-    access_trait_variable_key,
-    access_trait_profile_for_key,
-    AccessTraitRewriteDecision,
-    stack_object_name,
-    access_trait_field_name,
-    replace_c_children,
-):
+    should_attach_access_trait_names: Callable[[Any], bool],
+    build_stable_access_object_hints: Callable[[dict[BaseKey, object]], StableHints],
+    stable_access_object_hint_for_key: Callable[[StableHints, BaseKey | None], AccessTraitObjectHint | None],
+    access_trait_variable_key: Callable[[Any], BaseKey | None],
+    stack_object_name: Callable[[int], str],
+    access_trait_field_name: Callable[[int, int], str],
+    replace_c_children: ReplaceCChildren,
+) -> bool:
     if getattr(codegen, "cfunc", None) is None:
         return False
     if not should_attach_access_trait_names(codegen):
@@ -47,23 +44,22 @@ def _attach_access_trait_field_names(
     traits = cache.get(getattr(codegen.cfunc, "addr", None))
     if not isinstance(traits, dict):
         return False
-    evidence_profiles = build_access_trait_evidence_profiles(traits)
+    object_hints = build_stable_access_object_hints(traits)
+    if not object_hints:
+        return False
 
     def is_generic_stack_name(name: object) -> bool:
         return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+)", name) is not None
 
-    def stack_rewrite_decision(variable):
+    def stack_rewrite_decision(variable: Any) -> AccessTraitObjectHint | None:
         base_key = access_trait_variable_key(variable)
         if base_key is None:
             return None
-        profile = access_trait_profile_for_key(evidence_profiles, base_key)
-        if profile is None or profile.best_rewrite_kind() is None:
-            return None
-        return AccessTraitRewriteDecision(base_key, profile)
+        return stable_access_object_hint_for_key(object_hints, base_key)
 
     changed = False
 
-    def rename_stack_variable(cvar, *, suffix: int = 0):
+    def rename_stack_variable(cvar: Any, *, suffix: int = 0) -> Any:
         nonlocal changed
         variable = getattr(cvar, "variable", None)
         if not isinstance(variable, SimStackVariable):
@@ -74,7 +70,7 @@ def _attach_access_trait_field_names(
         name = getattr(variable, "name", None)
         if not is_generic_stack_name(name) and not (isinstance(name, str) and name.startswith("field_")):
             return None
-        if decision.preferred_kind() == "stack":
+        if decision.kind == "stack":
             field_name = stack_object_name(getattr(variable, "offset", suffix))
         else:
             field_name = access_trait_field_name(suffix, getattr(variable, "size", 1))
@@ -90,7 +86,7 @@ def _attach_access_trait_field_names(
                 changed = True
         return cvar
 
-    def transform(node):
+    def transform(node: Any) -> Any:
         if isinstance(node, structured_c.CVariable):
             renamed = rename_stack_variable(node, suffix=0)
             if renamed is not None:
@@ -109,17 +105,16 @@ def _attach_access_trait_field_names(
 
 
 def _attach_pointer_member_names(
-    project,
-    codegen,
+    project: Any,
+    codegen: Any,
     *,
-    should_attach_access_trait_names,
-    access_trait_member_candidates,
-    build_access_trait_evidence_profiles,
-    access_trait_profile_for_key,
-    access_trait_variable_key,
-    AccessTraitRewriteDecision,
-    replace_c_children,
-):
+    should_attach_access_trait_names: Callable[[Any], bool],
+    build_stable_access_object_hints: Callable[[dict[BaseKey, object]], StableHints],
+    stable_access_object_hint_for_key: Callable[[StableHints, BaseKey | None], AccessTraitObjectHint | None],
+    access_trait_variable_key: Callable[[Any], BaseKey | None],
+    access_trait_field_name: Callable[[int, int], str],
+    replace_c_children: ReplaceCChildren,
+) -> bool:
     if getattr(codegen, "cfunc", None) is None:
         return False
     if not should_attach_access_trait_names(codegen):
@@ -131,29 +126,26 @@ def _attach_pointer_member_names(
     traits = cache.get(getattr(codegen.cfunc, "addr", None))
     if not isinstance(traits, dict):
         return False
+    object_hints = build_stable_access_object_hints(traits)
+    if not object_hints:
+        return False
 
     def is_generic_name(name: object) -> bool:
         return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+)", name) is not None
 
-    evidence = access_trait_member_candidates(traits)
-    evidence_profiles = build_access_trait_evidence_profiles(traits)
-    if not evidence:
-        return False
-
-    def candidate_field_names(base_key: tuple[object, ...]) -> tuple[str, ...]:
-        profile = access_trait_profile_for_key(evidence_profiles, base_key)
-        if profile is None:
+    def candidate_field_names(base_key: BaseKey) -> tuple[str, ...]:
+        hint = stable_access_object_hint_for_key(object_hints, base_key)
+        if hint is None:
             return ()
-        decision = AccessTraitRewriteDecision(base_key, profile)
-        if decision.preferred_kind() is None:
+        if hint.kind not in {"member", "array", "induction"}:
             return ()
-        return decision.candidate_field_names()
+        return hint.candidate_field_names(access_trait_field_name=access_trait_field_name)
 
     changed = False
     assigned_names: dict[int, str] = {}
-    name_cursors: dict[tuple[object, ...], int] = {}
+    name_cursors: dict[BaseKey, int] = {}
 
-    def assign_member_name(base_key: tuple[object, ...]) -> str | None:
+    def assign_member_name(base_key: BaseKey) -> str | None:
         names = candidate_field_names(base_key)
         if not names:
             return None
@@ -185,11 +177,11 @@ def _attach_pointer_member_names(
                 variable.name = field_name
                 changed = True
             if getattr(cvar, "name", None) != field_name:
-                cvar.name = field_name
+                setattr(cvar, "name", field_name)
                 changed = True
             assigned_names[id(variable)] = field_name
 
-    def rename_member_variable(cvar):
+    def rename_member_variable(cvar: Any) -> Any:
         nonlocal changed
         if not isinstance(cvar, structured_c.CVariable):
             return None
@@ -211,14 +203,14 @@ def _attach_pointer_member_names(
             changed = True
         if getattr(cvar, "name", None) != field_name:
             try:
-                cvar.name = field_name
+                setattr(cvar, "name", field_name)
             except Exception:
                 pass
             else:
                 changed = True
         return cvar
 
-    def transform(node):
+    def transform(node: Any) -> Any:
         if isinstance(node, structured_c.CVariable):
             renamed = rename_member_variable(node)
             if renamed is not None:

@@ -18,6 +18,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures.thread import _threads_queues, _worker
 from datetime import datetime
+from _pytest.capture import EncodedFile
 
 
 DEFAULT_FREE_RAM_BUDGET_FRACTION = 0.45
@@ -140,7 +141,7 @@ def guard_angr_variable_recovery_binop_sub_size_mismatch():
 
 
 class ThreadBoundTextIO(io.TextIOBase):
-    def __init__(self, fallback):
+    def __init__(self, fallback: EncodedFile) -> None:
         self._fallback = fallback
         self._local = threading.local()
 

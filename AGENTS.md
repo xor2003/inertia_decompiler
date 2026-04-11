@@ -415,10 +415,24 @@ Never do these unless explicitly marked as a temporary rescue:
 - Split mixed-responsibility files before adding more logic.
 - Prefer SRP over convenience.
 - It is forbidden to add any code to file bigger when 400 lines.
-For example to inertia_decompiler/cli.py.
+For example to inertia_decompiler/cli.py and ./angr_platforms/tests/test_x86_16_cli.py.
 - Avoid hidden coupling and global state.
 - Keep data flow explicit.
-- Add comments only when they genuinely clarify non-obvious logic.
+
+### Comments
+- Prefer self-documenting code (clear names)
+- Write why, not what
+- Use docstrings for public functions/classes
+- Document edge cases, hacks, constraints
+- Avoid obvious / redundant comments
+
+### Typing
+- Always type public APIs
+- Use dataclass / TypedDict instead of raw dicts
+- Prefer concrete types over Any
+- Use Optional (X | None) explicitly
+- Create type aliases for complex types
+- Use Protocol for interfaces
 
 ## Useful references
 
