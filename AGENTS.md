@@ -415,6 +415,7 @@ Never do these unless explicitly marked as a temporary rescue:
 - Split mixed-responsibility files before adding more logic.
 - Prefer SRP over convenience.
 - It is forbidden to add any code to file bigger when 400 lines.
+For example to inertia_decompiler/cli.py.
 - Avoid hidden coupling and global state.
 - Keep data flow explicit.
 - Add comments only when they genuinely clarify non-obvious logic.

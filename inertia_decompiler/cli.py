@@ -61,6 +61,17 @@ from inertia_decompiler.cli_timeout import (
     _default_recovery_timeout,
     _stdout_is_interactive,
 )
+from inertia_decompiler import cli_access_traits as _cli_access_traits
+from inertia_decompiler import cli_access_trait_rewrite as _cli_access_trait_rewrite
+from inertia_decompiler import cli_linear_aliases as _cli_linear_aliases
+from inertia_decompiler import cli_stack_coalesce as _cli_stack_coalesce
+from inertia_decompiler import cli_stack_cvars as _cli_stack_cvars
+from inertia_decompiler import cli_stack_locals as _cli_stack_locals
+from inertia_decompiler import cli_segmented as _cli_segmented
+from inertia_decompiler import cli_segmented_elision as _cli_segmented_elision
+from inertia_decompiler import cli_segmented_compare as _cli_segmented_compare
+from inertia_decompiler import cli_segmented_lowering as _cli_segmented_lowering
+from inertia_decompiler import cli_word_loads as _cli_word_loads
 from inertia_decompiler.tail_validation import (
     TAIL_VALIDATION_ENABLE_ENV as _TAIL_VALIDATION_ENABLE_ENV,
     emit_tail_validation_console_summary as _emit_tail_validation_console_summary,
@@ -6167,46 +6178,8 @@ def _project_rewrite_cache(project: angr.Project) -> dict[str, dict[int, object]
     return cache
 
 
-@dataclass(frozen=True)
-class _SegmentedAccess:
-    kind: str
-    seg_name: str | None
-    assoc_kind: str = "unknown"
-    assoc_state: object | None = None
-    linear: int | None = None
-    cvar: structured_c.CVariable | None = None
-    stack_var: SimStackVariable | None = None
-    extra_offset: int = 0
-    addr_expr: object | None = None
-
-    def allows_object_rewrite(self) -> bool:
-        if self.assoc_state is not None and hasattr(self.assoc_state, "is_over_associated"):
-            return not self.assoc_state.is_over_associated()
-        return self.assoc_kind != "over"
-
-
-@dataclass(frozen=True)
-class _SegmentAssociationState:
-    seg_name: str | None
-    base_terms: int = 0
-    other_terms: int = 0
-    const_offset: int = 0
-    stack_slots: tuple[object, ...] = ()
-
-    @property
-    def assoc_kind(self) -> str:
-        if self.seg_name is None:
-            return "unknown"
-        if len(self.stack_slots) > 1:
-            return "over"
-        if self.base_terms == 0:
-            return "const" if self.other_terms == 0 else "over"
-        if self.other_terms > 0:
-            return "over"
-        return "single"
-
-    def is_over_associated(self) -> bool:
-        return self.assoc_kind == "over"
+_SegmentedAccess = _cli_segmented._SegmentedAccess
+_SegmentAssociationState = _cli_segmented._SegmentAssociationState
 
 
 @dataclass(frozen=True)
@@ -6227,289 +6200,80 @@ class _CODSourceRewriteSpec:
 
 
 def _segment_reg_name(node, project: angr.Project) -> str | None:
-    cache = _project_rewrite_cache(project).setdefault("segment_reg_name", {})
-    key = id(node)
-    if key in cache:
-        return cache[key]
-
-    if not isinstance(node, structured_c.CVariable):
-        cache[key] = None
-        return None
-    variable = getattr(node, "variable", None)
-    if not isinstance(variable, SimRegisterVariable):
-        cache[key] = None
-        return None
-    result = project.arch.register_names.get(variable.reg)
-    cache[key] = result
-    return result
+    return _cli_segmented._segment_reg_name(node, project, project_rewrite_cache=_project_rewrite_cache)
 
 
 def _classify_segmented_addr_expr(node, project: angr.Project) -> _SegmentedAccess | None:
-    cache = _project_rewrite_cache(project).setdefault("segmented_addr_expr", {})
-    key = id(node)
-    if key in cache:
-        return cache[key]
-
-    seg_name = None
-    cvar = None
-    stack_var = None
-    const_offset = 0
-    other_terms = []
-    base_terms = 0
-    stack_slots: list[object] = []
-
-    for term in _flatten_c_add_terms(node):
-        inner = _unwrap_c_casts(term)
-
-        if isinstance(inner, structured_c.CBinaryOp) and inner.op == "Mul":
-            local_seg = None
-            for maybe_seg, maybe_scale in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
-                if _c_constant_value(_unwrap_c_casts(maybe_scale)) != 16:
-                    continue
-                local_seg = _segment_reg_name(_unwrap_c_casts(maybe_seg), project)
-                if local_seg is not None:
-                    break
-            if local_seg is not None:
-                seg_name = local_seg
-                continue
-
-        constant = _c_constant_value(inner)
-        if constant is not None:
-            const_offset += constant
-            continue
-
-        matched_stack = _match_stack_cvar_and_offset(inner)
-        if matched_stack is not None:
-            matched_cvar, stack_offset = matched_stack
-            stack_offset = _normalize_16bit_signed_offset(stack_offset)
-            matched_var = getattr(matched_cvar, "variable", None)
-            current_var = getattr(cvar, "variable", None) if cvar is not None else None
-            if cvar is None:
-                cvar = matched_cvar
-                if isinstance(matched_var, SimStackVariable):
-                    stack_var = matched_var
-                    identity = _stack_slot_identity_for_variable(matched_var)
-                    if identity is not None:
-                        if not stack_slots:
-                            stack_slots.append(identity)
-                        elif stack_slots[0] == identity:
-                            pass
-                        elif hasattr(stack_slots[0], "can_join") and stack_slots[0].can_join(identity):
-                            joined_identity = stack_slots[0].join(identity)
-                            if joined_identity is not None:
-                                stack_slots[0] = joined_identity
-                        else:
-                            stack_slots.append(identity)
-                const_offset += stack_offset
-                base_terms += 1
-            elif current_var is matched_var:
-                if isinstance(matched_var, SimStackVariable):
-                    identity = _stack_slot_identity_for_variable(matched_var)
-                    if identity is not None:
-                        if not stack_slots:
-                            stack_slots.append(identity)
-                        elif stack_slots[0] == identity:
-                            pass
-                        elif hasattr(stack_slots[0], "can_join") and stack_slots[0].can_join(identity):
-                            joined_identity = stack_slots[0].join(identity)
-                            if joined_identity is not None:
-                                stack_slots[0] = joined_identity
-                        else:
-                            stack_slots.append(identity)
-                const_offset += stack_offset
-                base_terms += 1
-            else:
-                other_terms.append(term)
-            continue
-
-        other_terms.append(term)
-
-    if seg_name is None:
-        cache[key] = None
-        return None
-
-    assoc_state = _SegmentAssociationState(
-        seg_name=seg_name,
-        base_terms=base_terms,
-        other_terms=len(other_terms),
-        const_offset=const_offset,
-        stack_slots=tuple(stack_slots),
+    return _cli_segmented._classify_segmented_addr_expr(
+        node,
+        project,
+        project_rewrite_cache=_project_rewrite_cache,
+        flatten_c_add_terms=_flatten_c_add_terms,
+        unwrap_c_casts=_unwrap_c_casts,
+        c_constant_value=_c_constant_value,
+        match_stack_cvar_and_offset=_match_stack_cvar_and_offset,
+        normalize_16bit_signed_offset=_normalize_16bit_signed_offset,
+        stack_slot_identity_for_variable=_stack_slot_identity_for_variable,
     )
-    assoc_kind = assoc_state.assoc_kind
-
-    if seg_name == "ss" and cvar is not None and not other_terms:
-        normalized_offset = _normalize_16bit_signed_offset(const_offset)
-        result = _SegmentedAccess(
-            "stack",
-            seg_name,
-            assoc_kind=assoc_kind,
-            assoc_state=assoc_state,
-            cvar=cvar,
-            stack_var=stack_var,
-            extra_offset=normalized_offset,
-            addr_expr=node,
-        )
-        cache[key] = result
-        return result
-
-    if cvar is None and not other_terms:
-        if seg_name == "ds":
-            kind = "global" if const_offset >= 0 else "unknown"
-            linear = const_offset if const_offset >= 0 else None
-        elif seg_name == "es":
-            kind = "extra"
-            linear = const_offset
-        else:
-            kind = "segment_const"
-            linear = const_offset
-        result = _SegmentedAccess(
-            kind,
-            seg_name,
-            assoc_kind=assoc_kind,
-            assoc_state=assoc_state,
-            linear=linear,
-            extra_offset=const_offset,
-            addr_expr=node,
-        )
-        cache[key] = result
-        return result
-
-    result = _SegmentedAccess(
-        "unknown",
-        seg_name,
-        assoc_kind=assoc_kind,
-        assoc_state=assoc_state,
-        linear=const_offset if cvar is None else None,
-        cvar=cvar,
-        stack_var=stack_var,
-        extra_offset=const_offset,
-        addr_expr=node,
-    )
-    cache[key] = result
-    return result
 
 
 def _classify_segmented_dereference(node, project: angr.Project) -> _SegmentedAccess | None:
-    cache = _project_rewrite_cache(project).setdefault("segmented_dereference_class", {})
-    key = id(node)
-    if key in cache:
-        return cache[key]
-
-    if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
-        cache[key] = None
-        return None
-    operand = node.operand
-    if isinstance(operand, structured_c.CTypeCast):
-        operand = operand.expr
-    result = _classify_segmented_addr_expr(operand, project)
-    cache[key] = result
-    return result
+    return _cli_segmented._classify_segmented_dereference(
+        node,
+        project,
+        project_rewrite_cache=_project_rewrite_cache,
+        classify_segmented_addr_expr=_classify_segmented_addr_expr,
+    )
 
 
 def _match_real_mode_linear_expr(node, project: angr.Project) -> tuple[str | None, int | None]:
-    cache = _project_rewrite_cache(project).setdefault("real_mode_linear_expr", {})
-    key = id(node)
-    if key in cache:
-        return cache[key]
-
-    classified = _classify_segmented_addr_expr(node, project)
-    if classified is None or classified.kind not in {"global", "extra", "segment_const"}:
-        cache[key] = (None, None)
-        return None, None
-    result = (classified.seg_name, classified.linear)
-    cache[key] = result
-    return result
+    return _cli_segmented._match_real_mode_linear_expr(
+        node,
+        project,
+        project_rewrite_cache=_project_rewrite_cache,
+        classify_segmented_addr_expr=_classify_segmented_addr_expr,
+    )
 
 
 def _match_segmented_dereference(node, project: angr.Project) -> tuple[str | None, int | None]:
-    cache = _project_rewrite_cache(project).setdefault("segmented_dereference", {})
-    key = id(node)
-    if key in cache:
-        return cache[key]
-
-    classified = _classify_segmented_dereference(node, project)
-    if classified is None or classified.linear is None:
-        cache[key] = (None, None)
-        return None, None
-    result = (classified.seg_name, classified.linear)
-    cache[key] = result
-    return result
+    return _cli_segmented._match_segmented_dereference(
+        node,
+        project,
+        project_rewrite_cache=_project_rewrite_cache,
+        classify_segmented_dereference=_classify_segmented_dereference,
+    )
 
 
 def _match_segment_register_based_dereference(node, project: angr.Project):
-    classified = _classify_segmented_dereference(node, project)
-    if classified is None or classified.addr_expr is None or classified.seg_name not in {"ds", "es"}:
-        return None
-    if not classified.allows_object_rewrite():
-        return None
-
-    addr_expr = classified.addr_expr
-    base_terms = []
-    for term in _flatten_c_add_terms(addr_expr):
-        inner = _unwrap_c_casts(term)
-        if isinstance(inner, structured_c.CBinaryOp) and inner.op == "Mul":
-            segment_scale = False
-            for maybe_seg, maybe_scale in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
-                if _c_constant_value(_unwrap_c_casts(maybe_scale)) != 16:
-                    continue
-                if _segment_reg_name(_unwrap_c_casts(maybe_seg), project) is not None:
-                    segment_scale = True
-                    break
-            if segment_scale:
-                continue
-
-        if _c_constant_value(inner) is not None:
-            continue
-
-        if isinstance(inner, structured_c.CVariable) and isinstance(getattr(inner, "variable", None), SimRegisterVariable):
-            base_terms.append(inner)
-            continue
-
-        return None
-
-    if len(base_terms) != 1:
-        return None
-    return classified, base_terms[0]
+    return _cli_segmented_lowering._match_segment_register_based_dereference(
+        node,
+        project,
+        classify_segmented_dereference=_classify_segmented_dereference,
+        flatten_c_add_terms=_flatten_c_add_terms,
+        unwrap_c_casts=_unwrap_c_casts,
+        c_constant_value=_c_constant_value,
+        segment_reg_name=_segment_reg_name,
+    )
 
 
 def _strip_segment_scale_from_addr_expr(addr_expr, project: angr.Project):
-    kept_terms = []
-    for term in _flatten_c_add_terms(addr_expr):
-        inner = _unwrap_c_casts(term)
-        if isinstance(inner, structured_c.CBinaryOp) and inner.op == "Mul":
-            segment_scale = False
-            for maybe_seg, maybe_scale in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
-                if _c_constant_value(_unwrap_c_casts(maybe_scale)) != 16:
-                    continue
-                if _segment_reg_name(_unwrap_c_casts(maybe_seg), project) is not None:
-                    segment_scale = True
-                    break
-            if segment_scale:
-                continue
-        kept_terms.append(term)
-
-    if not kept_terms:
-        return None
-    result = kept_terms[0]
-    for term in kept_terms[1:]:
-        result = structured_c.CBinaryOp("Add", result, term, codegen=getattr(term, "codegen", None))
-    return result
+    return _cli_segmented_lowering._strip_segment_scale_from_addr_expr(
+        addr_expr,
+        project,
+        flatten_c_add_terms=_flatten_c_add_terms,
+        unwrap_c_casts=_unwrap_c_casts,
+        c_constant_value=_c_constant_value,
+        segment_reg_name=_segment_reg_name,
+    )
 
 
 def _match_ss_stack_reference(node, project: angr.Project):
-    cache = _project_rewrite_cache(project).setdefault("ss_stack_reference", {})
-    key = id(node)
-    if key in cache:
-        return cache[key]
-
-    classified = _classify_segmented_dereference(node, project)
-    if classified is not None and classified.kind == "stack" and classified.stack_var is not None and classified.cvar is not None:
-        result = (classified.stack_var, classified.cvar, classified.extra_offset)
-        cache[key] = result
-        return result
-
-    cache[key] = None
-    return None
+    return _cli_segmented_lowering._match_ss_stack_reference(
+        node,
+        project,
+        project_rewrite_cache=_project_rewrite_cache,
+        classify_segmented_dereference=_classify_segmented_dereference,
+    )
 
 
 def _flatten_c_add_terms(node, seen: set[int] | None = None):
@@ -8877,219 +8641,39 @@ def _access_trait_member_candidates(traits: dict[str, dict[tuple[object, ...], i
 
 
 def _should_attach_access_trait_names(codegen) -> bool:
-    cfunc = getattr(codegen, "cfunc", None)
-    if cfunc is None:
-        return False
-    project = getattr(codegen, "project", None)
-    if project is None:
-        return False
-    cache = getattr(project, "_inertia_access_traits", None)
-    if not isinstance(cache, dict):
-        return False
-    traits = cache.get(getattr(cfunc, "addr", None))
-    if not isinstance(traits, dict):
-        return False
-    profiles = _build_access_trait_evidence_profiles(traits)
-    return any(profile.has_any_evidence() for profile in profiles.values())
+    return _cli_access_trait_rewrite._should_attach_access_trait_names(
+        codegen,
+        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+    )
 
 
 def _attach_access_trait_field_names(project: angr.Project, codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    if not _should_attach_access_trait_names(codegen):
-        return False
-
-    cache = getattr(project, "_inertia_access_traits", None)
-    if not isinstance(cache, dict):
-        return False
-    traits = cache.get(getattr(codegen.cfunc, "addr", None))
-    if not isinstance(traits, dict):
-        return False
-    evidence_profiles = _build_access_trait_evidence_profiles(traits)
-
-    def is_generic_stack_name(name: object) -> bool:
-        return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+)", name) is not None
-
-    def stack_rewrite_decision(variable) -> _AccessTraitRewriteDecision | None:
-        base_key = _access_trait_variable_key(variable)
-        if base_key is None:
-            return None
-        profile = _access_trait_profile_for_key(evidence_profiles, base_key)
-        if profile is None or profile.best_rewrite_kind() is None:
-            return None
-        return _AccessTraitRewriteDecision(base_key, profile)
-
-    changed = False
-
-    def rename_stack_variable(cvar, *, suffix: int = 0) -> structured_c.CVariable | None:
-        variable = getattr(cvar, "variable", None)
-        if not isinstance(variable, SimStackVariable):
-            return None
-        decision = stack_rewrite_decision(variable)
-        if decision is None or not decision.should_rename_stack():
-            return None
-
-        name = getattr(variable, "name", None)
-        if not is_generic_stack_name(name) and not (isinstance(name, str) and name.startswith("field_")):
-            return None
-
-        if decision.preferred_kind() == "stack":
-            field_name = _stack_object_name(getattr(variable, "offset", suffix))
-        else:
-            field_name = _access_trait_field_name(suffix, getattr(variable, "size", 1))
-        nonlocal changed
-        if getattr(variable, "name", None) != field_name:
-            variable.name = field_name
-            changed = True
-        if getattr(cvar, "name", None) != field_name:
-            try:
-                cvar.name = field_name
-            except Exception:
-                pass
-            else:
-                changed = True
-        return cvar
-
-    def transform(node):
-        if isinstance(node, structured_c.CVariable):
-            renamed = rename_stack_variable(node, suffix=0)
-            if renamed is not None:
-                return renamed
-
-        return node
-
-    root = codegen.cfunc.statements
-    new_root = transform(root)
-    if new_root is not root:
-        codegen.cfunc.statements = new_root
-        root = new_root
-        changed = True
-    if _replace_c_children(root, transform):
-        changed = True
-
-    return changed
+    return _cli_access_trait_rewrite._attach_access_trait_field_names(
+        project,
+        codegen,
+        should_attach_access_trait_names=_should_attach_access_trait_names,
+        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+        access_trait_variable_key=_access_trait_variable_key,
+        access_trait_profile_for_key=_access_trait_profile_for_key,
+        AccessTraitRewriteDecision=_AccessTraitRewriteDecision,
+        stack_object_name=_stack_object_name,
+        access_trait_field_name=_access_trait_field_name,
+        replace_c_children=_replace_c_children,
+    )
 
 
 def _attach_pointer_member_names(project: angr.Project, codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    if not _should_attach_access_trait_names(codegen):
-        return False
-
-    cache = getattr(project, "_inertia_access_traits", None)
-    if not isinstance(cache, dict):
-        return False
-    traits = cache.get(getattr(codegen.cfunc, "addr", None))
-    if not isinstance(traits, dict):
-        return False
-
-    def is_generic_name(name: object) -> bool:
-        return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+)", name) is not None
-
-    evidence = _access_trait_member_candidates(traits)
-    evidence_profiles = _build_access_trait_evidence_profiles(traits)
-
-    if not evidence:
-        return False
-
-    def candidate_field_names(base_key: tuple[object, ...]) -> tuple[str, ...]:
-        profile = _access_trait_profile_for_key(evidence_profiles, base_key)
-        if profile is None:
-            return ()
-        decision = _AccessTraitRewriteDecision(base_key, profile)
-        if decision.preferred_kind() is None:
-            return ()
-        return decision.candidate_field_names()
-
-    changed = False
-    assigned_names: dict[int, str] = {}
-    name_cursors: dict[tuple[object, ...], int] = {}
-
-    def assign_member_name(base_key: tuple[object, ...]) -> str | None:
-        names = candidate_field_names(base_key)
-        if not names:
-            return None
-        index = name_cursors.get(base_key, 0)
-        if index < len(names):
-            field_name = names[index]
-            name_cursors[base_key] = index + 1
-            return field_name
-        return names[-1]
-
-    variables_in_use = getattr(codegen.cfunc, "variables_in_use", None)
-    if isinstance(variables_in_use, dict):
-        for variable, cvar in list(variables_in_use.items()):
-            if not isinstance(variable, (SimRegisterVariable, SimStackVariable, SimMemoryVariable)):
-                continue
-            if not is_generic_name(getattr(variable, "name", None)) and not is_generic_name(getattr(cvar, "name", None)):
-                continue
-            base_key = _access_trait_variable_key(variable)
-            if base_key is None:
-                continue
-            field_name = assign_member_name(base_key)
-            if field_name is None:
-                continue
-            target = getattr(cvar, "unified_variable", None) or getattr(cvar, "variable", None)
-            if target is not None and getattr(target, "name", None) != field_name:
-                target.name = field_name
-                changed = True
-            if getattr(variable, "name", None) != field_name:
-                variable.name = field_name
-                changed = True
-            if getattr(cvar, "name", None) != field_name:
-                cvar.name = field_name
-                changed = True
-            assigned_names[id(variable)] = field_name
-
-    def rename_member_variable(cvar):
-        nonlocal changed
-        if not isinstance(cvar, structured_c.CVariable):
-            return None
-        variable = getattr(cvar, "variable", None)
-        if not isinstance(variable, (SimRegisterVariable, SimStackVariable, SimMemoryVariable)):
-            return None
-        if not is_generic_name(getattr(variable, "name", None)) and not is_generic_name(getattr(cvar, "name", None)):
-            return None
-
-        base_key = _access_trait_variable_key(variable)
-        if base_key is None:
-            return None
-        field_name = assigned_names.get(id(variable))
-        if field_name is None:
-            field_name = assign_member_name(base_key)
-        if field_name is None:
-            return None
-        if getattr(variable, "name", None) != field_name:
-            variable.name = field_name
-            changed = True
-        if getattr(cvar, "name", None) != field_name:
-            try:
-                cvar.name = field_name
-            except Exception:
-                pass
-            else:
-                changed = True
-        return cvar
-
-    def transform(node):
-        if isinstance(node, structured_c.CVariable):
-            renamed = rename_member_variable(node)
-            if renamed is not None:
-                return renamed
-        return node
-
-    root = codegen.cfunc.statements
-    new_root = transform(root)
-    if new_root is not root:
-        codegen.cfunc.statements = new_root
-        root = new_root
-        changed = True
-    if _replace_c_children(root, transform):
-        changed = True
-
-    return changed
+    return _cli_access_trait_rewrite._attach_pointer_member_names(
+        project,
+        codegen,
+        should_attach_access_trait_names=_should_attach_access_trait_names,
+        access_trait_member_candidates=_access_trait_member_candidates,
+        build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+        access_trait_profile_for_key=_access_trait_profile_for_key,
+        access_trait_variable_key=_access_trait_variable_key,
+        AccessTraitRewriteDecision=_AccessTraitRewriteDecision,
+        replace_c_children=_replace_c_children,
+    )
 
 
 def _attach_lst_data_names(project: angr.Project, codegen, lst_metadata: LSTMetadata | None) -> bool:
@@ -9449,323 +9033,34 @@ def _attach_register_names(project: angr.Project, codegen) -> bool:
 
 
 def _elide_redundant_segment_pointer_dereferences(project: angr.Project, codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    changed = False
-
-    eligible_bases: dict[int, tuple[structured_c.CVariable, set[int]]] = {}
-
-    def collect_candidate_bases() -> None:
-        for node in _iter_c_nodes_deep(codegen.cfunc.statements):
-            classified = _classify_segmented_dereference(node, project)
-            if classified is None or classified.addr_expr is None or classified.seg_name not in {"ds", "es"}:
-                continue
-
-            addr_expr = classified.addr_expr
-            base_terms = []
-            for term in _flatten_c_add_terms(addr_expr):
-                inner = _unwrap_c_casts(term)
-                if isinstance(inner, structured_c.CBinaryOp) and inner.op == "Mul":
-                    segment_scale = False
-                    for maybe_seg, maybe_scale in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
-                        if _c_constant_value(_unwrap_c_casts(maybe_scale)) != 16:
-                            continue
-                        if _segment_reg_name(_unwrap_c_casts(maybe_seg), project) is not None:
-                            segment_scale = True
-                            break
-                    if segment_scale:
-                        continue
-
-                if _c_constant_value(inner) is not None:
-                    continue
-
-                if isinstance(inner, structured_c.CVariable) and isinstance(getattr(inner, "variable", None), SimRegisterVariable):
-                    base_terms.append(inner)
-                    continue
-
-                base_terms = []
-                break
-
-            if len(base_terms) != 1:
-                continue
-            base_var = getattr(base_terms[0], "variable", None)
-            if not isinstance(base_var, SimRegisterVariable):
-                continue
-            entry = eligible_bases.get(id(base_var))
-            if entry is None:
-                eligible_bases[id(base_var)] = (base_terms[0], {classified.extra_offset})
-            else:
-                entry[1].add(classified.extra_offset)
-
-    collect_candidate_bases()
-
-    def _addr_expr_is_safe_projection(addr_expr) -> bool:
-        allowed_ops = {"Add", "Sub", "Mul", "And", "Or", "Xor", "Shl", "Shr", "Div"}
-
-        def _check(node) -> bool:
-            node = _unwrap_c_casts(node)
-            if _c_constant_value(node) is not None:
-                return True
-            if isinstance(node, structured_c.CVariable) and isinstance(getattr(node, "variable", None), SimRegisterVariable):
-                return True
-            if isinstance(node, structured_c.CUnaryOp) and node.op in {"Neg", "BitNot"}:
-                return _check(node.operand)
-            if isinstance(node, structured_c.CBinaryOp) and node.op in allowed_ops:
-                return _check(node.lhs) and _check(node.rhs)
-            return False
-
-        return _check(addr_expr)
-
-    def make_deref(base_expr, bits: int):
-        element_type = SimTypeChar(False) if bits == 8 else SimTypeShort(False)
-        ptr_type = SimTypePointer(element_type).with_arch(project.arch)
-        return structured_c.CUnaryOp(
-            "Dereference",
-            structured_c.CTypeCast(None, ptr_type, base_expr, codegen=codegen),
-            codegen=codegen,
-        )
-
-    def transform(node):
-        if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
-            return node
-        match = _match_segment_register_based_dereference(node, project)
-        if match is None:
-            classified = _classify_segmented_dereference(node, project)
-            if classified is None or classified.seg_name not in {"ds", "es"} or classified.addr_expr is None:
-                return node
-            base_expr = _strip_segment_scale_from_addr_expr(classified.addr_expr, project)
-            if base_expr is None or not _addr_expr_is_safe_projection(base_expr):
-                return node
-            if classified.cvar is not None and isinstance(base_expr, structured_c.CVariable):
-                if not _same_c_storage(base_expr, classified.cvar):
-                    return node
-        else:
-            classified, base_expr = match
-            base_var = getattr(getattr(base_expr, "variable", None), "reg", None)
-            if base_var is None:
-                return node
-            eligible = eligible_bases.get(id(getattr(base_expr, "variable", None)))
-            if eligible is None or eligible[1] != {0}:
-                return node
-        type_ = getattr(node, "type", None)
-        bits = getattr(type_, "size", None)
-        if bits != 8:
-            return node
-        # Keep the segment register visible elsewhere, but treat the register base
-        # itself as the pointer value. This is the source-like shape we want.
-        return make_deref(base_expr, bits)
-
-    root = codegen.cfunc.statements
-    new_root = transform(root)
-    if new_root is not root:
-        codegen.cfunc.statements = new_root
-        root = new_root
-        changed = True
-    else:
-        changed = False
-
-    if _replace_c_children(root, transform):
-        changed = True
-
-    return changed
+    return _cli_segmented_elision._elide_redundant_segment_pointer_dereferences(
+        project,
+        codegen,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        classify_segmented_dereference=_classify_segmented_dereference,
+        flatten_c_add_terms=_flatten_c_add_terms,
+        unwrap_c_casts=_unwrap_c_casts,
+        c_constant_value=_c_constant_value,
+        segment_reg_name=_segment_reg_name,
+        match_segment_register_based_dereference=_match_segment_register_based_dereference,
+        strip_segment_scale_from_addr_expr=_strip_segment_scale_from_addr_expr,
+        same_c_storage=_same_c_storage,
+        replace_c_children=_replace_c_children,
+    )
 
 
 def _collect_access_traits(project: angr.Project, codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    traits: dict[str, dict[tuple[object, ...], object]] = {
-        "base_const": {},
-        "base_stride": {},
-        "repeated_offsets": {},
-        "repeated_offset_widths": {},
-        "base_stride_widths": {},
-        "induction_evidence": {},
-        "stride_evidence": {},
-        "member_evidence": {},
-        "array_evidence": {},
-    }
-
-    cache = getattr(project, "_inertia_access_traits", None)
-    if isinstance(cache, dict):
-        existing = cache.get(getattr(codegen.cfunc, "addr", None))
-        if isinstance(existing, dict):
-            for bucket, bucket_data in existing.items():
-                if bucket not in traits or not isinstance(bucket_data, dict):
-                    continue
-                traits[bucket].update(bucket_data)
-
-    def record(bucket: str, key: tuple[object, ...]) -> None:
-        store = traits[bucket]
-        store[key] = store.get(key, 0) + 1
-
-    def record_stride_evidence(
-        *,
-        kind: str,
-        seg_name: str,
-        base_key: tuple[object, ...] | None,
-        index_key: tuple[object, ...] | None,
-        stride: int,
-        offset: int,
-        access_size: int,
-    ) -> None:
-        if index_key is None:
-            return
-        evidence_key = (kind, seg_name, base_key, index_key, stride, offset, access_size)
-        bucket_name = "induction_evidence" if kind == "induction_like" else "stride_evidence"
-        existing = traits[bucket_name].get(evidence_key)
-        existing_count = getattr(existing, "count", existing if isinstance(existing, int) else None)
-        count = 1 if existing_count is None else int(existing_count) + 1
-        traits[bucket_name][evidence_key] = _AccessTraitStrideEvidence(
-            segment=seg_name,
-            base_key=base_key,
-            index_key=index_key,
-            stride=stride,
-            offset=offset,
-            width=access_size,
-            count=count,
-            kind=kind,
-        )
-
-    def stable_base_key(variable) -> tuple[object, ...] | None:
-        if isinstance(variable, SimRegisterVariable):
-            return ("reg", getattr(variable, "reg", None))
-        if isinstance(variable, SimStackVariable):
-            identity = _stack_slot_identity_for_variable(variable)
-            if identity is None:
-                return None
-            return ("stack", identity.base, getattr(variable, "offset", None), getattr(variable, "region", None))
-        if isinstance(variable, SimMemoryVariable):
-            return ("mem", getattr(variable, "addr", None))
-        return None
-
-    def summarize_address(addr_expr):
-        base_terms: list[object] = []
-        offset = 0
-        stride_terms: list[tuple[object, int]] = []
-
-        for term in _flatten_c_add_terms(addr_expr):
-            inner = _unwrap_c_casts(term)
-            const_value = _c_constant_value(inner)
-            if const_value is not None:
-                offset += const_value
-                continue
-
-            if isinstance(inner, structured_c.CBinaryOp) and inner.op == "Mul":
-                for maybe_index, maybe_stride in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
-                    stride = _c_constant_value(_unwrap_c_casts(maybe_stride))
-                    if stride is None:
-                        continue
-                    index = _unwrap_c_casts(maybe_index)
-                    if isinstance(index, structured_c.CVariable):
-                        stride_terms.append((index, stride))
-                        break
-                else:
-                    base_terms.append(inner)
-                continue
-
-            if isinstance(inner, structured_c.CVariable):
-                base_terms.append(inner)
-                continue
-
-            base_terms.append(inner)
-
-        return base_terms, offset, stride_terms
-
-    for node in _iter_c_nodes_deep(codegen.cfunc.statements):
-        if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
-            continue
-
-        type_ = getattr(node, "type", None)
-        bits = getattr(type_, "size", None)
-        access_size = max((bits // project.arch.byte_width) if isinstance(bits, int) and bits > 0 else 1, 1)
-
-        plain_base_terms, plain_offset, plain_stride_terms = summarize_address(getattr(node, "operand", None))
-        if len(plain_base_terms) == 1 and isinstance(plain_base_terms[0], structured_c.CVariable):
-            plain_base_var = getattr(plain_base_terms[0], "variable", None)
-            if isinstance(plain_base_var, (SimRegisterVariable, SimStackVariable, SimMemoryVariable)):
-                plain_base_key = stable_base_key(plain_base_var)
-                if plain_base_key is None:
-                    continue
-                plain_base_name = getattr(plain_base_terms[0], "name", None)
-                if not isinstance(plain_base_name, str) or not plain_base_name:
-                    plain_base_name = getattr(plain_base_var, "name", None)
-                if plain_offset != 0:
-                    record(
-                        "member_evidence",
-                        (plain_base_key, plain_offset, access_size),
-                    )
-                for index_expr, stride in plain_stride_terms:
-                    index_var = getattr(index_expr, "variable", None)
-                    index_key = _access_trait_variable_key(index_var)
-                    if index_key is None or stride not in {2, 4, 8}:
-                        continue
-                    record(
-                        "array_evidence",
-                        (plain_base_key, index_key, stride, plain_offset, access_size),
-                    )
-
-        classified = _classify_segmented_dereference(node, project)
-        if classified is None:
-            continue
-
-        base_terms, offset, stride_terms = summarize_address(classified.addr_expr)
-        base_key = None
-        if len(base_terms) == 1 and isinstance(base_terms[0], structured_c.CVariable):
-            base_var = getattr(base_terms[0], "variable", None)
-            base_key = _access_trait_variable_key(base_var)
-            if base_key is not None:
-                record("base_const", (classified.seg_name, base_key, offset, access_size))
-                record("repeated_offsets", (classified.seg_name, base_key, offset))
-                record("repeated_offset_widths", (classified.seg_name, base_key, offset, access_size))
-                record("repeated_offset_widths", (classified.seg_name, base_key, offset, access_size))
-        for index_expr, stride in stride_terms:
-            index_var = getattr(index_expr, "variable", None)
-            index_key = _access_trait_variable_key(index_var)
-            if index_key is None:
-                continue
-            record("base_stride", (classified.seg_name, index_key, stride, offset, access_size))
-            record("base_stride_widths", (classified.seg_name, index_key, stride, offset, access_size))
-            if index_key[0] == "reg":
-                record_stride_evidence(
-                    kind="induction_like",
-                    seg_name=classified.seg_name,
-                    base_key=base_key,
-                    index_key=index_key,
-                    stride=stride,
-                    offset=offset,
-                    access_size=access_size,
-                )
-            if stride in {2, 4, 8}:
-                evidence_bucket = "array_evidence" if offset == 0 else "member_evidence"
-                record(
-                    evidence_bucket,
-                    (classified.seg_name, index_key, stride, offset, access_size),
-                )
-                record_stride_evidence(
-                    kind="array_like" if offset == 0 else "member_like",
-                    seg_name=classified.seg_name,
-                    base_key=base_key,
-                    index_key=index_key,
-                    stride=stride,
-                    offset=offset,
-                    access_size=access_size,
-                )
-
-    for key, count in list(traits["repeated_offsets"].items()):
-        if count < 2:
-            del traits["repeated_offsets"][key]
-
-    for key, count in list(traits["base_stride"].items()):
-        if count < 2:
-            del traits["base_stride"][key]
-
-    if not isinstance(cache, dict):
-        cache = {}
-        setattr(project, "_inertia_access_traits", cache)
-    cache[getattr(codegen.cfunc, "addr", 0)] = traits
-    return False
+    return _cli_access_traits._collect_access_traits(
+        project,
+        codegen,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        unwrap_c_casts=_unwrap_c_casts,
+        c_constant_value=_c_constant_value,
+        classify_segmented_dereference=_classify_segmented_dereference,
+        stack_slot_identity_for_variable=_stack_slot_identity_for_variable,
+        access_trait_variable_key=_access_trait_variable_key,
+        AccessTraitStrideEvidence=_AccessTraitStrideEvidence,
+    )
 
 
 def _prune_unused_unnamed_memory_declarations(codegen) -> bool:
@@ -10831,132 +10126,14 @@ def _simplify_nested_mk_fp_calls(codegen) -> bool:
 
 
 def _attach_ss_stack_variables(project: angr.Project, codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    created: dict[tuple[int, int], structured_c.CVariable] = {}
-    promoted: set[tuple[int, int]] = set()
-
-    def _stack_object_name(offset: int) -> str:
-        if offset >= 0:
-            return f"arg_{offset:x}"
-        return f"local_{-offset:x}"
-
-    def _stack_local_name_or_existing(*names: str | None, offset: int) -> str:
-        for name in names:
-            if isinstance(name, str) and name and not re.fullmatch(r"(?:v\d+|vvar_\d+)", name):
-                return name
-        return _stack_object_name(offset)
-
-    def transform(node):
-        nonlocal promoted
-        matched = _match_ss_stack_reference(node, project)
-        if matched is None:
-            return node
-        stack_var, ref_cvar, extra_offset = matched
-
-        type_ = getattr(node, "type", None)
-        if type_ is None:
-            return node
-
-        bits = getattr(type_, "size", None)
-        size = max((bits // project.arch.byte_width) if isinstance(bits, int) and bits > 0 else 1, 1)
-        final_offset = stack_var.offset + extra_offset
-        promoted_offset = final_offset
-        if size >= 4:
-            resolved_cvar = _resolve_stack_cvar_at_offset(codegen, final_offset)
-            resolved_variable = getattr(resolved_cvar, "variable", None)
-            if isinstance(resolved_variable, SimStackVariable):
-                promoted_offset = getattr(resolved_variable, "offset", final_offset)
-                _promote_direct_stack_cvariable(codegen, resolved_cvar, size, type_)
-                key = (promoted_offset, size)
-                promoted.add(key)
-                existing = created.get(key)
-                if existing is not None:
-                    return existing
-                created[key] = resolved_cvar
-                return resolved_cvar
-        key = (promoted_offset, size)
-        promoted.add(key)
-        existing = created.get(key)
-        if existing is not None:
-            return existing
-        if extra_offset == 0:
-            local_name = _stack_local_name_or_existing(
-                getattr(ref_cvar, "name", None),
-                getattr(stack_var, "name", None),
-                offset=promoted_offset,
-            )
-        else:
-            local_name = _stack_object_name(promoted_offset)
-
-        cvar = structured_c.CVariable(
-            SimStackVariable(
-                promoted_offset,
-                size,
-                base=getattr(stack_var, "base", "bp"),
-                name=local_name,
-                region=codegen.cfunc.addr,
-            ),
-            variable_type=type_,
-            codegen=codegen,
-        )
-        created[key] = cvar
-        return cvar
-
-    root = codegen.cfunc.statements
-    new_root = transform(root)
-    if new_root is not root:
-        codegen.cfunc.statements = new_root
-        root = new_root
-        changed = True
-    else:
-        changed = False
-
-    if _replace_c_children(root, transform):
-        changed = True
-
-    for variable, cvar in getattr(codegen.cfunc, "variables_in_use", {}).items():
-        identity = _stack_slot_identity_for_variable(variable)
-        if identity is None:
-            continue
-        offset = getattr(variable, "offset", None)
-        matching = [size for promoted_offset, size in promoted if promoted_offset == offset]
-        if not matching:
-            continue
-        size = max(matching)
-        target_type = _stack_type_for_size(size)
-        if getattr(variable, "size", 0) < size:
-            variable.size = size
-            changed = True
-        if getattr(cvar, "variable_type", None) != target_type:
-            cvar.variable_type = target_type
-            changed = True
-        unified = getattr(cvar, "unified_variable", None)
-        if unified is not None and getattr(unified, "size", 0) < size:
-            try:
-                unified.size = size
-                changed = True
-            except Exception:
-                pass
-
-    unified_locals = getattr(codegen.cfunc, "unified_local_vars", None)
-    if isinstance(unified_locals, dict):
-        for variable, cvar_and_vartypes in list(unified_locals.items()):
-            identity = _stack_slot_identity_for_variable(variable)
-            if identity is None:
-                continue
-            offset = getattr(variable, "offset", None)
-            matching = [size for promoted_offset, size in promoted if promoted_offset == offset]
-            if not matching:
-                continue
-            size = max(matching)
-            target_type = _stack_type_for_size(size)
-            new_entries = {(cvariable, target_type) for cvariable, _vartype in cvar_and_vartypes}
-            if new_entries != cvar_and_vartypes:
-                unified_locals[variable] = new_entries
-                changed = True
-    return changed
+    return _cli_stack_locals._attach_ss_stack_variables(
+        project,
+        codegen,
+        match_ss_stack_reference=_match_ss_stack_reference,
+        resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
+        replace_c_children=_replace_c_children,
+        stack_slot_identity_for_variable=_stack_slot_identity_for_variable,
+    )
 
 
 def _rewrite_ss_stack_byte_offsets(project: angr.Project, codegen) -> bool:
@@ -11151,443 +10328,88 @@ def _rewrite_ss_stack_byte_offsets(project: angr.Project, codegen) -> bool:
 
 
 def _promote_direct_stack_cvariable(codegen, cvar, size: int, type_) -> bool:
-    changed = False
-
-    variable = getattr(cvar, "variable", None)
-    if variable is None:
-        return False
-
-    if getattr(variable, "size", 0) < size:
-        variable.size = size
-        changed = True
-    if getattr(cvar, "variable_type", None) != type_:
-        cvar.variable_type = type_
-        changed = True
-
-    unified = getattr(cvar, "unified_variable", None)
-    if unified is not None and getattr(unified, "size", 0) < size:
-        try:
-            unified.size = size
-            changed = True
-        except Exception:
-            pass
-
-    variables_in_use = getattr(codegen.cfunc, "variables_in_use", None)
-    if isinstance(variables_in_use, dict):
-        tracked = variables_in_use.get(variable)
-        if tracked is not None and getattr(tracked, "variable_type", None) != type_:
-            tracked.variable_type = type_
-            changed = True
-
-    unified_locals = getattr(codegen.cfunc, "unified_local_vars", None)
-    if isinstance(unified_locals, dict):
-        for tracked_var, cvar_and_vartypes in list(unified_locals.items()):
-            if tracked_var is not variable:
-                continue
-            new_entries = set()
-            for tracked_cvar, _vartype in cvar_and_vartypes:
-                if getattr(tracked_cvar, "variable_type", None) != type_:
-                    tracked_cvar.variable_type = type_
-                    changed = True
-                new_entries.add((tracked_cvar, type_))
-            if new_entries != cvar_and_vartypes:
-                unified_locals[tracked_var] = new_entries
-                changed = True
-            break
-
-    return changed
+    return _cli_stack_locals._promote_direct_stack_cvariable(codegen, cvar, size, type_)
 
 
 def _stack_type_for_size(size: int):
-    return SimTypeChar(False) if size == 1 else SimTypeShort(False)
+    return _cli_stack_locals._stack_type_for_size(size)
 
 
 def _resolve_stack_cvar_at_offset(codegen, offset: int):
-    if getattr(codegen, "cfunc", None) is None:
-        return None
-    if not isinstance(offset, int):
-        return None
-
-    arg_candidates: list[tuple[object, object]] = []
-    arg_variable_ids = {
-        id(getattr(arg, "variable", None))
-        for arg in getattr(codegen.cfunc, "arg_list", ()) or ()
-        if getattr(arg, "variable", None) is not None
-    }
-    arg_slot_identities = {
-        _stack_slot_identity_for_variable(getattr(arg, "variable", None))
-        for arg in getattr(codegen.cfunc, "arg_list", ()) or ()
-        if isinstance(getattr(arg, "variable", None), SimStackVariable)
-    }
-    arg_slot_identities.discard(None)
-    for arg in getattr(codegen.cfunc, "arg_list", ()) or ():
-        variable = getattr(arg, "variable", None)
-        if isinstance(variable, SimStackVariable):
-            arg_candidates.append((variable, arg))
-
-    best_exact = None
-    best_exact_score = None
-    best_covering = None
-    best_covering_score = None
-
-    def _stack_name_is_generic(name: object) -> bool:
-        return isinstance(name, str) and re.fullmatch(r"(?:arg_\d+|s_[0-9a-fA-F]+|v\d+|vvar_\d+|ir_\d+)", name) is not None
-
-    def _stack_candidate_score(variable, cvar, *, exact: bool) -> tuple[int, int, int, int, int]:
-        identity = _stack_slot_identity_for_variable(variable)
-        if identity is None:
-            return (-1, -1, -1, -1, -1)
-        variable_name = getattr(variable, "name", None)
-        cvar_name = getattr(cvar, "name", None)
-        unified_name = getattr(getattr(cvar, "unified_variable", None), "name", None)
-        preferred_name = next(
-            (name for name in (variable_name, cvar_name, unified_name) if isinstance(name, str) and name and not _stack_name_is_generic(name)),
-            None,
-        )
-        is_arg_variable = 1 if id(variable) in arg_variable_ids else 0
-        is_arg_slot = 1 if identity in arg_slot_identities else 0
-        has_preferred_name = 1 if preferred_name is not None else 0
-        size = getattr(variable, "size", None)
-        size_rank = -size if isinstance(size, int) else 0
-        exact_rank = 1 if exact else 0
-        return (exact_rank, is_arg_variable, is_arg_slot, has_preferred_name, size_rank, -getattr(variable, "offset", 0))
-
-    candidates = list(arg_candidates)
-    candidates.extend(list(getattr(codegen.cfunc, "variables_in_use", {}).items()))
-
-    for variable, cvar in candidates:
-        if not isinstance(variable, SimStackVariable):
-            continue
-        identity = _stack_slot_identity_for_variable(variable)
-        if identity is None:
-            continue
-
-        base_offset = getattr(variable, "offset", None)
-        size = getattr(variable, "size", None)
-        if not isinstance(base_offset, int) or not isinstance(size, int):
-            continue
-
-        if base_offset == offset:
-            score = _stack_candidate_score(variable, cvar, exact=True)
-            if best_exact_score is None or score > best_exact_score:
-                best_exact = cvar
-                best_exact_score = score
-            continue
-
-        if base_offset <= offset < base_offset + size:
-            score = _stack_candidate_score(variable, cvar, exact=False)
-            if best_covering_score is None or score > best_covering_score:
-                best_covering = cvar
-                best_covering_score = score
-
-    if best_exact is not None:
-        return best_exact
-    return best_covering
+    return _cli_stack_cvars._resolve_stack_cvar_at_offset(
+        codegen,
+        offset,
+        stack_slot_identity_for_variable=_stack_slot_identity_for_variable,
+    )
 
 
 def _materialize_stack_cvar_at_offset(codegen, offset: int, size: int = 2):
-    if getattr(codegen, "cfunc", None) is None:
-        return None
-    if not isinstance(offset, int):
-        return None
-
-    resolved = _resolve_stack_cvar_at_offset(codegen, offset)
-    resolved_variable = getattr(resolved, "variable", None)
-    if isinstance(resolved_variable, SimStackVariable) and getattr(resolved_variable, "offset", None) == offset:
-        target_type = _stack_type_for_size(size)
-        _promote_direct_stack_cvariable(codegen, resolved, size, target_type)
-        return resolved
-
-    target_type = _stack_type_for_size(size)
-    variable = SimStackVariable(
+    return _cli_stack_cvars._materialize_stack_cvar_at_offset(
+        codegen,
         offset,
         size,
-        base="bp",
-        name=_stack_object_name(offset),
-        region=getattr(codegen.cfunc, "addr", None),
+        resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
+        promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
+        stack_type_for_size=_stack_type_for_size,
     )
-    cvar = structured_c.CVariable(variable, variable_type=target_type, codegen=codegen)
-
-    variables_in_use = getattr(codegen.cfunc, "variables_in_use", None)
-    if isinstance(variables_in_use, dict):
-        variables_in_use[variable] = cvar
-
-    unified_locals = getattr(codegen.cfunc, "unified_local_vars", None)
-    if isinstance(unified_locals, dict):
-        unified_locals[variable] = {(cvar, target_type)}
-
-    stack_local_candidates = getattr(codegen, "_inertia_stack_local_declaration_candidates", None)
-    if isinstance(stack_local_candidates, dict):
-        stack_local_candidates[variable] = cvar
-
-    sort_local_vars = getattr(codegen.cfunc, "sort_local_vars", None)
-    if callable(sort_local_vars):
-        with contextlib.suppress(Exception):
-            sort_local_vars()
-
-    return cvar
 
 
 def _canonicalize_stack_cvar_expr(expr, codegen, active_expr_ids: set[int] | None = None):
-    expr = _unwrap_c_casts(expr)
-    if active_expr_ids is None:
-        active_expr_ids = set()
-    expr_id = id(expr)
-    if expr_id in active_expr_ids:
-        return expr
-    active_expr_ids.add(expr_id)
-    if isinstance(expr, structured_c.CVariable):
-        variable = getattr(expr, "variable", None)
-        if isinstance(variable, SimStackVariable):
-            offset = getattr(variable, "offset", None)
-            if isinstance(offset, int):
-                resolved = _resolve_stack_cvar_at_offset(codegen, offset)
-                if isinstance(resolved, structured_c.CVariable):
-                    active_expr_ids.discard(expr_id)
-                    return resolved
-                resolved_variable = getattr(resolved, "variable", None)
-                if isinstance(resolved_variable, SimStackVariable):
-                    variable_type = getattr(resolved, "variable_type", None) or getattr(expr, "variable_type", None)
-                    active_expr_ids.discard(expr_id)
-                    return structured_c.CVariable(resolved_variable, variable_type=variable_type, codegen=codegen)
-        active_expr_ids.discard(expr_id)
-        return expr
-    if isinstance(expr, structured_c.CUnaryOp):
-        operand = _canonicalize_stack_cvar_expr(expr.operand, codegen, active_expr_ids)
-        if operand is not expr.operand:
-            active_expr_ids.discard(expr_id)
-            return structured_c.CUnaryOp(expr.op, operand, codegen=getattr(expr, "codegen", None))
-        active_expr_ids.discard(expr_id)
-        return expr
-    if isinstance(expr, structured_c.CBinaryOp):
-        lhs = _canonicalize_stack_cvar_expr(expr.lhs, codegen, active_expr_ids)
-        rhs = _canonicalize_stack_cvar_expr(expr.rhs, codegen, active_expr_ids)
-        if lhs is not expr.lhs or rhs is not expr.rhs:
-            active_expr_ids.discard(expr_id)
-            return structured_c.CBinaryOp(expr.op, lhs, rhs, codegen=getattr(expr, "codegen", None))
-        active_expr_ids.discard(expr_id)
-        return expr
-    if isinstance(expr, structured_c.CTypeCast):
-        inner = _canonicalize_stack_cvar_expr(expr.expr, codegen, active_expr_ids)
-        if inner is not expr.expr:
-            active_expr_ids.discard(expr_id)
-            return structured_c.CTypeCast(None, expr.type, inner, codegen=getattr(expr, "codegen", None))
-        active_expr_ids.discard(expr_id)
-        return expr
-    active_expr_ids.discard(expr_id)
-    return expr
+    return _cli_stack_cvars._canonicalize_stack_cvar_expr(
+        expr,
+        codegen,
+        unwrap_c_casts=_unwrap_c_casts,
+        resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
+        active_expr_ids=active_expr_ids,
+    )
 
 
 def _canonicalize_stack_cvars(codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    changed = False
-
-    def transform(node):
-        nonlocal changed
-        if not isinstance(node, structured_c.CVariable):
-            return node
-        canonical = _canonicalize_stack_cvar_expr(node, codegen)
-        if canonical is not node:
-            changed = True
-            return canonical
-        return node
-
-    root = codegen.cfunc.statements
-    new_root = transform(root)
-    if new_root is not root:
-        codegen.cfunc.statements = new_root
-        root = new_root
-        changed = True
-    if _replace_c_children(root, transform):
-        changed = True
-
-    return changed
+    return _cli_stack_cvars._canonicalize_stack_cvars(
+        codegen,
+        replace_c_children=_replace_c_children,
+        canonicalize_stack_cvar_expr=_canonicalize_stack_cvar_expr,
+    )
 
 
 def _resolve_stack_cvar_from_addr_expr(project: angr.Project, codegen, addr_expr):
-    classified = _classify_segmented_addr_expr(addr_expr, project)
-    if classified is None or classified.kind != "stack" or classified.cvar is None:
-        return None
-
-    variable = getattr(classified.cvar, "variable", None)
-    if not isinstance(variable, SimStackVariable):
-        return None
-
-    target_offset = getattr(variable, "offset", None)
-    if not isinstance(target_offset, int):
-        return None
-
-    resolved_offset = target_offset + classified.extra_offset
-    resolved = _resolve_stack_cvar_at_offset(codegen, resolved_offset)
-    resolved_variable = getattr(resolved, "variable", None)
-    if isinstance(resolved_variable, SimStackVariable) and getattr(resolved_variable, "offset", None) == resolved_offset:
-        _promote_direct_stack_cvariable(codegen, resolved, 2, _stack_type_for_size(2))
-        return resolved
-    return _materialize_stack_cvar_at_offset(codegen, resolved_offset, 2)
+    return _cli_stack_cvars._resolve_stack_cvar_from_addr_expr(
+        project,
+        codegen,
+        addr_expr,
+        classify_segmented_addr_expr=_classify_segmented_addr_expr,
+        resolve_stack_cvar_at_offset=_resolve_stack_cvar_at_offset,
+        promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
+        materialize_stack_cvar_at_offset=_materialize_stack_cvar_at_offset,
+        stack_type_for_size=_stack_type_for_size,
+    )
 
 
 def _coalesce_direct_ss_local_word_statements(project: angr.Project, codegen) -> bool:
-    if getattr(codegen, "cfunc", None) is None:
-        return False
-
-    changed = False
-    def visit(node):
-        nonlocal changed
-
-        if isinstance(node, structured_c.CStatements):
-            new_statements = []
-            i = 0
-            while i < len(node.statements):
-                stmt = node.statements[i]
-                if (
-                    i + 1 < len(node.statements)
-                    and isinstance(stmt, structured_c.CAssignment)
-                    and isinstance(stmt.lhs, structured_c.CVariable)
-                    and isinstance(node.statements[i + 1], structured_c.CAssignment)
-                ):
-                    next_stmt = node.statements[i + 1]
-                    matched = _match_ss_local_plus_const(next_stmt.lhs, project)
-                    if matched is not None:
-                        target_cvar, extra_offset = matched
-                        high_expr = _match_shift_right_8_expr(next_stmt.rhs)
-                        if (
-                            extra_offset == 1
-                            and (_stack_slot_identity_can_join(target_cvar, stmt.lhs) or _same_c_storage(target_cvar, stmt.lhs))
-                            and high_expr is not None
-                            and _same_c_expression(_unwrap_c_casts(high_expr), _unwrap_c_casts(stmt.rhs))
-                        ):
-                            if _promote_direct_stack_cvariable(codegen, stmt.lhs, 2, _stack_type_for_size(2)):
-                                changed = True
-                            new_statements.append(stmt)
-                            changed = True
-                            i += 2
-                            continue
-
-                visit(stmt)
-                new_statements.append(stmt)
-                i += 1
-
-            if changed or new_statements != node.statements:
-                node.statements = new_statements
-
-    visit(codegen.cfunc.statements)
-
-    return changed
+    return _cli_stack_coalesce._coalesce_direct_ss_local_word_statements(
+        project,
+        codegen,
+        match_ss_local_plus_const=_match_ss_local_plus_const,
+        match_shift_right_8_expr=_match_shift_right_8_expr,
+        stack_slot_identity_can_join=_stack_slot_identity_can_join,
+        same_c_expression=_same_c_expression,
+        unwrap_c_casts=_unwrap_c_casts,
+        promote_direct_stack_cvariable=_promote_direct_stack_cvariable,
+        stack_type_for_size=_stack_type_for_size,
+    )
 
 
 def _seed_adjacent_byte_pair_aliases(project: angr.Project, codegen) -> dict[int, object]:
-    if getattr(codegen, "cfunc", None) is None:
-        return {}
-
-    statements = getattr(codegen.cfunc, "statements", None)
-    if not _structured_codegen_node(statements):
-        return {}
-
-    aliases: dict[int, object] = {}
-
-    def _collect_variable_ids(expr, ids: set[int]) -> None:
-        expr = _unwrap_c_casts(expr)
-        if isinstance(expr, structured_c.CVariable):
-            variable = getattr(expr, "variable", None)
-            if variable is not None:
-                ids.add(id(variable))
-            return
-        for attr in ("lhs", "rhs", "operand", "expr"):
-            if not hasattr(expr, attr):
-                continue
-            try:
-                value = getattr(expr, attr)
-            except Exception:
-                continue
-            if _structured_codegen_node(value):
-                _collect_variable_ids(value, ids)
-        for attr in ("args", "operands", "statements"):
-            if not hasattr(expr, attr):
-                continue
-            try:
-                items = getattr(expr, attr)
-            except Exception:
-                continue
-            for item in items or ():
-                if _structured_codegen_node(item):
-                    _collect_variable_ids(item, ids)
-
-    dereferenced_variable_ids: set[int] = set()
-    for node in _iter_c_nodes_deep(statements):
-        if isinstance(node, structured_c.CUnaryOp) and node.op == "Dereference":
-            _collect_variable_ids(getattr(node, "operand", None), dereferenced_variable_ids)
-
-    def _record_alias(lhs, expr) -> None:
-        variable = getattr(lhs, "variable", None)
-        if variable is None:
-            return
-        aliases[id(variable)] = expr
-
-    def visit(node) -> None:
-        if isinstance(node, structured_c.CStatements):
-            stmt_list = getattr(node, "statements", None)
-            if isinstance(stmt_list, list):
-                for index in range(len(stmt_list) - 1):
-                    low_stmt = stmt_list[index]
-                    high_stmt = stmt_list[index + 1]
-                    if not (
-                        isinstance(low_stmt, structured_c.CAssignment)
-                        and isinstance(high_stmt, structured_c.CAssignment)
-                        and isinstance(low_stmt.lhs, structured_c.CVariable)
-                        and isinstance(high_stmt.lhs, structured_c.CVariable)
-                    ):
-                        continue
-
-                    low_addr_expr = _match_byte_load_addr_expr(_unwrap_c_casts(low_stmt.rhs))
-                    high_addr_expr = _match_byte_load_addr_expr(_unwrap_c_casts(high_stmt.rhs))
-                    if low_addr_expr is None or high_addr_expr is None:
-                        continue
-                    if not _addr_exprs_are_byte_pair(low_addr_expr, high_addr_expr, project):
-                        continue
-                    low_addr_ids: set[int] = set()
-                    high_addr_ids: set[int] = set()
-                    _collect_variable_ids(low_addr_expr, low_addr_ids)
-                    _collect_variable_ids(high_addr_expr, high_addr_ids)
-
-                    word_expr = _make_word_dereference_from_addr_expr(codegen, project, low_addr_expr)
-
-                    _record_alias(low_stmt.lhs, word_expr)
-                    _record_alias(high_stmt.lhs, word_expr)
-            for stmt in getattr(node, "statements", ()) or ():
-                visit(stmt)
-            return
-
-        if isinstance(node, structured_c.CIfElse):
-            for cond, body in getattr(node, "condition_and_nodes", ()) or ():
-                visit(cond)
-                visit(body)
-            else_node = getattr(node, "else_node", None)
-            if else_node is not None:
-                visit(else_node)
-            return
-
-        if isinstance(node, structured_c.CWhileLoop):
-            visit(getattr(node, "condition", None))
-            visit(getattr(node, "body", None))
-            return
-
-        if hasattr(structured_c, "CDoWhileLoop") and isinstance(node, getattr(structured_c, "CDoWhileLoop")):
-            visit(getattr(node, "condition", None))
-            visit(getattr(node, "body", None))
-            return
-
-        if hasattr(structured_c, "CForLoop") and isinstance(node, getattr(structured_c, "CForLoop")):
-            visit(getattr(node, "init", None))
-            visit(getattr(node, "condition", None))
-            visit(getattr(node, "iteration", None))
-            visit(getattr(node, "body", None))
-            return
-
-    visit(statements)
-
-    return aliases
+    return _cli_linear_aliases._seed_adjacent_byte_pair_aliases(
+        project,
+        codegen,
+        structured_codegen_node=_structured_codegen_node,
+        unwrap_c_casts=_unwrap_c_casts,
+        iter_c_nodes_deep=_iter_c_nodes_deep,
+        match_byte_load_addr_expr=_match_byte_load_addr_expr,
+        addr_exprs_are_byte_pair=_addr_exprs_are_byte_pair,
+        make_word_dereference_from_addr_expr=_make_word_dereference_from_addr_expr,
+    )
 
 
 def _coalesce_linear_recurrence_statements(project: angr.Project, codegen) -> bool:
@@ -12325,203 +11147,104 @@ def _coalesce_segmented_word_store_statements(project: angr.Project, codegen) ->
 
 
 def _global_memory_addr(node) -> int | None:
-    if not isinstance(node, structured_c.CVariable):
-        return None
-    variable = getattr(node, "variable", None)
-    if not isinstance(variable, SimMemoryVariable):
-        return None
-    addr = getattr(variable, "addr", None)
-    return addr if isinstance(addr, int) else None
+    return _cli_word_loads._global_memory_addr(node)
 
 
 def _global_load_addr(node, project: angr.Project) -> int | None:
-    addr = _global_memory_addr(node)
-    if addr is not None:
-        return addr
-    classified = _classify_segmented_dereference(node, project)
-    if classified is None or classified.kind != "global":
-        return None
-    return classified.linear
+    return _cli_word_loads._global_load_addr(node, project)
 
 
 def _match_scaled_high_byte(node, project: angr.Project) -> int | None:
-    if not isinstance(node, structured_c.CBinaryOp):
-        return None
-
-    if node.op == "Mul":
-        pairs = ((node.lhs, node.rhs), (node.rhs, node.lhs))
-        for maybe_load, maybe_scale in pairs:
-            if _c_constant_value(maybe_scale) != 0x100:
-                continue
-            addr = _global_load_addr(maybe_load, project)
-            if addr is not None:
-                return addr
-
-    if node.op == "Shl":
-        pairs = ((node.lhs, node.rhs), (node.rhs, node.lhs))
-        for maybe_load, maybe_scale in pairs:
-            if _c_constant_value(maybe_scale) != 8:
-                continue
-            addr = _global_load_addr(maybe_load, project)
-            if addr is not None:
-                return addr
-
-    return None
-
-
-def _extract_dereference_addr_expr(node):
-    if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
-        return None
-    operand = node.operand
-    if isinstance(operand, structured_c.CTypeCast):
-        return operand.expr
-    return operand
-
-
-def _match_byte_load_addr_expr(node):
-    addr_expr = _extract_dereference_addr_expr(node)
-    if addr_expr is None:
-        return None
-    type_ = getattr(node, "type", None)
-    bits = getattr(type_, "size", None)
-    if bits not in {8, None}:
-        return None
-    return addr_expr
-
-
-def _match_byte_store_addr_expr(node):
-    addr_expr = _extract_dereference_addr_expr(node)
-    if addr_expr is None:
-        return None
-    type_ = getattr(node, "type", None)
-    bits = getattr(type_, "size", None)
-    if bits != 8:
-        return None
-    return addr_expr
-
-
-def _match_shifted_high_byte_addr_expr(node):
-    node = _unwrap_c_casts(node)
-    if not isinstance(node, structured_c.CBinaryOp):
-        return None
-
-    if node.op == "Mul":
-        pairs = ((node.lhs, node.rhs), (node.rhs, node.lhs))
-        for maybe_load, maybe_scale in pairs:
-            if _c_constant_value(_unwrap_c_casts(maybe_scale)) == 0x100:
-                return _match_byte_load_addr_expr(_unwrap_c_casts(maybe_load))
-
-    if node.op == "Shl":
-        pairs = ((node.lhs, node.rhs), (node.rhs, node.lhs))
-        for maybe_load, maybe_scale in pairs:
-            if _c_constant_value(_unwrap_c_casts(maybe_scale)) == 8:
-                return _match_byte_load_addr_expr(_unwrap_c_casts(maybe_load))
-
-    return None
-
-
-def _match_word_pair_low_addr_expr(node, project: angr.Project):
-    node = _unwrap_c_casts(node)
-    if not isinstance(node, structured_c.CBinaryOp) or node.op not in {"Or", "Add"}:
-        return None
-
-    for low_expr, high_expr in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-        low_addr_expr = _match_byte_load_addr_expr(_unwrap_c_casts(low_expr))
-        high_addr_expr = _match_shifted_high_byte_addr_expr(high_expr)
-        if low_addr_expr is None or high_addr_expr is None:
-            continue
-        if _addr_exprs_are_byte_pair(low_addr_expr, high_addr_expr, project):
-            return low_addr_expr
-
-    return None
-
-
-def _split_expr_const_offset(node):
-    terms = _flatten_c_add_terms(node)
-    const_sum = 0
-    others = []
-    for term in terms:
-        constant = _c_constant_value(_unwrap_c_casts(term))
-        if constant is not None:
-            const_sum += constant
-        else:
-            others.append(term)
-    return others, const_sum
-
-
-def _same_expression_list(lhs_terms, rhs_terms) -> bool:
-    if len(lhs_terms) != len(rhs_terms):
-        return False
-
-    used = [False] * len(rhs_terms)
-    for lhs in lhs_terms:
-        matched = False
-        for idx, rhs in enumerate(rhs_terms):
-            if used[idx]:
-                continue
-            if _same_c_expression(lhs, rhs):
-                used[idx] = True
-                matched = True
-                break
-        if not matched:
-            return False
-    return True
-
-
-def _addr_exprs_are_same(low_addr_expr, high_addr_expr, project: angr.Project) -> bool:
-    low_class = _classify_segmented_addr_expr(low_addr_expr, project)
-    high_class = _classify_segmented_addr_expr(high_addr_expr, project)
-
-    if low_class is not None and high_class is not None:
-        if low_class.kind == high_class.kind and low_class.seg_name == high_class.seg_name:
-            if low_class.kind == "stack" and low_class.cvar is not None and high_class.cvar is not None:
-                if _same_c_expression(low_class.cvar, high_class.cvar):
-                    return low_class.extra_offset == high_class.extra_offset
-            if low_class.kind in {"global", "extra", "segment_const"}:
-                return low_class.linear == high_class.linear
-
-    low_terms, low_const = _split_expr_const_offset(low_addr_expr)
-    high_terms, high_const = _split_expr_const_offset(high_addr_expr)
-    return low_const == high_const and _same_expression_list(low_terms, high_terms)
-
-
-def _addr_exprs_are_byte_pair(low_addr_expr, high_addr_expr, project: angr.Project | None = None) -> bool:
-    if project is not None:
-        low_class = _classify_segmented_addr_expr(low_addr_expr, project)
-        high_class = _classify_segmented_addr_expr(high_addr_expr, project)
-        if low_class is not None and high_class is not None:
-            if low_class.kind == high_class.kind and low_class.seg_name == high_class.seg_name:
-                if low_class.kind == "stack" and low_class.stack_var is not None and high_class.stack_var is not None:
-                    if _stack_slot_identity_can_join_var(low_class.stack_var, high_class.stack_var):
-                        return high_class.extra_offset == low_class.extra_offset + 1
-                if low_class.kind in {"global", "extra", "segment_const"}:
-                    if low_class.linear is not None and high_class.linear is not None:
-                        return high_class.linear == low_class.linear + 1
-
-    low_terms, low_const = _split_expr_const_offset(low_addr_expr)
-    high_terms, high_const = _split_expr_const_offset(high_addr_expr)
-    return _same_expression_list(low_terms, high_terms) and high_const == low_const + 1
-
-
-def _make_word_dereference_from_addr_expr(codegen, project: angr.Project, addr_expr):
-    word_type = SimTypeShort(False)
-    ptr_type = SimTypePointer(word_type).with_arch(project.arch)
-    return structured_c.CUnaryOp(
-        "Dereference",
-        structured_c.CTypeCast(None, ptr_type, addr_expr, codegen=codegen),
-        codegen=codegen,
+    return _cli_word_loads._match_scaled_high_byte(
+        node,
+        project,
+        c_constant_value=_c_constant_value,
+        global_load_addr=_global_load_addr,
     )
 
 
+def _extract_dereference_addr_expr(node):
+    return _cli_word_loads._extract_dereference_addr_expr(node)
+
+
+def _match_byte_load_addr_expr(node):
+    return _cli_word_loads._match_byte_load_addr_expr(
+        node,
+        unwrap_c_casts=_unwrap_c_casts,
+    )
+
+
+def _match_byte_store_addr_expr(node):
+    return _cli_word_loads._match_byte_store_addr_expr(node)
+
+
+def _match_shifted_high_byte_addr_expr(node):
+    return _cli_word_loads._match_shifted_high_byte_addr_expr(
+        node,
+        unwrap_c_casts=_unwrap_c_casts,
+        c_constant_value=_c_constant_value,
+        match_byte_load_addr_expr=_match_byte_load_addr_expr,
+    )
+
+
+def _match_word_pair_low_addr_expr(node, project: angr.Project):
+    return _cli_word_loads._match_word_pair_low_addr_expr(
+        node,
+        project,
+        unwrap_c_casts=_unwrap_c_casts,
+        match_byte_load_addr_expr=_match_byte_load_addr_expr,
+        match_shifted_high_byte_addr_expr=_match_shifted_high_byte_addr_expr,
+        addr_exprs_are_byte_pair=_addr_exprs_are_byte_pair,
+    )
+
+
+def _split_expr_const_offset(node):
+    return _cli_segmented_compare._split_expr_const_offset(
+        node,
+        flatten_c_add_terms=_flatten_c_add_terms,
+        unwrap_c_casts=_unwrap_c_casts,
+        c_constant_value=_c_constant_value,
+    )
+
+
+def _same_expression_list(lhs_terms, rhs_terms) -> bool:
+    return _cli_segmented_compare._same_expression_list(
+        lhs_terms,
+        rhs_terms,
+        same_c_expression=_same_c_expression,
+    )
+
+
+def _addr_exprs_are_same(low_addr_expr, high_addr_expr, project: angr.Project) -> bool:
+    return _cli_segmented_compare._addr_exprs_are_same(
+        low_addr_expr,
+        high_addr_expr,
+        project,
+        classify_segmented_addr_expr=_classify_segmented_addr_expr,
+        same_c_expression=_same_c_expression,
+        split_expr_const_offset=_split_expr_const_offset,
+        same_expression_list=_same_expression_list,
+    )
+
+
+def _addr_exprs_are_byte_pair(low_addr_expr, high_addr_expr, project: angr.Project | None = None) -> bool:
+    return _cli_segmented_compare._addr_exprs_are_byte_pair(
+        low_addr_expr,
+        high_addr_expr,
+        project,
+        classify_segmented_addr_expr=_classify_segmented_addr_expr,
+        stack_slot_identity_can_join_var=_stack_slot_identity_can_join_var,
+        split_expr_const_offset=_split_expr_const_offset,
+        same_expression_list=_same_expression_list,
+    )
+
+
+def _make_word_dereference_from_addr_expr(codegen, project: angr.Project, addr_expr):
+    return _cli_word_loads._make_word_dereference_from_addr_expr(codegen, project, addr_expr)
+
+
 def _match_word_dereference_addr_expr(node):
-    addr_expr = _extract_dereference_addr_expr(node)
-    if addr_expr is None:
-        return None
-    type_ = getattr(node, "type", None)
-    bits = getattr(type_, "size", None)
-    if bits != 16:
-        return None
-    return addr_expr
+    return _cli_word_loads._match_word_dereference_addr_expr(node)
 
 
 def _match_word_rhs_from_byte_pair(low_rhs, high_rhs, codegen, project: angr.Project):
@@ -12628,10 +11351,11 @@ def _match_word_rhs_from_byte_pair(low_rhs, high_rhs, codegen, project: angr.Pro
 
 
 def _high_byte_store_addr(node, project: angr.Project) -> int | None:
-    classified = _classify_segmented_dereference(node, project)
-    if classified is None or classified.kind != "global":
-        return None
-    return classified.linear
+    return _cli_word_loads._high_byte_store_addr(
+        node,
+        project,
+        classify_segmented_dereference=_classify_segmented_dereference,
+    )
 
 
 def _make_word_global(codegen, addr: int, name: str):
