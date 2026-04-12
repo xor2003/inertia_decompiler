@@ -64,6 +64,7 @@ from inertia_decompiler.cli_timeout import (
 from inertia_decompiler import cli_access_traits as _cli_access_traits
 from inertia_decompiler import cli_access_object_hints as _cli_access_object_hints
 from inertia_decompiler import cli_access_profiles as _cli_access_profiles
+from inertia_decompiler import cli_access_rewrite_artifact as _cli_access_rewrite_artifact
 from inertia_decompiler import cli_access_trait_rewrite as _cli_access_trait_rewrite
 from inertia_decompiler import cli_memory_prune as _cli_memory_prune
 from inertia_decompiler import cli_dead_local_prune as _cli_dead_local_prune
@@ -8467,9 +8468,14 @@ def _access_trait_member_candidates(traits: dict[str, dict[tuple[object, ...], i
 def _should_attach_access_trait_names(codegen) -> bool:
     return _cli_access_trait_rewrite._should_attach_access_trait_names(
         codegen,
-        has_stable_access_object_hints=lambda current_codegen: _cli_access_object_hints._has_stable_access_object_hints(
-            current_codegen,
+        has_access_rewrite_artifact=lambda current_codegen: _cli_access_rewrite_artifact.has_access_rewrite_artifact(
+            getattr(current_codegen, "project", None),
+            getattr(getattr(current_codegen, "cfunc", None), "addr", None),
             build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+            build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
+                traits,
+                build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+            ),
         ),
     )
 
@@ -8479,9 +8485,14 @@ def _attach_access_trait_field_names(project: angr.Project, codegen) -> bool:
         project,
         codegen,
         should_attach_access_trait_names=_should_attach_access_trait_names,
-        build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
-            traits,
+        load_access_rewrite_artifact=lambda current_project, function_addr: _cli_access_rewrite_artifact.load_access_rewrite_artifact(
+            current_project,
+            function_addr,
             build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+            build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
+                traits,
+                build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+            ),
         ),
         stable_access_object_hint_for_key=_cli_access_object_hints._stable_access_object_hint_for_key,
         access_trait_variable_key=_access_trait_variable_key,
@@ -8496,9 +8507,14 @@ def _attach_pointer_member_names(project: angr.Project, codegen) -> bool:
         project,
         codegen,
         should_attach_access_trait_names=_should_attach_access_trait_names,
-        build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
-            traits,
+        load_access_rewrite_artifact=lambda current_project, function_addr: _cli_access_rewrite_artifact.load_access_rewrite_artifact(
+            current_project,
+            function_addr,
             build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+            build_stable_access_object_hints=lambda traits: _cli_access_object_hints._build_stable_access_object_hints(
+                traits,
+                build_access_trait_evidence_profiles=_build_access_trait_evidence_profiles,
+            ),
         ),
         stable_access_object_hint_for_key=_cli_access_object_hints._stable_access_object_hint_for_key,
         access_trait_variable_key=_access_trait_variable_key,

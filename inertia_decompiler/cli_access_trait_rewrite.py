@@ -6,6 +6,7 @@ from typing import Any, Callable, TypeAlias
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 
+from .cli_access_rewrite_artifact import AccessRewriteArtifact
 from .cli_access_object_hints import AccessTraitObjectHint, BaseKey
 
 
@@ -16,9 +17,9 @@ ReplaceCChildren: TypeAlias = Callable[[Any, Callable[[Any], Any]], bool]
 def _should_attach_access_trait_names(
     codegen: Any,
     *,
-    has_stable_access_object_hints: Callable[[Any], bool],
+    has_access_rewrite_artifact: Callable[[Any], bool],
 ) -> bool:
-    return has_stable_access_object_hints(codegen)
+    return has_access_rewrite_artifact(codegen)
 
 
 def _attach_access_trait_field_names(
@@ -26,7 +27,7 @@ def _attach_access_trait_field_names(
     codegen: Any,
     *,
     should_attach_access_trait_names: Callable[[Any], bool],
-    build_stable_access_object_hints: Callable[[dict[BaseKey, object]], StableHints],
+    load_access_rewrite_artifact: Callable[[Any, Any], AccessRewriteArtifact | None],
     stable_access_object_hint_for_key: Callable[[StableHints, BaseKey | None], AccessTraitObjectHint | None],
     access_trait_variable_key: Callable[[Any], BaseKey | None],
     stack_object_name: Callable[[int], str],
@@ -37,16 +38,10 @@ def _attach_access_trait_field_names(
         return False
     if not should_attach_access_trait_names(codegen):
         return False
-
-    cache = getattr(project, "_inertia_access_traits", None)
-    if not isinstance(cache, dict):
+    artifact = load_access_rewrite_artifact(project, getattr(codegen.cfunc, "addr", None))
+    if artifact is None or not artifact.object_hints:
         return False
-    traits = cache.get(getattr(codegen.cfunc, "addr", None))
-    if not isinstance(traits, dict):
-        return False
-    object_hints = build_stable_access_object_hints(traits)
-    if not object_hints:
-        return False
+    object_hints = artifact.object_hints
 
     def is_generic_stack_name(name: object) -> bool:
         return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+)", name) is not None
@@ -54,6 +49,8 @@ def _attach_access_trait_field_names(
     def stack_rewrite_decision(variable: Any) -> AccessTraitObjectHint | None:
         base_key = access_trait_variable_key(variable)
         if base_key is None:
+            return None
+        if base_key in artifact.refusal_reasons or (len(base_key) == 4 and base_key[:3] in artifact.refusal_reasons):
             return None
         return stable_access_object_hint_for_key(object_hints, base_key)
 
@@ -109,7 +106,7 @@ def _attach_pointer_member_names(
     codegen: Any,
     *,
     should_attach_access_trait_names: Callable[[Any], bool],
-    build_stable_access_object_hints: Callable[[dict[BaseKey, object]], StableHints],
+    load_access_rewrite_artifact: Callable[[Any, Any], AccessRewriteArtifact | None],
     stable_access_object_hint_for_key: Callable[[StableHints, BaseKey | None], AccessTraitObjectHint | None],
     access_trait_variable_key: Callable[[Any], BaseKey | None],
     access_trait_field_name: Callable[[int, int], str],
@@ -119,21 +116,17 @@ def _attach_pointer_member_names(
         return False
     if not should_attach_access_trait_names(codegen):
         return False
-
-    cache = getattr(project, "_inertia_access_traits", None)
-    if not isinstance(cache, dict):
+    artifact = load_access_rewrite_artifact(project, getattr(codegen.cfunc, "addr", None))
+    if artifact is None or not artifact.object_hints:
         return False
-    traits = cache.get(getattr(codegen.cfunc, "addr", None))
-    if not isinstance(traits, dict):
-        return False
-    object_hints = build_stable_access_object_hints(traits)
-    if not object_hints:
-        return False
+    object_hints = artifact.object_hints
 
     def is_generic_name(name: object) -> bool:
         return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+)", name) is not None
 
     def candidate_field_names(base_key: BaseKey) -> tuple[str, ...]:
+        if base_key in artifact.refusal_reasons or (len(base_key) == 4 and base_key[:3] in artifact.refusal_reasons):
+            return ()
         hint = stable_access_object_hint_for_key(object_hints, base_key)
         if hint is None:
             return ()
@@ -226,5 +219,4 @@ def _attach_pointer_member_names(
     if replace_c_children(root, transform):
         changed = True
     return changed
-
 

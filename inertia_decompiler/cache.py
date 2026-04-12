@@ -46,6 +46,7 @@ DECOMPILATION_CACHE_SOURCE_FILES = (
     _ROOT / "inertia_decompiler" / "project_loading.py",
     _ROOT / "inertia_decompiler" / "sidecar_parsers.py",
     _ROOT / "inertia_decompiler" / "sidecar_metadata.py",
+    _ROOT / "inertia_decompiler" / "tail_validation.py",
     _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "analysis_helpers.py",
     _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "decompiler_postprocess.py",
     _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "decompiler_postprocess_simplify.py",
@@ -53,6 +54,9 @@ DECOMPILATION_CACHE_SOURCE_FILES = (
     _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "lift_86_16.py",
     _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "load_dos_mz.py",
     _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "load_dos_ne.py",
+    _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "tail_validation.py",
+    _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "tail_validation_fingerprint.py",
+    _ROOT / "angr_platforms" / "angr_platforms" / "X86_16" / "tail_validation_routing.py",
 )
 
 
