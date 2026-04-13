@@ -48,10 +48,6 @@ except Exception:
     pass
 
 from angr_platforms.X86_16.corpus_scan import FunctionScanResult, extract_cod_functions, scan_function
-from angr_platforms.X86_16.milestone_report import (
-    cache_x86_16_tail_validation_detail_artifact,
-    render_x86_16_tail_validation_console_summary,
-)
 from angr_platforms.X86_16.tail_validation import (
     annotate_x86_16_tail_validation_surface_with_baseline,
     build_x86_16_tail_validation_aggregate,
@@ -59,6 +55,7 @@ from angr_platforms.X86_16.tail_validation import (
     compare_x86_16_tail_validation_baseline,
 )
 from inertia_decompiler.cache import DECOMPILATION_CACHE_SOURCE_FILES, _cache_source_digest
+from inertia_decompiler.tail_validation import emit_tail_validation_surface_summary
 
 
 _REAL_STDOUT = sys.stdout
@@ -187,35 +184,82 @@ def _uncollected_tail_validation_record(
     }
 
 
+def _normalize_tail_validation_record(
+    record: dict[str, object],
+    *,
+    cod_path: Path,
+    proc_name: str | None,
+    proc_kind: str | None,
+) -> dict[str, object]:
+    normalized = dict(record)
+    if not normalized.get("cod_file"):
+        normalized["cod_file"] = cod_path.name
+    if proc_name is not None and not normalized.get("proc_name"):
+        normalized["proc_name"] = proc_name
+    if proc_kind is not None and not normalized.get("proc_kind"):
+        normalized["proc_kind"] = proc_kind
+    if not normalized.get("proc_name") and isinstance(normalized.get("function_name"), str):
+        normalized["proc_name"] = normalized["function_name"]
+    return normalized
+
+
+def _append_uncollected_tail_validation_record(
+    records: list[dict[str, object]],
+    *,
+    cod_path: Path,
+    proc_name: str | None,
+    proc_kind: str | None,
+    exit_kind: str,
+    exit_detail: str,
+) -> int:
+    records.append(
+        _uncollected_tail_validation_record(
+            cod_path=cod_path,
+            proc_name=proc_name,
+            proc_kind=proc_kind,
+            exit_kind=exit_kind,
+            exit_detail=exit_detail,
+        )
+    )
+    return 1
+
+
 def _append_tail_validation_records_for_result(
     records: list[dict[str, object]],
     result: CodWorkResult,
 ) -> int:
-    result_records = tuple(record for record in result.tail_validation_records if isinstance(record, dict))
+    result_records = tuple(
+        _normalize_tail_validation_record(
+            record,
+            cod_path=result.cod_path,
+            proc_name=result.proc_name,
+            proc_kind=result.proc_kind,
+        )
+        for record in result.tail_validation_records
+        if isinstance(record, dict)
+    )
     result_scanned = max(0, int(result.tail_validation_scanned or 0))
     if result_records:
         records.extend(result_records)
         missing = max(0, result_scanned - len(result_records))
         for _ in range(missing):
-            records.append(
-                _uncollected_tail_validation_record(
-                    cod_path=result.cod_path,
-                    proc_name=result.proc_name,
-                    proc_kind=result.proc_kind,
-                    exit_kind=result.exit_kind,
-                    exit_detail=result.exit_detail or "tail validation metadata omitted record details",
-                )
+            _append_uncollected_tail_validation_record(
+                records,
+                cod_path=result.cod_path,
+                proc_name=result.proc_name,
+                proc_kind=result.proc_kind,
+                exit_kind=result.exit_kind,
+                exit_detail=result.exit_detail or "tail validation metadata omitted record details",
             )
         return max(result_scanned, len(result_records))
 
-    records.append(
-        _uncollected_tail_validation_record(
-            cod_path=result.cod_path,
-            proc_name=result.proc_name,
-            proc_kind=result.proc_kind,
-            exit_kind=result.exit_kind,
-            exit_detail=result.exit_detail or "tail validation metadata omitted record details",
-        )
+    _append_uncollected_tail_validation_record(
+        records,
+        cod_path=result.cod_path,
+        proc_name=result.proc_name,
+        proc_kind=result.proc_kind,
+        exit_kind=result.exit_kind,
+        exit_detail=result.exit_detail or "tail validation metadata omitted record details",
     )
     return max(1, result_scanned)
 
@@ -868,16 +912,14 @@ def _run_work_item(item: CodWorkItem, *, timeout: int, max_memory_mb: int) -> Co
             for record in raw_records:
                 if not isinstance(record, dict):
                     continue
-                enriched = dict(record)
-                if not enriched.get("cod_file"):
-                    enriched["cod_file"] = item.cod_path.name
-                if item.proc_name is not None and not enriched.get("proc_name"):
-                    enriched["proc_name"] = item.proc_name
-                if item.proc_kind is not None and not enriched.get("proc_kind"):
-                    enriched["proc_kind"] = item.proc_kind
-                if not enriched.get("proc_name") and isinstance(enriched.get("function_name"), str):
-                    enriched["proc_name"] = enriched["function_name"]
-                enriched_records.append(enriched)
+                enriched_records.append(
+                    _normalize_tail_validation_record(
+                        record,
+                        cod_path=item.cod_path,
+                        proc_name=item.proc_name,
+                        proc_kind=item.proc_kind,
+                    )
+                )
             tail_validation_records = tuple(enriched_records)
         tail_validation_scanned = int(tail_validation_payload.get("scanned", 0) or 0)
 
@@ -1177,16 +1219,14 @@ def main() -> int:
         nonlocal failures, tail_validation_scanned
         failures += 1
         print(f"  {_worker_failure_summary(item, ex)}: {item.cod_path} :: {item.label}")
-        tail_validation_records.append(
-            _uncollected_tail_validation_record(
-                cod_path=item.cod_path,
-                proc_name=item.proc_name,
-                proc_kind=item.proc_kind,
-                exit_kind="worker_exception",
-                exit_detail=f"{type(ex).__name__}: {ex}",
-            )
+        tail_validation_scanned += _append_uncollected_tail_validation_record(
+            tail_validation_records,
+            cod_path=item.cod_path,
+            proc_name=item.proc_name,
+            proc_kind=item.proc_kind,
+            exit_kind="worker_exception",
+            exit_detail=f"{type(ex).__name__}: {ex}",
         )
-        tail_validation_scanned += 1
         writer = file_writers[item.cod_path]
         writer.add_failure(item.proc_index, _format_worker_failure(item, ex))
         if writer.is_complete():
@@ -1254,16 +1294,14 @@ def main() -> int:
                         failures += 1
                         print(f"  timeout after {args.subprocess_timeout}s: {item.cod_path} :: {item.label}")
                         writer = file_writers[item.cod_path]
-                        tail_validation_records.append(
-                            _uncollected_tail_validation_record(
-                                cod_path=item.cod_path,
-                                proc_name=item.proc_name,
-                                proc_kind=item.proc_kind,
-                                exit_kind="subprocess_timeout",
-                                exit_detail=f"worker pool scheduler timeout after {args.subprocess_timeout}s",
-                            )
+                        tail_validation_scanned += _append_uncollected_tail_validation_record(
+                            tail_validation_records,
+                            cod_path=item.cod_path,
+                            proc_name=item.proc_name,
+                            proc_kind=item.proc_kind,
+                            exit_kind="subprocess_timeout",
+                            exit_detail=f"worker pool scheduler timeout after {args.subprocess_timeout}s",
                         )
-                        tail_validation_scanned += 1
                         writer.add_failure(
                             item.proc_index,
                             f"/* timeout after {args.subprocess_timeout}s */",
@@ -1319,21 +1357,19 @@ def main() -> int:
         cod_files=cod_files,
         proc_names=args.proc_name,
     )
-    rendered = render_x86_16_tail_validation_console_summary(surface, cache_path=console_cache_path)
-    detail_artifact = cache_x86_16_tail_validation_detail_artifact(surface, cache_path=detail_cache_path)
-    for line in rendered.get("lines", ()):
-        if isinstance(line, str) and line:
-            print(f"{_TAIL_VALIDATION_STDERR_PREFIX}{line}")
-    if surface.get("severity") != "clean":
-        print(f"{_TAIL_VALIDATION_STDERR_PREFIX}detail artifact {detail_cache_path}")
-        if rendered.get("cache_hit"):
-            print(f"{_TAIL_VALIDATION_STDERR_PREFIX}console summary cache hit")
-        if detail_artifact.get("cache_hit"):
-            print(f"{_TAIL_VALIDATION_STDERR_PREFIX}detail artifact cache hit")
+    sys.stdout.flush()
+    emit_tail_validation_surface_summary(
+        records=tail_validation_records,
+        scanned=tail_validation_scanned,
+        summary=dict(aggregate.get("summary", {}) or {}),
+        surface=surface,
+        console_cache_path=console_cache_path,
+        detail_cache_path=detail_cache_path,
+    )
     if args.write_tail_validation_baseline:
         baseline = build_x86_16_tail_validation_baseline(aggregate.get("summary", {}))
         _write_tail_validation_baseline(baseline_path, baseline)
-        print(f"{_TAIL_VALIDATION_STDERR_PREFIX}wrote baseline {baseline_path}")
+        print(f"{_TAIL_VALIDATION_STDERR_PREFIX}wrote baseline {baseline_path}", file=sys.stderr)
 
     elapsed = time.perf_counter() - start
     print(f"done in {elapsed:.1f}s; failures={failures}/{len(work_items)}")

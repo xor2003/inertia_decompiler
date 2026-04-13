@@ -143,6 +143,35 @@ The harness now tries to stay cheap by default:
 - `codex resume` uses a short continuation prompt instead of resending the full role prompt.
 - Local Python one-liners launched from the repo root inherit the repo memory guard.
 
+The harness policy is to save tokens only when quality does not drop. In
+practice that means:
+
+- keep persistent runtime state in machine-readable artifacts under
+  `.codex_automation/` instead of replaying full history
+- feed models task packets, typed summaries, and exact artifact paths rather
+  than raw logs or long chat transcripts
+- prefer lazy loading and exact slices over broad repository scans or full-file
+  dumps
+- suppress repeated prompt boilerplate, repeated evidence excerpts, and repeated
+  test reruns
+- trim tool output to the signal before it returns to a model
+- keep visible model output short and structured; do not spend tokens on
+  narrative
+- use stronger models only for steps that need them; use cheaper models for
+  routing, checking, pruning, and summarization
+- keep token-saving tricks subordinate to correctness, attribution, and
+  debuggability
+
+Concretely, for this harness:
+
+- the role prompt is sent once in compact form, then resumes use delta prompts
+- the active task packet is the main work unit; full plan/history replay is not
+  the default
+- checker/planner should read current evidence artifacts before doing new broad
+  exploration
+- worker should prefer the smallest repro and smallest proving test
+- reviewer should prune done plan items instead of carrying dead text forward
+
 The main knobs are:
 
 - `COMPACT_PROMPTS=1`

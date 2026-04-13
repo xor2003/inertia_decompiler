@@ -13,7 +13,16 @@ from meta_harness.policy import (
     decide_worker_runtime,
     decide_worker_timeout,
 )
-from meta_harness.task_packet import TASK_PACKET_SCHEMA_VERSION, parse_plan_task_packets, parse_task_packet
+from meta_harness.task_packet import (
+    TASK_PACKET_SCHEMA_VERSION,
+    count_remaining_plan_steps,
+    parse_plan_task_packets,
+    parse_task_packet,
+    plan_item_is_finished,
+    prune_completed_plan_file,
+    prune_completed_plan_text,
+    split_plan_items,
+)
 
 
 def test_parse_task_packet_extracts_core_fields():
@@ -30,6 +39,25 @@ def test_parse_task_packet_extracts_core_fields():
     assert packet.done_conditions
 
 
+def test_task_packet_prompt_block_filters_noise_and_compacts_fields():
+    item = (
+        "6. [rewrite] Goal: Keep wrapper and direct fallback aligned. "
+        "Edit `/tmp/repo/a.py:1-2`, `detail_cache_path`, `/tmp/repo/b.py:3-4`, "
+        "`emit_tail_validation_snapshot_or_uncollected()`, "
+        "`pytest /tmp/repo/tests/test_a.py -k tail_validation`. "
+        "Done when wrapper and direct output match and pytest /tmp/repo/tests/test_a.py -k tail_validation passes."
+    )
+    packet = parse_task_packet(item)
+    block = packet.to_prompt_block()
+
+    assert "detail_cache_path" not in block
+    assert "pytest /tmp/repo/tests/test_a.py -k tail_validation" in block
+    assert "Target files: /tmp/repo/a.py, /tmp/repo/b.py" in block
+    assert "Callable refs: emit_tail_validation_snapshot_or_uncollected()" in block
+    assert "Escalation policy:" not in block
+    assert "Objective: Keep wrapper and direct fallback aligned." in block
+
+
 def test_parse_plan_task_packets_splits_numbered_items():
     plan = (
         "1. `a.py:1-2`: first item. Done when pytest tests/test_a.py passes.\n"
@@ -37,6 +65,55 @@ def test_parse_plan_task_packets_splits_numbered_items():
     )
     packets = parse_plan_task_packets(plan)
     assert [packet.item_id for packet in packets] == ["1", "2"]
+
+
+def test_prune_completed_plan_text_removes_done_items_and_keeps_unfinished():
+    plan = (
+        "1. Done: finish the first item.\n"
+        "Why now: the first item is finished.\n\n"
+        "2. [pending] keep the second item.\n"
+        "Why now: the second item is still open.\n\n"
+        "3. Completed: finish the third item.\n"
+    )
+    result = prune_completed_plan_text(plan)
+    assert result.changed is True
+    assert result.original_item_count == 3
+    assert result.kept_item_count == 1
+    assert result.removed_item_count == 2
+    assert "finish the first item" not in result.updated_text
+    assert "keep the second item" in result.updated_text
+    assert "finish the third item" not in result.updated_text
+
+
+def test_prune_completed_plan_file_writes_pruned_text(tmp_path):
+    plan_path = tmp_path / "PLAN.md"
+    plan_path.write_text(
+        "1. Done: remove me.\n"
+        "Why now: already completed.\n\n"
+        "2. [pending] keep me.\n"
+        "Why now: still active.\n",
+        encoding="utf-8",
+    )
+
+    result = prune_completed_plan_file(plan_path)
+
+    assert result.changed is True
+    assert result.removed_item_count == 1
+    assert plan_path.read_text(encoding="utf-8") == "2. [pending] keep me.\nWhy now: still active.\n"
+
+
+def test_split_and_count_remaining_plan_steps_ignore_done_numbered_items():
+    plan = (
+        "1. Done: completed item.\n"
+        "Why now: already done.\n\n"
+        "2. Goal: active item.\n"
+        "Why now: still open.\n\n"
+        "3. [completed] also done.\n"
+    )
+    assert len(split_plan_items(plan)) == 3
+    assert plan_item_is_finished("1. Done: completed item.") is True
+    assert plan_item_is_finished("2. Goal: active item.") is False
+    assert count_remaining_plan_steps(plan) == 1
 
 
 def test_worker_runtime_policy_escalates_on_recent_reason():

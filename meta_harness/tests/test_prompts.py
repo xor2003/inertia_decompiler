@@ -41,8 +41,11 @@ def test_planner_prompt_mentions_plan_and_remaining_steps(monkeypatch, tmp_path)
     assert "Preserve unfinished strategic items" in prompt
     assert "Do not drop user-added unfinished goals" in prompt
     assert "Pause for minute" not in prompt
-    assert "Minimal and actionable" in prompt
+    assert "Speak in compact cave-man English" in prompt
+    assert "Short words. Short lines." in prompt
     assert "Avoid spending tokens on implementation" in prompt
+    assert "Use task packets, typed summaries, and artifact paths instead of replaying full history" in prompt
+    assert "Trim tool output to the signal before reusing it in a prompt" in prompt
     assert "Do not run pytest, corpus scans, or large validation commands" in prompt
     assert "Read the current evidence and debug logs first" in prompt
     assert "tail-validation summary or detail-artifact paths" in prompt
@@ -68,13 +71,26 @@ def test_planner_prompt_accepts_current_item_and_rewrite_target(monkeypatch, tmp
     assert "giant item to split" in prompt
 
 
+def test_planner_prompt_avoids_duplicate_rewrite_body_when_task_packet_matches(monkeypatch, tmp_path):
+    cfg = _cfg(monkeypatch, tmp_path)
+    item = "1. [rewrite] giant item to split"
+    packet = "Task packet id: 1\nObjective: split item"
+    prompt = build_planner_prompt(cfg, current_item=item, rewrite_target=item, task_packet=packet)
+
+    assert prompt.count(item) == 0
+    assert "Rewrite the active task packet into smaller numbered items" in prompt
+    assert "Current task packet" in prompt
+
+
 def test_worker_prompt_mentions_implementation_role(monkeypatch, tmp_path):
     cfg = _cfg(monkeypatch, tmp_path)
     prompt = build_worker_prompt(cfg)
     assert "Continue implementing the unfinished steps" in prompt
     assert "one unfinished top-level plan item at a time" in prompt
     assert "Never use source-specific hacks" in prompt
+    assert "Speak in compact cave-man English" in prompt
     assert "Run the smallest test that proves the touched behavior" in prompt
+    assert "Use task packets, typed summaries, and artifact paths instead of replaying full history" in prompt
     assert "change code or the hypothesis before rerunning that same test" in prompt
     assert "capture a concrete profile/trace/log snapshot before the first fix" in prompt
     assert "Use cProfile/line_profiler/memray/py-spy through the active virtualenv" in prompt
@@ -93,6 +109,10 @@ def test_worker_prompt_accepts_focus_item_and_retry_context(monkeypatch, tmp_pat
     assert "fix BYTEOPS first" in prompt
     assert "Recent worker retry context" in prompt
     assert "repeated failing test: test_byteops" in prompt
+    assert "more detail line" not in build_worker_prompt(
+        cfg,
+        focus_item="1. `decompile.py:10` fix BYTEOPS first\nmore detail line",
+    )
 
 
 def test_worker_and_planner_prompts_accept_task_packet(monkeypatch, tmp_path):
@@ -124,6 +144,7 @@ def test_reviewer_prompt_allows_harness_improvements(monkeypatch, tmp_path):
     cfg = _cfg(monkeypatch, tmp_path)
     prompt = build_reviewer_prompt(cfg)
     assert "improve the harness itself" in prompt
+    assert "Speak in compact cave-man English" in prompt
     assert "Avoid pytest, sweep reruns, or broad repository exploration" in prompt
     assert "Evaluate the current active task packet explicitly" in prompt
     assert "Task packet status: done|partial|blocked|rewrite" in prompt

@@ -25,11 +25,23 @@ class StorageObjectRecord:
     object_kind: str
     candidate_offsets: tuple[int, ...]
 
-    def should_rename_stack(self) -> bool:
+    def is_member_like(self) -> bool:
+        return self.object_kind == "member"
+
+    def is_array_like(self) -> bool:
+        return self.object_kind == "array"
+
+    def is_stack_like(self) -> bool:
+        return self.object_kind == "stack"
+
+    def is_structural(self) -> bool:
         return self.object_kind in {"member", "array", "stack"}
 
+    def should_rename_stack(self) -> bool:
+        return self.is_structural()
+
     def primary_member_offset(self) -> int | None:
-        if self.object_kind != "member" or not self.candidate_offsets:
+        if not self.is_member_like() or not self.candidate_offsets:
             return None
         return self.candidate_offsets[0]
 

@@ -24,6 +24,17 @@ class AccessRewriteArtifact:
     refusal_reasons: dict[BaseKey, str]
 
 
+def _stable_object_hints_from_artifact(storage_object_artifact: StorageObjectArtifact) -> StableHints:
+    return {
+        base_key: AccessTraitObjectHint(
+            base_key=record.base_key,
+            kind=record.object_kind,
+            candidates=tuple((offset, 1, 1) for offset in record.candidate_offsets),
+        )
+        for base_key, record in storage_object_artifact.records.items()
+    }
+
+
 def load_access_rewrite_artifact(
     project: object,
     function_addr: int | None,
@@ -49,14 +60,7 @@ def load_access_rewrite_artifact(
         build_access_trait_evidence_profiles=build_access_trait_evidence_profiles,
         build_stable_access_object_hints=build_stable_access_object_hints,
     )
-    object_hints = {
-        base_key: AccessTraitObjectHint(
-            base_key=record.base_key,
-            kind=record.object_kind,
-            candidates=tuple((offset, 1, 1) for offset in record.candidate_offsets),
-        )
-        for base_key, record in storage_object_artifact.records.items()
-    }
+    object_hints = _stable_object_hints_from_artifact(storage_object_artifact)
     refusal_reasons = {
         base_key: refusal.reason for base_key, refusal in storage_object_artifact.refusals.items()
     }

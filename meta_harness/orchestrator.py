@@ -50,7 +50,15 @@ from .runtime_records import (
     summarize_session_rows,
     write_json,
 )
-from .task_packet import TASK_PACKET_SCHEMA_VERSION, TaskPacket, parse_plan_task_packets
+from .task_packet import (
+    TASK_PACKET_SCHEMA_VERSION,
+    TaskPacket,
+    count_remaining_plan_steps,
+    parse_plan_task_packets,
+    plan_item_is_finished,
+    prune_completed_plan_file,
+    split_plan_items,
+)
 from .webui import append_chat_entry
 
 
@@ -1451,31 +1459,7 @@ class MetaHarness:
         if not self.cfg.plan_path.exists():
             return None
         text = self.cfg.plan_path.read_text(encoding="utf-8", errors="replace")
-        for pat in (r"Global Remaining steps:\s*(\d+)", r"Remaining steps:\s*(\d+)"):
-            match = re.search(pat, text)
-            if match:
-                return int(match.group(1))
-
-        capture = False
-        numbered = 0
-        unchecked = 0
-        for raw_line in text.splitlines():
-            line = raw_line.strip()
-            if re.match(r"^##+\s+Remaining steps\b", line, re.IGNORECASE):
-                capture = True
-                continue
-            if capture and re.match(r"^##+\s+", line):
-                break
-            if not capture:
-                continue
-            if re.match(r"^\d+\.\s+\S", line):
-                numbered += 1
-            elif re.match(r"^[-*]\s+\[\s\]\s+\S", line):
-                unchecked += 1
-
-        if numbered or unchecked:
-            return numbered + unchecked
-        return None
+        return count_remaining_plan_steps(text)
 
     def plan_task_packets(self) -> list[TaskPacket]:
         if not self.cfg.plan_path.exists():
@@ -1485,32 +1469,11 @@ class MetaHarness:
     def plan_items(self) -> list[str]:
         if not self.cfg.plan_path.exists():
             return []
-        lines = self.cfg.plan_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        items: list[str] = []
-        current: list[str] = []
-        for raw_line in lines:
-            if re.match(r"^\d+\.\s+\S", raw_line):
-                if current:
-                    items.append("\n".join(current).strip())
-                    current = []
-                current.append(raw_line.rstrip())
-                continue
-            if not current:
-                continue
-            if raw_line.strip():
-                current.append(raw_line.rstrip())
-        if current:
-            items.append("\n".join(current).strip())
-        return [item for item in items if item]
+        return split_plan_items(self.cfg.plan_path.read_text(encoding="utf-8", errors="replace"))
 
     @staticmethod
     def _plan_item_is_finished(item: str) -> bool:
-        first_line = item.splitlines()[0].strip() if item.strip() else ""
-        match = re.match(r"^\d+\.\s+\[([^\]]+)\]", first_line)
-        if not match:
-            return False
-        status = match.group(1).strip().lower()
-        return status.startswith("completed") or status == "superseded"
+        return plan_item_is_finished(item)
 
     def unfinished_plan_items(self) -> list[str]:
         return [item for item in self.plan_items() if not self._plan_item_is_finished(item)]
@@ -2307,6 +2270,11 @@ class MetaHarness:
             green_level=self.current_green_level,
             task_packet_status=self.current_task_packet_status,
         )
+        prune_result = prune_completed_plan_file(self.cfg.plan_path)
+        if prune_result.changed:
+            self.log(
+                f"Pruned {prune_result.removed_item_count} completed plan items from {self.cfg.plan_path.name}"
+            )
         self.sync_current_plan_item()
         self.save_role_markers("reviewer", log_file, remaining)
         self.capture_cycle_artifact(log_file, "reviewer.log")

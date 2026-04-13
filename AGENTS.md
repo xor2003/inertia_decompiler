@@ -41,6 +41,19 @@ Current x86-16 shape also includes:
 - `control-flow structuring` as an explicit stage
 - `confidence/assumption` reporting as first-class output
 
+For x86-16 ownership boundaries:
+
+- `angr` is the frontend and infrastructure layer:
+  - loader/runtime
+  - CFG
+  - VEX lift
+  - AIL/reference/fallback decompiler
+- Inertia-owned typed IR is the long-term reasoning layer.
+
+That means alias, widening, traits, types, and readable control-flow recovery
+should move toward typed Inertia IR artifacts, not deeper dependence on AIL or
+raw VEX tmp shape.
+
 ## Hard rules
 
 ### Solve problems at the earliest correct layer
@@ -95,6 +108,38 @@ Allowed only as temporary debugging aids, never as recovery logic:
 
 If a rule cannot be explained in terms of decoded instructions, CFG shape, lifted IR, alias state, typed pattern objects, or another structured intermediate representation, it is not an acceptable recovery rule.
 
+### Reasoning IR discipline
+
+The x86-16 reasoning layer should converge on three explicit domains:
+
+- `Value`: arithmetic/data values
+- `Address`: typed memory addresses
+- `Condition`: typed branch meaning
+
+Required behavior:
+
+- `LOAD` and `STORE` operate on `Address`, not generic `Value`
+- segment space is attached to typed addresses as early as possible
+- alias and widening consume typed storage/range objects
+- conditions are modeled explicitly in IR instead of leaving all meaning buried in raw flag temporaries
+
+Do not:
+
+- use generic value objects as the only memory model forever
+- treat base-register naming as semantic proof of segment identity
+- leave all readable branch meaning trapped inside VEX tmp graphs
+- use AIL as the long-term source of truth for alias, widening, traits, or type/object recovery
+
+Allowed temporary compromise:
+
+- a frontend may derive a provisional default segment from decoded addressing form when the lifter does not preserve it directly
+
+But that provisional segment:
+
+- is evidence only
+- must be represented in typed address state
+- must not be used as object/type proof without stronger corroboration
+
 ### Alias-first
 
 Before adding any join or simplification rule, ask whether the issue is actually storage identity.
@@ -104,6 +149,8 @@ Required behavior:
 - storage identity comes from the alias model
 - register slices, stack slots, and segmented memory are modeled as storage
 - widening happens only after alias compatibility is proven
+- storage identity is built from typed address/storage objects, not only from generic values
+- overlap decisions are range-based when width/size is known
 
 Forbidden shortcuts:
 
@@ -135,12 +182,31 @@ Required behavior:
 - treat `ss`, `ds`, and `es` as distinct spaces
 - keep stable association separate from over-associated cases
 - lower to pointer/object form only when evidence is strong
+- keep segment identity attached to typed address objects rather than reconstructing it late
+- if segment identity is provisional or ambiguous, surface that as typed evidence or refusal state
 
 Forbidden behavior:
 
 - do not flatten segmented memory for convenience
 - do not merge segment spaces by default
 - do not treat a familiar segmented expression as object-like without proof
+
+### Condition and flag discipline
+
+The lifter is the execution-semantics source of truth. The reasoning IR must
+still model conditions explicitly.
+
+Required behavior:
+
+- represent branch meaning as typed conditions when possible
+- consume lifted flags/VEX temporaries as evidence, not as the final reasoning substrate
+- keep control-flow reasoning expressed in terms like equality, ordering, zero/nonzero, carry, and loop predicates rather than raw tmp names
+
+Do not:
+
+- reimplement the CPU ALU just to make conditions readable
+- leave all condition meaning buried in VEX tmp structure and expect rewrite to fix it later
+- reason about control flow from rendered assembly text instead of typed condition objects
 
 ### Rewrite boundary
 
@@ -373,6 +439,22 @@ Token-efficiency defaults:
 - prefer compact prompts
 - prefer short continuation prompts on `codex resume`
 - use `gpt-5.4-mini` by default for planner/checker/worker/reviewer unless a stronger model is justified
+
+Token-efficiency discipline:
+
+- compress visible output, not the reasoning substrate
+- prefer typed artifacts, task packets, and machine-readable state over replaying full chat history
+- prefer external persisted state and small deltas over resending prior turns
+- load only the smallest relevant code, log, artifact, or tool slice needed for the current decision
+- prefer semantic retrieval, exact symbol lookup, and focused file windows over broad repository tours
+- prefer one stable artifact path or summary row over repeating the same evidence in prose
+- trim tool and CLI output before feeding it back to a model; keep only the signal
+- prefer compact structured output or short bullet rows over verbose explanatory prose
+- do not repeat the same prompt preamble, file dump, test output, or evidence excerpt when a prior artifact already proves the point
+- do not re-run the same expensive command without a concrete code change, hypothesis change, or missing measurement
+- when a backend supports prompt caching, previous-response chaining, or equivalent prefix reuse, prefer it for stable instructions and tool schemas
+- use small/cheap models for routing, pruning, summarization, or classification, and reserve stronger models for the reasoning step that actually needs them
+- if a token-saving trick would hide evidence, remove semantic detail, or weaken attribution, do not use it
 
 ## Review checklist
 

@@ -118,12 +118,12 @@ def emit_tail_validation_snapshot_or_uncollected(
 def function_attempt_display_status(result: FunctionWorkResult) -> str:
     if result.status == "ok":
         return "decompiled"
-    if result.partial_payload:
-        return "fallback"
     if result.status == "timeout":
         return "timed_out"
     if result.status == "empty":
         return "empty"
+    if result.partial_payload:
+        return "fallback"
     return result.status
 
 

@@ -83,6 +83,7 @@ from inertia_decompiler import cli_stack_coalesce as _cli_stack_coalesce
 from inertia_decompiler import cli_stack_cvars as _cli_stack_cvars
 from inertia_decompiler import cli_stack_byte_offsets as _cli_stack_byte_offsets
 from inertia_decompiler import cli_stack_locals as _cli_stack_locals
+from inertia_decompiler import cli_string_timeout_fallback as _cli_string_timeout_fallback
 from inertia_decompiler import cli_segmented as _cli_segmented
 from inertia_decompiler import cli_segmented_elision as _cli_segmented_elision
 from inertia_decompiler import cli_segmented_compare as _cli_segmented_compare
@@ -1173,6 +1174,24 @@ def _try_emit_trivial_sidecar_c(
     if len(lines) == 1 and lines[0].endswith(": ret"):
         return f"void {name}(void)\n{{\n}}\n"
     return None
+
+
+def _try_emit_string_intrinsic_c(
+    project: angr.Project,
+    *,
+    start: int,
+    end: int,
+    name: str,
+) -> str | None:
+    fallback = _cli_string_timeout_fallback.try_render_x86_16_string_timeout_fallback(
+        project,
+        start=start,
+        end=end,
+        name=name,
+    )
+    if fallback is None:
+        return None
+    return fallback.c_text
 
 
 def _try_decompile_peer_sidecar_slice(
@@ -11957,72 +11976,14 @@ def main(argv: list[str] | None = None) -> int:
                     print("\n/* == c == */")
                     print(payload)
                     return 0
-                print("/* Function recovery timed out; using sidecar-bounded asm fallback. */")
-                print(f"/* binary: {args.binary} */")
-                print(f"/* arch: {project.arch.name} */")
-                print(f"/* entry: {project.entry:#x} */")
-                print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
-                _emit_tail_validation_for_function_run_or_uncollected(
+                string_c = _try_emit_string_intrinsic_c(
                     project,
-                    None,
-                    SimpleNamespace(addr=sidecar_region[0], name=code_name),
-                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("asm"),
-                    binary_path=args.binary,
+                    start=sidecar_region[0],
+                    end=sidecar_region[1],
+                    name=code_name,
                 )
-                print("\n/* == asm fallback == */")
-                print(_format_asm_range(project, sidecar_region[0], sidecar_region[1]))
-                return 4
-            nonopt_c = _try_decompile_non_optimized_slice(
-                project,
-                args.addr,
-                function_label or f"sub_{args.addr:x}",
-                timeout=_bounded_non_optimized_timeout(args.timeout),
-                api_style=args.api_style,
-                binary_path=args.binary,
-                lst_metadata=lst_metadata,
-                cod_metadata=cod_metadata,
-            )
-            if nonopt_c is not None:
-                fallback_function = SimpleNamespace(addr=args.addr, name=function_label or f"sub_{args.addr:x}")
-                print("/* Function recovery timed out; produced non-optimized slice decompilation. */")
-                print(f"/* binary: {args.binary} */")
-                print(f"/* arch: {project.arch.name} */")
-                print(f"/* entry: {project.entry:#x} */")
-                print(f"/* function: {args.addr:#x} {function_label or f'sub_{args.addr:x}'} */")
-                _emit_tail_validation_for_function_run_or_uncollected(
-                    project,
-                    None,
-                    fallback_function,
-                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
-                    binary_path=args.binary,
-                )
-                print("\n/* == c (non-optimized fallback) == */")
-                print(nonopt_c)
-                return 0
-            fallback_function = SimpleNamespace(addr=args.addr, name=function_label or f"sub_{args.addr:x}")
-            start, end = _infer_linear_disassembly_window(project, args.addr)
-            asm_fallback = _format_asm_range(project, start, end)
-            recovery_detail = _function_recovery_detail(getattr(project, "_inertia_decompiler_stage", None))
-            if recovery_detail is None:
-                recovery_detail = "during x86-16 function recovery (direct-address path)"
-            _emit_timeout_and_exit(args.timeout, recovery_detail)
-        except FuturesTimeoutError:
-            sidecar_region = _lst_code_region(lst_metadata, args.addr) if lst_metadata is not None else None
-            if sidecar_region is not None:
-                code_name = _lst_code_label(lst_metadata, sidecar_region[0], project.entry) or f"sub_{args.addr:x}"
-                slice_result = _try_decompile_sidecar_slice(
-                    project,
-                    lst_metadata,
-                    sidecar_region[0],
-                    code_name,
-                    timeout=args.timeout,
-                    api_style=args.api_style,
-                    binary_path=args.binary,
-                )
-                if slice_result is not None:
-                    _status, payload = slice_result
-                    fallback_function = SimpleNamespace(addr=sidecar_region[0], name=code_name)
-                    print("/* Function recovery timed out; recovered function slice from sidecar bounds. */")
+                if string_c is not None:
+                    print("/* Function recovery timed out; emitted generic string-intrinsic fallback from sidecar bounds. */")
                     print(f"/* binary: {args.binary} */")
                     print(f"/* arch: {project.arch.name} */")
                     print(f"/* entry: {project.entry:#x} */")
@@ -12030,12 +11991,12 @@ def main(argv: list[str] | None = None) -> int:
                     _emit_tail_validation_for_function_run_or_uncollected(
                         project,
                         None,
-                        fallback_function,
-                        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
+                        SimpleNamespace(addr=sidecar_region[0], name=code_name),
+                        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
                         binary_path=args.binary,
                     )
-                    print("\n/* == c == */")
-                    print(payload)
+                    print("\n/* == c (string intrinsic fallback) == */")
+                    print(string_c)
                     return 0
                 print("/* Function recovery timed out; using sidecar-bounded asm fallback. */")
                 print(f"/* binary: {args.binary} */")
@@ -12081,6 +12042,152 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             fallback_function = SimpleNamespace(addr=args.addr, name=function_label or f"sub_{args.addr:x}")
             start, end = _infer_linear_disassembly_window(project, args.addr)
+            string_c = _try_emit_string_intrinsic_c(
+                project,
+                start=start,
+                end=end,
+                name=fallback_function.name,
+            )
+            if string_c is not None:
+                print("/* Function recovery timed out; emitted generic string-intrinsic fallback. */")
+                print(f"/* binary: {args.binary} */")
+                print(f"/* arch: {project.arch.name} */")
+                print(f"/* entry: {project.entry:#x} */")
+                print(f"/* function: {args.addr:#x} {fallback_function.name} */")
+                _emit_tail_validation_for_function_run_or_uncollected(
+                    project,
+                    None,
+                    fallback_function,
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
+                    binary_path=args.binary,
+                )
+                print("\n/* == c (string intrinsic fallback) == */")
+                print(string_c)
+                return 0
+            asm_fallback = _format_asm_range(project, start, end)
+            recovery_detail = _function_recovery_detail(getattr(project, "_inertia_decompiler_stage", None))
+            if recovery_detail is None:
+                recovery_detail = "during x86-16 function recovery (direct-address path)"
+            _emit_timeout_and_exit(args.timeout, recovery_detail)
+        except FuturesTimeoutError:
+            sidecar_region = _lst_code_region(lst_metadata, args.addr) if lst_metadata is not None else None
+            if sidecar_region is not None:
+                code_name = _lst_code_label(lst_metadata, sidecar_region[0], project.entry) or f"sub_{args.addr:x}"
+                slice_result = _try_decompile_sidecar_slice(
+                    project,
+                    lst_metadata,
+                    sidecar_region[0],
+                    code_name,
+                    timeout=args.timeout,
+                    api_style=args.api_style,
+                    binary_path=args.binary,
+                )
+                if slice_result is not None:
+                    _status, payload = slice_result
+                    fallback_function = SimpleNamespace(addr=sidecar_region[0], name=code_name)
+                    print("/* Function recovery timed out; recovered function slice from sidecar bounds. */")
+                    print(f"/* binary: {args.binary} */")
+                    print(f"/* arch: {project.arch.name} */")
+                    print(f"/* entry: {project.entry:#x} */")
+                    print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
+                    _emit_tail_validation_for_function_run_or_uncollected(
+                        project,
+                        None,
+                        fallback_function,
+                        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
+                        binary_path=args.binary,
+                    )
+                    print("\n/* == c == */")
+                    print(payload)
+                    return 0
+                string_c = _try_emit_string_intrinsic_c(
+                    project,
+                    start=sidecar_region[0],
+                    end=sidecar_region[1],
+                    name=code_name,
+                )
+                if string_c is not None:
+                    print("/* Function recovery timed out; emitted generic string-intrinsic fallback from sidecar bounds. */")
+                    print(f"/* binary: {args.binary} */")
+                    print(f"/* arch: {project.arch.name} */")
+                    print(f"/* entry: {project.entry:#x} */")
+                    print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
+                    _emit_tail_validation_for_function_run_or_uncollected(
+                        project,
+                        None,
+                        SimpleNamespace(addr=sidecar_region[0], name=code_name),
+                        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
+                        binary_path=args.binary,
+                    )
+                    print("\n/* == c (string intrinsic fallback) == */")
+                    print(string_c)
+                    return 0
+                print("/* Function recovery timed out; using sidecar-bounded asm fallback. */")
+                print(f"/* binary: {args.binary} */")
+                print(f"/* arch: {project.arch.name} */")
+                print(f"/* entry: {project.entry:#x} */")
+                print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
+                _emit_tail_validation_for_function_run_or_uncollected(
+                    project,
+                    None,
+                    SimpleNamespace(addr=sidecar_region[0], name=code_name),
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("asm"),
+                    binary_path=args.binary,
+                )
+                print("\n/* == asm fallback == */")
+                print(_format_asm_range(project, sidecar_region[0], sidecar_region[1]))
+                return 4
+            nonopt_c = _try_decompile_non_optimized_slice(
+                project,
+                args.addr,
+                function_label or f"sub_{args.addr:x}",
+                timeout=_bounded_non_optimized_timeout(args.timeout),
+                api_style=args.api_style,
+                binary_path=args.binary,
+                lst_metadata=lst_metadata,
+                cod_metadata=cod_metadata,
+            )
+            if nonopt_c is not None:
+                fallback_function = SimpleNamespace(addr=args.addr, name=function_label or f"sub_{args.addr:x}")
+                print("/* Function recovery timed out; produced non-optimized slice decompilation. */")
+                print(f"/* binary: {args.binary} */")
+                print(f"/* arch: {project.arch.name} */")
+                print(f"/* entry: {project.entry:#x} */")
+                print(f"/* function: {args.addr:#x} {function_label or f'sub_{args.addr:x}'} */")
+                _emit_tail_validation_for_function_run_or_uncollected(
+                    project,
+                    None,
+                    fallback_function,
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
+                    binary_path=args.binary,
+                )
+                print("\n/* == c (non-optimized fallback) == */")
+                print(nonopt_c)
+                return 0
+            fallback_function = SimpleNamespace(addr=args.addr, name=function_label or f"sub_{args.addr:x}")
+            start, end = _infer_linear_disassembly_window(project, args.addr)
+            string_c = _try_emit_string_intrinsic_c(
+                project,
+                start=start,
+                end=end,
+                name=fallback_function.name,
+            )
+            if string_c is not None:
+                print("/* Function recovery timed out; emitted generic string-intrinsic fallback. */")
+                print(f"/* binary: {args.binary} */")
+                print(f"/* arch: {project.arch.name} */")
+                print(f"/* entry: {project.entry:#x} */")
+                print(f"/* function: {args.addr:#x} {fallback_function.name} */")
+                _emit_tail_validation_for_function_run_or_uncollected(
+                    project,
+                    None,
+                    fallback_function,
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
+                    binary_path=args.binary,
+                )
+                print("\n/* == c (string intrinsic fallback) == */")
+                print(string_c)
+                return 0
             asm_fallback = _format_asm_range(project, start, end)
             recovery_detail = _function_recovery_detail(getattr(project, "_inertia_decompiler_stage", None))
             if recovery_detail is None:
@@ -12176,6 +12283,7 @@ def main(argv: list[str] | None = None) -> int:
             debug_output="",
             function=func,
             function_cfg=cfg,
+            partial_payload=partial_payload,
             tail_validation=direct_tail_validation_snapshot or _tail_validation_snapshot_for_function_run(project, func),
         )
         if status != "ok":
@@ -12268,6 +12376,27 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n/* == c (partial timeout) == */")
                 print(partial_payload)
                 return 0
+            sidecar_region = _lst_code_region(lst_metadata, func.addr) if lst_metadata is not None else None
+            linear_window = None if sidecar_region is not None else _infer_linear_disassembly_window(project, func.addr)
+            string_c = _try_emit_string_intrinsic_c(
+                project,
+                start=sidecar_region[0] if sidecar_region is not None else linear_window[0],
+                end=sidecar_region[1] if sidecar_region is not None else linear_window[1],
+                name=func.name,
+            )
+            if string_c is not None:
+                _emit_tail_validation_for_function_run_or_uncollected(
+                    project,
+                    cfg,
+                    func,
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
+                    binary_path=args.binary,
+                )
+                print(f"\n/* Decompilation {status}: {payload} */")
+                print("/* Falling back to generic string-intrinsic recovery. */")
+                print("\n/* == c (string intrinsic fallback) == */")
+                print(string_c)
+                return 0
             _emit_tail_validation_for_function_run_or_uncollected(
                 project,
                 cfg,
@@ -12275,7 +12404,6 @@ def main(argv: list[str] | None = None) -> int:
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("asm"),
                 binary_path=args.binary,
             )
-            sidecar_region = _lst_code_region(lst_metadata, func.addr) if lst_metadata is not None else None
             asm_fallback = (
                 _format_asm_range(project, sidecar_region[0], sidecar_region[1])
                 if sidecar_region is not None
@@ -12941,6 +13069,7 @@ def main(argv: list[str] | None = None) -> int:
     def _emit_function_result(item: FunctionWorkItem, result: FunctionWorkResult) -> tuple[int, int]:
         decompiled_local = 0
         failed_local = 0
+        attempt_status_printed = False
         if result.debug_output:
             print(result.debug_output, end="" if result.debug_output.endswith("\n") else "\n")
         function = item.function
@@ -12959,7 +13088,12 @@ def main(argv: list[str] | None = None) -> int:
 
         emitted_problem = False
         if result.partial_payload:
-            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=result.tail_validation)
+            _print_function_attempt_status(
+                function,
+                attempt=_function_attempt_display_status(result),
+                validation_snapshot=result.tail_validation,
+            )
+            attempt_status_printed = True
             print(f"/* problem: {result.status} */")
             _print_diagnostic_text(result.payload)
             print("/* -- c (partial timeout) -- */")
@@ -12992,17 +13126,43 @@ def main(argv: list[str] | None = None) -> int:
 
         if not allow_heavy_fallbacks or skip_heavy_fallbacks_for_result:
             sidecar_region = _lst_code_region(lst_metadata, function.addr) if lst_metadata is not None else None
+            string_c = None
+            if result.partial_payload is None:
+                if sidecar_region is not None:
+                    string_c = _try_emit_string_intrinsic_c(
+                        project,
+                        start=sidecar_region[0],
+                        end=sidecar_region[1],
+                        name=function.name,
+                    )
+                else:
+                    start, end = _infer_linear_disassembly_window(project, function.addr)
+                    string_c = _try_emit_string_intrinsic_c(project, start=start, end=end, name=function.name)
+            if string_c is not None:
+                decompiled_local += 1
+                fallback_snapshot = _remember_fallback_tail_validation(
+                    item,
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
+                )
+                _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
+                if not emitted_problem:
+                    print(f"/* problem: {result.status} */")
+                    _print_diagnostic_text(result.payload)
+                print("/* -- c (string intrinsic fallback) -- */")
+                print(string_c, flush=True)
+                return decompiled_local, failed_local
             asm_fallback = (
                 _format_asm_range(project, sidecar_region[0], sidecar_region[1])
                 if sidecar_region is not None
                 else _format_asm_range(project, *_infer_linear_disassembly_window(project, function.addr))
             )
             failed_local += 1
-            _print_function_attempt_status(
-                function,
-                attempt=_function_attempt_display_status(result),
-                validation_snapshot=result.tail_validation,
-            )
+            if not attempt_status_printed:
+                _print_function_attempt_status(
+                    function,
+                    attempt=_function_attempt_display_status(result),
+                    validation_snapshot=result.tail_validation,
+                )
             if result.partial_payload is not None:
                 if emitted_problem:
                     print("/* -- asm fallback -- */")
@@ -13084,17 +13244,42 @@ def main(argv: list[str] | None = None) -> int:
             return decompiled_local, failed_local
 
         sidecar_region = _lst_code_region(lst_metadata, function.addr) if lst_metadata is not None else None
+        string_c = None
+        if sidecar_region is not None:
+            string_c = _try_emit_string_intrinsic_c(
+                project,
+                start=sidecar_region[0],
+                end=sidecar_region[1],
+                name=function.name,
+            )
+        else:
+            start, end = _infer_linear_disassembly_window(project, function.addr)
+            string_c = _try_emit_string_intrinsic_c(project, start=start, end=end, name=function.name)
+        if string_c is not None:
+            decompiled_local += 1
+            fallback_snapshot = _remember_fallback_tail_validation(
+                item,
+                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
+            )
+            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
+            if not emitted_problem:
+                print(f"/* problem: {result.status} */")
+                _print_diagnostic_text(result.payload)
+            print("/* -- c (string intrinsic fallback) -- */")
+            print(string_c, flush=True)
+            return decompiled_local, failed_local
         asm_fallback = (
             _format_asm_range(project, sidecar_region[0], sidecar_region[1])
             if sidecar_region is not None
             else _format_asm_range(project, *_infer_linear_disassembly_window(project, function.addr))
         )
         failed_local += 1
-        _print_function_attempt_status(
-            function,
-            attempt=_function_attempt_display_status(result),
-            validation_snapshot=result.tail_validation,
-        )
+        if not attempt_status_printed:
+            _print_function_attempt_status(
+                function,
+                attempt=_function_attempt_display_status(result),
+                validation_snapshot=result.tail_validation,
+            )
         if result.status == "empty":
             if asm_fallback.startswith("<assembly unavailable") or asm_fallback == "<no instructions>":
                 print(f"/* no bytes available for function at {function.addr:#x}; likely external or synthetic */")

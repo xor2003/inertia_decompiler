@@ -6,10 +6,11 @@ from .config import RuntimeConfig
 def _style_contract() -> str:
     return (
         "Response style:\n"
-        "- Minimal and actionable.\n"
-        "- No repetition.\n"
-        "- No explanations unless needed for the role.\n"
-        "- Prefer concrete results over narration.\n\n"
+        "- Speak in compact cave-man English.\n"
+        "- Short words. Short lines.\n"
+        "- No fluff. No repeat.\n"
+        "- Say what done, what next, what block.\n"
+        "- Prefer concrete result over story.\n\n"
     )
 
 
@@ -17,8 +18,12 @@ def _token_discipline() -> str:
     return (
         "Token discipline:\n"
         "- Do not narrate progress before using tools unless a brief note is essential.\n"
+        "- Use task packets, typed summaries, and artifact paths instead of replaying full history.\n"
         "- Read only the smallest relevant file slices; avoid dumping full files when a targeted window or `rg` hit is enough.\n"
+        "- Prefer lazy loading of code, logs, and tool context; do not front-load broad context.\n"
         "- Prefer focused searches (`rg`, exact symbols, exact test names) over broad repository scans.\n"
+        "- Trim tool output to the signal before reusing it in a prompt.\n"
+        "- Reuse prior artifact-backed facts instead of restating the same evidence in prose.\n"
         "- Do not rerun the same test or command without a concrete code or hypothesis change.\n"
         "- When a command already proved a point, reuse that result instead of re-reading the same evidence.\n\n"
     )
@@ -145,23 +150,32 @@ def build_planner_prompt(
         "- If there is nothing meaningful left to do, say that clearly.\n"
         "- At the end, print exactly: Global Remaining steps: N\n"
     )
-    if current_item.strip():
+    current_item_text = current_item.strip()
+    rewrite_target_text = rewrite_target.strip()
+    task_packet_text = task_packet.strip()
+    if current_item_text and not task_packet_text:
         prompt += (
             "\nCurrent plan item in progress:\n"
             "- Keep this item first unless it is done or needs to be split.\n"
-            f"{current_item.strip()}\n"
+            f"{current_item_text}\n"
         )
-    if rewrite_target.strip():
-        prompt += (
-            "\nPlanner rewrite request:\n"
-            "- Rewrite this item into smaller numbered items that are easier for worker to finish one by one.\n"
-            f"{rewrite_target.strip()}\n"
-        )
-    if task_packet.strip():
+    if rewrite_target_text:
+        if rewrite_target_text == current_item_text and task_packet_text:
+            prompt += (
+                "\nPlanner rewrite request:\n"
+                "- Rewrite the active task packet into smaller numbered items; do not repeat the full item body again.\n"
+            )
+        else:
+            prompt += (
+                "\nPlanner rewrite request:\n"
+                "- Rewrite this item into smaller numbered items that are easier for worker to finish one by one.\n"
+                f"{rewrite_target_text}\n"
+            )
+    if task_packet_text:
         prompt += (
             "\nCurrent task packet:\n"
             "- Keep the updated plan aligned with this packet unless it is now done or needs rewrite.\n"
-            f"{task_packet.strip()}\n"
+            f"{task_packet_text}\n"
         )
     return prompt
 
@@ -194,23 +208,27 @@ def build_worker_prompt(
         "- Print exactly one line at the end as: Green level: focused-item-green|cycle-green|merge-safe-green|red\n"
         "- At the end of each step, print exactly: Global Remaining steps: N\n"
     )
-    if focus_item.strip():
+    focus_item_text = focus_item.strip()
+    retry_context_text = retry_context.strip()
+    task_packet_text = task_packet.strip()
+    if focus_item_text:
+        focus_summary = focus_item_text.splitlines()[0]
         prompt += (
             "\nCurrent focus item:\n"
             "- Treat this as the primary task for this worker step.\n"
-            f"{focus_item.strip()}\n"
+            f"{focus_summary}\n"
         )
-    if retry_context.strip():
+    if retry_context_text:
         prompt += (
             "\nRecent worker retry context:\n"
             "- Use this to avoid repeating the same failed loop.\n"
-            f"{retry_context.strip()}\n"
+            f"{retry_context_text}\n"
         )
-    if task_packet.strip():
+    if task_packet_text:
         prompt += (
             "\nActive task packet:\n"
             "- Stay inside this packet's scope until done or concretely blocked.\n"
-            f"{task_packet.strip()}\n"
+            f"{task_packet_text}\n"
         )
     return prompt
 

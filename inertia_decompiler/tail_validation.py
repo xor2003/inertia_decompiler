@@ -70,13 +70,46 @@ def tail_validation_enabled_for_run(binary_path: Path | None, *, proc: str | Non
 
 def tail_validation_record_for_result(item: Any, result: Any) -> dict[str, object] | None:
     snapshot = getattr(result, "tail_validation", None)
-    if not isinstance(snapshot, dict) or not snapshot:
-        return None
     function = getattr(result, "function", None) or getattr(item, "function", None)
-    return {
+    project = getattr(function, "project", None)
+    binary_name = getattr(project, "filename", None)
+    cod_file = Path(binary_name).name if isinstance(binary_name, (str, os.PathLike)) else None
+    proc_name = getattr(function, "name", None) or "sub"
+    proc_kind = None
+    lst_metadata = getattr(project, "_inertia_lst_metadata", None)
+    cod_proc_kinds = getattr(lst_metadata, "cod_proc_kinds", None)
+    if isinstance(cod_proc_kinds, Mapping):
+        kind = cod_proc_kinds.get(getattr(function, "addr", None))
+        if isinstance(kind, str) and kind:
+            proc_kind = kind.upper()
+    identity = {
+        "cod_file": cod_file,
+        "proc_name": proc_name,
+        "proc_kind": proc_kind,
         "function_addr": getattr(function, "addr", 0),
-        "function_name": getattr(function, "name", "sub"),
-        **snapshot,
+        "function_name": proc_name,
+    }
+    if isinstance(snapshot, dict) and snapshot:
+        return {
+            **identity,
+            **snapshot,
+        }
+    status = getattr(result, "status", None)
+    payload = getattr(result, "payload", None)
+    debug_output = getattr(result, "debug_output", None)
+    exit_detail = None
+    for candidate in (payload, debug_output):
+        if isinstance(candidate, str) and candidate.strip():
+            exit_detail = candidate.strip()
+            break
+    if exit_detail is None:
+        exit_detail = "tail validation snapshot missing"
+    exit_kind = status if isinstance(status, str) and status else "uncollected"
+    return {
+        **identity,
+        "tail_validation_uncollected": True,
+        "exit_kind": exit_kind,
+        "exit_detail": exit_detail,
     }
 
 
@@ -88,11 +121,77 @@ def collect_tail_validation_records(
     for item in function_tasks:
         result = result_map.get(getattr(item, "index"))
         if result is None:
+            function = getattr(item, "function", None)
+            project = getattr(function, "project", None)
+            binary_name = getattr(project, "filename", None)
+            cod_file = Path(binary_name).name if isinstance(binary_name, (str, os.PathLike)) else None
+            records.append(
+                {
+                    "cod_file": cod_file,
+                    "proc_name": getattr(function, "name", None) or "sub",
+                    "proc_kind": None,
+                    "function_addr": getattr(function, "addr", 0),
+                    "function_name": getattr(function, "name", None) or "sub",
+                    "tail_validation_uncollected": True,
+                    "exit_kind": "missing_result",
+                    "exit_detail": "function result missing from tail-validation aggregate input",
+                }
+            )
             continue
         record = tail_validation_record_for_result(item, result)
         if record is not None:
             records.append(record)
     return records
+
+
+def emit_tail_validation_surface_summary(
+    *,
+    records: Sequence[Mapping[str, object]],
+    scanned: int,
+    summary: Mapping[str, object],
+    surface: Mapping[str, object],
+    console_cache_path: Path | None,
+    detail_cache_path: Path | None,
+) -> None:
+    emitted_any = False
+    rendered = render_x86_16_tail_validation_console_summary(surface, cache_path=console_cache_path)
+    detail_artifact = cache_x86_16_tail_validation_detail_artifact(surface, cache_path=detail_cache_path)
+    for line in rendered.get("lines", ()):
+        if isinstance(line, str) and line:
+            print(f"{TAIL_VALIDATION_STDERR_PREFIX}{line}", file=sys.stderr)
+            emitted_any = True
+    if surface.get("severity") != "clean":
+        detail_artifact_path = detail_artifact.get("path")
+        if isinstance(detail_artifact_path, Path):
+            print(f"{TAIL_VALIDATION_STDERR_PREFIX}detail artifact {detail_artifact_path}", file=sys.stderr)
+            emitted_any = True
+        elif detail_cache_path is not None:
+            print(f"{TAIL_VALIDATION_STDERR_PREFIX}detail artifact {detail_cache_path}", file=sys.stderr)
+            emitted_any = True
+        if rendered.get("cache_hit"):
+            print(f"{TAIL_VALIDATION_STDERR_PREFIX}console summary cache hit", file=sys.stderr)
+            emitted_any = True
+        if detail_artifact.get("cache_hit"):
+            print(f"{TAIL_VALIDATION_STDERR_PREFIX}detail artifact cache hit", file=sys.stderr)
+            emitted_any = True
+    if os.environ.get(TAIL_VALIDATION_METADATA_ENV) == "1":
+        payload = {
+            "scanned": int(scanned),
+            "records": [dict(record) for record in records if isinstance(record, Mapping)],
+            "summary": dict(summary or {}),
+            "surface": dict(surface or {}),
+            "console_cache_hit": bool(rendered.get("cache_hit")),
+            "console_cache_path": str(console_cache_path) if console_cache_path is not None else None,
+            "detail_cache_hit": bool(detail_artifact.get("cache_hit")),
+            "detail_cache_path": str(detail_cache_path) if detail_cache_path is not None else None,
+        }
+        print(
+            f"{TAIL_VALIDATION_METADATA_PREFIX}{json.dumps(payload, sort_keys=True)}",
+            file=sys.stderr,
+        )
+        emitted_any = True
+    if emitted_any:
+        sys.stderr.flush()
 
 
 def tail_validation_snapshot_for_function_run(project, function) -> dict[str, object]:
@@ -146,43 +245,18 @@ def emit_tail_validation_console_summary(
     records = collect_tail_validation_records(function_tasks, result_map)
     scanned = len(function_tasks)
     aggregate = build_x86_16_tail_validation_aggregate(records, scanned=scanned)
+    summary = dict(aggregate.get("summary", {}) or {})
     surface = dict(aggregate.get("surface", {}) or {})
     console_cache_path = tail_validation_console_cache_path(binary_path, function_tasks)
     detail_cache_path = tail_validation_detail_cache_path(binary_path, function_tasks)
-    rendered = render_x86_16_tail_validation_console_summary(surface, cache_path=console_cache_path)
-    detail_artifact = cache_x86_16_tail_validation_detail_artifact(surface, cache_path=detail_cache_path)
-    for line in rendered.get("lines", ()):
-        if isinstance(line, str) and line:
-            print(f"{TAIL_VALIDATION_STDERR_PREFIX}{line}", file=sys.stderr)
-            emitted_any = True
-    if surface.get("severity") != "clean":
-        if detail_cache_path is not None:
-            print(f"{TAIL_VALIDATION_STDERR_PREFIX}detail artifact {detail_cache_path}", file=sys.stderr)
-            emitted_any = True
-        if rendered.get("cache_hit"):
-            print(f"{TAIL_VALIDATION_STDERR_PREFIX}console summary cache hit", file=sys.stderr)
-            emitted_any = True
-        if detail_artifact.get("cache_hit"):
-            print(f"{TAIL_VALIDATION_STDERR_PREFIX}detail artifact cache hit", file=sys.stderr)
-            emitted_any = True
-    if os.environ.get(TAIL_VALIDATION_METADATA_ENV) == "1":
-        payload = {
-            "scanned": scanned,
-            "records": records,
-            "summary": dict(aggregate.get("summary", {}) or {}),
-            "surface": surface,
-            "console_cache_hit": bool(rendered.get("cache_hit")),
-            "console_cache_path": str(console_cache_path) if console_cache_path is not None else None,
-            "detail_cache_hit": bool(detail_artifact.get("cache_hit")),
-            "detail_cache_path": str(detail_cache_path) if detail_cache_path is not None else None,
-        }
-        print(
-            f"{TAIL_VALIDATION_METADATA_PREFIX}{json.dumps(payload, sort_keys=True)}",
-            file=sys.stderr,
-        )
-        emitted_any = True
-    if emitted_any:
-        sys.stderr.flush()
+    emit_tail_validation_surface_summary(
+        records=records,
+        scanned=scanned,
+        summary=summary,
+        surface=surface,
+        console_cache_path=console_cache_path,
+        detail_cache_path=detail_cache_path,
+    )
 
 
 def tail_validation_cache_label(binary_path: Path | None, function_tasks: Sequence[Any]) -> str | None:
