@@ -166,8 +166,10 @@ def run_provider_once(
     log_file: Path,
     config: LlmConfig,
     session_id: str = "",
+    timeout_secs: int | None = None,
 ) -> int:
-    timeout_cmd = ["timeout", "--foreground", f"{config.codex_timeout_secs}s"]
+    effective_timeout_secs = int(timeout_secs or config.codex_timeout_secs)
+    timeout_cmd = ["timeout", "--foreground", f"{effective_timeout_secs}s"]
     codex_preexec = _build_codex_memory_preexec_fn(config.codex_memory_limit_mb)
     provider_env = _provider_env(config)
     header = (

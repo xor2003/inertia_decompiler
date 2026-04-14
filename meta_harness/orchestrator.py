@@ -209,27 +209,59 @@ class MetaHarness:
         with self.status_lock:
             self.cfg.status_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    def _start_status_heartbeat(self, step: str, status: str, extra: str = ""):
+    def _start_status_heartbeat(self, step: str, status: str, extra: str = "", *, log_path: Path | None = None):
         interval = float(self.cfg.status_heartbeat_secs)
         if interval <= 0:
             return None
 
         started = time.monotonic()
+        last_wall = time.time()
+        last_log_size = -1
         stop_event = threading.Event()
 
         def _run() -> None:
+            nonlocal last_wall, last_log_size
             while not stop_event.wait(interval):
+                now_wall = time.time()
+                wall_gap = int(max(0.0, now_wall - last_wall))
+                last_wall = now_wall
                 elapsed = int(time.monotonic() - started)
                 heartbeat_extra = extra
                 if heartbeat_extra:
                     heartbeat_extra += " "
                 heartbeat_extra += f"heartbeat_elapsed={elapsed}s"
+                log_note = ""
+                if log_path is not None and log_path.exists():
+                    try:
+                        size = log_path.stat().st_size
+                    except OSError:
+                        size = -1
+                    if size >= 0:
+                        if last_log_size >= 0 and size == last_log_size:
+                            log_note = " log=no-growth"
+                        elif last_log_size >= 0:
+                            log_note = f" log=+{size - last_log_size}B"
+                        else:
+                            log_note = f" log={size}B"
+                        last_log_size = size
+                if wall_gap > int(interval * 2):
+                    heartbeat_extra += f" wall_gap={wall_gap}s"
+                    log_note += " clock-jump-or-suspend"
                 self.write_status(step, status, heartbeat_extra)
-                self.log(f"{step} still {status}; elapsed={elapsed}s")
+                self.log(f"{step} still {status}; elapsed={elapsed}s{log_note}")
 
         thread = threading.Thread(target=_run, name=f"{step}-status-heartbeat", daemon=True)
         thread.start()
         return stop_event, thread
+
+    def role_timeout_secs(self, role: str) -> int:
+        if role == "worker":
+            return int(self.cfg.codex_timeout_secs)
+        if role == "planner":
+            return min(int(self.cfg.codex_timeout_secs), 300)
+        if role in {"reviewer", "checker", "crash-reviewer"}:
+            return min(int(self.cfg.codex_timeout_secs), 180)
+        return int(self.cfg.codex_timeout_secs)
 
     def check_stop_file(self) -> None:
         if self.cfg.stop_file.exists():
@@ -1670,6 +1702,7 @@ class MetaHarness:
         session_file = self.role_session_file(role)
         previous_log = self.last_role_log_file(role)
         started = time.monotonic()
+        timeout_secs = self.role_timeout_secs(role)
         mode = "new"
 
         def _raise_role_error(message: str, exit_code: int | None = None) -> None:
@@ -1703,7 +1736,7 @@ class MetaHarness:
         effective = build_effective_prompt(role, provider, prompt, self.llm_cfg, previous_log)
         prompt_file.write_text(effective, encoding="utf-8")
         mode = "resume" if resume and backend_supports_sessions(provider) and session_file.exists() else "new"
-        self.write_status(role, "running", f"provider={provider} model={model} log={log_file.name}")
+        self.write_status(role, "running", f"provider={provider} model={model} timeout={timeout_secs}s log={log_file.name}")
         self.log(f"Starting {role} with {provider}/{model}{' via resume' if mode == 'resume' else ''}")
         self.record_event(
             "role.started",
@@ -1715,18 +1748,42 @@ class MetaHarness:
             mode=mode,
             log=log_file.name,
         )
-        heartbeat = self._start_status_heartbeat(role, "running", f"provider={provider} model={model} log={log_file.name}")
+        heartbeat = self._start_status_heartbeat(
+            role,
+            "running",
+            f"provider={provider} model={model} timeout={timeout_secs}s log={log_file.name}",
+            log_path=log_file,
+        )
 
         try:
             if mode == "resume":
                 session_id = session_file.read_text(encoding="utf-8").strip()
-                rc = run_provider_once(provider, "resume", model, effective, prompt_file, log_file, self.llm_cfg, session_id)
+                rc = run_provider_once(
+                    provider,
+                    "resume",
+                    model,
+                    effective,
+                    prompt_file,
+                    log_file,
+                    self.llm_cfg,
+                    session_id,
+                    timeout_secs=timeout_secs,
+                )
                 if rc != 0:
                     _raise_role_error(f"{role} resume failed", exit_code=rc)
             else:
                 max_attempts = self.llm_cfg.local_model_max_retries + 1 if provider in {"ollama", "llamacpp"} else 1
                 for attempt in range(1, max_attempts + 1):
-                    rc = run_provider_once(provider, "new", model, effective, prompt_file, log_file, self.llm_cfg)
+                    rc = run_provider_once(
+                        provider,
+                        "new",
+                        model,
+                        effective,
+                        prompt_file,
+                        log_file,
+                        self.llm_cfg,
+                        timeout_secs=timeout_secs,
+                    )
                     if rc == 0 and validate_output(role, provider, log_file, self.llm_cfg):
                         break
                     if provider not in {"ollama", "llamacpp"}:
@@ -1744,7 +1801,16 @@ class MetaHarness:
                             previous_log,
                         )
                         prompt_file.write_text(effective, encoding="utf-8")
-                        rc = run_provider_once(fallback_provider, "new", fallback_model, effective, prompt_file, log_file, self.llm_cfg)
+                        rc = run_provider_once(
+                            fallback_provider,
+                            "new",
+                            fallback_model,
+                            effective,
+                            prompt_file,
+                            log_file,
+                            self.llm_cfg,
+                            timeout_secs=timeout_secs,
+                        )
                         provider = fallback_provider
                         if rc != 0 or not validate_output(role, provider, log_file, self.llm_cfg):
                             _raise_role_error(f"{role} failed after retries", exit_code=rc)
@@ -2002,7 +2068,16 @@ class MetaHarness:
         self.check_stop_file()
         self.preflight_resource_check("checker")
         self.mark_cycle_step("checker", "running")
-        log_file = self.run_role("checker", self.cfg.checker_model, build_checker_prompt(self.cfg))
+        try:
+            log_file = self.run_role("checker", self.cfg.checker_model, build_checker_prompt(self.cfg))
+        except RoleRunError as exc:
+            if exc.exit_code not in self.graceful_exit_codes:
+                raise
+            self.capture_cycle_artifact(exc.log_file, "checker.timeout.log")
+            self.log("Checker timed out; continuing to planner with current evidence")
+            self.mark_cycle_step("checker", "done-with-failures", f"timeout exit_code={exc.exit_code}")
+            self.capture_cycle_snapshot("checker-timeout")
+            return
         remaining = self.extract_remaining_steps(log_file)
         if not remaining:
             self.die("Checker did not print remaining step count")
@@ -2015,16 +2090,28 @@ class MetaHarness:
         self.check_stop_file()
         self.preflight_resource_check("planner")
         self.mark_cycle_step("planner", "running")
-        log_file = self.run_role(
-            "planner",
-            self.cfg.planner_model,
-            build_planner_prompt(
-                self.cfg,
-                current_item=self.current_plan_item_text(),
-                rewrite_target=self.plan_rewrite_target,
-                task_packet=self.current_task_packet_block(),
-            ),
-        )
+        try:
+            log_file = self.run_role(
+                "planner",
+                self.cfg.planner_model,
+                build_planner_prompt(
+                    self.cfg,
+                    current_item=self.current_plan_item_text(),
+                    rewrite_target=self.plan_rewrite_target,
+                    task_packet=self.current_task_packet_block(),
+                ),
+            )
+        except RoleRunError as exc:
+            if exc.exit_code not in self.graceful_exit_codes:
+                raise
+            self.capture_cycle_artifact(exc.log_file, "planner.timeout.log")
+            if not self.cfg.plan_path.exists():
+                raise
+            self.log("Planner timed out; continuing with existing plan")
+            self.sync_current_plan_item()
+            self.mark_cycle_step("planner", "done-with-failures", f"timeout exit_code={exc.exit_code} existing-plan")
+            self.capture_cycle_snapshot("planner-timeout")
+            return
         remaining = self.extract_remaining_steps(log_file)
         if not remaining:
             self.die("Planner did not print remaining step count")
@@ -2237,15 +2324,26 @@ class MetaHarness:
         self.preflight_resource_check("reviewer")
         self.mark_cycle_step("reviewer", "running")
         completed_packet = self.current_task_packet_obj()
-        log_file = self.run_role(
-            "reviewer",
-            self.cfg.reviewer_model,
-            build_reviewer_prompt(
-                self.cfg,
-                stall_context=self.build_worker_stall_context(),
-                task_packet=self.current_task_packet_block(),
-            ),
-        )
+        try:
+            log_file = self.run_role(
+                "reviewer",
+                self.cfg.reviewer_model,
+                build_reviewer_prompt(
+                    self.cfg,
+                    stall_context=self.build_worker_stall_context(),
+                    task_packet=self.current_task_packet_block(),
+                ),
+            )
+        except RoleRunError as exc:
+            if exc.exit_code not in self.graceful_exit_codes:
+                raise
+            self.capture_cycle_artifact(exc.log_file, "reviewer.timeout.log")
+            self.log("Reviewer timed out; carrying forward current remaining-plan count")
+            remaining = str(self.plan_remaining_steps() or "1")
+            self.current_task_packet_status = "partial"
+            self.mark_cycle_step("reviewer", "done-with-failures", f"timeout exit_code={exc.exit_code} remaining={remaining}")
+            self.capture_cycle_snapshot("reviewer-timeout")
+            return remaining
         remaining = self.extract_remaining_steps(log_file)
         if not remaining:
             self.die("Reviewer did not print remaining step count")

@@ -948,8 +948,25 @@ def _extract_proc_body(raw_output: str) -> str:
     marker = "/* == c == */"
     idx = raw_output.rfind(marker)
     if idx == -1:
-        return raw_output.strip()
-    return raw_output[idx + len(marker) :].lstrip("\n").rstrip()
+        body = raw_output.strip()
+    else:
+        body = raw_output[idx + len(marker) :].lstrip("\n").rstrip()
+    return _strip_nonsemantic_fallback_markers(body)
+
+
+def _strip_nonsemantic_fallback_markers(body: str) -> str:
+    if not body:
+        return body
+    filtered_lines = [
+        line
+        for line in body.splitlines()
+        if line.strip()
+        not in {
+            "/* == c (string intrinsic fallback) == */",
+            "/* -- c (string intrinsic fallback) -- */",
+        }
+    ]
+    return "\n".join(filtered_lines).rstrip()
 
 
 def _render_result_block(result: CodWorkResult) -> str:
@@ -982,6 +999,15 @@ def _render_result_block(result: CodWorkResult) -> str:
         parts.append(f"/* {detail} */")
     if rendered:
         parts.append(rendered)
+    parts.append(
+        f"/* == end {result.proc_index}/{result.proc_total} {result.cod_path.name}"
+        + (
+            f" :: {result.proc_name}" + (f" [{result.proc_kind}]" if result.proc_kind else "")
+            if result.proc_name is not None
+            else " :: whole-file"
+        )
+        + " == */"
+    )
     if stderr_text.strip():
         parts.append(f"/* == stderr {result.cod_path.name} == */")
         parts.append(stderr_text.rstrip())

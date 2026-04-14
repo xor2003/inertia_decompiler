@@ -24,6 +24,14 @@ This separation helps reduce role confusion:
 - `worker` stays focused on code and verification.
 - `reviewer` keeps the plan honest and can improve the harness loop itself.
 
+Harness architecture rule:
+
+- if the harness/control loop is the blocker, simplify it
+- prefer fewer moving parts over more retries, more policy, or more role-specific branching
+- use complexity only when it buys a clear quality or reliability win
+- if the current decompiler issue is blocked by project architecture, the harness may route work into project-architecture improvement instead of forcing a local patch
+- compare candidate fixes by earliest correct layer and lowest long-term semantic debt
+
 ## Layout
 
 - `config.py`
@@ -222,6 +230,14 @@ in the repo-local `.codex_harness.conf`, not in the shared harness defaults or
 generic harness documentation. `LIFE.EXE` remains compare-only oracle
 evidence, not part of the live lane. Before running `python -m meta_harness
 --fresh`, make sure no active process owns `.codex_automation/run.lock`:
+
+For this repo's active lane, the intended prioritization is:
+
+- fix the most silly visible `LIFE2.EXE` outputs first
+- prefer empty/failed output, raw asm fallback, and obviously wrong fallback
+  families over subtle cleanup
+- keep architectural placement correct, but do not let subsystem purity outrank
+  a clearly worse emitted result
 
 ```bash
 python - <<'PY'

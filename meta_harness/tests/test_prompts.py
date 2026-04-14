@@ -48,6 +48,12 @@ def test_planner_prompt_mentions_plan_and_remaining_steps(monkeypatch, tmp_path)
     assert "Trim tool output to the signal before reusing it in a prompt" in prompt
     assert "Do not run pytest, corpus scans, or large validation commands" in prompt
     assert "Read the current evidence and debug logs first" in prompt
+    assert "brainstorm the earliest correct architectural layer" in prompt
+    assert "simplify it instead of layering on more policy" in prompt
+    assert "cannot be solved cleanly inside the current project architecture" in prompt
+    assert "Prefer architecturally correct placement over convenience" in prompt
+    assert "compare them briefly and pick the one with the least semantic debt" in prompt
+    assert "harness-side change and a decompiler-side change are both plausible" in prompt
     assert "tail-validation summary or detail-artifact paths" in prompt
     assert "identify the concrete failing family from the logs" in prompt
     assert "Use the logs to determine where the problem lives" in prompt
@@ -88,6 +94,8 @@ def test_worker_prompt_mentions_implementation_role(monkeypatch, tmp_path):
     assert "Continue implementing the unfinished steps" in prompt
     assert "one unfinished top-level plan item at a time" in prompt
     assert "Never use source-specific hacks" in prompt
+    assert "If the harness itself is the blocker, simplify or improve it" in prompt
+    assert "If the current decompiler architecture blocks an honest fix" in prompt
     assert "Speak in compact cave-man English" in prompt
     assert "Run the smallest test that proves the touched behavior" in prompt
     assert "Use task packets, typed summaries, and artifact paths instead of replaying full history" in prompt
@@ -144,6 +152,8 @@ def test_reviewer_prompt_allows_harness_improvements(monkeypatch, tmp_path):
     cfg = _cfg(monkeypatch, tmp_path)
     prompt = build_reviewer_prompt(cfg)
     assert "improve the harness itself" in prompt
+    assert "prefer fewer moving parts over more retries" in prompt
+    assert "blocked by project architecture" in prompt
     assert "Speak in compact cave-man English" in prompt
     assert "Avoid pytest, sweep reruns, or broad repository exploration" in prompt
     assert "Evaluate the current active task packet explicitly" in prompt
@@ -172,6 +182,7 @@ def test_checker_and_crash_prompts_reference_evidence(monkeypatch, tmp_path):
     assert "Do not run pytest, corpus scans, or broad repository searches" in checker
     assert "Harness restart required" in crash
     assert "/tmp/cycle" in crash
+    assert "too complex for the current lane" in crash
 
 
 def test_resume_prompt_is_short_and_keeps_required_marker(monkeypatch, tmp_path):

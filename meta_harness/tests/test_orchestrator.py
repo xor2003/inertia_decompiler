@@ -1176,6 +1176,73 @@ def test_worker_cycle_retries_when_worker_claims_zero_but_plan_has_steps(monkeyp
     assert (harness.current_cycle_dir / "worker.iter02.log").exists()
 
 
+def test_role_timeout_secs_uses_shorter_budget_for_non_worker(monkeypatch, tmp_path):
+    cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
+    harness = MetaHarness(cfg, llm_cfg)
+
+    assert harness.role_timeout_secs("worker") == cfg.codex_timeout_secs
+    assert harness.role_timeout_secs("planner") == min(cfg.codex_timeout_secs, 300)
+    assert harness.role_timeout_secs("reviewer") == min(cfg.codex_timeout_secs, 180)
+    assert harness.role_timeout_secs("checker") == min(cfg.codex_timeout_secs, 180)
+
+
+def test_planner_timeout_continues_with_existing_plan(monkeypatch, tmp_path):
+    cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
+    cfg.plan_path.write_text("1. existing item\n", encoding="utf-8")
+    harness = MetaHarness(cfg, llm_cfg)
+    harness.prepare_cycle_workspace()
+
+    timed_out_log = cfg.log_dir / "timed_out_planner.log"
+    timed_out_log.parent.mkdir(parents=True, exist_ok=True)
+    timed_out_log.write_text("partial planner output before timeout\n", encoding="utf-8")
+
+    synced = {"count": 0}
+
+    monkeypatch.setattr(harness, "check_stop_file", lambda: None)
+    monkeypatch.setattr(harness, "preflight_resource_check", lambda _context: None)
+    monkeypatch.setattr(
+        harness,
+        "run_role",
+        lambda role, model, prompt, **_kwargs: (_ for _ in ()).throw(RoleRunError(role, timed_out_log, "planner timed out", 124)),
+    )
+    monkeypatch.setattr(harness, "sync_current_plan_item", lambda *args, **kwargs: synced.__setitem__("count", synced["count"] + 1))
+
+    harness.planner_step()
+
+    state = json.loads((harness.current_cycle_dir / "cycle.state.json").read_text(encoding="utf-8"))
+    assert synced["count"] == 1
+    assert state["steps"]["planner"]["status"] == "done-with-failures"
+    assert (harness.current_cycle_dir / "planner.timeout.log").exists()
+
+
+def test_reviewer_timeout_returns_plan_remaining(monkeypatch, tmp_path):
+    cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
+    cfg.plan_path.write_text("1. one\n2. two\n", encoding="utf-8")
+    harness = MetaHarness(cfg, llm_cfg)
+    harness.prepare_cycle_workspace()
+
+    timed_out_log = cfg.log_dir / "timed_out_reviewer.log"
+    timed_out_log.parent.mkdir(parents=True, exist_ok=True)
+    timed_out_log.write_text("partial reviewer output before timeout\n", encoding="utf-8")
+
+    monkeypatch.setattr(harness, "check_stop_file", lambda: None)
+    monkeypatch.setattr(harness, "preflight_resource_check", lambda _context: None)
+    monkeypatch.setattr(
+        harness,
+        "run_role",
+        lambda role, model, prompt, **_kwargs: (_ for _ in ()).throw(RoleRunError(role, timed_out_log, "reviewer timed out", 124)),
+    )
+    monkeypatch.setattr(harness, "plan_remaining_steps", lambda: 2)
+
+    remaining = harness.reviewer_step()
+
+    state = json.loads((harness.current_cycle_dir / "cycle.state.json").read_text(encoding="utf-8"))
+    assert remaining == "2"
+    assert harness.current_task_packet_status == "partial"
+    assert state["steps"]["reviewer"]["status"] == "done-with-failures"
+    assert (harness.current_cycle_dir / "reviewer.timeout.log").exists()
+
+
 def test_consume_operator_comments_archives_and_clears_file(monkeypatch, tmp_path):
     cfg, llm_cfg = _make_cfg(monkeypatch, tmp_path)
     harness = MetaHarness(cfg, llm_cfg)

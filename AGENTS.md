@@ -49,10 +49,65 @@ For x86-16 ownership boundaries:
   - VEX lift
   - AIL/reference/fallback decompiler
 - Inertia-owned typed IR is the long-term reasoning layer.
+- x86 string instructions (`movs*`, `scas*`, `lods*`, `stos*`, `cmps*`, repeat variants) should converge into the generic typed-IR decompiler path, not remain permanent timeout-only fallback logic.
+- future assembly-to-C targets may be hand-written or obfuscated; generic recovery must prefer typed semantic effects, CFG shape, and alias state over compiler-shaped assumptions.
 
 That means alias, widening, traits, types, and readable control-flow recovery
 should move toward typed Inertia IR artifacts, not deeper dependence on AIL or
 raw VEX tmp shape.
+
+## Target decompiler
+
+We are building a decompiler for:
+
+- compiler output
+- hand-written assembly
+- mixed C/asm codebases
+- eventually obfuscated real-mode x86
+
+The target output is:
+
+- readable C
+- evidence-driven
+- conservative when uncertain
+- generic across instruction families, including string instructions
+
+The target output is not:
+
+- compiler-shaped guesswork
+- name-driven library recognition as primary recovery
+- pretty C that hides uncertainty
+- a fallback-first pipeline
+
+Architectural implications:
+
+- every instruction family should be recoverable through generic semantic layers when practical
+- string instructions must converge into the normal typed-IR/effect/structuring pipeline
+- loop-carried state, live conditions, segment state, register IO, flags, and memory effects should become first-class typed facts
+- interprocedural summaries should describe input registers, output registers, segment-register state, live flags, and memory impact systematically
+- runtime traces are optional refinement evidence, not the main semantics substrate
+
+## Agent execution rules
+
+Agent should do:
+
+- push semantics earlier, not later
+- prefer generic typed effects over family-specific timeout rescue logic
+- make register, segment, flag, condition, and memory impact explicit in typed artifacts
+- track what is live across loops, branches, and call boundaries
+- prefer static recovery first and use runtime evidence only to refine unknowns
+- design passes so they still work on hand-written or obfuscated x86, not only compiler-shaped code
+- replace temporary fallback logic with normal-path typed recovery when a generic mechanism exists
+
+Agent should not do:
+
+- build recovery around compiler/library names
+- assume nice stack frames, nice calling conventions, or nice loop shapes
+- leave meaningful semantics trapped in raw VEX tmp graphs forever
+- treat timeout fallback as the final architecture
+- solve live flag / segment / loop state in rewrite
+- add text-pattern recovery over rendered asm or rendered C
+- depend on runtime traces as the only source of segment or memory semantics
 
 ## Hard rules
 
@@ -410,6 +465,13 @@ Avoid:
 - output that cannot be explained later from stored metadata
 
 ## Harness rules
+
+Harness simplification rule:
+
+- if the meta-harness control flow becomes the blocker, simplify the harness before adding more harness machinery
+- prefer fewer roles, fewer retries, and fewer special-case branches when that preserves output quality and attribution
+- the harness may drive project-architecture changes when the current decompiler architecture is the real blocker to an honest fix
+- do not keep harness complexity that mainly compensates for unclear plans, weak evidence flow, or misplaced recovery logic
 
 The meta harness respects the root-level `STOP` file. If `STOP` exists, `./run.sh` stops before advancing the cycle.
 
