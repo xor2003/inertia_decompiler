@@ -118,6 +118,7 @@ from inertia_decompiler.runtime_support import (
     default_exe_showcase_cap as _default_exe_showcase_cap,
     emit_timeout_and_exit as _emit_timeout_and_exit,
     format_address as _format_address,
+    guard_angr_clinic_stage_markers as _guard_angr_clinic_stage_markers,
     guard_angr_peephole_expr_bitwidth_assertion as _guard_angr_peephole_expr_bitwidth_assertion,
     guard_angr_variable_recovery_binop_sub_size_mismatch as _guard_angr_variable_recovery_binop_sub_size_mismatch,
     install_angr_peephole_expr_bitwidth_guard as _install_angr_peephole_expr_bitwidth_guard,
@@ -3212,26 +3213,27 @@ def _decompile_function(
 
     dec = None
     try:
-        with _guard_angr_peephole_expr_bitwidth_assertion():
-            with _guard_angr_variable_recovery_binop_sub_size_mismatch():
-                with _analysis_timeout(_remaining_timeout()):
-                    if decompiler_options is None:
-                        dec = project.analyses.Decompiler(function, cfg=cfg)
-                    else:
-                        dec = project.analyses.Decompiler(function, cfg=cfg, options=decompiler_options)
-                    if dec.codegen is None:
-                        fallback_options = None if decompiler_options is not None else [("structurer_cls", "Phoenix")]
-                        logging.getLogger(__name__).debug(
-                            "Selected decompiler structurer produced no code for %s; retrying with %s.",
-                            function,
-                            "SAILR" if decompiler_options is not None else "Phoenix",
-                        )
-                        if fallback_options is None:
-                            dec = project.analyses.Decompiler(function, cfg=cfg)
-                        else:
-                            dec = project.analyses.Decompiler(function, cfg=cfg, options=fallback_options)
-                    print(f"[dbg] Decompiler returned for {hex(function.addr)}")
-                    sys.stdout.flush()
+                with _guard_angr_peephole_expr_bitwidth_assertion():
+                    with _guard_angr_variable_recovery_binop_sub_size_mismatch():
+                        with _guard_angr_clinic_stage_markers(project):
+                            with _analysis_timeout(_remaining_timeout()):
+                                if decompiler_options is None:
+                                    dec = project.analyses.Decompiler(function, cfg=cfg)
+                                else:
+                                    dec = project.analyses.Decompiler(function, cfg=cfg, options=decompiler_options)
+                                if dec.codegen is None:
+                                    fallback_options = None if decompiler_options is not None else [("structurer_cls", "Phoenix")]
+                                    logging.getLogger(__name__).debug(
+                                        "Selected decompiler structurer produced no code for %s; retrying with %s.",
+                                        function,
+                                        "SAILR" if decompiler_options is not None else "Phoenix",
+                                    )
+                                    if fallback_options is None:
+                                        dec = project.analyses.Decompiler(function, cfg=cfg)
+                                    else:
+                                        dec = project.analyses.Decompiler(function, cfg=cfg, options=fallback_options)
+                                print(f"[dbg] Decompiler returned for {hex(function.addr)}")
+                                sys.stdout.flush()
     except _AnalysisTimeout:
         partial_payload = None
         if dec is not None and getattr(dec, "codegen", None) is not None:
@@ -3252,6 +3254,8 @@ def _decompile_function(
         timeout_stage = getattr(project, "_inertia_decompiler_stage", None)
         if timeout_stage == "core":
             detail = "during core decompilation"
+        elif isinstance(timeout_stage, str) and timeout_stage.startswith("core:clinic:"):
+            detail = f"during {timeout_stage.split(':', 1)[1].replace(':', ' ')}"
         elif isinstance(timeout_stage, str) and timeout_stage.startswith("structuring:"):
             detail = f"during x86-16 structuring pass {timeout_stage.split(':', 1)[1]}"
         elif timeout_stage == "structuring":
@@ -12072,6 +12076,34 @@ def main(argv: list[str] | None = None) -> int:
                     print("\n/* == c == */")
                     print(payload)
                     return 0
+                nonopt_result: NonOptimizedSliceOutcome | str | None = _try_decompile_non_optimized_slice(
+                    project,
+                    sidecar_region[0],
+                    code_name,
+                    timeout=_bounded_non_optimized_timeout(args.timeout),
+                    api_style=args.api_style,
+                    binary_path=args.binary,
+                    lst_metadata=lst_metadata,
+                    cod_metadata=cod_metadata,
+                )
+                nonopt_c = _non_optimized_slice_rendered(nonopt_result)
+                if nonopt_c is not None:
+                    fallback_function = SimpleNamespace(addr=sidecar_region[0], name=code_name)
+                    print("/* Function recovery timed out; produced non-optimized slice decompilation. */")
+                    print(f"/* binary: {args.binary} */")
+                    print(f"/* arch: {project.arch.name} */")
+                    print(f"/* entry: {project.entry:#x} */")
+                    print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
+                    _emit_tail_validation_for_function_run_or_uncollected(
+                        project,
+                        None,
+                        fallback_function,
+                        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
+                        binary_path=args.binary,
+                    )
+                    print("\n/* == c (non-optimized fallback) == */")
+                    print(nonopt_c)
+                    return 0
                 string_c = _try_emit_string_intrinsic_c(
                     project,
                     start=sidecar_region[0],
@@ -12208,6 +12240,34 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     print("\n/* == c == */")
                     print(payload)
+                    return 0
+                nonopt_result: NonOptimizedSliceOutcome | str | None = _try_decompile_non_optimized_slice(
+                    project,
+                    sidecar_region[0],
+                    code_name,
+                    timeout=_bounded_non_optimized_timeout(args.timeout),
+                    api_style=args.api_style,
+                    binary_path=args.binary,
+                    lst_metadata=lst_metadata,
+                    cod_metadata=cod_metadata,
+                )
+                nonopt_c = _non_optimized_slice_rendered(nonopt_result)
+                if nonopt_c is not None:
+                    fallback_function = SimpleNamespace(addr=sidecar_region[0], name=code_name)
+                    print("/* Function recovery timed out; produced non-optimized slice decompilation. */")
+                    print(f"/* binary: {args.binary} */")
+                    print(f"/* arch: {project.arch.name} */")
+                    print(f"/* entry: {project.entry:#x} */")
+                    print(f"/* function: {sidecar_region[0]:#x} {code_name} */")
+                    _emit_tail_validation_for_function_run_or_uncollected(
+                        project,
+                        None,
+                        fallback_function,
+                        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
+                        binary_path=args.binary,
+                    )
+                    print("\n/* == c (non-optimized fallback) == */")
+                    print(nonopt_c)
                     return 0
                 string_c = _try_emit_string_intrinsic_c(
                     project,

@@ -1,627 +1,670 @@
-UASM v2.57, Aug 10 2024, Masm-compatible assembler.
-
-./snake.asm
-
-                                                .686p
-                                                .mmx
-                                                .model large
-
-                                ; ===========================================================================
-
-                                ; Segment type: Pure data
-00000000                        DATA            segment para stack 'DATA' use16
-                                                assume cs:DATA
-00000000  57656C636F6D652074    msg             db 'Welcome to the snake game!!',0
-                                                                        ; DATA XREF: main+F\u2193o
-                                                                        ; main+30\u2193o
-0000001C  0A                    instructions    db 0Ah                  ; DATA XREF: main+19\u2193o
-0000001D  0D55736520612C2073                    db 0Dh,'Use a, s, d and w to control your snake',0Ah
-00000046  0D557365207120616E                    db 0Dh,'Use q anytime to quit',0Dh,0Ah
-0000005E  507265737320616E79                    db 'Press any key to continue$'
-00000078  5468616E6B7320666F    aThanksForPlayi db 'Thanks for playing! hope you enjoyed',0
-                                                                        ; DATA XREF: main+7C\u2193o
-0000009D  4F4F5053212120796F    gameovermsg     db 'OOPS!! your snake died! :P ',0
-                                                                        ; DATA XREF: main+63\u2193o
-000000B9  53636F72653A2000      scoremsg        db 'Score: ',0          ; DATA XREF: draw\u2193o
-000000C1  5E                    head            db '^'                  ; DATA XREF: draw+1A\u2193o
-                                                                        ; keyboardfunctions+D\u2193r ...
-000000C2  0A                                    db 0Ah
-000000C3  0A                                    db 0Ah
-000000C4  2A                    body            db '*'                  ; DATA XREF: shiftsnake+80\u2193o
-000000C5  0A                                    db  0Ah
-000000C6  0B                                    db 0Bh
-000000C7  00                                    db    0
-000000C8  00                                    db    0
-000000C9  00                                    db    0
-000000CA  00                                    db    0
-000000CB  00                                    db    0
-000000CC  00                                    db    0
-000000CD  00                                    db    0
-000000CE  00                                    db    0
-000000CF  00                                    db    0
-000000D0  00                                    db    0
-000000D1  00                                    db    0
-000000D2  00                                    db    0
-000000D3  00                                    db    0
-000000D4  00                                    db    0
-000000D5  00                                    db    0
-000000D6  00                                    db    0
-000000D7  00                                    db    0
-000000D8  00                                    db    0
-000000D9  00                                    db    0
-000000DA  00                                    db    0
-000000DB  00                                    db    0
-000000DC  00                                    db    0
-000000DD  00                                    db    0
-000000DE  00                                    db    0
-000000DF  00                                    db    0
-000000E0  00                                    db    0
-000000E1  00                                    db    0
-000000E2  00                                    db    0
-000000E3  00                                    db    0
-000000E4  00                                    db    0
-000000E5  00                                    db    0
-000000E6  00                                    db    0
-000000E7  00                                    db    0
-000000E8  00                                    db    0
-000000E9  00                                    db    0
-000000EA  00                                    db    0
-000000EB  00                                    db    0
-000000EC  00                                    db    0
-000000ED  00                                    db    0
-000000EE  00                                    db    0
-000000EF  00                                    db    0
-000000F0  00                                    db    0
-000000F1  00                                    db    0
-000000F2  00                                    db    0
-000000F3  00                                    db    0
-000000F4  01                    segmentcount    db 1                    ; DATA XREF: draw+10\u2193r
-                                                                        ; shiftsnake:loc_10371\u2193r ...
-000000F5  01                    fruitactive     db 1                    ; DATA XREF: fruitgeneration:loc_101AB\u2193r
-                                                                        ; draw+3C\u2193w ...
-000000F6  08                    fruitx          db 8                    ; DATA XREF: fruitgeneration+4\u2193r
-                                                                        ; fruitgeneration+33\u2193w ...
-000000F7  08                    fruity          db 8                    ; DATA XREF: fruitgeneration\u2193r
-                                                                        ; fruitgeneration+20\u2193w ...
-000000F8  00                    gameover        db 0                    ; DATA XREF: main+3D\u2193r
-                                                                        ; shiftsnake:loc_1036C\u2193w
-000000F9  00                    quit            db 0                    ; DATA XREF: main+47\u2193r
-                                                                        ; keyboardfunctions:loc_102F1\u2193w
-000000FA  05                    delaytime       db 5                    ; DATA XREF: main+5B\u2193w
-                                                                        ; main+74\u2193w ...
-000000FB  00                                    db 0
-000000FC  00                                    db    0
-000000FD  00                                    db    0
-000000FE  00                                    db    0
-000000FF  00                                    db    0
-00000100                         ; ===========================================================================
-
-                                ; Segment type: Pure code
-00000000                        seg001          segment byte public 'CODE' use16
-                                 ; =============== S U B R O U T I N E =======================================
-
-                                ; Attributes: noreturn
-
-                                ; int __cdecl main(int argc, const char **argv, const char **envp)
-00000000                        main            proc near
-
- = 2                            argc            = dword ptr  2
- = 6                            argv            = dword ptr  6
- = A                            envp            = dword ptr  0Ah
-
-00000000  B80000                                mov     ax, seg DATA
-00000003  8ED8                                  mov     ds, ax
-00000005  B800B8                                mov     ax, 0B800h
-00000008  8EC0                                  mov     es, ax
-0000000A  B80300                                mov     ax, 3
-0000000D  CD10                                  int     10h             ; - VIDEO - SET VIDEO MODE
-                                                                        ; AL = mode
-0000000F  BA0000                                mov     dx, 0
-00000012  B409                                  mov     ah, 9
-00000014  CD21                                  int     21h             ; DOS - PRINT STRING
-                                                                        ; DS:DX -> string terminated by "$"
-00000016  B407                                  mov     ah, 7
-00000018  CD21                                  int     21h             ; DOS - DIRECT STDIN INPUT, NO ECHO
-0000001A  B80300                                mov     ax, 3
-0000001D  CD10                                  int     10h             ; - VIDEO - SET VIDEO MODE
-                                                                        ; AL = mode
-0000001F  B8004C                                mov     ax, 4C00h
-00000022  CD21                                  int     21h             ; DOS - 2+ - QUIT WITH EXIT CODE (EXIT)
-00000024                        main            endp                    ; AL = exit code
-
-
-00000024                        delay           proc near               ; CODE XREF: main:loc_1012D\u2191p
-                                                                        ; main+6A\u2191p ...
-00000024  B400                                  mov     ah, 0
-00000026  CD1A                                  int     1Ah             ; CLOCK - GET TIME OF DAY
-                                                                        ; Return: CX:DX = clock count
-                                                                        ; AL = 00h if clock was read or written (via AH=0,1) since the previous
-                                                                        ; midnight
-                                                                        ; Otherwise, AL > 0
-00000028  8BDA                                  mov     bx, dx
-
-0000002A                        loc_10198:                              ; CODE XREF: delay+E\u2193j
-0000002A  CD1A                                  int     1Ah
-0000002C  2BD3                                  sub     dx, bx
-0000002E  7CFA                                  jl      short loc_10198
-00000030  C3                                    retn
-00000031                        delay           endp
-
-
-                                ; =============== S U B R O U T I N E =======================================
-
-
-00000031                        fruitgeneration proc near               ; CODE XREF: main+4E\u2191p
-00000031  8A2E0000                              mov     ch, fruity
-00000035  8A0E0000                              mov     cl, fruitx
-
-00000039                        loc_101AB:                              ; CODE XREF: fruitgeneration+47\u2193j
-                                                                        ; fruitgeneration+4E\u2193j ...
-00000039  803E000001                            cmp     fruitactive, 1
-0000003E  746F                                  jz      short locret_10221
-00000040  B400                                  mov     ah, 0
-00000042  CD1A                                  int     1Ah             ; CLOCK - GET TIME OF DAY
-                                                                        ; Return: CX:DX = clock count
-                                                                        ; AL = 00h if clock was read or written (via AH=0,1) since the previous
-                                                                        ; midnight
-                                                                        ; Otherwise, AL > 0
-00000044  52                                    push    dx
-00000045  8BC2                                  mov     ax, dx
-00000047  33D2                                  xor     dx, dx
-00000049  32FF                                  xor     bh, bh
-0000004B  B30F                                  mov     bl, 15
-0000004D  FECB                                  dec     bl
-0000004F  F7F3                                  div     bx
-00000051  88160000                              mov     fruity, dl
-00000055  FE060000                              inc     fruity
-00000059  58                                    pop     ax
-0000005A  B328                                  mov     bl, 40
-0000005C  FECA                                  dec     dl
-0000005E  32FF                                  xor     bh, bh
-00000060  33D2                                  xor     dx, dx
-00000062  F7F3                                  div     bx
-00000064  88160000                              mov     fruitx, dl
-00000068  FE060000                              inc     fruitx
-0000006C  380E0000                              cmp     fruitx, cl
-00000070  7508                                  jnz     short loc_101EC
-00000072  382E0000                              cmp     fruity, ch
-00000076  7502                                  jnz     short loc_101EC
-00000078  EBBF                                  jmp     short loc_101AB
-                                ; ---------------------------------------------------------------------------
-
-0000007A                        loc_101EC:                              ; CODE XREF: fruitgeneration+3F\u2191j
-                                                                        ; fruitgeneration+45\u2191j
-0000007A  A00000                                mov     al, fruitx
-0000007D  D0C8                                  ror     al, 1
-0000007F  72B8                                  jb      short loc_101AB
-00000081  8006000002                            add     fruity, 2
-00000086  8006000000                            add     fruitx, 0
-0000008B  8A360000                              mov     dh, fruity
-0000008F  8A160000                              mov     dl, fruitx
-00000093  E8F101                                call    readcharat
-00000096  80FB2A                                cmp     bl, '*'
-00000099  749E                                  jz      short loc_101AB
-0000009B  80FB5E                                cmp     bl, '^'
-0000009E  7499                                  jz      short loc_101AB
-000000A0  80FB3C                                cmp     bl, '<'
-000000A3  7494                                  jz      short loc_101AB
-000000A5  80FB3E                                cmp     bl, '>'
-000000A8  748F                                  jz      short loc_101AB
-000000AA  80FB76                                cmp     bl, 'v'
-000000AD  748A                                  jz      short loc_101AB
-
-000000AF                        locret_10221:                           ; CODE XREF: fruitgeneration+D\u2191j
-000000AF  C3                                    retn
-000000B0                        fruitgeneration endp
-
-
-                                ; =============== S U B R O U T I N E =======================================
-
-
-000000B0                        dispdigit       proc near               ; CODE XREF: dispnum+10\u2193p
-000000B0  80C230                                add     dl, 30h ; '0'
-000000B3  B402                                  mov     ah, 2
-000000B5  CD21                                  int     21h             ; DOS - DISPLAY OUTPUT
-                                                                        ; DL = character to send to standard output
-000000B7  C3                                    retn
-000000B8                        dispdigit       endp
-
-
-                                ; =============== S U B R O U T I N E =======================================
-
-
-000000B8                        dispnum         proc near               ; CODE XREF: dispnum+C\u2193p
-                                                                        ; draw+17\u2193p
-000000B8  85C0                                  test    ax, ax
-000000BA  7410                                  jz      short loc_1023E
-000000BC  33D2                                  xor     dx, dx
-000000BE  BB0A00                                mov     bx, 10
-000000C1  F7F3                                  div     bx
-000000C3  52                                    push    dx
-000000C4  E8F1FF                                call    dispnum
-000000C7  5A                                    pop     dx
-000000C8  E8E5FF                                call    dispdigit
-000000CB  C3                                    retn
-                                ; ---------------------------------------------------------------------------
-
-000000CC                        loc_1023E:                              ; CODE XREF: dispnum+2\u2191j
-000000CC  B402                                  mov     ah, 2
-000000CE  C3                                    retn
-000000CF                        dispnum         endp
-
-
-                                ; =============== S U B R O U T I N E =======================================
-
-
-000000CF                        setcursorpos    proc near               ; CODE XREF: draw+D\u2193p
-000000CF  B402                                  mov     ah, 2
-000000D1  53                                    push    bx
-000000D2  B700                                  mov     bh, 0
-000000D4  CD10                                  int     10h             ; - VIDEO - SET CURSOR POSITION
-                                                                        ; DH,DL = row, column (0,0 = upper left)
-                                                                        ; BH = page number
-000000D6  5B                                    pop     bx
-000000D7  C3                                    retn
-000000D8                        setcursorpos    endp
-
-
-                                ; =============== S U B R O U T I N E =======================================
-
-
-000000D8                        draw            proc near               ; CODE XREF: main+51\u2191p
-000000D8  8D1E0000                              lea     bx, scoremsg    ; "Score: "
-000000DC  BA0901                                mov     dx, 109h
-000000DF  E8D001                                call    writestringat
-000000E2  83C207                                add     dx, 7
-000000E5  E8E7FF                                call    setcursorpos
-000000E8  A00000                                mov     al, segmentcount
-000000EB  FEC8                                  dec     al
-000000ED  32E4                                  xor     ah, ah
-000000EF  E8C6FF                                call    dispnum
-000000F2  8D360000                              lea     si, head
-
-000000F6                        loc_10268:                              ; CODE XREF: draw+2D\u2193j
-000000F6  8A1C                                  mov     bl, [si]
-000000F8  84DB                                  test    bl, bl
-000000FA  740B                                  jz      short loc_10279
-000000FC  8B5401                                mov     dx, [si+1]
-000000FF  E85A01                                call    writecharat
-00000102  83C603                                add     si, 3
-00000105  EBEF                                  jmp     short loc_10268
-                                ; ---------------------------------------------------------------------------
-
-00000107                        loc_10279:                              ; CODE XREF: draw+22\u2191j
-00000107  B346                                  mov     bl, 'F'
-00000109  8A360000                              mov     dh, fruity
-0000010D  8A160000                              mov     dl, fruitx
-00000111  E84801                                call    writecharat
-00000114  C606000001                            mov     fruitactive, 1
-00000119  C3                                    retn
-0000011A                        draw            endp
-
-
-                                ; =============== S U B R O U T I N E =======================================
-
-
-0000011A                        readchar        proc near               ; CODE XREF: keyboardfunctions\u2193p
-0000011A  B401                                  mov     ah, 1
-0000011C  CD16                                  int     16h             ; KEYBOARD - CHECK BUFFER, DO NOT CLEAR
-                                                                        ; Return: ZF clear if character in buffer
-                                                                        ; AH = scan code, AL = character
-                                                                        ; ZF set if no character in buffer
-0000011E  7503                                  jnz     short loc_10295
-00000120  32D2                                  xor     dl, dl
-00000122  C3                                    retn
-                                ; ---------------------------------------------------------------------------
-
-00000123                        loc_10295:                              ; CODE XREF: readchar+4\u2191j
-00000123  B400                                  mov     ah, 0
-00000125  CD16                                  int     16h             ; KEYBOARD - READ CHAR FROM BUFFER, WAIT IF EMPTY
-                                                                        ; Return: AH = scan code, AL = character
-00000127  8AD0                                  mov     dl, al
-00000129  C3                                    retn
-0000012A                        readchar        endp
-
-
-                                ; =============== S U B R O U T I N E =======================================
-
-
-0000012A                        keyboardfunctions proc near             ; CODE XREF: main+44\u2191p
-0000012A  E8EDFF                                call    readchar
-0000012D  80FA00                                cmp     dl, 0
-00000130  7447                                  jz      short loc_102EB
-00000132  80FA77                                cmp     dl, 'w'
-00000135  750D                                  jnz     short loc_102B6
-00000137  803E000076                            cmp     head, 'v'
-0000013C  743B                                  jz      short loc_102EB
-0000013E  C60600005E                            mov     head, '^'
-00000143  C3                                    retn
-                                ; ---------------------------------------------------------------------------
-
-00000144                        loc_102B6:                              ; CODE XREF: keyboardfunctions+B\u2191j
-00000144  80FA73                                cmp     dl, 's'
-00000147  750D                                  jnz     short loc_102C8
-00000149  803E00005E                            cmp     head, '^'
-0000014E  7429                                  jz      short loc_102EB
-00000150  C606000076                            mov     head, 'v'
-00000155  C3                                    retn
-                                ; ---------------------------------------------------------------------------
-
-00000156                        loc_102C8:                              ; CODE XREF: keyboardfunctions+1D\u2191j
-00000156  80FA61                                cmp     dl, 'a'
-00000159  750D                                  jnz     short loc_102DA
-0000015B  803E00003E                            cmp     head, '>'
-00000160  7417                                  jz      short loc_102EB
-00000162  C60600003C                            mov     head, '<'
-00000167  C3                                    retn
-                                ; ---------------------------------------------------------------------------
-
-00000168                        loc_102DA:                              ; CODE XREF: keyboardfunctions+2F\u2191j
-00000168  80FA64                                cmp     dl, 'd'
-0000016B  750C                                  jnz     short loc_102EB
-0000016D  803E00003C                            cmp     head, '<'
-00000172  7405                                  jz      short loc_102EB
-00000174  C60600003E                            mov     head, '>'
-
-00000179                        loc_102EB:                              ; CODE XREF: keyboardfunctions+6\u2191j
-                                                                        ; keyboardfunctions+12\u2191j ...
-00000179  80FA71                                cmp     dl, 'q'
-0000017C  7401                                  jz      short loc_102F1
-0000017E  C3                                    retn
-                                ; ---------------------------------------------------------------------------
-
-0000017F                        loc_102F1:                              ; CODE XREF: keyboardfunctions+52\u2191j
-0000017F  FE060000                              inc     quit
-00000183  C3                                    retn
-00000184                        keyboardfunctions endp
-
-
-                                ; =============== S U B R O U T I N E =======================================
-
-
-00000184                        shiftsnake      proc near               ; CODE XREF: main+3A\u2191p
-00000184  BB0000                                mov     bx, offset head
-00000187  33C0                                  xor     ax, ax
-00000189  8A07                                  mov     al, [bx]
-0000018B  50                                    push    ax
-0000018C  43                                    inc     bx
-0000018D  8B07                                  mov     ax, [bx]
-0000018F  43                                    inc     bx
-00000190  43                                    inc     bx
-00000191  33C9                                  xor     cx, cx
-
-00000193                        loc_10305:                              ; CODE XREF: shiftsnake+1F\u2193j
-00000193  8B37                                  mov     si, [bx]
-00000195  8537                                  test    [bx], si
-00000197  740C                                  jz      short loc_10317
-00000199  41                                    inc     cx
-0000019A  43                                    inc     bx
-0000019B  8B17                                  mov     dx, [bx]
-0000019D  8907                                  mov     [bx], ax
-0000019F  8BC2                                  mov     ax, dx
-000001A1  43                                    inc     bx
-000001A2  43                                    inc     bx
-000001A3  EBEE                                  jmp     short loc_10305
-                                ; ---------------------------------------------------------------------------
-
-000001A5                        loc_10317:                              ; CODE XREF: shiftsnake+13\u2191j
-000001A5  58                                    pop     ax
-000001A6  52                                    push    dx
-000001A7  8D1E0000                              lea     bx, head
-000001AB  43                                    inc     bx
-000001AC  8B17                                  mov     dx, [bx]
-000001AE  3C3C                                  cmp     al, '<'
-000001B0  7506                                  jnz     short loc_1032A
-000001B2  FECA                                  dec     dl
-000001B4  FECA                                  dec     dl
-000001B6  EB14                                  jmp     short loc_1033E
-                                ; ---------------------------------------------------------------------------
-
-000001B8                        loc_1032A:                              ; CODE XREF: shiftsnake+2C\u2191j
-000001B8  3C3E                                  cmp     al, 3Eh ; '>'
-000001BA  7506                                  jnz     short loc_10334
-000001BC  FEC2                                  inc     dl
-000001BE  FEC2                                  inc     dl
-000001C0  EB0A                                  jmp     short loc_1033E
-                                ; ---------------------------------------------------------------------------
-
-000001C2                        loc_10334:                              ; CODE XREF: shiftsnake+36\u2191j
-000001C2  3C5E                                  cmp     al, '^'
-000001C4  7504                                  jnz     short loc_1033C
-000001C6  FECE                                  dec     dh
-000001C8  EB02                                  jmp     short loc_1033E
-                                ; ---------------------------------------------------------------------------
-
-000001CA                        loc_1033C:                              ; CODE XREF: shiftsnake+40\u2191j
-000001CA  FEC6                                  inc     dh
-
-000001CC                        loc_1033E:                              ; CODE XREF: shiftsnake+32\u2191j
-                                                                        ; shiftsnake+3C\u2191j ...
-000001CC  8917                                  mov     [bx], dx
-000001CE  E8B600                                call    readcharat
-000001D1  80FB46                                cmp     bl, 'F'
-000001D4  7429                                  jz      short loc_10371
-000001D6  8BCA                                  mov     cx, dx
-000001D8  5A                                    pop     dx
-000001D9  80FB2A                                cmp     bl, '*'
-000001DC  741C                                  jz      short loc_1036C
-000001DE  B300                                  mov     bl, 0
-000001E0  E87900                                call    writecharat
-000001E3  8BD1                                  mov     dx, cx
-000001E5  80FE02                                cmp     dh, 2
-000001E8  7410                                  jz      short loc_1036C
-000001EA  80FE11                                cmp     dh, 11h
-000001ED  740B                                  jz      short loc_1036C
-000001EF  80FA00                                cmp     dl, 0
-000001F2  7406                                  jz      short loc_1036C
-000001F4  80FA28                                cmp     dl, 28h ; '('
-000001F7  7401                                  jz      short loc_1036C
-000001F9  C3                                    retn
-                                ; ---------------------------------------------------------------------------
-
-000001FA                        loc_1036C:                              ; CODE XREF: shiftsnake+58\u2191j
-                                                                        ; shiftsnake+64\u2191j ...
-000001FA  FE060000                              inc     gameover
-000001FE  C3                                    retn
-                                ; ---------------------------------------------------------------------------
-
-000001FF                        loc_10371:                              ; CODE XREF: shiftsnake+50\u2191j
-000001FF  A00000                                mov     al, segmentcount
-00000202  32E4                                  xor     ah, ah
-00000204  8D1E0000                              lea     bx, body
-00000208  B90300                                mov     cx, 3
-0000020B  F7E1                                  mul     cx
-0000020D  5A                                    pop     dx
-0000020E  03D8                                  add     bx, ax
-00000210  C6072A                                mov     byte ptr [bx], '*'
-00000213  895701                                mov     [bx+1], dx
-00000216  FE060000                              inc     segmentcount
-0000021A  8A360000                              mov     dh, fruity
-0000021E  8A160000                              mov     dl, fruitx
-00000222  B300                                  mov     bl, 0
-00000224  E83500                                call    writecharat
-00000227  C606000000                            mov     fruitactive, 0
-0000022C  C3                                    retn
-0000022D                        shiftsnake      endp
-
-
-                                ; =============== S U B R O U T I N E =======================================
-
-
-0000022D                        printbox        proc near               ; CODE XREF: main+2A\u2191p
-0000022D  B602                                  mov     dh, 2
-0000022F  B200                                  mov     dl, 0
-00000231  B92800                                mov     cx, 28h ; '('
-00000234  B32A                                  mov     bl, '*'
-
-00000236                        loc_103A8:                              ; CODE XREF: printbox+E\u2193j
-00000236  E82300                                call    writecharat
-00000239  FEC2                                  inc     dl
-0000023B  E2F9                                  loop    loc_103A8
-0000023D  B90F00                                mov     cx, 0Fh
-
-00000240                        loc_103B2:                              ; CODE XREF: printbox+18\u2193j
-00000240  E81900                                call    writecharat
-00000243  FEC6                                  inc     dh
-00000245  E2F9                                  loop    loc_103B2
-00000247  B92800                                mov     cx, 28h ; '('
-
-0000024A                        loc_103BC:                              ; CODE XREF: printbox+22\u2193j
-0000024A  E80F00                                call    writecharat
-0000024D  FECA                                  dec     dl
-0000024F  E2F9                                  loop    loc_103BC
-00000251  B90F00                                mov     cx, 0Fh
-
-00000254                        loc_103C6:                              ; CODE XREF: printbox+2C\u2193j
-00000254  E80500                                call    writecharat
-00000257  FECE                                  dec     dh
-00000259  E2F9                                  loop    loc_103C6
-0000025B  C3                                    retn
-0000025C                        printbox        endp
-
-
-                                ; =============== S U B R O U T I N E =======================================
-
-
-0000025C                        writecharat     proc near               ; CODE XREF: draw+27\u2191p
-                                                                        ; draw+39\u2191p ...
-0000025C  52                                    push    dx
-0000025D  8BC2                                  mov     ax, dx
-0000025F  2500FF                                and     ax, 0FF00h
-00000262  D1E8                                  shr     ax, 1
-00000264  D1E8                                  shr     ax, 1
-00000266  D1E8                                  shr     ax, 1
-00000268  D1E8                                  shr     ax, 1
-0000026A  D1E8                                  shr     ax, 1
-0000026C  D1E8                                  shr     ax, 1
-0000026E  D1E8                                  shr     ax, 1
-00000270  D1E8                                  shr     ax, 1
-00000272  53                                    push    bx
-00000273  B7A0                                  mov     bh, 0A0h ; ' '
-00000275  F6E7                                  mul     bh
-00000277  5B                                    pop     bx
-00000278  81E2FF00                              and     dx, 0FFh
-0000027C  D1E2                                  shl     dx, 1
-0000027E  03C2                                  add     ax, dx
-00000280  8BF8                                  mov     di, ax
-00000282  26881D                                mov     es:[di], bl
-00000285  5A                                    pop     dx
-00000286  C3                                    retn
-00000287                        writecharat     endp
-
-
-                                ; =============== S U B R O U T I N E =======================================
-
-
-00000287                        readcharat      proc near               ; CODE XREF: fruitgeneration+62\u2191p
-                                                                        ; shiftsnake+4A\u2191p
-00000287  52                                    push    dx
-00000288  8BC2                                  mov     ax, dx
-0000028A  2500FF                                and     ax, 0FF00h
-0000028D  D1E8                                  shr     ax, 1
-0000028F  D1E8                                  shr     ax, 1
-00000291  D1E8                                  shr     ax, 1
-00000293  D1E8                                  shr     ax, 1
-00000295  D1E8                                  shr     ax, 1
-00000297  D1E8                                  shr     ax, 1
-00000299  D1E8                                  shr     ax, 1
-0000029B  D1E8                                  shr     ax, 1
-0000029D  53                                    push    bx
-0000029E  B7A0                                  mov     bh, 0A0h ; ' '
-000002A0  F6E7                                  mul     bh
-000002A2  5B                                    pop     bx
-000002A3  81E2FF00                              and     dx, 0FFh
-000002A7  D1E2                                  shl     dx, 1
-000002A9  03C2                                  add     ax, dx
-000002AB  8BF8                                  mov     di, ax
-000002AD  268A1D                                mov     bl, es:[di]
-000002B0  5A                                    pop     dx
-000002B1  C3                                    retn
-000002B2                        readcharat      endp
-
-
-                                ; =============== S U B R O U T I N E =======================================
-
-
-000002B2                        writestringat   proc near               ; CODE XREF: main+16\u2191p
-                                                                        ; main+37\u2191p ...
-000002B2  52                                    push    dx
-000002B3  8BC2                                  mov     ax, dx
-000002B5  2500FF                                and     ax, 0FF00h
-000002B8  D1E8                                  shr     ax, 1
-000002BA  D1E8                                  shr     ax, 1
-000002BC  D1E8                                  shr     ax, 1
-000002BE  D1E8                                  shr     ax, 1
-000002C0  D1E8                                  shr     ax, 1
-000002C2  D1E8                                  shr     ax, 1
-000002C4  D1E8                                  shr     ax, 1
-000002C6  D1E8                                  shr     ax, 1
-000002C8  53                                    push    bx
-000002C9  B7A0                                  mov     bh, 0A0h ; ' '
-000002CB  F6E7                                  mul     bh
-000002CD  5B                                    pop     bx
-000002CE  81E2FF00                              and     dx, 0FFh
-000002D2  D1E2                                  shl     dx, 1
-000002D4  03C2                                  add     ax, dx
-000002D6  8BF8                                  mov     di, ax
-
-000002D8                        loc_1044A:                              ; CODE XREF: writestringat+32\u2193j
-000002D8  8A07                                  mov     al, [bx]
-000002DA  84C0                                  test    al, al
-000002DC  7408                                  jz      short loc_10458
-000002DE  268805                                mov     es:[di], al
-000002E1  47                                    inc     di
-000002E2  47                                    inc     di
-000002E3  43                                    inc     bx
-000002E4  EBF2                                  jmp     short loc_1044A
-                                ; ---------------------------------------------------------------------------
-
-000002E6                        loc_10458:                              ; CODE XREF: writestringat+2A\u2191j
-000002E6  5A                                    pop     dx
-000002E7  C3                                    retn
-000002E8                        writestringat   endp
-
-00                                                end main
+UASM v2.49, Jun 21 2019, Masm-compatible assembler.
+
+snake.asm
+                                ;*******************************************************************************************************************
+                                ;                                              Snake Game By                                                       *
+                                ;                                                 HERO-DAI                                                         *
+                                ;*******************************************************************************************************************
+
+                                ;code is not well-commented, sorry about that, I'll try to comment it nice and well, but can't make any
+                                ;promises, Also, this code writes directly into the video memory instead of int 21H (21H is slow) except
+                                ;at some certain points (like displaying scores and the intro)
+
+                                ;and next time someone tells you to not use goto, ask them to code in assembly without goto... :P
+
+ = 0                            left equ 0
+ = 2                            top equ 2
+ = F                            row equ 15
+ = 28                           col equ 40
+ = 28                           right equ left+col
+ = 11                           bottom equ top+row
+
+                                .model small
+00000000                        data segment
+00000000  57656C636F6D652074        msg db "Welcome to the snake game!!",0
+0000001C  0A0D55736520612C20        instructions db 0AH,0DH,"Use a, s, d and w to control your snake",0AH,0DH,"Use q anytime to quit",0DH,0AH, "Press any key to continue$"
+00000078  5468616E6B7320666F        quitmsg db "Thanks for playing! hope you enjoyed",0
+0000009D  4F4F5053212120796F        gameovermsg db "OOPS!! your snake died! :P ", 0
+000000B9  53636F72653A2000          scoremsg db "Score: ",0
+000000C1  5E0A0A                    head db '^',10,10
+000000C4  2A0A0B000000000000        body db '*',10,11, 3*15 DUP(0)
+000000F4  01                        segmentcount db 1
+000000F5  01                        fruitactive db 1
+000000F6  08                        fruitx db 8
+000000F7  08                        fruity db 8
+000000F8  00                        gameover db 0
+000000F9  00                        quit db 0   
+000000FA  05                        delaytime db 5
+000000FB                        data ends
+
+00000000                        text segment
+00000000                        main proc far
+                                	assume ds: data, es: nothing
+00000000  B80000                	mov ax, data
+00000003  8ED8                  	mov ds, ax 
+                                	
+00000005  B800B8                	mov ax, 0b800H
+00000008  8EC0                  	mov es, ax
+                                	
+                                	;clearing the screen
+0000000A  B80300                	mov ax, 0003H
+0000000D  CD10                  	int 10H
+                                	
+0000000F  8D1E0000              	lea bx, msg
+00000013  BA0000                	mov dx,00
+00000016  E80B03                	call writestringat
+                                	
+00000019  8D160000              	lea dx, instructions
+0000001D  B409                  	mov ah, 09H
+0000001F  CD21                  	int 21h
+                                	
+00000021  B407                  	mov ah, 07h
+00000023  CD21                  	int 21h
+00000025  B80300                	mov ax, 0003H
+00000028  CD10                  	int 10H
+0000002A  E87202                    call printbox      
+                                    
+                                    
+0000002D                        mainloop:       
+0000002D  E86200                    call delay             
+00000030  8D1E0000                  lea bx, msg
+00000034  BA0000                    mov dx, 00
+00000037  E8EA02                    call writestringat
+0000003A  E8B901                    call shiftsnake
+0000003D  803E000001                cmp gameover,1
+00000042  7412                      je gameover_mainloop
+                                    
+00000044  E85501                    call keyboardfunctions
+00000047  803E000001                cmp quit, 1
+0000004C  7421                      je quitpressed_mainloop
+0000004E  E85200                    call fruitgeneration
+00000051  E8F600                    call draw
+                                    
+                                    ;TODO: check gameover and quit
+                                    
+00000054  EBD7                      jmp mainloop
+                                    
+00000056                        gameover_mainloop: 
+00000056  B80300                    mov ax, 0003H
+00000059  CD10                  	int 10H
+0000005B  C606000064                mov delaytime, 100
+00000060  BA0000                    mov dx, 0000H
+00000063  8D1E0000                  lea bx, gameovermsg
+00000067  E8BA02                    call writestringat
+0000006A  E82500                    call delay    
+0000006D  EB19                      jmp quit_mainloop    
+                                    
+0000006F                        quitpressed_mainloop:
+0000006F  B80300                    mov ax, 0003H
+00000072  CD10                  	int 10H    
+00000074  C606000064                mov delaytime, 100
+00000079  BA0000                    mov dx, 0000H
+0000007C  8D1E0000                  lea bx, quitmsg
+00000080  E8A102                    call writestringat
+00000083  E80C00                    call delay    
+00000086  EB00                      jmp quit_mainloop    
+
+                                    
+                                    
+
+00000088                        quit_mainloop:
+                                ;first clear screen
+00000088  B80300                mov ax, 0003H
+0000008B  CD10                  int 10h    
+0000008D  B8004C                mov ax, 4c00h
+00000090  CD21                  int 21h  
+
+
+00000092                        main endp
+                                         
+
+
+00000092                        delay proc 
+                                    
+                                    ;this procedure uses 1A interrupt, more info can be found on   
+                                    ;http://www.computing.dcu.ie/~ray/teaching/CA296/notes/8086_bios_and_dos_interrupts.html
+00000092  B400                      mov ah, 00
+00000094  CD1A                      int 1Ah
+00000096  8BDA                      mov bx, dx
+                                    
+00000098                        jmp_delay:
+00000098  CD1A                      int 1Ah
+0000009A  2BD3                      sub dx, bx
+                                    ;there are about 18 ticks in a second, 10 ticks are about enough
+0000009C  3A160000                  cmp dl, delaytime                                                      
+000000A0  7CF6                      jl jmp_delay    
+000000A2                            ret
+                                    
+000000A3                        delay endp
+                                   
+                                   
+
+
+000000A3                        fruitgeneration proc
+000000A3  8A2E0000                  mov ch, fruity
+000000A7  8A0E0000                  mov cl, fruitx
+000000AB                        regenerate:
+                                    
+000000AB  803E000001                cmp fruitactive, 1
+000000B0  746F                      je ret_fruitactive
+000000B2  B400                      mov ah, 00
+000000B4  CD1A                      int 1Ah
+                                    ;dx contains the ticks
+000000B6  52                        push dx
+000000B7  8BC2                      mov ax, dx
+000000B9  33D2                      xor dx, dx
+000000BB  32FF                      xor bh, bh
+000000BD  B30F                      mov bl, row
+000000BF  FECB                      dec bl
+000000C1  F7F3                      div bx
+000000C3  88160000                  mov fruity, dl
+000000C7  FE060000                  inc fruity
+                                    
+                                    
+000000CB  58                        pop ax
+000000CC  B328                      mov bl, col
+000000CE  FECA                      dec dl
+000000D0  32FF                      xor bh, bh
+000000D2  33D2                      xor dx, dx
+000000D4  F7F3                      div bx
+000000D6  88160000                  mov fruitx, dl
+000000DA  FE060000                  inc fruitx
+                                    
+000000DE  380E0000                  cmp fruitx, cl
+000000E2  7508                      jne nevermind
+000000E4  382E0000                  cmp fruity, ch
+000000E8  7502                      jne nevermind
+000000EA  EBBF                      jmp regenerate             
+000000EC                        nevermind:
+000000EC  A00000                    mov al, fruitx
+000000EF  D0C8                      ror al,1
+000000F1  72B8                      jc regenerate
+                                    
+                                    
+000000F3  8006000002                add fruity, top
+000000F8  8006000000                add fruitx, left 
+                                    
+000000FD  8A360000                  mov dh, fruity
+00000101  8A160000                  mov dl, fruitx
+00000105  E8F101                    call readcharat
+00000108  80FB2A                    cmp bl, '*'
+0000010B  749E                      je regenerate
+0000010D  80FB5E                    cmp bl, '^'
+00000110  7499                      je regenerate
+00000112  80FB3C                    cmp bl, '<'
+00000115  7494                      je regenerate
+00000117  80FB3E                    cmp bl, '>'
+0000011A  748F                      je regenerate
+0000011C  80FB76                    cmp bl, 'v'
+0000011F  748A                      je regenerate    
+                                    
+00000121                        ret_fruitactive:
+00000121                            ret
+00000122                        fruitgeneration endp
+
+
+00000122                        dispdigit proc
+00000122  80C230                    add dl, '0'
+00000125  B402                      mov ah, 02H
+00000127  CD21                      int 21H
+00000129                            ret
+0000012A                        dispdigit endp   
+                                   
+0000012A                        dispnum proc    
+0000012A  85C0                      test ax,ax
+0000012C  7410                      jz retz
+0000012E  33D2                      xor dx, dx
+                                    ;ax contains the number to be displayed
+                                    ;bx must contain 10
+00000130  BB0A00                    mov bx,10
+00000133  F7F3                      div bx
+                                    ;dispnum ax first.
+00000135  52                        push dx
+00000136  E8F1FF                    call dispnum  
+00000139  5A                        pop dx
+0000013A  E8E5FF                    call dispdigit
+0000013D                            ret
+0000013E                        retz:
+0000013E  B402                      mov ah, 02  
+00000140                            ret    
+00000141                        dispnum endp   
+
+
+
+                                ;sets the cursor position, ax and bx used, dh=row, dl = column
+                                ;preserves other registers
+00000141                        setcursorpos proc
+00000141  B402                      mov ah, 02H
+00000143  53                        push bx
+00000144  B700                      mov bh,0
+00000146  CD10                      int 10h
+00000148  5B                        pop bx
+00000149                            ret
+0000014A                        setcursorpos endp
+
+
+
+0000014A                        draw proc
+0000014A  8D1E0000                  lea bx, scoremsg
+0000014E  BA0901                    mov dx, 0109h
+00000151  E8D001                    call writestringat
+                                    
+                                    
+00000154  83C207                    add dx, 7
+00000157  E8E7FF                    call setcursorpos
+0000015A  A00000                    mov al, segmentcount
+0000015D  FEC8                      dec al
+0000015F  32E4                      xor ah, ah
+00000161  E8C6FF                    call dispnum
+                                        
+00000164  8D360000                  lea si, head
+00000168                        draw_loop:
+00000168  8A1C                      mov bl, ds:[si]
+0000016A  84DB                      test bl, bl
+0000016C  740B                      jz out_draw
+0000016E  8B5401                    mov dx, ds:[si+1]
+00000171  E85A01                    call writecharat
+00000174  83C603                    add si,3   
+00000177  EBEF                      jmp draw_loop 
+
+00000179                        out_draw:
+00000179  B346                      mov bl, 'F'
+0000017B  8A360000                  mov dh, fruity
+0000017F  8A160000                  mov dl, fruitx
+00000183  E84801                    call writecharat
+00000186  C606000001                mov fruitactive, 1
+                                    
+0000018B                            ret
+                                    
+                                    
+                                    
+0000018C                        draw endp
+
+
+
+                                ;dl contains the ascii character if keypressed, else dl contains 0
+                                ;uses dx and ax, preserves other registers
+0000018C                        readchar proc
+0000018C  B401                      mov ah, 01H
+0000018E  CD16                      int 16H
+00000190  7503                      jnz keybdpressed
+00000192  32D2                      xor dl, dl
+00000194                            ret
+00000195                        keybdpressed:
+                                    ;extract the keystroke from the buffer
+00000195  B400                      mov ah, 00H
+00000197  CD16                      int 16H
+00000199  8AD0                      mov dl,al
+0000019B                            ret
+
+
+0000019C                        readchar endp                    
+                                         
+                                         
+                                         
+                                                  
+                                                    
+
+
+0000019C                        keyboardfunctions proc
+                                    
+0000019C  E8EDFF                    call readchar
+0000019F  80FA00                    cmp dl, 0
+000001A2  7447                      je next_14
+                                    
+                                    ;so a key was pressed, which key was pressed then solti?
+000001A4  80FA77                    cmp dl, 'w'
+000001A7  750D                      jne next_11
+000001A9  803E000076                cmp head, 'v'
+000001AE  743B                      je next_14
+000001B0  C60600005E                mov head, '^'
+000001B5                            ret
+000001B6                        next_11:
+000001B6  80FA73                    cmp dl, 's'
+000001B9  750D                      jne next_12
+000001BB  803E00005E                cmp head, '^'
+000001C0  7429                      je next_14
+000001C2  C606000076                mov head, 'v'
+000001C7                            ret
+000001C8                        next_12:
+000001C8  80FA61                    cmp dl, 'a'
+000001CB  750D                      jne next_13
+000001CD  803E00003E                cmp head, '>'
+000001D2  7417                      je next_14
+000001D4  C60600003C                mov head, '<'
+000001D9                            ret
+000001DA                        next_13:
+000001DA  80FA64                    cmp dl, 'd'
+000001DD  750C                      jne next_14
+000001DF  803E00003C                cmp head, '<'
+000001E4  7405                      je next_14
+000001E6  C60600003E                mov head,'>'
+000001EB                        next_14:    
+000001EB  80FA71                    cmp dl, 'q'
+000001EE  7401                      je quit_keyboardfunctions
+000001F0                            ret    
+000001F1                        quit_keyboardfunctions:   
+                                    ;conditions for quitting in here please  
+000001F1  FE060000                  inc quit
+000001F5                            ret
+                                    
+000001F6                        keyboardfunctions endp
+
+
+                                                    
+                                                    
+                                                    
+                                                    
+                                                    
+                                                    
+000001F6                        shiftsnake proc     
+000001F6  BB0000                    mov bx, offset head
+                                    
+                                    ;determine the where should the head go solti?
+                                    ;preserve the head
+000001F9  33C0                      xor ax, ax
+000001FB  8A07                      mov al, [bx]
+000001FD  50                        push ax
+000001FE  43                        inc bx
+000001FF  8B07                      mov ax, [bx]
+00000201  43                        inc bx    
+00000202  43                        inc bx
+00000203  33C9                      xor cx, cx
+00000205                        l:      
+00000205  8B37                      mov si, [bx]
+00000207  8537                      test si, [bx]
+00000209  740C                      jz outside
+0000020B  41                        inc cx     
+0000020C  43                        inc bx
+0000020D  8B17                      mov dx,[bx]
+0000020F  8907                      mov [bx], ax
+00000211  8BC2                      mov ax,dx
+00000213  43                        inc bx
+00000214  43                        inc bx
+00000215  EBEE                      jmp l
+                                    
+00000217                        outside:    
+                                    
+                                    
+                                    ;hopefully, the snake will be shifted, i.e. moved.
+                                    ;now shift the head in its proper direction and then clear the last segment. 
+                                    ;But don't clear the last segment if the snake has eaten the fruit
+00000217  58                        pop ax
+                                    ;al contains the snake head direction
+                                    
+00000218  52                        push dx
+                                    ;dx now consists the coordinates of the last segment, we can use this to clear it
+                                    
+                                    
+00000219  8D1E0000                  lea bx, head
+0000021D  43                        inc bx
+0000021E  8B17                      mov dx, [bx]
+                                    
+00000220  3C3C                      cmp al, '<'
+00000222  7506                      jne next_1
+00000224  FECA                      dec dl
+00000226  FECA                      dec dl
+00000228  EB14                      jmp done_checking_the_head
+0000022A                        next_1:
+0000022A  3C3E                      cmp al, '>'
+0000022C  7506                      jne next_2                
+0000022E  FEC2                      inc dl 
+00000230  FEC2                      inc dl
+00000232  EB0A                      jmp done_checking_the_head
+                                    
+00000234                        next_2:
+00000234  3C5E                      cmp al, '^'
+00000236  7504                      jne next_3 
+00000238  FECE                      dec dh               
+                                                   
+                                    
+0000023A  EB02                      jmp done_checking_the_head
+                                    
+0000023C                        next_3:
+                                    ;must be 'v'
+0000023C  FEC6                      inc dh
+                                    
+0000023E                        done_checking_the_head:    
+0000023E  8917                      mov [bx],dx
+                                    ;dx contains the new position of the head, now check whats in that position   
+00000240  E8B600                    call readcharat ;dx
+                                    ;bl contains the result
+                                    
+00000243  80FB46                    cmp bl, 'F'
+00000246  7429                      je i_ate_fruit
+                                    
+                                    ;if fruit was not eaten, then clear the last segment, 
+                                    ;it will be cleared where?
+00000248  8BCA                      mov cx, dx
+0000024A  5A                        pop dx 
+0000024B  80FB2A                    cmp bl, '*'    ;the snake bit itself, gameover
+0000024E  741C                      je game_over
+00000250  B300                      mov bl, 0
+00000252  E87900                    call writecharat
+00000255  8BD1                      mov dx, cx
+                                    
+                                    
+                                    
+                                    
+                                    
+                                    ;check whether the snake is within the boundary
+00000257  80FE02                    cmp dh, top
+0000025A  7410                      je game_over
+0000025C  80FE11                    cmp dh, bottom
+0000025F  740B                      je game_over
+00000261  80FA00                    cmp dl,left
+00000264  7406                      je game_over
+00000266  80FA28                    cmp dl, right
+00000269  7401                      je game_over
+                                    
+                                    
+                                    
+                                    ;balance the stack, number of segment and the coordinate of the last segment
+                                    
+0000026B                            ret
+0000026C                        game_over:
+0000026C  FE060000                  inc gameover
+00000270                            ret
+00000271                        i_ate_fruit:    
+
+                                    ; add a new segment then
+00000271  A00000                    mov al, segmentcount
+00000274  32E4                      xor ah, ah
+                                    
+                                    
+00000276  8D1E0000                  lea bx, body
+0000027A  B90300                    mov cx, 3
+0000027D  F7E1                      mul cx
+                                    
+0000027F  5A                        pop dx
+00000280  03D8                      add bx, ax
+00000282  C6072A                    mov byte ptr ds:[bx], '*'
+00000285  895701                    mov [bx+1], dx
+00000288  FE060000                  inc segmentcount 
+0000028C  8A360000                  mov dh, fruity
+00000290  8A160000                  mov dl, fruitx
+00000294  B300                      mov bl, 0
+00000296  E83500                    call writecharat
+00000299  C606000000                mov fruitactive, 0   
+0000029E                            ret 
+0000029F                        shiftsnake endp
+                                   
+                                   
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                   
+                                         
+                                ;Printbox
+0000029F                        printbox proc
+                                ;Draw a box around
+0000029F  B602                      mov dh, top
+000002A1  B200                      mov dl, left
+000002A3  B92800                    mov cx, col
+000002A6  B32A                      mov bl, '*'
+000002A8                        l1:                 
+000002A8  E82300                    call writecharat
+000002AB  FEC2                      inc dl
+000002AD  E2F9                      loop l1
+                                    
+000002AF  B90F00                    mov cx, row
+000002B2                        l2:
+000002B2  E81900                    call writecharat
+000002B5  FEC6                      inc dh
+000002B7  E2F9                      loop l2
+                                    
+000002B9  B92800                    mov cx, col
+000002BC                        l3:
+000002BC  E80F00                    call writecharat
+000002BF  FECA                      dec dl
+000002C1  E2F9                      loop l3
+
+000002C3  B90F00                    mov cx, row     
+000002C6                        l4:
+000002C6  E80500                    call writecharat    
+000002C9  FECE                      dec dh 
+000002CB  E2F9                      loop l4    
+                                    
+000002CD                            ret
+000002CE                        printbox endp
+                                              
+                                              
+                                              
+                                              
+                                              
+                                              
+                                              
+                                              
+                                              
+                                ;dx contains row, col
+                                ;bl contains the character to write
+                                ;uses di. 
+000002CE                        writecharat proc
+                                    ;80x25
+000002CE  52                        push dx
+000002CF  8BC2                      mov ax, dx
+000002D1  2500FF                    and ax, 0FF00H
+000002D4  D1E8                      shr ax,1
+000002D6  D1E8                      shr ax,1
+000002D8  D1E8                      shr ax,1
+000002DA  D1E8                      shr ax,1
+000002DC  D1E8                      shr ax,1
+000002DE  D1E8                      shr ax,1
+000002E0  D1E8                      shr ax,1
+000002E2  D1E8                      shr ax,1
+                                    
+                                    
+000002E4  53                        push bx
+000002E5  B7A0                      mov bh, 160
+000002E7  F6E7                      mul bh 
+000002E9  5B                        pop bx
+000002EA  81E2FF00                  and dx, 0FFH
+000002EE  D1E2                      shl dx,1
+000002F0  03C2                      add ax, dx
+000002F2  8BF8                      mov di, ax
+000002F4  26881D                    mov es:[di], bl
+000002F7  5A                        pop dx
+000002F8                            ret    
+000002F9                        writecharat endp
+                                            
+                                            
+                                            
+                                            
+                                            
+                                            
+                                            
+                                            
+                                            
+                                ;dx contains row,col
+                                ;returns the character at bl
+                                ;uses di
+000002F9                        readcharat proc
+000002F9  52                        push dx
+000002FA  8BC2                      mov ax, dx
+000002FC  2500FF                    and ax, 0FF00H
+000002FF  D1E8                      shr ax,1
+00000301  D1E8                      shr ax,1
+00000303  D1E8                      shr ax,1
+00000305  D1E8                      shr ax,1
+00000307  D1E8                      shr ax,1
+00000309  D1E8                      shr ax,1
+0000030B  D1E8                      shr ax,1
+0000030D  D1E8                      shr ax,1    
+0000030F  53                        push bx
+00000310  B7A0                      mov bh, 160
+00000312  F6E7                      mul bh 
+00000314  5B                        pop bx
+00000315  81E2FF00                  and dx, 0FFH
+00000319  D1E2                      shl dx,1
+0000031B  03C2                      add ax, dx
+0000031D  8BF8                      mov di, ax
+0000031F  268A1D                    mov bl,es:[di]
+00000322  5A                        pop dx
+00000323                            ret
+00000324                        readcharat endp        
+
+
+
+
+
+
+
+
+                                ;dx contains row, col
+                                ;bx contains the offset of the string
+00000324                        writestringat proc
+00000324  52                        push dx
+00000325  8BC2                      mov ax, dx
+00000327  2500FF                    and ax, 0FF00H
+0000032A  D1E8                      shr ax,1
+0000032C  D1E8                      shr ax,1
+0000032E  D1E8                      shr ax,1
+00000330  D1E8                      shr ax,1
+00000332  D1E8                      shr ax,1
+00000334  D1E8                      shr ax,1
+00000336  D1E8                      shr ax,1
+00000338  D1E8                      shr ax,1
+                                    
+0000033A  53                        push bx
+0000033B  B7A0                      mov bh, 160
+0000033D  F6E7                      mul bh
+                                    
+0000033F  5B                        pop bx
+00000340  81E2FF00                  and dx, 0FFH
+00000344  D1E2                      shl dx,1
+00000346  03C2                      add ax, dx
+00000348  8BF8                      mov di, ax
+0000034A                        loop_writestringat:
+                                    
+0000034A  8A07                      mov al, [bx]
+0000034C  84C0                      test al, al
+0000034E  7408                      jz exit_writestringat
+00000350  268805                    mov es:[di], al
+00000353  47                        inc di
+00000354  47                        inc di
+00000355  43                        inc bx
+00000356  EBF2                      jmp loop_writestringat
+                                    
+                                    
+00000358                        exit_writestringat:
+00000358  5A                        pop dx
+00000359                            ret
+                                    
+                                    
+0000035A                        writestringat endp
+                                     
+                                     
+                                     
+                                     
+                                     
+0000035A                        text ends          
+                                end main
 
 
 Binary Map:
@@ -629,12 +672,12 @@ Binary Map:
 Segment                  Pos(file)     RVA  Size(fil) Size(mem)
 ---------------------------------------------------------------
 <header>                        0        0        30         0
-SNAKE_TEXT                     30        0         0         0
+_TEXT                          30        0         0         0
 _DATA                          30        0         0         0
-DATA                           30        0       100       100
-seg001                        130      100       2E8       2E8
+data                           30        0        FB        FB
+text                          130      100       35A       35A
 ---------------------------------------------------------------
-                                                 418       3E8
+                                                 48A       45A
 
 
 Macros:
@@ -646,7 +689,6 @@ Macros:
 @InStr . . . . . . . . . . . . .        Func
 @SizeStr . . . . . . . . . . . .        Func
 @SubStr  . . . . . . . . . . . .        Func
-ALIGNADDR  . . . . . . . . . . .        Proc
 ASDOUBLE . . . . . . . . . . . .        Func
 ASFLOAT  . . . . . . . . . . . .        Func
 COMINTERFACE . . . . . . . . . .        Proc
@@ -663,6 +705,7 @@ LOADMSD  . . . . . . . . . . . .        Proc
 LOADMSS  . . . . . . . . . . . .        Proc
 LOADPS . . . . . . . . . . . . .        Proc
 LOADSS . . . . . . . . . . . . .        Proc
+MEMALIGN . . . . . . . . . . . .        Proc
 MEMALLOC . . . . . . . . . . . .        Proc
 MEMFREE  . . . . . . . . . . . .        Proc
 MOV128 . . . . . . . . . . . . .        Proc
@@ -985,87 +1028,94 @@ Segments and Groups:
 
                 N a m e                 Size     Length   Align   Combine Class
 
-DATA . . . . . . . . . . . . . .        16 Bit   0100     Para    Stack   'DATA'
-SNAKE_TEXT . . . . . . . . . . .        32 Bit   00000000 Para    Public  'CODE'
-seg001 . . . . . . . . . . . . .        16 Bit   02E8     Byte    Public  'CODE'
+_TEXT  . . . . . . . . . . . . .        16 Bit   0000     Word    Public  'CODE'
+data . . . . . . . . . . . . . .        16 Bit   00FB     Para    Private ''
+text . . . . . . . . . . . . . .        16 Bit   035A     Para    Private ''
 DGROUP . . . . . . . . . . . . .        GROUP
-_DATA  . . . . . . . . . . . . .        32 Bit   00000000 Para    Public  'DATA'
+_DATA  . . . . . . . . . . . . .        16 Bit   0000     Word    Public  'DATA'
 
 
 Procedures, parameters and locals:
 
                 N a m e                 Type     Value    Segment  Length
 
-delay  . . . . . . . . . . . . .        P Near   0024     seg001   000D Public   
-  loc_10198  . . . . . . . . . .        L Near   002A     seg001
-dispdigit  . . . . . . . . . . .        P Near   00B0     seg001   0008 Public   
-dispnum  . . . . . . . . . . . .        P Near   00B8     seg001   0017 Public   
-  loc_1023E  . . . . . . . . . .        L Near   00CC     seg001
-draw . . . . . . . . . . . . . .        P Near   00D8     seg001   0042 Public   
-  loc_10279  . . . . . . . . . .        L Near   0107     seg001
-  loc_10268  . . . . . . . . . .        L Near   00F6     seg001
-fruitgeneration  . . . . . . . .        P Near   0031     seg001   007F Public   
-  loc_101EC  . . . . . . . . . .        L Near   007A     seg001
-  locret_10221 . . . . . . . . .        L Near   00AF     seg001
-  loc_101AB  . . . . . . . . . .        L Near   0039     seg001
-keyboardfunctions  . . . . . . .        P Near   012A     seg001   005A Public   
-  loc_102EB  . . . . . . . . . .        L Near   0179     seg001
-  loc_102C8  . . . . . . . . . .        L Near   0156     seg001
-  loc_102DA  . . . . . . . . . .        L Near   0168     seg001
-  loc_102B6  . . . . . . . . . .        L Near   0144     seg001
-  loc_102F1  . . . . . . . . . .        L Near   017F     seg001
-main . . . . . . . . . . . . . .        P Near   0000     seg001   0024 Public   
-printbox . . . . . . . . . . . .        P Near   022D     seg001   002F Public   
-  loc_103A8  . . . . . . . . . .        L Near   0236     seg001
-  loc_103BC  . . . . . . . . . .        L Near   024A     seg001
-  loc_103B2  . . . . . . . . . .        L Near   0240     seg001
-  loc_103C6  . . . . . . . . . .        L Near   0254     seg001
-readchar . . . . . . . . . . . .        P Near   011A     seg001   0010 Public   
-  loc_10295  . . . . . . . . . .        L Near   0123     seg001
-readcharat . . . . . . . . . . .        P Near   0287     seg001   002B Public   
-setcursorpos . . . . . . . . . .        P Near   00CF     seg001   0009 Public   
-shiftsnake . . . . . . . . . . .        P Near   0184     seg001   00A9 Public   
-  loc_1036C  . . . . . . . . . .        L Near   01FA     seg001
-  loc_1033E  . . . . . . . . . .        L Near   01CC     seg001
-  loc_10317  . . . . . . . . . .        L Near   01A5     seg001
-  loc_1032A  . . . . . . . . . .        L Near   01B8     seg001
-  loc_10334  . . . . . . . . . .        L Near   01C2     seg001
-  loc_10305  . . . . . . . . . .        L Near   0193     seg001
-  loc_1033C  . . . . . . . . . .        L Near   01CA     seg001
-  loc_10371  . . . . . . . . . .        L Near   01FF     seg001
-writecharat  . . . . . . . . . .        P Near   025C     seg001   002B Public   
-writestringat  . . . . . . . . .        P Near   02B2     seg001   0036 Public   
-  loc_10458  . . . . . . . . . .        L Near   02E6     seg001
-  loc_1044A  . . . . . . . . . .        L Near   02D8     seg001
+delay  . . . . . . . . . . . . .        P Near   0092     text     0011 Public   
+  jmp_delay  . . . . . . . . . .        L Near   0098     text
+dispdigit  . . . . . . . . . . .        P Near   0122     text     0008 Public   
+dispnum  . . . . . . . . . . . .        P Near   012A     text     0017 Public   
+  retz . . . . . . . . . . . . .        L Near   013E     text
+draw . . . . . . . . . . . . . .        P Near   014A     text     0042 Public   
+  draw_loop  . . . . . . . . . .        L Near   0168     text
+  out_draw . . . . . . . . . . .        L Near   0179     text
+fruitgeneration  . . . . . . . .        P Near   00A3     text     007F Public   
+  ret_fruitactive  . . . . . . .        L Near   0121     text
+  nevermind  . . . . . . . . . .        L Near   00EC     text
+  regenerate . . . . . . . . . .        L Near   00AB     text
+keyboardfunctions  . . . . . . .        P Near   019C     text     005A Public   
+  next_11  . . . . . . . . . . .        L Near   01B6     text
+  next_14  . . . . . . . . . . .        L Near   01EB     text
+  next_13  . . . . . . . . . . .        L Near   01DA     text
+  next_12  . . . . . . . . . . .        L Near   01C8     text
+  quit_keyboardfunctions . . . .        L Near   01F1     text
+main . . . . . . . . . . . . . .        P Far    0000     text     0092 Public   
+  quitpressed_mainloop . . . . .        L Near   006F     text
+  gameover_mainloop  . . . . . .        L Near   0056     text
+  mainloop . . . . . . . . . . .        L Near   002D     text
+  quit_mainloop  . . . . . . . .        L Near   0088     text
+printbox . . . . . . . . . . . .        P Near   029F     text     002F Public   
+  l3 . . . . . . . . . . . . . .        L Near   02BC     text
+  l2 . . . . . . . . . . . . . .        L Near   02B2     text
+  l1 . . . . . . . . . . . . . .        L Near   02A8     text
+  l4 . . . . . . . . . . . . . .        L Near   02C6     text
+readchar . . . . . . . . . . . .        P Near   018C     text     0010 Public   
+  keybdpressed . . . . . . . . .        L Near   0195     text
+readcharat . . . . . . . . . . .        P Near   02F9     text     002B Public   
+setcursorpos . . . . . . . . . .        P Near   0141     text     0009 Public   
+shiftsnake . . . . . . . . . . .        P Near   01F6     text     00A9 Public   
+  outside  . . . . . . . . . . .        L Near   0217     text
+  next_2 . . . . . . . . . . . .        L Near   0234     text
+  done_checking_the_head . . . .        L Near   023E     text
+  next_3 . . . . . . . . . . . .        L Near   023C     text
+  i_ate_fruit  . . . . . . . . .        L Near   0271     text
+  game_over  . . . . . . . . . .        L Near   026C     text
+  next_1 . . . . . . . . . . . .        L Near   022A     text
+  l  . . . . . . . . . . . . . .        L Near   0205     text
+writecharat  . . . . . . . . . .        P Near   02CE     text     002B Public   
+writestringat  . . . . . . . . .        P Near   0324     text     0036 Public   
+  loop_writestringat . . . . . .        L Near   034A     text
+  exit_writestringat . . . . . .        L Near   0358     text
 
 
 Symbols:
 
                 N a m e                 Type       Value     Attr
 
-@CodeSize  . . . . . . . . . . .        Number             1h 
-@DataSize  . . . . . . . . . . .        Number             1h 
+@CodeSize  . . . . . . . . . . .        Number             0h 
+@DataSize  . . . . . . . . . . .        Number             0h 
 @Interface . . . . . . . . . . .        Number             0h 
-@Model . . . . . . . . . . . . .        Number             5h 
-@code  . . . . . . . . . . . . .        Text   SNAKE_TEXT
+@Model . . . . . . . . . . . . .        Number             2h 
+@code  . . . . . . . . . . . . .        Text   _TEXT
 @data  . . . . . . . . . . . . .        Text   DGROUP
 @stack . . . . . . . . . . . . .        Text   DGROUP
-aThanksForPlayi  . . . . . . . .        Byte[37]          78h DATA 
-argc . . . . . . . . . . . . . .        DWord              2h 
-argv . . . . . . . . . . . . . .        DWord              6h 
-body . . . . . . . . . . . . . .        Byte              C4h DATA 
-delaytime  . . . . . . . . . . .        Byte              FAh DATA 
-envp . . . . . . . . . . . . . .        DWord              Ah 
-fruitactive  . . . . . . . . . .        Byte              F5h DATA 
-fruitx . . . . . . . . . . . . .        Byte              F6h DATA 
-fruity . . . . . . . . . . . . .        Byte              F7h DATA 
-gameover . . . . . . . . . . . .        Byte              F8h DATA 
-gameovermsg  . . . . . . . . . .        Byte[28]          9Dh DATA 
-head . . . . . . . . . . . . . .        Byte              C1h DATA 
-instructions . . . . . . . . . .        Byte              1Ch DATA 
-msg  . . . . . . . . . . . . . .        Byte[28]           0h DATA 
-quit . . . . . . . . . . . . . .        Byte              F9h DATA 
-scoremsg . . . . . . . . . . . .        Byte[8]           B9h DATA 
-segmentcount . . . . . . . . . .        Byte              F4h DATA 
+body . . . . . . . . . . . . . .        Byte[48]          C4h data 
+bottom . . . . . . . . . . . . .        Number            11h 
+col  . . . . . . . . . . . . . .        Number            28h 
+delaytime  . . . . . . . . . . .        Byte              FAh data 
+fruitactive  . . . . . . . . . .        Byte              F5h data 
+fruitx . . . . . . . . . . . . .        Byte              F6h data 
+fruity . . . . . . . . . . . . .        Byte              F7h data 
+gameover . . . . . . . . . . . .        Byte              F8h data 
+gameovermsg  . . . . . . . . . .        Byte[28]          9Dh data 
+head . . . . . . . . . . . . . .        Byte[3]           C1h data 
+instructions . . . . . . . . . .        Byte[92]          1Ch data 
+left . . . . . . . . . . . . . .        Number             0h 
+msg  . . . . . . . . . . . . . .        Byte[28]           0h data 
+quit . . . . . . . . . . . . . .        Byte              F9h data 
+quitmsg  . . . . . . . . . . . .        Byte[37]          78h data 
+right  . . . . . . . . . . . . .        Number            28h 
+row  . . . . . . . . . . . . . .        Number             Fh 
+scoremsg . . . . . . . . . . . .        Byte[8]           B9h data 
+segmentcount . . . . . . . . . .        Byte              F4h data 
+top  . . . . . . . . . . . . . .        Number             2h 
 
-./snake.asm: 632 lines, 2 passes, 6517 ms, 0 warnings, 0 errors
+snake.asm: 664 lines, 2 passes, 9 ms, 2 warnings, 0 errors

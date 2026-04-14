@@ -32,6 +32,57 @@ _REAL_STDOUT = sys.stdout
 _REAL_STDERR = sys.stderr
 _CURRENT_PROJECT = None
 _FORMAT_FIRST_BLOCK_ASM: Callable[[object, int], str] | None = None
+PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT = 96
+
+
+def _expr_child_nodes(expr) -> tuple[object, ...]:  # noqa: ANN001
+    children: list[object] = []
+    operand = getattr(expr, "operand", None)
+    if operand is not None:
+        children.append(operand)
+    operands = getattr(expr, "operands", None)
+    if isinstance(operands, tuple | list):
+        children.extend(node for node in operands if node is not None)
+    for attr in ("addr", "cond", "iftrue", "iffalse"):
+        node = getattr(expr, attr, None)
+        if node is not None:
+            children.append(node)
+    return tuple(children)
+
+
+def _expr_tree_node_count(expr, cache: dict[int, int]) -> int:  # noqa: ANN001
+    expr_id = id(expr)
+    cached = cache.get(expr_id)
+    if cached is not None:
+        return cached
+    total = 1
+    for child in _expr_child_nodes(expr):
+        if hasattr(child, "__dict__") or hasattr(type(child), "__slots__"):
+            total += _expr_tree_node_count(child, cache)
+            if total > PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT:
+                break
+    cache[expr_id] = total
+    return total
+
+
+def _stmt_expr_children(stmt) -> tuple[object, ...]:  # noqa: ANN001
+    children: list[object] = []
+    for attr in ("dst", "src", "addr", "data", "condition", "true_target", "false_target", "ret_exprs"):
+        value = getattr(stmt, attr, None)
+        if isinstance(value, tuple | list):
+            children.extend(node for node in value if node is not None)
+        elif value is not None:
+            children.append(value)
+    return tuple(children)
+
+
+def _block_has_pathologically_complex_expr(block, limit: int = PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT) -> bool:  # noqa: ANN001
+    cache: dict[int, int] = {}
+    for stmt in getattr(block, "statements", ()) or ():
+        for expr in _stmt_expr_children(stmt):
+            if _expr_tree_node_count(expr, cache) > limit:
+                return True
+    return False
 
 
 def install_jumpkind_logging_context(project, formatter: Callable[[object, int], str] | None) -> None:
@@ -49,9 +100,68 @@ def default_exe_showcase_cap(total_functions: int, timeout: int) -> int:
 def install_angr_peephole_expr_bitwidth_guard(walker_cls) -> object:
     original_handle_expr = walker_cls._handle_expr
 
+    def _normalize_replacement_bits(expr, replacement):  # noqa: ANN001
+        expr_bits = getattr(expr, "bits", None)
+        replacement_bits = getattr(replacement, "bits", None)
+        if expr_bits is None or replacement_bits is None or expr_bits == replacement_bits:
+            return replacement
+
+        try:
+            from angr.ailment.expression import BasePointerOffset, Const
+        except ImportError:
+            return replacement
+
+        if isinstance(replacement, BasePointerOffset):
+            return BasePointerOffset(
+                replacement.idx,
+                expr_bits,
+                replacement.base,
+                replacement.offset,
+                variable=getattr(replacement, "variable", None),
+                variable_offset=getattr(replacement, "variable_offset", None),
+                **getattr(replacement, "tags", {}),
+            )
+
+        if isinstance(replacement, Const) and isinstance(replacement.value, int):
+            mask = (1 << expr_bits) - 1
+            return Const(
+                replacement.idx,
+                getattr(replacement, "variable", None),
+                replacement.value & mask,
+                expr_bits,
+                **getattr(replacement, "tags", {}),
+            )
+
+        return replacement
+
     def _guarded_handle_expr(self, expr_idx, expr, stmt_idx, stmt, block):
         expr = super(walker_cls, self)._handle_expr(expr_idx, expr, stmt_idx, stmt, block)
         old_expr = expr
+        expr_node_cache = getattr(self, "_inertia_expr_node_cache", None)
+        if not isinstance(expr_node_cache, dict):
+            expr_node_cache = {}
+            self._inertia_expr_node_cache = expr_node_cache
+        expr_node_count = _expr_tree_node_count(expr, expr_node_cache)
+        if expr_node_count > PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT:
+            complex_seen = getattr(self, "_inertia_complex_expr_skip_seen", None)
+            if not isinstance(complex_seen, set):
+                complex_seen = set()
+                self._inertia_complex_expr_skip_seen = complex_seen
+            block_addr = getattr(block, "addr", None)
+            skip_key = (block_addr, stmt_idx, expr_idx, type(expr).__name__)
+            if skip_key not in complex_seen:
+                complex_seen.add(skip_key)
+                print(
+                    "[dbg] clinic:skip-peephole-complex-expr "
+                    f"block={block_addr:#x} "
+                    f"stmt_idx={stmt_idx} "
+                    f"expr_idx={expr_idx} "
+                    f"expr_type={type(expr).__name__} "
+                    f"node_count={expr_node_count}",
+                    file=sys.stderr,
+                )
+                sys.stderr.flush()
+            return expr
         redo = True
         while redo:
             redo = False
@@ -59,7 +169,20 @@ def install_angr_peephole_expr_bitwidth_guard(walker_cls) -> object:
                 if isinstance(expr, expr_opt.expr_classes):
                     replacement = expr_opt.optimize(expr, stmt_idx=stmt_idx, block=block)
                     if replacement is not None and replacement is not expr:
+                        replacement = _normalize_replacement_bits(expr, replacement)
                         if getattr(expr, "bits", None) != getattr(replacement, "bits", None):
+                            block_addr = getattr(block, "addr", None)
+                            print(
+                                "[dbg] clinic:peephole-bits-mismatch "
+                                f"opt={type(expr_opt).__name__} "
+                                f"block={block_addr:#x} "
+                                f"stmt_idx={stmt_idx} "
+                                f"expr_bits={getattr(expr, 'bits', None)} "
+                                f"replacement_bits={getattr(replacement, 'bits', None)} "
+                                f"expr={expr!s} replacement={replacement!s}",
+                                file=sys.stderr,
+                            )
+                            sys.stderr.flush()
                             continue
                         expr = replacement
                         redo = True
@@ -97,10 +220,36 @@ def install_angr_variable_recovery_binop_sub_size_guard(
 
     original_handle_binop_sub = engine_cls._handle_binop_Sub
 
+    def _coerce_bv_width(data, bits):  # noqa: ANN001
+        size = data.size()
+        if size == bits:
+            return data
+        if size > bits:
+            try:
+                return data[bits - 1 : 0]
+            except Exception:
+                return data
+        try:
+            return data.zero_extend(bits - size)
+        except Exception:
+            return data
+
     def _guarded_handle_binop_sub(self, expr):
         arg0, arg1 = expr.operands
         r0, r1 = self._expr_pair(arg0, arg1)
-        compute = r0.data - r1.data if r0.data.size() == r1.data.size() else self.state.top(expr.bits)
+        if r0.data.size() != r1.data.size():
+            print(
+                "[dbg] clinic:variable-recovery-size-mismatch "
+                f"op=Sub lhs_bits={r0.data.size()} rhs_bits={r1.data.size()} expr_bits={expr.bits}",
+                file=sys.stderr,
+            )
+            sys.stderr.flush()
+        if r0.data.size() == r1.data.size():
+            compute = r0.data - r1.data
+        else:
+            lhs = _coerce_bv_width(r0.data, expr.bits)
+            rhs = _coerce_bv_width(r1.data, expr.bits)
+            compute = lhs - rhs if lhs.size() == rhs.size() == expr.bits else self.state.top(expr.bits)
 
         type_constraints = set()
         if r0.typevar is not None and r1.data.concrete and isinstance(r0.typevar, typevars_module.TypeVariable):
@@ -138,6 +287,60 @@ def guard_angr_variable_recovery_binop_sub_size_mismatch():
         yield
     finally:
         engine_cls._handle_binop_Sub = original_handle_binop_sub
+
+
+@contextlib.contextmanager
+def guard_angr_clinic_stage_markers(project):
+    from angr.analyses.decompiler.block_simplifier import BlockSimplifier
+    from angr.analyses.decompiler.clinic import Clinic
+    from angr.analyses.decompiler.utils import peephole_optimize_multistmts, peephole_optimize_stmts
+
+    orig_stage_pre_ssa = Clinic._stage_pre_ssa_level1_simplifications
+    orig_simplify_block = Clinic._simplify_block
+    orig_peephole_optimize = BlockSimplifier._peephole_optimize
+
+    def _stage_pre_ssa_level1_simplifications(self, *args, **kwargs):  # noqa: ANN001
+        project._inertia_decompiler_stage = "core:clinic:pre_ssa_level1_simplifications"
+        return orig_stage_pre_ssa(self, *args, **kwargs)
+
+    def _simplify_block(self, *args, **kwargs):  # noqa: ANN001
+        project._inertia_decompiler_stage = "core:clinic:simplify_block"
+        return orig_simplify_block(self, *args, **kwargs)
+
+    def _peephole_optimize(self, *args, **kwargs):  # noqa: ANN001
+        project._inertia_decompiler_stage = "core:clinic:peephole_optimize"
+        block = args[0] if args else kwargs.get("block")
+        if block is not None and _block_has_pathologically_complex_expr(block):
+            skipped = getattr(self, "_inertia_complex_block_skip_seen", None)
+            if not isinstance(skipped, set):
+                skipped = set()
+                self._inertia_complex_block_skip_seen = skipped
+            block_addr = getattr(block, "addr", None)
+            if block_addr not in skipped:
+                skipped.add(block_addr)
+                print(
+                    "[dbg] clinic:skip-peephole-complex-block "
+                    f"block={block_addr:#x}",
+                    file=sys.stderr,
+                )
+                sys.stderr.flush()
+            statements, stmts_updated = peephole_optimize_stmts(block, self._stmt_peephole_opts)
+            new_block = block.copy(statements=statements) if stmts_updated else block
+            statements, multi_stmts_updated = peephole_optimize_multistmts(new_block, self._multistmt_peephole_opts)
+            if not multi_stmts_updated:
+                return new_block
+            return new_block.copy(statements=statements)
+        return orig_peephole_optimize(self, *args, **kwargs)
+
+    Clinic._stage_pre_ssa_level1_simplifications = _stage_pre_ssa_level1_simplifications
+    Clinic._simplify_block = _simplify_block
+    BlockSimplifier._peephole_optimize = _peephole_optimize
+    try:
+        yield
+    finally:
+        Clinic._stage_pre_ssa_level1_simplifications = orig_stage_pre_ssa
+        Clinic._simplify_block = orig_simplify_block
+        BlockSimplifier._peephole_optimize = orig_peephole_optimize
 
 
 class ThreadBoundTextIO(io.TextIOBase):

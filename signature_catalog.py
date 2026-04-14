@@ -3,13 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from inertia_decompiler.signature_matching_policy import signature_matching_disabled
 from omf_pat import (
     LocalPatMatchResult,
     PatModule,
+    PatPublicName,
     ensure_pat_from_omf_input,
     format_pat_module_line,
     load_cached_pat_regex_specs,
     match_pat_modules,
+    normalized_pat_merge_name,
     parse_pat_file,
 )
 
@@ -83,12 +86,13 @@ def build_signature_catalog(
             key = (
                 module.pattern_bytes,
                 module.module_length,
-                module.public_names,
-                module.referenced_names,
+                _normalized_pat_name_key(module.public_names),
+                _normalized_pat_name_key(module.referenced_names),
                 module.tail_bytes,
             )
             if key in unique_modules:
                 duplicate_module_count += 1
+                unique_modules[key] = _merge_pat_module_provenance(unique_modules[key], module)
                 continue
             unique_modules[key] = module
 
@@ -114,6 +118,34 @@ def build_signature_catalog(
     )
 
 
+def _merge_pat_module_provenance(existing: PatModule, incoming: PatModule) -> PatModule:
+    source_paths = _merge_provenance_values(existing.source_path, incoming.source_path)
+    compiler_names = _merge_provenance_values(existing.compiler_name, incoming.compiler_name)
+    return PatModule(
+        source_path=source_paths,
+        compiler_name=compiler_names,
+        module_name=existing.module_name,
+        pattern_bytes=existing.pattern_bytes,
+        module_length=existing.module_length,
+        public_names=existing.public_names,
+        referenced_names=existing.referenced_names,
+        tail_bytes=existing.tail_bytes,
+    )
+
+
+def _normalized_pat_name_key(names: tuple[PatPublicName, ...]) -> tuple[tuple[int, str], ...]:
+    return tuple((entry.offset, normalized_pat_merge_name(entry.name)) for entry in names)
+
+
+def _merge_provenance_values(left: str, right: str) -> str:
+    values: list[str] = []
+    for raw in (left, right):
+        for value in (part.strip() for part in raw.split(" || ") if part.strip()):
+            if value not in values:
+                values.append(value)
+    return " || ".join(values)
+
+
 def match_signature_catalog(
     catalog_path: Path,
     binary_path: Path,
@@ -122,6 +154,8 @@ def match_signature_catalog(
     backend: str | None = None,
     cache_dir: Path | None = None,
 ) -> LocalPatMatchResult:
+    if signature_matching_disabled():
+        return LocalPatMatchResult({}, {}, ())
     if not catalog_path.exists():
         return LocalPatMatchResult({}, {}, ())
     main_object = getattr(getattr(project, "loader", None), "main_object", None)
@@ -141,6 +175,11 @@ def match_signature_catalog(
     specs = load_cached_pat_regex_specs(catalog_path, effective_cache_dir)
     if not specs:
         return LocalPatMatchResult({}, {}, ())
-    code_labels, code_ranges = match_pat_modules(image_bytes, min_addr, specs, backend=backend)
+    code_labels, code_ranges, matched_compiler_names = match_pat_modules(
+        image_bytes,
+        min_addr,
+        specs,
+        backend=backend,
+    )
     source_formats = ("signature_catalog",) if code_labels or code_ranges else ()
-    return LocalPatMatchResult(code_labels, code_ranges, source_formats)
+    return LocalPatMatchResult(code_labels, code_ranges, source_formats, matched_compiler_names)

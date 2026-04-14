@@ -9,6 +9,8 @@ import re
 import subprocess
 import tempfile
 
+from inertia_decompiler.signature_matching_policy import signature_matching_disabled
+
 try:
     import hyperscan as _hyperscan
 except Exception:
@@ -24,6 +26,7 @@ class PatPublicName:
 @dataclass(frozen=True)
 class PatModule:
     source_path: str
+    compiler_name: str
     module_name: str
     pattern_bytes: tuple[int | None, ...]
     module_length: int
@@ -37,6 +40,7 @@ class LocalPatMatchResult:
     code_labels: dict[int, str]
     code_ranges: dict[int, tuple[int, int]]
     source_formats: tuple[str, ...]
+    matched_compiler_names: tuple[str, ...] = ()
 
 
 @dataclass
@@ -59,6 +63,7 @@ class _OMFPublic:
 class _OMFFixupRef:
     seg_index: int
     offset: int
+    width: int
     name: str
 
 
@@ -112,6 +117,7 @@ class MicrosoftLibMetadata:
 @dataclass(frozen=True)
 class CachedPatRegexSpec:
     source_path: str
+    compiler_name: str
     module_name: str
     regex_source: bytes
     scan_source: bytes
@@ -124,9 +130,12 @@ class CachedPatRegexSpec:
 _PAT_HEX_RE = re.compile(r"^(?:[0-9A-Fa-f]{2}|\.\.)+$")
 _PAT_PUBLIC_RE = re.compile(r"^:(?P<offset>-?[0-9A-Fa-f]{4,8})(?:@)?$")
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_PAT_MERGE_NAME_RE = re.compile(r"^_*([A-Za-z0-9](?:[A-Za-z0-9_]*[A-Za-z0-9])?)_*$")
 
 
 def parse_pat_file(pat_path: Path) -> tuple[PatModule, ...]:
+    if signature_matching_disabled():
+        return ()
     modules: list[PatModule] = []
     try:
         lines = pat_path.read_text(errors="ignore").splitlines()
@@ -143,6 +152,11 @@ def parse_pat_line(line: str, *, source_path: str = "<memory>") -> PatModule | N
     stripped = line.strip()
     if not stripped or stripped == "---":
         return None
+    comment_text = ""
+    if ";" in stripped:
+        stripped, comment_text = stripped.split(";", 1)
+        stripped = stripped.rstrip()
+        comment_text = comment_text.strip()
     parts = stripped.split()
     if len(parts) < 5:
         return None
@@ -184,9 +198,11 @@ def parse_pat_line(line: str, *, source_path: str = "<memory>") -> PatModule | N
         idx += 1
     if not public_names or module_length <= 0:
         return None
+    comment_source_path, comment_compiler_name, comment_module_name = _parse_pat_comment_metadata(comment_text)
     return PatModule(
-        source_path=source_path,
-        module_name=public_names[0].name,
+        source_path=comment_source_path or source_path,
+        compiler_name=comment_compiler_name or _compiler_name_from_source_path(comment_source_path or source_path),
+        module_name=comment_module_name or public_names[0].name,
         pattern_bytes=pattern_bytes,
         module_length=module_length,
         public_names=tuple(public_names),
@@ -200,7 +216,7 @@ def format_pat_module_line(module: PatModule) -> str:
     public_tokens = " ".join(f":{public.offset:04X} {public.name}" for public in module.public_names)
     ref_tokens = " ".join(f"^{ref.offset:04X} {ref.name}" for ref in module.referenced_names)
     tail = _encode_pat_bytes(module.tail_bytes)
-    comment = _sanitize_pat_comment(f"{module.module_name} {module.source_path}".strip())
+    comment = _sanitize_pat_comment(_format_pat_comment(module))
     parts = [head, "00", "0000", f"{module.module_length:04X}", public_tokens]
     if ref_tokens:
         parts.append(ref_tokens)
@@ -209,6 +225,62 @@ def format_pat_module_line(module: PatModule) -> str:
     if comment:
         parts.append(f"; {comment}")
     return " ".join(part for part in parts if part).rstrip()
+
+
+def _format_pat_comment(module: PatModule) -> str:
+    parts = [f"mod={module.module_name}"]
+    if module.source_path:
+        parts.append(f"src={module.source_path}")
+    if module.compiler_name:
+        parts.append(f"compiler={module.compiler_name}")
+    return " | ".join(parts)
+
+
+def _parse_pat_comment_metadata(comment_text: str) -> tuple[str, str, str]:
+    if not comment_text:
+        return "", "", ""
+    source_path = ""
+    compiler_name = ""
+    module_name = ""
+    for part in (piece.strip() for piece in comment_text.split("|")):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key == "src":
+            source_path = value
+        elif key == "compiler":
+            compiler_name = value
+        elif key == "mod":
+            module_name = value
+    return source_path, compiler_name, module_name
+
+
+def _compiler_name_from_source_path(source_path: str) -> str:
+    lowered = source_path.replace("\\", "/").lower()
+    if "microsoft c v5.1" in lowered:
+        return "Microsoft C v5.1"
+    if "microsoft c v5" in lowered:
+        return "Microsoft C v5"
+    if "microsoft c v6ax" in lowered:
+        return "Microsoft C v6ax"
+    if "borland" in lowered or "turbo " in lowered:
+        return "Borland/Turbo"
+    if "watcom" in lowered:
+        return "Watcom"
+    if "zortech" in lowered:
+        return "Zortech"
+    if "ida" in lowered or "flair" in lowered:
+        return "IDA FLAIR"
+    return ""
+
+
+def normalized_pat_merge_name(name: str) -> str:
+    match = _PAT_MERGE_NAME_RE.fullmatch(name)
+    if match is not None:
+        return match.group(1).lower()
+    return name
 
 
 def ensure_pat_from_omf_input(
@@ -296,6 +368,8 @@ def discover_local_pat_matches(
     max_pat_modules: int = 512,
     backend: str | None = None,
 ) -> LocalPatMatchResult:
+    if signature_matching_disabled():
+        return LocalPatMatchResult({}, {}, ())
     candidate_inputs = _discover_candidate_pat_inputs(binary_path)[:max_candidate_inputs]
     if not candidate_inputs:
         return LocalPatMatchResult({}, {}, ())
@@ -322,7 +396,12 @@ def discover_local_pat_matches(
     if image is None:
         return LocalPatMatchResult({}, {}, ())
     base_addr, image_bytes = image
-    code_labels, code_ranges = match_pat_modules(image_bytes, base_addr, modules, backend=selected_backend)
+    code_labels, code_ranges, matched_compiler_names = match_pat_modules(
+        image_bytes,
+        base_addr,
+        modules,
+        backend=selected_backend,
+    )
     source_formats: list[str] = []
     if code_labels:
         if used_plain_pat:
@@ -330,7 +409,7 @@ def discover_local_pat_matches(
         if used_generated:
             source_formats.append("local_omf_pat")
         source_formats.append(f"pat_backend:{selected_backend}")
-    return LocalPatMatchResult(code_labels, code_ranges, tuple(source_formats))
+    return LocalPatMatchResult(code_labels, code_ranges, tuple(source_formats), matched_compiler_names)
 
 
 def match_pat_modules(
@@ -339,14 +418,22 @@ def match_pat_modules(
     modules: tuple[PatModule | CachedPatRegexSpec, ...] | list[PatModule | CachedPatRegexSpec],
     *,
     backend: str | None = None,
-) -> tuple[dict[int, str], dict[int, tuple[int, int]]]:
+) -> tuple[dict[int, str], dict[int, tuple[int, int]], tuple[str, ...]]:
     selected_backend = _normalize_pat_backend_choice(backend)
     code_labels: dict[int, str] = {}
     code_ranges: dict[int, tuple[int, int]] = {}
+    matched_compiler_names: list[str] = []
     for module in modules:
         hits = _find_pat_matches(image_bytes, module, backend=selected_backend)
         if len(hits) != 1:
             continue
+        for compiler_name in (
+            part.strip()
+            for part in getattr(module, "compiler_name", "").split(" || ")
+            if part.strip()
+        ):
+            if compiler_name not in matched_compiler_names:
+                matched_compiler_names.append(compiler_name)
         start_off = hits[0]
         match_addr = base_addr + start_off
         public_names = module.public_names
@@ -360,12 +447,17 @@ def match_pat_modules(
         for public_name in public_names:
             linear = match_addr + public_name.offset
             code_labels.setdefault(linear, public_name.name.lstrip("_"))
-    return code_labels, code_ranges
+    return code_labels, code_ranges, tuple(matched_compiler_names)
 
 
 def generate_pat_from_omf_obj(obj_path: Path, out_path: Path) -> int:
     try:
-        lines = _generate_pat_lines_from_omf_blob(obj_path.read_bytes(), source_name=obj_path.name)
+        lines = _generate_pat_lines_from_omf_blob(
+            obj_path.read_bytes(),
+            source_name=obj_path.name,
+            provenance_source=str(obj_path),
+            provenance_compiler=_compiler_name_from_source_path(str(obj_path)),
+        )
         out_path.write_text("".join(f"{line}\n" for line in lines) + "---\n")
         return len(lines)
     except Exception:
@@ -386,7 +478,14 @@ def generate_pat_from_omf_lib(lib_path: Path, out_path: Path) -> int:
             return 0
         
         for module in extract_omf_modules_from_lib(lib_path):
-            lines.extend(_generate_pat_lines_from_omf_blob(module.data, source_name=module.module_name))
+            lines.extend(
+                _generate_pat_lines_from_omf_blob(
+                    module.data,
+                    source_name=module.module_name,
+                    provenance_source=str(lib_path),
+                    provenance_compiler=_compiler_name_from_source_path(str(lib_path)),
+                )
+            )
         
         if lines:
             out_path.write_text("".join(f"{line}\n" for line in lines) + "---\n")
@@ -566,7 +665,7 @@ def lookup_omf_lib_symbol(lib_path: Path, symbol_name: str) -> MicrosoftLibDicti
 
 
 def _build_pat_line(
-    function_bytes: bytes,
+    function_bytes: bytes | list[int | None],
     *,
     public_name: str,
     module_name: str,
@@ -577,7 +676,7 @@ def _build_pat_line(
     head = list(function_bytes[:32])
     while len(head) < 32:
         head.append(None)
-    tail = function_bytes[32:]
+    tail = list(function_bytes[32:])
     ref_tokens = " ".join(f"^{ref.offset:04X} {ref.name}" for ref in _dedupe_referenced_names(referenced_names))
     line = (
         f"{_encode_pat_bytes(head)} 00 0000 {len(function_bytes):04X} "
@@ -587,6 +686,126 @@ def _build_pat_line(
         line += f" {ref_tokens}"
     line += f" {_encode_pat_bytes(tail)} ; {module_name}"
     return line.rstrip()
+
+
+def _wildcard_zero_displacement_control_transfers(
+    function_bytes: list[int | None],
+) -> list[int | None]:
+    rewritten = list(function_bytes)
+    limit = len(rewritten)
+    index = 0
+    while index < limit:
+        opcode = rewritten[index]
+        if opcode == 0xE8 or opcode == 0xE9:
+            if index + 2 < limit and rewritten[index + 1] == 0 and rewritten[index + 2] == 0:
+                rewritten[index + 1] = None
+                rewritten[index + 2] = None
+            index += 3
+            continue
+        if opcode == 0x9A or opcode == 0xEA:
+            if index + 4 < limit and all(rewritten[index + off] == 0 for off in range(1, 5)):
+                for off in range(1, 5):
+                    rewritten[index + off] = None
+            index += 5
+            continue
+        index += 1
+    return rewritten
+
+
+def _wildcard_far_transfer_opcode_variants(
+    function_bytes: list[int | None],
+) -> list[int | None]:
+    """
+    IDA FLAIR PAT guidance for 16-bit x86 says external far calls may be
+    linker-rewritten from:
+
+        9A ........
+
+    into:
+
+        90 0E E8 ....
+
+    The target bytes are already fixup-wildcarded. To keep the object-module
+    pattern matchable against the linked image, the far-transfer opcode byte
+    itself must also be allowed to vary.
+    """
+
+    rewritten = list(function_bytes)
+    limit = len(rewritten)
+    index = 0
+    while index + 4 < limit:
+        opcode = rewritten[index]
+        if opcode in {0x9A, 0xEA} and all(rewritten[index + off] is None for off in range(1, 5)):
+            rewritten[index] = None
+            index += 5
+            continue
+        index += 1
+    return rewritten
+
+
+def _is_microsoft_c_compiler_name(compiler_name: str) -> bool:
+    return "microsoft c" in compiler_name.lower()
+
+
+def _looks_like_msvc_fpu_runtime(
+    public_name: str,
+    referenced_names: tuple[PatPublicName, ...],
+    *,
+    compiler_name: str,
+) -> bool:
+    if not _is_microsoft_c_compiler_name(compiler_name):
+        return False
+    lowered = public_name.lower()
+    if lowered.startswith(("__f", "__af", "__anf", "b$")):
+        return True
+    return any(ref.name.lower().startswith(("__f", "__af", "__anf", "b$f")) for ref in referenced_names)
+
+
+def _x87_emulator_variant_bytes(function_bytes: list[int | None]) -> list[int | None]:
+    """
+    MS-DOS x87 emulator encoding observed in Microsoft C 16-bit runtimes.
+
+    Ghidra issue #2427 and MS DOS reverse-engineering notes use this mapping:
+
+      9B D9 -> CD 35
+      9B DA -> CD 36
+      9B DB -> CD 37
+      9B DC -> CD 38
+      9B DD -> CD 39
+      9B DE -> CD 3A
+      9B DF -> CD 3B
+      9B 26 -> CD 3C
+      9B 90 -> CD 3D
+
+    This is emitted only as an alternate PAT row for runtime helpers so exact
+    matching can see both the direct x87 and emulator-linked encodings.
+    """
+
+    mapping = {
+        (0x9B, 0xD9): (0xCD, 0x35),
+        (0x9B, 0xDA): (0xCD, 0x36),
+        (0x9B, 0xDB): (0xCD, 0x37),
+        (0x9B, 0xDC): (0xCD, 0x38),
+        (0x9B, 0xDD): (0xCD, 0x39),
+        (0x9B, 0xDE): (0xCD, 0x3A),
+        (0x9B, 0xDF): (0xCD, 0x3B),
+        (0x9B, 0x26): (0xCD, 0x3C),
+        (0x9B, 0x90): (0xCD, 0x3D),
+    }
+    rewritten = list(function_bytes)
+    changed = False
+    index = 0
+    while index + 1 < len(rewritten):
+        pair = (rewritten[index], rewritten[index + 1])
+        if pair in mapping:
+            repl0, repl1 = mapping[pair]
+            rewritten[index] = repl0
+            rewritten[index + 1] = repl1
+            changed = True
+            index += 2
+            continue
+        index += 1
+    return rewritten if changed else function_bytes
 
 
 def _parse_omf_obj(obj_path: Path) -> tuple[str, list[_OMFSegment], list[_OMFPublic], list[_OMFFixupRef]]:
@@ -636,7 +855,13 @@ def _parse_omf_blob(
     return module_name, segments, publics, fixup_refs
 
 
-def _generate_pat_lines_from_omf_blob(blob: bytes, *, source_name: str) -> list[str]:
+def _generate_pat_lines_from_omf_blob(
+    blob: bytes,
+    *,
+    source_name: str,
+    provenance_source: str = "",
+    provenance_compiler: str = "",
+) -> list[str]:
     module_name, segments, publics, fixup_refs = _parse_omf_blob(blob, module_name_hint=Path(source_name).stem)
     lines: list[str] = []
     publics_by_segment: dict[int, list[_OMFPublic]] = {}
@@ -660,13 +885,19 @@ def _generate_pat_lines_from_omf_blob(blob: bytes, *, source_name: str) -> list[
             end = max(start, min(next_public, seg_limit))
             if end <= start:
                 continue
-            func_bytes = bytes(segment.data[start:end])
+            func_bytes: list[int | None] = list(bytes(segment.data[start:end]))
             if sum(1 for _ in func_bytes[:32]) < 4:
                 continue
+            for fixup_ref in segment_refs:
+                if not (start <= fixup_ref.offset < end):
+                    continue
+                local_off = fixup_ref.offset - start
+                for idx in range(local_off, min(local_off + fixup_ref.width, len(func_bytes))):
+                    func_bytes[idx] = None
             function_refs = tuple(
                 PatPublicName(offset=fixup_ref.offset - start, name=fixup_ref.name)
                 for fixup_ref in segment_refs
-                if start <= fixup_ref.offset < end
+                if start <= fixup_ref.offset < end and fixup_ref.name
             )
             line = _build_pat_line(
                 func_bytes,
@@ -675,7 +906,86 @@ def _generate_pat_lines_from_omf_blob(blob: bytes, *, source_name: str) -> list[
                 referenced_names=function_refs,
             )
             if line is not None:
+                line = line.rsplit(" ; ", 1)[0] + " ; " + _sanitize_pat_comment(
+                    " | ".join(
+                        part
+                        for part in (
+                            f"mod={module_name}:{public.name}",
+                            f"src={provenance_source}" if provenance_source else "",
+                            f"compiler={provenance_compiler}" if provenance_compiler else "",
+                        )
+                        if part
+                    )
+                )
                 lines.append(line)
+            wildcard_ctf_bytes = _wildcard_zero_displacement_control_transfers(func_bytes)
+            if wildcard_ctf_bytes != func_bytes:
+                wildcard_line = _build_pat_line(
+                    wildcard_ctf_bytes,
+                    public_name=public.name,
+                    module_name=f"{module_name}:{public.name}",
+                    referenced_names=function_refs,
+                )
+                if wildcard_line is not None:
+                    wildcard_line = wildcard_line.rsplit(" ; ", 1)[0] + " ; " + _sanitize_pat_comment(
+                        " | ".join(
+                            part
+                            for part in (
+                                f"mod={module_name}:{public.name}",
+                                f"src={provenance_source}" if provenance_source else "",
+                                f"compiler={provenance_compiler}" if provenance_compiler else "",
+                            )
+                            if part
+                        )
+                    )
+                    lines.append(wildcard_line)
+            wildcard_far_transfer_bytes = _wildcard_far_transfer_opcode_variants(func_bytes)
+            if wildcard_far_transfer_bytes != func_bytes and wildcard_far_transfer_bytes != wildcard_ctf_bytes:
+                wildcard_far_transfer_line = _build_pat_line(
+                    wildcard_far_transfer_bytes,
+                    public_name=public.name,
+                    module_name=f"{module_name}:{public.name}",
+                    referenced_names=function_refs,
+                )
+                if wildcard_far_transfer_line is not None:
+                    wildcard_far_transfer_line = wildcard_far_transfer_line.rsplit(" ; ", 1)[0] + " ; " + _sanitize_pat_comment(
+                        " | ".join(
+                            part
+                            for part in (
+                                f"mod={module_name}:{public.name}",
+                                f"src={provenance_source}" if provenance_source else "",
+                                f"compiler={provenance_compiler}" if provenance_compiler else "",
+                            )
+                            if part
+                        )
+                    )
+                    lines.append(wildcard_far_transfer_line)
+            if _looks_like_msvc_fpu_runtime(
+                public.name,
+                function_refs,
+                compiler_name=provenance_compiler,
+            ):
+                x87_emulator_bytes = _x87_emulator_variant_bytes(func_bytes)
+                if x87_emulator_bytes != func_bytes and x87_emulator_bytes != wildcard_ctf_bytes and x87_emulator_bytes != wildcard_far_transfer_bytes:
+                    emulator_line = _build_pat_line(
+                        x87_emulator_bytes,
+                        public_name=public.name,
+                        module_name=f"{module_name}:{public.name}",
+                        referenced_names=function_refs,
+                    )
+                    if emulator_line is not None:
+                        emulator_line = emulator_line.rsplit(" ; ", 1)[0] + " ; " + _sanitize_pat_comment(
+                            " | ".join(
+                                part
+                                for part in (
+                                    f"mod={module_name}:{public.name}",
+                                    f"src={provenance_source}" if provenance_source else "",
+                                    f"compiler={provenance_compiler}" if provenance_compiler else "",
+                                )
+                                if part
+                            )
+                        )
+                        lines.append(emulator_line)
     return lines
 
 
@@ -1038,26 +1348,55 @@ def _parse_fixupp_refs(
         offset += 1
         _frame_method, offset = _consume_fixupp_frame(payload, offset, fixdat, frame_threads)
         target_method, target_index, offset = _consume_fixupp_target(payload, offset, fixdat, target_threads)
+        location_kind = (locat >> 10) & 0x0F
+        displacement_size = _omf_fixup_width_from_location_kind(location_kind)
         if not (fixdat & 0x04):
-            location_kind = (locat >> 10) & 0x0F
-            displacement_size = 4 if location_kind in {9, 11, 13} else 2
             offset = min(len(payload), offset + displacement_size)
-        if target_method != 2 or target_index <= 0 or target_index >= len(external_names):
-            continue
         dro = locat & 0x03FF
         if dro >= last_data_context.data_length:
             continue
-        target_name = external_names[target_index]
-        if not target_name:
-            continue
+        target_name = ""
+        if target_method == 2 and 0 < target_index < len(external_names):
+            target_name = external_names[target_index]
         refs.append(
             _OMFFixupRef(
                 seg_index=last_data_context.seg_index,
                 offset=last_data_context.data_offset + dro,
+                width=displacement_size,
                 name=target_name,
             )
         )
     return refs
+
+
+def _omf_fixup_width_from_location_kind(location_kind: int) -> int:
+    """
+    OMF LOCAT.LOC width classes for x86, per linker/reference behavior.
+
+      0  -> low-order byte
+      1  -> 16-bit offset
+      2  -> 16-bit base segment/group
+      3  -> ptr16:16
+      5  -> same as 1
+      9  -> 32-bit offset
+      11 -> ptr16:32
+      13 -> same as 9
+
+    Unsupported/unknown kinds fall back conservatively to 2 bytes to avoid
+    under-consuming the common 16-bit displacement field shape.
+    """
+
+    width_by_kind = {
+        0: 1,
+        1: 2,
+        2: 2,
+        3: 4,
+        5: 2,
+        9: 4,
+        11: 6,
+        13: 4,
+    }
+    return width_by_kind.get(location_kind, 2)
 
 
 def _consume_fixupp_thread(
@@ -1331,6 +1670,7 @@ def _compile_pat_module_to_cached_regex(module: PatModule) -> CachedPatRegexSpec
     regex_source, scan_source, checked_match_length = _build_pat_regex_source(module)
     return CachedPatRegexSpec(
         source_path=module.source_path,
+        compiler_name=module.compiler_name,
         module_name=module.module_name,
         regex_source=regex_source,
         scan_source=scan_source,
