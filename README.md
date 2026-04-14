@@ -1,137 +1,112 @@
 # Inertia Decompiler
 
-Inertia decompiler provides support for decompiling 16-bit x86 real mode binaries using the angr framework, with custom agents for architecture, lifting, and simulation.
+Inertia is an angr-based decompiler workspace focused on 16-bit x86 real-mode binaries.
 
-## Project overview
-
-Inertia is an angr-based decompiler focused on readable, evidence-driven C for real-mode x86 binaries.
-
-The project priorities are:
+Project priorities:
 
 - correctness first
 - readability second
 - recompilable output where practical
 
-The project is not aiming to become a transpiler.
+This repo is not aiming to be a source-shaped transpiler. When evidence is weak, it prefers explicit low-level C, visible assumptions, and honest fallback modes.
 
-## Features
+## Killer Features
 
-- **DOS MZ loader** — In-tree loader with relocation handling instead of treating every sample like a flat blob
-- **DOS/BIOS interrupt modeling** — Turns `int 0x21` and friends into synthetic helper calls
-- **Far-call-aware CFG** — Extended CFG analysis that stays narrow without losing obvious callees
-- **COD and LST sidecar ingestion** — Names, procedure slicing, and evidence-backed annotations from compiler output
-- **Confidence and assumption reporting** — Uncertain recovery is visible instead of hidden
-- **Recompilable-subset ratchet** — Focus on producing output that can round-trip back to working code
-- **Region-based structuring pipeline** — Loops, ifs, gotos, and future switch recovery
-- **Corpus-first harnessing** — Regressions, bounded scans, and real-binary progress tracking
-- **FLAIR pattern extraction** — Library function identification from `.lib` and `.obj` inputs
-- **CodeView NB00 debug info** — Symbol and type recovery from CodeView debug sections
-- **Turbo Debugger TDINFO parsing** — Symbol extraction from Borland debug formats
-- **Peer-EXE catalog borrowing** — Exact byte-identical sibling executables can donate function catalogs when native sidecars are absent
+- **Real-mode x86 support in angr**: in-tree `x86-16` arch, lifter, SimOS, DOS MZ loader, and DOS NE loader
+- **Decompiler CLI that works on real DOS inputs**: whole-binary or single-function recovery from `.COM`, `.EXE`, raw blobs, and `.COD`
+- **Sidecar-aware recovery**: `.COD`, `.LST`, `.MAP`, CodeView, and TDINFO metadata improve labels, ranges, and emitted C
+- **Evidence-backed fallback modes**: timeouts and lift failures stay visible instead of being silently replaced with guessed output
+- **Peer-EXE catalog borrowing**: sibling executables can donate labels only when function bytes match exactly across the full claimed span
+- **Library signature support**: import `.pat`, OMF `.obj`, and OMF `.lib` into a deduplicated PAT catalog
+- **Tail validation**: semantic checks on late pipeline output instead of trusting cleanup blindly
+- **Batch corpus tooling**: decompile whole `.COD` trees into sibling `.dec` outputs with bounded workers and validation baselines
+- **Integrated debugger utilities**: angr-backed DOS debugging through GDB RSP and a Textual TUI
 
-## Supported Formats
+## Supported inputs
 
-### Binary formats
+### Executables and blobs
 
-| Format | Description | Loading method |
-|--------|-------------|----------------|
-| `.COM` | DOS COM files (raw executable, loads at 0x100) | `backend="blob"` or `simos="DOS"` |
-| `.EXE` | DOS MZ executables with relocations | DOS MZ loader |
-| `.EXE` (NE) | 16-bit Windows New Executable files | DOS NE loader (smoke-level support) |
-| `.BIN` | Raw binary blobs | `angr.load_shellcode()` |
-| OMF `.OBJ` | Object Module Format object files | FLAIR pattern extraction |
-| OMF `.LIB` | Object Module Format libraries | FLAIR pattern extraction |
+| Input | Status | Notes |
+|---|---|---|
+| `.COM` | supported | blob-loaded with DOS SimOS |
+| `.EXE` DOS MZ | supported | in-tree loader with relocations |
+| `.EXE` 16-bit NE | smoke-level supported | loaded through `dos_ne` backend |
+| `.BIN` / `.RAW` | supported | blob loading |
+| `.COD` | supported | can be loaded as a blob or sliced by `--proc` |
 
-### Sidecar/debug formats
+### Metadata and symbol sources
 
-| Format | Description | Usage |
-|--------|-------------|-------|
-| `.COD` | Microsoft compiler assembly listings | Procedure metadata, call names, source correlation |
-| `.LST` | Assembler listing files | Labels, procedures, symbols, segments |
-| CodeView NB00 | CodeView debug information | Symbol names, types, code/data classification |
-| TDINFO | Turbo Debugger debug information | Symbol tables, code labels |
-| `.MAP` | Linker map files | Segment ranges, symbol addresses |
+| Source | Usage |
+|---|---|
+| `.COD` listings | procedure slicing, local naming, source-backed annotations |
+| `.LST` listings | labels, ranges, segment-aware metadata |
+| `.MAP` files | code/data layout and public symbol recovery |
+| CodeView NB00 / NB02 / NB04 | symbol/type/debug metadata when embedded |
+| TDINFO | Borland/Turbo Debugger symbol metadata |
+| `.pat` / OMF `.obj` / OMF `.lib` | library signature matching via deduplicated PAT catalogs |
+| peer `.EXE` siblings | exact-match catalog borrowing, reported as `peer_exe` evidence |
 
-### Architecture modes
+## CLI
 
-| Mode | Status | Description |
-|------|--------|-------------|
-| Real mode (16-bit) | Supported | Primary target — full x86 real-mode semantics |
-| Real mode (32-bit) | Planned | 32-bit operands and addressing in real mode (operand-size override) |
-| Unreal mode | Planned | 32-bit segment limits via descriptor tricks while staying in real mode |
-| MZ/NE | Smoke-level supported | New Executable format (16-bit Windows) |
-| Protected mode (32-bit) | Not planned | Outside scope — focus is real-mode DOS |
+The main entrypoints are:
 
-## Why This Repo Is Interesting
+- `./decompile.py`
+- `python -m inertia_decompiler.cli`
+- installed script: `decompile-x86-16`
 
-This is not just "angr pointed at 16-bit DOS." The repo already contains several pieces that are unusual enough to be fun to work on:
+`decompile.py` re-execs into `./.venv/bin/python` when that virtualenv exists, so local runs stay on the repo interpreter by default.
 
-- custom `x86-16` architecture, lifter, and `SimOS` support for real-mode binaries
-- in-tree DOS MZ loader with relocation handling instead of treating every sample like a flat blob
-- bounded recovery windows and timeout-aware fallback paths for scan-safe decompilation
-- DOS and BIOS interrupt modeling that turns `int 0x21`/friends into synthetic helper calls
-- far-call-aware CFG extension so recovery can stay narrow without losing obvious callees
-- `COD` and `LST` sidecar ingestion for names, procedure slicing, and evidence-backed annotations
-- exact-span peer executable matching so stripped sibling builds can reuse verified function catalogs without guessing
-- explicit `confidence` and `assumption` reporting so uncertain recovery is visible instead of hidden
-- a recompilable-subset ratchet, not just “pretty pseudocode”
-- an in-progress region-based structuring pipeline for loops, ifs, gotos, and future switch recovery
-- corpus-first harnessing for regressions, bounded scans, and real-binary progress tracking
+Basic usage:
 
-If you like decompilers that try to be honest about segmented memory, calling conventions, and uncertain evidence, this codebase already has real architecture to extend.
+```bash
+./decompile.py examples/snake.EXE
+./decompile.py angr_platforms/x16_samples/ICOMDO.COM
+./decompile.py examples/BENCHMUL.BIN --blob --base-addr 0x1000 --entry-point 0x1000
+./decompile.py LIFE.EXE --addr 0x11423 --timeout 30
+./decompile.py cod/DOSFUNC.COD --proc _dos_free --proc-kind NEAR --timeout 10
+```
 
-## Decompiler Shape
+Current CLI options:
 
-The current x86-16 decompiler is organized around the recovery pipeline:
+- `--addr` decompile one function by address
+- `--blob` force blob loading
+- `--base-addr` and `--entry-point` control blob/COM layout
+- `--show-asm` print the first lifted block before C
+- `--proc` and `--proc-kind` extract one procedure from a `.COD`
+- `--timeout` bound analysis time
+- `--window` bound CFG recovery near a target address
+- `--max-memory-mb` set a best-effort address-space cap
+- `--max-functions` cap whole-binary output volume
+- `--api-style` choose helper naming style: `modern`, `dos`, `raw`, `pseudo`, `service`, `msc`, `compiler`
+- `--pat-backend` choose PAT matcher backend: `hyperscan` or `python_regex`
+- `--signature-catalog` load a deduplicated PAT catalog
+
+## Output model
+
+The x86-16 recovery pipeline is organized around:
 
 `IR -> Alias model -> Widening -> Traits -> Types -> Rewrite`
 
-Recent work made two parts explicit:
+Control-flow structuring and confidence/assumption reporting are explicit parts of the current pipeline, not late cosmetic cleanup.
 
-- `control-flow structuring` now has its own stage instead of living inside late cleanup.
-- `confidence` and `assumption` reporting now travel through scan and milestone outputs so the decompiler can say what is recovered, what is uncertain, and what is still unresolved.
+When recovery fails or times out, the CLI reports that directly and may emit one of several evidence-backed fallbacks, including:
 
-## x86-16 platform map
+- partial-timeout C
+- sidecar-slice C
+- peer-sidecar C
+- trivial sidecar C
+- non-optimized fallback C
+- string-intrinsic fallback C
+- assembly fallback
+- lift-break probes
 
-The main x86-16 implementation lives under [`angr_platforms/angr_platforms/X86_16`](/home/xor/vextest/angr_platforms/angr_platforms/X86_16).
+Tail-validation summaries are emitted for semantic guardrails instead of treating late-stage rewrites as automatically trusted.
 
-Key modules:
+## Install
 
-- Arch: [`arch_86_16.py`](/home/xor/vextest/angr_platforms/angr_platforms/X86_16/arch_86_16.py)
-- Lifter: [`lift_86_16.py`](/home/xor/vextest/angr_platforms/angr_platforms/X86_16/lift_86_16.py)
-- Instructions: [`instr_base.py`](/home/xor/vextest/angr_platforms/angr_platforms/X86_16/instr_base.py), [`instr16.py`](/home/xor/vextest/angr_platforms/angr_platforms/X86_16/instr16.py)
-- Runtime/core: [`emulator.py`](/home/xor/vextest/angr_platforms/angr_platforms/X86_16/emulator.py), [`processor.py`](/home/xor/vextest/angr_platforms/angr_platforms/X86_16/processor.py)
-- SimOS: [`simos_86_16.py`](/home/xor/vextest/angr_platforms/angr_platforms/X86_16/simos_86_16.py)
-- Hardware helpers: [`memory.py`](/home/xor/vextest/angr_platforms/angr_platforms/X86_16/memory.py), [`io.py`](/home/xor/vextest/angr_platforms/angr_platforms/X86_16/io.py), [`interrupt.py`](/home/xor/vextest/angr_platforms/angr_platforms/X86_16/interrupt.py)
+The repo is tested against the angr stack pinned in [pyproject.toml](/home/xor/vextest/pyproject.toml).
 
-AIL lifting and decompilation use the in-tree x86-16 platform; this is the main supported path for the real-mode work in this repo.
-
-Quick smoke example:
-
-```python
-import angr
-import angr_platforms.X86_16
-
-binary = b'\xb8\x01\x00\x05\x02\x00\xc3'  # MOV AX,1; ADD AX,2; RET
-p = angr.Project(binary, backend="blob", arch="X86_16")
-cfg = p.analyses.CFG()
-decomp = p.analyses.Decompiler(target_addr=0x0)
-print(decomp.code)
-```
-
-## TODO
-- Unreal mode support
-
-## Requirements
-You will need:
-1. [angr-platforms](https://github.com/xor2003/angr-platforms)
-2. [patched angr](https://github.com/xor2003/angr)
-
-Use a fresh Python virtual environment. The current checked setup is working
-with Python 3.14.x. The package metadata supports Python 3.10+, but the
-recommended path for this repo is to keep the project isolated in `.venv`.
-
-From a fresh clone:
+Recommended local setup:
 
 ```bash
 git submodule update --init --recursive
@@ -139,136 +114,86 @@ python3.14 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pip install -e ./angr_platforms[test]
+python -m pip install -e .
+python -m pip install -e ".[test]"
 ```
 
-If you already have a working `.venv`, re-run the last two commands after a
-submodule update so the root environment and `angr_platforms` stay in sync.
+If you are working on the in-tree `angr_platforms` package directly, reinstall after submodule updates so the root environment and editable package stay aligned.
 
-Quick verification:
+## Signature catalogs
+
+To build one deduplicated PAT catalog from `.pat`, `.obj`, and `.lib` inputs:
 
 ```bash
-python -m pytest -q tests/test_x86_16_smoketest.py tests/test_x86_16_cod_samples.py
+python scripts/build_signature_catalog.py signature_catalogs/ QLINK/ --output signature_catalogs/local.pat
 ```
 
-## Usage
-
-For a COM file (e.g., `simple.com`), import the x86-16 platform once before creating the project:
-```python
-import angr
-import angr_platforms.X86_16  # registers the custom x86-16 platform
-
-project = angr.Project(
-    "angr_platforms/test_programs/x86_16/simple.com",
-    main_opts={"backend": "blob", "arch": "X86_16"},
-    auto_load_libs=False,
-    simos="DOS",
-)
-cfg = project.analyses.CFGFast(start_at_entry=False, function_starts=[0], normalize=True)
-func = cfg.functions[0]
-decomp = project.analyses.Decompiler(func, cfg=cfg)
-print(decomp.codegen.text)
-```
-
-For raw blobs, use `angr.load_shellcode(...)` with the x86-16 architecture object:
-
-```python
-import angr
-import angr_platforms.X86_16  # registers the custom x86-16 platform
-from angr_platforms.X86_16.arch_86_16 import Arch86_16
-
-binary = b'\xb8\x01\x00\x05\x02\x00\xc3'
-project = angr.load_shellcode(
-    binary,
-    arch=Arch86_16(),
-    start_offset=0x1000,
-    load_address=0x1000,
-    selfmodifying_code=False,
-    rebase_granularity=0x1000,
-)
-cfg = project.analyses.CFGFast(normalize=True)
-func = cfg.functions[0x1000]
-decomp = project.analyses.Decompiler(func, cfg=cfg)
-print(decomp.codegen.text)
-```
-
-Note: import `angr_platforms.X86_16` before constructing the project so the custom agents are registered. For COM files or other headerless binaries that you want to load from a file path, use `main_opts={"backend": "blob", "arch": "X86_16"}`. For raw blobs, prefer `angr.load_shellcode(...)` as shown above.
-
-For legacy script usage:
-```bash
-./decompile.py test.bin
-```
-
-When native sidecars such as `.COD`, `.LST`, `.MAP`, or embedded debug info are absent, Inertia can also reuse function labels/ranges from a nearby sibling executable in the same family only when the bytes at the same function entry and across the full claimed function span match exactly. This peer-derived evidence is reported as `peer_exe` and is kept separate from native sidecar sources.
-
-## Project docs and current status
-
-**Main roadmap** (deterministic, actionable):
-- [`GLOBAL_PLAN3.md`](/home/xor/vextest/GLOBAL_PLAN3.md) — **Active roadmap** (4 phases, deterministic DoD, PC reasoning assistant)
-  - For forward planning and architecture decisions
-- [`PLAN.md`](/home/xor/vextest/PLAN.md) — **Immediate fixes** (4 regression items, see completed + in-progress)
-  - Completed first, then follow GLOBAL_PLAN3 phases
-
-**Reference docs** (philosophical, not action items):
-- [`AGENTS.md`](/home/xor/vextest/AGENTS.md) — Operating rules and architecture constraints (read first)
-- [`GLOBAL_PLAN.md`](/home/xor/vextest/GLOBAL_PLAN.md) — Architectural thinking (historical reference)
-- [`GLOBAL_PLAN2.md`](/home/xor/vextest/GLOBAL_PLAN2.md) — Pre-implementation roadmap (historical reference)
-
-**Implementation docs**:
-- [`angr_platforms/docs/dream_decompiler_execution_plan.md`](/home/xor/vextest/angr_platforms/docs/dream_decompiler_execution_plan.md)
-- [`angr_platforms/docs/x86_16_80286_real_mode_coverage.md`](/home/xor/vextest/angr_platforms/docs/x86_16_80286_real_mode_coverage.md)
-- [`angr_platforms/docs/x86_16_mnemonic_coverage.md`](/home/xor/vextest/angr_platforms/docs/x86_16_mnemonic_coverage.md)
-- [`angr_platforms/docs/x86_16_reference_priority.md`](/home/xor/vextest/angr_platforms/docs/x86_16_reference_priority.md)
-
-Focused x86-16 tests:
-
-- [`angr_platforms/tests/test_x86_16_smoketest.py`](/home/xor/vextest/angr_platforms/tests/test_x86_16_smoketest.py)
-- [`angr_platforms/tests/test_x86_16_cod_samples.py`](/home/xor/vextest/angr_platforms/tests/test_x86_16_cod_samples.py)
-- [`angr_platforms/tests/test_x86_16_dos_mz_loader.py`](/home/xor/vextest/angr_platforms/tests/test_x86_16_dos_mz_loader.py)
-- [`angr_platforms/tests/test_x86_16_sample_matrix.py`](/home/xor/vextest/angr_platforms/tests/test_x86_16_sample_matrix.py)
-- [`angr_platforms/tests/test_x86_16_runtime_samples.py`](/home/xor/vextest/angr_platforms/tests/test_x86_16_runtime_samples.py)
-- [`angr_platforms/tests/test_x86_16_compare_semantics.py`](/home/xor/vextest/angr_platforms/tests/test_x86_16_compare_semantics.py)
-- [`angr_platforms/tests/test_x86_16_cli.py`](/home/xor/vextest/angr_platforms/tests/test_x86_16_cli.py)
-
-Focused commands:
+That catalog can then be used during decompilation:
 
 ```bash
-cd /home/xor/vextest/angr_platforms && ../.venv/bin/python -m pytest -q tests/test_x86_16_smoketest.py tests/test_x86_16_cod_samples.py tests/test_x86_16_dos_mz_loader.py tests/test_x86_16_sample_matrix.py tests/test_x86_16_runtime_samples.py
-cd /home/xor/vextest/angr_platforms && ../.venv/bin/python scripts/scan_cod_dir.py ../cod --mode scan-safe --timeout-sec 5 --max-memory-mb 1024
+./decompile.py your_binary.exe --signature-catalog signature_catalogs/local.pat
 ```
 
-## Failure Handling
+## Batch `.COD` runs
 
-When recovery fails, prefer an honest fallback over silence:
+To decompile a whole `.COD` corpus into sibling `.dec` files:
 
-- If the lifter crashes or lifting breaks, dump assembly around the first failing address and investigate the lifter.
-- If the decompiler times out, emit a non-optimized decompilation fallback before dropping to raw assembly, then investigate the timeout.
-- If the decompiler crashes, report the failure clearly, preserve the best available assembly or non-optimized output, and investigate the crash instead of masking it.
+```bash
+python scripts/decompile_cod_dir.py cod --timeout 20 --max-memory-mb 1024
+```
 
+Useful filters:
 
-## x86-16 Quick Start
+- `--cod-file <name-or-path>` limit to one or more listings
+- `--proc-name <name>` limit to one or more procedures
+- `--skip-existing` avoid overwriting existing `.dec`
+- `--write-tail-validation-baseline` persist the current changed-set baseline
 
-This repo includes an in-tree real-mode DOS sample corpus under `x16_samples/`.
+## Sample corpus
 
-- Decompile a DOS executable directly from the repo root with:
-  - `./decompile.py your_binary.exe`
-- Decompile a `.COM` sample the same way:
-  - `./decompile.py your_binary.com`
-- For raw blobs, use:
-  - `./decompile.py --blob your_binary.bin`
-- If recovery is slow, pass a larger timeout or a concrete function start:
-  - `./decompile.py your_binary.exe --timeout 60`
-  - `./decompile.py your_binary.exe --addr 0x1146`
-- To keep analysis bounded on large or awkward binaries, you can also tune:
-  - `./decompile.py your_binary.exe --window 0x400`
-  - `./decompile.py your_binary.exe --max-memory-mb 1024`
+The repo includes a small x86-16 corpus under [angr_platforms/x16_samples/README.md](/home/xor/vextest/angr_platforms/x16_samples/README.md).
 
-- Build or rebuild the sample matrix with `./scripts/build_x16_samples.sh`
-- Run the focused x86-16 regression suite with:
-  - `../.venv/bin/python -m pytest -q tests/test_x86_16_smoketest.py tests/test_x86_16_cod_samples.py tests/test_x86_16_dos_mz_loader.py tests/test_x86_16_sample_matrix.py`
-- Run just the real-binary corpus coverage with:
-  - `../.venv/bin/python -m pytest -q tests/test_x86_16_sample_matrix.py`
+Typical sample flow:
 
-The sample rebuild uses the DOS toolchain from `/home/xor/games/f15se2-re` by default. If your toolchain checkout lives somewhere else, set `X16_TOOLCHAIN_ROOT=/path/to/f15se2-re`.
+```bash
+./angr_platforms/scripts/build_x16_samples.sh
+./.venv/bin/python -m pytest -q angr_platforms/tests/test_x86_16_sample_matrix.py
+./decompile.py angr_platforms/x16_samples/IMOD.EXE
+./decompile.py angr_platforms/x16_samples/IMOD.COD --proc _main
+```
 
-For repository operating rules and architecture constraints, see [`AGENTS.md`](/home/xor/vextest/AGENTS.md). For harness behavior and knobs, see [`meta_harness/README.md`](/home/xor/vextest/meta_harness/README.md).
+## Debugging tools
+
+The repo also carries debugger utilities built around angr simulation, GDB RSP, and Textual:
+
+```bash
+python -m inertia_decompiler.debug_dos LIFE.EXE --port 1234
+python -m inertia_decompiler.gdb_tui --host 127.0.0.1 --port 1234 --arch x86_16
+```
+
+## Layout
+
+Main code:
+
+- [inertia_decompiler/cli.py](/home/xor/vextest/inertia_decompiler/cli.py): root decompiler CLI
+- [inertia_decompiler/project_loading.py](/home/xor/vextest/inertia_decompiler/project_loading.py): loader selection, blob setup, packed-EXE handling
+- [inertia_decompiler/sidecar_metadata.py](/home/xor/vextest/inertia_decompiler/sidecar_metadata.py): sidecar/debug metadata loading
+- [inertia_decompiler/tail_validation.py](/home/xor/vextest/inertia_decompiler/tail_validation.py): validation routing and reporting
+- [angr_platforms/angr_platforms/X86_16](/home/xor/vextest/angr_platforms/angr_platforms/X86_16): x86-16 platform, loaders, and analysis support
+
+## Focused tests
+
+Good starting points:
+
+```bash
+./.venv/bin/python -m pytest -q \
+  angr_platforms/tests/test_x86_16_smoketest.py \
+  angr_platforms/tests/test_x86_16_cli.py \
+  angr_platforms/tests/test_x86_16_cod_samples.py \
+  angr_platforms/tests/test_x86_16_dos_mz_loader.py \
+  angr_platforms/tests/test_x86_16_dos_ne_loader.py \
+  angr_platforms/tests/test_x86_16_sample_matrix.py \
+  angr_platforms/tests/test_x86_16_tail_validation.py
+```
+
+For wider x86-16 coverage, the test suite also includes dedicated files for structuring, aliasing, widening, segmented memory, string instructions, recovery artifacts, helper modeling, confidence reporting, corpus scans, and validation manifests under [angr_platforms/tests](/home/xor/vextest/angr_platforms/tests).

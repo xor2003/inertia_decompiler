@@ -12014,6 +12014,7 @@ def main(argv: list[str] | None = None) -> int:
             print("/* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */")
         print(_recovery_evidence_line(args.binary, lst_metadata))
     low_memory_path = _prefer_low_memory_path()
+    interactive_stdout = _stdout_is_interactive()
     if args.addr is not None:
         print("/* recovering function... */", flush=True)
 
@@ -12840,8 +12841,6 @@ def main(argv: list[str] | None = None) -> int:
                 code_name = _lst_code_label(lst_metadata, addr, project.entry)
                 if code_name is not None:
                     func.name = code_name
-
-    interactive_stdout = _stdout_is_interactive()
 
     if lst_metadata is not None and visible_code_labels:
         total_functions = ranked_labeled_total or len(labeled_offsets)
