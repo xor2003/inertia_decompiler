@@ -146,9 +146,12 @@ from inertia_decompiler.work_items import (
 )
 from inertia_decompiler.slice_recovery import (
     SliceRecoveryAttemptOutcome,
-    bounded_slice_runner_timeout,
     build_default_slice_recovery_attempts,
     run_bounded_slice_recovery,
+)
+from inertia_decompiler.non_optimized_fallback import (
+    bounded_non_optimized_attempt_timeout,
+    describe_non_optimized_unavailable,
 )
 
 print = _timestamped_print
@@ -1088,56 +1091,82 @@ def _try_decompile_non_optimized_slice(
             pick_function=_pick_function,
         )
 
-        def _recover_and_decompile():
-            def _decompile_attempt(attempt_name, slice_project, cfg, func):
-                if not isinstance(getattr(func, "addr", None), int):
-                    func.addr = start
-                if not hasattr(func, "normalized"):
-                    func.normalized = True
-                func.name = name
-                _prepare_function_for_decompilation(slice_project, func)
-                effective_cod_metadata = cod_metadata
-                if effective_cod_metadata is None:
-                    effective_cod_metadata = _sidecar_cod_metadata_for_function(
-                        slice_project,
-                        func,
-                        binary_path,
-                        lst_metadata,
-                    )
-                status, payload, partial_payload, *_ = _decompile_function_with_stats(
+        def _decompile_attempt(attempt_name, slice_project, cfg, func):
+            if not isinstance(getattr(func, "addr", None), int):
+                func.addr = start
+            if not hasattr(func, "normalized"):
+                func.normalized = True
+            func.name = name
+            _prepare_function_for_decompilation(slice_project, func)
+            effective_cod_metadata = cod_metadata
+            if effective_cod_metadata is None:
+                effective_cod_metadata = _sidecar_cod_metadata_for_function(
                     slice_project,
-                    cfg,
                     func,
-                    max(1, min(timeout, 4)),
-                    api_style,
                     binary_path,
-                    cod_metadata=effective_cod_metadata,
-                    lst_metadata=lst_metadata,
-                    enable_structured_simplify=False,
-                    enable_postprocess=False,
-                    allow_isolated_retry=False,
+                    lst_metadata,
                 )
-                if not isinstance(partial_payload, str):
-                    partial_payload = None
-                snapshot = getattr(slice_project, "_inertia_last_tail_validation_snapshot", None)
+            status, payload, partial_payload, *_ = _decompile_function_with_stats(
+                slice_project,
+                cfg,
+                func,
+                max(1, min(timeout, 4)),
+                api_style,
+                binary_path,
+                cod_metadata=effective_cod_metadata,
+                lst_metadata=lst_metadata,
+                enable_structured_simplify=False,
+                enable_postprocess=False,
+                allow_isolated_retry=False,
+            )
+            if not isinstance(partial_payload, str):
+                partial_payload = None
+            snapshot = getattr(slice_project, "_inertia_last_tail_validation_snapshot", None)
+            return SliceRecoveryAttemptOutcome(
+                attempt_name=attempt_name,
+                status=status,
+                payload=payload,
+                partial_payload=partial_payload,
+                snapshot=dict(snapshot) if isinstance(snapshot, dict) else None,
+            )
+
+        def _run_bounded_attempt(attempt_name: str, job):
+            attempt_timeout = bounded_non_optimized_attempt_timeout(timeout)
+            try:
+                if (
+                    os.name == "posix"
+                    and threading.current_thread() is threading.main_thread()
+                    and threading.active_count() == 1
+                    and (
+                        isinstance(slice_source_project, angr.Project)
+                        or getattr(_run_with_timeout_in_fork, "__module__", "") != "inertia_decompiler.runtime_support"
+                    )
+                ):
+                    return _run_with_timeout_in_fork(job, timeout=attempt_timeout)
+                return _run_with_timeout_in_daemon_thread(
+                    job,
+                    timeout=attempt_timeout,
+                    thread_name_prefix=f"nonopt-attempt-{attempt_name}",
+                )
+            except Exception as ex:  # noqa: BLE001
                 return SliceRecoveryAttemptOutcome(
                     attempt_name=attempt_name,
-                    status=status,
-                    payload=payload,
-                    partial_payload=partial_payload,
-                    snapshot=dict(snapshot) if isinstance(snapshot, dict) else None,
+                    status="error",
+                    payload=f"{attempt_name} bounded attempt: {_describe_exception(ex)}",
                 )
 
-            outcomes = run_bounded_slice_recovery(
-                recovery_attempts,
-                build_slice_project=lambda: _build_project_from_bytes(code, base_addr=start, entry_point=start),
-                inherit_runtime_policy=lambda slice_project: _inherit_tail_validation_runtime_policy(
-                    slice_project,
-                    slice_source_project,
-                ),
-                describe_exception=_describe_exception,
-                decompile=_decompile_attempt,
-            )
+        outcomes = run_bounded_slice_recovery(
+            recovery_attempts,
+            build_slice_project=lambda: _build_project_from_bytes(code, base_addr=start, entry_point=start),
+            inherit_runtime_policy=lambda slice_project: _inherit_tail_validation_runtime_policy(
+                slice_project,
+                slice_source_project,
+            ),
+            describe_exception=_describe_exception,
+            decompile=_decompile_attempt,
+            run_attempt=_run_bounded_attempt,
+        )
+        def _recover_and_summarize() -> NonOptimizedSliceOutcome:
             failure_details: list[str] = []
             best_partial: SliceRecoveryAttemptOutcome | None = None
             for attempt in outcomes:
@@ -1170,43 +1199,7 @@ def _try_decompile_non_optimized_slice(
                 failure_detail=failure_detail,
                 attempt_failures=tuple(failure_details),
             )
-
-        try:
-            runner_timeout = bounded_slice_runner_timeout(
-                timeout=timeout,
-                attempt_count=len(recovery_attempts),
-                per_attempt_timeout_cap=4,
-                setup_slack=3,
-                max_timeout=20,
-            )
-            if (
-                os.name == "posix"
-                and threading.current_thread() is threading.main_thread()
-                and threading.active_count() == 1
-                and (
-                    isinstance(slice_source_project, angr.Project)
-                    or getattr(_run_with_timeout_in_fork, "__module__", "") != "inertia_decompiler.runtime_support"
-                )
-            ):
-                outcome = _run_with_timeout_in_fork(
-                    _recover_and_decompile,
-                    timeout=runner_timeout,
-                )
-            else:
-                outcome = _run_with_timeout_in_daemon_thread(
-                    _recover_and_decompile,
-                    timeout=runner_timeout,
-                    thread_name_prefix="nonopt-fallback",
-                )
-        except Exception as ex:  # noqa: BLE001
-            detail = f"{label}: retry crashed: {_describe_exception(ex)}"
-            return NonOptimizedSliceOutcome(
-                rendered=None,
-                status="error",
-                payload=detail,
-                failure_detail=detail,
-                attempt_failures=(detail,),
-            )
+        outcome = _recover_and_summarize()
 
         slice_snapshot = snapshot_holder["value"]
         if isinstance(slice_snapshot, dict):
@@ -12164,9 +12157,18 @@ def main(argv: list[str] | None = None) -> int:
                     allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
                     binary_path=args.binary,
                 )
-                nonopt_failure_detail = _non_optimized_slice_failure_detail(nonopt_result)
-                if nonopt_failure_detail is not None:
-                    print(f"/* non-optimized fallback unavailable: {nonopt_failure_detail} */")
+                nonopt_skip_reason = describe_non_optimized_unavailable(
+                    allow_heavy_fallbacks=True,
+                    skip_heavy_fallbacks_for_result=False,
+                    interactive_stdout=interactive_stdout,
+                    max_functions=args.max_functions,
+                    addr_requested=args.addr is not None,
+                    result_status="timeout",
+                    failure_stage=None,
+                    nonopt_failure_detail=_non_optimized_slice_failure_detail(nonopt_result),
+                )
+                if nonopt_skip_reason is not None:
+                    print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
                 print("\n/* == c (string intrinsic fallback) == */")
                 print(string_c)
                 return 0
@@ -12292,6 +12294,18 @@ def main(argv: list[str] | None = None) -> int:
                     allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
                     binary_path=args.binary,
                 )
+                nonopt_skip_reason = describe_non_optimized_unavailable(
+                    allow_heavy_fallbacks=True,
+                    skip_heavy_fallbacks_for_result=False,
+                    interactive_stdout=interactive_stdout,
+                    max_functions=args.max_functions,
+                    addr_requested=args.addr is not None,
+                    result_status="timeout",
+                    failure_stage=None,
+                    nonopt_failure_detail=_non_optimized_slice_failure_detail(nonopt_result),
+                )
+                if nonopt_skip_reason is not None:
+                    print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
                 print("\n/* == c (string intrinsic fallback) == */")
                 print(string_c)
                 return 0
@@ -12502,9 +12516,18 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(f"\n/* Decompilation {status}: {payload} */")
                 print("/* Falling back to generic string-intrinsic recovery. */")
-                nonopt_failure_detail = _non_optimized_slice_failure_detail(nonopt_result)
-                if nonopt_failure_detail is not None:
-                    print(f"/* non-optimized fallback unavailable: {nonopt_failure_detail} */")
+                nonopt_skip_reason = describe_non_optimized_unavailable(
+                    allow_heavy_fallbacks=True,
+                    skip_heavy_fallbacks_for_result=False,
+                    interactive_stdout=interactive_stdout,
+                    max_functions=args.max_functions,
+                    addr_requested=args.addr is not None,
+                    result_status=status,
+                    failure_stage=None,
+                    nonopt_failure_detail=_non_optimized_slice_failure_detail(nonopt_result),
+                )
+                if nonopt_skip_reason is not None:
+                    print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
                 print("\n/* == c (string intrinsic fallback) == */")
                 print(string_c)
                 return 0
@@ -13260,17 +13283,16 @@ def main(argv: list[str] | None = None) -> int:
                 if not emitted_problem:
                     print(f"/* problem: {result.status} */")
                     _print_diagnostic_text(result.payload)
-                if not allow_heavy_fallbacks:
-                    lane_detail = (
-                        f"interactive_stdout={interactive_stdout}, max_functions={args.max_functions}, "
-                        f"addr={'set' if args.addr is not None else 'unset'}"
-                    )
-                    nonopt_skip_reason = f"heavy fallback lane disabled for sweep mode ({lane_detail})"
-                elif skip_heavy_fallbacks_for_result:
-                    stage_detail = f"stage={getattr(result, 'failure_stage', None) or 'unknown'}"
-                    nonopt_skip_reason = f"{result.status} result keeps heavy fallback lane closed ({stage_detail})"
-                else:
-                    nonopt_skip_reason = None
+                nonopt_skip_reason = describe_non_optimized_unavailable(
+                    allow_heavy_fallbacks=allow_heavy_fallbacks,
+                    skip_heavy_fallbacks_for_result=skip_heavy_fallbacks_for_result,
+                    interactive_stdout=interactive_stdout,
+                    max_functions=args.max_functions,
+                    addr_requested=args.addr is not None,
+                    result_status=result.status,
+                    failure_stage=getattr(result, "failure_stage", None),
+                    nonopt_failure_detail=None,
+                )
                 if nonopt_skip_reason is not None:
                     print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
                 print("/* -- c (string intrinsic fallback) -- */")
@@ -13391,19 +13413,16 @@ def main(argv: list[str] | None = None) -> int:
             if not emitted_problem:
                 print(f"/* problem: {result.status} */")
                 _print_diagnostic_text(result.payload)
-            if not allow_heavy_fallbacks:
-                lane_detail = (
-                    f"interactive_stdout={interactive_stdout}, max_functions={args.max_functions}, "
-                    f"addr={'set' if args.addr is not None else 'unset'}"
-                )
-                nonopt_skip_reason = f"heavy fallback lane disabled for sweep mode ({lane_detail})"
-            elif skip_heavy_fallbacks_for_result:
-                stage_detail = f"stage={getattr(result, 'failure_stage', None) or 'unknown'}"
-                nonopt_skip_reason = f"{result.status} result keeps heavy fallback lane closed ({stage_detail})"
-            else:
-                nonopt_failure_detail = _non_optimized_slice_failure_detail(nonopt_result)
-                if nonopt_failure_detail is not None:
-                    nonopt_skip_reason = nonopt_failure_detail
+            nonopt_skip_reason = describe_non_optimized_unavailable(
+                allow_heavy_fallbacks=allow_heavy_fallbacks,
+                skip_heavy_fallbacks_for_result=skip_heavy_fallbacks_for_result,
+                interactive_stdout=interactive_stdout,
+                max_functions=args.max_functions,
+                addr_requested=args.addr is not None,
+                result_status=result.status,
+                failure_stage=getattr(result, "failure_stage", None),
+                nonopt_failure_detail=_non_optimized_slice_failure_detail(nonopt_result),
+            )
             if nonopt_skip_reason is not None:
                 print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
             print("/* -- c (string intrinsic fallback) -- */")

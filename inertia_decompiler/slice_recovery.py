@@ -5,6 +5,7 @@ from typing import Any, Callable, Sequence
 
 
 SliceRecoverCallable = Callable[[Any], tuple[Any, Any]]
+SliceRecoveryRunner = Callable[[str, Callable[[], "SliceRecoveryAttemptOutcome"]], "SliceRecoveryAttemptOutcome"]
 
 
 @dataclass(frozen=True)
@@ -65,23 +66,24 @@ def run_bounded_slice_recovery(
     inherit_runtime_policy: Callable[[Any], None],
     decompile: Callable[[str, Any, Any, Any], SliceRecoveryAttemptOutcome],
     describe_exception: Callable[[Exception], str],
+    run_attempt: SliceRecoveryRunner | None = None,
 ) -> tuple[SliceRecoveryAttemptOutcome, ...]:
     outcomes: list[SliceRecoveryAttemptOutcome] = []
     for attempt_name, recover in attempts:
-        try:
-            slice_project = build_slice_project()
-            inherit_runtime_policy(slice_project)
-            cfg, func = recover(slice_project)
-        except Exception as ex:  # noqa: BLE001
-            outcomes.append(
-                SliceRecoveryAttemptOutcome(
+        def _run_one_attempt() -> SliceRecoveryAttemptOutcome:
+            try:
+                slice_project = build_slice_project()
+                inherit_runtime_policy(slice_project)
+                cfg, func = recover(slice_project)
+            except Exception as ex:  # noqa: BLE001
+                return SliceRecoveryAttemptOutcome(
                     attempt_name=attempt_name,
                     status="error",
                     payload=f"{attempt_name} recovery: {describe_exception(ex)}",
                 )
-            )
-            continue
-        outcome = decompile(attempt_name, slice_project, cfg, func)
+            return decompile(attempt_name, slice_project, cfg, func)
+
+        outcome = run_attempt(attempt_name, _run_one_attempt) if run_attempt is not None else _run_one_attempt()
         outcomes.append(outcome)
         if outcome.status == "ok":
             break
