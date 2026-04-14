@@ -11,6 +11,9 @@ __pycache__/
 .inertia_decomp_cache/
 .inertia_pat_cache/
 
+80286/
+martypc/
+
 pid.txt
 res.log
 result.txt

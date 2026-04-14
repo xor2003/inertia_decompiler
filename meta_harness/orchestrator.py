@@ -50,6 +50,7 @@ from .runtime_records import (
     summarize_session_rows,
     write_json,
 )
+from .state_context import merge_step_extra
 from .task_packet import (
     TASK_PACKET_SCHEMA_VERSION,
     TaskPacket,
@@ -1451,18 +1452,27 @@ class MetaHarness:
             return
         current_step = self.current_cycle_step() or "cycle"
         step_state = self.cycle_state.get("steps", {})
+        final_step_extra = f"exit_code={exit_code}" if exit_code is not None else ""
         if isinstance(step_state, dict):
             for step, entry in step_state.items():
                 if isinstance(entry, dict) and entry.get("status") == "running":
+                    final_step_extra = merge_step_extra(str(entry.get("extra", "")), final_step_extra)
                     step_state[step] = {
                         "status": reason,
                         "updated_at": self.iso_now(),
-                        "extra": f"exit_code={exit_code}" if exit_code is not None else "",
+                        "extra": final_step_extra,
                     }
                     break
         self.cycle_state["completed"] = False
         self._save_cycle_state()
-        self.write_status("harness", reason, f"cycle={self.current_cycle_index} step={current_step} exit_code={exit_code}")
+        self.write_status(
+            "harness",
+            reason,
+            merge_step_extra(
+                f"cycle={self.current_cycle_index} step={current_step}",
+                final_step_extra,
+            ),
+        )
         self.capture_cycle_snapshot(reason)
 
     def prepare_evidence_subset(self) -> None:
@@ -2293,6 +2303,7 @@ class MetaHarness:
                 self.write_status("worker", "stalled-no-progress", f"iteration={i} repeated_nonzero_result")
                 self.mark_cycle_step("worker", "stalled", f"iteration={i} repeated_nonzero_result")
                 return
+            self.mark_cycle_step("worker", "running", f"iteration={i} remaining={remaining}")
             time.sleep(self.cfg.worker_sleep_secs)
         self.clear_role_session("worker")
         self.log(
