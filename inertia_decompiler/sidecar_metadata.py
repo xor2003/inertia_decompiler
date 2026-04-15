@@ -8,6 +8,12 @@ from angr_platforms.X86_16.lst_extract import LSTMetadata, extract_lst_metadata
 from angr_platforms.X86_16.turbo_debug_tdinfo import parse_tdinfo_exe
 
 from inertia_decompiler.project_loading import _build_project, _probe_ida_base_linear
+from inertia_decompiler.sidecar_cache import (
+    apply_cached_sidecar_metadata,
+    emit_sidecar_metadata_debug,
+    load_cached_sidecar_metadata,
+    store_cached_sidecar_metadata,
+)
 from inertia_decompiler.sidecar_parsers import (
     _detect_flair_metadata,
     _parse_cod_sidecar_metadata,
@@ -171,6 +177,16 @@ def _load_lst_metadata(
     signature_catalog: Path | None = None,
     allow_peer_exe: bool = True,
 ) -> LSTMetadata | None:
+    cached_sidecar, sidecar_cache_key = load_cached_sidecar_metadata(
+        binary_path=binary,
+        pat_backend=pat_backend,
+        signature_catalog=signature_catalog,
+        allow_peer_exe=allow_peer_exe,
+    )
+    if cached_sidecar is not None:
+        metadata = apply_cached_sidecar_metadata(project, cached_sidecar)
+        emit_sidecar_metadata_debug(project, metadata)
+        return metadata
     load_base_linear = _probe_ida_base_linear(binary, getattr(project.loader.main_object, "linked_base", 0))
     code_labels: dict[int, str] = {}
     data_labels: dict[int, str] = {}
@@ -391,13 +407,8 @@ def _load_lst_metadata(
         cod_proc_kinds=cod_proc_kinds,
     )
     project._inertia_lst_metadata = metadata
-    print(
-        f"[dbg] loaded sidecar metadata: format={metadata.source_format} "
-        f"code_labels={len(metadata.code_labels)} data_labels={len(metadata.data_labels)} structs={len(metadata.struct_names)}"
-    )
-    flair_titles = getattr(project, "_inertia_flair_sig_titles", ())
-    if flair_titles:
-        print(f"[dbg] flair signature catalogs: {', '.join(flair_titles[:3])}")
+    store_cached_sidecar_metadata(cache_key=sidecar_cache_key, metadata=metadata, project=project)
+    emit_sidecar_metadata_debug(project, metadata)
     return metadata
 
 

@@ -12,7 +12,13 @@ from angr_platforms.X86_16.codeview_nb02_nb04 import parse_codeview_nb0204_bytes
 from angr_platforms.X86_16.flair_extract import list_flair_sig_libraries, match_flair_startup_entry
 from angr_platforms.X86_16.ne_exe_parse import parse_ne_exe
 
-from omf_pat import PatModule, discover_local_pat_matches, match_pat_modules, parse_pat_file
+from omf_pat import (
+    CachedPatRegexSpec,
+    _pick_pat_cache_dir,
+    discover_local_pat_matches,
+    load_cached_pat_regex_specs,
+    match_pat_modules,
+)
 from signature_catalog import match_signature_catalog
 
 
@@ -328,15 +334,26 @@ def _detect_flair_metadata(
         entry_bytes = b""
     code_labels: dict[int, str] = {}
     code_ranges: dict[int, tuple[int, int]] = {}
+    matched_compiler_names: list[str] = []
     source_parts: list[str] = []
+
+    def _remember_compiler(name: str | None) -> None:
+        if not name:
+            return
+        normalized = name.strip()
+        if normalized and normalized not in matched_compiler_names:
+            matched_compiler_names.append(normalized)
+
     startup_matches = match_flair_startup_entry(entry_bytes, flair_root)
-    startup_pat_labels, startup_pat_ranges = _match_flair_startup_pat_functions(
+    startup_pat_labels, startup_pat_ranges, startup_pat_compiler_names = _match_flair_startup_pat_functions(
         project,
         flair_root,
         backend=pat_backend,
     )
     if startup_pat_labels or startup_pat_ranges:
         source_parts.append("flair_pat")
+        for compiler_name in startup_pat_compiler_names:
+            _remember_compiler(compiler_name)
         for addr, name in startup_pat_labels.items():
             code_labels.setdefault(addr, name)
         for addr, span in startup_pat_ranges.items():
@@ -344,6 +361,7 @@ def _detect_flair_metadata(
     elif startup_matches:
         source_parts.append("flair_pat")
         first = startup_matches[0]
+        _remember_compiler(first.compiler_tag)
         for offset, name in first.public_names:
             linear = project.entry + offset
             code_labels.setdefault(linear, name.lstrip("_"))
@@ -351,24 +369,26 @@ def _detect_flair_metadata(
             first_offset = min(offset for offset, _name in first.public_names)
             start = project.entry + first_offset
             code_ranges.setdefault(start, (start, start + 0x100))
-    sig_libraries = [
-        library
-        for library in list_flair_sig_libraries(flair_root)
-        if "MSDOS" in library.os_types.upper() and "16BIT" in library.app_types.upper()
-    ]
-    if sig_libraries:
-        source_parts.append("flair_sig")
-        setattr(project, "_inertia_flair_sig_titles", tuple(library.title for library in sig_libraries[:8]))
     if startup_matches:
         setattr(project, "_inertia_flair_startup_matches", tuple(match.pat_path for match in startup_matches))
+        for match in startup_matches:
+            _remember_compiler(match.compiler_tag)
     if signature_catalog is not None:
-        catalog_matches = match_signature_catalog(signature_catalog, binary, project, backend=pat_backend)
+        catalog_matches = match_signature_catalog(
+            signature_catalog,
+            binary,
+            project,
+            backend=pat_backend,
+            compiler_names=tuple(matched_compiler_names),
+        )
         if catalog_matches.code_labels or catalog_matches.code_ranges:
             for addr, name in catalog_matches.code_labels.items():
                 code_labels.setdefault(addr, name)
             for addr, span in catalog_matches.code_ranges.items():
                 code_ranges.setdefault(addr, span)
             source_parts.extend(catalog_matches.source_formats)
+        for compiler_name in catalog_matches.matched_compiler_names:
+            _remember_compiler(compiler_name)
     local_pat_matches = discover_local_pat_matches(binary, project, flair_root=flair_root, backend=pat_backend)
     if local_pat_matches.code_labels or local_pat_matches.code_ranges:
         for addr, name in local_pat_matches.code_labels.items():
@@ -377,16 +397,21 @@ def _detect_flair_metadata(
             code_ranges.setdefault(addr, span)
         source_parts.extend(local_pat_matches.source_formats)
         setattr(project, "_inertia_flair_local_pat_sources", tuple(dict.fromkeys(local_pat_matches.source_formats)))
+    for compiler_name in local_pat_matches.matched_compiler_names:
+        _remember_compiler(compiler_name)
+    if matched_compiler_names:
+        setattr(project, "_inertia_signature_compiler_names", tuple(matched_compiler_names))
     return code_labels, code_ranges, tuple(source_parts)
 
 
 @lru_cache(maxsize=1)
-def _load_flair_startup_pat_modules(flair_root: str) -> tuple[PatModule, ...]:
+def _load_flair_startup_pat_modules(flair_root: str) -> tuple[CachedPatRegexSpec, ...]:
     root = Path(flair_root)
-    modules: list[PatModule] = []
+    cache_dir = _pick_pat_cache_dir(root / "startup")
+    modules: list[CachedPatRegexSpec] = []
     for pat_path in sorted((root / "startup").rglob("*.pat")):
         try:
-            modules.extend(parse_pat_file(pat_path))
+            modules.extend(load_cached_pat_regex_specs(pat_path, cache_dir))
         except OSError:
             continue
     return tuple(modules)
@@ -397,23 +422,29 @@ def _match_flair_startup_pat_functions(
     flair_root: Path,
     *,
     backend: str | None = None,
-) -> tuple[dict[int, str], dict[int, tuple[int, int]]]:
+) -> tuple[dict[int, str], dict[int, tuple[int, int]], tuple[str, ...]]:
     main_object = getattr(project.loader, "main_object", None)
     memory = getattr(project.loader, "memory", None)
     if main_object is None or memory is None:
-        return {}, {}
+        return {}, {}, ()
     min_addr = getattr(main_object, "min_addr", None)
     max_addr = getattr(main_object, "max_addr", None)
     if not isinstance(min_addr, int) or not isinstance(max_addr, int) or max_addr < min_addr:
-        return {}, {}
+        return {}, {}, ()
     try:
         image_bytes = bytes(memory.load(min_addr, max_addr - min_addr + 1))
     except Exception:
-        return {}, {}
+        return {}, {}, ()
     modules = _load_flair_startup_pat_modules(str(flair_root))
     if not modules:
-        return {}, {}
-    return match_pat_modules(image_bytes, min_addr, modules, backend=backend)
+        return {}, {}, ()
+    code_labels, code_ranges, matched_compiler_names = match_pat_modules(
+        image_bytes,
+        min_addr,
+        modules,
+        backend=backend,
+    )
+    return code_labels, code_ranges, matched_compiler_names
 
 
 def _parse_mzre_map_metadata(

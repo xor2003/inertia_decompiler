@@ -257,11 +257,13 @@ class MetaHarness:
 
     def role_timeout_secs(self, role: str) -> int:
         if role == "worker":
-            return int(self.cfg.codex_timeout_secs)
+            return min(int(self.cfg.codex_timeout_secs), 120)
         if role == "planner":
-            return min(int(self.cfg.codex_timeout_secs), 300)
-        if role in {"reviewer", "checker", "crash-reviewer"}:
             return min(int(self.cfg.codex_timeout_secs), 180)
+        if role == "crash-reviewer":
+            return min(int(self.cfg.codex_timeout_secs), 180)
+        if role in {"reviewer", "checker"}:
+            return min(int(self.cfg.codex_timeout_secs), 120)
         return int(self.cfg.codex_timeout_secs)
 
     def check_stop_file(self) -> None:

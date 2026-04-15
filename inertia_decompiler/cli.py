@@ -91,6 +91,9 @@ from inertia_decompiler import cli_segmented_lowering as _cli_segmented_lowering
 from inertia_decompiler import cli_segmented_load_coalesce as _cli_segmented_load_coalesce
 from inertia_decompiler import cli_segmented_store_coalesce as _cli_segmented_store_coalesce
 from inertia_decompiler import cli_word_loads as _cli_word_loads
+from inertia_decompiler.default_signature_catalog import default_signature_catalog_path
+from inertia_decompiler.decompilation_quality import assess_decompiled_c_text
+from inertia_decompiler.sidecar_policy import metadata_has_precise_code_regions
 from inertia_decompiler.tail_validation import (
     TAIL_VALIDATION_ENABLE_ENV as _TAIL_VALIDATION_ENABLE_ENV,
     emit_tail_validation_console_summary as _emit_tail_validation_console_summary,
@@ -151,6 +154,7 @@ from inertia_decompiler.slice_recovery import (
     run_bounded_slice_recovery,
 )
 from inertia_decompiler.non_optimized_fallback import (
+    allows_heavy_fallbacks_for_run,
     bounded_non_optimized_attempt_timeout,
     describe_non_optimized_unavailable,
 )
@@ -981,6 +985,9 @@ def _try_decompile_sidecar_slice(
                 lst_metadata=lst_metadata,
                 allow_isolated_retry=False,
             )
+            if status == "ok" and assess_decompiled_c_text(payload).markers:
+                status = "empty"
+                payload = "Sidecar slice decompilation remained unresolved after bounded recovery."
             snapshot = _tail_validation_snapshot_for_function_run(slice_project, func)
             return SliceRecoveryAttemptOutcome(
                 attempt_name=attempt_name,
@@ -1004,17 +1011,6 @@ def _try_decompile_sidecar_slice(
                     print(f"[dbg] sidecar slice fallback recovered {addr:#x} {name} via {attempt.attempt_name}")
                 return attempt.status, attempt.payload
             last_failure = (attempt.status, attempt.payload)
-        source_function = SimpleNamespace(addr=start, name=name)
-        cod_metadata = _sidecar_cod_metadata_for_function(
-            project,
-            source_function,
-            binary_path,
-            lst_metadata,
-        )
-        source_text = _render_cod_source_function_text(source_function, cod_metadata)
-        if source_text is not None:
-            print(f"[dbg] sidecar slice fallback recovered {addr:#x} {name} from COD source")
-            return "ok", source_text
         if last_failure is None:
             return "error", "sidecar slice recovery did not run"
         return last_failure
@@ -1120,6 +1116,9 @@ def _try_decompile_non_optimized_slice(
                 enable_postprocess=False,
                 allow_isolated_retry=False,
             )
+            if status == "ok" and assess_decompiled_c_text(payload).markers:
+                status = "empty"
+                payload = "Non-optimized slice decompilation remained unresolved after bounded recovery."
             if not isinstance(partial_payload, str):
                 partial_payload = None
             snapshot = getattr(slice_project, "_inertia_last_tail_validation_snapshot", None)
@@ -3497,6 +3496,14 @@ def _decompile_function(
             rf"(?P=indent)return\s+{re.escape(helper_name)}\((?P=args)\);\s*$"
         )
         formatted = redundant_wrapper_pattern.sub(rf"\g<indent>return {helper_name}(\g<args>);", formatted)
+    quality = assess_decompiled_c_text(formatted)
+    if quality.reject_as_decompiled:
+        _remember_tail_validation_snapshot(dec.codegen)
+        setattr(project, "_inertia_partial_codegen_text", None)
+        marker_summary = ", ".join(quality.markers[:3])
+        if len(quality.markers) > 3:
+            marker_summary += ", ..."
+        return "empty", f"Decompiler produced unresolved IR-shaped C ({marker_summary})."
     _remember_tail_validation_snapshot(dec.codegen)
     setattr(project, "_inertia_partial_codegen_text", None)
     return "ok", formatted
@@ -11909,8 +11916,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--timeout",
         type=int,
-        default=20,
-        help="Analysis timeout in seconds. Defaults to 20.",
+        default=120,
+        help="Analysis timeout in seconds. Defaults to 120.",
     )
     parser.add_argument(
         "--window",
@@ -11960,6 +11967,9 @@ def main(argv: list[str] | None = None) -> int:
     synthetic_globals = None
     lst_metadata = None
     prefer_fast_recovery = False
+    effective_signature_catalog = args.signature_catalog
+    if effective_signature_catalog is None:
+        effective_signature_catalog = default_signature_catalog_path()
     if args.proc is not None:
         entries = extract_cod_function_entries(args.binary, args.proc, args.proc_kind)
         cod_metadata = extract_cod_proc_metadata(args.binary, args.proc, args.proc_kind)
@@ -12005,7 +12015,7 @@ def main(argv: list[str] | None = None) -> int:
             args.binary,
             project,
             pat_backend=args.pat_backend,
-            signature_catalog=args.signature_catalog,
+            signature_catalog=effective_signature_catalog,
         )
         _apply_binary_specific_annotations(
             project,
@@ -12019,6 +12029,7 @@ def main(argv: list[str] | None = None) -> int:
         print(_recovery_evidence_line(args.binary, lst_metadata))
     low_memory_path = _prefer_low_memory_path()
     interactive_stdout = _stdout_is_interactive()
+    precise_sidecar_regions = metadata_has_precise_code_regions(lst_metadata)
     if args.addr is not None:
         print("/* recovering function... */", flush=True)
 
@@ -12047,7 +12058,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         except _AnalysisTimeout:
             sidecar_region = _lst_code_region(lst_metadata, args.addr) if lst_metadata is not None else None
-            if sidecar_region is not None:
+            if precise_sidecar_regions and sidecar_region is not None:
                 code_name = _lst_code_label(lst_metadata, sidecar_region[0], project.entry) or f"sub_{args.addr:x}"
                 slice_result = _try_decompile_sidecar_slice(
                     project,
@@ -12141,16 +12152,18 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n/* == asm fallback == */")
                 print(_format_asm_range(project, sidecar_region[0], sidecar_region[1]))
                 return 4
-            nonopt_result: NonOptimizedSliceOutcome | str | None = _try_decompile_non_optimized_slice(
-                project,
-                args.addr,
-                function_label or f"sub_{args.addr:x}",
-                timeout=_bounded_non_optimized_timeout(args.timeout),
-                api_style=args.api_style,
-                binary_path=args.binary,
-                lst_metadata=lst_metadata,
-                cod_metadata=cod_metadata,
-            )
+            nonopt_result: NonOptimizedSliceOutcome | str | None = None
+            if precise_sidecar_regions:
+                nonopt_result = _try_decompile_non_optimized_slice(
+                    project,
+                    args.addr,
+                    function_label or f"sub_{args.addr:x}",
+                    timeout=_bounded_non_optimized_timeout(args.timeout),
+                    api_style=args.api_style,
+                    binary_path=args.binary,
+                    lst_metadata=lst_metadata,
+                    cod_metadata=cod_metadata,
+                )
             nonopt_c = _non_optimized_slice_rendered(nonopt_result)
             if nonopt_c is not None:
                 fallback_function = SimpleNamespace(addr=args.addr, name=function_label or f"sub_{args.addr:x}")
@@ -12212,7 +12225,7 @@ def main(argv: list[str] | None = None) -> int:
             _emit_timeout_and_exit(args.timeout, recovery_detail)
         except FuturesTimeoutError:
             sidecar_region = _lst_code_region(lst_metadata, args.addr) if lst_metadata is not None else None
-            if sidecar_region is not None:
+            if precise_sidecar_regions and sidecar_region is not None:
                 code_name = _lst_code_label(lst_metadata, sidecar_region[0], project.entry) or f"sub_{args.addr:x}"
                 slice_result = _try_decompile_sidecar_slice(
                     project,
@@ -12306,16 +12319,18 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n/* == asm fallback == */")
                 print(_format_asm_range(project, sidecar_region[0], sidecar_region[1]))
                 return 4
-            nonopt_result: NonOptimizedSliceOutcome | str | None = _try_decompile_non_optimized_slice(
-                project,
-                args.addr,
-                function_label or f"sub_{args.addr:x}",
-                timeout=_bounded_non_optimized_timeout(args.timeout),
-                api_style=args.api_style,
-                binary_path=args.binary,
-                lst_metadata=lst_metadata,
-                cod_metadata=cod_metadata,
-            )
+            nonopt_result: NonOptimizedSliceOutcome | str | None = None
+            if precise_sidecar_regions:
+                nonopt_result = _try_decompile_non_optimized_slice(
+                    project,
+                    args.addr,
+                    function_label or f"sub_{args.addr:x}",
+                    timeout=_bounded_non_optimized_timeout(args.timeout),
+                    api_style=args.api_style,
+                    binary_path=args.binary,
+                    lst_metadata=lst_metadata,
+                    cod_metadata=cod_metadata,
+                )
             nonopt_c = _non_optimized_slice_rendered(nonopt_result)
             if nonopt_c is not None:
                 fallback_function = SimpleNamespace(addr=args.addr, name=function_label or f"sub_{args.addr:x}")
@@ -12470,7 +12485,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if status != "ok":
             slice_result = None
-            if lst_metadata is not None:
+            if precise_sidecar_regions:
                 slice_result = _try_decompile_sidecar_slice(
                     project,
                     lst_metadata,
@@ -12491,40 +12506,41 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n/* == c (sidecar slice fallback) == */")
                 print(slice_result[1])
                 return 0
-            peer_sidecar_c = _try_decompile_peer_sidecar_slice(
-                project,
-                lst_metadata,
-                func.addr,
-                func.name,
-                timeout=args.timeout,
-                api_style=args.api_style,
-                binary_path=args.binary,
-            )
-            if peer_sidecar_c is not None:
-                _emit_tail_validation_for_function_run_or_uncollected(
+            if precise_sidecar_regions:
+                peer_sidecar_c = _try_decompile_peer_sidecar_slice(
                     project,
-                    cfg,
-                    func,
-                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("peer_sidecar"),
+                    lst_metadata,
+                    func.addr,
+                    func.name,
+                    timeout=args.timeout,
+                    api_style=args.api_style,
                     binary_path=args.binary,
                 )
-                print("\n/* == c (peer sidecar fallback) == */")
-                print(peer_sidecar_c)
-                return 0
-            trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, func.addr, func.name)
-            if trivial_c is not None:
-                _emit_tail_validation_for_function_run_or_uncollected(
-                    project,
-                    cfg,
-                    func,
-                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("trivial_sidecar"),
-                    binary_path=args.binary,
-                )
-                print("\n/* == c (trivial sidecar fallback) == */")
-                print(trivial_c)
-                return 0
+                if peer_sidecar_c is not None:
+                    _emit_tail_validation_for_function_run_or_uncollected(
+                        project,
+                        cfg,
+                        func,
+                        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("peer_sidecar"),
+                        binary_path=args.binary,
+                    )
+                    print("\n/* == c (peer sidecar fallback) == */")
+                    print(peer_sidecar_c)
+                    return 0
+                trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, func.addr, func.name)
+                if trivial_c is not None:
+                    _emit_tail_validation_for_function_run_or_uncollected(
+                        project,
+                        cfg,
+                        func,
+                        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("trivial_sidecar"),
+                        binary_path=args.binary,
+                    )
+                    print("\n/* == c (trivial sidecar fallback) == */")
+                    print(trivial_c)
+                    return 0
             nonopt_result: NonOptimizedSliceOutcome | str | None = None
-            if partial_payload is None:
+            if partial_payload is None and precise_sidecar_regions:
                 nonopt_result = _try_decompile_non_optimized_slice(
                     project,
                     func.addr,
@@ -12987,6 +13003,7 @@ def main(argv: list[str] | None = None) -> int:
         and not (
             lst_metadata is not None
             and not visible_code_labels
+            and ranked_binary_offsets
             and args.max_functions > 0
         )
     ):
@@ -13238,12 +13255,11 @@ def main(argv: list[str] | None = None) -> int:
     if force_isolated_function_projects:
         print("/* parallel x86-16 decompilation: using one fresh analysis project per shown function for stability. */")
 
-    allow_heavy_fallbacks = (
-        interactive_stdout
-        or args.max_functions <= 0
-        or args.addr is not None
+    allow_heavy_fallbacks = allows_heavy_fallbacks_for_run(
+        interactive_stdout=interactive_stdout,
+        max_functions=args.max_functions,
+        addr_requested=args.addr is not None,
     )
-
     def _remember_fallback_tail_validation(
         item: FunctionWorkItem,
         *,
@@ -13274,7 +13290,11 @@ def main(argv: list[str] | None = None) -> int:
             print(_format_first_block_asm(project, function.addr))
         if result.status == "ok":
             decompiled_local += 1
-            _print_function_attempt_status(function, attempt="decompiled", validation_snapshot=result.tail_validation)
+            _print_function_attempt_status(
+                function,
+                attempt="decompiled",
+                validation_snapshot=result.tail_validation,
+            )
             print("/* -- c -- */")
             print(result.payload, flush=True)
             return decompiled_local, failed_local
@@ -13296,7 +13316,7 @@ def main(argv: list[str] | None = None) -> int:
         skip_heavy_fallbacks_for_result = bool(getattr(result, "skip_heavy_fallbacks", False))
 
         slice_result = None
-        if lst_metadata is not None and not skip_heavy_fallbacks_for_result:
+        if allow_heavy_fallbacks and precise_sidecar_regions and not skip_heavy_fallbacks_for_result:
             slice_result = _try_decompile_sidecar_slice(
                 project,
                 lst_metadata,
@@ -13391,39 +13411,40 @@ def main(argv: list[str] | None = None) -> int:
             _print_asm_fallback_text(asm_fallback)
             return decompiled_local, failed_local
 
-        peer_sidecar_c = _try_decompile_peer_sidecar_slice(
-            project,
-            lst_metadata,
-            function.addr,
-            function.name,
-            timeout=args.timeout,
-            api_style=args.api_style,
-            binary_path=args.binary,
-        )
-        if peer_sidecar_c is not None:
-            decompiled_local += 1
-            fallback_snapshot = _remember_fallback_tail_validation(
-                item,
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("peer_sidecar"),
+        if precise_sidecar_regions:
+            peer_sidecar_c = _try_decompile_peer_sidecar_slice(
+                project,
+                lst_metadata,
+                function.addr,
+                function.name,
+                timeout=args.timeout,
+                api_style=args.api_style,
+                binary_path=args.binary,
             )
-            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
-            print("/* -- c (peer sidecar fallback) -- */")
-            print(peer_sidecar_c, flush=True)
-            return decompiled_local, failed_local
+            if peer_sidecar_c is not None:
+                decompiled_local += 1
+                fallback_snapshot = _remember_fallback_tail_validation(
+                    item,
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("peer_sidecar"),
+                )
+                _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
+                print("/* -- c (peer sidecar fallback) -- */")
+                print(peer_sidecar_c, flush=True)
+                return decompiled_local, failed_local
 
-        trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, function.addr, function.name)
-        if trivial_c is not None:
-            decompiled_local += 1
-            fallback_snapshot = _remember_fallback_tail_validation(
-                item,
-                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("trivial_sidecar"),
-            )
-            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
-            print("/* -- c (trivial sidecar fallback) -- */")
-            print(trivial_c, flush=True)
-            return decompiled_local, failed_local
+            trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, function.addr, function.name)
+            if trivial_c is not None:
+                decompiled_local += 1
+                fallback_snapshot = _remember_fallback_tail_validation(
+                    item,
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("trivial_sidecar"),
+                )
+                _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
+                print("/* -- c (trivial sidecar fallback) -- */")
+                print(trivial_c, flush=True)
+                return decompiled_local, failed_local
         nonopt_result: NonOptimizedSliceOutcome | str | None = None
-        if result.partial_payload is None:
+        if result.partial_payload is None and (precise_sidecar_regions or args.addr is not None):
             nonopt_result = _try_decompile_non_optimized_slice(
                 project,
                 function.addr,

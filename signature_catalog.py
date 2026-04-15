@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from inertia_decompiler.cache import (
+    _cache_file_fingerprint,
+    _cache_source_digest,
+    _load_cache_json,
+    _store_cache_json,
+)
 from inertia_decompiler.signature_matching_policy import signature_matching_disabled
 from omf_pat import (
     LocalPatMatchResult,
@@ -14,6 +20,11 @@ from omf_pat import (
     match_pat_modules,
     normalized_pat_merge_name,
     parse_pat_file,
+)
+
+_SIGNATURE_MATCH_CACHE_COMPONENTS = (
+    Path(__file__).resolve(),
+    Path(__file__).resolve().parent / "omf_pat.py",
 )
 
 
@@ -153,6 +164,7 @@ def match_signature_catalog(
     *,
     backend: str | None = None,
     cache_dir: Path | None = None,
+    compiler_names: tuple[str, ...] = (),
 ) -> LocalPatMatchResult:
     if signature_matching_disabled():
         return LocalPatMatchResult({}, {}, ())
@@ -171,10 +183,25 @@ def match_signature_catalog(
         image_bytes = bytes(memory.load(min_addr, size))
     except Exception:
         return LocalPatMatchResult({}, {}, ())
+    cache_key = _signature_catalog_match_cache_key(
+        catalog_path=catalog_path,
+        binary_path=binary_path,
+        backend=backend,
+        compiler_names=compiler_names,
+    )
+    if cache_key is not None:
+        cached = _load_cache_json("signature_catalog_match", cache_key)
+        cached_result = _decode_signature_catalog_match(cached)
+        if cached_result is not None:
+            return cached_result
+
     effective_cache_dir = cache_dir or (binary_path.parent / ".inertia_pat_cache")
     specs = load_cached_pat_regex_specs(catalog_path, effective_cache_dir)
     if not specs:
         return LocalPatMatchResult({}, {}, ())
+    filtered_specs = _filter_specs_by_compiler_names(specs, compiler_names)
+    if filtered_specs:
+        specs = filtered_specs
     code_labels, code_ranges, matched_compiler_names = match_pat_modules(
         image_bytes,
         min_addr,
@@ -182,4 +209,90 @@ def match_signature_catalog(
         backend=backend,
     )
     source_formats = ("signature_catalog",) if code_labels or code_ranges else ()
+    result = LocalPatMatchResult(code_labels, code_ranges, source_formats, matched_compiler_names)
+    if cache_key is not None:
+        _store_cache_json("signature_catalog_match", cache_key, _encode_signature_catalog_match(result))
+    return result
+
+
+def _signature_catalog_match_cache_key(
+    *,
+    catalog_path: Path,
+    binary_path: Path,
+    backend: str | None,
+    compiler_names: tuple[str, ...],
+) -> dict[str, object] | None:
+    binary_fingerprint = _cache_file_fingerprint(binary_path)
+    catalog_fingerprint = _cache_file_fingerprint(catalog_path)
+    if binary_fingerprint is None or catalog_fingerprint is None:
+        return None
+    return {
+        "schema": 1,
+        "kind": "signature_catalog_match",
+        "binary": binary_fingerprint,
+        "catalog": catalog_fingerprint,
+        "backend": (backend or "").strip().lower(),
+        "compiler_names": tuple(compiler_names),
+        "components": _cache_source_digest(_SIGNATURE_MATCH_CACHE_COMPONENTS),
+    }
+
+
+def _encode_signature_catalog_match(result: LocalPatMatchResult) -> dict[str, object]:
+    return {
+        "code_labels": {str(addr): name for addr, name in result.code_labels.items()},
+        "code_ranges": {str(addr): [span[0], span[1]] for addr, span in result.code_ranges.items()},
+        "source_formats": list(result.source_formats),
+        "matched_compiler_names": list(result.matched_compiler_names),
+    }
+
+
+def _decode_signature_catalog_match(payload: dict[str, object] | None) -> LocalPatMatchResult | None:
+    if not isinstance(payload, dict):
+        return None
+    raw_labels = payload.get("code_labels")
+    raw_ranges = payload.get("code_ranges")
+    if not isinstance(raw_labels, dict) or not isinstance(raw_ranges, dict):
+        return None
+    code_labels: dict[int, str] = {}
+    code_ranges: dict[int, tuple[int, int]] = {}
+    try:
+        for addr_text, name in raw_labels.items():
+            if not isinstance(name, str):
+                return None
+            code_labels[int(addr_text)] = name
+        for addr_text, span in raw_ranges.items():
+            if not (isinstance(span, list) and len(span) == 2 and all(isinstance(value, int) for value in span)):
+                return None
+            code_ranges[int(addr_text)] = (span[0], span[1])
+    except (TypeError, ValueError):
+        return None
+    raw_formats = payload.get("source_formats", ())
+    raw_compilers = payload.get("matched_compiler_names", ())
+    source_formats = tuple(value for value in raw_formats if isinstance(value, str))
+    matched_compiler_names = tuple(value for value in raw_compilers if isinstance(value, str))
     return LocalPatMatchResult(code_labels, code_ranges, source_formats, matched_compiler_names)
+
+
+def _filter_specs_by_compiler_names(
+    specs: tuple[CachedPatRegexSpec, ...],
+    compiler_names: tuple[str, ...],
+) -> tuple[CachedPatRegexSpec, ...]:
+    ignored_filters = {"ida flair", "flair", "unknown"}
+    normalized_filters = tuple(
+        name.strip().lower()
+        for name in compiler_names
+        if name and name.strip() and name.strip().lower() not in ignored_filters
+    )
+    if not normalized_filters:
+        return ()
+    filtered: list[CachedPatRegexSpec] = []
+    for spec in specs:
+        compiler_name = getattr(spec, "compiler_name", "").strip().lower()
+        if not compiler_name:
+            continue
+        if any(
+            compiler_filter in compiler_name or compiler_name in compiler_filter
+            for compiler_filter in normalized_filters
+        ):
+            filtered.append(spec)
+    return tuple(filtered)

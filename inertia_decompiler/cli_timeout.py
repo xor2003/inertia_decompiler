@@ -7,9 +7,7 @@ import sys
 def _default_recovery_timeout(configured_timeout: int, *, explicit_timeout: bool) -> int:
     if configured_timeout <= 0:
         return 5
-    if configured_timeout <= 5:
-        return configured_timeout
-    return 5
+    return configured_timeout
 
 
 class _AdaptivePerByteTimeoutModel:
@@ -36,11 +34,7 @@ class _AdaptivePerByteTimeoutModel:
         return max(0.005, rate), max(0.0, overhead)
 
     def timeout_for_byte_count(self, byte_count: int) -> int:
-        if self.explicit_timeout:
-            return self.configured_timeout
-        rate, overhead = self._seed_rate()
-        estimate = self.margin * (overhead + rate * max(1, byte_count))
-        return max(2, min(180, math.ceil(max(2.0, estimate))))
+        return self.configured_timeout
 
 
 def _stdout_is_interactive() -> bool:

@@ -775,7 +775,7 @@ def _x87_emulator_variant_bytes(function_bytes: list[int | None]) -> list[int | 
       9B DE -> CD 3A
       9B DF -> CD 3B
       9B 26 -> CD 3C
-      9B 90 -> CD 3D
+      90 9B -> CD 3D
 
     This is emitted only as an alternate PAT row for runtime helpers so exact
     matching can see both the direct x87 and emulator-linked encodings.
@@ -790,7 +790,7 @@ def _x87_emulator_variant_bytes(function_bytes: list[int | None]) -> list[int | 
         (0x9B, 0xDE): (0xCD, 0x3A),
         (0x9B, 0xDF): (0xCD, 0x3B),
         (0x9B, 0x26): (0xCD, 0x3C),
-        (0x9B, 0x90): (0xCD, 0x3D),
+        (0x90, 0x9B): (0xCD, 0x3D),
     }
     rewritten = list(function_bytes)
     changed = False
@@ -1647,6 +1647,7 @@ def _default_pat_backend() -> str:
     return "hyperscan" if _hyperscan is not None else "python_regex"
 
 
+@lru_cache(maxsize=16)
 def load_cached_pat_regex_specs(pat_path: Path, cache_dir: Path) -> tuple[CachedPatRegexSpec, ...]:
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_key = _cache_key_for_file(pat_path)
@@ -1795,5 +1796,15 @@ def _sanitize_pat_comment(text: str) -> str:
 
 def _cache_key_for_file(path: Path) -> str:
     stat = path.stat()
-    raw = f"{path}:{stat.st_mtime_ns}:{stat.st_size}".encode()
+    raw = f"{path}:{stat.st_mtime_ns}:{stat.st_size}:{_omf_pat_tool_cache_fingerprint()}".encode()
     return hashlib.sha1(raw).hexdigest()[:12]
+
+
+@lru_cache(maxsize=1)
+def _omf_pat_tool_cache_fingerprint() -> str:
+    try:
+        tool_path = Path(__file__).resolve()
+        stat = tool_path.stat()
+        return f"{tool_path}:{stat.st_mtime_ns}:{stat.st_size}"
+    except OSError:
+        return "omf_pat_tool_unknown"
