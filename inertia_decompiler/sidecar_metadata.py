@@ -334,6 +334,7 @@ def _load_lst_metadata(
                 sibling_cod_path,
                 load_base_linear=load_base_linear,
                 existing_code_labels=cod_anchor_labels,
+                project=project,
             )
             cod_listing = _reconcile_cod_listing_with_codeview(cod_listing, codeview_code, codeview_ranges)
             if cod_listing.code_labels or cod_listing.code_ranges or cod_listing.proc_kinds:

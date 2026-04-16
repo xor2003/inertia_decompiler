@@ -29,6 +29,39 @@ class CachedSidecarMetadata:
     project_attrs: dict[str, tuple[str, ...]]
 
 
+def _maybe_rebase_stale_absolute_metadata(metadata: LSTMetadata, project) -> LSTMetadata:
+    main_object = getattr(getattr(project, "loader", None), "main_object", None)
+    linked_base = getattr(main_object, "linked_base", 0) or 0
+    if linked_base <= 0:
+        return metadata
+    if not metadata.absolute_addrs:
+        return metadata
+    if "cod_listing" not in (metadata.source_format or ""):
+        return metadata
+    code_keys = tuple(metadata.code_labels.keys())
+    if not code_keys:
+        return metadata
+    if max(code_keys) >= linked_base:
+        return metadata
+    if getattr(project, "entry", 0) < linked_base:
+        return metadata
+    shift = linked_base
+    return LSTMetadata(
+        data_labels={addr + shift: name for addr, name in metadata.data_labels.items()},
+        code_labels={addr + shift: name for addr, name in metadata.code_labels.items()},
+        code_ranges={
+            addr + shift: (start + shift, end + shift)
+            for addr, (start, end) in metadata.code_ranges.items()
+        },
+        signature_code_addrs=frozenset(addr + shift for addr in metadata.signature_code_addrs),
+        absolute_addrs=True,
+        source_format=metadata.source_format,
+        struct_names=metadata.struct_names,
+        cod_path=metadata.cod_path,
+        cod_proc_kinds={addr + shift: kind for addr, kind in metadata.cod_proc_kinds.items()},
+    )
+
+
 def sidecar_metadata_cache_key(
     *,
     binary_path: Path | None,
@@ -90,7 +123,7 @@ def store_cached_sidecar_metadata(
 
 
 def apply_cached_sidecar_metadata(project, cached: CachedSidecarMetadata) -> LSTMetadata:
-    metadata = cached.metadata
+    metadata = _maybe_rebase_stale_absolute_metadata(cached.metadata, project)
     project._inertia_lst_metadata = metadata
     for addr, name in metadata.data_labels.items():
         project.kb.labels[addr] = name
@@ -108,7 +141,15 @@ def emit_sidecar_metadata_debug(project, metadata: LSTMetadata) -> None:
     )
     compiler_names = getattr(project, "_inertia_signature_compiler_names", ())
     if compiler_names:
-        print(f"[dbg] signature-matched compiler families: {', '.join(compiler_names[:4])}")
+        filtered_compiler_names = []
+        for name in compiler_names:
+            normalized = str(name).strip()
+            if not normalized or normalized.lower() in {"ida flair", "v"}:
+                continue
+            if normalized not in filtered_compiler_names:
+                filtered_compiler_names.append(normalized)
+        if filtered_compiler_names:
+            print(f"[dbg] signature-matched compiler versions: {', '.join(filtered_compiler_names[:4])}")
     flair_titles = getattr(project, "_inertia_flair_sig_titles", ())
     if flair_titles:
         print(f"[dbg] flair signature catalogs: {', '.join(flair_titles[:3])}")

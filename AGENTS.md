@@ -141,6 +141,11 @@ Do not prefer:
 
 Recovery must be derived from internal program evidence, not from external hints that merely look correlated.
 
+Short rule:
+
+- Always genuinely decompile non-library functions.
+- Do not replace non-library function bodies with copied source, `.COD` text, or metadata-backed stand-ins.
+
 Forbidden as semantic proof:
 
 - sample-specific address ranges
@@ -152,6 +157,18 @@ Forbidden as semantic proof:
 - "known sample" substitutions that skip recovery
 - replacing timeout/failure with guessed helper C because the pattern "looks familiar"
 - using validation diffs themselves as proof of the missing semantics
+- copying or replaying same-stem source text from sibling `.c`/`.C`/`.cod` files as decompiler output for the active target binary
+- using `.COD` or source listings as a substitute for actually recovering C from the binary
+
+Allowed metadata use from `.COD` sidecars:
+
+- function names
+- argument names
+- local/stack variable names
+- procedure ranges
+- known call names
+
+This metadata may improve labels and debug context, but it is not proof of recovered body semantics.
 
 Allowed only as temporary debugging aids, never as recovery logic:
 
@@ -386,6 +403,7 @@ Rules:
 - If validation is `changed`, `unknown`, or `uncollected`, report that state honestly rather than collapsing it into success.
 - Any fallback that emits C must be driven by structured evidence from recovered instructions, CFG, lifted IR, alias/type state, or another typed intermediate representation.
 - Pretty-printed assembly is diagnostic output only. It must not be the matching substrate for semantic recovery.
+- Do not emit fallback C by copying text from sibling source files or `.COD` listings for the same target unless the user explicitly requests a source-backed comparison or rescue.
 
 ## Honesty over heroics
 
@@ -399,6 +417,7 @@ Prefer:
 Do not:
 
 - silently replace failure with guessed high-level C
+- silently replace failure with copied source from same-stem `.c`/`.C`/`.cod`
 - treat uncollected work as if it disappeared
 - collapse uncertainty into fake confidence
 
@@ -410,6 +429,12 @@ Special rewrites, allowlists, or source-backed rescues are allowed only if:
 - they are clearly temporary
 - they do not block replacement by a general architectural layer
 - they are reported explicitly as temporary rescue logic rather than normal recovery
+
+Hard fuse:
+
+- For the active target binary, do not use same-stem source sidecars (`foo.c`, `foo.C`, `foo.cod`) as emitted decompiler output.
+- Those files may be used to validate addresses, calling context, symbols, or to compare recovered output against known source.
+- They may not be used to stand in for missing decompilation unless the user explicitly asks for a source-backed rescue.
 
 Required follow-up:
 
@@ -577,6 +602,58 @@ For example to inertia_decompiler/cli.py and ./angr_platforms/tests/test_x86_16_
 - Use Optional (X | None) explicitly
 - Create type aliases for complex types
 - Use Protocol for interfaces
+
+### Sidecar address validation
+
+For sidecar-derived function starts (`.COD`, `.LST`, CodeView, TDINFO):
+
+- Do not assume `base + offset` is correct for segmented, packed, or linker-reordered binaries.
+- Validate sidecar procedure starts against the loaded image using loader segment mappings and/or code-byte anchors.
+- If cached metadata claims `absolute_addrs=True`, sanity-check that claim against the current loaded image before reuse.
+- If one known sidecar region is recovered as several tiny CFG functions, treat that as a recovery failure, not a valid final result.
+
+### Cache discipline for recovery metadata
+
+Any change to:
+
+- sidecar parsing
+- rebasing/normalization
+- loader segment mapping
+- signature matching inputs
+- metadata absolute/relative interpretation
+
+must invalidate the corresponding cache key or schema.
+
+### Recovery-lane gating
+
+Do not suppress a later fallback lane unless an earlier verdict proves the later lane cannot add information.
+
+In particular:
+
+- bounded `decompile:empty` does not by itself justify skipping non-optimized recovery
+- low-quality generated C is not proof of semantic impossibility
+- lane-closure policy must be stronger than quality refusal policy
+
+### Cross-path quality consistency
+
+All recovery paths must use the same decompilation-quality predicate.
+
+Forbidden:
+- rejecting output in one path because it has any marker
+- accepting/rejecting output in another path with a different threshold
+
+Use one shared quality gate and one shared interpretation.
+
+### Required diagnostics for exact-region recovery
+
+When recovering a function from a sidecar-known exact region, log:
+
+- requested start/end
+- recovered block addresses
+- recovered byte count
+- number of CFG function entries inside the region
+
+If recovered coverage is substantially below the exact region, report it as truncation/splitting.
 
 ## Useful references
 

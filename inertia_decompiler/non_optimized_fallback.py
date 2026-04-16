@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from inertia_decompiler.slice_recovery import BoundedSliceVerdict
+
 
 def allows_heavy_fallbacks_for_run(
     *,
@@ -38,3 +40,12 @@ def describe_non_optimized_unavailable(
         stage_detail = f"stage={failure_stage or 'unknown'}"
         return f"{result_status} result keeps heavy fallback lane closed ({stage_detail})"
     return nonopt_failure_detail
+
+
+def sidecar_verdict_closes_non_optimized_lane(verdict: BoundedSliceVerdict | None) -> bool:
+    """Return whether a dead sidecar verdict makes the later non-opt lane redundant."""
+    if verdict is None:
+        return False
+    if verdict.can_widen_locally:
+        return False
+    return verdict.stage in {"build", "recover"}

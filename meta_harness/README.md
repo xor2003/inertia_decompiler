@@ -225,17 +225,17 @@ builds `RuntimeConfig` and `LlmConfig`, while still letting real environment
 variables win.
 
 For this repo, the local override is used to keep the sweep focused on
-`LIFE2.EXE` instead of staging COD files. Any repo-specific goals should live
-in the repo-local `.codex_harness.conf`, not in the shared harness defaults or
-generic harness documentation. `LIFE.EXE` remains compare-only oracle
-evidence, not part of the live lane. Before running `python -m meta_harness
---fresh`, make sure no active process owns `.codex_automation/run.lock`:
+`SORTDEMO.EXE` instead of staging COD files. Any repo-specific goals should
+live in the repo-local `.codex_harness.conf`, not in the shared harness
+defaults or generic harness documentation. Before running
+`python -m meta_harness --fresh`, make sure no active process owns
+`.codex_automation/run.lock`:
 
 For this repo's active lane, the intended prioritization is:
 
-- fix the most silly visible `LIFE2.EXE` outputs first
-- prefer empty/failed output, raw asm fallback, and obviously wrong fallback
-  families over subtle cleanup
+- fix the most silly visible `SORTDEMO.EXE` outputs first
+- prefer repeated failed passes, empty/failed output, and raw asm fallback over
+  subtle cleanup
 - keep architectural placement correct, but do not let subsystem purity outrank
   a clearly worse emitted result
 
@@ -251,5 +251,5 @@ PY
 
 If you see `curated evidence sweep` or `scripts/decompile_cod_dir.py`, then the
 repo-local config was not loaded and the harness is back on the fallback lane.
-If `cfg.compare_input_description` does not mention the repo's expected
-compare-only oracle setup, the repo-local config was not loaded.
+If `cfg.compare_input_description` does not mention the repo's active
+`SORTDEMO.EXE` lane, the repo-local config was not loaded.

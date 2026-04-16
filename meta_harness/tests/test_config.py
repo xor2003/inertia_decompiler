@@ -24,14 +24,14 @@ def test_runtime_config_reads_repo_harness_config_file(monkeypatch, tmp_path):
     monkeypatch.delenv("HARNESS_CONFIG", raising=False)
     harness_conf = tmp_path / ".codex_harness.conf"
     harness_conf.write_text(
-        'SWEEP_LABEL="LIFE2 focused sweep"\n'
-        'COMPARE_INPUT_DESCRIPTION="LIFE2 direct decompilation outputs, focused harness logs, and the current code state, treating LIFE.EXE as the same program without helper metadata: compare behavior, recovered functions, and output quality against LIFE.EXE, but do not import or reuse LIFE.EXE helper metadata"\n'
-        'PRIMARY_PRIORITY="raise LIFE2.EXE decompilation toward LIFE.EXE output quality while treating LIFE.EXE and LIFE2.EXE as the same code without helpers from LIFE.EXE"\n'
-        'SECONDARY_PRIORITY="recover roughly the same function count and comparable decompiled output for LIFE2.EXE as for LIFE.EXE, and prefer fully optimized output, but emit partially optimized decompiled functions instead of dropping to raw failure when a timeout happens"\n'
-        'GENERAL_IMPROVEMENT_RULE="Never add hacks specific to one source file or one sample; fixes must be general-purpose improvements, and for this repo treat LIFE.EXE as the same codebase oracle for LIFE2.EXE while never using LIFE.EXE as a source of helper metadata."\n'
+        'SWEEP_LABEL="SORTDEMO focused sweep"\n'
+        'COMPARE_INPUT_DESCRIPTION="SORTDEMO direct decompilation outputs, focused harness logs, and the current code state: compare repeated function attempts, fallback families, and file-level compiler/library summaries against the current SORTDEMO baseline"\n'
+        'PRIMARY_PRIORITY="raise SORTDEMO.EXE decompilation quality by removing repeated failed function passes and replacing avoidable asm fallback with real recovered C"\n'
+        'SECONDARY_PRIORITY="emit stable whole-file compiler/library summaries for SORTDEMO.EXE and keep harness retries bounded, measurable, and evidence-driven"\n'
+        'GENERAL_IMPROVEMENT_RULE="Never add hacks specific to one source file or one sample; fixes must be general-purpose improvements. For this repo keep the live lane on SORTDEMO.EXE, prefer bounded --addr repros over broad sweeps while debugging a function family, and stop retrying a lane once it repeats the same failure family without new evidence."\n'
         'REPO_STANDING_TASKS=$\'task one\\ntask two\'\n'
-        'EVIDENCE_INPUT_FILES=$\'LIFE2.EXE\\nPLAN.md\'\n'
-        'SWEEP_CMD="python -m demo life2"\n',
+        'EVIDENCE_INPUT_FILES=$\'SORTDEMO.EXE\\nPLAN.md\'\n'
+        'SWEEP_CMD="python -m demo sortdemo"\n',
         encoding="utf-8",
     )
     monkeypatch.delenv("EVIDENCE_INPUT_FILES", raising=False)
@@ -40,24 +40,24 @@ def test_runtime_config_reads_repo_harness_config_file(monkeypatch, tmp_path):
 
     cfg = RuntimeConfig.from_env([])
 
-    assert cfg.sweep_label == "LIFE2 focused sweep"
-    assert cfg.evidence_input_files == ["LIFE2.EXE", "PLAN.md"]
-    assert cfg.sweep_cmd == "python -m demo life2"
+    assert cfg.sweep_label == "SORTDEMO focused sweep"
+    assert cfg.evidence_input_files == ["SORTDEMO.EXE", "PLAN.md"]
+    assert cfg.sweep_cmd == "python -m demo sortdemo"
     assert (
         cfg.compare_input_description
-        == "LIFE2 direct decompilation outputs, focused harness logs, and the current code state, treating LIFE.EXE as the same program without helper metadata: compare behavior, recovered functions, and output quality against LIFE.EXE, but do not import or reuse LIFE.EXE helper metadata"
+        == "SORTDEMO direct decompilation outputs, focused harness logs, and the current code state: compare repeated function attempts, fallback families, and file-level compiler/library summaries against the current SORTDEMO baseline"
     )
     assert (
         cfg.primary_priority
-        == "raise LIFE2.EXE decompilation toward LIFE.EXE output quality while treating LIFE.EXE and LIFE2.EXE as the same code without helpers from LIFE.EXE"
+        == "raise SORTDEMO.EXE decompilation quality by removing repeated failed function passes and replacing avoidable asm fallback with real recovered C"
     )
     assert (
         cfg.secondary_priority
-        == "recover roughly the same function count and comparable decompiled output for LIFE2.EXE as for LIFE.EXE, and prefer fully optimized output, but emit partially optimized decompiled functions instead of dropping to raw failure when a timeout happens"
+        == "emit stable whole-file compiler/library summaries for SORTDEMO.EXE and keep harness retries bounded, measurable, and evidence-driven"
     )
     assert (
         cfg.general_improvement_rule
-        == "Never add hacks specific to one source file or one sample; fixes must be general-purpose improvements, and for this repo treat LIFE.EXE as the same codebase oracle for LIFE2.EXE while never using LIFE.EXE as a source of helper metadata."
+        == "Never add hacks specific to one source file or one sample; fixes must be general-purpose improvements. For this repo keep the live lane on SORTDEMO.EXE, prefer bounded --addr repros over broad sweeps while debugging a function family, and stop retrying a lane once it repeats the same failure family without new evidence."
     )
     assert cfg.repo_standing_tasks == ["task one", "task two"]
 

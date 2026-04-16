@@ -6,7 +6,11 @@ from functools import lru_cache
 from pathlib import Path
 
 import angr
-from angr_platforms.X86_16.cod_extract import CODListingMetadata, extract_cod_listing_metadata
+from angr_platforms.X86_16.cod_extract import (
+    CODListingMetadata,
+    extract_cod_function_entries,
+    extract_cod_listing_metadata,
+)
 from angr_platforms.X86_16.codeview_nb00 import parse_codeview_nb00
 from angr_platforms.X86_16.codeview_nb02_nb04 import parse_codeview_nb0204_bytes
 from angr_platforms.X86_16.flair_extract import list_flair_sig_libraries, match_flair_startup_entry
@@ -254,18 +258,58 @@ def _parse_cod_sidecar_metadata(
     *,
     load_base_linear: int,
     existing_code_labels: dict[int, str] | None = None,
+    project: angr.Project | None = None,
 ) -> CODListingMetadata:
     metadata = extract_cod_listing_metadata(cod_path)
     existing = existing_code_labels or {}
+    base_candidates: dict[int, int] = {}
     delta_candidates: dict[int, int] = {}
     normalized_existing = {name.lstrip("_"): addr for addr, name in existing.items()}
     for offset, name in metadata.code_labels.items():
         existing_addr = normalized_existing.get(name.lstrip("_"))
         if existing_addr is None:
             continue
-        delta = existing_addr - offset
-        delta_candidates[delta] = delta_candidates.get(delta, 0) + 1
-    cod_linear_base = sorted(delta_candidates.items(), key=lambda item: (-item[1], item[0]))[0][0] if delta_candidates else load_base_linear
+        base = existing_addr - offset
+        base_candidates[base] = base_candidates.get(base, 0) + 1
+    if project is not None:
+        memory = getattr(getattr(project, "loader", None), "memory", None)
+        if memory is not None:
+            for offset, name in metadata.code_labels.items():
+                proc_kind = metadata.proc_kinds.get(offset, "NEAR")
+                try:
+                    entries = extract_cod_function_entries(cod_path, name, proc_kind)
+                except Exception:
+                    continue
+                prefix = bytearray()
+                for entry in entries:
+                    entry_bytes = entry.get("bytes")
+                    if not isinstance(entry_bytes, (bytes, bytearray)):
+                        continue
+                    for idx, byte in enumerate(entry_bytes):
+                        if idx + 2 < len(entry_bytes) and byte in {0xE8, 0xE9, 0x9A}:
+                            break
+                        prefix.append(byte)
+                        if len(prefix) >= 6:
+                            break
+                    if len(prefix) >= 6:
+                        break
+                if len(prefix) < 3:
+                    continue
+                expected = load_base_linear + offset
+                for delta in range(-0x20, 0x21):
+                    candidate = expected + delta
+                    try:
+                        observed = bytes(memory.load(candidate, len(prefix)))
+                    except Exception:
+                        continue
+                    if observed == bytes(prefix):
+                        delta_candidates[delta] = delta_candidates.get(delta, 0) + 1
+                        break
+    cod_linear_base = load_base_linear
+    if base_candidates:
+        cod_linear_base = sorted(base_candidates.items(), key=lambda item: (-item[1], item[0]))[0][0]
+    if delta_candidates:
+        cod_linear_base = load_base_linear + sorted(delta_candidates.items(), key=lambda item: (-item[1], abs(item[0]), item[0]))[0][0]
     code_labels = {cod_linear_base + offset: name.lstrip("_") for offset, name in metadata.code_labels.items()}
     code_ranges = {
         cod_linear_base + offset: (cod_linear_base + span[0], cod_linear_base + span[1])

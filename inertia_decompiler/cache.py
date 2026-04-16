@@ -8,7 +8,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 
-DECOMPILATION_CACHE_SCHEMA = 1
+DECOMPILATION_CACHE_SCHEMA = 2
 DECOMPILATION_CACHE_DIR = _ROOT / ".inertia_decomp_cache"
 RECOVERY_CACHE_SOURCE_FILES = (
     _ROOT / "decompile.py",

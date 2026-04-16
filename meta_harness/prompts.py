@@ -121,7 +121,7 @@ def build_planner_prompt(
         "- If the harness/control loop itself is causing retries, stalls, or planning drift, treat harness simplification as a valid first-class fix.\n"
         "- Prefer the simplest control flow that preserves quality; if the harness grew more complex than needed for the current lane, plan to simplify it instead of layering on more policy.\n"
         "- If the decompiler issue cannot be solved cleanly inside the current project architecture, plan the smallest architectural improvement that makes the fix honest.\n"
-        "- When the active compare lane is output quality (for example LIFE2.EXE vs LIFE.EXE), rank candidate work by the most silly visible defect first: failed/empty output, raw asm fallback, wrong fallback family, broken control flow, nonsense memory/segment expressions, then subtler cleanup.\n"
+        "- When the active compare lane is output quality (for example SORTDEMO.EXE or another active target versus its current baseline), rank candidate work by the most silly visible defect first: failed/empty output, raw asm fallback, wrong fallback family, broken control flow, nonsense memory/segment expressions, then subtler cleanup.\n"
         "- Prefer architecturally correct placement over convenience; do not default to fallback text cleanup or late rewrite when an earlier typed layer can carry the invariant.\n"
         "- If more than one placement looks plausible, compare them briefly and pick the one with the least semantic debt.\n"
         "- When a harness-side change and a decompiler-side change are both plausible, prefer the one that removes the real blocker with less long-term complexity.\n"

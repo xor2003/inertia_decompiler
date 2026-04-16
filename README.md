@@ -16,7 +16,6 @@ This repo is not aiming to be a source-shaped transpiler. When evidence is weak,
 - **Decompiler CLI that works on real DOS inputs**: whole-binary or single-function recovery from `.COM`, `.EXE`, raw blobs, and `.COD`
 - **Sidecar-aware recovery**: `.COD`, `.LST`, `.MAP`, CodeView, and TDINFO metadata improve labels, ranges, and emitted C
 - **Evidence-backed fallback modes**: timeouts and lift failures stay visible instead of being silently replaced with guessed output
-- **Peer-EXE catalog borrowing**: sibling executables can donate labels only when function bytes match exactly across the full claimed span
 - **Library signature support**: import `.pat`, OMF `.obj`, and OMF `.lib` into a deduplicated PAT catalog
 - **Tail validation**: semantic checks on late pipeline output instead of trusting cleanup blindly
 - **Batch corpus tooling**: decompile whole `.COD` trees into sibling `.dec` outputs with bounded workers and validation baselines
@@ -44,7 +43,6 @@ This repo is not aiming to be a source-shaped transpiler. When evidence is weak,
 | CodeView NB00 / NB02 / NB04 | symbol/type/debug metadata when embedded |
 | TDINFO | Borland/Turbo Debugger symbol metadata |
 | `.pat` / OMF `.obj` / OMF `.lib` | library signature matching via deduplicated PAT catalogs |
-| peer `.EXE` siblings | exact-match catalog borrowing, reported as `peer_exe` evidence |
 
 ## CLI
 
@@ -93,10 +91,8 @@ When recovery fails or times out, the CLI reports that directly and may emit one
 
 - partial-timeout C
 - sidecar-slice C
-- peer-sidecar C
 - trivial sidecar C
 - non-optimized fallback C
-- string-intrinsic fallback C
 - assembly fallback
 - lift-break probes
 

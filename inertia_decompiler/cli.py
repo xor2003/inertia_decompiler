@@ -91,9 +91,16 @@ from inertia_decompiler import cli_segmented_lowering as _cli_segmented_lowering
 from inertia_decompiler import cli_segmented_load_coalesce as _cli_segmented_load_coalesce
 from inertia_decompiler import cli_segmented_store_coalesce as _cli_segmented_store_coalesce
 from inertia_decompiler import cli_word_loads as _cli_word_loads
+from inertia_decompiler.c_text_cleanup import normalize_unresolved_c_text
 from inertia_decompiler.default_signature_catalog import default_signature_catalog_path
 from inertia_decompiler.decompilation_quality import assess_decompiled_c_text
+from inertia_decompiler.decompile_file_summary import emit_file_decompilation_summary
 from inertia_decompiler.sidecar_policy import metadata_has_precise_code_regions
+from inertia_decompiler.x86_16_exact_slice import (
+    function_original_addr,
+    mark_function_original_addr,
+    plan_x86_16_exact_slice,
+)
 from inertia_decompiler.tail_validation import (
     TAIL_VALIDATION_ENABLE_ENV as _TAIL_VALIDATION_ENABLE_ENV,
     emit_tail_validation_console_summary as _emit_tail_validation_console_summary,
@@ -121,6 +128,7 @@ from inertia_decompiler.runtime_support import (
     default_exe_showcase_cap as _default_exe_showcase_cap,
     emit_timeout_and_exit as _emit_timeout_and_exit,
     format_address as _format_address,
+    guard_angr_ail_narrowing as _guard_angr_ail_narrowing,
     guard_angr_clinic_stage_markers as _guard_angr_clinic_stage_markers,
     guard_angr_peephole_expr_bitwidth_assertion as _guard_angr_peephole_expr_bitwidth_assertion,
     guard_angr_variable_recovery_binop_sub_size_mismatch as _guard_angr_variable_recovery_binop_sub_size_mismatch,
@@ -149,6 +157,7 @@ from inertia_decompiler.work_items import (
     tail_validation_display_status as _tail_validation_display_status,
 )
 from inertia_decompiler.slice_recovery import (
+    BoundedSliceVerdict,
     SliceRecoveryAttemptOutcome,
     build_default_slice_recovery_attempts,
     run_bounded_slice_recovery,
@@ -157,6 +166,7 @@ from inertia_decompiler.non_optimized_fallback import (
     allows_heavy_fallbacks_for_run,
     bounded_non_optimized_attempt_timeout,
     describe_non_optimized_unavailable,
+    sidecar_verdict_closes_non_optimized_lane,
 )
 
 print = _timestamped_print
@@ -170,6 +180,7 @@ class NonOptimizedSliceOutcome:
     partial_payload: str | None = None
     failure_detail: str | None = None
     attempt_failures: tuple[str, ...] = ()
+    verdict: BoundedSliceVerdict | None = None
 
 
 def _non_optimized_slice_rendered(
@@ -266,7 +277,6 @@ from angr_platforms.X86_16.cod_extract import (
     join_cod_entries_with_synthetic_globals,
 )
 from angr_platforms.X86_16.cod_known_objects import known_cod_object_spec
-from angr_platforms.X86_16.cod_source_rewrites import apply_cod_source_rewrites as _apply_cod_source_rewrites
 from angr_platforms.X86_16.cod_source_rewrites import rewrite_known_cod_object_fields_from_source
 from angr_platforms.X86_16.lst_extract import LSTMetadata
 from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -952,7 +962,7 @@ def _try_decompile_sidecar_slice(
     timeout: int,
     api_style: str,
     binary_path: Path | None,
-) -> tuple[str, str] | None:
+) -> SliceRecoveryAttemptOutcome | None:
     region = _lst_code_region(lst_metadata, addr)
     if region is None:
         return None
@@ -965,16 +975,22 @@ def _try_decompile_sidecar_slice(
         return None
 
     def _recover_and_decompile():
+        slice_plan = plan_x86_16_exact_slice(start, end) if project.arch.name == "86_16" else None
+        slice_start = slice_plan.slice_start if slice_plan is not None else start
+        slice_end = slice_plan.slice_end if slice_plan is not None else end
         recovery_attempts = build_default_slice_recovery_attempts(
-            start,
-            end,
+            slice_start,
+            slice_end,
             pick_function_lean=_pick_function_lean,
             pick_function=_pick_function,
         )
-        last_failure: tuple[str, str] | None = None
-
         def _decompile_attempt(attempt_name, slice_project, cfg, func):
             func.name = name
+            if slice_plan is not None:
+                mark_function_original_addr(func, start)
+                slice_project._inertia_disable_ail_narrowing = True
+                slice_project._inertia_disable_complex_expr_scan = True
+                slice_project._inertia_fast_block_peephole = True
             status, payload, *_ = _decompile_function_with_stats(
                 slice_project,
                 cfg,
@@ -985,7 +1001,7 @@ def _try_decompile_sidecar_slice(
                 lst_metadata=lst_metadata,
                 allow_isolated_retry=False,
             )
-            if status == "ok" and assess_decompiled_c_text(payload).markers:
+            if status == "ok" and assess_decompiled_c_text(payload).reject_as_decompiled:
                 status = "empty"
                 payload = "Sidecar slice decompilation remained unresolved after bounded recovery."
             snapshot = _tail_validation_snapshot_for_function_run(slice_project, func)
@@ -998,8 +1014,29 @@ def _try_decompile_sidecar_slice(
 
         outcomes = run_bounded_slice_recovery(
             recovery_attempts,
-            build_slice_project=lambda: _build_project_from_bytes(code, base_addr=start, entry_point=start),
-            inherit_runtime_policy=lambda slice_project: _inherit_tail_validation_runtime_policy(slice_project, project),
+            build_slice_project=lambda: _build_project_from_bytes(
+                code,
+                base_addr=slice_start,
+                entry_point=slice_start,
+            ),
+            inherit_runtime_policy=lambda slice_project: (
+                setattr(slice_project, "_inertia_original_project", project)
+                if slice_plan is not None
+                else None,
+                setattr(slice_project, "_inertia_original_linear_delta", start - slice_start)
+                if slice_plan is not None
+                else None,
+                setattr(slice_project, "_inertia_disable_ail_narrowing", True)
+                if slice_plan is not None
+                else None,
+                setattr(slice_project, "_inertia_disable_complex_expr_scan", True)
+                if slice_plan is not None
+                else None,
+                setattr(slice_project, "_inertia_fast_block_peephole", True)
+                if slice_plan is not None
+                else None,
+                _inherit_tail_validation_runtime_policy(slice_project, project),
+            )[-1],
             describe_exception=_describe_exception,
             decompile=_decompile_attempt,
         )
@@ -1009,11 +1046,14 @@ def _try_decompile_sidecar_slice(
                     setattr(project, "_inertia_last_tail_validation_snapshot", dict(attempt.snapshot))
                 if attempt.attempt_name != "lean":
                     print(f"[dbg] sidecar slice fallback recovered {addr:#x} {name} via {attempt.attempt_name}")
-                return attempt.status, attempt.payload
-            last_failure = (attempt.status, attempt.payload)
-        if last_failure is None:
-            return "error", "sidecar slice recovery did not run"
-        return last_failure
+                return attempt
+        if not outcomes:
+            return SliceRecoveryAttemptOutcome(
+                attempt_name="sidecar-slice",
+                status="error",
+                payload="sidecar slice recovery did not run",
+            )
+        return outcomes[-1]
 
     try:
         runner_timeout = max(2, min(timeout, 8))
@@ -1023,21 +1063,18 @@ def _try_decompile_sidecar_slice(
             and threading.active_count() == 1
             and isinstance(project, angr.Project)
         ):
-            status, payload = _run_with_timeout_in_fork(
+            return _run_with_timeout_in_fork(
                 _recover_and_decompile,
                 timeout=runner_timeout,
             )
         else:
-            status, payload = _run_with_timeout_in_daemon_thread(
+            return _run_with_timeout_in_daemon_thread(
                 _recover_and_decompile,
                 timeout=runner_timeout,
                 thread_name_prefix="slice-fallback",
             )
     except Exception:
         return None
-    if status != "ok":
-        return None
-    return status, payload
 
 
 def _try_decompile_non_optimized_slice(
@@ -1056,9 +1093,17 @@ def _try_decompile_non_optimized_slice(
     # not a stable primary decompilation result.
 
     def _attempt(slice_source_project: angr.Project, *, label: str) -> NonOptimizedSliceOutcome:
+        arch_name = getattr(getattr(slice_source_project, "arch", None), "name", None)
         region = _lst_code_region(lst_metadata, addr)
         if region is None:
-            region = _infer_linear_disassembly_window(slice_source_project, addr, max_window=0x240)
+            if arch_name == "86_16" and addr == getattr(slice_source_project, "entry", None):
+                main_object = getattr(slice_source_project.loader, "main_object", None)
+                linked_base = getattr(main_object, "linked_base", None)
+                max_addr = getattr(main_object, "max_addr", None)
+                if isinstance(linked_base, int) and isinstance(max_addr, int):
+                    region = (linked_base, linked_base + max_addr + 1)
+            if region is None:
+                region = _infer_linear_disassembly_window(slice_source_project, addr, max_window=0x240)
         start, end = region
         if end <= start:
             detail = f"{label}: invalid slice window {start:#x}-{end:#x}"
@@ -1081,21 +1126,34 @@ def _try_decompile_non_optimized_slice(
                 attempt_failures=(detail,),
             )
         snapshot_holder: dict[str, dict[str, object] | None] = {"value": None}
+        slice_plan = plan_x86_16_exact_slice(start, end) if arch_name == "86_16" else None
+        slice_start = slice_plan.slice_start if slice_plan is not None else start
+        slice_end = slice_plan.slice_end if slice_plan is not None else end
+        reuse_existing_slice_project = (
+            lst_metadata is None
+            and arch_name == "86_16"
+            and addr == getattr(slice_source_project, "entry", None)
+        )
         recovery_attempts = build_default_slice_recovery_attempts(
-            start,
-            end,
+            slice_start,
+            slice_end,
             pick_function_lean=_pick_function_lean,
             pick_function=_pick_function,
         )
 
         def _decompile_attempt(attempt_name, slice_project, cfg, func):
             if not isinstance(getattr(func, "addr", None), int):
-                func.addr = start
+                func.addr = slice_start
             if not hasattr(func, "normalized"):
                 func.normalized = True
             func.name = name
-            _prepare_function_for_decompilation(slice_project, func)
             effective_cod_metadata = cod_metadata
+            if slice_plan is not None:
+                mark_function_original_addr(func, start)
+                slice_project._inertia_disable_ail_narrowing = True
+                slice_project._inertia_disable_complex_expr_scan = True
+                slice_project._inertia_fast_block_peephole = True
+            _prepare_function_for_decompilation(slice_project, func, effective_cod_metadata)
             if effective_cod_metadata is None:
                 effective_cod_metadata = _sidecar_cod_metadata_for_function(
                     slice_project,
@@ -1116,7 +1174,7 @@ def _try_decompile_non_optimized_slice(
                 enable_postprocess=False,
                 allow_isolated_retry=False,
             )
-            if status == "ok" and assess_decompiled_c_text(payload).markers:
+            if status == "ok" and assess_decompiled_c_text(payload).reject_as_decompiled:
                 status = "empty"
                 payload = "Non-optimized slice decompilation remained unresolved after bounded recovery."
             if not isinstance(partial_payload, str):
@@ -1130,7 +1188,7 @@ def _try_decompile_non_optimized_slice(
                 snapshot=dict(snapshot) if isinstance(snapshot, dict) else None,
             )
 
-        def _run_bounded_attempt(attempt_name: str, job):
+        def _run_bounded_attempt(attempt_name: str, job, trace_snapshot):
             attempt_timeout = bounded_non_optimized_attempt_timeout(timeout)
             try:
                 if (
@@ -1148,48 +1206,101 @@ def _try_decompile_non_optimized_slice(
                     timeout=attempt_timeout,
                     thread_name_prefix=f"nonopt-attempt-{attempt_name}",
                 )
+            except TimeoutError as ex:
+                return SliceRecoveryAttemptOutcome(
+                    attempt_name=attempt_name,
+                    status="timeout",
+                    payload=_describe_exception(ex),
+                    attempt_trace=trace_snapshot(),
+                )
             except Exception as ex:  # noqa: BLE001
                 return SliceRecoveryAttemptOutcome(
                     attempt_name=attempt_name,
                     status="error",
                     payload=f"{attempt_name} bounded attempt: {_describe_exception(ex)}",
+                    attempt_trace=trace_snapshot(),
                 )
 
         outcomes = run_bounded_slice_recovery(
             recovery_attempts,
-            build_slice_project=lambda: _build_project_from_bytes(code, base_addr=start, entry_point=start),
+            build_slice_project=(
+                (lambda: slice_source_project)
+                if reuse_existing_slice_project
+                else lambda: _build_project_from_bytes(
+                    code,
+                    base_addr=slice_start,
+                    entry_point=slice_start,
+                )
+            ),
             inherit_runtime_policy=lambda slice_project: _inherit_tail_validation_runtime_policy(
                 slice_project,
                 slice_source_project,
-            ),
+            ) if slice_plan is None else (
+                setattr(slice_project, "_inertia_original_project", slice_source_project),
+                setattr(slice_project, "_inertia_original_linear_delta", start - slice_start),
+                setattr(slice_project, "_inertia_disable_ail_narrowing", True),
+                setattr(slice_project, "_inertia_disable_complex_expr_scan", True),
+                setattr(slice_project, "_inertia_fast_block_peephole", True),
+                _inherit_tail_validation_runtime_policy(slice_project, slice_source_project),
+            )[-1],
             describe_exception=_describe_exception,
             decompile=_decompile_attempt,
             run_attempt=_run_bounded_attempt,
         )
+
+        def _attempt_failure_detail(attempt: SliceRecoveryAttemptOutcome) -> str:
+            detail = f"{label} {attempt.attempt_name}: {attempt.status}: {attempt.payload}"
+            if attempt.verdict is None:
+                return detail
+            tags: list[str] = []
+            if attempt.verdict.stage:
+                tags.append(f"stage={attempt.verdict.stage}")
+            if attempt.verdict.stop_family:
+                tags.append(f"stop_family={attempt.verdict.stop_family}")
+            if tags:
+                detail += f" ({', '.join(tags)})"
+            return detail
+
         def _recover_and_summarize() -> NonOptimizedSliceOutcome:
             failure_details: list[str] = []
             best_partial: SliceRecoveryAttemptOutcome | None = None
+            final_verdict: BoundedSliceVerdict | None = None
             for attempt in outcomes:
                 if isinstance(attempt.snapshot, dict):
                     snapshot_holder["value"] = dict(attempt.snapshot)
+                if attempt.verdict is not None:
+                    final_verdict = attempt.verdict
                 if attempt.status == "ok":
                     return NonOptimizedSliceOutcome(
                         rendered=attempt.payload,
                         status="ok",
                         payload=attempt.payload,
+                        verdict=attempt.verdict,
                     )
-                failure_detail = f"{label} {attempt.attempt_name}: {attempt.status}: {attempt.payload}"
+                failure_detail = _attempt_failure_detail(attempt)
                 failure_details.append(failure_detail)
                 if attempt.partial_payload is not None and best_partial is None:
                     best_partial = attempt
+            if (
+                outcomes
+                and outcomes[-1].verdict is not None
+                and not outcomes[-1].verdict.can_widen_locally
+                and outcomes[-1].attempt_name != recovery_attempts[-1][0]
+            ):
+                pruned_lane = recovery_attempts[len(outcomes)][0]
+                failure_details.append(
+                    f"{label}: pruned local lane {pruned_lane} after repeated "
+                    f"{outcomes[-1].verdict.stage or 'unknown'}:{outcomes[-1].verdict.stop_family or 'unknown'}"
+                )
             if best_partial is not None:
                 return NonOptimizedSliceOutcome(
                     rendered=best_partial.partial_payload,
                     status=best_partial.status,
                     payload=best_partial.payload,
                     partial_payload=best_partial.partial_payload,
-                    failure_detail=f"{label} {best_partial.attempt_name}: {best_partial.status}: {best_partial.payload}",
+                    failure_detail=_attempt_failure_detail(best_partial),
                     attempt_failures=tuple(failure_details),
+                    verdict=best_partial.verdict,
                 )
             failure_detail = "; ".join(failure_details[:3]) if failure_details else None
             return NonOptimizedSliceOutcome(
@@ -1198,6 +1309,7 @@ def _try_decompile_non_optimized_slice(
                 payload=failure_detail or f"{label}: non-optimized slice recovery did not run",
                 failure_detail=failure_detail,
                 attempt_failures=tuple(failure_details),
+                verdict=final_verdict,
             )
         outcome = _recover_and_summarize()
 
@@ -1208,6 +1320,69 @@ def _try_decompile_non_optimized_slice(
             print(f"[dbg] non-optimized fallback produced partial output for {addr:#x} {name} via {label}")
         return outcome
 
+
+def _try_decompile_non_optimized_known_function(
+    project: angr.Project,
+    cfg,
+    function,
+    *,
+    timeout: int,
+    api_style: str,
+    binary_path: Path | None,
+    lst_metadata: LSTMetadata | None,
+    cod_metadata: CODProcMetadata | None = None,
+    synthetic_globals: dict[int, tuple[str, int]] | None = None,
+) -> NonOptimizedSliceOutcome:
+    effective_cod_metadata = cod_metadata or _sidecar_cod_metadata_for_function(
+        project,
+        function,
+        binary_path,
+        lst_metadata,
+    )
+    _prepare_function_for_decompilation(project, function, effective_cod_metadata)
+    status, payload, partial_payload, *_ = _decompile_function_with_stats(
+        project,
+        cfg,
+        function,
+        max(1, min(timeout, 4)),
+        api_style,
+        binary_path,
+        cod_metadata=effective_cod_metadata,
+        synthetic_globals=synthetic_globals,
+        lst_metadata=lst_metadata,
+        enable_structured_simplify=False,
+        enable_postprocess=False,
+        allow_isolated_retry=False,
+    )
+    if status == "ok" and assess_decompiled_c_text(payload).reject_as_decompiled:
+        status = "empty"
+        payload = "Known-function non-optimized decompilation remained unresolved."
+    if not isinstance(partial_payload, str):
+        partial_payload = None
+    failure_detail = f"known-function nonopt: {status}: {payload}"
+    if status == "ok":
+        return NonOptimizedSliceOutcome(
+            rendered=payload,
+            status="ok",
+            payload=payload,
+        )
+    if partial_payload is not None:
+        return NonOptimizedSliceOutcome(
+            rendered=partial_payload,
+            status=status,
+            payload=payload,
+            partial_payload=partial_payload,
+            failure_detail=failure_detail,
+            attempt_failures=(failure_detail,),
+        )
+    return NonOptimizedSliceOutcome(
+        rendered=None,
+        status=status,
+        payload=payload,
+        failure_detail=failure_detail,
+        attempt_failures=(failure_detail,),
+    )
+
     outcome = _attempt(project, label="shared-project slice")
     if outcome.rendered is not None:
         return outcome
@@ -1217,7 +1392,12 @@ def _try_decompile_non_optimized_slice(
         retry_failures.extend(outcome.attempt_failures)
     elif outcome.failure_detail is not None:
         retry_failures.append(outcome.failure_detail)
-    should_try_fresh_project = allow_fresh_project_retry and binary_path is not None and timeout > 3
+    should_try_fresh_project = (
+        allow_fresh_project_retry
+        and binary_path is not None
+        and timeout > 3
+        and (outcome.verdict is None or outcome.verdict.can_retry_with_fresh_project)
+    )
     if should_try_fresh_project:
         try:
             fresh_project = _build_project_cached(
@@ -1239,8 +1419,14 @@ def _try_decompile_non_optimized_slice(
             elif outcome.failure_detail is not None:
                 retry_failures.append(outcome.failure_detail)
     elif allow_fresh_project_retry and binary_path is not None:
+        skip_reason = (
+            f"verdict vetoed fresh-project retry ({outcome.verdict.stage or 'unknown'}:"
+            f"{outcome.verdict.stop_family or 'unknown'})"
+            if outcome.verdict is not None and not outcome.verdict.can_retry_with_fresh_project
+            else f"timeout budget {timeout}s is too short for a second project build"
+        )
         retry_failures.append(
-            f"fresh-project slice skipped: timeout budget {timeout}s is too short for a second project build"
+            f"fresh-project slice skipped: {skip_reason}"
         )
 
     failure_detail = "; ".join(retry_failures[:3]) if retry_failures else None
@@ -1252,6 +1438,7 @@ def _try_decompile_non_optimized_slice(
         payload=failure_detail or f"non-optimized fallback unavailable for {addr:#x} {name}",
         failure_detail=failure_detail,
         attempt_failures=tuple(retry_failures),
+        verdict=outcome.verdict,
     )
 
 
@@ -1335,8 +1522,10 @@ def _try_decompile_peer_sidecar_slice(
             peer_snapshot = getattr(peer_project, "_inertia_last_tail_validation_snapshot", None)
             if isinstance(peer_snapshot, dict):
                 setattr(project, "_inertia_last_tail_validation_snapshot", dict(peer_snapshot))
+            if slice_result.status != "ok":
+                continue
             print(f"[dbg] peer sidecar fallback recovered {addr:#x} {peer_name} from {peer_path.name}")
-            return slice_result[1]
+            return slice_result.payload
     return None
 
 
@@ -1459,6 +1648,16 @@ def _exact_region_recovery_looks_truncated(
         return False
     _blocks, total_bytes = _function_recovery_score(function)
     return total_bytes < max(0x20, region_size // 3)
+
+
+def _count_region_local_functions(cfg, exact_region: tuple[int, int] | None) -> int:
+    if exact_region is None or cfg is None:
+        return 0
+    functions = getattr(cfg, "functions", None)
+    if functions is None:
+        return 0
+    start, end = exact_region
+    return sum(1 for addr in functions.keys() if isinstance(addr, int) and start <= addr < end)
 
 
 def _function_recovery_truncated(function) -> bool:
@@ -3070,11 +3269,11 @@ def _decompile_function(
             project,
             binary_path,
             lst_metadata,
-            func_addr=function.addr,
+            func_addr=function_original_addr(function),
             cod_metadata=effective_cod_metadata,
             synthetic_globals=synthetic_globals,
         )
-        _prepare_function_for_decompilation(project, function)
+        _prepare_function_for_decompilation(project, function, effective_cod_metadata)
         seed_calling_conventions(cfg)
         block_count, byte_count = _function_complexity(function)
         profile = _function_decompilation_profile(function, block_count, byte_count)
@@ -3127,7 +3326,7 @@ def _decompile_function(
             return None
         try:
             with _guard_angr_peephole_expr_bitwidth_assertion():
-                with _guard_angr_variable_recovery_binop_sub_size_mismatch():
+                with _guard_angr_variable_recovery_binop_sub_size_mismatch(project):
                     with _analysis_timeout(_remaining_timeout(max(1, min(timeout, 2)))):
                         clinic_analysis(function)
         except _AnalysisTimeout:
@@ -3212,27 +3411,28 @@ def _decompile_function(
 
     dec = None
     try:
-                with _guard_angr_peephole_expr_bitwidth_assertion():
-                    with _guard_angr_variable_recovery_binop_sub_size_mismatch():
-                        with _guard_angr_clinic_stage_markers(project):
-                            with _analysis_timeout(_remaining_timeout()):
-                                if decompiler_options is None:
+        with _guard_angr_peephole_expr_bitwidth_assertion(project):
+            with _guard_angr_variable_recovery_binop_sub_size_mismatch(project):
+                with _guard_angr_ail_narrowing(project):
+                    with _guard_angr_clinic_stage_markers(project):
+                        with _analysis_timeout(_remaining_timeout()):
+                            if decompiler_options is None:
+                                dec = project.analyses.Decompiler(function, cfg=cfg)
+                            else:
+                                dec = project.analyses.Decompiler(function, cfg=cfg, options=decompiler_options)
+                            if dec.codegen is None:
+                                fallback_options = None if decompiler_options is not None else [("structurer_cls", "Phoenix")]
+                                logging.getLogger(__name__).debug(
+                                    "Selected decompiler structurer produced no code for %s; retrying with %s.",
+                                    function,
+                                    "SAILR" if decompiler_options is not None else "Phoenix",
+                                )
+                                if fallback_options is None:
                                     dec = project.analyses.Decompiler(function, cfg=cfg)
                                 else:
-                                    dec = project.analyses.Decompiler(function, cfg=cfg, options=decompiler_options)
-                                if dec.codegen is None:
-                                    fallback_options = None if decompiler_options is not None else [("structurer_cls", "Phoenix")]
-                                    logging.getLogger(__name__).debug(
-                                        "Selected decompiler structurer produced no code for %s; retrying with %s.",
-                                        function,
-                                        "SAILR" if decompiler_options is not None else "Phoenix",
-                                    )
-                                    if fallback_options is None:
-                                        dec = project.analyses.Decompiler(function, cfg=cfg)
-                                    else:
-                                        dec = project.analyses.Decompiler(function, cfg=cfg, options=fallback_options)
-                                print(f"[dbg] Decompiler returned for {hex(function.addr)}")
-                                sys.stdout.flush()
+                                    dec = project.analyses.Decompiler(function, cfg=cfg, options=fallback_options)
+                            print(f"[dbg] Decompiler returned for {hex(function.addr)}")
+                            sys.stdout.flush()
     except _AnalysisTimeout:
         partial_payload = None
         if dec is not None and getattr(dec, "codegen", None) is not None:
@@ -3479,6 +3679,7 @@ def _decompile_function(
     formatted = _normalize_spurious_duplicate_local_suffixes(formatted)
     formatted = _dedupe_adjacent_prototype_lines(formatted)
     formatted = _sanitize_mangled_autonames_text(formatted)
+    formatted = normalize_unresolved_c_text(formatted)
     if not (
         binary_path is not None
         and binary_path.name.lower().endswith(".cod")
@@ -3544,7 +3745,23 @@ def _function_complexity(function):
     return complexity
 
 
-def _register_direct_call_target_function_stubs(project: angr.Project, function) -> int:
+def _register_direct_call_target_function_stubs(project: angr.Project, function, cod_metadata: CODProcMetadata | None = None) -> int:
+    def _original_callee_name(slice_target: int) -> str | None:
+        original_project = getattr(project, "_inertia_original_project", None)
+        original_delta = getattr(project, "_inertia_original_linear_delta", None)
+        if original_project is None or not isinstance(original_delta, int):
+            return None
+        original_target = slice_target + original_delta
+        label = getattr(getattr(original_project, "kb", None), "labels", {}).get(original_target)
+        if isinstance(label, str) and label:
+            return label
+        metadata = getattr(original_project, "_inertia_lst_metadata", None)
+        if metadata is not None:
+            label = getattr(metadata, "code_labels", {}).get(original_target)
+            if isinstance(label, str) and label:
+                return label
+        return None
+
     if getattr(getattr(project, "arch", None), "name", None) != "86_16":
         return 0
     main_object = getattr(getattr(project, "loader", None), "main_object", None)
@@ -3590,6 +3807,11 @@ def _register_direct_call_target_function_stubs(project: angr.Project, function)
     created = 0
     seen: set[int] = set()
     direct_calls: list[tuple[int | None, int]] = []
+    cod_call_names = tuple(
+        name
+        for name in dict.fromkeys(getattr(cod_metadata, "call_names", ()) or ())
+        if isinstance(name, str) and name
+    )
     for callsite in getattr(function, "get_call_sites", lambda: [])() or ():
         try:
             target = function.get_call_target(callsite)
@@ -3598,7 +3820,7 @@ def _register_direct_call_target_function_stubs(project: angr.Project, function)
         direct_calls.append((callsite, target))
     if not direct_calls:
         direct_calls.extend(_iter_capstone_direct_calls())
-    for _callsite, target in direct_calls:
+    for call_index, (_callsite, target) in enumerate(direct_calls):
         if not isinstance(target, int):
             continue
         candidates = {target}
@@ -3616,21 +3838,40 @@ def _register_direct_call_target_function_stubs(project: angr.Project, function)
                 continue
             seen.add(candidate)
             try:
-                project.kb.functions.function(addr=candidate, create=True)
+                stub = project.kb.functions.function(addr=candidate, create=True)
+                stub_name = _original_callee_name(candidate)
+                if (not isinstance(stub_name, str) or not stub_name) and call_index < len(cod_call_names):
+                    stub_name = cod_call_names[call_index]
+                if isinstance(stub_name, str) and stub_name:
+                    try:
+                        stub.name = stub_name
+                    except Exception:
+                        pass
                 created += 1
             except Exception:
                 continue
     return created
 
 
-def _prepare_function_for_decompilation(project: angr.Project, function) -> int:
-    print(f"[dbg] decompile_function: addr={hex(function.addr)} name={function.name}")
+def _prepare_function_for_decompilation(
+    project: angr.Project,
+    function,
+    cod_metadata: CODProcMetadata | None = None,
+) -> int:
+    display_addr = function_original_addr(function)
+    if display_addr == function.addr:
+        print(f"[dbg] decompile_function: addr={display_addr:#x} name={function.name}")
+    else:
+        print(
+            f"[dbg] decompile_function: addr={display_addr:#x} "
+            f"(slice={function.addr:#x}) name={function.name}"
+        )
     sys.stdout.flush()
     # Ensure function is normalized before decompilation.
     if not function.normalized:
         print(f"[dbg] function {function.addr:#x} not normalized, normalizing...")
         function.normalize()
-    created_helper_stubs = _register_direct_call_target_function_stubs(project, function)
+    created_helper_stubs = _register_direct_call_target_function_stubs(project, function, cod_metadata=cod_metadata)
     if created_helper_stubs:
         print(f"[dbg] registered {created_helper_stubs} direct callee stub(s) for {function.addr:#x}")
     return created_helper_stubs
@@ -4945,9 +5186,8 @@ def _decompile_function_with_stats(
     allow_isolated_retry: bool = True,
 ):
     block_count, byte_count = _function_complexity(function)
-    print(
-        f"[dbg] function complexity for {function.addr:#x} {function.name}: blocks={block_count}, bytes={byte_count}"
-    )
+    display_addr = function_original_addr(function)
+    print(f"[dbg] function complexity for {display_addr:#x} {function.name}: blocks={block_count}, bytes={byte_count}")
     sys.stdout.flush()
     start = time.perf_counter()
     deadline = time.monotonic() + max(1, timeout)
@@ -4968,7 +5208,7 @@ def _decompile_function_with_stats(
     )
     partial_payload = getattr(project, "_inertia_partial_codegen_text", None)
     elapsed = time.perf_counter() - start
-    print(f"[dbg] decompilation time for {function.addr:#x} {function.name}: {elapsed:.2f}s")
+    print(f"[dbg] decompilation time for {display_addr:#x} {function.name}: {elapsed:.2f}s")
     sys.stdout.flush()
     return status, payload, partial_payload, block_count, byte_count, elapsed
 
@@ -10606,52 +10846,6 @@ def _annotate_cod_proc_output(c_text: str, function, metadata: CODProcMetadata |
         c_text = "\n".join(lines)
     if metadata.call_names and "CallReturn();" in c_text:
         c_text = c_text.replace("CallReturn();", f"{metadata.call_names[0]}();", 1)
-    if metadata.call_sources:
-        for call_name, call_text in metadata.call_sources:
-            replacement = call_text if call_text.endswith(";") else f"{call_text};"
-            base_name = call_name.lstrip("_")
-            for candidate in (
-                rf"(?<![A-Za-z0-9])_?{re.escape(base_name)}\s*\(\s*\);",
-                rf"(?<![A-Za-z0-9]){re.escape(base_name)}\s*\(\s*\);",
-            ):
-                c_text, count = re.subn(candidate, replacement, c_text, count=1)
-                if count:
-                    break
-        anonymous_call_pattern = re.compile(
-            r"(?<![A-Za-z_])(?:0x[0-9a-fA-F]+|\d+|sub_[0-9a-fA-F]+)\s*\(\s*\)"
-        )
-        for _call_name, call_text in metadata.call_sources:
-            replacement = call_text.rstrip(";")
-            c_text, count = anonymous_call_pattern.subn(replacement, c_text, count=1)
-            if count == 0:
-                break
-        remaining_anonymous_call_pattern = re.compile(
-            r"(?<![A-Za-z_])(?P<target>0x[0-9a-fA-F]+|\d+|sub_[0-9a-fA-F]+)\s*\(\s*\)"
-        )
-
-        def _replace_remaining_anonymous_call(match: re.Match[str]) -> str:
-            target_text = match.group("target")
-            if target_text.startswith("sub_"):
-                return match.group(0)
-            try:
-                target = int(target_text, 0)
-            except ValueError:
-                return match.group(0)
-            return f"sub_{target:x}()"
-
-        c_text = remaining_anonymous_call_pattern.sub(_replace_remaining_anonymous_call, c_text)
-        wide_return_pattern = re.compile(
-            r"(?m)^(?P<indent>\s*)return\s+[^;]*?\|\s*(?P<call>[A-Za-z_][\w$?@]*\s*\([^;]*\));\s*$"
-        )
-
-        def _replace_wide_return(match: re.Match[str]) -> str:
-            call_text = match.group("call")
-            call_name = call_text.split("(", 1)[0].strip()
-            if preferred_known_helper_signature_decl(call_name) is None:
-                return match.group(0)
-            return f"{match.group('indent')}return {call_text};"
-
-        c_text = wide_return_pattern.sub(_replace_wide_return, c_text)
 
     if metadata is not None and len(tuple(dict.fromkeys(metadata.call_names))) == 1:
         call_name = metadata.call_names[0].lstrip("_")
@@ -10660,83 +10854,9 @@ def _annotate_cod_proc_output(c_text: str, function, metadata: CODProcMetadata |
             staging_assignment_pattern = re.compile(r"(?m)^\s*s_[0-9a-fA-F]+\s*=\s*[^;]+;\s*$")
             c_text = staging_assignment_pattern.sub("", c_text)
             c_text = re.sub(r"\n{3,}", "\n\n", c_text)
-    c_text = _repair_missing_cod_function_header_text(c_text, function, metadata)
-    if metadata is not None:
-        source_return_lines = [
-            line.strip()
-            for line in metadata.source_lines
-            if re.match(r"^return\s+[^;]+;\s*$", line.strip())
-        ]
-        if source_return_lines:
-            source_return_line = source_return_lines[-1]
-
-            def _infer_source_return_type(return_line: str) -> str:
-                expr = return_line[len("return ") :].rstrip(";").strip()
-                if "MK_FP(" in expr or "Concat(" in expr or re.search(r"<<\s*16\b", expr) is not None:
-                    return "long"
-                call_match = re.match(r"(?P<call>[A-Za-z_][\w$?@]*)\s*\(", expr)
-                if call_match is not None:
-                    call_name = call_match.group("call")
-                    decl = preferred_known_helper_signature_decl(call_name)
-                    if decl is not None:
-                        decl_match = re.match(r"(?P<ret>.+?)\s+[A-Za-z_][\w$?@]*\s*\(", decl)
-                        if decl_match is not None:
-                            return decl_match.group("ret").strip()
-                return "unsigned short"
-
-            inferred_return_type = _infer_source_return_type(source_return_line)
-            header_pattern = re.compile(
-                r"(?m)^(?P<indent>\s*)(?P<ret>void|[A-Za-z_][\w\s\*\[\]]*?)\s+"
-                r"(?P<name>[A-Za-z_][\w$?@]*)\s*\((?P<args>[^)]*)\)\s*\{"
-            )
-            header_match = header_pattern.search(c_text)
-            if header_match is not None and header_match.group("ret").strip() != inferred_return_type:
-                c_text = (
-                    c_text[: header_match.start("ret")]
-                    + inferred_return_type
-                    + c_text[header_match.end("ret") :]
-                )
-
-            current_return_pattern = re.compile(r"(?m)^\s*return\s+[^;]+;\s*$")
-            current_return_matches = list(current_return_pattern.finditer(c_text))
-            void_signature = _contains_void_function_definition_text(c_text)
-            if re.search(rf"(?m)^\s*{re.escape(source_return_line)}\s*$", c_text) is None and not void_signature:
-                if current_return_matches:
-                    tail_match = current_return_matches[-1]
-                    c_text = (
-                        c_text[: tail_match.start()]
-                        + f"    {source_return_line}"
-                        + c_text[tail_match.end() :]
-                    )
-                else:
-                    insert_at = c_text.rfind("}")
-                    if insert_at != -1:
-                        body = c_text[:insert_at].rstrip()
-                        c_text = f"{body}\n    {source_return_line}\n{c_text[insert_at:]}"
-            if re.search(r"(?m)^\s*return;\s*$", c_text) is not None and current_return_pattern.search(c_text) is not None:
-                c_text = re.sub(r"(?m)^\s*return;\s*$", "", c_text, count=1)
-            guarded_return_names = []
-            for return_line in source_return_lines:
-                expr = return_line[len("return ") :].rstrip(";").strip()
-                if re.fullmatch(r"[A-Za-z_][\w$?@]*", expr) is not None:
-                    guarded_return_names.append(expr)
-            for guard_name in guarded_return_names:
-                guard_pattern = re.compile(rf"(?m)^(?P<indent>\s*)if\s*\(\s*{re.escape(guard_name)}\s*\)\s*$")
-                if guard_pattern.search(c_text) is None:
-                    continue
-                if re.search(rf"(?m)^\s*if\s*\(\s*{re.escape(guard_name)}\s*\)\s+return\s+{re.escape(guard_name)}\s*;\s*$", c_text):
-                    break
-                c_text = guard_pattern.sub(
-                    rf"\g<indent>if ({guard_name}) return {guard_name};",
-                    c_text,
-                    count=1,
-                )
-                break
     c_text = _prune_unused_staging_assignments(c_text)
-    c_text = _apply_cod_source_rewrites(c_text, metadata)
     c_text = _simplify_x86_16_stack_references(c_text)
     c_text = _normalize_mk_fp_segment_names(c_text, metadata)
-    c_text = _restore_collapsed_cod_source_function_text(c_text, function, metadata)
     c_text = _prune_void_function_return_values_text(c_text)
     c_text = _prune_unused_local_declarations_text(c_text)
     c_text = _dedupe_duplicate_local_declarations_text(c_text)
@@ -11420,6 +11540,46 @@ def _recover_lst_function(
 ):
     addr = offset if lst_metadata.absolute_addrs else project.entry + offset
     exact_region = _lst_code_region(lst_metadata, addr)
+    if project.arch.name == "86_16" and exact_region is not None:
+        slice_plan = plan_x86_16_exact_slice(*exact_region)
+        if slice_plan.needs_rebased_slice:
+            code = bytes(project.loader.memory.load(slice_plan.original_start, slice_plan.original_end - slice_plan.original_start))
+            slice_project = _build_project_from_bytes(
+                code,
+                base_addr=slice_plan.slice_base,
+                entry_point=slice_plan.slice_start,
+            )
+            slice_project._inertia_original_project = project
+            slice_project._inertia_original_linear_delta = exact_region[0] - slice_plan.slice_start
+            slice_project._inertia_disable_ail_narrowing = True
+            slice_project._inertia_disable_complex_expr_scan = True
+            slice_project._inertia_fast_block_peephole = True
+            _inherit_tail_validation_runtime_policy(slice_project, project)
+            slice_region = (slice_plan.slice_start, slice_plan.slice_end)
+            with _analysis_timeout(max(1, timeout)):
+                try:
+                    cfg, func = _pick_function_lean(
+                        slice_project,
+                        slice_plan.slice_start,
+                        regions=[slice_region],
+                        data_references=False,
+                        extend_far_calls=False,
+                    )
+                except KeyError:
+                    cfg, func = _pick_function(
+                        slice_project,
+                        slice_plan.slice_start,
+                        regions=[slice_region],
+                        data_references=False,
+                        force_smart_scan=False,
+                    )
+            func.name = name
+            mark_function_original_addr(func, exact_region[0])
+            print(
+                f"[dbg] rebased exact-region recovery for {name}: "
+                f"{exact_region[0]:#x}-{exact_region[1]:#x} -> {slice_region[0]:#x}-{slice_region[1]:#x}"
+            )
+            return cfg, func
     with _analysis_timeout(max(1, timeout)):
         if project.arch.name == "86_16":
             fast_windows = _x86_16_fast_recovery_windows(window, low_memory=low_memory)
@@ -11447,6 +11607,12 @@ def _recover_lst_function(
 
             if cfg is not None and func is not None:
                 if _exact_region_recovery_looks_truncated(func, exact_region):
+                    split_count = _count_region_local_functions(cfg, exact_region)
+                    if split_count > 1:
+                        print(
+                            f"[dbg] exact-region recovery split {name} into {split_count} local functions "
+                            f"inside {exact_region[0]:#x}-{exact_region[1]:#x}"
+                        )
                     best_cfg = cfg
                     best_func = func
                     best_score = _function_recovery_score(func)
@@ -12069,8 +12235,7 @@ def main(argv: list[str] | None = None) -> int:
                     api_style=args.api_style,
                     binary_path=args.binary,
                 )
-                if slice_result is not None:
-                    _status, payload = slice_result
+                if slice_result is not None and slice_result.status == "ok":
                     fallback_function = SimpleNamespace(addr=sidecar_region[0], name=code_name)
                     print("/* Function recovery timed out; recovered function slice from sidecar bounds. */")
                     print(f"/* binary: {args.binary} */")
@@ -12085,7 +12250,7 @@ def main(argv: list[str] | None = None) -> int:
                         binary_path=args.binary,
                     )
                     print("\n/* == c == */")
-                    print(payload)
+                    print(slice_result.payload)
                     return 0
                 nonopt_result: NonOptimizedSliceOutcome | str | None = _try_decompile_non_optimized_slice(
                     project,
@@ -12236,8 +12401,7 @@ def main(argv: list[str] | None = None) -> int:
                     api_style=args.api_style,
                     binary_path=args.binary,
                 )
-                if slice_result is not None:
-                    _status, payload = slice_result
+                if slice_result is not None and slice_result.status == "ok":
                     fallback_function = SimpleNamespace(addr=sidecar_region[0], name=code_name)
                     print("/* Function recovery timed out; recovered function slice from sidecar bounds. */")
                     print(f"/* binary: {args.binary} */")
@@ -12252,7 +12416,7 @@ def main(argv: list[str] | None = None) -> int:
                         binary_path=args.binary,
                     )
                     print("\n/* == c == */")
-                    print(payload)
+                    print(slice_result.payload)
                     return 0
                 nonopt_result: NonOptimizedSliceOutcome | str | None = _try_decompile_non_optimized_slice(
                     project,
@@ -12408,14 +12572,15 @@ def main(argv: list[str] | None = None) -> int:
         if function_label is not None:
             func.name = function_label
         elif lst_metadata is not None:
-            code_name = lst_metadata.code_labels.get(func.addr)
+            code_name = lst_metadata.code_labels.get(function_original_addr(func))
             if code_name is not None:
                 func.name = code_name
+        direct_project = getattr(func, "project", project)
         _apply_binary_specific_annotations(
-            project,
+            direct_project,
             args.binary,
             lst_metadata,
-            func_addr=func.addr,
+            func_addr=function_original_addr(func),
             cod_metadata=cod_metadata,
             synthetic_globals=synthetic_globals,
         )
@@ -12423,18 +12588,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"/* binary: {args.binary} */")
         print(f"/* arch: {project.arch.name} */")
         print(f"/* entry: {project.entry:#x} */")
-        print(f"/* function: {func.addr:#x} {func.name} */")
+        print(f"/* function: {function_original_addr(func):#x} {func.name} */")
 
         if args.show_asm:
             print("\n/* == asm == */")
-            print(_format_first_block_asm(project, func.addr))
+            print(_format_first_block_asm(direct_project, func.addr))
 
         print("/* decompiling... */", flush=True)
         direct_tail_validation_snapshot: dict[str, object] | None = None
         try:
             def direct_decompile_job():
                 result = _decompile_function_with_stats(
-                    project,
+                    direct_project,
                     cfg,
                     func,
                     args.timeout,
@@ -12444,7 +12609,7 @@ def main(argv: list[str] | None = None) -> int:
                     synthetic_globals=synthetic_globals,
                     lst_metadata=lst_metadata,
                 )
-                return (*result, _tail_validation_snapshot_for_function_run(project, func))
+                return (*result, _tail_validation_snapshot_for_function_run(direct_project, func))
 
             direct_decompile_timeout = max(1, args.timeout) + 1
             if (
@@ -12481,36 +12646,70 @@ def main(argv: list[str] | None = None) -> int:
             function=func,
             function_cfg=cfg,
             partial_payload=partial_payload,
-            tail_validation=direct_tail_validation_snapshot or _tail_validation_snapshot_for_function_run(project, func),
+            tail_validation=direct_tail_validation_snapshot or _tail_validation_snapshot_for_function_run(direct_project, func),
         )
         if status != "ok":
+            direct_display_addr = function_original_addr(func)
+            using_rebased_direct_slice = direct_project is not project
             slice_result = None
-            if precise_sidecar_regions:
+            sidecar_closed_nonopt = False
+            known_nonopt_result: NonOptimizedSliceOutcome | str | None = None
+            if partial_payload is None and (precise_sidecar_regions or using_rebased_direct_slice):
+                known_nonopt_result = _try_decompile_non_optimized_known_function(
+                    direct_project,
+                    cfg,
+                    func,
+                    timeout=_bounded_non_optimized_timeout(args.timeout),
+                    api_style=args.api_style,
+                    binary_path=args.binary,
+                    lst_metadata=None if using_rebased_direct_slice else lst_metadata,
+                    cod_metadata=cod_metadata,
+                    synthetic_globals=synthetic_globals,
+                )
+            known_nonopt_c = _non_optimized_slice_rendered(known_nonopt_result)
+            if known_nonopt_c is not None:
+                _emit_tail_validation_for_function_run_or_uncollected(
+                    direct_project,
+                    cfg,
+                    func,
+                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
+                    binary_path=args.binary,
+                )
+                print(f"\n/* Decompilation {status}: {payload} */")
+                print("/* Falling back to known-function non-optimized decompilation. */")
+                print("\n/* == c (non-optimized fallback) == */")
+                print(known_nonopt_c)
+                return 0
+            if precise_sidecar_regions and not using_rebased_direct_slice:
                 slice_result = _try_decompile_sidecar_slice(
                     project,
                     lst_metadata,
-                    func.addr,
+                    direct_display_addr,
                     func.name,
                     timeout=args.timeout,
                     api_style=args.api_style,
                     binary_path=args.binary,
                 )
             if slice_result is not None:
-                _emit_tail_validation_for_function_run_or_uncollected(
-                    project,
-                    cfg,
-                    func,
-                    allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
-                    binary_path=args.binary,
-                )
-                print("\n/* == c (sidecar slice fallback) == */")
-                print(slice_result[1])
-                return 0
-            if precise_sidecar_regions:
+                if slice_result.status != "ok":
+                    sidecar_closed_nonopt = sidecar_verdict_closes_non_optimized_lane(slice_result.verdict)
+                    slice_result = None
+                else:
+                    _emit_tail_validation_for_function_run_or_uncollected(
+                        direct_project,
+                        cfg,
+                        func,
+                        allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
+                        binary_path=args.binary,
+                    )
+                    print("\n/* == c (sidecar slice fallback) == */")
+                    print(slice_result.payload)
+                    return 0
+            if precise_sidecar_regions and not using_rebased_direct_slice:
                 peer_sidecar_c = _try_decompile_peer_sidecar_slice(
                     project,
                     lst_metadata,
-                    func.addr,
+                    direct_display_addr,
                     func.name,
                     timeout=args.timeout,
                     api_style=args.api_style,
@@ -12518,7 +12717,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if peer_sidecar_c is not None:
                     _emit_tail_validation_for_function_run_or_uncollected(
-                        project,
+                        direct_project,
                         cfg,
                         func,
                         allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("peer_sidecar"),
@@ -12527,10 +12726,10 @@ def main(argv: list[str] | None = None) -> int:
                     print("\n/* == c (peer sidecar fallback) == */")
                     print(peer_sidecar_c)
                     return 0
-                trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, func.addr, func.name)
+                trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, direct_display_addr, func.name)
                 if trivial_c is not None:
                     _emit_tail_validation_for_function_run_or_uncollected(
-                        project,
+                        direct_project,
                         cfg,
                         func,
                         allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("trivial_sidecar"),
@@ -12540,21 +12739,26 @@ def main(argv: list[str] | None = None) -> int:
                     print(trivial_c)
                     return 0
             nonopt_result: NonOptimizedSliceOutcome | str | None = None
-            if partial_payload is None and precise_sidecar_regions:
+            if (
+                partial_payload is None
+                and known_nonopt_c is None
+                and (precise_sidecar_regions or using_rebased_direct_slice)
+                and not sidecar_closed_nonopt
+            ):
                 nonopt_result = _try_decompile_non_optimized_slice(
-                    project,
+                    direct_project if using_rebased_direct_slice else project,
                     func.addr,
                     func.name,
                     timeout=_bounded_non_optimized_timeout(args.timeout),
                     api_style=args.api_style,
                     binary_path=args.binary,
-                    lst_metadata=lst_metadata,
+                    lst_metadata=None if using_rebased_direct_slice else lst_metadata,
                     cod_metadata=cod_metadata,
                 )
             nonopt_c = _non_optimized_slice_rendered(nonopt_result)
             if nonopt_c is not None:
                 _emit_tail_validation_for_function_run_or_uncollected(
-                    project,
+                    direct_project,
                     cfg,
                     func,
                     allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
@@ -12575,17 +12779,19 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n/* == c (partial timeout) == */")
                 print(partial_payload)
                 return 0
-            sidecar_region = _lst_code_region(lst_metadata, func.addr) if lst_metadata is not None else None
-            linear_window = None if sidecar_region is not None else _infer_linear_disassembly_window(project, func.addr)
+            sidecar_region = None
+            if lst_metadata is not None and not using_rebased_direct_slice:
+                sidecar_region = _lst_code_region(lst_metadata, direct_display_addr)
+            linear_window = None if sidecar_region is not None else _infer_linear_disassembly_window(direct_project, func.addr)
             string_c = _try_emit_string_intrinsic_c(
-                project,
+                direct_project,
                 start=sidecar_region[0] if sidecar_region is not None else linear_window[0],
                 end=sidecar_region[1] if sidecar_region is not None else linear_window[1],
                 name=func.name,
             )
             if string_c is not None:
                 _emit_tail_validation_for_function_run_or_uncollected(
-                    project,
+                    direct_project,
                     cfg,
                     func,
                     allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
@@ -12609,7 +12815,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(string_c)
                 return 0
             _emit_tail_validation_for_function_run_or_uncollected(
-                project,
+                direct_project,
                 cfg,
                 func,
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("asm"),
@@ -12622,6 +12828,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"\n/* Decompilation {status}: {payload} */")
             print("/* Falling back to non-optimized disassembly. */")
+            nonopt_failure_detail = _non_optimized_slice_failure_detail(nonopt_result)
+            if nonopt_failure_detail is not None:
+                print(f"/* non-optimized fallback failed: {nonopt_failure_detail} */")
             print("\n/* == lift break probe == */")
             print(_probe_lift_break(project, func.addr))
             print("\n/* == asm fallback == */")
@@ -13315,7 +13524,7 @@ def main(argv: list[str] | None = None) -> int:
 
         skip_heavy_fallbacks_for_result = bool(getattr(result, "skip_heavy_fallbacks", False))
 
-        slice_result = None
+        slice_result: SliceRecoveryAttemptOutcome | None = None
         if allow_heavy_fallbacks and precise_sidecar_regions and not skip_heavy_fallbacks_for_result:
             slice_result = _try_decompile_sidecar_slice(
                 project,
@@ -13326,7 +13535,7 @@ def main(argv: list[str] | None = None) -> int:
                 api_style=args.api_style,
                 binary_path=args.binary,
             )
-        if slice_result is not None:
+        if slice_result is not None and slice_result.status == "ok":
             decompiled_local += 1
             fallback_snapshot = _remember_fallback_tail_validation(
                 item,
@@ -13334,7 +13543,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
             print("/* -- c (sidecar slice fallback) -- */")
-            print(slice_result[1], flush=True)
+            print(slice_result.payload, flush=True)
             return decompiled_local, failed_local
 
         nonopt_skip_reason: str | None = None
@@ -13444,17 +13653,59 @@ def main(argv: list[str] | None = None) -> int:
                 print(trivial_c, flush=True)
                 return decompiled_local, failed_local
         nonopt_result: NonOptimizedSliceOutcome | str | None = None
-        if result.partial_payload is None and (precise_sidecar_regions or args.addr is not None):
+        known_nonopt_result: NonOptimizedSliceOutcome | str | None = None
+        function_project = getattr(function, "project", project)
+        using_rebased_function_slice = function_project is not project
+        function_lst_metadata = None if using_rebased_function_slice else lst_metadata
+        if result.partial_payload is None and item.function_cfg is not None:
+            known_nonopt_result = _try_decompile_non_optimized_known_function(
+                function_project,
+                item.function_cfg,
+                function,
+                timeout=_bounded_non_optimized_timeout(args.timeout),
+                api_style=args.api_style,
+                binary_path=args.binary,
+                lst_metadata=function_lst_metadata,
+                cod_metadata=cod_metadata,
+            )
+        known_nonopt_c = _non_optimized_slice_rendered(known_nonopt_result)
+        if known_nonopt_c is not None:
+            decompiled_local += 1
+            fallback_snapshot = _remember_fallback_tail_validation(
+                item,
+                function=function,
+                allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
+            )
+            _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
+            if not emitted_problem:
+                print(f"/* problem: {result.status} */")
+                _print_diagnostic_text(result.payload)
+            print("/* -- c (non-optimized fallback) -- */")
+            print(known_nonopt_c, flush=True)
+            return decompiled_local, failed_local
+        if (
+            result.partial_payload is None
+            and (precise_sidecar_regions or args.addr is not None)
+            and known_nonopt_c is None
+            and not sidecar_verdict_closes_non_optimized_lane(
+                slice_result.verdict if slice_result is not None else None
+            )
+        ):
             nonopt_result = _try_decompile_non_optimized_slice(
-                project,
+                function_project if using_rebased_function_slice else project,
                 function.addr,
                 function.name,
                 timeout=_bounded_non_optimized_timeout(args.timeout),
                 api_style=args.api_style,
                 binary_path=args.binary,
-                lst_metadata=lst_metadata,
+                lst_metadata=function_lst_metadata,
                 cod_metadata=cod_metadata,
                 allow_fresh_project_retry=not use_serial_fork_per_function,
+            )
+        elif slice_result is not None and sidecar_verdict_closes_non_optimized_lane(slice_result.verdict):
+            print(
+                "/* non-optimized fallback unavailable: "
+                f"sidecar slice already closed the lane ({slice_result.verdict.stage}:{slice_result.verdict.stop_family}) */"
             )
         nonopt_c = _non_optimized_slice_rendered(nonopt_result)
         if nonopt_c is not None:
@@ -13861,6 +14112,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"summary: {timed_out} discovered function(s) timed out during decompilation")
         if failed:
             print(f"summary: {failed} functions fell back to asm/details")
+        emit_file_decompilation_summary(
+            project,
+            lst_metadata,
+            shown_total=total_shown,
+            decompiled=decompiled,
+            failed=failed,
+            skipped_signature_labels=skipped_signature_labels,
+        )
         _emit_function_timing_summary(function_tasks, result_map)
         return 0 if decompiled else 2
     else:
@@ -14042,5 +14301,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"summary: {timed_out} discovered function(s) timed out during decompilation")
     if failed:
         print(f"summary: {failed} functions fell back to asm/details")
+    emit_file_decompilation_summary(
+        project,
+        lst_metadata,
+        shown_total=total_shown,
+        decompiled=decompiled,
+        failed=failed,
+        skipped_signature_labels=skipped_signature_labels,
+    )
     _emit_function_timing_summary(function_tasks, result_map)
     return 0 if decompiled else 2

@@ -97,7 +97,7 @@ def default_exe_showcase_cap(total_functions: int, timeout: int) -> int:
     return min(24, max(8, timeout))
 
 
-def install_angr_peephole_expr_bitwidth_guard(walker_cls) -> object:
+def install_angr_peephole_expr_bitwidth_guard(walker_cls, project=None) -> object:
     original_handle_expr = walker_cls._handle_expr
 
     def _normalize_replacement_bits(expr, replacement):  # noqa: ANN001
@@ -137,31 +137,32 @@ def install_angr_peephole_expr_bitwidth_guard(walker_cls) -> object:
     def _guarded_handle_expr(self, expr_idx, expr, stmt_idx, stmt, block):
         expr = super(walker_cls, self)._handle_expr(expr_idx, expr, stmt_idx, stmt, block)
         old_expr = expr
-        expr_node_cache = getattr(self, "_inertia_expr_node_cache", None)
-        if not isinstance(expr_node_cache, dict):
-            expr_node_cache = {}
-            self._inertia_expr_node_cache = expr_node_cache
-        expr_node_count = _expr_tree_node_count(expr, expr_node_cache)
-        if expr_node_count > PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT:
-            complex_seen = getattr(self, "_inertia_complex_expr_skip_seen", None)
-            if not isinstance(complex_seen, set):
-                complex_seen = set()
-                self._inertia_complex_expr_skip_seen = complex_seen
-            block_addr = getattr(block, "addr", None)
-            skip_key = (block_addr, stmt_idx, expr_idx, type(expr).__name__)
-            if skip_key not in complex_seen:
-                complex_seen.add(skip_key)
-                print(
-                    "[dbg] clinic:skip-peephole-complex-expr "
-                    f"block={block_addr:#x} "
-                    f"stmt_idx={stmt_idx} "
-                    f"expr_idx={expr_idx} "
-                    f"expr_type={type(expr).__name__} "
-                    f"node_count={expr_node_count}",
-                    file=sys.stderr,
-                )
-                sys.stderr.flush()
-            return expr
+        if not getattr(project, "_inertia_disable_complex_expr_scan", False):
+            expr_node_cache = getattr(self, "_inertia_expr_node_cache", None)
+            if not isinstance(expr_node_cache, dict):
+                expr_node_cache = {}
+                self._inertia_expr_node_cache = expr_node_cache
+            expr_node_count = _expr_tree_node_count(expr, expr_node_cache)
+            if expr_node_count > PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT:
+                complex_seen = getattr(self, "_inertia_complex_expr_skip_seen", None)
+                if not isinstance(complex_seen, set):
+                    complex_seen = set()
+                    self._inertia_complex_expr_skip_seen = complex_seen
+                block_addr = getattr(block, "addr", None)
+                skip_key = (block_addr, stmt_idx, expr_idx, type(expr).__name__)
+                if skip_key not in complex_seen:
+                    complex_seen.add(skip_key)
+                    print(
+                        "[dbg] clinic:skip-peephole-complex-expr "
+                        f"block={block_addr:#x} "
+                        f"stmt_idx={stmt_idx} "
+                        f"expr_idx={expr_idx} "
+                        f"expr_type={type(expr).__name__} "
+                        f"node_count={expr_node_count}",
+                        file=sys.stderr,
+                    )
+                    sys.stderr.flush()
+                return expr
         redo = True
         while redo:
             redo = False
@@ -210,6 +211,7 @@ def install_angr_variable_recovery_binop_sub_size_guard(
     *,
     richr_cls=None,
     typevars_module=None,
+    project=None,
 ) -> object:
     if richr_cls is None or typevars_module is None:
         from angr.analyses.typehoon import typevars as angr_typevars
@@ -238,12 +240,29 @@ def install_angr_variable_recovery_binop_sub_size_guard(
         arg0, arg1 = expr.operands
         r0, r1 = self._expr_pair(arg0, arg1)
         if r0.data.size() != r1.data.size():
-            print(
-                "[dbg] clinic:variable-recovery-size-mismatch "
-                f"op=Sub lhs_bits={r0.data.size()} rhs_bits={r1.data.size()} expr_bits={expr.bits}",
-                file=sys.stderr,
-            )
-            sys.stderr.flush()
+            mismatch_seen = None
+            if project is not None:
+                mismatch_seen = getattr(project, "_inertia_size_mismatch_seen", None)
+                if not isinstance(mismatch_seen, set):
+                    mismatch_seen = set()
+                    setattr(project, "_inertia_size_mismatch_seen", mismatch_seen)
+            else:
+                mismatch_seen = getattr(self, "_inertia_size_mismatch_seen", None)
+            if not isinstance(mismatch_seen, set):
+                mismatch_seen = set()
+                if project is not None:
+                    setattr(project, "_inertia_size_mismatch_seen", mismatch_seen)
+                else:
+                    self._inertia_size_mismatch_seen = mismatch_seen
+            mismatch_key = (r0.data.size(), r1.data.size(), expr.bits)
+            if mismatch_key not in mismatch_seen:
+                mismatch_seen.add(mismatch_key)
+                print(
+                    "[dbg] clinic:variable-recovery-size-mismatch "
+                    f"op=Sub lhs_bits={r0.data.size()} rhs_bits={r1.data.size()} expr_bits={expr.bits}",
+                    file=sys.stderr,
+                )
+                sys.stderr.flush()
         if r0.data.size() == r1.data.size():
             compute = r0.data - r1.data
         else:
@@ -266,11 +285,11 @@ def install_angr_variable_recovery_binop_sub_size_guard(
 
 
 @contextlib.contextmanager
-def guard_angr_peephole_expr_bitwidth_assertion():
+def guard_angr_peephole_expr_bitwidth_assertion(project=None):
     from angr.analyses.decompiler import utils as decompiler_utils
 
     walker_cls = decompiler_utils._PeepholeExprsWalker
-    original_handle_expr = install_angr_peephole_expr_bitwidth_guard(walker_cls)
+    original_handle_expr = install_angr_peephole_expr_bitwidth_guard(walker_cls, project=project)
     try:
         yield
     finally:
@@ -278,11 +297,11 @@ def guard_angr_peephole_expr_bitwidth_assertion():
 
 
 @contextlib.contextmanager
-def guard_angr_variable_recovery_binop_sub_size_mismatch():
+def guard_angr_variable_recovery_binop_sub_size_mismatch(project=None):
     from angr.analyses.variable_recovery import engine_ail as variable_recovery_engine
 
     engine_cls = variable_recovery_engine.SimEngineVRAIL
-    original_handle_binop_sub = install_angr_variable_recovery_binop_sub_size_guard(engine_cls)
+    original_handle_binop_sub = install_angr_variable_recovery_binop_sub_size_guard(engine_cls, project=project)
     try:
         yield
     finally:
@@ -310,11 +329,18 @@ def guard_angr_clinic_stage_markers(project):
     def _peephole_optimize(self, *args, **kwargs):  # noqa: ANN001
         project._inertia_decompiler_stage = "core:clinic:peephole_optimize"
         block = args[0] if args else kwargs.get("block")
+        if block is not None and getattr(project, "_inertia_fast_block_peephole", False):
+            statements, stmts_updated = peephole_optimize_stmts(block, self._stmt_peephole_opts)
+            new_block = block.copy(statements=statements) if stmts_updated else block
+            statements, multi_stmts_updated = peephole_optimize_multistmts(new_block, self._multistmt_peephole_opts)
+            if not multi_stmts_updated:
+                return new_block
+            return new_block.copy(statements=statements)
         if block is not None and _block_has_pathologically_complex_expr(block):
-            skipped = getattr(self, "_inertia_complex_block_skip_seen", None)
+            skipped = getattr(project, "_inertia_complex_block_skip_seen", None)
             if not isinstance(skipped, set):
                 skipped = set()
-                self._inertia_complex_block_skip_seen = skipped
+                setattr(project, "_inertia_complex_block_skip_seen", skipped)
             block_addr = getattr(block, "addr", None)
             if block_addr not in skipped:
                 skipped.add(block_addr)
@@ -341,6 +367,25 @@ def guard_angr_clinic_stage_markers(project):
         Clinic._stage_pre_ssa_level1_simplifications = orig_stage_pre_ssa
         Clinic._simplify_block = orig_simplify_block
         BlockSimplifier._peephole_optimize = orig_peephole_optimize
+
+
+@contextlib.contextmanager
+def guard_angr_ail_narrowing(project):
+    from angr.analyses.decompiler.ail_simplifier import AILSimplifier
+
+    original_narrow_exprs = AILSimplifier._narrow_exprs
+
+    def _guarded_narrow_exprs(self, *args, **kwargs):  # noqa: ANN001
+        if getattr(project, "_inertia_disable_ail_narrowing", False):
+            project._inertia_decompiler_stage = "core:clinic:narrowing-skipped"
+            return False
+        return original_narrow_exprs(self, *args, **kwargs)
+
+    AILSimplifier._narrow_exprs = _guarded_narrow_exprs
+    try:
+        yield
+    finally:
+        AILSimplifier._narrow_exprs = original_narrow_exprs
 
 
 class ThreadBoundTextIO(io.TextIOBase):
