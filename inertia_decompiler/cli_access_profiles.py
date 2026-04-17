@@ -126,6 +126,8 @@ def infer_induction_variable(profile: AccessTraitEvidenceProfile) -> AccessTrait
         return None
 
     best = max(candidates, key=lambda evidence: (int(evidence.count), int(evidence.width), -abs(int(evidence.offset))))
+    if int(best.count) < 2:
+        return None
     return AccessTraitInductionVar(
         base_key=best.base_key,
         index_key=best.index_key,
