@@ -206,6 +206,32 @@ def enable_line_buffered_stdio() -> None:
                 pass
 
 
+def _project_current_function_context(project) -> tuple[int | None, str | None, int | None]:
+    context = getattr(project, "_inertia_current_function_debug", None)
+    if not isinstance(context, dict):
+        return (None, None, None)
+    addr = context.get("addr")
+    name = context.get("name")
+    slice_addr = context.get("slice_addr")
+    return (
+        addr if isinstance(addr, int) else None,
+        name if isinstance(name, str) else None,
+        slice_addr if isinstance(slice_addr, int) else None,
+    )
+
+
+def _project_current_function_context_suffix(project) -> str:
+    addr, name, slice_addr = _project_current_function_context(project)
+    parts: list[str] = []
+    if isinstance(addr, int):
+        parts.append(f"addr={addr:#x}")
+    if isinstance(slice_addr, int) and slice_addr != addr:
+        parts.append(f"slice={slice_addr:#x}")
+    if isinstance(name, str) and name:
+        parts.append(f"name={name}")
+    return f" {' '.join(parts)}" if parts else ""
+
+
 def install_angr_variable_recovery_binop_sub_size_guard(
     engine_cls,
     *,
@@ -254,12 +280,14 @@ def install_angr_variable_recovery_binop_sub_size_guard(
                     setattr(project, "_inertia_size_mismatch_seen", mismatch_seen)
                 else:
                     self._inertia_size_mismatch_seen = mismatch_seen
-            mismatch_key = (r0.data.size(), r1.data.size(), expr.bits)
+            function_addr, _function_name, _slice_addr = _project_current_function_context(project)
+            mismatch_key = (function_addr, r0.data.size(), r1.data.size(), expr.bits)
             if mismatch_key not in mismatch_seen:
                 mismatch_seen.add(mismatch_key)
                 print(
                     "[dbg] clinic:variable-recovery-size-mismatch "
-                    f"op=Sub lhs_bits={r0.data.size()} rhs_bits={r1.data.size()} expr_bits={expr.bits}",
+                    f"op=Sub lhs_bits={r0.data.size()} rhs_bits={r1.data.size()} expr_bits={expr.bits}"
+                    f"{_project_current_function_context_suffix(project)}",
                     file=sys.stderr,
                 )
                 sys.stderr.flush()
@@ -346,7 +374,7 @@ def guard_angr_clinic_stage_markers(project):
                 skipped.add(block_addr)
                 print(
                     "[dbg] clinic:skip-peephole-complex-block "
-                    f"block={block_addr:#x}",
+                    f"block={block_addr:#x}{_project_current_function_context_suffix(project)}",
                     file=sys.stderr,
                 )
                 sys.stderr.flush()

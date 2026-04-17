@@ -4,6 +4,7 @@ import re
 
 
 _RAW_REGISTER_FRAGMENT_RE = re.compile(r"\b(?P<name>[A-Za-z_]\w*)\{r\d+\|\d+b\}")
+_CALLEE_NAMESPACE_RE = re.compile(r"::0x[0-9a-fA-F]+::(?P<name>[A-Za-z_]\w*)")
 _PLACEHOLDER_RE = re.compile(r"<(?P<body>0x[^>\n]+)>")
 
 
@@ -105,7 +106,8 @@ def _dedupe_local_declarations(c_text: str) -> str:
 def normalize_unresolved_c_text(c_text: str) -> str:
     """Normalize still-structured decompiler output into valid-ish C identifiers."""
 
-    normalized = _RAW_REGISTER_FRAGMENT_RE.sub(lambda match: match.group("name"), c_text)
+    normalized = _CALLEE_NAMESPACE_RE.sub(lambda match: match.group("name"), c_text)
+    normalized = _RAW_REGISTER_FRAGMENT_RE.sub(lambda match: match.group("name"), normalized)
     normalized = _sanitize_placeholder_names(normalized)
     normalized = _dedupe_local_declarations(normalized)
     normalized = re.sub(r"\s*/\*\s*do not return\s*\*/", "", normalized)

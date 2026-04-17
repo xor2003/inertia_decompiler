@@ -20,6 +20,16 @@ class AccessTraitStrideEvidence:
 
 
 @dataclass(frozen=True)
+class AccessTraitInductionVar:
+    base_key: tuple[object, ...] | None
+    index_key: tuple[object, ...] | None
+    stride: int
+    width: int
+    offset: int
+    count: int
+
+
+@dataclass(frozen=True)
 class AccessTraitEvidenceProfile:
     member_like: tuple[NamingCandidate, ...] = ()
     array_like: tuple[NamingCandidate, ...] = ()
@@ -96,6 +106,34 @@ class AccessTraitEvidenceProfile:
         if self.stack_like:
             return "stack"
         return None
+
+
+def infer_induction_variable(profile: AccessTraitEvidenceProfile) -> AccessTraitInductionVar | None:
+    candidates = tuple(
+        evidence
+        for evidence in profile.induction_evidence + profile.stride_evidence
+        if evidence.kind == "induction_like"
+    )
+    if not candidates:
+        return None
+
+    stride_set = {int(evidence.stride) for evidence in candidates}
+    index_keys = {evidence.index_key for evidence in candidates}
+    base_keys = {evidence.base_key for evidence in candidates}
+    widths = {int(evidence.width) for evidence in candidates}
+    offsets = {int(evidence.offset) for evidence in candidates}
+    if len(stride_set) != 1 or len(index_keys) != 1 or len(base_keys) != 1 or len(widths) != 1 or len(offsets) != 1:
+        return None
+
+    best = max(candidates, key=lambda evidence: (int(evidence.count), int(evidence.width), -abs(int(evidence.offset))))
+    return AccessTraitInductionVar(
+        base_key=best.base_key,
+        index_key=best.index_key,
+        stride=int(best.stride),
+        width=int(best.width),
+        offset=int(best.offset),
+        count=int(best.count),
+    )
 
 
 @dataclass(frozen=True)

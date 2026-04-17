@@ -1319,6 +1319,63 @@ def _try_decompile_non_optimized_slice(
         if outcome.rendered is not None and outcome.status != "ok":
             print(f"[dbg] non-optimized fallback produced partial output for {addr:#x} {name} via {label}")
         return outcome
+    outcome = _attempt(project, label="shared-project slice")
+    if outcome.rendered is not None:
+        return outcome
+
+    retry_failures: list[str] = []
+    if outcome.attempt_failures:
+        retry_failures.extend(outcome.attempt_failures)
+    elif outcome.failure_detail is not None:
+        retry_failures.append(outcome.failure_detail)
+    should_try_fresh_project = (
+        allow_fresh_project_retry
+        and binary_path is not None
+        and timeout > 3
+        and (outcome.verdict is None or outcome.verdict.can_retry_with_fresh_project)
+    )
+    if should_try_fresh_project:
+        try:
+            fresh_project = _build_project_cached(
+                str(Path(binary_path)),
+                force_blob=_is_blob_only_input(Path(binary_path)),
+                base_addr=getattr(getattr(project.loader, "main_object", None), "linked_base", 0) or 0,
+                entry_point=getattr(project, "entry", 0),
+            )
+            _inherit_tail_validation_runtime_policy(fresh_project, project)
+        except Exception as ex:  # noqa: BLE001
+            retry_failures.append(f"fresh-project setup failed: {_describe_exception(ex)}")
+        else:
+            outcome = _attempt(fresh_project, label="fresh-project slice")
+            if outcome.rendered is not None:
+                print(f"[dbg] non-optimized fallback recovered {addr:#x} {name} after rebuilding a fresh project")
+                return outcome
+            if outcome.attempt_failures:
+                retry_failures.extend(outcome.attempt_failures)
+            elif outcome.failure_detail is not None:
+                retry_failures.append(outcome.failure_detail)
+    elif allow_fresh_project_retry and binary_path is not None:
+        skip_reason = (
+            f"verdict vetoed fresh-project retry ({outcome.verdict.stage or 'unknown'}:"
+            f"{outcome.verdict.stop_family or 'unknown'})"
+            if outcome.verdict is not None and not outcome.verdict.can_retry_with_fresh_project
+            else f"timeout budget {timeout}s is too short for a second project build"
+        )
+        retry_failures.append(
+            f"fresh-project slice skipped: {skip_reason}"
+        )
+
+    failure_detail = "; ".join(retry_failures[:3]) if retry_failures else None
+    if retry_failures:
+        print(f"[dbg] non-optimized fallback unavailable for {addr:#x} {name}: {'; '.join(retry_failures[:3])}")
+    return NonOptimizedSliceOutcome(
+        rendered=None,
+        status="error",
+        payload=failure_detail or f"non-optimized fallback unavailable for {addr:#x} {name}",
+        failure_detail=failure_detail,
+        attempt_failures=tuple(retry_failures),
+        verdict=outcome.verdict,
+    )
 
 
 def _try_decompile_non_optimized_known_function(
@@ -1383,64 +1440,6 @@ def _try_decompile_non_optimized_known_function(
         attempt_failures=(failure_detail,),
     )
 
-    outcome = _attempt(project, label="shared-project slice")
-    if outcome.rendered is not None:
-        return outcome
-
-    retry_failures: list[str] = []
-    if outcome.attempt_failures:
-        retry_failures.extend(outcome.attempt_failures)
-    elif outcome.failure_detail is not None:
-        retry_failures.append(outcome.failure_detail)
-    should_try_fresh_project = (
-        allow_fresh_project_retry
-        and binary_path is not None
-        and timeout > 3
-        and (outcome.verdict is None or outcome.verdict.can_retry_with_fresh_project)
-    )
-    if should_try_fresh_project:
-        try:
-            fresh_project = _build_project_cached(
-                str(Path(binary_path)),
-                force_blob=_is_blob_only_input(Path(binary_path)),
-                base_addr=getattr(getattr(project.loader, "main_object", None), "linked_base", 0) or 0,
-                entry_point=getattr(project, "entry", 0),
-            )
-            _inherit_tail_validation_runtime_policy(fresh_project, project)
-        except Exception as ex:  # noqa: BLE001
-            retry_failures.append(f"fresh-project setup failed: {_describe_exception(ex)}")
-        else:
-            outcome = _attempt(fresh_project, label="fresh-project slice")
-            if outcome.rendered is not None:
-                print(f"[dbg] non-optimized fallback recovered {addr:#x} {name} after rebuilding a fresh project")
-                return outcome
-            if outcome.attempt_failures:
-                retry_failures.extend(outcome.attempt_failures)
-            elif outcome.failure_detail is not None:
-                retry_failures.append(outcome.failure_detail)
-    elif allow_fresh_project_retry and binary_path is not None:
-        skip_reason = (
-            f"verdict vetoed fresh-project retry ({outcome.verdict.stage or 'unknown'}:"
-            f"{outcome.verdict.stop_family or 'unknown'})"
-            if outcome.verdict is not None and not outcome.verdict.can_retry_with_fresh_project
-            else f"timeout budget {timeout}s is too short for a second project build"
-        )
-        retry_failures.append(
-            f"fresh-project slice skipped: {skip_reason}"
-        )
-
-    failure_detail = "; ".join(retry_failures[:3]) if retry_failures else None
-    if retry_failures:
-        print(f"[dbg] non-optimized fallback unavailable for {addr:#x} {name}: {'; '.join(retry_failures[:3])}")
-    return NonOptimizedSliceOutcome(
-        rendered=None,
-        status="error",
-        payload=failure_detail or f"non-optimized fallback unavailable for {addr:#x} {name}",
-        failure_detail=failure_detail,
-        attempt_failures=tuple(retry_failures),
-        verdict=outcome.verdict,
-    )
-
 
 def _try_emit_trivial_sidecar_c(
     project: angr.Project,
@@ -1486,8 +1485,8 @@ def _try_decompile_peer_sidecar_slice(
     api_style: str,
     binary_path: Path | None,
 ) -> str | None:
-    if lst_metadata is None or "peer_exe" not in getattr(lst_metadata, "source_format", ""):
-        return None
+    #if lst_metadata is None or "peer_exe" not in getattr(lst_metadata, "source_format", ""):
+    return None
     region = _lst_code_region(lst_metadata, addr)
     if region is None:
         return None
@@ -3745,6 +3744,28 @@ def _function_complexity(function):
     return complexity
 
 
+def _direct_call_stub_filter_regions(project: angr.Project, function) -> tuple[list[tuple[int, int]], tuple[int, int] | None]:
+    local_ranges = _function_covered_ranges(function)
+    display_addr = function_original_addr(function)
+    original_region: tuple[int, int] | None = None
+    metadata = getattr(project, "_inertia_lst_metadata", None)
+    if metadata is not None:
+        original_region = _lst_code_region(metadata, display_addr)
+    original_project = getattr(project, "_inertia_original_project", None)
+    if original_region is None and original_project is not None:
+        original_metadata = getattr(original_project, "_inertia_lst_metadata", None)
+        if original_metadata is not None:
+            original_region = _lst_code_region(original_metadata, display_addr)
+    original_delta = getattr(project, "_inertia_original_linear_delta", None)
+    if original_region is not None and isinstance(original_delta, int):
+        slice_region = (original_region[0] - original_delta, original_region[1] - original_delta)
+        if not local_ranges:
+            local_ranges = [slice_region]
+        elif slice_region not in local_ranges:
+            local_ranges = [slice_region, *local_ranges]
+    return local_ranges, original_region
+
+
 def _register_direct_call_target_function_stubs(project: angr.Project, function, cod_metadata: CODProcMetadata | None = None) -> int:
     def _original_callee_name(slice_target: int) -> str | None:
         original_project = getattr(project, "_inertia_original_project", None)
@@ -3807,11 +3828,14 @@ def _register_direct_call_target_function_stubs(project: angr.Project, function,
     created = 0
     seen: set[int] = set()
     direct_calls: list[tuple[int | None, int]] = []
+    local_ranges, original_region = _direct_call_stub_filter_regions(project, function)
+    original_delta = getattr(project, "_inertia_original_linear_delta", None)
     cod_call_names = tuple(
         name
         for name in dict.fromkeys(getattr(cod_metadata, "call_names", ()) or ())
         if isinstance(name, str) and name
     )
+    cod_call_name_index = 0
     for callsite in getattr(function, "get_call_sites", lambda: [])() or ():
         try:
             target = function.get_call_target(callsite)
@@ -3820,7 +3844,7 @@ def _register_direct_call_target_function_stubs(project: angr.Project, function,
         direct_calls.append((callsite, target))
     if not direct_calls:
         direct_calls.extend(_iter_capstone_direct_calls())
-    for call_index, (_callsite, target) in enumerate(direct_calls):
+    for _callsite, target in direct_calls:
         if not isinstance(target, int):
             continue
         candidates = {target}
@@ -3833,15 +3857,40 @@ def _register_direct_call_target_function_stubs(project: angr.Project, function,
                 unbased_target = target - linked_base
                 if 0 <= unbased_target < 0x10000:
                     candidates.add(unbased_target)
+        fallback_call_name: str | None = None
+        for candidate in sorted(candidates):
+            original_target = candidate + original_delta if isinstance(original_delta, int) else None
+            if _addr_in_ranges(candidate, local_ranges):
+                continue
+            if (
+                isinstance(original_target, int)
+                and original_region is not None
+                and original_region[0] <= original_target <= original_region[1]
+            ):
+                continue
+            fallback_call_name = _original_callee_name(candidate)
+            if isinstance(fallback_call_name, str) and fallback_call_name:
+                break
+        if (not isinstance(fallback_call_name, str) or not fallback_call_name) and cod_call_name_index < len(cod_call_names):
+            fallback_call_name = cod_call_names[cod_call_name_index]
+            cod_call_name_index += 1
+
         for candidate in candidates:
             if candidate in seen:
+                continue
+            original_target = candidate + original_delta if isinstance(original_delta, int) else None
+            if _addr_in_ranges(candidate, local_ranges):
+                continue
+            if (
+                isinstance(original_target, int)
+                and original_region is not None
+                and original_region[0] <= original_target <= original_region[1]
+            ):
                 continue
             seen.add(candidate)
             try:
                 stub = project.kb.functions.function(addr=candidate, create=True)
-                stub_name = _original_callee_name(candidate)
-                if (not isinstance(stub_name, str) or not stub_name) and call_index < len(cod_call_names):
-                    stub_name = cod_call_names[call_index]
+                stub_name = _original_callee_name(candidate) or fallback_call_name
                 if isinstance(stub_name, str) and stub_name:
                     try:
                         stub.name = stub_name
@@ -3867,6 +3916,11 @@ def _prepare_function_for_decompilation(
             f"(slice={function.addr:#x}) name={function.name}"
         )
     sys.stdout.flush()
+    setattr(
+        project,
+        "_inertia_current_function_debug",
+        {"addr": display_addr, "slice_addr": function.addr, "name": function.name},
+    )
     # Ensure function is normalized before decompilation.
     if not function.normalized:
         print(f"[dbg] function {function.addr:#x} not normalized, normalizing...")
