@@ -91,12 +91,11 @@ def _classify_segmented_addr_expr(
     base_terms = 0
     stack_slots: list[object] = []
 
-    for term in flatten_c_add_terms(node):
-        inner = unwrap_c_casts(term)
-
-        if isinstance(inner, structured_c.CBinaryOp) and inner.op == "Mul":
-            local_seg = None
-            for maybe_seg, maybe_scale in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
+    def _segment_scale_name(term) -> str | None:
+        if not isinstance(term, structured_c.CBinaryOp):
+            return None
+        if term.op == "Mul":
+            for maybe_seg, maybe_scale in ((term.lhs, term.rhs), (term.rhs, term.lhs)):
                 if c_constant_value(unwrap_c_casts(maybe_scale)) != 16:
                     continue
                 local_seg = _segment_reg_name(
@@ -105,10 +104,27 @@ def _classify_segmented_addr_expr(
                     project_rewrite_cache=project_rewrite_cache,
                 )
                 if local_seg is not None:
-                    break
-            if local_seg is not None:
-                seg_name = local_seg
-                continue
+                    return local_seg
+            return None
+        if term.op == "Shl":
+            for maybe_seg, maybe_scale in ((term.lhs, term.rhs), (term.rhs, term.lhs)):
+                if c_constant_value(unwrap_c_casts(maybe_scale)) != 4:
+                    continue
+                local_seg = _segment_reg_name(
+                    unwrap_c_casts(maybe_seg),
+                    project,
+                    project_rewrite_cache=project_rewrite_cache,
+                )
+                if local_seg is not None:
+                    return local_seg
+        return None
+
+    for term in flatten_c_add_terms(node):
+        inner = unwrap_c_casts(term)
+        local_seg = _segment_scale_name(inner)
+        if local_seg is not None:
+            seg_name = local_seg
+            continue
 
         constant = c_constant_value(inner)
         if constant is not None:

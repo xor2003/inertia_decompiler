@@ -96,6 +96,7 @@ from inertia_decompiler.default_signature_catalog import default_signature_catal
 from inertia_decompiler.decompilation_quality import assess_decompiled_c_text
 from inertia_decompiler.decompile_file_summary import emit_file_decompilation_summary
 from inertia_decompiler.sidecar_policy import metadata_has_precise_code_regions
+from inertia_decompiler.source_sidecar import render_local_source_sidecar_function
 from inertia_decompiler.x86_16_exact_slice import (
     function_original_addr,
     mark_function_original_addr,
@@ -588,6 +589,23 @@ def _regenerate_codegen_text_safely(codegen, *, context: str) -> tuple[str, bool
     except Exception:
         pass
     return _snapshot_codegen_text(codegen), True
+
+
+def _emit_optional_source_sidecar_c_block(
+    binary_path: Path | None,
+    function_name: str | None,
+    c_text: str,
+    *,
+    alternate_source_c: bool,
+    c_header: str,
+) -> None:
+    if alternate_source_c:
+        source_text = render_local_source_sidecar_function(binary_path, function_name)
+        if source_text is not None:
+            print("/* -- source c -- */")
+            print(source_text, end="" if source_text.endswith("\n") else "\n")
+    print(c_header)
+    print(c_text, end="" if c_text.endswith("\n") else "\n", flush=True)
 
 
 def _format_minimal_codegen_output(
@@ -6727,8 +6745,47 @@ def _flatten_c_add_terms(node, seen: set[int] | None = None):
     return [node]
 
 
-def _match_stack_cvar_and_offset(node):
+def _resolve_dirty_virtual_expr_8616(node):
+    dirty = getattr(node, "dirty", None)
+    if dirty is None:
+        return None
+    varid = getattr(dirty, "varid", None)
+    if not isinstance(varid, int):
+        return None
+    codegen = getattr(node, "codegen", None)
+    statements = getattr(getattr(getattr(codegen, "cfunc", None), "statements", None), "statements", None)
+    if not statements:
+        return None
+
+    target_name = f"vvar_{varid}"
+    matches = []
+    for stmt in statements:
+        if not isinstance(stmt, structured_c.CAssignment):
+            continue
+        lhs = getattr(stmt, "lhs", None)
+        if not isinstance(lhs, structured_c.CVariable):
+            continue
+        lhs_name = getattr(lhs, "name", None) or getattr(getattr(lhs, "variable", None), "name", None)
+        if lhs_name != target_name:
+            continue
+        matches.append(getattr(stmt, "rhs", None))
+        if len(matches) > 1:
+            return None
+    return matches[0] if len(matches) == 1 else None
+
+
+def _match_stack_cvar_and_offset(node, _seen: set[int] | None = None):
+    if _seen is None:
+        _seen = set()
     node = _unwrap_c_casts(node)
+    key = id(node)
+    if key in _seen:
+        return None
+    _seen.add(key)
+
+    resolved_dirty = _resolve_dirty_virtual_expr_8616(node)
+    if resolved_dirty is not None:
+        return _match_stack_cvar_and_offset(resolved_dirty, _seen)
 
     if isinstance(node, structured_c.CVariable):
         variable = getattr(node, "variable", None)
@@ -6745,8 +6802,8 @@ def _match_stack_cvar_and_offset(node):
         return None
 
     if isinstance(node, structured_c.CBinaryOp) and node.op in {"Add", "Sub"}:
-        lhs = _match_stack_cvar_and_offset(node.lhs)
-        rhs = _match_stack_cvar_and_offset(node.rhs)
+        lhs = _match_stack_cvar_and_offset(node.lhs, _seen)
+        rhs = _match_stack_cvar_and_offset(node.rhs, _seen)
         lhs_const = _c_constant_value(_unwrap_c_casts(node.lhs))
         rhs_const = _c_constant_value(_unwrap_c_casts(node.rhs))
 
@@ -12124,6 +12181,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the first lifted block before the decompiled C.",
     )
     parser.add_argument(
+        "--alternate-source-c",
+        action="store_true",
+        help="When a same-stem .c/.C source sidecar exists, print it before each decompiled C block.",
+    )
+    parser.add_argument(
         "--proc",
         default=None,
         help="Extract and decompile one procedure from a .COD listing by PROC name.",
@@ -12303,8 +12365,13 @@ def main(argv: list[str] | None = None) -> int:
                         allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
                         binary_path=args.binary,
                     )
-                    print("\n/* == c == */")
-                    print(slice_result.payload)
+                    _emit_optional_source_sidecar_c_block(
+                        args.binary,
+                        code_name,
+                        slice_result.payload,
+                        alternate_source_c=bool(args.alternate_source_c),
+                        c_header="\n/* == c == */",
+                    )
                     return 0
                 nonopt_result: NonOptimizedSliceOutcome | str | None = _try_decompile_non_optimized_slice(
                     project,
@@ -12331,8 +12398,13 @@ def main(argv: list[str] | None = None) -> int:
                         allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
                         binary_path=args.binary,
                     )
-                    print("\n/* == c (non-optimized fallback) == */")
-                    print(nonopt_c)
+                    _emit_optional_source_sidecar_c_block(
+                        args.binary,
+                        code_name,
+                        nonopt_c,
+                        alternate_source_c=bool(args.alternate_source_c),
+                        c_header="\n/* == c (non-optimized fallback) == */",
+                    )
                     return 0
                 string_c = _try_emit_string_intrinsic_c(
                     project,
@@ -12353,8 +12425,13 @@ def main(argv: list[str] | None = None) -> int:
                         allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
                         binary_path=args.binary,
                     )
-                    print("\n/* == c (string intrinsic fallback) == */")
-                    print(string_c)
+                    _emit_optional_source_sidecar_c_block(
+                        args.binary,
+                        code_name,
+                        string_c,
+                        alternate_source_c=bool(args.alternate_source_c),
+                        c_header="\n/* == c (string intrinsic fallback) == */",
+                    )
                     return 0
                 print("/* Function recovery timed out; using sidecar-bounded asm fallback. */")
                 print(f"/* binary: {args.binary} */")
@@ -12398,8 +12475,13 @@ def main(argv: list[str] | None = None) -> int:
                     allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
                     binary_path=args.binary,
                 )
-                print("\n/* == c (non-optimized fallback) == */")
-                print(nonopt_c)
+                _emit_optional_source_sidecar_c_block(
+                    args.binary,
+                    fallback_function.name,
+                    nonopt_c,
+                    alternate_source_c=bool(args.alternate_source_c),
+                    c_header="\n/* == c (non-optimized fallback) == */",
+                )
                 return 0
             fallback_function = SimpleNamespace(addr=args.addr, name=function_label or f"sub_{args.addr:x}")
             start, end = _infer_linear_disassembly_window(project, args.addr)
@@ -12434,8 +12516,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if nonopt_skip_reason is not None:
                     print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
-                print("\n/* == c (string intrinsic fallback) == */")
-                print(string_c)
+                _emit_optional_source_sidecar_c_block(
+                    args.binary,
+                    fallback_function.name,
+                    string_c,
+                    alternate_source_c=bool(args.alternate_source_c),
+                    c_header="\n/* == c (string intrinsic fallback) == */",
+                )
                 return 0
             asm_fallback = _format_asm_range(project, start, end)
             recovery_detail = _function_recovery_detail(getattr(project, "_inertia_decompiler_stage", None))
@@ -12469,8 +12556,13 @@ def main(argv: list[str] | None = None) -> int:
                         allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
                         binary_path=args.binary,
                     )
-                    print("\n/* == c == */")
-                    print(slice_result.payload)
+                    _emit_optional_source_sidecar_c_block(
+                        args.binary,
+                        code_name,
+                        slice_result.payload,
+                        alternate_source_c=bool(args.alternate_source_c),
+                        c_header="\n/* == c == */",
+                    )
                     return 0
                 nonopt_result: NonOptimizedSliceOutcome | str | None = _try_decompile_non_optimized_slice(
                     project,
@@ -12497,8 +12589,13 @@ def main(argv: list[str] | None = None) -> int:
                         allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
                         binary_path=args.binary,
                     )
-                    print("\n/* == c (non-optimized fallback) == */")
-                    print(nonopt_c)
+                    _emit_optional_source_sidecar_c_block(
+                        args.binary,
+                        code_name,
+                        nonopt_c,
+                        alternate_source_c=bool(args.alternate_source_c),
+                        c_header="\n/* == c (non-optimized fallback) == */",
+                    )
                     return 0
                 string_c = _try_emit_string_intrinsic_c(
                     project,
@@ -12519,8 +12616,13 @@ def main(argv: list[str] | None = None) -> int:
                         allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("string_intrinsic"),
                         binary_path=args.binary,
                     )
-                    print("\n/* == c (string intrinsic fallback) == */")
-                    print(string_c)
+                    _emit_optional_source_sidecar_c_block(
+                        args.binary,
+                        code_name,
+                        string_c,
+                        alternate_source_c=bool(args.alternate_source_c),
+                        c_header="\n/* == c (string intrinsic fallback) == */",
+                    )
                     return 0
                 print("/* Function recovery timed out; using sidecar-bounded asm fallback. */")
                 print(f"/* binary: {args.binary} */")
@@ -12564,8 +12666,13 @@ def main(argv: list[str] | None = None) -> int:
                     allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("non_optimized"),
                     binary_path=args.binary,
                 )
-                print("\n/* == c (non-optimized fallback) == */")
-                print(nonopt_c)
+                _emit_optional_source_sidecar_c_block(
+                    args.binary,
+                    fallback_function.name,
+                    nonopt_c,
+                    alternate_source_c=bool(args.alternate_source_c),
+                    c_header="\n/* == c (non-optimized fallback) == */",
+                )
                 return 0
             fallback_function = SimpleNamespace(addr=args.addr, name=function_label or f"sub_{args.addr:x}")
             start, end = _infer_linear_disassembly_window(project, args.addr)
@@ -12600,8 +12707,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if nonopt_skip_reason is not None:
                     print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
-                print("\n/* == c (string intrinsic fallback) == */")
-                print(string_c)
+                _emit_optional_source_sidecar_c_block(
+                    args.binary,
+                    fallback_function.name,
+                    string_c,
+                    alternate_source_c=bool(args.alternate_source_c),
+                    c_header="\n/* == c (string intrinsic fallback) == */",
+                )
                 return 0
             asm_fallback = _format_asm_range(project, start, end)
             recovery_detail = _function_recovery_detail(getattr(project, "_inertia_decompiler_stage", None))
@@ -12731,8 +12843,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(f"\n/* Decompilation {status}: {payload} */")
                 print("/* Falling back to known-function non-optimized decompilation. */")
-                print("\n/* == c (non-optimized fallback) == */")
-                print(known_nonopt_c)
+                _emit_optional_source_sidecar_c_block(
+                    args.binary,
+                    func.name,
+                    known_nonopt_c,
+                    alternate_source_c=bool(args.alternate_source_c),
+                    c_header="\n/* == c (non-optimized fallback) == */",
+                )
                 return 0
             if precise_sidecar_regions and not using_rebased_direct_slice:
                 slice_result = _try_decompile_sidecar_slice(
@@ -12756,8 +12873,13 @@ def main(argv: list[str] | None = None) -> int:
                         allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
                         binary_path=args.binary,
                     )
-                    print("\n/* == c (sidecar slice fallback) == */")
-                    print(slice_result.payload)
+                    _emit_optional_source_sidecar_c_block(
+                        args.binary,
+                        func.name,
+                        slice_result.payload,
+                        alternate_source_c=bool(args.alternate_source_c),
+                        c_header="\n/* == c (sidecar slice fallback) == */",
+                    )
                     return 0
             if precise_sidecar_regions and not using_rebased_direct_slice:
                 peer_sidecar_c = _try_decompile_peer_sidecar_slice(
@@ -12777,8 +12899,13 @@ def main(argv: list[str] | None = None) -> int:
                         allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("peer_sidecar"),
                         binary_path=args.binary,
                     )
-                    print("\n/* == c (peer sidecar fallback) == */")
-                    print(peer_sidecar_c)
+                    _emit_optional_source_sidecar_c_block(
+                        args.binary,
+                        func.name,
+                        peer_sidecar_c,
+                        alternate_source_c=bool(args.alternate_source_c),
+                        c_header="\n/* == c (peer sidecar fallback) == */",
+                    )
                     return 0
                 trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, direct_display_addr, func.name)
                 if trivial_c is not None:
@@ -12789,8 +12916,13 @@ def main(argv: list[str] | None = None) -> int:
                         allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("trivial_sidecar"),
                         binary_path=args.binary,
                     )
-                    print("\n/* == c (trivial sidecar fallback) == */")
-                    print(trivial_c)
+                    _emit_optional_source_sidecar_c_block(
+                        args.binary,
+                        func.name,
+                        trivial_c,
+                        alternate_source_c=bool(args.alternate_source_c),
+                        c_header="\n/* == c (trivial sidecar fallback) == */",
+                    )
                     return 0
             nonopt_result: NonOptimizedSliceOutcome | str | None = None
             if (
@@ -12820,8 +12952,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(f"\n/* Decompilation {status}: {payload} */")
                 print("/* Falling back to non-optimized slice decompilation. */")
-                print("\n/* == c (non-optimized fallback) == */")
-                print(nonopt_c)
+                _emit_optional_source_sidecar_c_block(
+                    args.binary,
+                    func.name,
+                    nonopt_c,
+                    alternate_source_c=bool(args.alternate_source_c),
+                    c_header="\n/* == c (non-optimized fallback) == */",
+                )
                 return 0
             if partial_payload is not None:
                 _emit_tail_validation_snapshot_or_uncollected(
@@ -12830,8 +12967,13 @@ def main(argv: list[str] | None = None) -> int:
                     direct_result.tail_validation,
                     binary_path=args.binary,
                 )
-                print("\n/* == c (partial timeout) == */")
-                print(partial_payload)
+                _emit_optional_source_sidecar_c_block(
+                    args.binary,
+                    func.name,
+                    partial_payload,
+                    alternate_source_c=bool(args.alternate_source_c),
+                    c_header="\n/* == c (partial timeout) == */",
+                )
                 return 0
             sidecar_region = None
             if lst_metadata is not None and not using_rebased_direct_slice:
@@ -12865,8 +13007,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if nonopt_skip_reason is not None:
                     print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
-                print("\n/* == c (string intrinsic fallback) == */")
-                print(string_c)
+                _emit_optional_source_sidecar_c_block(
+                    args.binary,
+                    func.name,
+                    string_c,
+                    alternate_source_c=bool(args.alternate_source_c),
+                    c_header="\n/* == c (string intrinsic fallback) == */",
+                )
                 return 0
             _emit_tail_validation_for_function_run_or_uncollected(
                 direct_project,
@@ -12892,8 +13039,13 @@ def main(argv: list[str] | None = None) -> int:
             return 6 if status == "error" else 4
 
         _emit_tail_validation_console_summary([direct_item], {1: direct_result}, binary_path=args.binary)
-        print("\n/* == c == */")
-        print(payload)
+        _emit_optional_source_sidecar_c_block(
+            args.binary,
+            func.name,
+            payload,
+            alternate_source_c=bool(args.alternate_source_c),
+            c_header="\n/* == c == */",
+        )
         return 0
 
     print("/* discovering likely functions... */", flush=True)
@@ -13542,6 +13694,14 @@ def main(argv: list[str] | None = None) -> int:
         decompiled_local = 0
         failed_local = 0
         attempt_status_printed = False
+        def _emit_c_block(c_text: str, header: str) -> None:
+            _emit_optional_source_sidecar_c_block(
+                args.binary,
+                item.function.name,
+                c_text,
+                alternate_source_c=bool(args.alternate_source_c),
+                c_header=header,
+            )
         if result.debug_output:
             print(result.debug_output, end="" if result.debug_output.endswith("\n") else "\n")
         function = item.function
@@ -13558,8 +13718,7 @@ def main(argv: list[str] | None = None) -> int:
                 attempt="decompiled",
                 validation_snapshot=result.tail_validation,
             )
-            print("/* -- c -- */")
-            print(result.payload, flush=True)
+            _emit_c_block(result.payload, "/* -- c -- */")
             return decompiled_local, failed_local
 
         emitted_problem = False
@@ -13572,8 +13731,7 @@ def main(argv: list[str] | None = None) -> int:
             attempt_status_printed = True
             print(f"/* problem: {result.status} */")
             _print_diagnostic_text(result.payload)
-            print("/* -- c (partial timeout) -- */")
-            print(result.partial_payload, flush=True)
+            _emit_c_block(result.partial_payload, "/* -- c (partial timeout) -- */")
             emitted_problem = True
 
         skip_heavy_fallbacks_for_result = bool(getattr(result, "skip_heavy_fallbacks", False))
@@ -13596,8 +13754,7 @@ def main(argv: list[str] | None = None) -> int:
                 allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("sidecar_slice"),
             )
             _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
-            print("/* -- c (sidecar slice fallback) -- */")
-            print(slice_result.payload, flush=True)
+            _emit_c_block(slice_result.payload, "/* -- c (sidecar slice fallback) -- */")
             return decompiled_local, failed_local
 
         nonopt_skip_reason: str | None = None
@@ -13637,8 +13794,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if nonopt_skip_reason is not None:
                     print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
-                print("/* -- c (string intrinsic fallback) -- */")
-                print(string_c, flush=True)
+                _emit_c_block(string_c, "/* -- c (string intrinsic fallback) -- */")
                 return decompiled_local, failed_local
             asm_fallback = (
                 _format_asm_range(project, sidecar_region[0], sidecar_region[1])
@@ -13691,8 +13847,7 @@ def main(argv: list[str] | None = None) -> int:
                     allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("peer_sidecar"),
                 )
                 _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
-                print("/* -- c (peer sidecar fallback) -- */")
-                print(peer_sidecar_c, flush=True)
+                _emit_c_block(peer_sidecar_c, "/* -- c (peer sidecar fallback) -- */")
                 return decompiled_local, failed_local
 
             trivial_c = _try_emit_trivial_sidecar_c(project, lst_metadata, function.addr, function.name)
@@ -13703,8 +13858,7 @@ def main(argv: list[str] | None = None) -> int:
                     allow_project_fallback=_tail_validation_fallback_allows_project_snapshot("trivial_sidecar"),
                 )
                 _print_function_attempt_status(function, attempt="fallback", validation_snapshot=fallback_snapshot)
-                print("/* -- c (trivial sidecar fallback) -- */")
-                print(trivial_c, flush=True)
+                _emit_c_block(trivial_c, "/* -- c (trivial sidecar fallback) -- */")
                 return decompiled_local, failed_local
         nonopt_result: NonOptimizedSliceOutcome | str | None = None
         known_nonopt_result: NonOptimizedSliceOutcome | str | None = None
@@ -13734,8 +13888,7 @@ def main(argv: list[str] | None = None) -> int:
             if not emitted_problem:
                 print(f"/* problem: {result.status} */")
                 _print_diagnostic_text(result.payload)
-            print("/* -- c (non-optimized fallback) -- */")
-            print(known_nonopt_c, flush=True)
+            _emit_c_block(known_nonopt_c, "/* -- c (non-optimized fallback) -- */")
             return decompiled_local, failed_local
         if (
             result.partial_payload is None
@@ -13772,8 +13925,7 @@ def main(argv: list[str] | None = None) -> int:
             if not emitted_problem:
                 print(f"/* problem: {result.status} */")
                 _print_diagnostic_text(result.payload)
-            print("/* -- c (non-optimized fallback) -- */")
-            print(nonopt_c, flush=True)
+            _emit_c_block(nonopt_c, "/* -- c (non-optimized fallback) -- */")
             return decompiled_local, failed_local
 
         sidecar_region = _lst_code_region(lst_metadata, function.addr) if lst_metadata is not None else None
@@ -13810,8 +13962,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             if nonopt_skip_reason is not None:
                 print(f"/* non-optimized fallback unavailable: {nonopt_skip_reason} */")
-            print("/* -- c (string intrinsic fallback) -- */")
-            print(string_c, flush=True)
+            _emit_c_block(string_c, "/* -- c (string intrinsic fallback) -- */")
             return decompiled_local, failed_local
         asm_fallback = (
             _format_asm_range(project, sidecar_region[0], sidecar_region[1])

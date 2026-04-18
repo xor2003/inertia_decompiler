@@ -48,4 +48,4 @@ def sidecar_verdict_closes_non_optimized_lane(verdict: BoundedSliceVerdict | Non
         return False
     if verdict.can_widen_locally:
         return False
-    return verdict.stage in {"build", "recover"}
+    return verdict.stage == "recover" and verdict.stop_family == "timeout"

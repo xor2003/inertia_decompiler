@@ -39,13 +39,51 @@ def _rewrite_ss_stack_byte_offsets(
     stack_pointer_aliases: dict[int, object] = {}
 
     def _is_linear_temp(cvar) -> bool:
-        return isinstance(cvar, structured_c.CVariable) and isinstance(getattr(cvar, "name", None), str) and re.fullmatch(
-            r"(?:v\d+|vvar_\d+)",
-            getattr(cvar, "name", ""),
-        ) is not None
+        if not isinstance(cvar, structured_c.CVariable):
+            return False
+        variable = getattr(cvar, "variable", None)
+        if isinstance(variable, SimStackVariable):
+            return False
+        name = getattr(cvar, "name", None)
+        if name is None:
+            return True
+        return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+|ir_\d+|tmp_\d+)", name) is not None
+
+    def _single_assignment_expr_for_virtual_name(name: str):
+        statements = getattr(getattr(codegen, "cfunc", None), "statements", None)
+        statements = getattr(statements, "statements", None)
+        if not statements:
+            return None
+
+        matches = []
+        for stmt in statements:
+            if not isinstance(stmt, structured_c.CAssignment):
+                continue
+            lhs = getattr(stmt, "lhs", None)
+            if not isinstance(lhs, structured_c.CVariable):
+                continue
+            lhs_name = getattr(lhs, "name", None) or getattr(getattr(lhs, "variable", None), "name", None)
+            if lhs_name != name:
+                continue
+            matches.append(getattr(stmt, "rhs", None))
+            if len(matches) > 1:
+                return None
+        return matches[0] if len(matches) == 1 else None
+
+    def _resolve_dirty_virtual_expr(node):
+        dirty = getattr(node, "dirty", None)
+        if dirty is None:
+            return None
+        varid = getattr(dirty, "varid", None)
+        if not isinstance(varid, int):
+            return None
+        return _single_assignment_expr_for_virtual_name(f"vvar_{varid}")
 
     def _resolve_stack_pointer_alias(node):
         node = unwrap_c_casts(node)
+        resolved_dirty = _resolve_dirty_virtual_expr(node)
+        if resolved_dirty is not None:
+            return _resolve_stack_pointer_alias(resolved_dirty)
         if isinstance(node, structured_c.CVariable):
             variable = getattr(node, "variable", None)
             if isinstance(variable, SimStackVariable):
@@ -154,10 +192,49 @@ def _rewrite_ss_stack_byte_offsets(
             return node
         classified = classify_segmented_dereference(node, project)
         if classified is None or classified.kind != "stack" or classified.cvar is None:
-            if classified is None or classified.seg_name != "ss" or classified.extra_offset <= 0:
+            if classified is None or classified.seg_name != "ss":
                 return node
             addr_expr = strip_segment_scale_from_addr_expr(getattr(classified, "addr_expr", None), project)
             if addr_expr is None:
+                return node
+            resolved_stack_alias = _resolve_stack_pointer_alias(addr_expr)
+            if resolved_stack_alias is not None:
+                base_cvar, extra_offset = resolved_stack_alias
+                type_ = getattr(node, "type", None)
+                bits = getattr(type_, "size", None)
+                if bits not in {8, 16}:
+                    return node
+                base_variable = getattr(base_cvar, "variable", None)
+                access_size = bits // project.arch.byte_width if isinstance(bits, int) and bits > 0 else None
+                if isinstance(base_variable, SimStackVariable) and isinstance(access_size, int):
+                    target_offset = getattr(base_variable, "offset", 0) + extra_offset
+                    resolved_cvar = resolve_stack_cvar_at_offset(codegen, target_offset)
+                    if resolved_cvar is not None:
+                        resolved_variable = getattr(resolved_cvar, "variable", None)
+                        resolved_offset = getattr(resolved_variable, "offset", None)
+                        resolved_size = getattr(resolved_variable, "size", None)
+                        if (
+                            isinstance(resolved_variable, SimStackVariable)
+                            and access_size >= 4
+                        ):
+                            if resolved_size is not None and resolved_size < access_size:
+                                promote_direct_stack_cvariable(
+                                    codegen,
+                                    resolved_cvar,
+                                    access_size,
+                                    stack_type_for_size(access_size),
+                                )
+                            return resolved_cvar
+                        if (
+                            isinstance(resolved_variable, SimStackVariable)
+                            and resolved_offset == target_offset
+                            and resolved_size == access_size
+                        ):
+                            return resolved_cvar
+                    if access_size >= 4:
+                        return materialize_stack_cvar_at_offset(codegen, target_offset, access_size)
+                return make_stack_deref(base_cvar, extra_offset, bits)
+            if classified.extra_offset <= 0:
                 return node
             if _contains_large_unsigned_constant(addr_expr):
                 return node

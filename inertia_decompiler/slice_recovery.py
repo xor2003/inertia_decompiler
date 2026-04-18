@@ -87,7 +87,7 @@ def _stabilize_bounded_slice_verdict(
     prior_outcomes: Sequence[SliceRecoveryAttemptOutcome],
     verdict: BoundedSliceVerdict,
 ) -> BoundedSliceVerdict:
-    if verdict.stop_family in {None, "ok"}:
+    if verdict.stop_family in {None, "ok", "empty"}:
         return verdict
     repeated_family = any(
         prior.verdict is not None

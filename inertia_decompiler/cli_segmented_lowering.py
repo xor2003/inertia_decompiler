@@ -22,18 +22,29 @@ def _match_segment_register_based_dereference(
 
     addr_expr = classified.addr_expr
     base_terms = []
-    for term in flatten_c_add_terms(addr_expr):
-        inner = unwrap_c_casts(term)
-        if isinstance(inner, structured_c.CBinaryOp) and inner.op == "Mul":
-            segment_scale = False
-            for maybe_seg, maybe_scale in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
+
+    def _is_segment_scale(term) -> bool:
+        if not isinstance(term, structured_c.CBinaryOp):
+            return False
+        if term.op == "Mul":
+            for maybe_seg, maybe_scale in ((term.lhs, term.rhs), (term.rhs, term.lhs)):
                 if c_constant_value(unwrap_c_casts(maybe_scale)) != 16:
                     continue
                 if segment_reg_name(unwrap_c_casts(maybe_seg), project) is not None:
-                    segment_scale = True
-                    break
-            if segment_scale:
-                continue
+                    return True
+            return False
+        if term.op == "Shl":
+            for maybe_seg, maybe_scale in ((term.lhs, term.rhs), (term.rhs, term.lhs)):
+                if c_constant_value(unwrap_c_casts(maybe_scale)) != 4:
+                    continue
+                if segment_reg_name(unwrap_c_casts(maybe_seg), project) is not None:
+                    return True
+        return False
+
+    for term in flatten_c_add_terms(addr_expr):
+        inner = unwrap_c_casts(term)
+        if _is_segment_scale(inner):
+            continue
 
         if c_constant_value(inner) is not None:
             continue
@@ -59,18 +70,29 @@ def _strip_segment_scale_from_addr_expr(
     segment_reg_name,
 ):
     kept_terms = []
-    for term in flatten_c_add_terms(addr_expr):
-        inner = unwrap_c_casts(term)
-        if isinstance(inner, structured_c.CBinaryOp) and inner.op == "Mul":
-            segment_scale = False
-            for maybe_seg, maybe_scale in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
+
+    def _is_segment_scale(term) -> bool:
+        if not isinstance(term, structured_c.CBinaryOp):
+            return False
+        if term.op == "Mul":
+            for maybe_seg, maybe_scale in ((term.lhs, term.rhs), (term.rhs, term.lhs)):
                 if c_constant_value(unwrap_c_casts(maybe_scale)) != 16:
                     continue
                 if segment_reg_name(unwrap_c_casts(maybe_seg), project) is not None:
-                    segment_scale = True
-                    break
-            if segment_scale:
-                continue
+                    return True
+            return False
+        if term.op == "Shl":
+            for maybe_seg, maybe_scale in ((term.lhs, term.rhs), (term.rhs, term.lhs)):
+                if c_constant_value(unwrap_c_casts(maybe_scale)) != 4:
+                    continue
+                if segment_reg_name(unwrap_c_casts(maybe_seg), project) is not None:
+                    return True
+        return False
+
+    for term in flatten_c_add_terms(addr_expr):
+        inner = unwrap_c_casts(term)
+        if _is_segment_scale(inner):
+            continue
         kept_terms.append(term)
 
     if not kept_terms:
