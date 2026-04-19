@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
-from angr.sim_variable import SimStackVariable
+from angr.sim_variable import SimRegisterVariable, SimStackVariable
 
 
 def _rewrite_ss_stack_byte_offsets(
@@ -37,6 +38,26 @@ def _rewrite_ss_stack_byte_offsets(
 
     changed = False
     stack_pointer_aliases: dict[int, object] = {}
+    synthetic_sp_anchor = None
+
+    def _synthetic_sp_anchor_cvar():
+        nonlocal synthetic_sp_anchor
+        if synthetic_sp_anchor is not None:
+            return synthetic_sp_anchor
+        region = getattr(codegen.cfunc, "addr", None)
+        variable = SimStackVariable(0, 2, base="sp", name="sp_0", region=region)
+        synthetic_sp_anchor = structured_c.CVariable(variable, variable_type=SimTypeShort(False), codegen=codegen)
+        variables_in_use = getattr(codegen.cfunc, "variables_in_use", None)
+        if isinstance(variables_in_use, dict):
+            variables_in_use.setdefault(variable, synthetic_sp_anchor)
+        unified_local_vars = getattr(codegen.cfunc, "unified_local_vars", None)
+        if isinstance(unified_local_vars, dict):
+            unified_local_vars.setdefault(variable, {(synthetic_sp_anchor, getattr(synthetic_sp_anchor, "variable_type", None))})
+        return synthetic_sp_anchor
+
+    def _is_sp_virtual_register(variable) -> bool:
+        sp_offset = getattr(getattr(project, "arch", None), "registers", {}).get("sp", (None, None))[0]
+        return isinstance(sp_offset, int) and getattr(variable, "reg", None) == sp_offset
 
     def _is_linear_temp(cvar) -> bool:
         if not isinstance(cvar, structured_c.CVariable):
@@ -50,13 +71,12 @@ def _rewrite_ss_stack_byte_offsets(
         return isinstance(name, str) and re.fullmatch(r"(?:v\d+|vvar_\d+|ir_\d+|tmp_\d+)", name) is not None
 
     def _single_assignment_expr_for_virtual_name(name: str):
-        statements = getattr(getattr(codegen, "cfunc", None), "statements", None)
-        statements = getattr(statements, "statements", None)
-        if not statements:
+        root = getattr(getattr(codegen, "cfunc", None), "statements", None)
+        if root is None:
             return None
 
         matches = []
-        for stmt in statements:
+        for stmt in iter_c_nodes_deep(root):
             if not isinstance(stmt, structured_c.CAssignment):
                 continue
             lhs = getattr(stmt, "lhs", None)
@@ -76,8 +96,19 @@ def _rewrite_ss_stack_byte_offsets(
             return None
         varid = getattr(dirty, "varid", None)
         if not isinstance(varid, int):
+            reg = getattr(dirty, "reg", None)
+            bits = getattr(dirty, "bits", None)
+            if _is_sp_virtual_register(SimpleNamespace(reg=reg, size=(bits // 8) if isinstance(bits, int) else None)):
+                return _synthetic_sp_anchor_cvar()
             return None
-        return _single_assignment_expr_for_virtual_name(f"vvar_{varid}")
+        resolved = _single_assignment_expr_for_virtual_name(f"vvar_{varid}")
+        if resolved is not None:
+            return resolved
+        reg = getattr(dirty, "reg", None)
+        bits = getattr(dirty, "bits", None)
+        if _is_sp_virtual_register(SimpleNamespace(reg=reg, size=(bits // 8) if isinstance(bits, int) else None)):
+            return _synthetic_sp_anchor_cvar()
+        return None
 
     def _resolve_stack_pointer_alias(node):
         node = unwrap_c_casts(node)
@@ -90,6 +121,8 @@ def _rewrite_ss_stack_byte_offsets(
                 identity = stack_slot_identity_for_variable(variable)
                 if identity is not None and identity.base == "bp":
                     return node, 0
+            if _is_sp_virtual_register(variable):
+                return _synthetic_sp_anchor_cvar(), 0
             alias = stack_pointer_aliases.get(id(variable))
             if alias is not None:
                 return alias.base, alias.offset
@@ -144,6 +177,20 @@ def _rewrite_ss_stack_byte_offsets(
         stack_pointer_aliases.update(aliases)
 
     _collect_stack_pointer_aliases()
+
+    def _effective_deref_bits(node) -> int | None:
+        type_ = getattr(node, "type", None)
+        bits = getattr(type_, "size", None)
+        if bits in {8, 16}:
+            return bits
+        operand = getattr(node, "operand", None)
+        cast_type = getattr(operand, "type", None)
+        if isinstance(cast_type, SimTypePointer):
+            pointee = getattr(cast_type, "pts_to", None)
+            pointee_bits = getattr(pointee, "size", None)
+            if pointee_bits in {8, 16}:
+                return pointee_bits
+        return None
 
     def make_stack_deref(cvar, offset: int, bits: int):
         element_type = SimTypeChar(False) if bits == 8 else SimTypeShort(False)
@@ -238,8 +285,7 @@ def _rewrite_ss_stack_byte_offsets(
                 return node
             if _contains_large_unsigned_constant(addr_expr):
                 return node
-            type_ = getattr(node, "type", None)
-            bits = getattr(type_, "size", None)
+            bits = _effective_deref_bits(node)
             if bits not in {8, 16}:
                 return node
             return make_addr_deref(addr_expr, bits)
@@ -248,8 +294,7 @@ def _rewrite_ss_stack_byte_offsets(
             extra_offset = classified.extra_offset
             base_variable = getattr(cvar, "variable", None)
             if isinstance(base_variable, SimStackVariable):
-                type_ = getattr(node, "type", None)
-                bits = getattr(type_, "size", None)
+                bits = _effective_deref_bits(node)
                 access_size = bits // project.arch.byte_width if isinstance(bits, int) and bits > 0 else None
                 target_offset = getattr(base_variable, "offset", 0) + extra_offset
                 resolved_cvar = resolve_stack_cvar_at_offset(codegen, target_offset)
@@ -274,8 +319,7 @@ def _rewrite_ss_stack_byte_offsets(
                         return resolved_cvar
                 if isinstance(access_size, int) and access_size >= 4:
                     return materialize_stack_cvar_at_offset(codegen, target_offset, access_size)
-        type_ = getattr(node, "type", None)
-        bits = getattr(type_, "size", None)
+        bits = _effective_deref_bits(node)
         if bits not in {8, 16}:
             return node
         return make_stack_deref(cvar, extra_offset, bits)

@@ -3584,6 +3584,9 @@ def _decompile_function(
         lambda: _prune_unused_local_declarations(dec.codegen),
         lambda: _dedupe_codegen_variable_names_8616(dec.codegen),
         lambda: _coalesce_linear_recurrence_statements(project, dec.codegen),
+        lambda: _rewrite_ss_stack_byte_offsets(project, dec.codegen),
+        lambda: _canonicalize_stack_cvars(dec.codegen),
+        lambda: _coalesce_direct_ss_local_word_statements(project, dec.codegen),
         lambda: _prune_unused_local_declarations(dec.codegen),
     )
     if small_function:
@@ -3623,6 +3626,9 @@ def _decompile_function(
             lambda: _prune_unused_local_declarations(dec.codegen),
             lambda: _dedupe_codegen_variable_names_8616(dec.codegen),
             lambda: _coalesce_linear_recurrence_statements(project, dec.codegen),
+            lambda: _rewrite_ss_stack_byte_offsets(project, dec.codegen),
+            lambda: _canonicalize_stack_cvars(dec.codegen),
+            lambda: _coalesce_direct_ss_local_word_statements(project, dec.codegen),
             lambda: _prune_unused_local_declarations(dec.codegen),
         )
         if lst_metadata is not None:
@@ -6753,13 +6759,13 @@ def _resolve_dirty_virtual_expr_8616(node):
     if not isinstance(varid, int):
         return None
     codegen = getattr(node, "codegen", None)
-    statements = getattr(getattr(getattr(codegen, "cfunc", None), "statements", None), "statements", None)
-    if not statements:
+    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
+    if root is None:
         return None
 
     target_name = f"vvar_{varid}"
     matches = []
-    for stmt in statements:
+    for stmt in _iter_c_nodes_deep(root):
         if not isinstance(stmt, structured_c.CAssignment):
             continue
         lhs = getattr(stmt, "lhs", None)
@@ -6851,6 +6857,8 @@ def _replace_c_children(node, transform, seen: set[int] | None = None) -> bool:
             "operand",
             "condition",
             "cond",
+            "initializer",
+            "iterator",
             "body",
             "iffalse",
             "iftrue",
@@ -10108,6 +10116,21 @@ def _simplify_x86_16_stack_byte_pointers(c_text: str, metadata: CODProcMetadata 
     raw_linear_pointer_store_re = re.compile(
         r"^(?P<indent>\s*)\*\(\((?P<type>[^()]+?)\s*\*\)\s*(?P<addr>0x[0-9A-Fa-f]+|\d+)\s*\)\s*=\s*(?P<rhs>[^;]+);\s*$"
     )
+    stack_alias_base_re = re.compile(
+        r"^\s*(?P<name>(?:vvar|ir|tmp)_\d+)\s*=\s*\((?:unsigned\s+)?int\)&\(&(?P<base>[A-Za-z_][\w$?@]*)\)\[(?P<index>-?\d+)\]\s*;\s*$"
+    )
+    stack_alias_chain_re = re.compile(
+        r"^\s*(?P<name>(?:vvar|ir|tmp)_\d+)\s*=\s*(?P<expr>(?:vvar|ir|tmp)_\d+(?:\s*[+-]\s*-?\d+)*)\s*;\s*$"
+    )
+    ss_stack_store_re = re.compile(
+        r"^(?P<indent>\s*)\*\(\((?P<type>[^()]+?)\s*\*\)\(\(ss\s*<<\s*4\)\s*\+\s*(?P<expr>.+?)\)\)\s*=\s*(?P<rhs>[^;]+);\s*$"
+    )
+    plain_stack_store_re = re.compile(
+        r"^(?P<indent>\s*)\*\(\((?P<type>[^()]+?)\s*\*\)\((?P<expr>(?:vvar|ir|tmp)_\d+(?:\s*[+-]\s*-?\d+)*)\)\)\s*=\s*(?P<rhs>[^;]+);\s*$"
+    )
+    direct_ss_stack_store_re = re.compile(
+        r"^(?P<indent>\s*)\*\(\((?P<type>[^()]+?)\s*\*\)\(\(ss << 4\) \+ (?P<base>(?:\(unsigned int\))?&[A-Za-z_][\w$?@]*)(?: (?P<op>[+-]) (?P<delta>\d+))?\)\)\s*=\s*(?P<rhs>[^;]+);\s*$"
+    )
 
     def _normalize_rhs(rhs: str) -> str:
         return rhs.replace("(unsigned short)", "").strip()
@@ -10129,11 +10152,90 @@ def _simplify_x86_16_stack_byte_pointers(c_text: str, metadata: CODProcMetadata 
             return 0x40, addr - 0x400
         return None
 
+    stack_alias_seeds: dict[str, tuple[str, int]] = {}
+    stack_alias_exprs: dict[str, str] = {}
+    for line in lines:
+        base_match = stack_alias_base_re.match(line)
+        if base_match is not None:
+            stack_alias_seeds[base_match.group("name")] = (base_match.group("base"), int(base_match.group("index"), 0))
+            continue
+        chain_match = stack_alias_chain_re.match(line)
+        if chain_match is not None:
+            stack_alias_exprs[chain_match.group("name")] = chain_match.group("expr").strip()
+
+    stack_alias_cache: dict[str, tuple[str, int] | None] = {}
+
+    def _resolve_stack_alias_expr(expr: str, seen: set[str] | None = None) -> tuple[str, int] | None:
+        expr = expr.strip()
+        if not expr:
+            return None
+        if seen is None:
+            seen = set()
+        first_match = re.match(r"^(?P<name>(?:vvar|ir|tmp)_\d+)", expr)
+        if first_match is None:
+            return None
+        name = first_match.group("name")
+        if name in seen:
+            return None
+        base = stack_alias_cache.get(name)
+        if base is None and name not in stack_alias_cache:
+            if name in stack_alias_seeds:
+                base = stack_alias_seeds[name]
+            elif name in stack_alias_exprs:
+                base = _resolve_stack_alias_expr(stack_alias_exprs[name], seen | {name})
+            stack_alias_cache[name] = base
+        if base is None:
+            return None
+        offset = base[1]
+        rest = expr[first_match.end() :]
+        for sign, value in re.findall(r"([+-])\s*(-?\d+)", rest):
+            delta = int(value, 0)
+            offset += delta if sign == "+" else -delta
+        return base[0], offset
+
+    def _render_stack_pointer_expr(base: str, offset: int) -> str:
+        if offset == 0:
+            return f"&{base}"
+        op = "+" if offset > 0 else "-"
+        return f"(&{base} {op} {abs(offset)})"
+
     kept_lines: list[str] = []
     i = 0
     while i < len(lines):
         current = lines[i]
         next_line = lines[i + 1] if i + 1 < len(lines) else None
+        ss_stack_match = ss_stack_store_re.match(current)
+        if ss_stack_match is not None:
+            stack_pointer = _resolve_stack_alias_expr(ss_stack_match.group("expr"))
+            if stack_pointer is not None:
+                base_name, base_offset = stack_pointer
+                kept_lines.append(
+                    f'{ss_stack_match.group("indent")}*(({ss_stack_match.group("type").strip()} *){_render_stack_pointer_expr(base_name, base_offset)}) = {ss_stack_match.group("rhs").strip()};'
+                )
+                i += 1
+                continue
+        plain_stack_match = plain_stack_store_re.match(current)
+        if plain_stack_match is not None:
+            stack_pointer = _resolve_stack_alias_expr(plain_stack_match.group("expr"))
+            if stack_pointer is not None:
+                base_name, base_offset = stack_pointer
+                kept_lines.append(
+                    f'{plain_stack_match.group("indent")}*(({plain_stack_match.group("type").strip()} *){_render_stack_pointer_expr(base_name, base_offset)}) = {plain_stack_match.group("rhs").strip()};'
+                )
+                i += 1
+                continue
+        direct_ss_stack_match = direct_ss_stack_store_re.match(current)
+        if direct_ss_stack_match is not None:
+            base_expr = direct_ss_stack_match.group("base").replace("(unsigned int)", "").strip()
+            delta = int(direct_ss_stack_match.group("delta") or "0", 0)
+            if direct_ss_stack_match.group("op") == "-":
+                delta = -delta
+            addr_expr = base_expr if delta == 0 else f"({base_expr} {'+' if delta > 0 else '-'} {abs(delta)})"
+            kept_lines.append(
+                f'{direct_ss_stack_match.group("indent")}*(({direct_ss_stack_match.group("type").strip()} *){addr_expr}) = {direct_ss_stack_match.group("rhs").strip()};'
+            )
+            i += 1
+            continue
         low_match = low_store_re.match(current)
         high_match = high_store_re.match(next_line) if next_line is not None else None
         if low_match is not None and high_match is not None:
@@ -10202,6 +10304,37 @@ def _simplify_x86_16_stack_byte_pointers(c_text: str, metadata: CODProcMetadata 
         i += 1
 
     result = "\n".join(kept_lines)
+
+    segmented_byte_pair_load_re = re.compile(
+        r"\(\*\(\(char \*\)\(\((?P<seg>[A-Za-z_][\w$?@]*) << 4\) \+ (?P<off>0x[0-9A-Fa-f]+|\d+)\)\) \| "
+        r"\*\(\(char \*\)\(\((?P=seg) << 4\) \+ (?P=off) \+ 1\)\) << 8\)"
+    )
+    stack_byte_pair_load_re = re.compile(
+        r"\(\*\(\(char \*\)\(\(ss << 4\) \+ (?P<base>(?:\(unsigned int\))?&[A-Za-z_][\w$?@]*)\)\) \| "
+        r"\*\(\(char \*\)\(\(ss << 4\) \+ (?P=base) \+ 1\)\) << 8\)"
+    )
+
+    result = segmented_byte_pair_load_re.sub(
+        lambda match: f'*((unsigned short far *)MK_FP({match.group("seg")}, {match.group("off")}))',
+        result,
+    )
+    result = stack_byte_pair_load_re.sub(
+        lambda match: f'*((unsigned short *){match.group("base").replace("(unsigned int)", "").strip()})',
+        result,
+    )
+    direct_ss_stack_expr_re = re.compile(
+        r"\*\(\((?P<type>[^()]+?)\s*\*\)\(\(ss << 4\) \+ (?P<base>(?:\(unsigned int\))?&[A-Za-z_][\w$?@]*)(?: (?P<op>[+-]) (?P<delta>\d+))?\)\)"
+    )
+
+    def _rewrite_direct_ss_stack_expr(match: re.Match[str]) -> str:
+        base_expr = match.group("base").replace("(unsigned int)", "").strip()
+        delta = int(match.group("delta") or "0", 0)
+        if match.group("op") == "-":
+            delta = -delta
+        addr_expr = base_expr if delta == 0 else f"({base_expr} {'+' if delta > 0 else '-'} {abs(delta)})"
+        return f'*(({match.group("type").strip()} *){addr_expr})'
+
+    result = direct_ss_stack_expr_re.sub(_rewrite_direct_ss_stack_expr, result)
 
     def _rewrite_source_backed_assignments(text: str) -> str:
         if metadata is None:

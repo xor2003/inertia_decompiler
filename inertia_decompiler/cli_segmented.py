@@ -91,6 +91,38 @@ def _classify_segmented_addr_expr(
     base_terms = 0
     stack_slots: list[object] = []
 
+    def _synthetic_sp_anchor(term):
+        if not isinstance(term, structured_c.CVariable):
+            return None
+        variable = getattr(term, "variable", None)
+        if not isinstance(variable, SimRegisterVariable):
+            return None
+        sp_offset = getattr(getattr(project, "arch", None), "registers", {}).get("sp", (None, None))[0]
+        if not isinstance(sp_offset, int) or getattr(variable, "reg", None) != sp_offset:
+            return None
+        codegen = getattr(term, "codegen", None)
+        region = getattr(getattr(codegen, "cfunc", None), "addr", None)
+        synthetic = SimStackVariable(0, getattr(variable, "size", None) or 2, base="sp", name="sp_0", region=region)
+        return structured_c.CVariable(synthetic, variable_type=getattr(term, "variable_type", None), codegen=codegen), 0
+
+    def _synthetic_sp_match(term):
+        synthetic = _synthetic_sp_anchor(term)
+        if synthetic is not None:
+            return synthetic
+        if not isinstance(term, structured_c.CBinaryOp) or term.op not in {"Add", "Sub"}:
+            return None
+        lhs = _synthetic_sp_anchor(unwrap_c_casts(term.lhs))
+        rhs = _synthetic_sp_anchor(unwrap_c_casts(term.rhs))
+        lhs_const = c_constant_value(unwrap_c_casts(term.lhs))
+        rhs_const = c_constant_value(unwrap_c_casts(term.rhs))
+        if lhs is not None and rhs_const is not None:
+            base, offset = lhs
+            return base, offset + (rhs_const if term.op == "Add" else -rhs_const)
+        if rhs is not None and lhs_const is not None and term.op == "Add":
+            base, offset = rhs
+            return base, offset + lhs_const
+        return None
+
     def _segment_scale_name(term) -> str | None:
         if not isinstance(term, structured_c.CBinaryOp):
             return None
@@ -132,6 +164,8 @@ def _classify_segmented_addr_expr(
             continue
 
         matched_stack = match_stack_cvar_and_offset(inner)
+        if matched_stack is None:
+            matched_stack = _synthetic_sp_match(inner)
         if matched_stack is not None:
             matched_cvar, stack_offset = matched_stack
             stack_offset = normalize_16bit_signed_offset(stack_offset)

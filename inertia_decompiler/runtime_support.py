@@ -20,6 +20,8 @@ from concurrent.futures.thread import _threads_queues, _worker
 from datetime import datetime
 from _pytest.capture import EncodedFile
 
+from .variable_recovery_sub_guard import build_guarded_handle_binop_sub_8616
+
 
 DEFAULT_FREE_RAM_BUDGET_FRACTION = 0.45
 DEFAULT_WORKER_MEMORY_FLOOR_MB = 1536
@@ -247,68 +249,12 @@ def install_angr_variable_recovery_binop_sub_size_guard(
         typevars_module = angr_typevars
 
     original_handle_binop_sub = engine_cls._handle_binop_Sub
-
-    def _coerce_bv_width(data, bits):  # noqa: ANN001
-        size = data.size()
-        if size == bits:
-            return data
-        if size > bits:
-            try:
-                return data[bits - 1 : 0]
-            except Exception:
-                return data
-        try:
-            return data.zero_extend(bits - size)
-        except Exception:
-            return data
-
-    def _guarded_handle_binop_sub(self, expr):
-        arg0, arg1 = expr.operands
-        r0, r1 = self._expr_pair(arg0, arg1)
-        if r0.data.size() != r1.data.size():
-            mismatch_seen = None
-            if project is not None:
-                mismatch_seen = getattr(project, "_inertia_size_mismatch_seen", None)
-                if not isinstance(mismatch_seen, set):
-                    mismatch_seen = set()
-                    setattr(project, "_inertia_size_mismatch_seen", mismatch_seen)
-            else:
-                mismatch_seen = getattr(self, "_inertia_size_mismatch_seen", None)
-            if not isinstance(mismatch_seen, set):
-                mismatch_seen = set()
-                if project is not None:
-                    setattr(project, "_inertia_size_mismatch_seen", mismatch_seen)
-                else:
-                    self._inertia_size_mismatch_seen = mismatch_seen
-            function_addr, _function_name, _slice_addr = _project_current_function_context(project)
-            mismatch_key = (function_addr, r0.data.size(), r1.data.size(), expr.bits)
-            if mismatch_key not in mismatch_seen:
-                mismatch_seen.add(mismatch_key)
-                print(
-                    "[dbg] clinic:variable-recovery-size-mismatch "
-                    f"op=Sub lhs_bits={r0.data.size()} rhs_bits={r1.data.size()} expr_bits={expr.bits}"
-                    f"{_project_current_function_context_suffix(project)}",
-                    file=sys.stderr,
-                )
-                sys.stderr.flush()
-        if r0.data.size() == r1.data.size():
-            compute = r0.data - r1.data
-        else:
-            lhs = _coerce_bv_width(r0.data, expr.bits)
-            rhs = _coerce_bv_width(r1.data, expr.bits)
-            compute = lhs - rhs if lhs.size() == rhs.size() == expr.bits else self.state.top(expr.bits)
-
-        type_constraints = set()
-        if r0.typevar is not None and r1.data.concrete and isinstance(r0.typevar, typevars_module.TypeVariable):
-            typevar = typevars_module.new_dtv(r0.typevar, label=typevars_module.SubN(r1.data.concrete_value))
-        else:
-            typevar = typevars_module.TypeVariable()
-            if r0.typevar is not None and r1.typevar is not None:
-                type_constraints.add(typevars_module.Sub(r0.typevar, r1.typevar, typevar))
-
-        return richr_cls(compute, typevar=typevar, type_constraints=type_constraints)
-
-    engine_cls._handle_binop_Sub = _guarded_handle_binop_sub
+    engine_cls._handle_binop_Sub = build_guarded_handle_binop_sub_8616(
+        richr_cls=richr_cls,
+        typevars_module=typevars_module,
+        project=project,
+        context_suffix=(_project_current_function_context, _project_current_function_context_suffix),
+    )
     return original_handle_binop_sub
 
 
