@@ -7,10 +7,11 @@ import time
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from angr import ailment
-from angr.ailment.expression import StackBaseOffset
+from angr.ailment.expression import BinaryOp, Load, StackBaseOffset
 from angr.analyses.decompiler.return_maker import ReturnMaker
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.calling_conventions import SimRegArg
@@ -24,6 +25,7 @@ from angr_platforms.X86_16.cod_known_objects import known_cod_object_spec
 from angr_platforms.X86_16.decompiler_postprocess_stage import _materialize_missing_terminal_ax_return_8616
 from angr_platforms.X86_16.decompiler_postprocess_utils import _replace_c_children_8616
 from angr_platforms.X86_16.decompiler_return_compat import (
+    _infer_x86_16_ax_return_expr_8616,
     _infer_x86_16_c_return_value_from_ax_8616,
     _resolve_codegen_prototype_8616,
     _return_compat_c_result_needs_neutralization_8616,
@@ -1286,12 +1288,16 @@ def test_decompiler_return_compat_infers_ax_stack_load_without_prototype():
         assert isinstance(result, ailment.Stmt.Return)
         assert len(result.ret_exprs) == 1
         retval = result.ret_exprs[0]
-        assert isinstance(retval, ailment.Expr.Load)
+        assert isinstance(retval, ailment.Expr.Register)
+        assert (retval.reg_offset, retval.bits, retval.tags["ins_addr"]) == (ax.reg_offset, ax.bits, ret_stmt.tags["ins_addr"])
+        assert function._inertia_return_compat_ax_materialized_count == 1
+        # Source evidence proves existence; only SSA may propagate it to RET.
+        retval = cast(Load, _infer_x86_16_ax_return_expr_8616(fake_self, ret_stmt, block))
+        assert isinstance(retval, Load)
         assert isinstance(retval.addr, StackBaseOffset)
         assert isinstance(retval.addr.tags.get("variable"), SimStackVariable)
         assert retval.addr.tags["variable"].base == "bp"
         assert retval.addr.offset == -2
-        assert getattr(function, "_inertia_return_compat_ax_materialized_count", 0) == 1
     finally:
         ReturnMaker._handle_Return = original_handle_return
 
@@ -1344,7 +1350,10 @@ def test_decompiler_return_compat_resolves_ax_self_update_return_source():
         assert isinstance(result, ailment.Stmt.Return)
         assert len(result.ret_exprs) == 1
         retval = result.ret_exprs[0]
-        assert isinstance(retval, ailment.Expr.BinaryOp)
+        assert isinstance(retval, ailment.Expr.Register)
+        assert (retval.reg_offset, retval.bits, retval.tags["ins_addr"]) == (ax_dst.reg_offset, ax_dst.bits, ret_stmt.tags["ins_addr"])
+        retval = cast(BinaryOp, _infer_x86_16_ax_return_expr_8616(fake_self, ret_stmt, block))
+        assert isinstance(retval, BinaryOp)
         assert retval.op == "Add"
         load_expr, const_expr = retval.operands
         assert isinstance(load_expr, ailment.Expr.Load)
@@ -1478,9 +1487,11 @@ def test_decompiler_return_compat_requires_unbranched_scalar_for_unused_caller(
         assert isinstance(result, ailment.Stmt.Return)
         assert len(result.ret_exprs) == expected_return_count
         if expected_return_count:
-            assert isinstance(result.ret_exprs[0], ailment.Expr.Const)
-            assert result.ret_exprs[0].value == 75
-            assert result.ret_exprs[0].bits == 16
+            captured = result.ret_exprs[0]
+            assert isinstance(captured, ailment.Expr.Register)
+            assert (captured.reg_offset, captured.bits, captured.tags["ins_addr"]) == (ax.reg_offset, ax.bits, ret_stmt.tags["ins_addr"])
+            assert isinstance(assignment.src, ailment.Expr.Const)
+            assert (assignment.src.value, assignment.src.bits) == (value.value, value.bits)
         assert fallback_calls == []
         assert isinstance(function.prototype.returnty, SimTypeShort)
         assert function.is_prototype_guessed is True
@@ -1676,8 +1687,11 @@ def test_decompiler_return_compat_keeps_guessed_scalar_when_caller_uses_return()
 
         assert isinstance(result, ailment.Stmt.Return)
         assert len(result.ret_exprs) == 1
-        assert isinstance(result.ret_exprs[0], ailment.Expr.Const)
-        assert result.ret_exprs[0].value == 75
+        captured = result.ret_exprs[0]
+        assert isinstance(captured, ailment.Expr.Register)
+        assert (captured.reg_offset, captured.bits, captured.tags["ins_addr"]) == (ax.reg_offset, ax.bits, ret_stmt.tags["ins_addr"])
+        assert isinstance(assignment.src, ailment.Expr.Const)
+        assert (assignment.src.value, assignment.src.bits) == (value.value, value.bits)
         assert isinstance(function.prototype.returnty, SimTypeShort)
         assert getattr(function, "_inertia_return_compat_guessed_scalar_refused_count", 0) == 0
     finally:
@@ -1731,8 +1745,12 @@ def test_decompiler_return_compat_keeps_unknown_caller_unconditional_predecessor
 
         assert isinstance(result, ailment.Stmt.Return)
         assert len(result.ret_exprs) == 1
-        assert isinstance(result.ret_exprs[0], ailment.Expr.Const)
-        assert result.ret_exprs[0].value == 75
+        captured = result.ret_exprs[0]
+        assert isinstance(captured, ailment.Expr.Register)
+        assert (captured.reg_offset, captured.bits, captured.tags["ins_addr"]) == (ax.reg_offset, ax.bits, ret_stmt.tags["ins_addr"])
+        assert pred_block.statements == [assignment, jump]
+        assert isinstance(assignment.src, ailment.Expr.Const)
+        assert (assignment.src.value, assignment.src.bits) == (value.value, value.bits)
         assert isinstance(function.prototype.returnty, SimTypeShort)
     finally:
         ReturnMaker._handle_Return = original_handle_return

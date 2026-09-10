@@ -1,5 +1,36 @@
 # QuickSort Partition Comparison Investigation
 
+## Sidecar-Free Acceptance Follow-Up (2026-09-10)
+
+Current `f37229fa1` production output passes validation and portable-flat
+compilation but the old test rejected its unbraced early return and following
+plain `if`. The source's outer `iLow < iHigh` guard is equivalently represented
+as `if (low >= high) return;`. An `else` after that return is unnecessary.
+
+The test now matches the early-return guard and immediately following
+one-element guard together, permitting braces and an optional `else` without
+allowing intervening statements. Partition guards, pivot initialization/use,
+pointer arguments, recursive-call order/bounds and call counts are unchanged.
+No production semantics or validation checks changed.
+
+- Before: one failure in 32.27 seconds, test call 24.21 seconds; failure was
+  after the validation and compilation assertions.
+- After: the complete regression passes in 9.30 seconds with accepted-result
+  cache reuse. This is not a decompiler performance improvement measurement.
+- An executable check of the actual matcher accepts three equivalent forms and
+  rejects six mutations: missing return, inverted guard, reversed subtraction,
+  wrong distance, intervening side effect and a valued return.
+- Pyright reports zero errors/warnings. Ruff `check --fix` reports 34 existing
+  findings in the large regression file; no suppression or threshold change.
+- Logs: `/tmp/inertia-sortd-quicksort-current.log`,
+  `/tmp/inertia-sortd-quicksort-guard.log`. The follow-up was observed complete
+  at 10:52:15 CEST; exact active implementation effort was not measured.
+
+This closes the recorded sidecar-free guard-shape failure, not the complete
+repository audit or all output-quality debt. Broad gates on identical production
+source passed immediately before this test-only correction; they were not
+repeated afterward.
+
 ## Status: Open
 
 ### Root Cause Repaired; Quality Debt Remains

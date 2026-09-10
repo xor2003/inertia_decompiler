@@ -6,6 +6,8 @@ constant into an IRValue displacement. Absolute constants remain bit patterns;
 relative displacements use their signed modular representative. Unknown or
 mismatched operation widths are not normalized. No storage identity, DCE,
 stack-frame recovery or rendered-text interpretation belongs here.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization.
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

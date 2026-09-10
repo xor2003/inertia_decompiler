@@ -4,6 +4,8 @@ Layer: IR.
 Responsibility: publish existing AIL/VEX source identity before SSA folding,
 including separate CFG occurrences. This is dataflow provenance, not argument
 ownership, stack balancing, Alias proof, or permission to remove an effect.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization.
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
@@ -17,6 +19,8 @@ import networkx as nx
 from angr.ailment.block import Block
 from angr.ailment.expression import BinaryOp, Const, Register
 from angr.ailment.statement import Assignment
+
+_BINARY_OPERAND_COUNT: int = 2
 
 
 class StackPointerArithmetic8616(StrEnum):
@@ -74,7 +78,7 @@ def _projection_8616(
     source = statement.src
     if not isinstance(source, BinaryOp) or source.op not in {"Add", "Sub"}:
         return None
-    if not isinstance(statement.dst, Register) or len(source.operands) != 2:
+    if not isinstance(statement.dst, Register) or len(source.operands) != _BINARY_OPERAND_COUNT:
         return None
     amount = source.operands[1]
     if not (

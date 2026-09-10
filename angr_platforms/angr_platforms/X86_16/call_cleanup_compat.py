@@ -21,6 +21,8 @@ from angr.ailment.manager import Manager
 from .semantics.call_return_segment import callee_return_evidence_8616
 from .semantics.terminal_return_contract import TerminalReturnFrameKind8616
 
+_WORD_OPERAND_BITS: int = 16
+
 
 @dataclass(frozen=True, slots=True)
 class CalleeCleanupFact8616:
@@ -77,11 +79,11 @@ def materialize_callee_cleanup_8616(
                 continue
             evidence = callee_return_evidence_8616(project, target.value)
             amount = evidence.consistent_cleanup
-            if not amount or evidence.consistent_return_operand_bits != 16:
+            if not amount or evidence.consistent_return_operand_bits != _WORD_OPERAND_BITS:
                 continue
             if evidence.consistent_return_frame_kind is not TerminalReturnFrameKind8616.NEAR:
                 continue
-            fact = CalleeCleanupFact8616(address, target.value, amount, 16)
+            fact = CalleeCleanupFact8616(address, target.value, amount, _WORD_OPERAND_BITS)
             read = Expr.Register(manager.next_atom(), sp_offset, 16)
             constant = Expr.Const(manager.next_atom(), amount, 16)
             value = Expr.BinaryOp(manager.next_atom(), "Add", (read, constant), False, bits=16)

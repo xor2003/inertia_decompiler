@@ -9,6 +9,8 @@ from pyvex.const import U8, U16, U32
 from pyvex.expr import Binop, Const, Get, RdTmp
 from pyvex.stmt import Put, WrTmp
 
+_CAPTURED_REGISTER_OFFSET = 36
+
 
 @pytest.mark.parametrize("width", [8, 16, 32])
 @pytest.mark.parametrize("position", ["low", "middle", "high"])
@@ -22,9 +24,9 @@ def test_selected_bit_is_equal_for_all_inputs_and_keeps_captured_read(width, pos
     left = Binop(f"Iop_And{width}", [RdTmp(0), Const(constant(mask))])
     right = Binop(f"Iop_And{width}", [RdTmp(1), Const(constant(inverse))])
     args = [RdTmp(3), RdTmp(2)] if reverse else [RdTmp(2), RdTmp(3)]
-    statements = [WrTmp(0, Get(36, f"Ity_I{width}")), WrTmp(1, Get(0, f"Ity_I{width}")),
+    statements = [WrTmp(0, Get(_CAPTURED_REGISTER_OFFSET, f"Ity_I{width}")), WrTmp(1, Get(0, f"Ity_I{width}")),
                   WrTmp(2, left), WrTmp(3, right), WrTmp(4, Binop(f"Iop_Or{width}", args)),
-                  Put(Const(constant(0)), 36)]
+                  Put(Const(constant(0)), _CAPTURED_REGISTER_OFFSET)]
     root = RdTmp(4)
     proof = project_bit_source_8616(root, statements, env, bit=bit)
     assert isinstance(proof.source, RdTmp) and proof.source.tmp == 0
@@ -33,13 +35,13 @@ def test_selected_bit_is_equal_for_all_inputs_and_keeps_captured_read(width, pos
     old, new = claripy.BVS("old", width), claripy.BVS("new", width)
     original = (old & mask) | (new & inverse)
     assert not claripy.Solver().satisfiable(extra_constraints=[original[bit:bit] != old[bit:bit]])
-    assert statements[-1].offset == 36
+    assert statements[-1].offset == _CAPTURED_REGISTER_OFFSET
 
 
 @pytest.mark.parametrize("case", ["unknown", "live_bit", "mixed_width", "cycle", "duplicate", "invalid_bit"])
 def test_unproven_projection_keeps_original_atom(case):
     env = IRTypeEnv(Arch86_16(), ["Ity_I16"] * 3)
-    statements = [WrTmp(0, Get(36, "Ity_I16"))]
+    statements = [WrTmp(0, Get(_CAPTURED_REGISTER_OFFSET, "Ity_I16"))]
     operation = "Iop_Add16" if case == "unknown" else "Iop_Or16"
     constant = Const(U16(0x400 if case == "live_bit" else 0))
     if case == "mixed_width":
@@ -53,3 +55,22 @@ def test_unproven_projection_keeps_original_atom(case):
     proof = project_bit_source_8616(root, statements, env, bit=16 if case == "invalid_bit" else 10)
     assert proof.source is root
     assert proof.materialized_count == 0 and proof.failure_count == 1
+
+
+@pytest.mark.parametrize(("chain_length", "accepted"), [(4, True), (70, False)])
+def test_definition_depth_exhaustion_discards_partial_projection(chain_length, accepted):
+    """A bounded proof must not publish a partially simplified source on exhaustion."""
+    env = IRTypeEnv(Arch86_16(), ["Ity_I16"] * (chain_length + 2))
+    statements = [WrTmp(0, Get(_CAPTURED_REGISTER_OFFSET, "Ity_I16"))]
+    statements.extend(WrTmp(index, RdTmp(index - 1)) for index in range(1, chain_length + 1))
+    root = RdTmp(chain_length + 1)
+    statements.append(WrTmp(root.tmp, Binop("Iop_Or16", [RdTmp(chain_length), Const(U16(0))])))
+
+    proof = project_bit_source_8616(root, statements, env, bit=10)
+
+    assert bool(proof.materialized_count) is accepted
+    assert proof.failure_count == int(not accepted)
+    if accepted:
+        assert isinstance(proof.source, RdTmp) and proof.source.tmp == chain_length
+    else:
+        assert proof.source is root

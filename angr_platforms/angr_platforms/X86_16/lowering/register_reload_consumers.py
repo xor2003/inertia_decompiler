@@ -5,6 +5,8 @@ Responsibility: identify an existing register read in local expressions only.
 A control statement's instruction tag cannot authorize reusing an SSA identity
 from its body, another branch, or a later iteration. This does not infer storage
 or remove effects; absent or ambiguous consumers refuse reconstruction.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

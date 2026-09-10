@@ -4,6 +4,8 @@ Layer: IR/native AIL adapter.
 Responsibility: reassociate only same-width integer Add/Sub chains with one
 register base. Preserve evaluation, source tags and bit-vector wrapping. This
 does not prove stack ownership, infer addresses or delete statements.
+Owns typed Value, Address, Condition, instruction facts, and lossless normalization.
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
@@ -18,6 +20,8 @@ from angr.ailment.block_walker import AILBlockRewriter
 from angr.ailment.expression import BinaryOp, Const, Expression, Register, VirtualVariable, VirtualVariableCategory
 from angr.ailment.manager import Manager
 from angr.ailment.statement import Statement
+
+_MIN_FOLD_TERMS: int = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +67,7 @@ def _fold_8616(
         indices.append(base.idx)
         displacement += constant.value if base.op == "Add" else -constant.value
         base = left
-    if len(indices) < 2 or not (
+    if len(indices) < _MIN_FOLD_TERMS or not (
         isinstance(base, Register)
         or (isinstance(base, VirtualVariable) and base.category is VirtualVariableCategory.REGISTER)
     ):

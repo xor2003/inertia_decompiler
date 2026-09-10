@@ -3,6 +3,8 @@
 Layer: Types/Lowering.
 Responsibility: keep node and inventory projections coherent using an existing
 typed reconciliation. No argument recovery, signature guessing or C-text matching.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
@@ -31,11 +33,13 @@ def publish_reconciled_call_argument_shape_8616(
             CallsiteArgumentShapeDecision8616.MATERIALIZED_PROVEN_LOGICAL_SHAPE,
             CallsiteArgumentShapeDecision8616.MATERIALIZED_LOGICAL_FAR_POINTER,
         }
-        or (
-            inventory.logical_arg_widths == updated.logical_arg_widths
-            and inventory.logical_arg_classes == updated.logical_arg_classes
-        )
     ):
+        return inventory
+    shape_unchanged = (
+        inventory.logical_arg_widths == updated.logical_arg_widths
+        and inventory.logical_arg_classes == updated.logical_arg_classes
+    )
+    if shape_unchanged:
         return inventory
     # The existing owner verifies every physical fact before carrying widths.
     physical_snapshot = replace(inventory, logical_arg_widths=())

@@ -4,6 +4,8 @@ Layer: Semantics.
 Responsibility: retain cleanup, return kind and operand width as independent
 facts. Missing width never proves a word-sized return. Consumers must require
 complete evidence before transferring machine frame ownership.
+Owns instruction effects, flags, branch meaning, and expression interpretation.
+Do not perform alias-state ownership, widening, lowering/materialization, structuring, rewrite, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations
@@ -11,6 +13,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
+
+_DECODED_PREFIX_SLOTS: int = 4
+_OPERAND_SIZE_OVERRIDE: int = 0x66
 
 
 class TerminalReturnFrameKind8616(StrEnum):
@@ -79,6 +84,6 @@ def decoded_return_operand_bits_8616(instruction: object) -> int | None:
         prefixes = cast(_DecodedReturnBoundary8616, instruction).prefix
     except AttributeError:
         return None
-    if not isinstance(prefixes, (list, tuple)) or len(prefixes) != 4:
+    if not isinstance(prefixes, (list, tuple)) or len(prefixes) != _DECODED_PREFIX_SLOTS:
         return None
-    return 32 if 0x66 in prefixes else 16
+    return 32 if _OPERAND_SIZE_OVERRIDE in prefixes else 16

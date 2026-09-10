@@ -3,6 +3,8 @@
 Layer: Types/Lowering.
 Responsibility: consume published stack coordinates when selecting argument or
 local identifiers. Never infer storage identity from names or entry-SP offsets.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations

@@ -763,7 +763,7 @@ def test_sortd_drawtime_sidecar_free_materializes_wide_delay_arguments(
     signature = re.search(r"(?:short|void) sub_10498\(unsigned short (\w+)\)", final_body)
     assert signature is not None
     argument_name = signature.group(1)
-    assert f"sub_10e70({argument_name} * 60, 75);" in final_body
+    assert re.search(rf"sub_10e70\((?:\(unsigned short\))?{re.escape(argument_name)} \* 60, 75\);", final_body)
     assert "[bp+0x4]" not in final_body
     assert "g_0B48 = sub_1137e();" in final_body
     assert "sub_12756(local_50, inertia_ss);" in final_body
@@ -817,15 +817,15 @@ def test_sortd_insertionsort_sidecar_free_splits_header_and_rebases_source(
     assert loop_header in final_body
     assert final_body.count("g_0BAA += 1;") == 1
     assert final_body.count(row_load) == 1
-    assert "local_6 = (char)local_8.field_0;" in final_body
+    assert "local_6 = (signed char)local_8.field_0;" in final_body
     assert "local_6 = local_8;" not in final_body
     assert len(guard.findall(final_body)) == 1
     assert final_body.count("g_0BA4 += 1;") == 1
     assert final_body.count(source_copy) == 1
     guard_match = guard.search(final_body)
     assert guard_match is not None
-    assert final_body.index("while (") < final_body.index(row_load)
-    assert final_body.index(row_load) < final_body.index("local_6 = (char)local_8.field_0;")
+    assert final_body.index("for (local_2 = 0;") < final_body.index(row_load)
+    assert final_body.index(row_load) < final_body.index("local_6 = (signed char)local_8.field_0;")
     assert final_body.index("g_0BAA += 1;") < guard_match.start()
     assert guard_match.start() < final_body.index("g_0BA4 += 1;")
     assert final_body.index("g_0BA4 += 1;") < final_body.index(source_copy)
@@ -923,12 +923,12 @@ def test_sortd_quicksort_sidecar_free_preserves_typed_control_flow_and_compiles(
     signature = re.search(r"void sub_10ce0\(short (\w+), short (\w+)\)", final_body)
     assert signature is not None
     low_arg, high_arg = signature.groups()
+    # Braces and an else after an unconditional return do not change the guard.
+    # Match both guards together so intervening work cannot bypass the return.
     assert re.search(
-        rf"if \((?:\(short\)\s*)?{low_arg} >= (?:\(short\)\s*)?{high_arg}\)\s*\{{\s*return;",
-        final_body,
-    ) is not None
-    assert re.search(
-        rf"else if \((?:\(unsigned short\)\s*)?{high_arg}\s*-\s*"
+        rf"if \((?:\(short\)\s*)?{low_arg} >= (?:\(short\)\s*)?{high_arg}\)\s*"
+        rf"(?:\{{\s*return;\s*\}}|return;)\s*(?:else\s+)?"
+        rf"if \((?:\(unsigned short\)\s*)?{high_arg}\s*-\s*"
         rf"(?:\(unsigned short\)\s*)?{low_arg}\s*==\s*1\)",
         final_body,
     ) is not None
@@ -1764,13 +1764,13 @@ def test_insertionsort_word_stores_materialized_without_raw_high_byte_memory():
     else:
         body = _function_body_from_stdout(result.stdout, "short InsertionSort")
     assert "barTemp = abarWork[" in body
-    assert "iLength = (char)barTemp.field_0;" in body
+    assert "iLength = (signed char)barTemp.field_0;" in body
     assert "iLength = (char)barTemp;" not in body
     assert "iRowTmp = iRow;" in body
     assert body.index("for (") < body.index("iRowTmp = iRow;")
     assert body.index("iRowTmp = iRow;") < body.index("iCompares += 1;")
     guard = re.search(
-        r"if \(\s*abarWork\[(?:iRowTmp|local_4) - 1\]\.field_0 <= iLength\s*\)"
+        r"if \(\s*abarWork\[(?:iRowTmp|local_4) - 1\]\.field_0 <= \(short\)iLength\s*\)"
         r"\s*break;",
         body,
     )
@@ -1780,8 +1780,8 @@ def test_insertionsort_word_stores_materialized_without_raw_high_byte_memory():
     )
     assert guard.end() < body.index("iSwaps += 1;")
     assert ("abarWork[iRowTmp] = barTemp;" in body) or ("abarWork[local_4] = barTemp;" in body)
-    assert ("DrawBar(iRowTmp);" in body) or ("DrawBar(local_4);" in body)
-    assert ("DrawTime(iRowTmp);" in body) or ("DrawTime(local_4);" in body)
+    assert re.search(r"DrawBar\((?:\(unsigned short\))?(?:iRowTmp|local_4)\);", body)
+    assert re.search(r"DrawTime\((?:\(unsigned short\))?(?:iRowTmp|local_4)\);", body)
     assert "mem_0B4D" not in body
     assert "MEM_U8(" not in body
     assert "SEG_U8(" not in body

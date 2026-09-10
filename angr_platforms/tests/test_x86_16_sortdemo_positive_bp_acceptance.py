@@ -93,7 +93,7 @@ def test_sortd_drawtime_proves_forwarded_wide_runtime_return(tmp_path: Path) -> 
     signature = re.search(r"void sub_10498\(unsigned short (\w+)\)", result.stdout)
     assert signature is not None, combined
     assert re.search(
-        rf"sub_10e70\(\s*{re.escape(signature.group(1))}\s*\*\s*60\s*,\s*75\s*\);",
+        rf"sub_10e70\(\s*(?:\(unsigned short\)\s*)?{re.escape(signature.group(1))}\s*\*\s*60\s*,\s*75\s*\);",
         result.stdout,
     )
     assert not re.search(r"(?m)^\s+aNldiv\(", result.stdout)

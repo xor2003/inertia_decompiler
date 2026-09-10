@@ -20,20 +20,44 @@ they must not become recovery evidence.
 
 ## Current Checkpoint (2026-09-10)
 
+Full architecture scope reconciliation closes all **29** recorded findings;
+all **371 architecture tests pass**, with no checker relaxation. The follow-up
+resolves eight Ruff findings across twelve promoted modules; scoped Ruff,
+MyPy, Pyright and 96 focused tests pass. Global lint debt and the complete-suite
+audit remain separate obligations. See the
+[quality-scope report](reference/p0-architecture-scope-reconciliation.md).
+
+Both sidecar-free DrawTime acceptance cases now pass after permitting an exact
+identity cast on the already unsigned-short argument; all wide-return/delay
+checks remain. Named/sidecar-free InsertionSort also pass with explicit signed
+casts and initialized loop expectations; lost-break oracle tests pass. See
+[acceptance evidence](reference/p0-drawtime-acceptance-contract.md).
+
+Seven CLI failures were stale stdout expectations for stderr diagnostics;
+[output-contract reconciliation](reference/p0-cli-output-test-contract.md)
+passes 13 reporting/fallback/parallel tests without production changes.
+
+Five return-compatibility failures were stale producer-substitution expectations;
+the [return contract reconciliation](reference/p0-return-maker-test-contract.md)
+preserves source-evidence checks while requiring AX capture at RET. Selected
+return/barrier tests pass; this does not refresh the complete audit count.
+
 ExchangeSort's initializer ordering and unsafe stack-probe deletion have focused
 repairs: 32 focused tests pass and the uninitialized read is gone. A subsequent
 repair preserves Lowering's required signed casts through legacy CLI cleanup:
 seven simplifier regressions pass, and ExchangeSort now validates and passes
-the CLI compilation gate. Its unchanged acceptance still fails on the outer
-`for`-loop shape assertion; P0 remains open.
+the CLI compilation gate. The subsequent instruction-local reload repair in
+`f37229fa1` closes the outer-loop shape failure: the focused acceptance and reload
+suite passes all 26 tests in 30.06 seconds. P0 remains open.
 See the [initializer preservation report](reference/p0-exchangesort-initializer-preservation.md)
 for the proven causes, owner boundaries, remaining investigation, DoD and
-Definition of Failure. Do not treat this as accepted ExchangeSort decompilation.
+Definition of Failure. This accepts the tested named ExchangeSort function, not
+the complete sidecar-free corpus or the full repository suite.
 The required-cast follow-up also repaired Structuring's casted-induction matcher;
 InitMenu's full compile/behavior regression and QuickSort's acceptance pass.
-Final fast/default lanes each pass 3,491 tests (145.42/131.60 seconds); three
-executable quality guards and seven MS C full round trips pass. The combined gate still fails on the
-existing 6,322 promoted-scope Ruff findings; the full repository audit is not
+The committed-source fast/default lanes each pass 3,502 tests (158.24/145.05
+seconds); three executable quality guards and seven MS C full round trips pass.
+The combined gate still fails on 6,319 promoted-scope Ruff findings; the full repository audit is not
 rerun by these lanes.
 
 QuickSort's corrupt partition expression has a focused passing repair: the
@@ -53,7 +77,8 @@ Source was stable, no nodes were missing/duplicated, and peak RSS stayed below
 2 GiB. This supersedes the older 52-failure baseline; routine passing counts
 must not be presented as a green full suite. Its QuickSort self-comparison was
 subsequently repaired as recorded above; the separate sidecar-free QuickSort
-guard-shape acceptance remains open. Preserve binary partition-size comparisons;
+guard-shape acceptance now passes after an evidence-backed brace/else expectation
+correction (one test, 9.30 seconds with accepted-result cache reuse). Preserve binary partition-size comparisons;
 do not suppress warnings or delete branches. The [QuickSort trace](reference/p0-quicksort-partition-comparison.md)
 records the investigation and accepted repair. The audit report retains all
 40 failing nodes and the slowest tests. The [test-overlap review](reference/p0-test-overlap-review.md)

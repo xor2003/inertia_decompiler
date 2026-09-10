@@ -382,6 +382,7 @@ check-all: ruff-all pyright-all type-ratchet-changed architecture-check agent-co
 	$(MAKE) type-ratchet-changed architecture-check agent-context-check test-ownership-check pytest-all
 
 QA_TYPED_FILES := \
+	angr_platforms/angr_platforms/X86_16/lowering/call_argument_call_preservation.py \
 	angr_platforms/angr_platforms/X86_16/ir/register_live_in.py \
 	angr_platforms/angr_platforms/X86_16/lowering/call_output_object_projection.py \
 	angr_platforms/angr_platforms/X86_16/lowering/runtime_call_results.py \
@@ -1411,6 +1412,7 @@ QA_TYPED_FILES := \
 	decompile.py
 
 QA_RUFF_TARGETS := \
+	angr_platforms/angr_platforms/X86_16/lowering/call_argument_call_preservation.py \
 	angr_platforms/angr_platforms/X86_16/ir/register_live_in.py \
 	angr_platforms/angr_platforms/X86_16/lowering/call_output_object_projection.py \
 	angr_platforms/angr_platforms/X86_16/lowering/runtime_call_results.py \
@@ -2828,6 +2830,8 @@ QA_RUFF_TARGETS += \
 	angr_platforms/tests/test_x86_16_clinic_semantic_stages.py
 
 QA_PYTEST_TARGETS := \
+	angr_platforms/tests/test_x86_16_stored_call_result_assignments.py \
+	angr_platforms/tests/test_x86_16_stored_call_result_definitions.py \
 	angr_platforms/tests/test_x86_16_gp_partial_live_in.py \
 	angr_platforms/tests/test_x86_16_callsite_return_use_zero_idiom.py \
 	angr_platforms/tests/test_x86_16_layer_boundaries.py::test_quality_and_diagnostics_modules_are_wired_into_production_paths \

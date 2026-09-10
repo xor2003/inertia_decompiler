@@ -5,6 +5,8 @@ Responsibility: inspect existing storage identities under pure casts when
 joining an initializer and iterator to an ordered loop condition. The original
 condition, including width/signedness conversions, must remain unchanged.
 This proves neither monotonicity nor cast redundancy and performs no recovery.
+Owns CFG shape, loops, switches, and structured condition lowering from proven IR/semantic evidence.
+Do not perform alias-state ownership, widening, type/materialization recovery, rewrite cleanup, postprocess, or CLI/reporting work here.
 """
 
 from __future__ import annotations

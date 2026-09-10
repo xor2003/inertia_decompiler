@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
+
+from angr import Project
 
 import inertia_decompiler.cli_function_discovery as discovery
 
@@ -38,7 +41,7 @@ def test_seed_neighbor_ranking_returns_picklable_addresses_from_fork(monkeypatch
     )
 
     result = discovery._collect_neighbor_targets_for_seed_ranking(
-        project,
+        cast(Project, project),  # Intentional minimal third-party project test double.
         bytes(0x400),
         0x1000,
     )
@@ -56,7 +59,7 @@ def test_seed_neighbor_ranking_refuses_failed_isolated_recovery(monkeypatch) -> 
     )
 
     assert discovery._collect_neighbor_targets_for_seed_ranking(
-        project,
+        cast(Project, project),
         bytes(0x400),
         0x1000,
     ) == set()
@@ -72,6 +75,7 @@ def test_evidence_only_function_recovery_skips_convention_seeding(
         entry=0x1000,
         arch=SimpleNamespace(name="86_16"),
         analyses=SimpleNamespace(CFGFast=lambda **_kwargs: cfg),
+        loader=SimpleNamespace(main_object=SimpleNamespace(binary=None)),
     )
     seeded: list[object] = []
     monkeypatch.setattr(
@@ -81,7 +85,7 @@ def test_evidence_only_function_recovery_skips_convention_seeding(
     )
 
     recovered = discovery._pick_function_lean(
-        project,
+        cast(Project, project),
         0x1000,
         regions=((0x1000, 0x1010),),
         extend_far_calls=False,

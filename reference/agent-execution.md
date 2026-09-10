@@ -17,6 +17,9 @@ They do not relax its architecture or function-fix acceptance contract.
 - Run linters periodically on changed files, not just at the end. Use the project
   venv, global tool configuration, and `ruff check --fix`; retain mandatory types
   and docs for touched non-test code. Do not expand into unrelated cleanup.
+- Add linters or enable additional checks when they reliably prevent observed
+  defects. Keep configuration shared between direct invocations and Make, test
+  enforcement, and report existing debt without hiding or weakening findings.
 - Use `PYTHON_JIT=1` for Python commands. Run pytest with `-n 7`, short tracebacks,
   and duration reporting so the slowest tests are visible on every run.
 - Pass the selected project interpreter to Pyright, for example

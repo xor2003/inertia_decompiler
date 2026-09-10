@@ -3,10 +3,10 @@
 ## Status
 
 2026-09-10: two causes of an uninitialized stack read and a subsequent required
-cast deletion are repaired. ExchangeSort now passes whole-tail validation and
-the CLI compilation gate. It is **not fully accepted**: its unchanged end-to-end
-regression still requires an outer `for` loop rather than the current `while`.
-Do not weaken the test or validator.
+cast deletion are repaired. The subsequent instruction-local reload correction
+in `f37229fa1` also closes the outer-loop shape failure. The named ExchangeSort
+acceptance now passes whole-tail validation, compilation and its loop/call
+assertions. This does not establish full-suite or sidecar-free corpus acceptance.
 
 ## Evidence And Correct Owners
 
@@ -153,22 +153,54 @@ Diagnostic logs: `/tmp/inertia-exchange-guard.log` and
 `/tmp/inertia-semantic-cast-before.log`, `/tmp/inertia-semantic-cast-alias.log`,
 `/tmp/inertia-exchange-cast-acceptance.log`.
 
-## Remaining Task
+## Instruction-Local Reload Correction
 
-**Reason:** an intervening register-copy assignment remains between the outer
-initializer and loop. The current output is a validated `while`, but does not
-meet the existing source-shape regression's `for` requirement. Determine whether
-the copy is dead using owned liveness evidence, not its name or rendered text.
+**Reason:** a resurrected register-copy assignment separated the initializer
+from the outer loop. Existing liveness correctly removed the original header
+carrier; later direct-stack reload replay selected a different, live SSA identity
+from inside the loop body. A control statement's own instruction tag had been
+combined with a recursive search of all descendant register reads.
 
-**Order:** trace the copy's definitions/uses, preserve a focused regression,
-then repair liveness/consumption at its owning layer if deletion is proven.
-Only then perform the existing structuring conversion and rerun unchanged
-function acceptance plus routine/executable gates. Do not move initialization
-past a live read to obtain a `for` loop.
+**Correct owner:** Types/Lowering now selects only reads in the instruction-owning
+statement's local expressions. Control statements contribute their condition,
+not child bodies. The focused `register_reload_consumers.py` helper requires the
+exact register width and an unambiguous existing variable/SSA identity; missing
+or conflicting evidence refuses reconstruction. The recursive legacy selector
+was removed from `real_mode_linear.py`. No DCE proof was relaxed and no semantic
+recovery was added to Rewrite or CLI.
+
+**Verification:** the new full-lowering body-identity regression failed before
+the fix. Final reload ownership/idempotence and ExchangeSort acceptance passed
+**26 tests**, seven dependency warnings, in **30.06 seconds**; the slowest test
+was ExchangeSort at **21.68 seconds**. Tests cover body-versus-header ownership,
+if/switch conditions, ambiguous SSA identities and byte/word/dword mismatches.
+The inner-loop assertion now requires the signed conversion when its declaration
+is unsigned, rather than demanding its unsafe removal; initializer, guard and
+call requirements remain. Scoped MyPy and Pyright pass. The large lowering owner
+retains 243 Ruff findings; the new helper and focused tests have none.
+
+**Committed-source gates:** `PYTHON_JIT=1 PYTHONHASHSEED=0 make -k quality-fast
+test-pipeline PYTHON=./.venv/bin/python` completed on `f37229fa1` with production
+source unchanged (only these status documents were edited):
+
+- Fast lane: **3,502 passed**, seven warnings, **158.24 seconds**.
+- Default lane: **3,502 passed**, seven warnings, **145.05 seconds**.
+- Startup architecture/context, ownership, 39-module compiled import smoke,
+  three executable quality guards and seven MS C full round trips pass.
+  Every MS C example reports `decompile_run=ok`.
+- Overall exit **2**: the linter aggregate remains red, including **6,319**
+  promoted-scope Ruff findings. No suppressions or threshold changes were added.
+- Slowest fast-lane calls: sidecar-free RunMenu ESC preservation **66.38s**,
+  InitMenu pause guard **65.27s**, sidecar-free InitBars stack array **62.90s**.
+
+Full log: `/tmp/inertia-f37229fa1-gates.log`. These overlapping routine lanes
+do not replace the complete repository audit. **Remaining verification:**
+continue the full-repository failure audit and close the linter debt.
 
 **DoD:** `validation=passed`, clean whole-tail validation, strict generated-C
 compilation, correct loop/guard semantics and preserved calls/argument classes.
-The original end-to-end shape assertions remain in force.
+The end-to-end loop shape requirements remain in force, with required signed
+conversions preserved.
 
 **Definition of Failure:** missing or unsigned machine-signed guards, suppressed
 validation, deletion of live code, guessed range assumptions, or passing only
@@ -193,3 +225,8 @@ Local time (UTC+02), 2026-09-10:
   Final broad verification started at 10:13:22; its per-lane durations are above.
 - Full implementation effort includes earlier placement tracing; these timestamps
   are observed verification milestones, not a claim of total development time.
+- Reload regression log completed at 10:28:14; final focused acceptance log at
+  10:35:58 (observed file timestamps, not implementation start/end times).
+  The final test invocation took 30.06 seconds; exact active effort is unknown.
+- Committed-source broad gate was observed terminal at 10:48:54. Per-lane test
+  durations are recorded above; this timestamp is not a total-effort estimate.

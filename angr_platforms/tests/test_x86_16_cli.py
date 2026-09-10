@@ -4174,11 +4174,12 @@ def test_emit_function_result_rejects_raw_segmented_access_even_with_stable_tail
         fallback_tail_validation_by_index={},
     )
 
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
     assert (decompiled, failed) == (0, 1)
-    assert "/* -- c -- */" not in out
-    assert "/* -- asm fallback -- */" in out
-    assert "raw-ds-segmented-access" in out
+    assert "/* -- c -- */" not in captured.out
+    assert "/* -- asm fallback -- */" in captured.out
+    assert "raw-ds-segmented-access" in captured.err
+    assert "raw-ds-segmented-access" not in captured.out
 
 
 def test_emit_function_result_rejects_compiler_failed_ok_payload(monkeypatch, tmp_path, capsys):
@@ -4318,13 +4319,15 @@ def test_emit_function_result_does_not_reprint_validation_failed_ok_payload(monk
         fallback_tail_validation_by_index={},
     )
 
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out = captured.out
     assert (decompiled, failed) == (0, 1)
     assert "failure family: status=validation_failed" in out
     assert "/* -- ok -- */" not in out
     assert "return QuickSort(iLow, local_6);" not in out
     assert "/* -- asm fallback -- */" in out
-    assert "mov ax, ax" in out
+    assert "mov ax, ax" in captured.err
+    assert "mov ax, ax" not in out
 
 
 def test_emit_function_result_retries_with_recovered_result_function(monkeypatch, tmp_path, capsys):
@@ -7150,15 +7153,20 @@ def test_decompile_function_disables_structuring_for_tiny_single_call_helpers(mo
         def __init__(self, function, cfg=None, options=None, expr_collapse_depth=None):
             assert options == [("structurer_cls", "Phoenix")]
             assert expr_collapse_depth is not None
-            cfunc = SimpleNamespace(variables_in_use={}, arg_list=())
             codegen = SimpleNamespace(
-                cfunc=cfunc,
                 project=function.project,
                 _inertia_call_target_identity_consumer_8616=lambda *_args: False,
                 next_ident=lambda name: f"{name}_0",
                 next_node_idx=lambda: 0,
             )
-            cfunc.statements = structured_c.CStatements([], addr=function.addr, codegen=codegen)
+            prototype = SimTypeFunction([], SimTypeShort(False)).with_arch(function.project.arch)
+            assert isinstance(prototype, SimTypeFunction)
+            codegen.cfunc = structured_c.CFunction(
+                function.addr, function.name,
+                prototype,
+                [], structured_c.CStatements([], addr=function.addr, codegen=codegen),
+                {}, None, codegen=codegen,
+            )
             self.codegen = codegen
             self.errors = []
             self.clinic = object()
@@ -7186,7 +7194,7 @@ def test_decompile_function_disables_structuring_for_tiny_single_call_helpers(mo
         normalized=True,
         project=project,
         block_addrs_set=set(blocks),
-        get_call_sites=lambda: [0x11972],
+        get_call_sites=lambda: [0x1196F],
     )
     cfg = SimpleNamespace()
 
@@ -9328,7 +9336,8 @@ def test_main_aggregate_asm_fallback_does_not_reuse_stale_project_snapshot(monke
 
     assert rc == 2
     assert "-- asm fallback --" in captured.out
-    assert "mov ax, ax" in captured.out
+    assert "mov ax, ax" in captured.err
+    assert "mov ax, ax" not in captured.out
     assert "[tail-validation]" in captured.err
     assert "not collected" in captured.err
     assert "detail artifact " in captured.err
@@ -9669,15 +9678,16 @@ def test_main_reports_pure_recovery_mode_and_attempt_states(monkeypatch, tmp_pat
     monkeypatch.setattr(decompile, "_run_function_work_item", _fake_run)
 
     rc = decompile.main([str(binary), "--timeout", "2", "--max-functions", "2"])
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out = captured.out
 
     assert rc == 2
     assert "/* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */" in out
     assert "/* functions queued for decompilation: 2 */" in out
     assert "/* info: selected 2 function(s) for display */" in out
     assert "/* info: decompilation attempted for 2/2 displayed function(s) */" in out
-    assert "/* info: function 0x10010 sub_10010 attempt=decompiled validation=passed */" in out
-    assert "/* info: function 0x10020 sub_10020 attempt=timed_out validation=uncollected */" in out
+    assert "/* info: function 0x10010 sub_10010 attempt=decompiled validation=passed */" in captured.err
+    assert "/* info: function 0x10020 sub_10020 attempt=timed_out validation=uncollected */" in captured.err
 
 
 def test_main_uses_ranked_binary_placeholders_when_upfront_catalog_is_empty(monkeypatch, tmp_path, capsys):
@@ -10987,10 +10997,11 @@ def test_main_falls_back_to_partial_timeout_before_asm_when_available(monkeypatc
     )
 
     rc = decompile.main([str(binary), "--timeout", "2", "--max-functions", "1"])
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out = captured.out
 
     assert rc == 2
-    assert "/* info: function 0x11423 _start attempt=timed_out validation=uncollected */" in out
+    assert "/* info: function 0x11423 _start attempt=timed_out validation=uncollected */" in captured.err
     assert "/* problem: timeout */" in out
     assert "/* -- c (partial timeout) -- */" in out
     assert out.index("/* -- c (partial timeout) -- */") < out.index("-- asm fallback --")
@@ -12204,11 +12215,12 @@ def test_main_parallel_keeps_timeout_after_deadline(monkeypatch, tmp_path, capsy
     monkeypatch.setattr(decompile.time, "monotonic", lambda: next(monotonic_values))
 
     rc = decompile.main([str(binary), "--timeout", "2", "--max-functions", "3"])
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
 
     assert rc == 2
-    assert "int _start(void) { return 0; }" not in out
-    assert "Timed out after 2s." in out
+    assert "int _start(void) { return 0; }" not in captured.out
+    assert "Timed out after 2s." in captured.err
+    assert "Timed out after 2s." not in captured.out
 
 
 def test_main_parallel_does_not_promote_late_partial_after_deadline(monkeypatch, tmp_path, capsys):
@@ -12278,12 +12290,13 @@ def test_main_parallel_does_not_promote_late_partial_after_deadline(monkeypatch,
     monkeypatch.setattr(decompile.time, "monotonic", lambda: next(monotonic_values))
 
     rc = decompile.main([str(binary), "--timeout", "2", "--max-functions", "3"])
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
 
     assert rc == 2
-    assert "/* -- c (partial timeout) -- */" not in out
-    assert "int _start(void) { return 0; }" not in out
-    assert "Timed out after 2s." in out
+    assert "/* -- c (partial timeout) -- */" not in captured.out
+    assert "int _start(void) { return 0; }" not in captured.out
+    assert "Timed out after 2s." in captured.err
+    assert "Timed out after 2s." not in captured.out
 
 
 def test_main_parallel_promotes_done_future_at_deadline(monkeypatch, tmp_path, capsys):
