@@ -174,6 +174,22 @@ def test_full_decompiler_preserves_one_low_subtraction_and_one_high_borrow() -> 
     assert " & 1" not in generated
 
 
+@pytest.mark.parametrize("code", ["2b060420c3", "1b160620c3", "13160620c3"])
+def test_native_clinic_keeps_flag_value_ites_out_of_straight_line_cfg(code: str) -> None:
+    """Direct decompilation must not split inside an ALU instruction for FLAGS."""
+    project = _project_from_bytes(bytes.fromhex(code))
+    cfg = project.analyses.CFGFast(normalize=True)
+    function = cfg.functions[0x1000]
+    assert len(function.graph) == 1
+
+    decompiler = project.analyses.Decompiler(function, cfg=cfg)
+
+    assert decompiler.codegen is not None
+    assert decompiler.clinic is not None
+    assert decompiler.clinic.graph is not None
+    assert {block.addr for block in decompiler.clinic.graph.nodes()} == {function.addr}
+
+
 def test_full_decompiler_preserves_one_low_addition_and_one_high_carry() -> None:
     code = bytes.fromhex("a100208b1602200306042013160620c3")
     project = _project_from_bytes(code)

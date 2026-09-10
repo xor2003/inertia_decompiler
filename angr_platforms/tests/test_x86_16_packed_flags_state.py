@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
@@ -9,6 +10,8 @@ from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.ir.status_flag_lift_context import StatusFlagLiftArtifact8616
 from angr_platforms.X86_16.lowering import packed_flags_state
 from angr_platforms.X86_16.postprocess.optimization.dce import _dead_code_elimination_8616
+
+_PRESERVATION_SITE = 0x104
 
 
 class _Codegen(SimpleNamespace):
@@ -39,7 +42,8 @@ def test_packed_preservation_matches_rebased_instruction_address() -> None:
     assert artifact.covers_packed_preservation_8616(0x1056)
 
 
-def test_packed_flags_live_in_expires_only_after_its_consumer(monkeypatch) -> None:
+@pytest.mark.parametrize("guard_kind", ["if", "while", "do-while"])
+def test_packed_flags_live_in_expires_only_after_its_consumer(monkeypatch, guard_kind) -> None:
     """DCE retains a consumed FLAGS live-in and removes its dead chain atomically."""
     codegen = _Codegen(project=SimpleNamespace(arch=Arch86_16()))
     incoming_flags = structured_c.CVariable(
@@ -61,7 +65,7 @@ def test_packed_flags_live_in_expires_only_after_its_consumer(monkeypatch) -> No
             codegen=codegen,
         ),
         codegen=codegen,
-        tags={"ins_addr": 0x104},
+        tags={"ins_addr": _PRESERVATION_SITE},
     )
     codegen.cfunc = SimpleNamespace(
         addr=0x100,
@@ -71,7 +75,7 @@ def test_packed_flags_live_in_expires_only_after_its_consumer(monkeypatch) -> No
         packed_flags_state,
         "active_status_flag_lift_artifact_8616",
         lambda _addr: SimpleNamespace(
-            covers_packed_preservation_8616=lambda address: address == 0x104,
+            covers_packed_preservation_8616=lambda address: address == _PRESERVATION_SITE,
         ),
     )
     monkeypatch.setattr(packed_flags_state, "record_global_declaration_spec_8616", lambda *_args, **_kwargs: None)
@@ -101,6 +105,10 @@ def test_packed_flags_live_in_expires_only_after_its_consumer(monkeypatch) -> No
         ],
         codegen=codegen,
     )
+    if guard_kind != "if":
+        guard, body = condition.condition_and_nodes[0]
+        loop_type = structured_c.CWhileLoop if guard_kind == "while" else structured_c.CDoWhileLoop
+        condition = loop_type(guard, body, codegen=codegen)
     codegen.cfunc.statements.statements.append(condition)
     assert _dead_code_elimination_8616(codegen) is False
     assert codegen.cfunc.statements.statements == [initializer, update, condition]
@@ -131,7 +139,7 @@ def test_initializes_dirty_ssa_flags_identity_from_physical_view(monkeypatch) ->
             codegen=codegen,
         ),
         codegen=codegen,
-        tags={"ins_addr": 0x104},
+        tags={"ins_addr": _PRESERVATION_SITE},
     )
     codegen.cfunc = SimpleNamespace(
         addr=0x100,
@@ -141,7 +149,7 @@ def test_initializes_dirty_ssa_flags_identity_from_physical_view(monkeypatch) ->
         packed_flags_state,
         "active_status_flag_lift_artifact_8616",
         lambda _addr: SimpleNamespace(
-            covers_packed_preservation_8616=lambda address: address == 0x104,
+            covers_packed_preservation_8616=lambda address: address == _PRESERVATION_SITE,
         ),
     )
     monkeypatch.setattr(packed_flags_state, "record_global_declaration_spec_8616", lambda *_args, **_kwargs: None)
@@ -150,7 +158,7 @@ def test_initializes_dirty_ssa_flags_identity_from_physical_view(monkeypatch) ->
     initializer = codegen.cfunc.statements.statements[0]
     assert isinstance(initializer, structured_c.CAssignment)
     assert isinstance(initializer.lhs, structured_c.CDirtyExpression)
-    assert initializer.lhs.dirty.varid == 2
+    assert initializer.lhs.dirty.varid == incoming_flags.dirty.varid
     assert isinstance(initializer.rhs, structured_c.CVariable)
     assert initializer.rhs.variable.name == "inertia_flags"
 
@@ -175,7 +183,7 @@ def test_initializes_flags_read_by_covered_non_flags_assignment(monkeypatch) -> 
             codegen=codegen,
         ),
         codegen=codegen,
-        tags={"ins_addr": 0x104},
+        tags={"ins_addr": _PRESERVATION_SITE},
     )
     codegen.cfunc = SimpleNamespace(
         addr=0x100,
@@ -185,8 +193,8 @@ def test_initializes_flags_read_by_covered_non_flags_assignment(monkeypatch) -> 
         packed_flags_state,
         "active_status_flag_lift_artifact_8616",
         lambda _addr: SimpleNamespace(
-            covers_packed_preservation_8616=lambda address: address == 0x104,
-            packed_preservation_addresses=frozenset({0x104}),
+            covers_packed_preservation_8616=lambda address: address == _PRESERVATION_SITE,
+            packed_preservation_addresses=frozenset({_PRESERVATION_SITE}),
         ),
     )
     monkeypatch.setattr(packed_flags_state, "record_global_declaration_spec_8616", lambda *_args, **_kwargs: None)
@@ -195,7 +203,7 @@ def test_initializes_flags_read_by_covered_non_flags_assignment(monkeypatch) -> 
     initializer = codegen.cfunc.statements.statements[0]
     assert isinstance(initializer, structured_c.CAssignment)
     assert isinstance(initializer.lhs, structured_c.CDirtyExpression)
-    assert initializer.lhs.dirty.varid == 2
+    assert initializer.lhs.dirty.varid == incoming_flags.dirty.varid
 
 
 def test_initializes_exact_flags_ssa_root_without_covered_owner(monkeypatch) -> None:
@@ -303,7 +311,7 @@ def test_wraps_structured_branch_root_before_flags_initialization(monkeypatch) -
         ),
         incoming_flags,
         codegen=codegen,
-        tags={"ins_addr": 0x104},
+        tags={"ins_addr": _PRESERVATION_SITE},
     )
     root = structured_c.CIfElse(
         [
@@ -319,8 +327,8 @@ def test_wraps_structured_branch_root_before_flags_initialization(monkeypatch) -
         packed_flags_state,
         "active_status_flag_lift_artifact_8616",
         lambda _addr: SimpleNamespace(
-            covers_packed_preservation_8616=lambda address: address == 0x104,
-            packed_preservation_addresses=frozenset({0x104}),
+            covers_packed_preservation_8616=lambda address: address == _PRESERVATION_SITE,
+            packed_preservation_addresses=frozenset({_PRESERVATION_SITE}),
             candidates=(),
         ),
     )

@@ -22,8 +22,10 @@ angr's default until ITE provenance can be selected individually.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Protocol, cast
+
+from angr.analyses.decompiler.clinic import Clinic
 
 type ClinicOption8616 = tuple[str, object]
 
@@ -83,4 +85,27 @@ def enforce_x86_16_clinic_options_8616(
     return protected
 
 
-__all__ = ["ClinicOption8616", "enforce_x86_16_clinic_options_8616"]
+def apply_x86_16_clinic_option_policy_8616() -> None:
+    """Enforce the shared policy for native and CLI callers before AIL splitting."""
+    original = cast(Callable[[Clinic], None], Clinic._analyze_for_decompiling)
+    if original.__name__ == "_analyze_with_x86_16_clinic_policy":
+        return
+
+    def _analyze_with_x86_16_clinic_policy(self: Clinic) -> None:
+        """Set architecture-owned options before native graph transformations."""
+        if self.project.arch.name == "86_16":
+            options = enforce_x86_16_clinic_options_8616(
+                [(_ITE_DIAMOND_OPTION, self._rewrite_ites_to_diamonds)],
+                function=self.function,
+            )
+            self._rewrite_ites_to_diamonds = bool(dict(options)[_ITE_DIAMOND_OPTION])
+        original(self)
+
+    Clinic._analyze_for_decompiling = _analyze_with_x86_16_clinic_policy
+
+
+__all__ = [
+    "ClinicOption8616",
+    "apply_x86_16_clinic_option_policy_8616",
+    "enforce_x86_16_clinic_options_8616",
+]

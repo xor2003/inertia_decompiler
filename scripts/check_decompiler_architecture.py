@@ -1878,6 +1878,7 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/postprocess/call_argument_transaction.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/cleanup.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/flags_cleanup.py",
+    "angr_platforms/angr_platforms/X86_16/postprocess/flag_dead_definitions.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/simplify.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/value_flow.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/optimization/const_prop.py",

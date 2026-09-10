@@ -24,7 +24,15 @@ Full architecture scope reconciliation closes all **29** recorded findings;
 all **371 architecture tests pass**, with no checker relaxation. The follow-up
 resolves eight Ruff findings across twelve promoted modules; scoped Ruff,
 MyPy, Pyright and 96 focused tests pass. Global lint debt and the complete-suite
-audit remain separate obligations. See the
+audit remain separate obligations. The [caller-cleanup investigation](reference/p0-caller-cleanup-loop-investigation.md)
+fixes unsafe flag-definition pruning, applies the shared straight-line Clinic
+policy to native callers, and preserves required word-carry casts in rendered C.
+The addition-duplication follow-up uses an exact unsigned-word carry predicate;
+all 37 focused tests pass, with compiled arithmetic evidence and stable native
+tail validation. Both routine lanes now pass 3,537 tests (164.15s/143.99s),
+all three executable quality guards and all seven MS C round trips pass.
+Global Ruff debt, caller argument acceptance and complete-suite closure remain
+open. See the
 [quality-scope report](reference/p0-architecture-scope-reconciliation.md).
 
 Both sidecar-free DrawTime acceptance cases now pass after permitting an exact

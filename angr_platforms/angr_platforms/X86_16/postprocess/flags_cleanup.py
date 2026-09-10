@@ -36,6 +36,7 @@ from ..decompiler_postprocess_utils import (
     _unwrap_statements_8616,
 )
 from ..lowering.physical_registers import physical_register_offset_8616
+from .flag_dead_definitions import prune_unread_flag_definitions_8616
 
 __all__ = [
     "_bool_cite_values_8616",
@@ -1457,62 +1458,13 @@ def _stmt_reads_reg_before_write_8616(stmt: object, reg_offset: int) -> tuple[bo
 
 
 def _prune_overwritten_flag_assignments_8616(project: object, codegen: object) -> bool:
-    def _impl() -> bool:
-        cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
-        registers = _dynamic_attr_8616(_dynamic_attr_8616(project, "arch", None), "registers", None)
-        if cfunc is None or _dynamic_attr_8616(cfunc, "statements", None) is None or not isinstance(registers, dict):
-            return False
-
-        flags_offset = registers.get("flags", (None, None))[0]
-        if flags_offset is None:
-            return False
-
-        changed = False
-
-        for _ in range(32):
-            pass_changed = False
-            stack = [cfunc.statements]
-            seen: set[int] = set()
-            while stack:
-                node = stack.pop()
-                if not _structured_codegen_node_8616(node):
-                    continue
-                node_id = id(node)
-                if node_id in seen:
-                    continue
-                seen.add(node_id)
-
-                if isinstance(node, CStatements):
-                    new_statements = []
-                    statements = list(_dynamic_attr_8616(node, "statements", ()))
-                    for idx, stmt in enumerate(statements):
-                        remove = False
-                        if isinstance(stmt, CAssignment) and _c_register_offset_8616(stmt.lhs) == flags_offset:
-                            remainder = CStatements(statements[idx + 1 :], codegen=codegen)
-                            reads, _writes = _stmt_reads_reg_before_write_8616(remainder, flags_offset)
-                            if not reads:
-                                remove = True
-                        if remove:
-                            changed = True
-                            pass_changed = True
-                            continue
-                        new_statements.append(stmt)
-                        stack.append(stmt)
-                    node.statements = new_statements
-
-                for attr in ("body", "else_node"):
-                    child = _dynamic_attr_8616(node, attr, None)
-                    if _structured_codegen_node_8616(child):
-                        stack.append(child)
-
-                pairs = _dynamic_attr_8616(node, "condition_and_nodes", None)
-                if pairs:
-                    for _cond, body in pairs:
-                        if _structured_codegen_node_8616(body):
-                            stack.append(body)
-                stack.extend(_switch_case_children_8616(node))
-            if not pass_changed:
-                break
-        return changed
-
-    return _impl()
+    """Compatibility entry for whole-function, exact-value dead-FLAGS cleanup."""
+    cfunc = _dynamic_attr_8616(codegen, "cfunc", None)
+    root = _dynamic_attr_8616(cfunc, "statements", None)
+    registers = _dynamic_attr_8616(_dynamic_attr_8616(project, "arch", None), "registers", None)
+    if root is None or not isinstance(registers, dict):
+        return False
+    flags_offset = registers.get("flags", (None, None))[0]
+    if not isinstance(flags_offset, int):
+        return False
+    return prune_unread_flag_definitions_8616(root, flags_offset)

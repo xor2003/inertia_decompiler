@@ -2029,6 +2029,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/tests/test_x86_16_wide_call_output_assignments.py",
             "angr_platforms/tests/test_x86_16_carry_borrow_cfg.py",
             "angr_platforms/tests/test_x86_16_carry_borrow_bit_cfg_ownership.py",
+            "angr_platforms/tests/test_x86_16_carry_predicate_execution.py",
             "angr_platforms/tests/test_x86_16_carry_borrow_bit_lowering.py",
             "angr_platforms/tests/test_x86_16_carry_borrow_sources.py",
             "angr_platforms/tests/test_x86_16_carry_borrow_stack_storage.py",
@@ -2357,8 +2358,14 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     ),
     TestOwnershipRule(
         owner="x86-16-postprocess-flags-cleanup",
-        paths=("angr_platforms/angr_platforms/X86_16/postprocess/flags_cleanup.py",),
-        tests=("angr_platforms/tests/test_x86_16_decompiler_postprocess_flags.py",),
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/postprocess/flags_cleanup.py",
+            "angr_platforms/angr_platforms/X86_16/postprocess/flag_dead_definitions.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_decompiler_postprocess_flags.py",
+            "angr_platforms/tests/test_x86_16_flags_physical_register_contract.py",
+        ),
     ),
     TestOwnershipRule(
         owner="postprocess-callsite-arguments",

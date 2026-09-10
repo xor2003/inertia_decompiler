@@ -812,6 +812,7 @@ def test_x86_16_bootstrap_module_description():
         "apply_x86_16_calling_convention_compatibility",
         "apply_x86_16_compatibility",
         "apply_x86_16_decompiler_return_compatibility",
+        "apply_x86_16_clinic_option_policy_8616",
         "apply_x86_16_decompiler_structuring",
         "apply_x86_16_decompiler_postprocess",
     )

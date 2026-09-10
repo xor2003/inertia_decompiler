@@ -985,6 +985,7 @@ QA_TYPED_FILES := \
 	angr_platforms/angr_platforms/X86_16/postprocess/call_argument_transaction.py \
 	angr_platforms/angr_platforms/X86_16/postprocess/cleanup.py \
 	angr_platforms/angr_platforms/X86_16/postprocess/flags_cleanup.py \
+	angr_platforms/angr_platforms/X86_16/postprocess/flag_dead_definitions.py \
 	angr_platforms/angr_platforms/X86_16/postprocess/simplify.py \
 	angr_platforms/angr_platforms/X86_16/postprocess/value_flow.py \
 	angr_platforms/angr_platforms/X86_16/postprocess/optimization/const_prop.py \
@@ -2015,6 +2016,7 @@ QA_RUFF_TARGETS := \
 	angr_platforms/angr_platforms/X86_16/postprocess/call_argument_transaction.py \
 	angr_platforms/angr_platforms/X86_16/postprocess/cleanup.py \
 	angr_platforms/angr_platforms/X86_16/postprocess/flags_cleanup.py \
+	angr_platforms/angr_platforms/X86_16/postprocess/flag_dead_definitions.py \
 	angr_platforms/angr_platforms/X86_16/postprocess/simplify.py \
 	angr_platforms/angr_platforms/X86_16/postprocess/value_flow.py \
 	angr_platforms/angr_platforms/X86_16/postprocess/optimization/const_prop.py \
@@ -2590,6 +2592,7 @@ QA_RUFF_TARGETS := \
 		angr_platforms/tests/test_x86_16_dce_optimization.py \
 		angr_platforms/tests/test_x86_16_dce_noop_conditionals.py \
 		angr_platforms/tests/test_x86_16_packed_flags_state.py \
+		angr_platforms/tests/test_x86_16_flags_physical_register_contract.py \
 		angr_platforms/tests/test_x86_16_dce_lvalue_reads.py \
 		angr_platforms/tests/test_x86_16_dead_local_prune.py \
 		angr_platforms/tests/test_x86_16_dead_local_structured_reads.py \
@@ -3113,6 +3116,7 @@ QA_PYTEST_TARGETS := \
 	angr_platforms/tests/test_x86_16_dce_optimization.py \
 	angr_platforms/tests/test_x86_16_dce_noop_conditionals.py \
 	angr_platforms/tests/test_x86_16_packed_flags_state.py \
+	angr_platforms/tests/test_x86_16_flags_physical_register_contract.py \
 	angr_platforms/tests/test_x86_16_dce_lvalue_reads.py \
 	angr_platforms/tests/test_x86_16_dead_local_prune.py \
 	angr_platforms/tests/test_x86_16_dead_local_structured_reads.py \
@@ -3292,6 +3296,7 @@ QA_RUFF_TARGETS += \
 	angr_platforms/tests/test_x86_16_status_flag_liveness.py \
 	angr_platforms/tests/test_x86_16_msc_caller_cleanup.py \
 	angr_platforms/tests/test_x86_16_alu_effect_order.py \
+	angr_platforms/tests/test_x86_16_carry_predicate_execution.py \
 	angr_platforms/tests/test_x86_16_simple_incdec_value_provenance.py \
 	angr_platforms/tests/test_x86_16_concrete_loop_conditions.py \
 	angr_platforms/tests/test_x86_16_lifting_opcode_tables.py \
@@ -3368,6 +3373,7 @@ QA_PYTEST_TARGETS += \
 	angr_platforms/tests/test_x86_16_status_flag_liveness.py \
 	angr_platforms/tests/test_x86_16_msc_caller_cleanup.py \
 	angr_platforms/tests/test_x86_16_alu_effect_order.py \
+	angr_platforms/tests/test_x86_16_carry_predicate_execution.py \
 	angr_platforms/tests/test_x86_16_simple_incdec_value_provenance.py \
 	angr_platforms/tests/test_x86_16_concrete_loop_conditions.py \
 	angr_platforms/tests/test_x86_16_lifting_opcode_tables.py \

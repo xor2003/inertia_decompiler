@@ -9,9 +9,16 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Final, cast
 
-from angr.analyses.decompiler.structured_codegen.c import CAssignment, CBinaryOp, CConstant, CTypeCast, CVariable
+from angr.analyses.decompiler.structured_codegen.c import (
+    CAssignment,
+    CBinaryOp,
+    CConstant,
+    CExpression,
+    CTypeCast,
+    CVariable,
+)
 from angr.sim_type import SimTypeShort
 
 from ..c_ast_utils import _clone_c_ast_tree_8616, _same_c_expression_8616
@@ -19,6 +26,10 @@ from ..semantics.carry_borrow_contracts import CarryBorrowKind8616
 from ..structuring_cfg_ownership import CFGInstructionSite8616, CFGOwnershipArtifact
 from .carry_borrow_bit_contracts import CarryBorrowBitLoweringFact8616, CarryBorrowBitLoweringFailure8616
 from .carry_borrow_bit_scope import node_matches_instruction_site_8616, variable_key_8616
+from .semantic_cast import CSemanticCast8616
+
+_WORD_BITS: Final = 16
+_WORD_MAX: Final = (1 << _WORD_BITS) - 1
 
 
 def _constant_int_8616(node: object) -> int | None:
@@ -105,10 +116,10 @@ def _predicate_matches_arithmetic_8616(
 
 def _unsigned_word_operand_8616(expression: object, arithmetic: CBinaryOp) -> CTypeCast:
     """Clone one proven 16-bit operand with explicit unsigned C semantics."""
-    return CTypeCast(
+    return CSemanticCast8616(
         arithmetic.type,
         SimTypeShort(signed=False),
-        _clone_c_ast_tree_8616(expression),
+        cast(CExpression, _clone_c_ast_tree_8616(expression)),
         codegen=arithmetic.codegen,
         tags=dict(arithmetic.tags),
     )
@@ -147,20 +158,22 @@ def _canonical_addition_carry_predicate_8616(
     addition: CBinaryOp,
     nodes: tuple[object, ...],
 ) -> CBinaryOp:
-    """Canonicalize equivalent unsigned carry identities for one exact add."""
-    addition_copy = cast(CBinaryOp, _clone_c_ast_tree_8616(addition))
-    lhs_copy = _project_unique_static_definition_8616(addition.lhs, nodes)
-    wrapped = CTypeCast(
-        addition.type,
-        SimTypeShort(signed=False),
-        addition_copy,
+    """Project unsigned carry without reevaluating the low addition."""
+    lhs = _project_unique_static_definition_8616(addition.lhs, nodes)
+    rhs = _project_unique_static_definition_8616(addition.rhs, nodes)
+    # For word operands, lhs + rhs exceeds WORD_MAX iff WORD_MAX - rhs < lhs.
+    # The subtraction cannot underflow and does not depend on C int promotion.
+    headroom = CBinaryOp(
+        "Sub",
+        CConstant(_WORD_MAX, SimTypeShort(False), codegen=addition.codegen),
+        _unsigned_word_operand_8616(rhs, addition),
         codegen=addition.codegen,
         tags=dict(addition.tags),
     )
     return CBinaryOp(
         "CmpLT",
-        wrapped,
-        lhs_copy,
+        headroom,
+        _unsigned_word_operand_8616(lhs, addition),
         codegen=addition.codegen,
         tags=dict(addition.tags),
     )
@@ -263,7 +276,7 @@ def _addition_carry_predicate_8616(
                 for shifted, mask in ((node.lhs, node.rhs), (node.rhs, node.lhs))
                 if _constant_int_8616(mask) == 1
             )
-        elif node.op in {"Shr", "Sar"} and _constant_int_8616(node.rhs) == 16:
+        elif node.op in {"Shr", "Sar"} and _constant_int_8616(node.rhs) == _WORD_BITS:
             shifted_values.append(node)
         for shifted in shifted_values:
             while isinstance(shifted, CTypeCast):
@@ -271,7 +284,7 @@ def _addition_carry_predicate_8616(
             if (
                 not isinstance(shifted, CBinaryOp)
                 or shifted.op not in {"Shr", "Sar"}
-                or _constant_int_8616(shifted.rhs) != 16
+                or _constant_int_8616(shifted.rhs) != _WORD_BITS
             ):
                 continue
             addition = shifted.lhs

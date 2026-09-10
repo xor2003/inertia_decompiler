@@ -28,6 +28,8 @@ DEFAULT_MSC6_ROOT: Path = Path("/home/xor/inertia_player/dos_compilers/Microsoft
 DEFAULT_ULTRA_QUICKC_ROOT: Path = REPO_ROOT / "borrow" / "UltraDecompiler" / "QuickC"
 
 FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
+    "angr_platforms/tests/test_x86_16_flags_physical_register_contract.py",
+    "angr_platforms/tests/test_x86_16_packed_flags_state.py",
     "angr_platforms/tests/test_x86_16_stored_call_result_assignments.py",
     "angr_platforms/tests/test_x86_16_stored_call_result_definitions.py",
     "angr_platforms/tests/test_x86_16_validation_branch_conditions.py",
@@ -208,6 +210,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_x86_16_layer_boundaries.py::"
     "test_quality_compatibility_exports_retain_canonical_identity",
     "angr_platforms/tests/test_x86_16_alu_effect_order.py",
+    "angr_platforms/tests/test_x86_16_carry_predicate_execution.py",
     "angr_platforms/tests/test_x86_16_simple_incdec_value_provenance.py",
     "angr_platforms/tests/test_x86_16_concrete_loop_conditions.py",
     "angr_platforms/tests/test_x86_16_lifting_opcode_tables.py",
