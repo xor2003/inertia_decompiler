@@ -12,7 +12,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Protocol
+from typing import Final, Protocol
 
 from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
@@ -27,10 +27,15 @@ from angr.sim_variable import SimStackVariable
 
 from ..c_ast_utils import _iter_c_nodes_deep_8616
 from ..ir.core import MemSpace
+from .frame_carrier_liveness import _scalar_identity_8616
 from .frame_register_carriers import FrameRegisterCarrierResolution8616
 from .gp_register_state import runtime_gp_expression_view_8616
 from .physical_registers import physical_register_view_8616
 from .runtime_segment_access import RuntimeSegmentAccessContext8616, runtime_segment_access_space_8616
+
+_WORD_BYTES: Final = 2
+_BYTE_BITS: Final = 8
+_SEGMENTED_ACCESS_ARITY: Final = 2
 
 
 class _ArchitectureRegisters8616(Protocol):
@@ -104,8 +109,18 @@ def _is_entry_sp_decrement_8616(
         and isinstance(rhs, CBinaryOp)
         and rhs.op == "Sub"
         and _matches_register_8616(rhs.lhs, project, "sp", register_carriers)
-        and _constant_8616(rhs.rhs) == 2
+        and _constant_8616(rhs.rhs) == _WORD_BYTES
     )
+
+
+def _flatten_frame_address_8616(term: object, sign: int = 1) -> list[tuple[object, int]]:
+    """Flatten structured addition/subtraction without changing address meaning."""
+    term = _unwrap_casts_8616(term)
+    if isinstance(term, CBinaryOp) and term.op == "Add":
+        return _flatten_frame_address_8616(term.lhs, sign) + _flatten_frame_address_8616(term.rhs, sign)
+    if isinstance(term, CBinaryOp) and term.op == "Sub":
+        return _flatten_frame_address_8616(term.lhs, sign) + _flatten_frame_address_8616(term.rhs, -sign)
+    return [(term, sign)]
 
 
 def _entry_ss_sp_displacement_8616(
@@ -120,7 +135,7 @@ def _entry_ss_sp_displacement_8616(
     required_ss_terms = 1
     if isinstance(value, CFunctionCall):
         args = tuple(value.args or ())
-        if len(args) != 2:
+        if len(args) != _SEGMENTED_ACCESS_ARITY:
             return None
         segment_space = (
             runtime_segment_access_space_8616(
@@ -141,19 +156,10 @@ def _entry_ss_sp_displacement_8616(
     else:
         return None
 
-    def flatten(term: object, sign: int = 1) -> list[tuple[object, int]]:
-        """Flatten structured addition and subtraction without rendering text."""
-        term = _unwrap_casts_8616(term)
-        if isinstance(term, CBinaryOp) and term.op == "Add":
-            return flatten(term.lhs, sign) + flatten(term.rhs, sign)
-        if isinstance(term, CBinaryOp) and term.op == "Sub":
-            return flatten(term.lhs, sign) + flatten(term.rhs, -sign)
-        return [(term, sign)]
-
     displacement = 0
     ss_terms = 0
     sp_terms = 0
-    for term, sign in flatten(address):
+    for term, sign in _flatten_frame_address_8616(address):
         constant = _constant_8616(term)
         if constant is not None:
             displacement += sign * constant
@@ -170,7 +176,12 @@ def _entry_ss_sp_displacement_8616(
             ):
                 ss_terms += 1
                 continue
-        if sign == 1 and _matches_register_8616(term, project, "sp", register_carriers):
+        anchor = term.operand if isinstance(term, CUnaryOp) and term.op in {"Reference", "AddressOf"} else None
+        entry_anchor = (
+            isinstance(anchor, CVariable) and isinstance(anchor.variable, SimStackVariable)
+            and anchor.variable.base == "bp" and anchor.variable.offset == 0
+        )
+        if sign == 1 and (entry_anchor or _matches_register_8616(term, project, "sp", register_carriers)):
             sp_terms += 1
             continue
         return None
@@ -198,12 +209,56 @@ def is_exact_push_bp_store_carrier_8616(
         project,
         codegen,
         register_carriers,
-    ) != -2:
+    ) != -_WORD_BYTES:
         return False
     return canonical_frame_proven or any(
         _is_entry_sp_decrement_8616(node, project, function_addr, register_carriers)
         for node in _iter_c_nodes_deep_8616(root)
     )
+
+
+def _paired_bp_byte_store_8616(
+    statement: CAssignment,
+    root: object,
+    project: _ProjectRegisters8616,
+    function_addr: int,
+    codegen: object | None,
+    register_carriers: FrameRegisterCarrierResolution8616 | None,
+) -> bool:
+    """Require both exact saved-word byte slots and the same captured BP value."""
+    lhs = _unwrap_casts_8616(statement.lhs)
+    if not (isinstance(lhs, CVariable) and isinstance(lhs.variable, SimStackVariable)
+            and lhs.variable.size == 1 and lhs.variable.offset == -_WORD_BYTES):
+        return False
+    source = _unwrap_casts_8616(statement.rhs)
+    source_id = _scalar_identity_8616(source)
+    if not isinstance(source_id, int) or not _matches_register_8616(source, project, "bp", register_carriers):
+        return False
+    matches = 0
+    for candidate in _iter_c_nodes_deep_8616(root):
+        if not isinstance(candidate, CAssignment) or _statement_addr_8616(candidate) != function_addr:
+            continue
+        other = _unwrap_casts_8616(candidate.lhs)
+        duplicate_low = (candidate is not statement and isinstance(other, CVariable)
+                         and isinstance(other.variable, SimStackVariable) and other.variable.offset == -_WORD_BYTES)
+        if duplicate_low:
+            return False
+        if _entry_ss_sp_displacement_8616(candidate.lhs, root, project, codegen, register_carriers) != -1:
+            continue
+        high = _unwrap_casts_8616(candidate.rhs)
+        if not (isinstance(high, CBinaryOp) and high.op == "Shr" and _constant_8616(high.rhs) == _BYTE_BITS
+                and _scalar_identity_8616(high.lhs) == source_id
+                and _matches_register_8616(high.lhs, project, "bp", register_carriers)):
+            return False
+        try:
+            store_type = candidate.lhs.type
+            byte_store = store_type is not None and store_type.size == _BYTE_BITS
+        except (AttributeError, TypeError, ValueError):
+            byte_store = False
+        if not byte_store:
+            return False
+        matches += 1
+    return matches == 1
 
 
 def is_exact_push_bp_carrier_8616(
@@ -242,6 +297,10 @@ def is_exact_push_bp_carrier_8616(
     ):
         return False
     rhs = statement.rhs
+    if canonical_frame_proven and _paired_bp_byte_store_8616(
+        statement, root, project, function_addr, codegen, register_carriers,
+    ):
+        return True
     expected_bp = project.arch.registers.get("bp")
     if (
         expected_bp is not None

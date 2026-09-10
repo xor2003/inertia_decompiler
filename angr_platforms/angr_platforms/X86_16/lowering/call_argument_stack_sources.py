@@ -2,7 +2,7 @@
 
 Layer: Types/Lowering.
 Responsibility: resolve call sources to typed BP-stack objects and distinguish
-outgoing carriers by their machine-BP coordinates.
+outgoing carriers by their machine-BP coordinates and complete PUSH widths.
 Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 
@@ -14,9 +14,10 @@ from rendered C, assembly text, symbol names, or compiler-specific shapes.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, MutableMapping
-from typing import Protocol, cast
+from enum import Enum
+from typing import Final, Protocol, cast
 
-from angr.analyses.decompiler.structured_codegen.c import CVariable
+from angr.analyses.decompiler.structured_codegen.c import CExpression, CVariable
 from angr.sim_variable import SimStackVariable
 
 from ..c_ast_utils import _iter_c_nodes_deep_8616
@@ -28,6 +29,40 @@ from .stack_variable_coordinates import (
     stack_cvar_for_machine_bp_range_8616,
     stack_variable_coordinate_registry_8616,
 )
+
+_PUSH_WIDTHS: Final = frozenset({16, 32})
+_OUTGOING_CARRIER_MAX_BP_OFFSET: Final = 2
+
+
+class PushStoreWidthVerdict8616(Enum):
+    """Whether a typed lvalue has a complete architectural PUSH width."""
+
+    COMPLETE_WIDTH = "complete_width"
+    PARTIAL_REFUSE = "partial_refuse"
+    UNKNOWN_REFUSE = "unknown_refuse"
+
+
+def classify_push_store_width_8616(lvalue: object) -> PushStoreWidthVerdict8616:
+    """Refuse partial/unknown stores without changing their memory effects.
+
+    Width is necessary, not sufficient: PUSH identity, alias storage and reaching
+    definitions must independently establish ownership by a call argument.
+    """
+    if not isinstance(lvalue, CExpression):
+        return PushStoreWidthVerdict8616.UNKNOWN_REFUSE
+    try:
+        store_type = lvalue.type
+        if store_type is None:
+            return PushStoreWidthVerdict8616.UNKNOWN_REFUSE
+        width = store_type.size
+    except (AttributeError, TypeError, ValueError):
+        # Native codegen can expose missing or architecture-unbound types.
+        return PushStoreWidthVerdict8616.UNKNOWN_REFUSE
+    if not isinstance(width, int) or isinstance(width, bool) or width <= 0:
+        return PushStoreWidthVerdict8616.UNKNOWN_REFUSE
+    if width in _PUSH_WIDTHS:
+        return PushStoreWidthVerdict8616.COMPLETE_WIDTH
+    return PushStoreWidthVerdict8616.PARTIAL_REFUSE
 
 
 class _CallArgumentCFunction8616(Protocol):
@@ -80,28 +115,31 @@ def iter_stack_cvariable_candidates_8616(
     for cvar in synthetic_stack_cvars.values():
         yield from _yield_candidate(cvar)
 
+    for candidate in _native_stack_candidates_8616(cfunc):
+        yield from _yield_candidate(candidate)
+
+
+def _native_stack_candidates_8616(cfunc: _CallArgumentCFunction8616) -> Iterator[object]:
+    """Read native declaration and body inventories without assuming completeness."""
     try:
         arguments = cfunc.arg_list
     except AttributeError:
         arguments = ()
-    for argument in arguments or ():
-        yield from _yield_candidate(argument)
+    yield from arguments or ()
 
     try:
         variables_in_use = cfunc.variables_in_use
     except AttributeError:
         variables_in_use = {}
     if isinstance(variables_in_use, Mapping):
-        for cvar in variables_in_use.values():
-            yield from _yield_candidate(cvar)
+        yield from variables_in_use.values()
 
     try:
         root = cfunc.statements
     except AttributeError:
         root = None
     if root is not None:
-        for node in _iter_c_nodes_deep_8616(root):
-            yield from _yield_candidate(node)
+        yield from _iter_c_nodes_deep_8616(root)
 
 
 def containing_stack_cvariable_8616(
@@ -222,7 +260,7 @@ def outgoing_call_stack_carrier_offset_8616(
 ) -> int | None:
     """Return the machine-BP offset only for an outgoing call-stack carrier."""
     bp_offset = call_argument_stack_variable_offset_8616(codegen, expression)
-    return bp_offset if isinstance(bp_offset, int) and 0 <= bp_offset <= 2 else None
+    return bp_offset if isinstance(bp_offset, int) and 0 <= bp_offset <= _OUTGOING_CARRIER_MAX_BP_OFFSET else None
 
 
 def call_argument_stack_variable_offset_8616(

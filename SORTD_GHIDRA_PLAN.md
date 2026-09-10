@@ -20,6 +20,22 @@ they must not become recovery evidence.
 
 ## Current Checkpoint (2026-09-10)
 
+Current P0 follow-up: native SSA DCE was deleting caller-observed ES writes.
+The IR/native adapter now publishes segment return-boundary uses before DCE;
+existing lowering renders the surviving effects without Rewrite changes.
+The compiled ES/DS caller cases, original BIOS regression and focused contracts
+pass (120 tests, 15.13s). Both routine lanes pass 3,583 tests; all executable
+quality guards and all three default pipeline lanes pass. Global lint still
+fails. The next Lowering repair prevents individual byte stores from consuming
+a whole-word immediate fact. The BIOS CLI probe now has one store, a void
+signature and an explicit return, with tail validation passed; unused locals
+still block strict compilation. Eight new width regressions and the related
+module/wiring checks pass (297 tests). Both routine lanes now pass 3,595 tests
+(199.82s/139.43s), all three executable quality guards pass, and the default
+pipeline passes all three lanes including MS C round trips. Global lint and
+strict BIOS compilation remain open. This is not full-suite closure. See the
+[live segment repair](reference/p0-full-suite-followup-20260910.md).
+
 Full architecture scope reconciliation closes all **29** recorded findings;
 all **371 architecture tests pass**, with no checker relaxation. The follow-up
 resolves eight Ruff findings across twelve promoted modules; scoped Ruff,
@@ -34,6 +50,31 @@ all three executable quality guards and all seven MS C round trips pass.
 Global Ruff debt, caller argument acceptance and complete-suite closure remain
 open. See the
 [quality-scope report](reference/p0-architecture-scope-reconciliation.md).
+
+Uncommitted caller-width follow-up: a Lowering-owned width refusal prevents
+byte stores becoming word arguments, and the last-N-stores guess was removed.
+Exact saved-BP pair ownership now repairs QuickC `hello`; both routine lanes
+pass 3,562 tests and the default pipeline passes all three lanes, including
+the MS C round trips. Global Ruff debt remains.
+
+The fresh [full-suite follow-up](reference/p0-full-suite-followup-20260910.md)
+accounts for all 11,625 tests: 11,420 passed, 35 failed, 170 skipped in 1,257.89s.
+Four failures subsequently pass focused reruns; this is not a new full-suite
+count. Prioritize the remaining call-argument evidence failures and corpus
+acceptance failures without weakening width refusal or validation.
+The call-fixture follow-up reconciles seven more audit failures: six explicit
+word-width fixtures and one unknown-store retention expectation. Combined call
+and caller-cleanup tests report 188 passed, one conflicting-evidence failure.
+The last conflict exposed count-only deletion of unmatched argument stores.
+Cleanup now requires recorded instruction/value matches; six mutation-tested
+cases cover refusal and acceptance. Call/caller/ownership tests pass 253 cases,
+and all default executable lanes pass. Twenty-three audit failures remain
+unresolved; the full-suite baseline is not recomputed from focused results.
+See the follow-up report for remaining lint debt and exact gate timing.
+DOSFUNC's cast-sensitive call assertion is now covered by the exhaustive
+compiled oracle, strengthened with exact error-message and argument corruption
+checks: 13 focused tests pass. BIOS's missing ES write requires effect-contract
+review and remains open. Twenty-two original audit failures remain unresolved.
 
 Both sidecar-free DrawTime acceptance cases now pass after permitting an exact
 identity cast on the already unsigned-short argument; all wide-return/delay

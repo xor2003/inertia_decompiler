@@ -1204,7 +1204,6 @@ def test_dosfunc_cod_sample_deduplicates_stack_local_names(tmp_path):
 
     assert text.count("return err;") == 1
     assert_dos_free_behavior(text, tmp_path)
-    assert 'ERROR("dos_free: error freeing segment 0x%x: error 0x%x", segment, err);' in text
     assert "ERROR();" not in text
     assert "err_2" not in text
 

@@ -1,4 +1,8 @@
-"""Execute generated DOS free wrappers against an exhaustive call-result oracle."""
+"""Execute generated DOS free wrappers against an exhaustive call-result oracle.
+
+Layer: Tests.
+Responsibility: verify generated calls, error messages, arguments and returns.
+"""
 
 import subprocess
 from pathlib import Path
@@ -6,6 +10,7 @@ from pathlib import Path
 _HARNESS = r'''
 #include GENERATED_C
 #include <stdarg.h>
+#include <string.h>
 
 REGS rin, rout;
 SREGS sreg;
@@ -26,6 +31,7 @@ int ERROR(const char *fmt, ...)
 {
     va_list args;
     ++errors;
+    if (fmt == NULL || strcmp(fmt, "dos_free: error freeing segment 0x%x: error 0x%x")) bad = 1;
     va_start(args, fmt);
     if ((unsigned)va_arg(args, int) != expected_segment ||
         (unsigned)va_arg(args, int) != expected_result) bad = 1;

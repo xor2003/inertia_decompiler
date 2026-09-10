@@ -2,8 +2,9 @@
 
 Layer: Rewrite/Postprocess cleanup.
 Responsibility: consume existing physical-register and SSA identities to remove
-pure definitions with no remaining read. Do not recover semantics, storage
-identity, types, call signatures, control flow, or facts from rendered text.
+pure definitions with no remaining read. Do not recover new semantics, storage
+identity, types, call signatures, control flow, or facts from rendered text,
+COD, source, or CLI/reporting evidence here.
 Consumes already-proven IR, alias, widening, typed, and structuring facts.
 Block-local absence of reads is not proof: enclosing guards and captured older
 SSA values remain consumers. Unknown identities and side effects are retained.

@@ -24,7 +24,7 @@ def _wrapper(
     expression: str, *, setup: str = "rin.h.ah = 73; sreg.es = segment;",
     extra_call: str = "", result: str = "err", error_call: bool = True,
 ) -> str:
-    error = 'ERROR("error", segment, err);' if error_call else ""
+    error = 'ERROR("dos_free: error freeing segment 0x%x: error 0x%x", segment, err);' if error_call else ""
     return _DECLARATIONS + f"""
 unsigned short _dos_free(unsigned short segment) {{
     {setup}
@@ -55,5 +55,16 @@ def test_oracle_accepts_equivalent_word_results(tmp_path: Path, expression: str)
 ], ids=["missing-call", "duplicate-call", "wrong-input-pointer", "lost-error-result",
         "wrong-service", "wrong-segment", "missing-error-report"])
 def test_oracle_rejects_corrupted_behavior(tmp_path: Path, source: str) -> None:
+    with pytest.raises(AssertionError, match="violated the call/result oracle"):
+        assert_dos_free_behavior(source, tmp_path)
+
+
+@pytest.mark.parametrize("original,replacement", [
+    ("dos_free: error freeing segment", "wrong operation on segment"),
+    (", segment, err);", ", 0, err);"),
+    (", segment, err);", ", segment, 0);"),
+])
+def test_oracle_rejects_corrupted_error_report(tmp_path: Path, original: str, replacement: str) -> None:
+    source = _wrapper("intdosx(&rin, &rout, &sreg)").replace(original, replacement)
     with pytest.raises(AssertionError, match="violated the call/result oracle"):
         assert_dos_free_behavior(source, tmp_path)

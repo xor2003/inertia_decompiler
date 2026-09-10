@@ -192,6 +192,7 @@ from .storage_identity_facts import (
     StorageIdentityEvidenceKind8616,
     global_storage_identity_facts_8616,
 )
+from .store_projection_width import has_exact_store_projection_width_8616
 from .wide_call_return_recombine import (
     DIRECT_CALL_RETURN_STORE_EVIDENCE_TAG_8616,
     fold_tagged_wide_call_return_stores_8616,
@@ -1764,7 +1765,7 @@ def materialize_direct_global_symbol_stores_from_evidence_8616(
         query_session = (
             StructuredAstQuerySession8616(root) if isinstance(root, CStatements) else None
         )
-        if query_session is not None and query_session.record_mutation(
+        if isinstance(root, CStatements) and query_session is not None and query_session.record_mutation(
             _materialize_direct_global_boolean_stores_8616(
                 root,
                 codegen,
@@ -1776,7 +1777,7 @@ def materialize_direct_global_symbol_stores_from_evidence_8616(
         ):
             changed = True
             root_changed = True
-        if query_session is not None and query_session.record_mutation(
+        if isinstance(root, CStatements) and query_session is not None and query_session.record_mutation(
             _remove_duplicate_direct_global_boolean_store_artifacts_8616(
                 root,
                 direct_boolean_by_offset,
@@ -1785,7 +1786,7 @@ def materialize_direct_global_symbol_stores_from_evidence_8616(
         ):
             changed = True
             root_changed = True
-        if query_session is not None and query_session.record_mutation(
+        if isinstance(root, CStatements) and query_session is not None and query_session.record_mutation(
             _remove_direct_global_boolean_store_high_byte_merges_8616(
                 root,
                 direct_boolean_by_offset,
@@ -1832,7 +1833,7 @@ def materialize_direct_global_symbol_stores_from_evidence_8616(
             direct_assignment_changed = True
         if query_session is not None:
             query_session.record_mutation(direct_assignment_changed)
-        if query_session is not None and query_session.record_mutation(
+        if isinstance(root, CStatements) and query_session is not None and query_session.record_mutation(
             _remove_materialized_direct_global_call_return_carriers_8616(
                 root,
                 codegen,
@@ -1842,7 +1843,7 @@ def materialize_direct_global_symbol_stores_from_evidence_8616(
         ):
             changed = True
             root_changed = True
-        if query_session is not None and query_session.record_mutation(
+        if isinstance(root, CStatements) and query_session is not None and query_session.record_mutation(
             _materialize_direct_global_dword_update_from_scalar_preserve_8616(
                 root,
                 codegen,
@@ -1853,7 +1854,7 @@ def materialize_direct_global_symbol_stores_from_evidence_8616(
         ):
             changed = True
             root_changed = True
-        if query_session is not None and query_session.record_mutation(
+        if isinstance(root, CStatements) and query_session is not None and query_session.record_mutation(
             _remove_direct_global_redundant_high_byte_stores_8616(
                 root,
                 codegen,
@@ -1863,12 +1864,12 @@ def materialize_direct_global_symbol_stores_from_evidence_8616(
         ):
             changed = True
             root_changed = True
-        if query_session is not None and query_session.record_mutation(
+        if isinstance(root, CStatements) and query_session is not None and query_session.record_mutation(
             _remove_segment_pointer_helper_self_assignments_8616(root, stats)
         ):
             changed = True
             root_changed = True
-        if query_session is not None and query_session.record_mutation(
+        if isinstance(root, CStatements) and query_session is not None and query_session.record_mutation(
             _materialize_direct_global_single_byte_stores_8616(
                 root,
                 codegen,
@@ -1954,6 +1955,7 @@ def _materialize_anonymous_direct_segmented_global_stores_8616(
                     if assignment is not None
                     and isinstance(assignment.lhs, CUnaryOp)
                     and assignment.lhs.op == "Dereference"
+                    and has_exact_store_projection_width_8616(assignment.lhs, item.width)
                     and item.immediate_value is not None
                     and _constant_int_8616(assignment.rhs)
                     == (item.immediate_value & ((1 << (item.width * 8)) - 1))

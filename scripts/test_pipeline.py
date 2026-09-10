@@ -52,6 +52,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_generated_c_indexed_argument_contract.py",
     "angr_platforms/tests/test_omf_pat_lidata.py",
     "angr_platforms/tests/test_test_pipeline.py",
+    "angr_platforms/tests/test_make_linter_inputs.py",
     "angr_platforms/tests/test_check_sortd_sidecar_free.py",
     "angr_platforms/tests/test_compare_ghidra_function_coverage.py",
     "angr_platforms/tests/test_generated_c_artifacts.py",
@@ -211,6 +212,16 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "test_quality_compatibility_exports_retain_canonical_identity",
     "angr_platforms/tests/test_x86_16_alu_effect_order.py",
     "angr_platforms/tests/test_x86_16_carry_predicate_execution.py",
+    "angr_platforms/tests/test_x86_16_msc_caller_cleanup.py",
+    "angr_platforms/tests/test_x86_16_segment_call_effects.py",
+    "angr_platforms/tests/test_x86_16_native_segment_live_out.py",
+    "angr_platforms/tests/test_x86_16_anonymous_store_width.py",
+    "angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::"
+    "test_materialize_callsite_stack_arguments_requires_exact_consumed_push_evidence",
+    "angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::"
+    "test_materialize_callsite_stack_arguments_keeps_unproven_far_pointer_stores",
+    "angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::"
+    "test_materialize_callsite_stack_arguments_keeps_unproven_scalar_byte_pair_stores",
     "angr_platforms/tests/test_x86_16_simple_incdec_value_provenance.py",
     "angr_platforms/tests/test_x86_16_concrete_loop_conditions.py",
     "angr_platforms/tests/test_x86_16_lifting_opcode_tables.py",
@@ -231,6 +242,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_x86_16_runtime_push_carrier.py",
     "angr_platforms/tests/test_x86_16_storage_prototype_snapshot.py",
     "angr_platforms/tests/test_x86_16_frame_prologue_carriers.py",
+    "angr_platforms/tests/test_x86_16_frame_byte_carriers.py",
     "angr_platforms/tests/test_x86_16_frame_carrier_liveness.py",
     "angr_platforms/tests/test_x86_16_call_execution_frame_carriers.py",
     "angr_platforms/tests/test_x86_16_call_frame_base_effects.py",

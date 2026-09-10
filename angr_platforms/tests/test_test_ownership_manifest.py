@@ -66,6 +66,7 @@ def test_selects_real_mode_linear_focused_tests_for_implementation_file():
 
     assert selected == (
         "angr_platforms/tests/test_x86_16_stack_reload_instruction_ownership.py",
+        "angr_platforms/tests/test_x86_16_machine_stack_names.py",
         "angr_platforms/tests/test_x86_16_direct_stack_replay.py",
         "angr_platforms/tests/test_x86_16_direct_stack_reload_idempotence.py",
         "angr_platforms/tests/test_x86_16_linear_global_decomposition_cache.py",
@@ -287,6 +288,7 @@ def test_selects_postprocess_callsite_argument_tests_for_implementation_file():
     )
 
     assert selected == (
+        "angr_platforms/tests/test_x86_16_stack_probe_local_preservation.py",
         "angr_platforms/tests/test_decompiler_architecture_check.py",
         "angr_platforms/tests/test_x86_16_jcc_instruction_reuse.py",
         "angr_platforms/tests/test_x86_16_jcc_typed_condition_order.py",
@@ -299,7 +301,9 @@ def test_selects_postprocess_callsite_argument_tests_for_implementation_file():
         "angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::"
         "test_materialize_callsite_stack_arguments_refuses_direct_ds_byte_pair_store_prune",
         "angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::"
-        "test_materialize_callsite_stack_arguments_prunes_keep_existing_scalar_byte_pair_stores",
+        "test_materialize_callsite_stack_arguments_keeps_unproven_scalar_byte_pair_stores",
+        "angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::"
+        "test_materialize_callsite_stack_arguments_requires_exact_consumed_push_evidence",
     )
 
 

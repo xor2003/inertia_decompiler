@@ -7,15 +7,26 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import angr
+import pytest
+from angr.analyses.decompiler.structured_codegen.c import CFunctionCall, CVariable
+from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeInt, SimTypeLongLong, SimTypeShort
+from angr.sim_variable import SimStackVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
+from angr_platforms.X86_16.c_ast_utils import _iter_c_nodes_deep_8616, _same_c_expression_8616
 from angr_platforms.X86_16.lift_86_16 import Lifter86_16  # noqa: F401
+from angr_platforms.X86_16.lowering.call_argument_stack_sources import (
+    PushStoreWidthVerdict8616,
+    classify_push_store_width_8616,
+)
 from angr_platforms.X86_16.semantics.immediate_semantics import sign_extend_u8_to_u16
 from angr_platforms.X86_16.simos_86_16 import (
     SimCC8616MSCmedium,
     SimCC8616MSCsmall,
 )
+from archinfo import ArchX86
 
 from scripts.check_sortd_sidecar_free import mz_executable_image
 
@@ -38,12 +49,10 @@ def test_msc_c_conventions_leave_argument_cleanup_to_caller() -> None:
     assert SimCC8616MSCmedium.CALLEE_CLEANUP is False
 
 
-def test_group83_immediate_sign_extension_is_exact() -> None:
+@pytest.mark.parametrize("encoded,expected", [(0x04, 0x0004), (0x80, 0xFF80), (0xFC, 0xFFFC), (0x1FC, 0xFFFC)])
+def test_group83_immediate_sign_extension_is_exact(encoded: int, expected: int) -> None:
     """Normalize positive and negative encoded bytes to exact word patterns."""
-    assert sign_extend_u8_to_u16(0x04) == 0x0004
-    assert sign_extend_u8_to_u16(0x80) == 0xFF80
-    assert sign_extend_u8_to_u16(0xFC) == 0xFFFC
-    assert sign_extend_u8_to_u16(0x1FC) == 0xFFFC
+    assert sign_extend_u8_to_u16(encoded) == expected
 
 
 def test_stack_cleanup_immediate_lifts_as_typed_word_constant() -> None:
@@ -81,6 +90,52 @@ def test_caller_cleanup_loop_preserves_affine_stack_pointer() -> None:
     assert decompiler.codegen is not None
     assert "/* unsupported instruction */" not in decompiler.codegen.text
     assert "sub_1020();" in decompiler.codegen.text
+
+
+@pytest.mark.parametrize(
+    "store_type,expected",
+    [
+        (SimTypeChar(False), PushStoreWidthVerdict8616.PARTIAL_REFUSE),
+        (SimTypeShort(False), PushStoreWidthVerdict8616.COMPLETE_WIDTH),
+        (SimTypeInt(False).with_arch(ArchX86()), PushStoreWidthVerdict8616.COMPLETE_WIDTH),
+        (SimTypeLongLong(False), PushStoreWidthVerdict8616.PARTIAL_REFUSE),
+        (SimTypeBottom(), PushStoreWidthVerdict8616.UNKNOWN_REFUSE),
+    ],
+)
+def test_push_store_width_requires_one_complete_architectural_value(store_type, expected):
+    codegen = SimpleNamespace(
+        next_node_idx=lambda: 1, next_ident=lambda name: name, project=SimpleNamespace(arch=ArchX86()),
+    )
+    variable = CVariable(SimStackVariable(-2, 2, base="bp"), variable_type=store_type, codegen=codegen)
+    original_type = variable.variable_type
+    assert classify_push_store_width_8616(variable) is expected
+    assert variable.variable_type is original_type
+
+
+def test_push_store_width_refuses_missing_typed_lvalue() -> None:
+    assert classify_push_store_width_8616(object()) is PushStoreWidthVerdict8616.UNKNOWN_REFUSE
+
+
+def test_caller_cleanup_does_not_split_one_push_into_two_arguments() -> None:
+    """Two identical word PUSHes cannot become the two bytes of one PUSH."""
+    code = bytes.fromhex("558bec5050e8180083c4044975f58be55dc3") + b"\x90" * 14 + b"\xc3"
+    project = _project_from_bytes(code)
+    project.arch.bits = 32
+    cfg = project.analyses.CFGFast(normalize=True, function_starts=[0x1000, 0x1020])
+    decompiler = project.analyses.Decompiler(cfg.functions[0x1000], cfg=cfg)
+    assert decompiler.codegen is not None
+    calls = [
+        node
+        for node in _iter_c_nodes_deep_8616(decompiler.codegen.cfunc.statements)
+        if isinstance(node, CFunctionCall)
+    ]
+    assert len(calls) == 1
+    arguments = calls[0].args
+    # A bare RET does not establish formal arity. If physical pushes are
+    # projected as arguments, both must retain the same captured AX value.
+    assert len(arguments) in {0, 2}
+    if arguments:
+        assert _same_c_expression_8616(arguments[0], arguments[1])
 
 
 def test_sortd_percolateup_caller_cleanup_has_no_opaque_sp_expression(
@@ -121,5 +176,6 @@ def test_sortd_percolateup_caller_cleanup_has_no_opaque_sp_expression(
     assert "validation=passed" in combined
     assert "whole-tail validation clean across 1 functions" in combined
     assert "/* unsupported instruction */" not in result.stdout
-    assert result.stdout.count("sub_107b8(") == 2
-    assert result.stdout.count("sub_10768(") == 2
+    declaration_and_call_count = 2
+    assert result.stdout.count("sub_107b8(") == declaration_and_call_count
+    assert result.stdout.count("sub_10768(") == declaration_and_call_count

@@ -648,6 +648,8 @@ QA_TYPED_FILES := \
 	angr_platforms/angr_platforms/X86_16/codegen_parentheses.py \
 	angr_platforms/angr_platforms/X86_16/stack_anchor_compat.py \
 	angr_platforms/angr_platforms/X86_16/ir/native_stack_anchor.py \
+	angr_platforms/angr_platforms/X86_16/ir/native_segment_live_out.py \
+	angr_platforms/angr_platforms/X86_16/lowering/store_projection_width.py \
 	angr_platforms/angr_platforms/X86_16/lowering/runtime_push_carrier.py \
 	angr_platforms/angr_platforms/X86_16/semantics/call_return_segment.py \
 	angr_platforms/angr_platforms/X86_16/semantics/terminal_return_contract.py \
@@ -1679,6 +1681,8 @@ QA_RUFF_TARGETS := \
 	angr_platforms/angr_platforms/X86_16/codegen_parentheses.py \
 	angr_platforms/angr_platforms/X86_16/stack_anchor_compat.py \
 	angr_platforms/angr_platforms/X86_16/ir/native_stack_anchor.py \
+	angr_platforms/angr_platforms/X86_16/ir/native_segment_live_out.py \
+	angr_platforms/angr_platforms/X86_16/lowering/store_projection_width.py \
 	angr_platforms/angr_platforms/X86_16/lowering/runtime_push_carrier.py \
 	angr_platforms/angr_platforms/X86_16/semantics/call_return_segment.py \
 	angr_platforms/angr_platforms/X86_16/semantics/terminal_return_contract.py \
@@ -2699,6 +2703,10 @@ QA_RUFF_TARGETS := \
 	angr_platforms/tests/test_x86_16_runtime_push_carrier.py \
 	angr_platforms/tests/test_x86_16_storage_prototype_snapshot.py \
 	angr_platforms/tests/test_x86_16_frame_prologue_carriers.py \
+	angr_platforms/tests/test_x86_16_frame_byte_carriers.py \
+	angr_platforms/tests/test_x86_16_native_segment_live_out.py \
+	angr_platforms/tests/test_x86_16_anonymous_store_width.py \
+	angr_platforms/tests/test_x86_16_segment_call_effects.py \
 	angr_platforms/tests/test_x86_16_frame_carrier_liveness.py \
 	angr_platforms/tests/test_x86_16_unobserved_return_maker.py \
 	angr_platforms/tests/test_x86_16_dosfunc_behavior.py \
@@ -3161,6 +3169,10 @@ QA_PYTEST_TARGETS := \
 	angr_platforms/tests/test_x86_16_runtime_push_carrier.py \
 	angr_platforms/tests/test_x86_16_storage_prototype_snapshot.py \
 	angr_platforms/tests/test_x86_16_frame_prologue_carriers.py \
+	angr_platforms/tests/test_x86_16_frame_byte_carriers.py \
+	angr_platforms/tests/test_x86_16_native_segment_live_out.py \
+	angr_platforms/tests/test_x86_16_anonymous_store_width.py \
+	angr_platforms/tests/test_x86_16_segment_call_effects.py \
 	angr_platforms/tests/test_x86_16_frame_carrier_liveness.py \
 	angr_platforms/tests/test_x86_16_unobserved_return_maker.py \
 	angr_platforms/tests/test_x86_16_dosfunc_behavior.py \
@@ -3275,6 +3287,7 @@ QA_PYTEST_TARGETS := \
 # Focused owner tests are appended while the legacy QA lists remain curated.
 QA_RUFF_TARGETS += \
 	angr_platforms/tests/test_x86_16_symbolic_value_boundaries.py \
+	angr_platforms/tests/test_make_linter_inputs.py \
 	angr_platforms/tests/test_x86_16_direction_flag_execution.py \
 	angr_platforms/tests/test_x86_16_stack_helpers.py \
 	angr_platforms/tests/test_x86_16_structuring_pass_validation.py \
@@ -3295,6 +3308,7 @@ QA_RUFF_TARGETS += \
 	angr_platforms/tests/test_x86_16_status_flag_lift_context.py \
 	angr_platforms/tests/test_x86_16_status_flag_liveness.py \
 	angr_platforms/tests/test_x86_16_msc_caller_cleanup.py \
+	angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py \
 	angr_platforms/tests/test_x86_16_alu_effect_order.py \
 	angr_platforms/tests/test_x86_16_carry_predicate_execution.py \
 	angr_platforms/tests/test_x86_16_simple_incdec_value_provenance.py \
@@ -3348,6 +3362,7 @@ QA_RUFF_TARGETS += \
 	angr_platforms/tests/test_x86_16_validation_call_return_storage.py
 
 QA_PYTEST_TARGETS += \
+	angr_platforms/tests/test_make_linter_inputs.py \
 	angr_platforms/tests/test_x86_16_symbolic_value_boundaries.py \
 	angr_platforms/tests/test_x86_16_direction_flag_execution.py \
 	angr_platforms/tests/test_x86_16_stack_helpers.py \
@@ -3372,6 +3387,9 @@ QA_PYTEST_TARGETS += \
 	angr_platforms/tests/test_x86_16_status_flag_lift_context.py \
 	angr_platforms/tests/test_x86_16_status_flag_liveness.py \
 	angr_platforms/tests/test_x86_16_msc_caller_cleanup.py \
+	angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::test_materialize_callsite_stack_arguments_requires_exact_consumed_push_evidence \
+	angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::test_materialize_callsite_stack_arguments_keeps_unproven_far_pointer_stores \
+	angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::test_materialize_callsite_stack_arguments_keeps_unproven_scalar_byte_pair_stores \
 	angr_platforms/tests/test_x86_16_alu_effect_order.py \
 	angr_platforms/tests/test_x86_16_carry_predicate_execution.py \
 	angr_platforms/tests/test_x86_16_simple_incdec_value_provenance.py \

@@ -85,6 +85,7 @@ from angr_platforms.X86_16.tail_validation import (
     compare_x86_16_tail_validation_summaries,
 )
 from angr_platforms.X86_16.tail_validation_fingerprint import _expr_fingerprint
+from call_store_fixtures import ss_word_store, word_dereference
 
 
 def _args_match(args: list, expected: list) -> bool:
@@ -2385,30 +2386,7 @@ def test_materialize_callsite_stack_arguments_matches_same_register_with_renamed
     )
 
     def _ss_dirty_store(displacement: int, rhs):
-        return CAssignment(
-            structured_c.CUnaryOp(
-                "Dereference",
-                structured_c.CBinaryOp(
-                    "Add",
-                    structured_c.CBinaryOp(
-                        "Shl",
-                        ss_reg,
-                        structured_c.CConstant(4, SimTypeShort(False), codegen=codegen),
-                        codegen=codegen,
-                    ),
-                    structured_c.CBinaryOp(
-                        "Sub",
-                        CDirtyExpression("vvar_85", codegen=codegen),
-                        structured_c.CConstant(-displacement, SimTypeShort(False), codegen=codegen),
-                        codegen=codegen,
-                    ),
-                    codegen=codegen,
-                ),
-                codegen=codegen,
-            ),
-            rhs,
-            codegen=codegen,
-        )
+        return ss_word_store(codegen, ss_reg, displacement, rhs)
 
     probe = CExpressionStatement(
         CFunctionCall("aNchkstk", SimpleNamespace(name="aNchkstk"), [], codegen=codegen), codegen=codegen
@@ -2512,30 +2490,7 @@ def test_materialize_callsite_stack_arguments_walks_same_register_chain_across_s
     )
 
     def _ss_dirty_store(displacement: int, rhs):
-        return CAssignment(
-            structured_c.CUnaryOp(
-                "Dereference",
-                structured_c.CBinaryOp(
-                    "Add",
-                    structured_c.CBinaryOp(
-                        "Shl",
-                        ss_reg,
-                        structured_c.CConstant(4, SimTypeShort(False), codegen=codegen),
-                        codegen=codegen,
-                    ),
-                    structured_c.CBinaryOp(
-                        "Sub",
-                        CDirtyExpression("vvar_85", codegen=codegen),
-                        structured_c.CConstant(-displacement, SimTypeShort(False), codegen=codegen),
-                        codegen=codegen,
-                    ),
-                    codegen=codegen,
-                ),
-                codegen=codegen,
-            ),
-            rhs,
-            codegen=codegen,
-        )
+        return ss_word_store(codegen, ss_reg, displacement, rhs)
 
     probe = CExpressionStatement(
         CFunctionCall("aNchkstk", SimpleNamespace(name="aNchkstk"), [], codegen=codegen), codegen=codegen
@@ -2631,30 +2586,7 @@ def test_materialize_callsite_stack_arguments_keeps_nested_indexed_offsets_witho
     )
 
     def _ss_dirty_store(displacement: int, rhs):
-        return CAssignment(
-            structured_c.CUnaryOp(
-                "Dereference",
-                structured_c.CBinaryOp(
-                    "Add",
-                    structured_c.CBinaryOp(
-                        "Shl",
-                        ss_reg,
-                        structured_c.CConstant(4, SimTypeShort(False), codegen=codegen),
-                        codegen=codegen,
-                    ),
-                    structured_c.CBinaryOp(
-                        "Sub",
-                        CDirtyExpression("vvar_85", codegen=codegen),
-                        structured_c.CConstant(-displacement, SimTypeShort(False), codegen=codegen),
-                        codegen=codegen,
-                    ),
-                    codegen=codegen,
-                ),
-                codegen=codegen,
-            ),
-            rhs,
-            codegen=codegen,
-        )
+        return ss_word_store(codegen, ss_reg, displacement, rhs)
 
     def _work_offset(index_value: int):
         return structured_c.CBinaryOp(
@@ -2764,30 +2696,7 @@ def test_materialize_callsite_stack_arguments_falls_back_to_recent_dirty_value_c
     )
 
     def _ss_dirty_store(displacement: int, rhs):
-        return CAssignment(
-            structured_c.CUnaryOp(
-                "Dereference",
-                structured_c.CBinaryOp(
-                    "Add",
-                    structured_c.CBinaryOp(
-                        "Shl",
-                        ss_reg,
-                        structured_c.CConstant(4, SimTypeShort(False), codegen=codegen),
-                        codegen=codegen,
-                    ),
-                    structured_c.CBinaryOp(
-                        "Sub",
-                        CDirtyExpression("vvar_85", codegen=codegen),
-                        structured_c.CConstant(-displacement, SimTypeShort(False), codegen=codegen),
-                        codegen=codegen,
-                    ),
-                    codegen=codegen,
-                ),
-                codegen=codegen,
-            ),
-            rhs,
-            codegen=codegen,
-        )
+        return ss_word_store(codegen, ss_reg, displacement, rhs)
 
     probe = CExpressionStatement(
         CFunctionCall("aNchkstk", SimpleNamespace(name="aNchkstk"), [], codegen=codegen), codegen=codegen
@@ -2910,30 +2819,7 @@ def test_materialize_callsite_stack_arguments_prefers_named_dirty_value_carrier_
     )
 
     def _ss_dirty_store(displacement: int, rhs):
-        return CAssignment(
-            structured_c.CUnaryOp(
-                "Dereference",
-                structured_c.CBinaryOp(
-                    "Add",
-                    structured_c.CBinaryOp(
-                        "Shl",
-                        ss_reg,
-                        structured_c.CConstant(4, SimTypeShort(False), codegen=codegen),
-                        codegen=codegen,
-                    ),
-                    structured_c.CBinaryOp(
-                        "Sub",
-                        CDirtyExpression("vvar_85", codegen=codegen),
-                        structured_c.CConstant(-displacement, SimTypeShort(False), codegen=codegen),
-                        codegen=codegen,
-                    ),
-                    codegen=codegen,
-                ),
-                codegen=codegen,
-            ),
-            rhs,
-            codegen=codegen,
-        )
+        return ss_word_store(codegen, ss_reg, displacement, rhs)
 
     probe = CExpressionStatement(
         CFunctionCall("aNchkstk", SimpleNamespace(name="aNchkstk"), [], codegen=codegen), codegen=codegen
@@ -3225,7 +3111,9 @@ def test_materialize_callsite_stack_arguments_prefers_typed_probe_stores_over_pu
     assert _args_match(final_stmt.expr.args, [arg_slot])
 
 
-def test_materialize_callsite_stack_arguments_prefers_generic_probe_stores_over_push_arg_sources():
+@pytest.mark.parametrize("matching_value", [False, True])
+@pytest.mark.parametrize("instruction", [None, 0x400F, 0x4011])
+def test_materialize_callsite_stack_arguments_requires_exact_consumed_push_evidence(matching_value, instruction):
     project = _project()
     codegen = _empty_codegen(project)
     structured_c = _scg.c
@@ -3244,8 +3132,7 @@ def test_materialize_callsite_stack_arguments_prefers_generic_probe_stores_over_
         variable_type=SimTypeShort(False),
         codegen=codegen,
     )
-    outgoing = structured_c.CUnaryOp(
-        "Dereference",
+    outgoing = word_dereference(
         structured_c.CBinaryOp(
             "Sub",
             carrier,
@@ -3258,6 +3145,9 @@ def test_materialize_callsite_stack_arguments_prefers_generic_probe_stores_over_
         CFunctionCall("aNchkstk", SimpleNamespace(name="aNchkstk"), [], codegen=codegen), codegen=codegen
     )
     call = CFunctionCall("DrawBar", SimpleNamespace(name="DrawBar"), [], codegen=codegen)
+    recorded_value = structured_c.CConstant(3, SimTypeShort(False), codegen=codegen)
+    stored_value = recorded_value if matching_value else arg_slot
+    store = CAssignment(outgoing, stored_value, tags={"ins_addr": instruction}, codegen=codegen)
     codegen.cfunc.statements = CStatements(
         [
             probe,
@@ -3271,7 +3161,7 @@ def test_materialize_callsite_stack_arguments_prefers_generic_probe_stores_over_
                 ),
                 codegen=codegen,
             ),
-            CAssignment(outgoing, arg_slot, codegen=codegen),
+            store,
             CExpressionStatement(call, codegen=codegen),
         ],
         addr=0x4010,
@@ -3306,17 +3196,19 @@ def test_materialize_callsite_stack_arguments_prefers_generic_probe_stores_over_
             return_register=None,
             return_used=False,
             push_arg_sources=(("imm", 3),),
+            push_arg_instruction_addrs=(0x4011,),
         ),
     }
 
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
 
     assert changed is True
-    assert len(codegen.cfunc.statements.statements) == 2
+    consumed = matching_value and instruction == 0x4011
+    assert (store not in codegen.cfunc.statements.statements) is consumed
     assert codegen.cfunc.statements.statements[0] is probe
     final_stmt = codegen.cfunc.statements.statements[-1]
     assert isinstance(final_stmt, CExpressionStatement)
-    assert _args_match(final_stmt.expr.args, [arg_slot])
+    assert _args_match(final_stmt.expr.args, [recorded_value])
 
 
 def test_materialize_callsite_stack_arguments_rematerializes_typed_probe_call_even_with_existing_args():
@@ -4225,8 +4117,7 @@ def test_materialize_callsite_stack_arguments_carries_probe_evidence_into_loop_b
         variable_type=SimTypeShort(False),
         codegen=codegen,
     )
-    outgoing = structured_c.CUnaryOp(
-        "Dereference",
+    outgoing = word_dereference(
         structured_c.CBinaryOp(
             "Add",
             structured_c.CBinaryOp(
@@ -5411,11 +5302,13 @@ def test_materialize_callsite_stack_arguments_refuses_return_frame_placeholder_a
         ),
     }
 
+    original_statements = tuple(codegen.cfunc.statements.statements)
     changed = _materialize_callsite_stack_arguments_8616(project, codegen)
 
-    assert changed is True
+    # Coincidence with a return address does not prove this store is dead.
+    assert changed is False
     assert target_call.args == []
-    assert all(not isinstance(stmt, CAssignment) for stmt in codegen.cfunc.statements.statements)
+    assert tuple(codegen.cfunc.statements.statements) == original_statements
     assert codegen.cfunc.statements.statements[-1].expr is target_call
 
 
@@ -6752,7 +6645,7 @@ def test_materialize_anonymous_call_keeps_physical_ss_bp_address_arguments():
     assert segment_arg.variable.name == "inertia_ss"
 
 
-def test_materialize_callsite_stack_arguments_prunes_direct_push_source_far_pointer_stores():
+def test_materialize_callsite_stack_arguments_keeps_unproven_far_pointer_stores():
     project = _project()
     codegen = _empty_codegen(project)
     structured_c = _scg.c
@@ -6800,19 +6693,20 @@ def test_materialize_callsite_stack_arguments_prunes_direct_push_source_far_poin
         ),
     }
 
+    original_stores = tuple(codegen.cfunc.statements.statements[:-1])
     assert _materialize_callsite_stack_arguments_8616(project, codegen) is True
 
-    assert len(codegen.cfunc.statements.statements) == 1
-    final_call = codegen.cfunc.statements.statements[0].expr
+    assert tuple(codegen.cfunc.statements.statements[:-1]) == original_stores
+    final_call = codegen.cfunc.statements.statements[-1].expr
     assert len(final_call.args) == 1
     arg = final_call.args[0]
     assert isinstance(arg, structured_c.CUnaryOp)
     assert arg.op == "Reference"
     assert getattr(getattr(arg.operand, "variable", None), "name", None) == "achT"
-    assert codegen._inertia_callsite_direct_push_source_stores_pruned_8616 == 2
+    assert not hasattr(codegen, "_inertia_callsite_direct_push_source_stores_pruned_8616")
 
 
-def test_materialize_callsite_stack_arguments_prunes_keep_existing_scalar_byte_pair_stores():
+def test_materialize_callsite_stack_arguments_keeps_unproven_scalar_byte_pair_stores():
     project = _project()
     codegen = _empty_codegen(project)
     structured_c = _scg.c
@@ -6884,12 +6778,14 @@ def test_materialize_callsite_stack_arguments_prunes_keep_existing_scalar_byte_p
         ),
     }
 
+    original_statements = tuple(codegen.cfunc.statements.statements)
     assert _materialize_callsite_stack_arguments_8616(project, codegen) is True
 
     statements = codegen.cfunc.statements.statements
-    assert len(statements) == 1
-    assert statements[0].expr is call
-    assert codegen._inertia_callsite_direct_push_source_stores_pruned_8616 == 5
+    assert tuple(statements) == original_statements
+    assert statements[-1].expr is call
+    assert [arg.value for arg in call.args] == [2, 48]
+    assert not hasattr(codegen, "_inertia_callsite_direct_push_source_stores_pruned_8616")
 
 
 def test_materialize_callsite_stack_arguments_refuses_direct_ds_byte_pair_store_prune():

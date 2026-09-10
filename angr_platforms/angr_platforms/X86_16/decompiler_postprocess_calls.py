@@ -152,8 +152,10 @@ from .lowering.call_argument_shape import (
 )
 from .lowering.call_argument_shape_publication import publish_reconciled_call_argument_shape_8616
 from .lowering.call_argument_stack_sources import (
+    PushStoreWidthVerdict8616,
     call_argument_source_requires_exact_address_identity_8616,
     call_argument_stack_variable_offset_8616,
+    classify_push_store_width_8616,
     containing_stack_cvariable_8616,
     iter_stack_cvariable_candidates_8616,
     materialize_call_argument_stack_cvariable_8616,
@@ -12078,6 +12080,8 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
             lhs, rhs = _assignment_lhs_rhs(assignment)
             if lhs is None:
                 continue
+            if classify_push_store_width_8616(lhs) is not PushStoreWidthVerdict8616.COMPLETE_WIDTH:
+                continue
             if _contains_unresolved_dirty_expr_8616(lhs):
                 continue
             if _is_consumed_push_ss_store_lhs_8616(project, codegen, lhs):
@@ -15520,6 +15524,7 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
                 push_sources: tuple[StructuredAstValue, ...],
                 typed_probe_fact: TypedStackProbeReturnFact8616 | None,
             ) -> int:
+                """Consume only stores matching recorded PUSH identities and values."""
                 if not prune_consumed_arg_stores:
                     return 0
                 if call is None or not _boundary_tuple_8616(getattr(call, "args", ()) or ()):
@@ -15609,6 +15614,24 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
                     or not consumed_indices
                 ):
                     return 0
+                # A matching store count is not consumption evidence. Require
+                # every removed store to belong to an exact recorded PUSH and
+                # carry its recorded value; unknown/conflicting stores survive.
+                call_summary = summary_map.get(id(call))
+                push_addresses = call_summary.push_arg_instruction_addrs if call_summary is not None else ()
+                if len(push_addresses) != physical_push_count or len(set(push_addresses)) != physical_push_count:
+                    return 0
+                sources_by_instruction = dict(zip(push_addresses, push_sources, strict=True))
+                for consumed_index in consumed_indices:
+                    candidate = _top_level_assignment_node_8616(new_statements[consumed_index])
+                    if candidate is None:
+                        return 0
+                    instruction = _assignment_ins_addr_8616(candidate)
+                    if instruction is None:
+                        return 0
+                    source = sources_by_instruction.get(instruction)
+                    if not _expr_matches_push_source_value_8616(candidate.rhs, source):
+                        return 0
                 cleanup_indices = sorted(
                     set(consumed_indices) | set(_consumed_stack_store_carrier_indices_8616(consumed_indices))
                 )
@@ -16262,91 +16285,6 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
                             ) and _delete_consumed_return_call_refs_8616(consumed_return_call_indices):
                                 changed = True
                             if transaction.arguments_accepted:
-                                _refresh_summary_arg_shape(call, summary)
-                                strict_arg_shape_applied = True
-                            if transaction.changed:
-                                changed = True
-                if not strict_arg_shape_applied and len(new_statements) >= expected_arg_count:  # noqa: SIM102
-                    if not typed_stack_probe_materialization and (
-                        not stack_probe_seen or stack_probe_address_seen or typed_stack_probe_fact is None
-                    ):
-
-                        def _rhs_matches_current_return_addr_8616(rhs: StructuredAstValue) -> bool:
-                            """Return true when a candidate argument is the call's return-frame value."""
-                            return_addr = summary_return_addr  # noqa: B023
-                            if not isinstance(return_addr, int):
-                                return False
-                            node = rhs
-                            while isinstance(node, CTypeCast):
-                                node = node.expr
-                            if not isinstance(node, structured_c.CConstant):
-                                return False
-                            value = node.value
-                            return isinstance(value, int) and (value & 0xFFFF) == (return_addr & 0xFFFF)
-
-                        candidate_stmts = new_statements[-expected_arg_count:]
-                        candidate_rhs = []
-                        for candidate in candidate_stmts:
-                            rhs = _stack_store_rhs_from_statement(candidate)
-                            if rhs is None:
-                                rhs = _outgoing_arg_placeholder_rhs_from_statement(candidate)
-                            if rhs is not None and _rhs_matches_current_return_addr_8616(rhs):
-                                rhs = None
-                            candidate_rhs.append(rhs)
-                        candidate_indices = list(range(len(new_statements) - expected_arg_count, len(new_statements)))
-                        if len(candidate_rhs) > 1:
-                            candidate_rhs = list(reversed(candidate_rhs))
-                            candidate_indices = list(reversed(candidate_indices))
-                        normalized_args = (
-                            _normalize_materialized_call_args(
-                                candidate_rhs,
-                                candidate_indices,
-                                new_statements,
-                                call_name=semantic_call_name or call_name,
-                            )
-                            if all(rhs is not None for rhs in candidate_rhs)
-                            else None
-                        )
-                        if normalized_args is not None and _all_arg_exprs_are_non_segment_registers(normalized_args):
-                            transaction = _set_materialized_call_args(
-                                call,
-                                normalized_args,
-                                call_name=semantic_call_name or call_name,
-                                force_replace=True,
-                            )
-                            if transaction.arguments_accepted:
-                                record_stack_arg_materialization_8616(codegen, len(normalized_args))
-                                _record_prunable_segment_metadata_ids(
-                                    call,
-                                    new_statements,
-                                    candidate_indices,
-                                )
-                                if prune_consumed_arg_stores and summary is not None:
-                                    if stack_probe_seen and not stack_probe_address_seen and typed_stack_probe_fact is None:
-                                        cleanup_indices = candidate_indices.copy()
-                                        scan_idx = min(candidate_indices, default=-1) - 1
-                                        while scan_idx >= 0:
-                                            prev_stmt = new_statements[scan_idx]
-                                            if _statement_contains_call(prev_stmt):
-                                                break
-                                            if _is_stack_carrier_temp_assignment(
-                                                prev_stmt
-                                            ) or _is_segment_register_metadata_store(prev_stmt):
-                                                cleanup_indices.append(scan_idx)
-                                                scan_idx -= 1
-                                                continue
-                                            break
-                                        _delete_consumed_indices_8616(
-                                            new_statements,
-                                            list(set(cleanup_indices)),
-                                            live_consumers=(call, *statements[i + 1 :]),
-                                        )
-                                    else:
-                                        _delete_consumed_indices_8616(
-                                            new_statements,
-                                            list(range(len(new_statements) - expected_arg_count, len(new_statements))),
-                                            live_consumers=(call, *statements[i + 1 :]),
-                                        )
                                 _refresh_summary_arg_shape(call, summary)
                                 strict_arg_shape_applied = True
                             if transaction.changed:

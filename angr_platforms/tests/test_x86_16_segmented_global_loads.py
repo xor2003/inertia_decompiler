@@ -479,6 +479,7 @@ def test_anonymous_direct_immediate_store_resegments_exact_tagged_dereference():
         codegen=codegen,
         tags={"ins_addr": 0x10028},
     )
+    assignment.lhs._type = SimTypeChar(False).with_arch(project.arch)
     root = CStatements([assignment], codegen=codegen)
     codegen.cfunc = SimpleNamespace(addr=0x10000, statements=root, body=root)
     evidence = (

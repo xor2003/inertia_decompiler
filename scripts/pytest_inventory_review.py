@@ -28,6 +28,8 @@ REVIEWED_TEST_MODULE_LAYERS: Final[Mapping[str, tuple[str, ...]]] = MappingProxy
             "tooling/gates",
             "inertia_decompiler/cli",
         ),
+        # Mutation checks exercise another test's oracle, not decompiler imports.
+        "angr_platforms/tests/test_cod_openfilewrapper_consolidation.py": ("tooling/gates",),
         "angr_platforms/tests/test_decompile_jit_restart.py": ("inertia_decompiler/cli",),
         "angr_platforms/tests/test_makefile_quiet_output.py": ("tooling/gates",),
         "angr_platforms/tests/test_omf_pat_far_transfer_variants.py": ("compiler-flags",),
@@ -67,6 +69,26 @@ REVIEWED_TEST_MODULE_LAYERS: Final[Mapping[str, tuple[str, ...]]] = MappingProxy
 
 RETIRED_TEST_CONTRACTS: Final[Mapping[str, RetiredTestContract]] = MappingProxyType(
     {
+        **{
+            "angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::" + previous: RetiredTestContract(
+                reason="renamed to enforce evidence-backed consumption and retain unproven memory stores",
+                replacements=("angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::" + replacement,),
+            )
+            for previous, replacement in (
+                (
+                    "test_materialize_callsite_stack_arguments_prefers_generic_probe_stores_over_push_arg_sources",
+                    "test_materialize_callsite_stack_arguments_requires_exact_consumed_push_evidence",
+                ),
+                (
+                    "test_materialize_callsite_stack_arguments_prunes_direct_push_source_far_pointer_stores",
+                    "test_materialize_callsite_stack_arguments_keeps_unproven_far_pointer_stores",
+                ),
+                (
+                    "test_materialize_callsite_stack_arguments_prunes_keep_existing_scalar_byte_pair_stores",
+                    "test_materialize_callsite_stack_arguments_keeps_unproven_scalar_byte_pair_stores",
+                ),
+            )
+        },
         **{
             "angr_platforms/tests/test_x86_16_cod_regressions.py::" + retired: RetiredTestContract(
                 reason="identical CLI invocation; existing status and output checks consolidated into behavior regression",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from types import SimpleNamespace
 
+from angr.ailment.expression import VirtualVariable, VirtualVariableCategory
 from angr.analyses.decompiler.structured_codegen.c import (
     CITE,
     CAssignment,
@@ -69,7 +70,7 @@ def _reg(project, name: str, codegen, *, var_name: str | None = None):
 def _dirty_reg(project, name: str, codegen, *, varid: int = 1):
     reg_offset, reg_size = project.arch.registers[name]
     return CDirtyExpression(
-        SimpleNamespace(varid=varid, idx=varid, name=f"vvar_{varid}", reg_offset=reg_offset, bits=reg_size * 8),
+        VirtualVariable(varid, varid, reg_size * 8, VirtualVariableCategory.REGISTER, oident=reg_offset),
         codegen=codegen,
     )
 

@@ -16,12 +16,15 @@ from angr.knowledge_plugins.functions.function import Function, PrototypeSource
 from .ail_displacement_compat import apply_register_displacement_compatibility_8616
 from .call_frame_compat import apply_call_frame_compatibility_8616
 from .codegen_parentheses import apply_codegen_parentheses_8616
+from .ir.native_segment_live_out import apply_native_segment_live_out_compatibility_8616
 from .patch_dirty import apply_patch as _apply_dirty_patch
 from .stack_anchor_compat import apply_native_stack_anchor_compatibility_8616
 from .stack_compat import apply_x86_16_stack_compatibility as _apply_stack_compatibility
 from .typehoon_compat import apply_x86_16_typehoon_compatibility as _apply_typehoon_compatibility
 
 __all__ = ["apply_x86_16_compatibility"]
+
+_OUT_HELPER_OPERAND_COUNT = 3
 
 
 class _AilBlockStatements8616(Protocol):
@@ -101,7 +104,7 @@ def _normalize_x86_16_io_dirty_statements(
         operands = tuple(dirty.operands)
         width_value = (
             cast(_AilConstantValue8616, operands[-1]).value
-            if len(operands) == 3 and isinstance(operands[-1], ailment.Expr.Const) else None
+            if len(operands) == _OUT_HELPER_OPERAND_COUNT and isinstance(operands[-1], ailment.Expr.Const) else None
         )
         width = width_value if isinstance(width_value, int) else None
         helper = helper_by_width.get(width) if width is not None else None
@@ -205,6 +208,7 @@ def apply_x86_16_compatibility() -> None:
     """Install all frontend/runtime compatibility patches for x86-16 support."""
     _apply_function_prototype_source_compatibility()
     _apply_clinic_custom_lifter_compatibility()
+    apply_native_segment_live_out_compatibility_8616()
     apply_call_frame_compatibility_8616()
     apply_register_displacement_compatibility_8616()
     apply_codegen_parentheses_8616()

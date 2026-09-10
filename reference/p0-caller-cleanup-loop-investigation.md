@@ -1,4 +1,136 @@
-# Caller-Cleanup Loop: Remaining Failure
+# Caller-Cleanup and PUSH Widths
+
+## Saved-BP Byte Pair Repair
+
+QuickC `hello` reproduced the final-C failure on the width-safety revision
+(exit **4**). Frame decoding was complete, but all seven observed frame-pruning
+attempts refused the structured entry carrier. The low byte was an aliased
+one-byte stack variable at entry-SP minus two, sourced from the BP SSA value;
+the high byte remained a segmented store at entry-SP minus one, sourced from
+the same value shifted by eight. Existing whole-word matching intentionally
+rejected the one-byte carrier.
+
+Lowering now recognizes this pair only with decoded canonical-frame proof,
+exact instruction ownership, the native entry-SP anchor, both saved-word slots,
+an exact shared SSA identity and matching physical BP views. Isolated bytes,
+different SSA values, wrong slots/shifts/instructions, and duplicate/conflicting
+projections refuse. The existing whole-function frame-use check still runs
+before the instruction group is consumed. No lifter behavior, validation rule,
+or Rewrite recovery was changed. The production owner remains below 350 lines.
+
+The first focused candidate exposed two proof holes: general expression
+equality ignored distinct register SSA IDs, and a conflicting high-byte store
+was initially ignored. New refusal tests reproduced both; the final proof uses
+the existing frame scalar-identity owner and rejects conflicts. All **64 focused
+frame tests pass** in **9.64s**, seven dependency warnings. The original
+isolated-byte refusal tests remain unchanged.
+
+The live `hello` command now exits **0**, reports `validation=passed` and clean
+whole-tail validation, retains the call argument, and emits no raw saved-BP
+store. Its generated C passes `gcc -std=c99 -Wall -Wextra -Werror -fsyntax-only`.
+Scoped Ruff, MyPy and Pyright pass. Final fast/default test lanes each pass
+3,562 tests (159.34s/146.68s); executable guards and all three default pipeline
+lanes pass. The combined Make command still exits 2 on global Ruff debt.
+The subsequent complete audit remains red; see
+[full-suite follow-up](p0-full-suite-followup-20260910.md).
+Logs: `/tmp/inertia-hello-before.log`, `/tmp/inertia-hello-frame.log`,
+`/tmp/inertia-frame-byte-final.log`, `/tmp/inertia-hello-after.log`.
+
+## Width Safety Repair
+
+Removing the last-N-stores fallback alone did not fix the bug: a second
+backtracking path selected the same byte stores. The shared store-value reader
+was returning lvalues typed as 8-bit `char` as complete pushed arguments.
+The existing `lowering/call_argument_stack_sources.py` now owns a typed width
+verdict: 16/32-bit stores have complete architectural PUSH width; subword,
+oversized and unknown-width stores refuse. Width is only a necessary condition,
+not proof of PUSH identity or argument ownership. No byte coalescing or new
+semantic recovery was introduced in Rewrite.
+
+The legacy reader consumes this verdict and leaves refused stores intact.
+The redundant last-N-stores materialization/deletion branch was removed,
+shrinking the large compatibility file by 85 lines before the width check.
+No architecture exception was added: the check resides in the existing admitted
+stack-source owner. The original no-argument assertion and the added value
+regression both pass; the physical unknown sources are not promoted to invented
+byte arguments. Complete word reconstruction for unknown sources remains a
+separate typed recovery obligation, not something proven by this guard.
+
+Verification: **83 related integration tests pass** in **20.61s**, including
+the sidecar-free PercolateUp acceptance; **26 owner/caller tests pass** in
+**22.10s** after adding width/refusal coverage. Scoped production MyPy and
+Pyright pass. Ruff is clean for the touched Lowering owner and test module;
+the legacy calls module retains **367 findings**. Its two related Lowering lint
+findings were fixed by separating native inventory traversal from deduplication
+and naming the return-frame offset bound. Routine runner and ownership scopes
+now include the caller-cleanup module, matching Make's existing selection.
+Broad gates: both routine lanes pass **3,552 tests**, in **176.33s** and
+**147.81s**. All three executable quality guards and the complete seven-case
+MS C round-trip lane pass. The aggregate still exits **2**: global Ruff debt
+remains, and the Ultra/QuickC fixture lane has **three passed, one failed**.
+No whole-suite closure is claimed.
+
+The newly exposed fixture is QuickC `hello`. Its call argument survives, and
+whole-tail validation reports passed, but the final-C contract correctly rejects
+a surviving saved-BP high-byte store rendered using raw `ss << 4` arithmetic.
+The output includes a write of `(inertia_ebp & 0xffff) >> 8` through that stack
+address. This is frame-bookkeeping preservation/materialization debt, not a
+reason to restore byte-as-word argument guessing or suppress the final-C guard.
+The next repair must establish the exact saved-register spill ownership and
+handle all byte projections coherently at the owning layer. The broad run is
+not green; this safety checkpoint remains uncommitted.
+
+The structured pipeline result is authoritative: the failed lane is
+`ultra-quickc-fixtures`, not `msc6-tiny-full-pipeline`. Some MS C profiles record
+failed earlier attempts even when the accepted round trip passes; these fields
+alone do not identify the failing lane.
+Log: `/tmp/inertia-caller-width-gates.log`; structured evidence:
+`angr_platforms/.cache/test_pipeline/summary.json` and
+`examples/build_ultra_quickc_pipeline/ultra_quickc_fixtures.json`.
+Logs: `/tmp/inertia-caller-no-guess.log`, `/tmp/inertia-caller-store-width.log`,
+`/tmp/inertia-caller-width-final.log`, `/tmp/inertia-caller-owner-tests.log`.
+
+## Reproduced Word-PUSH Argument Corruption
+
+Revalidated on committed `2bc106e48`: the original caller-cleanup regression
+still fails. Binary summary at callsite `0x1005` reports two physical pushes at
+`0x1003` and `0x1004`, widths `(2, 2)`, and cleanup of four bytes. Both push
+sources remain unclassified; the callee argument-count evidence is UNKNOWN.
+The native Clinic call has no arguments. During the legacy calls adapter,
+`_rewrite_block_body` selects the last `expected_arg_count` stack-store
+statements and passes their RHSs to `_set_materialized_call_args`.
+
+The stores are independently resolved bytes of word PUSHes. Therefore the last
+two statements are the high and low byte stores of the final PUSH, not two
+logical arguments. The resulting call is `sub_1020(AX >> 8, AX)` even though
+both machine pushes capture AX. This is a concrete width/identity failure;
+changing call text or counting stores cannot repair it.
+
+A new AST regression reproduces the value mismatch without claiming that the
+bare RET establishes zero formal arguments: if the physical words become
+arguments, their captured values must be identical. The original no-argument
+assertion is unchanged. The focused module excluding its external PercolateUp
+case now reports **two failed, six passed**, seven warnings, **11.87s**. Ruff
+is clean after parameterizing the existing immediate-boundary cases and naming
+the declaration-plus-call count. No production behavior has changed in this
+investigation; the new failing regression is uncommitted.
+
+Next repair belongs in typed stack-argument lowering: consume exact PUSH
+instruction identities, widths and storage facts, account for every byte
+projection, and materialize a word only when all pieces agree. Replace the
+legacy last-N-statements shortcut with that proof or explicit refusal. Do not
+change the byte-safe frontend access helpers, infer zero arity from a bare RET,
+or add another Rewrite argument heuristic. Preserve memory effects until the
+typed materialization and consumption proof closes.
+
+DoD: the value regression passes; the arity expectation is resolved using
+binary/callee evidence; whole-tail validation and generated-C execution pass;
+unrelated stores, incomplete byte sets and conflicting identities refuse; the
+routine gates and MS C round trips remain green.
+Failure: accepting one byte as a word, suppressing the original assertion,
+discarding stores without consumption proof, or hiding UNKNOWN as success.
+Evidence: `/tmp/inertia-caller-current.log`,
+`/tmp/inertia-caller-args-evidence.log`, `/tmp/inertia-caller-word-regression.log`.
 
 ## Carry Duplication Follow-Up
 

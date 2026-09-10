@@ -1623,7 +1623,10 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-call-argument-stack-sources",
         paths=("angr_platforms/angr_platforms/X86_16/lowering/call_argument_stack_sources.py",),
-        tests=("angr_platforms/tests/test_x86_16_validation_call_argument_sources.py",),
+        tests=(
+            "angr_platforms/tests/test_x86_16_validation_call_argument_sources.py",
+            "angr_platforms/tests/test_x86_16_msc_caller_cleanup.py",
+        ),
     ),
     TestOwnershipRule(
         owner="x86-16-validation-control-flow",
@@ -1783,6 +1786,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         tests=(
             "angr_platforms/tests/test_x86_16_callee_saved_frame.py",
             "angr_platforms/tests/test_x86_16_canonical_frame_carriers.py",
+            "angr_platforms/tests/test_x86_16_frame_byte_carriers.py",
             "angr_platforms/tests/test_frame_carrier_type_contracts.py",
             "angr_platforms/tests/test_x86_16_terminal_register_return_values.py",
         ),
@@ -2382,8 +2386,40 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::"
             "test_materialize_callsite_stack_arguments_refuses_direct_ds_byte_pair_store_prune",
             "angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::"
-            "test_materialize_callsite_stack_arguments_prunes_keep_existing_scalar_byte_pair_stores",
+            "test_materialize_callsite_stack_arguments_keeps_unproven_scalar_byte_pair_stores",
+            "angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py::"
+            "test_materialize_callsite_stack_arguments_requires_exact_consumed_push_evidence",
         ),
+    ),
+    TestOwnershipRule(
+        owner="call-store-test-fixtures",
+        paths=("angr_platforms/tests/call_store_fixtures.py",),
+        tests=("angr_platforms/tests/test_x86_16_decompiler_postprocess_calls.py",),
+    ),
+    TestOwnershipRule(
+        owner="segment-call-effect-preservation",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/ir/native_segment_live_out.py",
+            "angr_platforms/angr_platforms/X86_16/ir/segment_state.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/segment_register_state.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_segment_call_effects.py",
+            "angr_platforms/tests/test_x86_16_native_segment_live_out.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="make-linter-path-contract",
+        paths=("Makefile",),
+        tests=("angr_platforms/tests/test_make_linter_inputs.py",),
+    ),
+    TestOwnershipRule(
+        owner="anonymous-store-projection-width",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/lowering/store_projection_width.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/segmented_global_loads.py",
+        ),
+        tests=("angr_platforms/tests/test_x86_16_anonymous_store_width.py",),
     ),
     TestOwnershipRule(
         owner="x86-16-runtime-segment-access",
