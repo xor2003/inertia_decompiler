@@ -3,6 +3,8 @@
 
 Responsibility: coordinate legacy AST cleanup helpers around already-recovered facts.
 Forbidden: owning decompiler semantics, source-backed recovery, or postprocess semantic repair.
+Required Lowering conversions survive unless Lowering proves identity against
+the emitted declaration; copies retain their class, types and evidence tags.
 Dynamic attribute boundary: getattr/setattr use here is limited to third-party
 angr/codegen compatibility objects and optional diagnostic metadata.
 """
@@ -46,6 +48,7 @@ from angr_platforms.X86_16.lowering.c_runtime_header import (
     interrupt_helper_declarations_8616,
 )
 from angr_platforms.X86_16.lowering.segmented_lowering import _SegmentedAccess
+from angr_platforms.X86_16.lowering.semantic_cast import CSemanticCast8616, is_identity_semantic_variable_cast_8616
 from angr_platforms.X86_16.lst_extract import LSTMetadata
 from angr_platforms.X86_16.semantics.alias_query import (
     _storage_domain_for_expr,
@@ -2100,7 +2103,10 @@ def _simplify_structured_c_expressions(codegen: StructuredCodegenValue) -> bool:
             if isinstance(current, structured_c.CTypeCast):
                 inner = _resolve_copy_alias_expr(current.expr, seen)
                 if inner is not current.expr:
-                    return structured_c.CTypeCast(None, current.type, inner, codegen=current.codegen)
+                    # Preserve Lowering's conversion class, types and evidence.
+                    replacement = copy.copy(current)
+                    replacement.expr = inner
+                    return replacement
                 return current
             if isinstance(current, structured_c.CUnaryOp):
                 operand = _resolve_copy_alias_expr(current.operand, seen)
@@ -2987,7 +2993,10 @@ def _simplify_structured_c_expressions(codegen: StructuredCodegenValue) -> bool:
 
 
 def _unwrap_c_casts(node: StructuredAstValue) -> StructuredAstValue:
+    """Skip cosmetic casts without discarding required machine conversions."""
     while isinstance(node, structured_c.CTypeCast):
+        if isinstance(node, CSemanticCast8616) and not is_identity_semantic_variable_cast_8616(node):
+            break
         node = node.expr
     return node
 

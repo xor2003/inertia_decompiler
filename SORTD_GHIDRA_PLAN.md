@@ -21,13 +21,18 @@ they must not become recovery evidence.
 ## Current Checkpoint (2026-09-10)
 
 ExchangeSort's initializer ordering and unsafe stack-probe deletion have focused
-repairs: 32 focused tests pass and the uninitialized read is gone. The unchanged
-function acceptance still fails on its outer-loop guard; P0 remains open.
+repairs: 32 focused tests pass and the uninitialized read is gone. A subsequent
+repair preserves Lowering's required signed casts through legacy CLI cleanup:
+seven simplifier regressions pass, and ExchangeSort now validates and passes
+the CLI compilation gate. Its unchanged acceptance still fails on the outer
+`for`-loop shape assertion; P0 remains open.
 See the [initializer preservation report](reference/p0-exchangesort-initializer-preservation.md)
-for the two proven causes, owner boundaries, remaining investigation, DoD and
+for the proven causes, owner boundaries, remaining investigation, DoD and
 Definition of Failure. Do not treat this as accepted ExchangeSort decompilation.
-Final fast/default lanes each pass 3,476 tests; three executable quality guards
-and seven MS C full round trips pass. The combined gate still fails on the
+The required-cast follow-up also repaired Structuring's casted-induction matcher;
+InitMenu's full compile/behavior regression and QuickSort's acceptance pass.
+Final fast/default lanes each pass 3,491 tests (145.42/131.60 seconds); three
+executable quality guards and seven MS C full round trips pass. The combined gate still fails on the
 existing 6,322 promoted-scope Ruff findings; the full repository audit is not
 rerun by these lanes.
 

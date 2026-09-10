@@ -763,6 +763,7 @@ QA_TYPED_FILES := \
 	angr_platforms/angr_platforms/X86_16/lowering/register_local_declarations.py \
 	angr_platforms/angr_platforms/X86_16/lowering/register_variable_identity.py \
 	angr_platforms/angr_platforms/X86_16/lowering/stack_address_coordinates.py \
+	angr_platforms/angr_platforms/X86_16/lowering/register_reload_consumers.py \
 	angr_platforms/angr_platforms/X86_16/lowering/stack_storage_evidence.py \
 	angr_platforms/angr_platforms/X86_16/lowering/call_return_selectors.py \
 	angr_platforms/angr_platforms/X86_16/lowering/call_return_stack_bindings.py \
@@ -1112,6 +1113,7 @@ QA_TYPED_FILES := \
 	angr_platforms/angr_platforms/X86_16/structuring/direct_stack_move_loop_tail_replay.py \
 	angr_platforms/angr_platforms/X86_16/structuring/condition_refresh.py \
 	angr_platforms/angr_platforms/X86_16/structuring/canonical_for_loops.py \
+	angr_platforms/angr_platforms/X86_16/structuring/induction_comparisons.py \
 	angr_platforms/angr_platforms/X86_16/structuring/loop_body_repair.py \
 	angr_platforms/angr_platforms/X86_16/structuring/loop_break_jcc.py \
 	angr_platforms/angr_platforms/X86_16/structuring/loop_exit_return_guards.py \
@@ -1790,6 +1792,7 @@ QA_RUFF_TARGETS := \
 	angr_platforms/angr_platforms/X86_16/lowering/register_local_declarations.py \
 	angr_platforms/angr_platforms/X86_16/lowering/register_variable_identity.py \
 	angr_platforms/angr_platforms/X86_16/lowering/stack_address_coordinates.py \
+	angr_platforms/angr_platforms/X86_16/lowering/register_reload_consumers.py \
 	angr_platforms/angr_platforms/X86_16/lowering/stack_storage_evidence.py \
 	angr_platforms/angr_platforms/X86_16/lowering/call_return_selectors.py \
 	angr_platforms/angr_platforms/X86_16/lowering/call_return_stack_bindings.py \
@@ -2139,6 +2142,7 @@ QA_RUFF_TARGETS := \
 	angr_platforms/angr_platforms/X86_16/structuring/direct_stack_move_loop_tail_replay.py \
 	angr_platforms/angr_platforms/X86_16/structuring/condition_refresh.py \
 	angr_platforms/angr_platforms/X86_16/structuring/canonical_for_loops.py \
+	angr_platforms/angr_platforms/X86_16/structuring/induction_comparisons.py \
 	angr_platforms/angr_platforms/X86_16/structuring/loop_body_repair.py \
 	angr_platforms/angr_platforms/X86_16/structuring/loop_break_jcc.py \
 	angr_platforms/angr_platforms/X86_16/structuring/loop_exit_return_guards.py \
@@ -2648,6 +2652,7 @@ QA_RUFF_TARGETS := \
 	angr_platforms/tests/test_x86_16_direct_stack_move_pretest_body.py \
 	angr_platforms/tests/test_x86_16_direct_stack_move_pretest_initializers.py \
 	angr_platforms/tests/test_x86_16_stack_probe_local_preservation.py \
+	angr_platforms/tests/test_x86_16_casted_loop_induction.py \
 	angr_platforms/tests/test_x86_16_direct_stack_move_loops.py \
 	angr_platforms/tests/test_x86_16_direct_stack_update_groups.py \
 	angr_platforms/tests/test_x86_16_indexed_address_copies.py \
@@ -3198,6 +3203,7 @@ QA_PYTEST_TARGETS := \
 	angr_platforms/tests/test_x86_16_direct_stack_move_pretest_body.py \
 	angr_platforms/tests/test_x86_16_direct_stack_move_pretest_initializers.py \
 	angr_platforms/tests/test_x86_16_stack_probe_local_preservation.py \
+	angr_platforms/tests/test_x86_16_casted_loop_induction.py \
 	angr_platforms/tests/test_x86_16_direct_stack_move_loops.py \
 	angr_platforms/tests/test_x86_16_direct_stack_update_groups.py \
 	angr_platforms/tests/test_x86_16_indexed_address_copies.py \

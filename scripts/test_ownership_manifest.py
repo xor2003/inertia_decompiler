@@ -1015,6 +1015,17 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         tests=("angr_platforms/tests/test_x86_16_stack_probe_local_preservation.py",),
     ),
     TestOwnershipRule(
+        owner="x86-16-casted-loop-induction",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/structuring/canonical_for_loops.py",
+            "angr_platforms/angr_platforms/X86_16/structuring/induction_comparisons.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_canonical_for_loops.py",
+            "angr_platforms/tests/test_x86_16_casted_loop_induction.py",
+        ),
+    ),
+    TestOwnershipRule(
         owner="x86-16-structuring-switch-loop-tail-breaks",
         paths=(
             "angr_platforms/angr_platforms/X86_16/structuring/switch_loop_tail_breaks.py",
@@ -1468,6 +1479,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="real-mode-linear-lowering",
         paths=(
+            "angr_platforms/angr_platforms/X86_16/lowering/register_reload_consumers.py",
             "angr_platforms/angr_platforms/X86_16/lowering/real_mode_linear.py",
             "angr_platforms/angr_platforms/X86_16/lowering/machine_stack_names.py",
             "angr_platforms/angr_platforms/X86_16/lowering/linear_global_decomposition_cache.py",

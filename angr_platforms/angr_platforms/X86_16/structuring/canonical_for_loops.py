@@ -37,6 +37,7 @@ from ..c_ast_utils import (
     _same_c_expression_8616,
 )
 from ..ir.condition_ir import inverted_comparison_op_8616
+from .induction_comparisons import ordered_comparison_uses_induction_8616 as _ordered_comparison_uses_induction_8616
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,28 +199,6 @@ def _nonzero_loop_induction_8616(condition: CExpression) -> CVariable | None:
     return None
 
 
-def _ordered_comparison_uses_induction_8616(
-    condition: CExpression,
-    induction: CVariable,
-) -> bool:
-    """Prove one stable ordered comparison operand is the induction value."""
-    if not isinstance(condition, CBinaryOp) or condition.op not in {
-        "CmpLT",
-        "CmpLE",
-        "CmpGT",
-        "CmpGE",
-    }:
-        return False
-    if not isinstance(condition.lhs, (CVariable, CConstant)) or not isinstance(
-        condition.rhs,
-        (CVariable, CConstant),
-    ):
-        return False
-    lhs_matches = _same_variable_8616(condition.lhs, induction)
-    rhs_matches = _same_variable_8616(condition.rhs, induction)
-    return lhs_matches != rhs_matches
-
-
 def _pretest_continuation_condition_8616(
     break_condition: CExpression,
     induction: CVariable,
@@ -236,7 +215,7 @@ def _pretest_continuation_condition_8616(
             return None
         ordered_condition = operand
         invert_comparison = False
-    if not _ordered_comparison_uses_induction_8616(
+    if not isinstance(ordered_condition, CBinaryOp) or not _ordered_comparison_uses_induction_8616(
         ordered_condition,
         induction,
     ):
@@ -273,7 +252,8 @@ def _contains_current_loop_continue_8616(statement: CStatement | None) -> bool:
     if isinstance(statement, CSwitchCase):
         return any(
             _contains_current_loop_continue_8616(child)
-            for child in statement.cases.values()
+            for child in _iter_c_node_children_8616(statement.cases)
+            if isinstance(child, CStatement)
         ) or _contains_current_loop_continue_8616(statement.default)
     return False
 
@@ -544,7 +524,8 @@ def _recover_nested_loops_8616(
         return
     if isinstance(statement, CSwitchCase):
         for child in _iter_c_node_children_8616(statement.cases):
-            _recover_nested_loops_8616(child, codegen, counts)
+            if isinstance(child, CStatement):
+                _recover_nested_loops_8616(child, codegen, counts)
         _recover_nested_loops_8616(statement.default, codegen, counts)
 
 

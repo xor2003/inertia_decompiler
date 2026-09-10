@@ -1017,14 +1017,14 @@ def test_sortdemo_exchangesort_preserves_inner_loop_setup_and_guarded_minimum_up
         or "local_4 = local_6;\n        for (local_2 = local_6;" in final_body
         or "local_4 = local_6;\n        local_2 = local_6;\n        while (true)" in final_body
     )
-    assert (
-        "for (iRowNext = iRowCur; iRowNext < cRow;" in final_body
-        or "for (local_2 = local_6; local_2 < cRow;" in final_body
-        or "for (local_2 = local_6; local_2 < g_ba2;" in final_body
-        or "for (iRowNext = iRowCur; iRowNext < SEG_U16(inertia_ds, 2978);" in final_body
-        or "if (iRowNext >= cRow)" in final_body
-        or "if (local_2 >= cRow)" in final_body
-        or "if (local_2 >= g_ba2)" in final_body
+    next_row = "iRowNext" if "iRowNext" in final_body else "local_2"
+    current_row = "iRowCur" if "iRowCur" in final_body else "local_6"
+    # Preserve the signed machine comparison when storage is declared unsigned.
+    next_comparison = f"(short){next_row}" if f"unsigned short {next_row};" in final_body else next_row
+    assert any(
+        f"for ({next_row} = {current_row}; {next_comparison} < {bound};" in final_body
+        or f"if ({next_comparison} >= {bound})" in final_body
+        for bound in ("cRow", "g_ba2", "SEG_U16(inertia_ds, 2978)")
     )
     comparison_guards = (
         "if (abarWork[iRowNext] < abarWork[iRowMin])",
@@ -1643,7 +1643,9 @@ def test_initmenu_pause_zero_guard_has_no_raw_flag_carrier(tmp_path):
     assert 'strcpy(ach, "            ");' in body
     assert "if (i >= cszMenu)" not in body
     iterator_lines = tuple(line.strip() for line in body.splitlines() if line.lstrip().startswith("for ("))
-    assert iterator_lines == ("for (i = 0; i < cszMenu; i += 1)",)
+    # An unsigned declaration needs the binary's signed comparison conversion.
+    comparison_index = "(short)i" if "unsigned short i;" in body else "i"
+    assert iterator_lines == (f"for (i = 0; {comparison_index} < cszMenu; i += 1)",)
     assert "DrawFrame(1, 45, 35, cszMenu + 2);" in body
     assert "settextposition(i + 2, 48);" in body
     assert "outtext(aszMenu[i]);" in body

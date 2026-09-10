@@ -258,6 +258,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_x86_16_direct_stack_move_pretest_body.py",
     "angr_platforms/tests/test_x86_16_direct_stack_move_pretest_initializers.py",
     "angr_platforms/tests/test_x86_16_stack_probe_local_preservation.py",
+    "angr_platforms/tests/test_x86_16_casted_loop_induction.py",
     "angr_platforms/tests/test_x86_16_decompilation_cache_surface.py",
     "angr_platforms/tests/test_x86_16_return_compat_counters.py",
     "angr_platforms/tests/test_x86_16_return_expression_preservation.py",

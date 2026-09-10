@@ -184,6 +184,7 @@ from .linear_global_decomposition_cache import (
 )
 from .machine_stack_names import machine_bp_stack_object_name_8616
 from .physical_registers import physical_register_name_8616, physical_register_offset_8616
+from .register_reload_consumers import instruction_local_register_read_8616
 from .register_variable_identity import (
     capstone_register_name_8616 as _capstone_register_name_8616,
 )
@@ -14670,70 +14671,6 @@ def _node_reads_register_name_8616(
     return result
 
 
-def _find_first_register_cvar_use_8616(
-    node: StructuredAstValue, reg_name: str, *, seen: set[int] | None = None
-) -> StructuredAstValue:
-    if node is None:
-        return None
-    if seen is None:
-        seen = set()
-    node_id = id(node)
-    if node_id in seen:
-        return None
-    seen.add(node_id)
-    if isinstance(node, structured_c.CVariable) and _same_register_cvar_name_8616(node, reg_name):
-        return node
-    if isinstance(node, structured_c.CAssignment):
-        return _find_first_register_cvar_use_8616(node.rhs, reg_name, seen=seen)
-    if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-        return None
-    for attr in (
-        "condition",
-        "cond",
-        "lhs",
-        "rhs",
-        "operand",
-        "expr",
-        "iftrue",
-        "iffalse",
-        "args",
-        "operands",
-        "body",
-        "else_node",
-        "statements",
-    ):
-        value = None
-        with contextlib.suppress(Exception):
-            value = getattr(node, attr, None)
-        if isinstance(value, (list, tuple)):
-            for item in tuple(value):
-                if isinstance(item, tuple):
-                    for part in item:
-                        found = _find_first_register_cvar_use_8616(part, reg_name, seen=seen)
-                        if found is not None:
-                            return found
-                else:
-                    found = _find_first_register_cvar_use_8616(item, reg_name, seen=seen)
-                    if found is not None:
-                        return found
-        else:
-            found = _find_first_register_cvar_use_8616(value, reg_name, seen=seen)
-            if found is not None:
-                return found
-    pairs = None
-    with contextlib.suppress(Exception):
-        pairs = getattr(node, "condition_and_nodes", None)
-    if pairs:
-        for condition, body in tuple(pairs):
-            found = _find_first_register_cvar_use_8616(condition, reg_name, seen=seen)
-            if found is not None:
-                return found
-            found = _find_first_register_cvar_use_8616(body, reg_name, seen=seen)
-            if found is not None:
-                return found
-    return None
-
-
 def _is_same_register_move_assignment_8616(
     stmt: StructuredAstValue, reg_name: str, source_expr: StructuredAstValue
 ) -> bool:
@@ -14757,11 +14694,10 @@ def _insertion_point_has_register_move_assignment_8616(
 
 def _insert_before_first_register_cvar_use_8616(
     root: StructuredAstValue, reg_name: str, source_expr: StructuredAstValue, codegen: StructuredAstValue,
-    *, project: AngrProjectValue, ins_addr: int,
+    *, project: AngrProjectValue, ins_addr: int, register_width: int,
 ) -> bool:
     """Place a proven reload only at a consumer carrying its instruction origin."""
     seen: set[int] = set()
-    read_memo: dict[int, bool] = {}
 
     def visit(node: StructuredAstValue) -> bool:
         """Keep unrelated earlier reads intact when a register name is reused."""
@@ -14777,13 +14713,15 @@ def _insert_before_first_register_cvar_use_8616(
                     or isinstance(nested_statements, list)
                 ) and visit(stmt):
                     return True
-                if _node_has_instruction_address_8616(stmt, project, ins_addr) and _node_reads_register_name_8616(stmt, reg_name, memo=read_memo):
+                cvar = (
+                    instruction_local_register_read_8616(stmt, reg_name, register_width)
+                    if _node_has_instruction_address_8616(stmt, project, ins_addr)
+                    else None
+                )
+                if cvar is not None:
                     if _insertion_point_has_register_move_assignment_8616(statements, index, reg_name, source_expr):
                         root._inertia_stack_mov_assignment_already_present_8616 = True
                         return True
-                    cvar = _find_first_register_cvar_use_8616(stmt, reg_name)
-                    if cvar is None:
-                        return False
                     assignment = structured_c.CAssignment(cvar, source_expr, codegen=codegen, tags={"ins_addr": ins_addr})
                     statements.insert(index, assignment)
                     return True
@@ -17173,6 +17111,7 @@ def _materialize_direct_stack_mov_instructions_impl_8616(
                         reload_expr,
                         codegen,
                         project=project,
+                        register_width=reload_fact.width,
                         ins_addr=reload_fact.ins_addr,
                     )
                     register_use_insert_elapsed += time.perf_counter() - reload_step_started
