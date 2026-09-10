@@ -26,6 +26,7 @@ from .stack_lowering_from_facts import materialize_stack_cvar_at_offset_from_fac
 from .stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     stack_cvar_for_machine_bp_range_8616,
+    stack_variable_coordinate_registry_8616,
 )
 
 
@@ -110,15 +111,27 @@ def containing_stack_cvariable_8616(
     offset: int,
     size_hint: int = 1,
 ) -> CVariable | None:
-    """Return the strongest existing BP-stack object proven to contain ``offset``."""
+    """Select a proven object extent, not merely its angr backing allocation.
+
+    ``size_hint`` bounds the containing object's size; it is not a read width
+    starting at ``offset``. Callers may request addresses inside that object.
+    """
     minimum_size = max(size_hint, 1)
     canonical = stack_cvar_for_machine_bp_range_8616(codegen, offset, minimum_size)
     if isinstance(canonical, CVariable) and isinstance(canonical.variable, SimStackVariable):
         return canonical
+    owner = stack_variable_coordinate_registry_8616(codegen).containing_bp_range(offset, 1)
+    if (
+        owner is not None and owner.size >= minimum_size
+        and isinstance(owner.cvar, CVariable) and isinstance(owner.cvar.variable, SimStackVariable)
+    ):
+        return owner.cvar
     best: CVariable | None = None
     best_score: tuple[int, int, int, int, int] | None = None
     for cvar in iter_stack_cvariable_candidates_8616(codegen, synthetic_stack_cvars):
         variable = cvar.variable
+        if not isinstance(variable, SimStackVariable):
+            continue
         base_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
         size = variable.size
         if variable.base != "bp" or not isinstance(base_offset, int) or not isinstance(size, int):

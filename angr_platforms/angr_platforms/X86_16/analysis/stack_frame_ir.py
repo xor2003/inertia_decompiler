@@ -3,6 +3,8 @@
 Responsibility: summarize SS frame accesses from typed IR artifacts.
 Entry-frame proof must follow the last BP write before use; overwritten setup
 candidates are neither live evidence nor conflicting alternatives.
+Captured register views retain their source temporary: trace that SSA value
+instead of adding an old SP displacement to the current stack delta again.
 Forbidden: inventing locals/args without segmented SS:BP/SP evidence.
 """
 
@@ -154,11 +156,16 @@ def _bp_access_8616(instruction: IRInstr) -> bool:
 
 
 def _sp_relative_value_8616(instruction: IRInstr) -> IRValue | None:
-    """Return the sole typed SP-relative source of a register move."""
+    """Return a direct SP read; captured temporaries require SSA provenance."""
     if instruction.op != "MOV" or len(instruction.args) != 1:
         return None
     source = instruction.args[0]
-    if isinstance(source, IRValue) and source.space is MemSpace.REG and source.name == "sp":
+    if (
+        isinstance(source, IRValue)
+        and source.space is MemSpace.REG
+        and source.name == "sp"
+        and source.source_tmp is None
+    ):
         return source
     return None
 

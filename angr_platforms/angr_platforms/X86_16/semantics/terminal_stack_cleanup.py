@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Any, Protocol, cast
 
 from angr.errors import SimEngineError, SimTranslationError
@@ -22,6 +21,11 @@ from ..frontend_instruction_reachability import (
     collect_instruction_reachability_8616,
     decoded_block_instructions_8616,
 )
+from .terminal_return_contract import (
+    TerminalReturnFrameKind8616,
+    TerminalStackCleanupEvidence8616,
+    decoded_return_operand_bits_8616,
+)
 
 __all__ = [
     "TerminalReturnFrameKind8616",
@@ -29,14 +33,6 @@ __all__ = [
     "collect_terminal_stack_cleanup_evidence_8616",
     "terminal_stack_cleanup_at_address_8616",
 ]
-
-
-class TerminalReturnFrameKind8616(StrEnum):
-    """Machine return-frame shapes proven on terminal callee paths."""
-
-    NEAR = "near"
-    FAR = "far"
-    INTERRUPT = "interrupt"
 
 
 class _FunctionSurface8616(Protocol):
@@ -82,44 +78,6 @@ class _ReachableFunctionSurface8616:
 
     addr: int
     block_addrs_set: frozenset[int]
-
-
-@dataclass(frozen=True, slots=True)
-class TerminalStackCleanupEvidence8616:
-    """Closed accounting for cleanup amounts on reachable return paths."""
-
-    cleanup_amounts: frozenset[int]
-    raw_fact_count: int
-    normalized_fact_count: int
-    classified_fact_count: int
-    materialized_count: int
-    failure_count: int
-    return_frame_kinds: frozenset[TerminalReturnFrameKind8616] = frozenset()
-
-    @property
-    def complete(self) -> bool:
-        """Return whether every terminal path has a valid cleanup amount."""
-        return (
-            self.raw_fact_count > 0
-            and self.normalized_fact_count == self.raw_fact_count
-            and self.classified_fact_count == self.raw_fact_count
-            and self.materialized_count == self.classified_fact_count
-            and self.failure_count == 0
-        )
-
-    @property
-    def consistent_cleanup(self) -> int | None:
-        """Return the one cleanup amount proven on every terminal path."""
-        if not self.complete or len(self.cleanup_amounts) != 1:
-            return None
-        return next(iter(self.cleanup_amounts))
-
-    @property
-    def consistent_return_frame_kind(self) -> TerminalReturnFrameKind8616 | None:
-        """Return the one machine return-frame shape on every terminal path."""
-        if not self.complete or len(self.return_frame_kinds) != 1:
-            return None
-        return next(iter(self.return_frame_kinds))
 
 
 def _terminal_cleanup_cache_8616(
@@ -230,17 +188,20 @@ def collect_terminal_stack_cleanup_evidence_8616(
         return TerminalStackCleanupEvidence8616(frozenset(), 1, 0, 0, 0, 1)
     amounts: set[int] = set()
     frame_kinds: set[TerminalReturnFrameKind8616] = set()
+    operand_bits: set[int | None] = set()
     counts = [0, 0, 0, 0, 0]
 
     def record_cleanup(
         cleanup: int,
         frame_kind: TerminalReturnFrameKind8616,
+        width: int | None,
     ) -> None:
         """Record one classified terminal cleanup and frame-shape fact."""
         for index in range(4):
             counts[index] += 1
         amounts.add(cleanup)
         frame_kinds.add(frame_kind)
+        operand_bits.add(width)
 
     def record_failure() -> None:
         """Record one terminal/control fact that cannot be classified."""
@@ -265,26 +226,26 @@ def collect_terminal_stack_cleanup_evidence_8616(
                 cleanup = _return_cleanup_8616(insn)
                 frame_kind = _return_frame_kind_8616(insn)
                 if isinstance(cleanup, int) and frame_kind is not None:
-                    record_cleanup(cleanup, frame_kind)
+                    record_cleanup(cleanup, frame_kind, decoded_return_operand_bits_8616(_inner_instruction_8616(insn)))
                 else:
                     record_failure()
                 return
             if mnemonic in {"jmp", "jmpw", "ljmp"}:
                 target = _direct_target_8616(insn)
-                if target in block_addrs:
+                if isinstance(target, int) and target in block_addrs:
                     scan(target, path | {block_addr})
                 else:
                     record_failure()
                 return
             if _is_conditional_branch_8616(mnemonic):
                 for successor in dict.fromkeys((_direct_target_8616(insn), _fallthrough_8616(insn))):
-                    if successor in block_addrs:
+                    if isinstance(successor, int) and successor in block_addrs:
                         scan(successor, path | {block_addr})
                     else:
                         record_failure()
                 return
         fallthrough = _fallthrough_8616(insns[-1])
-        if fallthrough in block_addrs:
+        if isinstance(fallthrough, int) and fallthrough in block_addrs:
             scan(fallthrough, path | {block_addr})
         else:
             record_failure()
@@ -298,6 +259,7 @@ def collect_terminal_stack_cleanup_evidence_8616(
         materialized_count=counts[3],
         failure_count=counts[4],
         return_frame_kinds=frozenset(frame_kinds),
+        return_operand_bits=frozenset(operand_bits),
     )
 
 
@@ -346,6 +308,7 @@ def terminal_stack_cleanup_at_address_8616(
             1,
             0,
             frozenset({frame_kind}),
+            frozenset({decoded_return_operand_bits_8616(_inner_instruction_8616(terminal))}),
         )
         cache[address] = evidence
         return evidence

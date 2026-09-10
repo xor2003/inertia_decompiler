@@ -9,7 +9,8 @@ Do not perform alias-state ownership, widening, type/materialization recovery, r
 This owner consumes binary callsite summaries and C-AST storage identities. It
 never infers destinations from names or rendered C. Missing or conflicting
 storage evidence is an explicit refusal; rewrite and postprocess must not repair
-the call assignment later.
+the call assignment later. Retargeting a same-width scalar definition must
+preserve its value immediately: later reads may outlive the destination slot.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CStatements,
     CVariable,
 )
-from angr.sim_variable import SimStackVariable
+from angr.sim_variable import SimRegisterVariable, SimStackVariable
 
 from ..c_ast_utils import _clone_c_ast_tree_8616, _iter_c_nodes_deep_8616
 from ..callsite_summary import CallsiteReturnUseKind8616, CallsiteSummary8616
@@ -121,7 +122,7 @@ def _store_artifacts_8616(
     root: object,
     store_ins_addr: int,
 ) -> tuple[tuple[CStatements, CAssignment], ...]:
-    """Return direct C assignments emitted from one exact machine store."""
+    """Return store artifacts without consuming scalar register definitions."""
     artifacts: list[tuple[CStatements, CAssignment]] = []
     for parent in _statement_containers_8616(root):
         artifacts.extend(
@@ -129,6 +130,10 @@ def _store_artifacts_8616(
             for statement in tuple(parent.statements or ())
             if (
                 isinstance(statement, CAssignment)
+                and not (
+                    isinstance(statement.lhs, CVariable)
+                    and isinstance(statement.lhs.variable, SimRegisterVariable)
+                )
                 and not any(isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(statement.rhs))
                 and statement.tags.get("ins_addr") == store_ins_addr
             )
@@ -277,9 +282,22 @@ def materialize_stored_call_result_assignments_8616(
         stats.classified_fact_count += 1
         lhs = cast(CVariable, _clone_c_ast_tree_8616(destination_variable))
         if isinstance(occurrence.statement, CAssignment):
+            previous_lhs = occurrence.statement.lhs
             occurrence.statement.lhs = lhs
+            if (
+                isinstance(previous_lhs, CVariable)
+                and isinstance(previous_lhs.variable, SimRegisterVariable)
+                and previous_lhs.variable.size == destination[1]
+            ):
+                capture = CAssignment(
+                    previous_lhs, _clone_c_ast_tree_8616(lhs),
+                    tags=dict(occurrence.statement.tags), codegen=codegen,
+                )
+                captured_statements = list(occurrence.parent.statements)
+                captured_statements.insert(captured_statements.index(occurrence.statement) + 1, capture)
+                occurrence.parent.statements = captured_statements
         else:
-            statements = list(occurrence.parent.statements or ())
+            statements: list[object] = list(occurrence.parent.statements or ())
             statements[occurrence.index] = CAssignment(
                 lhs,
                 occurrence.call,

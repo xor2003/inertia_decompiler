@@ -1154,16 +1154,17 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         return (self._get_reg16("flags") & self._const16(1 << bit)) == self._const16(0)
 
     def _binop_reg_reg(self, op_name: str, dst_reg: str, src_reg: str) -> None:
+        """Lift register arithmetic with explicit zeroing values and original flag inputs."""
         dst = self._get_reg16(dst_reg)
         src = self._get_reg16(src_reg)
         if op_name == "add":
             result = dst + src
         elif op_name == "sub":
-            result = dst - src
+            result = self._const16(0) if dst_reg == src_reg else dst - src
             if self._next_instruction_is_simple_jcc():
                 self._record_cmp_condition_source(dst, src)
         elif op_name == "xor":
-            result = dst ^ src
+            result = self._const16(0) if dst_reg == src_reg else dst ^ src
         elif op_name == "and":
             result = dst & src
         elif op_name == "or":
@@ -1419,11 +1420,9 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         return StatusFlag8616.NONE
 
     def _should_update_binop_flags_8616(self, op_name: str, *, logical_condition_recorded: bool) -> bool:
-        """Return whether a binop's architectural flags remain semantically live."""
+        """Keep live execution flags even when a logical condition was published."""
         written = binop_status_flag_writes_8616(op_name)
-        if written is not None and self._flags_fully_overwritten_before_use_8616(written):
-            return False
-        return not logical_condition_recorded
+        return not (written is not None and self._flags_fully_overwritten_before_use_8616(written))
 
     def _direct_jcc_condition(self, kind: str) -> Any | None:
         def _impl() -> Any | None:

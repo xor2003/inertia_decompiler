@@ -67,6 +67,30 @@ REVIEWED_TEST_MODULE_LAYERS: Final[Mapping[str, tuple[str, ...]]] = MappingProxy
 
 RETIRED_TEST_CONTRACTS: Final[Mapping[str, RetiredTestContract]] = MappingProxyType(
     {
+        **{
+            "angr_platforms/tests/test_x86_16_cod_regressions.py::" + retired: RetiredTestContract(
+                reason="identical CLI invocation; existing status and output checks consolidated into behavior regression",
+                replacements=("angr_platforms/tests/test_x86_16_cod_regressions.py::" + replacement,),
+            )
+            for retired, replacement in (
+                ("test_cod_regression_targets_are_recoverable[BIOSFUNC.COD-_bios_clearkeyflags-20]",
+                 "test_cod_biosfunc_clearkeyflags_far_word_store"),
+                ("test_cod_regression_targets_are_recoverable[DOSFUNC.COD-_dos_getfree-20]",
+                 "test_cod_dos_getfree_call_and_return_recovered"),
+                ("test_cod_regression_targets_are_recoverable[DOSFUNC.COD-_dos_loadOverlay-20]",
+                 "test_cod_dos_loadoverlay_wrapper_returns_loadprog"),
+                ("test_cod_regression_targets_are_recoverable[DOSFUNC.COD-_dos_getReturnCode-20]",
+                 "test_cod_dos_getreturncode_returns_value"),
+                ("test_cod_regression_targets_are_recoverable[EGAME2.COD-_openFileWrapper-20]",
+                 "test_cod_openfilewrapper_direct_forwarding"),
+                ("test_cod_known_helper_signatures_are_declared[DOSFUNC.COD-_dos_getfree-anchors0]",
+                 "test_cod_dos_getfree_call_and_return_recovered"),
+                ("test_cod_known_helper_signatures_are_declared[DOSFUNC.COD-_dos_loadOverlay-anchors1]",
+                 "test_cod_dos_loadoverlay_wrapper_returns_loadprog"),
+                ("test_cod_known_helper_signatures_are_declared[EGAME2.COD-_openFileWrapper-anchors2]",
+                 "test_cod_openfilewrapper_direct_forwarding"),
+            )
+        },
         "angr_platforms/tests/test_x86_16_cli.py::test_decompile_cli_small_cod_logic_batch"
         "[path12-_TIDShowRange-NEAR-10-30-expected_tokens12-forbidden_tokens12]": RetiredTestContract(
             reason="duplicate command whose timeout branch bypassed all nominal output assertions",

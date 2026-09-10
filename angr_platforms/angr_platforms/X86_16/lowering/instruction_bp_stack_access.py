@@ -282,12 +282,14 @@ def select_instruction_bp_stack_access_8616(
     *,
     displacement: int,
     size: int,
+    kind: StackMemoryAliasFactKind8616 | None = None,
 ) -> InstructionBpStackAccess8616 | None:
-    """Prefer the shaped range, or return the site's sole proven BP range."""
+    """Keep exact execution width; a wider logical owner is not a wider access."""
     candidates = {
         fact
         for instruction_addr in instruction_addrs
         for fact in index.by_instruction_addr.get(instruction_addr, ())
+        if kind is None or fact.kind is kind
     }
     exact = tuple(
         fact
@@ -301,6 +303,8 @@ def select_instruction_bp_stack_access_8616(
     )
     if exact_logical:
         return min(exact_logical, key=lambda fact: fact.kind.value)
+    if exact:
+        return min(exact, key=lambda fact: (fact.evidence.value, fact.kind.value))
     same_base_logical_owners = tuple(
         fact
         for fact in candidates
@@ -310,8 +314,6 @@ def select_instruction_bp_stack_access_8616(
     )
     if same_base_logical_owners:
         return min(same_base_logical_owners, key=lambda fact: (fact.size, fact.kind.value))
-    if exact:
-        return min(exact, key=lambda fact: (fact.evidence.value, fact.kind.value))
     logical = tuple(
         fact
         for fact in candidates

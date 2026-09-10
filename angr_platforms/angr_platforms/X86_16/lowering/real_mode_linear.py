@@ -92,7 +92,7 @@ from capstone.x86_const import (
 
 from ..alias.alias_model import _stack_storage_facts_for_segmented_address_8616
 from ..alias.alias_model_impl import AliasStorageFacts, _StackSlotIdentity
-from ..alias.stack_memory_ssa_contracts import StackMemorySSAAliasArtifact8616
+from ..alias.stack_memory_ssa_contracts import StackMemoryAliasFactKind8616, StackMemorySSAAliasArtifact8616
 from ..analysis_helpers import canonicalize_x86_16_padding_call_target_8616
 from ..annotations import ANNOTATION_KEY
 from ..c_ast_utils import _iter_c_nodes_deep_8616, _iter_c_statement_nodes_8616
@@ -182,6 +182,7 @@ from .linear_global_decomposition_cache import (
     LinearGlobalCarrierKey8616,
     LinearGlobalDecompositionCache8616,
 )
+from .machine_stack_names import machine_bp_stack_object_name_8616
 from .physical_registers import physical_register_name_8616, physical_register_offset_8616
 from .register_variable_identity import (
     capstone_register_name_8616 as _capstone_register_name_8616,
@@ -193,6 +194,7 @@ from .register_variable_identity import (
     register_cvar_names_8616,
 )
 from .runtime_memory_helpers import memory_pointer_helper_8616, segmented_memory_read_helper_8616
+from .runtime_push_carrier import RuntimePushCarrierVerdict8616, classify_runtime_push_carrier_8616
 from .runtime_segment_access import runtime_segment_access_space_8616
 from .segment_access_policy import (
     instruction_addrs_from_node_8616,
@@ -209,6 +211,7 @@ from .stack_address_coordinates import (
     absolute_machine_bp_offset_from_wrapped_anchor_8616,
     consume_indexed_stack_frame_terms_8616,
     machine_bp_offset_for_entry_sp_anchor_8616,
+    machine_bp_offset_for_native_anchor_8616,
 )
 from .stack_aggregate_objects import StackAggregateObjectFact8616, materialize_stack_aggregate_objects_8616
 from .stack_frame_projection import entry_sp_offset_for_machine_bp_range_8616
@@ -1191,6 +1194,7 @@ def stack_cvar_for_stable_ss_linear_access_8616(
             displacement,
             requested_size,
             owner_hint=owner_hint,
+            require_lvalue=require_lvalue,
         )
         if requested_size is not None
         else None
@@ -1212,11 +1216,7 @@ def stack_cvar_for_stable_ss_linear_access_8616(
             variables_in_use.setdefault(variable, projected_owner)
         _ensure_positive_bp_stack_arg_8616(codegen, projected_owner, target_type)
         if require_lvalue:
-            return (
-                projected_owner
-                if projected_value.status is StackValueProjectionStatus8616.EXACT_VALUE
-                else None
-            )
+            return projected_value.expression
         return projected_value.expression
     if (
         projected_value is not None
@@ -1225,6 +1225,7 @@ def stack_cvar_for_stable_ss_linear_access_8616(
             StackValueProjectionStatus8616.AMBIGUOUS_OWNER,
             StackValueProjectionStatus8616.OUTSIDE_VALUE,
             StackValueProjectionStatus8616.OWNER_NOT_EXPRESSION,
+            StackValueProjectionStatus8616.UNSUPPORTED_WRITE_VIEW,
         }
     ):
         return None
@@ -1345,8 +1346,7 @@ def _preferred_stack_object_name_8616(
     known_bindings: tuple[StackVariableBinding, ...] | None = None,
 ) -> str:
     """Return an annotation name only for the matching proven stack object."""
-    raw_default_name = _stack_object_name(offset, codegen=codegen)
-    default_name = str(raw_default_name)
+    default_name = machine_bp_stack_object_name_8616(offset, codegen=codegen)
     cfunc = codegen.cfunc if codegen is not None else None
     try:
         func = codegen._func if codegen is not None else None
@@ -3237,6 +3237,7 @@ def _resolve_stack_offset_from_binary_8616(
 def _stack_offset_from_expr_8616(
     node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue, seen: set[int] | None = None
 ) -> int | None:
+    """Resolve stack-address expressions using their proven coordinate domain."""
     def _impl() -> StructuredAstValue:
         nonlocal node, seen
         if seen is None:
@@ -3262,6 +3263,11 @@ def _stack_offset_from_expr_8616(
             return None
         seen.add(node_id)
 
+        native_anchor = machine_bp_offset_for_native_anchor_8616(codegen, node)
+        if native_anchor is not None:
+            offset_cache[node_id] = native_anchor
+            return native_anchor
+
         const = _constant_value_8616(node)
         if const is not None:
             offset_cache[node_id] = const
@@ -3281,10 +3287,7 @@ def _stack_offset_from_expr_8616(
             operand = _strip_casts_8616(node.operand)
             variable = getattr(operand, "variable", None) if isinstance(operand, structured_c.CVariable) else None
             if isinstance(variable, SimStackVariable):
-                variable_offset = machine_bp_offset_for_stack_variable_8616(
-                    codegen,
-                    variable,
-                )
+                variable_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
                 if isinstance(variable_offset, int):
                     offset_cache[node_id] = variable_offset
                     return variable_offset
@@ -7590,7 +7593,7 @@ def _ensure_stack_cvar_min_width_8616(codegen: StructuredAstValue, cvar: Structu
 def _resolve_direct_stack_update_cvar_8616(
     codegen: StructuredAstValue, offset: int, width: int
 ) -> StructuredAstValue | None:
-    """Resolve the C variable representing a direct stack update slot."""
+    """Resolve a stack update through the active registry, including old AST clones."""
     projected = stack_cvar_for_machine_bp_range_8616(codegen, offset, width)
     if isinstance(projected, structured_c.CVariable):
         _apply_preferred_stack_cvar_name_8616(projected, offset, codegen)
@@ -7626,11 +7629,12 @@ def _resolve_direct_stack_update_cvar_8616(
         for node in _iter_structured_c_nodes_8616(root):
             if not isinstance(node, structured_c.CVariable) or id(node) in seen_candidate_ids:
                 continue
-            if not _stack_cvar_matches_offset_width_8616(node, offset, width):
+            variable = node.variable
+            if not isinstance(variable, SimStackVariable) or variable.base != "bp":
                 continue
-            stack_id = _stack_cvar_identity_8616(node)
-            stack_size = stack_id[1] if stack_id is not None else None
-            if stack_size != width:
+            stack_size = variable.size
+            bp_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
+            if _canonical_stack_offset_8616(bp_offset) != offset or stack_size != width:
                 continue
             _apply_preferred_stack_cvar_name_8616(node, offset, codegen)
             _ensure_stack_cvar_has_identifier_8616(codegen, node, offset)
@@ -11657,16 +11661,23 @@ def prune_consumed_call_push_stack_assignments_8616(
         insn = _instruction_at_or_decode_8616(project, ins_addr, insn_by_addr)
         if getattr(insn, "id", None) != X86_INS_PUSH:
             return False
+        materialized_args = (
+            materialized_args_by_push_instruction_addr.get(ins_addr, ())
+            if materialized_args_by_push_instruction_addr is not None else ()
+        )
+        runtime_verdict = classify_runtime_push_carrier_8616(
+            root, statement, materialized_args, sp_offset=project.arch.registers["sp"][0],
+        )
+        if runtime_verdict in {RuntimePushCarrierVerdict8616.UNKNOWN_REFUSE, RuntimePushCarrierVerdict8616.OBSERVED}:
+            liveness_refusal_count += 1
+            return False
         if not (
+            runtime_verdict is RuntimePushCarrierVerdict8616.UNOBSERVED
+            or
             _is_consumed_push_stack_carrier_lhs_8616(project, lhs)
             or _is_consumed_push_ss_store_lhs_8616(project, codegen, lhs)
         ):
             return False
-        materialized_args = (
-            materialized_args_by_push_instruction_addr.get(ins_addr, ())
-            if materialized_args_by_push_instruction_addr is not None
-            else ()
-        )
         if isinstance(lhs, structured_c.CDirtyExpression) and materialized_args_by_push_instruction_addr is not None:
             liveness = classify_call_argument_carrier_liveness_8616(
                 lhs,
@@ -17633,6 +17644,7 @@ def lower_stable_ss_linear_stack_dereferences_8616(
     def _instruction_bp_stack_access_8616(
         node: StructuredAstValue,
         shaped_access: RealModeLinearStackAccess8616,
+        *, require_lvalue: bool,
     ) -> tuple[InstructionBpStackAccess8616, StackValueOwnerHint8616 | None] | None:
         """Bind one SS-shaped access to its exact direct BP instruction operand."""
         nonlocal instruction_bp_access_index
@@ -17655,6 +17667,7 @@ def lower_stable_ss_linear_stack_dereferences_8616(
             source_addrs,
             displacement=shaped_access.displacement,
             size=shaped_access.width if isinstance(shaped_access.width, int) else 0,
+            kind=StackMemoryAliasFactKind8616.STORE if require_lvalue else StackMemoryAliasFactKind8616.LOAD,
         )
         if exact is None:
             return None
@@ -17729,8 +17742,8 @@ def lower_stable_ss_linear_stack_dereferences_8616(
         instruction_bp_access_lane.classified += 1
         return exact, owner_hint
 
-    def transform(node: StructuredAstValue) -> StructuredAstValue:
-        """Materialize only proven SS stack accesses while preserving unrelated AST."""
+    def transform(node: StructuredAstValue, *, require_lvalue: bool = False) -> StructuredAstValue:
+        """Materialize proven SS accesses without substituting read projections for writes."""
         nonlocal candidate_count, changed, materialized_count, refused_count
         stripped_node = _strip_casts_8616(node)
         if isinstance(stripped_node, structured_c.CFunctionCall):
@@ -17778,6 +17791,7 @@ def lower_stable_ss_linear_stack_dereferences_8616(
                 instruction_selection = _instruction_bp_stack_access_8616(
                     stripped_node,
                     access,
+                    require_lvalue=require_lvalue,
                 )
                 instruction_access = (
                     instruction_selection[0]
@@ -17799,6 +17813,7 @@ def lower_stable_ss_linear_stack_dereferences_8616(
                     access,
                     instruction_access=instruction_access,
                     owner_hint=owner_hint,
+                    require_lvalue=require_lvalue,
                 )
                 if cvar is None:
                     if instruction_access is not None:
@@ -17886,7 +17901,9 @@ def lower_stable_ss_linear_stack_dereferences_8616(
                     setattr(node, attr, tuple(new_items))
                     local_changed = True
             elif value is not None:
-                replacement = transform(value)
+                replacement = transform(
+                    value, require_lvalue=isinstance(node, structured_c.CAssignment) and attr == "lhs",
+                )
                 if replacement is not value:
                     setattr(node, attr, replacement)
                     local_changed = True
@@ -17921,7 +17938,7 @@ def lower_stable_ss_linear_stack_dereferences_8616(
                     local_changed = True
                 new_pairs.append((new_cond, new_body))
             if pair_changed:
-                node.condition_and_nodes = new_pairs
+                cast(Any, node).condition_and_nodes = new_pairs
         return local_changed
 
     if replace_children(root):

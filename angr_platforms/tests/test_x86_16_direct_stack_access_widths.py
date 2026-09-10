@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
@@ -21,6 +22,39 @@ from angr_platforms.X86_16.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
     stack_variable_coordinate_registry_8616,
 )
+
+
+@pytest.mark.parametrize("width", [1, 2])
+@pytest.mark.parametrize("listed", [False, True], ids=["ast-only", "inventory-and-ast"])
+@pytest.mark.parametrize("stale_context", [False, True], ids=["current-context", "snapshot-context"])
+def test_direct_stack_update_rejects_raw_offset_collision_in_ast(width, listed, stale_context):
+    """Entry-SP -2 mapped to BP+0 must not become the BP-2 local."""
+    arch = Arch86_16()
+    codegen = SimpleNamespace(
+        project=SimpleNamespace(arch=arch),
+        cfunc=SimpleNamespace(addr=0x1000, variables_in_use={}, unified_local_vars={}, arg_list=()),
+        next_idx=lambda _name: 1, next_node_idx=lambda: 1, next_ident=lambda name: name,
+    )
+    variable = SimStackVariable(-2, width, base="bp", name="saved_frame")
+    type_ = (SimTypeChar(False) if width == 1 else SimTypeShort(False)).with_arch(arch)
+    old_codegen = SimpleNamespace(project=codegen.project, next_ident=lambda name: name, next_node_idx=lambda: 1)
+    saved = structured_c.CVariable(variable, variable_type=type_, codegen=old_codegen if stale_context else codegen)
+    codegen.cfunc.statements = structured_c.CStatements([
+        structured_c.CAssignment(saved, structured_c.CConstant(7, type_, codegen=codegen), codegen=codegen),
+    ], codegen=codegen)
+    if listed:
+        codegen.cfunc.variables_in_use[variable] = saved
+    record_stack_variable_coordinate_projection_8616(
+        codegen, variable=variable, cvar=saved, bp_offset=0, entry_sp_offset=-2, size=width,
+    )
+
+    selected = _resolve_direct_stack_update_cvar_8616(codegen, -2, width)
+
+    assert selected is not saved
+    assert machine_bp_offset_for_stack_variable_8616(codegen, variable) == 0
+    assert variable.name == "saved_frame"
+    assert isinstance(selected, structured_c.CVariable)
+    assert machine_bp_offset_for_stack_variable_8616(codegen, selected.variable) == -2
 
 
 def test_byte_update_keeps_containing_word_as_allocation_only() -> None:

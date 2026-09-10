@@ -9,6 +9,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 This module uses exact callsite tags, physical SP identity, SSA identity, and
 closed use counts. It does not inspect assembly text, rendered C, helper names,
 or source/debug sidecars.
+Runtime SP consumption refuses any external parent-register view, including call arguments.
 """
 
 from __future__ import annotations
@@ -256,6 +257,10 @@ def prune_consumed_call_execution_frame_carriers_8616(
             and len(normalized_runtime) == 1
             and sum(1 for node in _iter_c_nodes_deep_8616(root) if node is call) == 1
             and _direct_successor_contains_call_8616(normalized_runtime[0], call)
+            and not any(
+                (view := runtime_gp_expression_view_8616(node)) is not None and view.parent_name == "esp"
+                for node in _iter_c_nodes_deep_8616(root, seen={id(normalized_runtime[0].statement)})
+            )
         ):
             return _result_8616(
                 CallExecutionFrameCarrierStatus8616.REFUSED,

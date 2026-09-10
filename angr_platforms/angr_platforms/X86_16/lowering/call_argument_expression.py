@@ -2,7 +2,9 @@
 
 Layer: Types/Lowering.
 Responsibility: consume structured call-argument source operations and build
-their typed C-AST expression without recovering new semantics.
+their typed C-AST expression without recovering new semantics. Preserve array
+decay and decoded string-object addresses instead of converting them to segment
+offsets again. A pointer type alone does not prove an offset was materialized.
 Consumes Recovery, Alias, and Widening facts through typed source tokens.
 Forbidden: source/COD/rendered-C inference, call discovery, or cleanup pruning.
 Consumes alias, widening, and typed facts.
@@ -14,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
-from angr.sim_type import SimType
+from angr.sim_type import SimType, SimTypeChar, SimTypeFixedSizeArray, SimTypePointer
 
 from ..callsite_summary import CallsitePushExprOp8616
 
@@ -60,8 +62,31 @@ __all__ = (
     "CALL_ARGUMENT_SOURCE_OPERATION_NAMES_8616",
     "CallArgumentOperation8616",
     "CallArgumentSource8616",
+    "call_argument_has_materialized_object_address_8616",
     "materialize_call_argument_operations_8616",
 )
+
+
+def call_argument_has_materialized_object_address_8616(expression: object) -> bool:
+    """Recognize concrete C object addresses, not guessed near-pointer values.
+
+    Fixed arrays decay to addresses in argument position. A decoded character
+    string bound to the constant's actual pointer type also denotes a C object.
+    Numeric constants, pointer-typed scalar carriers, and integer conversions
+    are not evidence of either form and remain subject to address lowering.
+    """
+    if isinstance(expression, structured_c.CVariable):
+        return isinstance(expression.variable_type, SimTypeFixedSizeArray)
+    if not isinstance(expression, structured_c.CConstant):
+        return False
+    type_ = expression.type
+    references = expression.reference_values
+    return bool(
+        isinstance(type_, SimTypePointer)
+        and isinstance(type_.pts_to, SimTypeChar)
+        and isinstance(references, dict)
+        and isinstance(references.get(type_), (str, bytes))
+    )
 
 
 def _constant_8616(

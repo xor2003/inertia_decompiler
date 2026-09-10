@@ -27,6 +27,32 @@ They do not relax its architecture or function-fix acceptance contract.
 - Avoid adding to files already over 350 lines where practical. Extract a focused
   owner when warranted, but do not turn a small fix into a size-only refactor.
 
+### Clear Code
+
+- Prefer descriptive domain names and straightforward control flow. Code should
+  communicate intent without requiring readers to reconstruct the algorithm.
+- Add comments where they explain non-obvious reasoning, invariants, constraints,
+  or proof obligations. Explain why, not obvious assignments; keep comments
+  accurate when changing the implementation. Docstrings remain mandatory.
+- Extract meaningful magic values into named, typed constants at their owning
+  layer, especially repeated values and domain limits. Do not replace every
+  obvious zero or one with a name or introduce configuration without a need.
+- Split complex conditions into meaningfully named Boolean variables or focused
+  predicates before using them. Preserve short-circuit evaluation, evaluation
+  order, side effects, and guards against invalid accesses.
+- Extract focused helpers when they clarify a coherent operation or remove real
+  duplication. Do not create wrappers or meaningless names merely to satisfy a
+  complexity threshold. Apply improvements to touched code, not unrelated files.
+- The shared Ruff configuration enforces `C901` (complexity above 10), `PLR0916`
+  (more than five Boolean terms in an if condition), and `PLR2004` (unnamed numeric
+  comparison values), alongside existing simplification, type and docstring
+  rules. `PLR0916` requires preview mode; preview-only rules require explicit
+  selection. Direct Ruff and Make invocations must use this same configuration.
+- These checks are guardrails, not proof of clarity: review comment usefulness,
+  descriptive names, constants outside comparisons, and complex expressions the
+  rules do not cover. Do not silence findings with blanket exclusions or weaken
+  thresholds. Record legacy violations honestly and fix them as files are touched.
+
 ### Measured Performance Work
 
 - Optimize code or tests on demand when measurements show a meaningful execution
@@ -38,6 +64,14 @@ They do not relax its architecture or function-fix acceptance contract.
 - Record cache state, worker count, timing conditions, before/after results and
   semantic acceptance. A faster microbenchmark or fewer scans is not an
   end-to-end improvement. Keep plan-specific gain thresholds and memory limits.
+- For in-process diagnostic hooks, first prove they execute in the analysis
+  worker. Parent counters do not observe forked/clean-worker state. Direct-address
+  probes may require both `INERTIA_OTEL_PROFILE_IN_PROCESS=1` and
+  `INERTIA_DIRECT_ADDR_FORCE_THREAD=1`; these are diagnostic settings, not defaults.
+- Also verify that a diagnostic run did not return a cached function. For a
+  bounded in-process probe, use a temporary cache namespace/directory instead of
+  deleting shared caches; confirm actual stage observations before interpreting
+  an empty counter as absence of behavior.
 - Remove or consolidate tests only after proving duplication, supersession or
   obsolete requirements. Do not reduce coverage, suppress diagnostics, shorten
   timeouts indiscriminately, or hide failures to improve timings.

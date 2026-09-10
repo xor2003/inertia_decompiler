@@ -104,26 +104,6 @@ def _assert_cod_proc_succeeded_or_reported_unvalidated_partial(result: subproces
     )
 
 
-@pytest.mark.parametrize(
-    ("cod_name", "proc_name", "timeout"),
-    (
-        ("BIOSFUNC.COD", "_bios_clearkeyflags", 20),
-        ("DOSFUNC.COD", "_dos_getfree", 20),
-        ("DOSFUNC.COD", "_dos_loadOverlay", 20),
-        ("DOSFUNC.COD", "_dos_getReturnCode", 20),
-        ("EGAME2.COD", "_openFileWrapper", 20),
-    ),
-)
-def test_cod_regression_targets_are_recoverable(cod_name: str, proc_name: str, timeout: int):
-    result = _run_cod_proc(COD_DIR / cod_name, proc_name, timeout=timeout)
-
-    _assert_cod_proc_succeeded_or_reported_unvalidated_partial(result)
-    assert f"function: 0x1000 {proc_name}" in result.stdout
-    if result.returncode != 0:
-        return
-    assert "Decompilation empty" not in result.stdout
-
-
 def test_cod_timeout_target_is_classified_deterministically():
     start = time.monotonic()
     result = _run_cod_proc(
@@ -199,7 +179,8 @@ def test_cod_runner_hotspots_fall_back_through_scan_safe_classifier(monkeypatch,
     assert "worker process terminated abruptly" not in rendered
 
 
-def test_cod_biosfunc_clearkeyflags_far_word_store():
+def test_cod_biosfunc_clearkeyflags_far_word_store() -> None:
+    """Retain discovery and far-store behavior in one real decompilation."""
     result = _run_cod_proc(COD_DIR / "BIOSFUNC.COD", "_bios_clearkeyflags")
 
     assert result.returncode == 0, result.stderr + result.stdout
@@ -214,6 +195,7 @@ def test_cod_biosfunc_clearkeyflags_far_word_store():
     _assert_has_none(
         result.stdout,
         (
+            "Decompilation empty",
             "inertia_es, 1047",
             "*(1047)",
             "*(1048)",
@@ -224,7 +206,8 @@ def test_cod_biosfunc_clearkeyflags_far_word_store():
     )
 
 
-def test_cod_dos_getfree_call_and_return_recovered():
+def test_cod_dos_getfree_call_and_return_recovered() -> None:
+    """Retain discovery, declaration and return checks from one CLI run."""
     result = _run_cod_proc(COD_DIR / "DOSFUNC.COD", "_dos_getfree")
 
     assert result.returncode == 0, result.stderr + result.stdout
@@ -241,6 +224,7 @@ def test_cod_dos_getfree_call_and_return_recovered():
     _assert_has_none(
         result.stdout,
         (
+            "Decompilation empty", "<missing-type>",
             "rin = 72;",
             "rin = 65535;",
             "s_2 = &",
@@ -415,16 +399,17 @@ def test_cod_overlay_function_address_keeps_proven_known_object_bindings():
     assert compile_result.passed, compile_result.stderr
 
 
-def test_cod_dos_loadoverlay_wrapper_returns_loadprog():
+def test_cod_dos_loadoverlay_wrapper_returns_loadprog() -> None:
+    """Retain discovery, declaration and forwarding checks from one CLI run."""
     result = _run_cod_proc(COD_DIR / "DOSFUNC.COD", "_dos_loadOverlay")
 
     _assert_cod_proc_succeeded_or_reported_unvalidated_partial(result)
+    assert "function: 0x1000 _dos_loadOverlay" in result.stdout
     if result.returncode != 0:
         return
     _assert_has_all(
         result.stdout,
         (
-            "function: 0x1000 _dos_loadOverlay",
             "file",
             "segment",
         ),
@@ -433,6 +418,7 @@ def test_cod_dos_loadoverlay_wrapper_returns_loadprog():
     _assert_has_none(
         result.stdout,
         (
+            "Decompilation empty", "<missing-type>",
             "3823()",
             "v12 << 16",
             "s_4 =",
@@ -501,16 +487,18 @@ def test_cod_loadprog_preserves_binary_arguments_and_recompiles():
     assert compile_result.passed, compile_result.stderr
 
 
-def test_cod_openfilewrapper_direct_forwarding():
+def test_cod_openfilewrapper_direct_forwarding() -> None:
+    """Check discovery, declarations and forwarding from one identical CLI run."""
     result = _run_cod_proc(COD_DIR / "EGAME2.COD", "_openFileWrapper")
-
     _assert_cod_proc_succeeded_or_reported_unvalidated_partial(result)
+    assert "function: 0x1000 _openFileWrapper" in result.stdout
     if result.returncode != 0:
         return
-    _assert_has_all(result.stdout, ("function: 0x1000 _openFileWrapper", "path", "mode"))
+    _assert_has_all(result.stdout, ("path", "mode"))
     _assert_has_none(
         result.stdout,
         (
+            "Decompilation empty", "<missing-type>",
             "s_2 = &",
             "s_4 = mode",
             "s_6 = path",
@@ -518,12 +506,14 @@ def test_cod_openfilewrapper_direct_forwarding():
     )
 
 
-def test_cod_dos_getreturncode_returns_value():
+def test_cod_dos_getreturncode_returns_value() -> None:
+    """Retain discovery and return behavior from one real decompilation."""
     result = _run_cod_proc(COD_DIR / "DOSFUNC.COD", "_dos_getReturnCode")
 
     combined = result.stderr + result.stdout
     assert result.returncode == 0, combined
     assert "validation=passed" in combined
+    assert "Decompilation empty" not in result.stdout
     _assert_has_all(
         result.stdout,
         (
@@ -531,32 +521,6 @@ def test_cod_dos_getreturncode_returns_value():
             "return rout.h.al;",
         ),
     )
-
-
-@pytest.mark.parametrize(
-    ("cod_name", "proc_name", "anchors"),
-    (
-        (
-            "DOSFUNC.COD",
-            "_dos_getfree",
-            ("int _intdos(union REGS *in, union REGS *out);", "int _ERROR(const char *fmt, ...);"),
-        ),
-        (
-            "DOSFUNC.COD",
-            "_dos_loadOverlay",
-            ("int loadprog(const char *file, unsigned short segment, unsigned short mode, const char *cmdline);",),
-        ),
-        ("EGAME2.COD", "_openFileWrapper", ("int _openFile(const char *path, unsigned short mode);",)),
-    ),
-)
-def test_cod_known_helper_signatures_are_declared(cod_name: str, proc_name: str, anchors: tuple[str, ...]):
-    result = _run_cod_proc(COD_DIR / cod_name, proc_name)
-
-    _assert_cod_proc_succeeded_or_reported_unvalidated_partial(result)
-    if result.returncode != 0:
-        return
-    assert f"function: 0x1000 {proc_name}" in result.stdout
-    assert "<missing-type>" not in result.stdout
 
 
 def test_regenerate_codegen_text_falls_back_on_failure():

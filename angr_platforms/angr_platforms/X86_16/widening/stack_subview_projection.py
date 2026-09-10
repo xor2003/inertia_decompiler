@@ -184,7 +184,7 @@ def materialize_contained_stack_subviews_8616(codegen: object) -> bool:
             )
             proof = _word_byte_proof_8616(resolution.proof)
             container_range = (
-                stack_variable_range_8616(candidate.container.variable, artifact.function_addr)
+                stack_variable_range_8616(candidate.container.variable, artifact.function_addr, codegen=codegen)
                 if artifact is not None
                 else None
             )

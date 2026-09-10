@@ -21,7 +21,6 @@ from enum import Enum
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
-from angr.sim_variable import SimStackVariable
 
 from ..alias.stack_coordinate_projection import (
     project_stack_offset_to_machine_bp_8616,
@@ -35,6 +34,7 @@ from .stack_memory_objects_contracts import (
     StackMemoryObjectWideningArtifact8616,
     StackMemoryObjectWideningCandidate8616,
 )
+from .stack_subview_coordinates import published_stack_variable_range_8616, stack_variable_range_8616
 
 
 class StackObjectViewResolutionKind8616(Enum):
@@ -115,17 +115,6 @@ def current_stack_object_widening_8616(
     return artifact
 
 
-def stack_variable_range_8616(variable: object, function_addr: int) -> tuple[int, int] | None:
-    """Return one exact BP-relative range from a third-party stack variable."""
-    if not isinstance(variable, SimStackVariable):
-        return None
-    if variable.base != "bp" or variable.region != function_addr:
-        return None
-    if not isinstance(variable.offset, int) or not isinstance(variable.size, int):
-        return None
-    return (variable.offset, variable.size) if variable.size > 0 else None
-
-
 def _address_range_8616(address: IRAddress) -> tuple[int, int] | None:
     """Return one exact SS:BP range from a Widening address."""
     if address.space is not MemSpace.SS or address.base != ("bp",) or address.size <= 0:
@@ -152,6 +141,11 @@ def _owner_cvariable_8616(
     for variable, cvar in cfunc.variables_in_use.items():
         raw_range = stack_variable_range_8616(variable, function_addr)
         if raw_range is None or not isinstance(cvar, structured_c.CVariable):
+            continue
+        bound_range = published_stack_variable_range_8616(codegen, variable, function_addr)
+        if bound_range is not None:
+            if bound_range == owner_range:
+                owners.append(cvar)
             continue
         projection = project_stack_offset_to_machine_bp_8616(
             source_alias,
@@ -276,7 +270,7 @@ def resolve_stack_object_view_8616(
         return StackObjectViewResolution8616(StackObjectViewResolutionKind8616.NOT_CANDIDATE)
     function = _validated_function_8616(cfunc, artifact)
     function_addr = artifact.function_addr
-    view_range = stack_variable_range_8616(view.variable, function_addr)
+    view_range = stack_variable_range_8616(view.variable, function_addr, codegen=codegen)
     if view_range is None:
         return StackObjectViewResolution8616(StackObjectViewResolutionKind8616.NOT_CANDIDATE)
     return _resolve_exact_view_range_8616(
@@ -299,7 +293,7 @@ def resolve_widened_stack_object_read_8616(
     if artifact is None:
         return StackObjectViewResolution8616(StackObjectViewResolutionKind8616.NOT_CANDIDATE)
     function = _validated_function_8616(cfunc, artifact)
-    syntax_range = stack_variable_range_8616(view.variable, artifact.function_addr)
+    syntax_range = stack_variable_range_8616(view.variable, artifact.function_addr, codegen=codegen)
     if syntax_range is None:
         return StackObjectViewResolution8616(StackObjectViewResolutionKind8616.NOT_CANDIDATE)
     logical_read_ranges = {

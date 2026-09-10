@@ -39,6 +39,7 @@ _FRONTEND_OWNER_NAMES_8616 = (
     "cr.py",
     "debug.py",
     "dev_io.py",
+    "direction_step.py",
     "eflags.py",
     "emu.py",
     "emulator.py",

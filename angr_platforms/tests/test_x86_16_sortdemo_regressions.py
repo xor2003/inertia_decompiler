@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -10,6 +9,7 @@ from pathlib import Path
 import pytest
 from x86_16_initmenu_execution import assert_initmenu_pause_guard_behavior
 from x86_16_reinitbars_execution import assert_reinitbars_loop_behavior
+from x86_16_telemetry_support import diagnostic_payloads, telemetry_integer
 from x86_16_timeout_support import scaled_decompile_timeout as _scaled_timeout
 
 from inertia_decompiler.acceptance_scorecard import build_acceptance_scorecard
@@ -176,7 +176,7 @@ def test_sortd_sidecar_free_initbars_preserves_binary_stack_array(tmp_path: Path
         and "SEG_U16(inertia_ds, 308) = 0;" in result.stdout
     )
     typed_pause_store = (
-        "g_0132 = g_0132 & 0xffff0000 | 30;" in result.stdout
+        "g_0132 = (g_0132 & 0xffff0000) | 30;" in result.stdout
         and any(f"g_0132 = g_0132 & {mask};" in result.stdout for mask in ("65535", "0xffff"))
     )
     assert raw_pause_store or typed_pause_store or "g_0132 = 30;" in result.stdout
@@ -187,39 +187,15 @@ def test_sortd_sidecar_free_initbars_preserves_binary_stack_array(tmp_path: Path
 
 
 def _typed_switch_replacement_safety_payloads(combined_output: str) -> tuple[dict[str, object], ...]:
-    prefix = "[typed-switch-replacement-safety] "
-    payloads: list[dict[str, object]] = []
-    for line in combined_output.splitlines():
-        if not line.startswith(prefix):
-            continue
-        payload = json.loads(line[len(prefix) :])
-        assert isinstance(payload, dict)
-        payloads.append(payload)
-    return tuple(payloads)
+    return diagnostic_payloads(combined_output, "[typed-switch-replacement-safety] ")
 
 
 def _typed_switch_seqnode_replacement_payloads(combined_output: str) -> tuple[dict[str, object], ...]:
-    prefix = "[typed-switch-seqnode-replacement] "
-    payloads: list[dict[str, object]] = []
-    for line in combined_output.splitlines():
-        if not line.startswith(prefix):
-            continue
-        payload = json.loads(line[len(prefix) :])
-        assert isinstance(payload, dict)
-        payloads.append(payload)
-    return tuple(payloads)
+    return diagnostic_payloads(combined_output, "[typed-switch-seqnode-replacement] ")
 
 
 def _typed_switch_pre_codegen_seqnode_payloads(combined_output: str) -> tuple[dict[str, object], ...]:
-    prefix = "[typed-switch-pre-codegen-seqnode] "
-    payloads: list[dict[str, object]] = []
-    for line in combined_output.splitlines():
-        if not line.startswith(prefix):
-            continue
-        payload = json.loads(line[len(prefix) :])
-        assert isinstance(payload, dict)
-        payloads.append(payload)
-    return tuple(payloads)
+    return diagnostic_payloads(combined_output, "[typed-switch-pre-codegen-seqnode] ")
 
 
 def _function_body_from_stdout(stdout: str, signature: str) -> str:
@@ -1350,6 +1326,7 @@ def test_sortdemo_quicksort_preserves_pivot_swaps_and_recursive_calls():
         body,
     )
     assert body.count("SwapBars(") == 3
+    assert re.search(r"if \(\(?(?:\(short\))?iUp - iLow\)? < \(?iHigh - (?:\(short\))?iUp\)?\)", body), "binary partition-size comparison was not preserved"
     assert len(
         re.findall(
             rf"QuickSort\({index_view}iLow, {index_view}iUp - 1\);",
@@ -1358,7 +1335,7 @@ def test_sortdemo_quicksort_preserves_pivot_swaps_and_recursive_calls():
     ) == 2
     assert len(
         re.findall(
-            rf"QuickSort\({index_view}iUp \+ 1, iHigh\);",
+            rf"QuickSort\({index_view}iUp \+ 1, {index_view}iHigh\);",
             body,
         )
     ) == 2
@@ -1367,7 +1344,7 @@ def test_sortdemo_quicksort_preserves_pivot_swaps_and_recursive_calls():
         body,
     ) is None
     assert re.search(
-        rf"QuickSort\({index_view}iUp, iHigh\);",
+        rf"QuickSort\({index_view}iUp, {index_view}iHigh\);",
         body,
     ) is None
     do_body = body[body.index("do\n") :]
@@ -1405,13 +1382,15 @@ def test_sortdemo_runmenu_typed_switch_artifacts_are_safe_and_materialized():
     pre_codegen_payloads = _typed_switch_pre_codegen_seqnode_payloads(combined)
     assert pre_codegen_payloads, combined
     pre_codegen_payload = pre_codegen_payloads[-1]
-    assert pre_codegen_payload["node_count"] >= 1
+    assert telemetry_integer(pre_codegen_payload, "node_count") >= 1
     assert pre_codegen_payload["switch_case_node_count"] == 1
-    assert pre_codegen_payload["condition_edge_evidence_count"] >= 1
+    assert telemetry_integer(pre_codegen_payload, "condition_edge_evidence_count") >= 1
     assert pre_codegen_payload["condition_edge_block_addrs"]
+    edge_summaries = pre_codegen_payload["condition_edge_summaries"]
+    assert isinstance(edge_summaries, list)
     edge_switch_values = {
         summary["condition"]["rhs"]["const"]
-        for summary in pre_codegen_payload["condition_edge_summaries"]
+        for summary in edge_summaries
         if summary["condition"]["op"] == "eq"
         and summary["condition"]["lhs"]["space"] == "reg"
         and summary["condition"]["lhs"]["name"] == "ax"
@@ -1420,13 +1399,15 @@ def test_sortdemo_runmenu_typed_switch_artifacts_are_safe_and_materialized():
     assert all(isinstance(value, int) for value in edge_switch_values)
     edge_producer_semantics = [
         summary.get("producer_semantics", ())
-        for summary in pre_codegen_payload["condition_edge_summaries"]
+        for summary in edge_summaries
         if summary.get("producer_semantics")
     ]
     assert ["normalized_cmp_reg_imm16", "ax", 69, ["cmp_reg_imm16", "ax", 69]] in edge_producer_semantics
     assert pre_codegen_payload["pre_codegen_grouped_switch_artifact_count"] == 1
     assert pre_codegen_payload["pre_codegen_grouped_switch_error"] is None
-    [mapping] = pre_codegen_payload["pre_codegen_grouped_switch_artifact_mappings"]
+    mappings = pre_codegen_payload["pre_codegen_grouped_switch_artifact_mappings"]
+    assert isinstance(mappings, list)
+    [mapping] = mappings
     assert mapping["expanded_root_mapped_case_count"] == 9
     assert mapping["expanded_root_normalization_ready"] is True
     assert mapping["expanded_root_normalization_status"] == "branch_splits_ready"
@@ -1445,7 +1426,9 @@ def test_sortdemo_runmenu_typed_switch_artifacts_are_safe_and_materialized():
     payloads = _typed_switch_replacement_safety_payloads(combined)
     assert payloads, combined
     payload = payloads[-1]
-    assert payload["attempted_count"] == payload["safe_count"] + payload["refused_count"]
+    assert telemetry_integer(payload, "attempted_count") == (
+        telemetry_integer(payload, "safe_count") + telemetry_integer(payload, "refused_count")
+    )
     assert payload["attempted_count"] == 0
     assert payload["status"] == "no_candidates"
     assert "clPause[" not in result.stdout
@@ -1453,19 +1436,27 @@ def test_sortdemo_runmenu_typed_switch_artifacts_are_safe_and_materialized():
     replacement_payloads = _typed_switch_seqnode_replacement_payloads(combined)
     assert replacement_payloads, combined
     replacement_payload = replacement_payloads[-1]
-    assert replacement_payload["attempted_count"] == 1
-    assert replacement_payload["changed"] is True
-    assert replacement_payload["replaced_count"] == 1
-    assert replacement_payload["case_count"] == 9
-    assert replacement_payload["default_target_addr"] == 4523
-    assert replacement_payload["refusal_reasons"] == {}
+    history = replacement_payload["attempt_history"]
+    assert isinstance(history, list) and history
+    assert all(isinstance(record, dict) for record in history)
+    successes = [record for record in history if record["changed"]]
+    assert successes, history
+    for success in successes:
+        assert success["attempted_count"] == success["replaced_count"] == 1
+        assert success["case_count"] == 9
+        assert success["default_target_addr"] == 4523
+        assert success["refusal_reasons"] == []
+    assert history[-1]["stage"] == "pre_codegen"
+    assert replacement_payload["attempted_count"] == replacement_payload["replaced_count"] == 0
+    assert replacement_payload["changed"] is False
+    assert replacement_payload["refusal_reasons"] == {"already_structured": 1}
     assert replacement_payload["case_runtime_segment_helper_unresolved_count"] == 0
     assert replacement_payload["case_unresolved_linear_segment_count"] == 0
-    assert replacement_payload["runtime_helper_segment_carrier_candidate_count"] > 0
+    assert telemetry_integer(replacement_payload, "runtime_helper_segment_carrier_candidate_count") > 0
     assert (
-        replacement_payload["runtime_helper_segment_carrier_materialized_count"]
-        + replacement_payload["runtime_helper_segment_carrier_refused_count"]
-        == replacement_payload["runtime_helper_segment_carrier_candidate_count"]
+        telemetry_integer(replacement_payload, "runtime_helper_segment_carrier_materialized_count")
+        + telemetry_integer(replacement_payload, "runtime_helper_segment_carrier_refused_count")
+        == telemetry_integer(replacement_payload, "runtime_helper_segment_carrier_candidate_count")
     )
     assert replacement_payload["runtime_helper_segment_carrier_refused_count"] == 0
     assert (

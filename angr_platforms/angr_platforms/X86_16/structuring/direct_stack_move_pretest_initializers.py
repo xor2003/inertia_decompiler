@@ -3,7 +3,8 @@
 Layer: Structuring.
 Responsibility: join typed direct-stack assignments to exact machine
 initializer, condition, body, iterator, and loopback evidence, then place the
-already-lowered assignment immediately before its unique pretest loop.
+already-lowered assignment before its unique pretest loop without moving an
+existing unconditional initializer past intervening reads.
 Owns CFG shape, loops, switches, and structured condition lowering from proven
 IR/semantic evidence.
 Do not perform alias-state ownership, widening, type/materialization recovery,
@@ -30,7 +31,6 @@ from .direct_stack_move_loop_evidence import (
     comparable_address_8616,
 )
 from .direct_stack_move_loop_sites import (
-    DirectStackMoveAssignmentLocation8616,
     _tree_reads_stack_offset_8616,
     _tree_tag_addresses_8616,
     tagged_assignment_locations_8616,
@@ -39,6 +39,7 @@ from .direct_stack_move_ownership import (
     direct_stack_move_branch_owned_addresses_8616,
 )
 from .pretest_condition_surface import pretest_condition_surface_8616
+from .pretest_initializer_placement import place_pretest_initializer_8616 as _place_pretest_initializer_8616
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -267,36 +268,6 @@ def _pretest_initializer_sites_8616(
 
     visit(root, 0)
     return tuple(sites)
-
-
-def _place_pretest_initializer_8616(
-    site: DirectStackMovePretestInitializerSite8616,
-    assignment: structured_c.CAssignment,
-    location: DirectStackMoveAssignmentLocation8616 | None,
-) -> tuple[bool, bool]:
-    """Place one exact assignment immediately before its structured loop."""
-    try:
-        loop_index = next(
-            index for index, statement in enumerate(site.statements) if statement is site.loop
-        )
-    except StopIteration:
-        return False, False
-    if (
-        location is not None
-        and location.statements is site.statements
-        and location.index == loop_index - 1
-    ):
-        return True, True
-    if location is not None:
-        del location.statements[location.index]
-    try:
-        loop_index = next(
-            index for index, statement in enumerate(site.statements) if statement is site.loop
-        )
-    except StopIteration:
-        return False, False
-    site.statements.insert(loop_index, assignment)
-    return True, False
 
 
 def place_direct_stack_move_pretest_initializer_assignment_8616(

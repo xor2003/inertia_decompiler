@@ -58,12 +58,18 @@ class _RegisterBank(dict):
         super().__init__((self._reg_key(reg), value) for reg, value in pairs)
 
     def __getitem__(self, reg):
+        if reg is reg16_t.SP:
+            return super().__getitem__(self._reg_key(reg32_t.ESP)) & 0xFFFF
         return super().__getitem__(self._reg_key(reg))
 
     def __setitem__(self, reg, value):
+        if reg is reg16_t.SP:
+            reg, value = reg32_t.ESP, (self[reg32_t.ESP] & 0xFFFF0000) | (value & 0xFFFF)
         super().__setitem__(self._reg_key(reg), value)
 
     def get(self, reg, default=None):
+        if reg is reg16_t.SP:
+            return self[reg]
         return super().get(self._reg_key(reg), default)
 
 
@@ -74,7 +80,6 @@ class _StackEmu:
             (reg16_t.CX, 0x2222),
             (reg16_t.DX, 0x3333),
             (reg16_t.BX, 0x4444),
-            (reg16_t.SP, 0x1000),
             (reg16_t.BP, 0x2222),
             (reg16_t.SI, 0x5555),
             (reg16_t.DI, 0x6666),
@@ -83,7 +88,7 @@ class _StackEmu:
             (reg32_t.ECX, 0x22222222),
             (reg32_t.EDX, 0x33333333),
             (reg32_t.EBX, 0x44444444),
-            (reg32_t.ESP, 0x2000),
+            (reg32_t.ESP, 0x1000),
             (reg32_t.EBP, 0x55555555),
             (reg32_t.ESI, 0x66666666),
             (reg32_t.EDI, 0x77777777),
@@ -187,12 +192,12 @@ def test_stack_helpers_register_immediate_and_flags_primitives_cover_both_widths
     push_flags16(emu)
     push_flags32(emu)
 
-    assert emu.memory[(sgreg_t.SS, 0x1FFC)] == 0x11111111
+    assert emu.memory[(sgreg_t.SS, 0x0FFA)] == 0x11111111
     assert emu.memory[(sgreg_t.SS, 0x0FFE)] == 0x1111
-    assert emu.memory[(sgreg_t.SS, 0x0FFC)] == 0xBEEF
-    assert emu.memory[(sgreg_t.SS, 0x1FF8)] == 0xCAFEBABE
-    assert emu.memory[(sgreg_t.SS, 0x0FFA)] == 0xF002
-    assert emu.memory[(sgreg_t.SS, 0x1FF4)] == 0xF002
+    assert emu.memory[(sgreg_t.SS, 0x0FF8)] == 0xBEEF
+    assert emu.memory[(sgreg_t.SS, 0x0FF4)] == 0xCAFEBABE
+    assert emu.memory[(sgreg_t.SS, 0x0FF2)] == 0xF002
+    assert emu.memory[(sgreg_t.SS, 0x0FEE)] == 0xF002
 
     assert pop_flags32(emu) == 0xF002
     assert pop_flags16(emu) == 0x0002
@@ -214,6 +219,7 @@ def test_stack_helpers_push16_register_preserves_original_sp_value():
 
 def test_stack_helpers_enter32_uses_real_mode_16bit_nesting_addresses():
     emu = _StackEmu()
+    emu.gpregs[reg32_t.ESP] = 0x2000
     emu.gpregs[reg32_t.EBP] = 0x12340010
     emu.memory[(sgreg_t.SS, 0x000C)] = 0xAABBCCDD
 
@@ -453,6 +459,7 @@ def test_stack_helpers_emit_near_call_and_jump_set_control_transfer_edges():
     assert emu.get_gpreg(reg16_t.IP) == 0x3333
     assert emu.irsb.jumpkind == "Ijk_Boring"
 
+    emu.gpregs[reg32_t.ESP] = 0x2000
     emit_near_call32(emu, 0x2000)
     assert emu.get_gpreg(reg32_t.EIP) == 0x2000
     assert emu.memory[(sgreg_t.SS, 0x1FFC)] == 0x1000
@@ -498,6 +505,7 @@ def test_stack_helpers_branch_rel8_and_rel16_share_relative_target_emission():
 
 def test_stack_helpers_push_and_pop_all32_preserve_saved_esp_slot():
     emu = _StackEmu()
+    emu.gpregs[reg32_t.ESP] = 0x2000
 
     push_all32(emu)
 
@@ -525,6 +533,7 @@ def test_stack_helpers_push_and_pop_all32_preserve_saved_esp_slot():
 
 def test_stack_helpers_segment32_helpers_round_trip_segment_registers():
     emu = _StackEmu()
+    emu.gpregs[reg32_t.ESP] = 0x2000
     emu.sgregs[sgreg_t.DS] = 0xBEEF
 
     push_segment32(emu, sgreg_t.DS)

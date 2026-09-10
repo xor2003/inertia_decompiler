@@ -23,14 +23,15 @@ from test_x86_16_stack_aggregate_objects import _AggregateCodegen, _stack_cvar
 
 @pytest.mark.parametrize("live", [True, False])
 @pytest.mark.parametrize("declared", [True, False])
-def test_aggregate_replay_restores_only_exact_live_tracked_storage(live, declared, monkeypatch):
+@pytest.mark.parametrize("backing_size", [1, 16], ids=["narrow-backing", "full-backing"])
+def test_aggregate_replay_restores_only_exact_live_tracked_storage(live, declared, backing_size, monkeypatch):
     monkeypatch.setattr(
         "angr_platforms.X86_16.lowering.stack_aggregate_objects.entry_sp_offset_for_machine_bp_range_8616",
         lambda *_args: -20,
     )
     codegen = _AggregateCodegen()
     array_type = SimTypeFixedSizeArray(SimTypeChar(False), 16)
-    variable, array = _stack_cvar(codegen, -20, 16, "buffer", array_type)
+    variable, array = _stack_cvar(codegen, -20, backing_size, "buffer", array_type)
     codegen._inertia_stack_aggregate_cvars_8616 = {-18: array}
     codegen.cfunc.statements = CStatements([array] if live else [], codegen=codegen)
     if not declared:
@@ -50,7 +51,9 @@ def test_aggregate_replay_restores_only_exact_live_tracked_storage(live, declare
         assert projection.variable is not variable
 
 
-@pytest.mark.parametrize("failure", ["region", "width", "coordinate", "unknown_frame", "lookalike"])
+@pytest.mark.parametrize(
+    "failure", ["region", "width", "coordinate", "unknown_frame", "lookalike", "narrow_untyped", "narrow_extent"],
+)
 def test_live_aggregate_restore_refuses_unproven_identity(failure):
     codegen = _AggregateCodegen()
     variable, array = _stack_cvar(codegen, -20, 16, "buffer", SimTypeFixedSizeArray(SimTypeChar(False), 16))
@@ -58,6 +61,11 @@ def test_live_aggregate_restore_refuses_unproven_identity(failure):
     codegen.cfunc.statements = CStatements([array], codegen=codegen)
     if failure == "region":
         variable.region = 0x2000
+    elif failure in {"narrow_untyped", "narrow_extent"}:
+        variable.size = 1
+        array.variable_type = (
+            SimTypeChar(False) if failure == "narrow_untyped" else SimTypeFixedSizeArray(SimTypeChar(False), 8)
+        )
     elif failure == "lookalike":
         codegen.cfunc.statements = CStatements([
             CVariable(copy(variable), variable_type=array.variable_type, codegen=codegen),

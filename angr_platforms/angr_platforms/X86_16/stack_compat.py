@@ -1,6 +1,6 @@
 """Layer: Frontend/angr compatibility.
 
-Responsibility: patch angr stack address translation and propagation for 16-bit x86 stack facts.
+Responsibility: preserve numeric stack values and exact widths at angr's address propagation boundary.
 Forbidden: stack variable recovery, alias ownership, or rewrite-stage stack repair.
 """
 
@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol, cast
 
+from angr.ailment.block import Block
 from angr.ailment.expression import (
     Convert,
     Expression,
@@ -23,11 +24,15 @@ from angr.analyses.s_propagator import SPropagator
 from angr.code_location import AILCodeLocation
 from angr.knowledge_plugins.key_definitions.live_definitions import LiveDefinitions
 
+from .stack_value_use import StackValueUse8616, classify_stack_value_use_8616
+
 __all__ = [
     "StackPointerPropagationNormalization8616",
     "StackPointerPropagationStats8616",
     "StackPointerPropagationVerdict8616",
+    "StackValueUse8616",
     "apply_x86_16_stack_compatibility",
+    "classify_stack_value_use_8616",
     "normalize_stack_pointer_replacement_8616",
 ]
 
@@ -175,7 +180,7 @@ def apply_x86_16_stack_compatibility() -> None:
     original_sprop_analyze = cast(_SPropAnalyze, SPropagator._analyze)
 
     def _analyze_8616(self: SPropagator) -> None:
-        """Normalize angr replacements and publish the associated evidence counts."""
+        """Publish proven replacements and remove width or numeric-use refusals."""
         original_sprop_analyze(self)
         model = cast(_SPropagatorModelLike, self.model)
         aggregate = StackPointerPropagationStats8616()
@@ -188,8 +193,32 @@ def apply_x86_16_stack_compatibility() -> None:
         if sp_offset is None or bp_offset is None:
             raise ValueError("86_16 stack propagation requires registered SP and BP offsets")
         stack_register_offsets = frozenset((sp_offset, bp_offset))
-        for replacements_at_location in model.replacements.values():
+        blocks: dict[tuple[int, int | None], Block] = {}
+        subject_block = self.block
+        if self.func_graph is not None:
+            blocks = {(block.addr, block.idx): block for block in self.func_graph if isinstance(block, Block)}
+        elif isinstance(subject_block, Block):
+            native_block = cast(Block, subject_block)
+            blocks[(native_block.addr, native_block.idx)] = native_block
+        for location, replacements_at_location in model.replacements.items():
+            block = blocks.get((location.block_addr, location.block_idx))
+            statement = (
+                block.statements[location.stmt_idx]
+                if block is not None and location.stmt_idx is not None
+                and 0 <= location.stmt_idx < len(block.statements) else None
+            )
             for replaced, replacement in tuple(replacements_at_location.items()):
+                scalar = replacement
+                while isinstance(scalar, Convert):
+                    scalar = scalar.operand
+                if isinstance(scalar, StackBaseOffset) and isinstance(replaced, VirtualVariable):
+                    use = classify_stack_value_use_8616(statement, replaced.varid)
+                    if use is not StackValueUse8616.ADDRESS_ONLY:
+                        del replacements_at_location[replaced]
+                        aggregate = aggregate.merged(StackPointerPropagationStats8616(
+                            raw_fact_count=1, normalized_fact_count=1, failure_count=1,
+                        ))
+                        continue
                 result = normalize_stack_pointer_replacement_8616(
                     replaced,
                     replacement,
@@ -197,7 +226,9 @@ def apply_x86_16_stack_compatibility() -> None:
                     ail_manager=self._ail_manager,
                 )
                 aggregate = aggregate.merged(result.stats)
-                if result.stats.materialized_count:
+                if result.verdict is StackPointerPropagationVerdict8616.REFUSED_WIDENING:
+                    del replacements_at_location[replaced]
+                elif result.stats.materialized_count:
                     replacements_at_location[replaced] = result.replacement
         model._inertia_stack_pointer_propagation_stats_8616 = aggregate
 

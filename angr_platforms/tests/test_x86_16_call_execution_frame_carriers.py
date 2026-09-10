@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
     CBinaryOp,
@@ -265,6 +266,34 @@ def test_consumed_call_execution_frame_refuses_external_carrier_use() -> None:
     assert result.stats.failure_count == 1
     assert pre in codegen.cfunc.statements.statements
     assert restore in codegen.cfunc.statements.statements
+
+
+@pytest.mark.parametrize("observer", ["argument", "after", "branch"])
+@pytest.mark.parametrize("width", [2, 4])
+def test_runtime_call_frame_refuses_external_sp_observer(observer, width):
+    codegen, call, pre = _runtime_sp_call_fixture()
+    value = pre.lhs
+    if width == 2:
+        value = CBinaryOp(
+            "And", value, CConstant(0xFFFF, SimTypeLong(False), codegen=codegen), codegen=codegen,
+        )
+    if observer == "argument":
+        call.args = [value]
+    else:
+        assignment = CAssignment(_dirty(codegen, 99, register_name="ax"), value, codegen=codegen)
+        statement = assignment if observer == "after" else CIfElse(
+            [(CConstant(1, SimTypeShort(False), codegen=codegen), CStatements([assignment], codegen=codegen))],
+            codegen=codegen,
+        )
+        codegen.cfunc.statements.statements.append(statement)
+    original = tuple(codegen.cfunc.statements.statements)
+    result = prune_consumed_call_execution_frame_carriers_8616(
+        codegen, call, callsite_addr=0x1052, return_frame_width=2,
+    )
+    assert result.status is CallExecutionFrameCarrierStatus8616.REFUSED
+    assert result.stats.classified_fact_count == 0
+    assert result.stats.removed_statement_count == 0
+    assert tuple(codegen.cfunc.statements.statements) == original
 
 
 def test_consumed_call_execution_frame_refuses_non_sp_pair() -> None:

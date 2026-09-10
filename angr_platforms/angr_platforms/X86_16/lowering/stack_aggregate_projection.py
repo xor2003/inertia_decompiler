@@ -13,12 +13,12 @@ from dataclasses import dataclass
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import CVariable
+from angr.sim_type import SimTypeFixedSizeArray
 from angr.sim_variable import SimStackVariable
 
 from ..c_ast_utils import _iter_c_nodes_deep_8616, _replace_c_children_8616
 from .stack_variable_coordinates import (
     bind_stack_variable_coordinate_cvar_8616,
-    publish_selected_stack_cvar_projection_8616,
     record_stack_variable_coordinate_alias_8616,
     record_stack_variable_coordinate_projection_8616,
     stack_variable_coordinate_registry_8616,
@@ -110,13 +110,20 @@ def restore_live_stack_aggregate_declaration_8616(
 
     A copied private cache alone is insufficient. Require the exact tracked
     variable object in the current AST or exact tracked declaration, its
-    function region and full storage width, and the current producer's proven
-    entry-SP coordinate. No name or offset-based variable join is performed.
+    function region and proven aggregate width, and the current producer's
+    entry-SP coordinate. A narrower angr backing allocation is permitted only
+    with the exact already-materialized array type. No name or offset-based
+    variable join is performed.
     """
     if not isinstance(tracked, CVariable) or not isinstance(tracked.variable, SimStackVariable):
         return False
     boundary = cast(_AggregateViewBoundary8616, codegen)
     variable = tracked.variable
+    array_type = tracked.variable_type
+    width_matches = variable.size == size or (
+        isinstance(variable.size, int) and 0 < variable.size < size
+        and isinstance(array_type, SimTypeFixedSizeArray) and array_type.size == size * 8
+    )
     try:
         function = boundary.cfunc
         root = function.statements
@@ -124,7 +131,7 @@ def restore_live_stack_aggregate_declaration_8616(
         return False
     if (
         entry_sp_offset is None or variable.base != "bp" or variable.offset != entry_sp_offset
-        or variable.size != size or variable.region != function.addr
+        or not width_matches or variable.region != function.addr
     ):
         return False
     declared = any(value is tracked for value in function.variables_in_use.values())
@@ -139,11 +146,9 @@ def restore_live_stack_aggregate_declaration_8616(
     ), None)
     if live is None:
         return False
-    projection = publish_selected_stack_cvar_projection_8616(
-        codegen, live, bp_offset=bp_offset, size=size, entry_sp_offset=entry_sp_offset,
+    select_stack_aggregate_projection_8616(
+        codegen, [live], live, bp_offset=bp_offset, size=size, entry_sp_offset=entry_sp_offset,
     )
-    if projection is None:
-        return False
     function.variables_in_use[variable] = live
     return True
 

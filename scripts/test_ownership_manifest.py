@@ -85,6 +85,11 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         tests=("angr_platforms/tests/test_access_trait_runtime_factory.py",),
     ),
     TestOwnershipRule(
+        owner="structured-simplifier-expression-identity",
+        paths=("inertia_decompiler/cli_c_ast_rewrites.py",),
+        tests=("angr_platforms/tests/test_structured_simplifier_identity.py",),
+    ),
+    TestOwnershipRule(
         owner="generic-annotation-contracts",
         paths=(
             "inertia_decompiler/fork_timeout.py",
@@ -374,8 +379,17 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     ),
     TestOwnershipRule(
         owner="x86-16-runtime-compat",
-        paths=("angr_platforms/angr_platforms/X86_16/compat.py",),
+        paths=("angr_platforms/angr_platforms/X86_16/compat.py",
+               "angr_platforms/angr_platforms/X86_16/call_frame_compat.py",
+               "angr_platforms/angr_platforms/X86_16/call_cleanup_compat.py",
+               "angr_platforms/angr_platforms/X86_16/ir/stack_pointer_provenance.py",
+               "angr_platforms/angr_platforms/X86_16/ir/ail_register_displacement.py",
+               "angr_platforms/angr_platforms/X86_16/ail_displacement_compat.py"),
         tests=(
+            "angr_platforms/tests/test_x86_16_call_frame_compat.py",
+            "angr_platforms/tests/test_x86_16_callee_cleanup_compat.py",
+            "angr_platforms/tests/test_x86_16_stack_pointer_provenance.py",
+            "angr_platforms/tests/test_x86_16_ail_register_displacement.py",
             "angr_platforms/tests/test_x86_16_package_exports.py::test_x86_16_package_exports_source_backends",
             "angr_platforms/tests/test_x86_16_package_exports.py::test_x86_16_bootstrap_module_description",
         ),
@@ -384,6 +398,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         owner="x86-16-bootstrap",
         paths=("angr_platforms/angr_platforms/X86_16/bootstrap.py",),
         tests=(
+            "angr_platforms/tests/test_x86_16_bootstrap_import_order.py",
             "angr_platforms/tests/test_x86_16_package_exports.py::test_x86_16_bootstrap_module_exports",
             "angr_platforms/tests/test_x86_16_package_exports.py::test_x86_16_bootstrap_module_description",
         ),
@@ -445,8 +460,29 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     ),
     TestOwnershipRule(
         owner="x86-16-stack-compatibility",
-        paths=("angr_platforms/angr_platforms/X86_16/stack_compat.py",),
-        tests=("angr_platforms/tests/test_x86_16_stack_compat.py",),
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/stack_compat.py",
+            "angr_platforms/angr_platforms/X86_16/stack_value_use.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_stack_compat.py",
+            "angr_platforms/tests/test_x86_16_stack_address_operand_roles.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-codegen-parentheses",
+        paths=("angr_platforms/angr_platforms/X86_16/codegen_parentheses.py",),
+        tests=("angr_platforms/tests/test_x86_16_codegen_parentheses.py",),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-test-telemetry",
+        paths=("angr_platforms/tests/x86_16_telemetry_support.py",),
+        tests=("angr_platforms/tests/test_x86_16_telemetry_support.py",),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-codegen-metadata",
+        paths=("angr_platforms/angr_platforms/X86_16/codegen_metadata.py",),
+        tests=("angr_platforms/tests/test_x86_16_codegen_metadata.py",),
     ),
     TestOwnershipRule(
         owner="x86-16-correctness-goals",
@@ -656,6 +692,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-symbolic-instruction-values",
         paths=(
+            "angr_platforms/angr_platforms/X86_16/stack_helpers.py",
             "angr_platforms/angr_platforms/X86_16/instr_base.py",
             "angr_platforms/angr_platforms/X86_16/instr32.py",
         ),
@@ -669,6 +706,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/tests/test_x86_16_borrow_80386_lifter_corpus.py::"
             "test_division_emits_guarded_zero_and_overflow_fault_exits",
             "angr_platforms/tests/test_x86_16_80386_stack_imul_edges.py",
+            "angr_platforms/tests/test_x86_16_stack_pointer_width.py",
         ),
     ),
     TestOwnershipRule(
@@ -845,11 +883,13 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         paths=(
             "angr_platforms/angr_platforms/X86_16/lowering/call_output_object_projection.py",
             "angr_platforms/angr_platforms/X86_16/lowering/call_execution_frame_carriers.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/call_execution_frame_runtime.py",
             "angr_platforms/angr_platforms/X86_16/lowering/call_output_stack_objects.py",
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_call_output_object_projection.py",
             "angr_platforms/tests/test_x86_16_call_execution_frame_carriers.py",
+            "angr_platforms/tests/test_x86_16_call_frame_base_effects.py",
             "angr_platforms/tests/test_x86_16_call_output_stack_objects.py",
             "angr_platforms/tests/test_x86_16_sortd_sleep_regression.py",
         ),
@@ -957,6 +997,8 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-direct-stack-move-pretest-body",
         paths=(
+            "angr_platforms/angr_platforms/X86_16/structuring/direct_stack_move_pretest_initializers.py",
+            "angr_platforms/angr_platforms/X86_16/structuring/pretest_initializer_placement.py",
             "angr_platforms/angr_platforms/X86_16/structuring/direct_stack_move_loop_entries.py",
             "angr_platforms/angr_platforms/X86_16/structuring/direct_stack_move_pretest_body.py",
             "angr_platforms/angr_platforms/X86_16/structuring/direct_stack_move_pretest_body_evidence.py",
@@ -966,6 +1008,11 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/tests/test_x86_16_direct_stack_move_pretest_body.py",
             "angr_platforms/tests/test_x86_16_direct_stack_move_pretest_initializers.py",
         ),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-stack-probe-local-preservation",
+        paths=("angr_platforms/angr_platforms/X86_16/decompiler_postprocess_calls.py",),
+        tests=("angr_platforms/tests/test_x86_16_stack_probe_local_preservation.py",),
     ),
     TestOwnershipRule(
         owner="x86-16-structuring-switch-loop-tail-breaks",
@@ -1042,10 +1089,12 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/ir/block_ownership.py",
             "angr_platforms/angr_platforms/X86_16/ir/vex_condition_transport.py",
             "angr_platforms/angr_platforms/X86_16/ir/vex_import.py",
+            "angr_platforms/angr_platforms/X86_16/ir/vex_integer_displacement.py",
             "angr_platforms/angr_platforms/X86_16/ir/vex_types.py",
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_vex_import.py",
+            "angr_platforms/tests/test_x86_16_vex_integer_displacement.py",
             "angr_platforms/tests/test_x86_16_vex_import_hot_path.py",
             "angr_platforms/tests/test_x86_16_vex_import_cfg_successors.py",
             "angr_platforms/tests/test_x86_16_vex_memory_access_fidelity.py",
@@ -1180,7 +1229,13 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         tests=(
             "angr_platforms/tests/test_x86_16_return_compat_counters.py",
             "angr_platforms/tests/test_x86_16_return_stack_address_compat.py",
+            "angr_platforms/tests/test_x86_16_return_expression_preservation.py",
         ),
+    ),
+    TestOwnershipRule(
+        owner="dos-free-generated-c-oracle",
+        paths=("angr_platforms/tests/x86_16_dosfunc_behavior.py",),
+        tests=("angr_platforms/tests/test_x86_16_dosfunc_behavior.py",),
     ),
     TestOwnershipRule(
         owner="symbolic-frontend-value-contract",
@@ -1188,10 +1243,15 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/vex_value_contract.py",
             "angr_platforms/angr_platforms/X86_16/memory.py",
             "angr_platforms/angr_platforms/X86_16/processor.py",
+            "angr_platforms/angr_platforms/X86_16/direction_step.py",
+            "angr_platforms/angr_platforms/X86_16/ir/vex_bit_source.py",
         ),
         tests=(
+            "angr_platforms/tests/test_x86_16_lifted_integer_constants.py",
             "angr_platforms/tests/test_x86_16_symbolic_value_boundaries.py",
             "angr_platforms/tests/test_x86_16_direction_flag_execution.py",
+            "angr_platforms/tests/test_x86_16_vex_bit_source.py",
+            "angr_platforms/tests/test_x86_16_sortdemo_regressions.py::test_initmenu_pause_zero_guard_has_no_raw_flag_carrier",
             "angr_platforms/tests/test_x86_16_memory.py",
         ),
     ),
@@ -1342,6 +1402,14 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         tests=("angr_platforms/tests/test_x86_16_segmented_lowering.py",),
     ),
     TestOwnershipRule(
+        owner="x86-16-stored-call-result-definitions",
+        paths=("angr_platforms/angr_platforms/X86_16/structuring/stored_call_result_assignments.py",),
+        tests=(
+            "angr_platforms/tests/test_x86_16_stored_call_result_assignments.py",
+            "angr_platforms/tests/test_x86_16_stored_call_result_definitions.py",
+        ),
+    ),
+    TestOwnershipRule(
         owner="x86-16-lowering-segmented-runtime",
         paths=(
             "angr_platforms/angr_platforms/X86_16/ir/register_live_in.py",
@@ -1401,6 +1469,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         owner="real-mode-linear-lowering",
         paths=(
             "angr_platforms/angr_platforms/X86_16/lowering/real_mode_linear.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/machine_stack_names.py",
             "angr_platforms/angr_platforms/X86_16/lowering/linear_global_decomposition_cache.py",
             "angr_platforms/angr_platforms/X86_16/lowering/callsite_segment_provenance.py",
             "angr_platforms/angr_platforms/X86_16/lowering/direct_stack_replay.py",
@@ -1411,6 +1480,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_stack_reload_instruction_ownership.py",
+            "angr_platforms/tests/test_x86_16_machine_stack_names.py",
             "angr_platforms/tests/test_x86_16_direct_stack_replay.py",
             "angr_platforms/tests/test_x86_16_direct_stack_reload_idempotence.py",
             "angr_platforms/tests/test_x86_16_linear_global_decomposition_cache.py",
@@ -1443,8 +1513,16 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     ),
     TestOwnershipRule(
         owner="x86-16-protected-call-arguments",
-        paths=("angr_platforms/angr_platforms/X86_16/lowering/call_argument_state.py",),
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/lowering/call_argument_state.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/call_argument_call_preservation.py",
+        ),
         tests=("angr_platforms/tests/test_x86_16_protected_call_arguments.py",),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-call-argument-expressions",
+        paths=("angr_platforms/angr_platforms/X86_16/lowering/call_argument_expression.py",),
+        tests=("angr_platforms/tests/test_x86_16_call_argument_expression.py",),
     ),
     TestOwnershipRule(
         owner="x86-16-stack-aggregate-objects",
@@ -1578,10 +1656,12 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         owner="x86-16-callsite-prototype-declarations",
         paths=(
             "angr_platforms/angr_platforms/X86_16/lowering/callsite_prototype_declarations.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/call_argument_shape_publication.py",
             "angr_platforms/angr_platforms/X86_16/lowering/callsite_pointer_tables.py",
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_callsite_prototype_declarations.py",
+            "angr_platforms/tests/test_x86_16_call_argument_shape_publication.py",
             "angr_platforms/tests/test_x86_16_interprocedural_storage_consumers.py",
             "angr_platforms/tests/test_x86_16_callsite_pointer_tables.py",
             "angr_platforms/tests/test_x86_16_project_type_contracts.py",
@@ -1791,6 +1871,9 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/lowering/call_return_frame.py",
             "angr_platforms/angr_platforms/X86_16/semantics/call_register_effects.py",
             "angr_platforms/angr_platforms/X86_16/semantics/call_return_frame_effects.py",
+            "angr_platforms/angr_platforms/X86_16/semantics/call_return_segment.py",
+            "angr_platforms/angr_platforms/X86_16/semantics/terminal_return_contract.py",
+            "angr_platforms/angr_platforms/X86_16/semantics/terminal_stack_cleanup.py",
             "angr_platforms/angr_platforms/X86_16/semantics/call_output_contracts.py",
             "angr_platforms/angr_platforms/X86_16/semantics/call_outputs.py",
             "angr_platforms/angr_platforms/X86_16/semantics/call_stack_effect_contracts.py",
@@ -1806,6 +1889,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/tests/test_x86_16_call_argument_carrier_liveness.py",
             "angr_platforms/tests/test_x86_16_callsite_return_use_zero_idiom.py",
             "angr_platforms/tests/test_x86_16_call_return_frame_effects.py",
+            "angr_platforms/tests/test_x86_16_call_return_segment.py",
             "angr_platforms/tests/test_x86_16_call_outputs.py",
             "angr_platforms/tests/test_x86_16_call_stack_effects.py",
             "angr_platforms/tests/test_x86_16_partial_register_address_break.py",
@@ -2004,6 +2088,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-stack-subview-projection",
         paths=(
+            "angr_platforms/angr_platforms/X86_16/widening/stack_subview_coordinates.py",
             "angr_platforms/angr_platforms/X86_16/widening/stack_subview_expression.py",
             "angr_platforms/angr_platforms/X86_16/widening/stack_subview_projection.py",
             "angr_platforms/angr_platforms/X86_16/widening/stack_subview_proof.py",

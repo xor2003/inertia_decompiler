@@ -1782,6 +1782,7 @@ def _is_linear_register_temp_var(cvar: StructuredAstValue) -> bool:
 
 
 def _simplify_structured_c_expressions(codegen: StructuredCodegenValue) -> bool:
+    """Apply legacy cleanup without reusing analyses of discarded expressions."""
     def _impl() -> bool:
         cfunc = getattr(codegen, "cfunc", None)
         if cfunc is None or getattr(cfunc, "statements", None) is None:
@@ -2063,7 +2064,6 @@ def _simplify_structured_c_expressions(codegen: StructuredCodegenValue) -> bool:
         _no_match = object()
         adjacent_byte_pair_cache: dict[tuple[int, int], object] = {}
         word_plus_minus_one_cache: dict[int, object] = {}
-        widening_match_cache: dict[int, object] = {}
 
         def _alias_storage_key(expr: StructuredAstValue) -> StructuredAstValue:
             facts = describe_alias_storage(expr)
@@ -2453,21 +2453,18 @@ def _simplify_structured_c_expressions(codegen: StructuredCodegenValue) -> bool:
             word_plus_minus_one_cache[key] = _no_match
             return None
 
-        def _analyze_widening_expr_cached(node: StructuredAstValue) -> StructuredAstValue:
-            key = id(node)
-            if key in widening_match_cache:
-                cached = widening_match_cache[key]
-                return None if cached is _no_match else cached
-            result = _analyze_widening_expr(
+        def _analyze_current_widening_expr(node: StructuredAstValue) -> StructuredAstValue:
+            """Analyze current operands, including temporary resolved expressions."""
+            # Resolved nodes can be discarded between calls and their IDs reused.
+            # The mutable AST and alias maps also preclude pass-wide memoization.
+            return _analyze_widening_expr(
                 node,
                 _resolve_copy_alias_expr,
                 _match_high_byte_projection_base,
             )
-            widening_match_cache[key] = result if result is not None else _no_match
-            return result
 
         def _match_linear_word_delta_expr(node: StructuredAstValue) -> StructuredAstValue:
-            analysis = _analyze_widening_expr_cached(node)
+            analysis = _analyze_current_widening_expr(node)
             if analysis is None or analysis.kind != "linear":
                 return None
             if analysis.delta == 0:
@@ -2510,7 +2507,7 @@ def _simplify_structured_c_expressions(codegen: StructuredCodegenValue) -> bool:
                 break
 
         def _match_high_byte_preserving_word_expr(node: StructuredAstValue) -> StructuredAstValue:
-            analysis = _analyze_widening_expr_cached(node)
+            analysis = _analyze_current_widening_expr(node)
             if analysis is None or analysis.kind != "high_byte_preserving":
                 return None
             return structured_c.CBinaryOp(
@@ -2523,7 +2520,7 @@ def _simplify_structured_c_expressions(codegen: StructuredCodegenValue) -> bool:
         def _memory_backed_widening_base(node: StructuredAstValue) -> bool:
             if _expr_uses_dereference_backed_temp(node, dereference_backed_linear_temps):
                 return True
-            analysis = _analyze_widening_expr_cached(node)
+            analysis = _analyze_current_widening_expr(node)
             if analysis is None:
                 return False
             base_expr = _resolve_copy_alias_expr(_unwrap_c_casts(analysis.base_expr))

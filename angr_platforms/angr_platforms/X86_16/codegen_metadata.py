@@ -12,6 +12,9 @@ import contextlib
 import typing
 from enum import Enum
 
+if typing.TYPE_CHECKING:
+    from angr.sim_variable import SimStackVariable
+
 __all__ = [
     "GlobalDeclarationArrayExtent8616",
     "GlobalDeclarationArrayLength8616",
@@ -19,7 +22,29 @@ __all__ = [
     "get_codegen_sequence_attr",
     "get_codegen_side_metadata",
     "set_codegen_sequence_attr",
+    "snapshot_stack_local_candidates_8616",
 ]
+
+
+def snapshot_stack_local_candidates_8616(codegen: object) -> dict[int, tuple[SimStackVariable, object]]:
+    """Retain native stack declarations by object identity, excluding arguments.
+
+    This copies existing declaration metadata only; it supplies no Alias proof
+    and does not classify storage or authorize removal of any stack effect.
+    """
+    from angr.analyses.decompiler.structured_codegen.c import CFunction
+    from angr.sim_variable import SimStackVariable
+
+    # Native code generators expose different roots; require the C contract.
+    function = getattr(codegen, "cfunc", None)
+    if not isinstance(function, CFunction):
+        raise TypeError("Stack declaration snapshot requires a native CFunction")
+    argument_ids = {id(argument.variable) for argument in function.arg_list}
+    return {
+        id(variable): (variable, declaration)
+        for variable, declaration in function.variables_in_use.items()
+        if isinstance(variable, SimStackVariable) and id(variable) not in argument_ids
+    }
 
 
 class GlobalDeclarationArrayExtent8616(Enum):

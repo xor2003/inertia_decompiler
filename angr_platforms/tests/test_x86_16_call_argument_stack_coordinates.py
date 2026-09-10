@@ -6,7 +6,7 @@ Tests the Types/Lowering coordinate consumer without relying on rendered C.
 from types import SimpleNamespace
 
 from angr.analyses.decompiler.structured_codegen.c import CVariable
-from angr.sim_type import SimTypeShort
+from angr.sim_type import SimTypeChar, SimTypeFixedSizeArray, SimTypeShort
 from angr.sim_variable import SimStackVariable
 from angr_platforms.X86_16.alias.stack_memory_ssa import (
     build_x86_16_stack_memory_ssa_alias_artifact,
@@ -31,6 +31,7 @@ from angr_platforms.X86_16.ir.ssa_function import build_x86_16_function_ssa
 from angr_platforms.X86_16.lowering.call_argument_stack_sources import (
     call_argument_stack_variable_offset_8616,
     containing_stack_cvariable_8616,
+    materialize_call_argument_stack_cvariable_8616,
     outgoing_call_stack_carrier_offset_8616,
 )
 from angr_platforms.X86_16.lowering.real_mode_linear import (
@@ -142,6 +143,40 @@ def test_byte_call_source_does_not_retype_wider_same_start_stack_view() -> None:
     assert word.variable.size == 2
     assert isinstance(word.variable_type, SimTypeShort)
     assert call_argument_stack_variable_offset_8616(codegen, byte) == -2
+
+
+def test_call_address_preserves_proven_array_with_narrow_backing() -> None:
+    """A word-sized address request must not overwrite a proven byte array."""
+    codegen = _Codegen()
+    array_type = SimTypeFixedSizeArray(SimTypeChar(False), 16)
+    array = CVariable(
+        SimStackVariable(-20, 1, base="bp", name="buffer", region=0x1000),
+        variable_type=array_type, codegen=codegen,
+    )
+    original_type = array.variable_type
+    codegen.cfunc = SimpleNamespace(
+        addr=0x1000, arg_list=(), statements=None,
+        variables_in_use={array.variable: array}, unified_local_vars={},
+    )
+    codegen._inertia_vex_ir_frame = FrameAccessArtifact(
+        bp_coordinate=BPFrameCoordinateEvidence8616(
+            status=FrameCoordinateStatus8616.PROVEN, bp_entry_sp_delta=-2,
+            detail="push bp; mov bp, sp", stats=FrameCoordinateStats8616(1, 1, 1, 1, 0),
+        ),
+    )
+    record_stack_variable_coordinate_projection_8616(
+        codegen, variable=array.variable, cvar=array,
+        bp_offset=-18, entry_sp_offset=-20, size=16,
+    )
+
+    selected = materialize_call_argument_stack_cvariable_8616(
+        codegen, {}, machine_bp_offset=-18, size_hint=2,
+    )
+
+    assert selected is array
+    assert array.variable_type is original_type
+    assert array.variable.size == 1
+    assert machine_bp_offset_for_stack_variable_8616(codegen, array.variable) == -18
 
 
 def test_unprojected_call_argument_keeps_raw_machine_bp_coordinate() -> None:

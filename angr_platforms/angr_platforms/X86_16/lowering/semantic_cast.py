@@ -3,6 +3,8 @@
 Layer: Types/Lowering.
 Responsibility: distinguish required width/signedness conversions from angr's
 optional cosmetic casts so generated C preserves binary value semantics.
+Byte conversions use explicit signedness; plain C char is target-dependent,
+and native SimTypeChar's unnamed representation loses its signed flag.
 Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
@@ -38,7 +40,12 @@ class CSemanticCast8616(
             return
         parenthesis = structured_c.CClosingObject("(")
         yield "(", parenthesis
-        yield self.dst_type.c_repr(name=None), self.dst_type
+        destination = self.dst_type
+        if isinstance(destination, SimTypeChar) and isinstance(destination.signed, bool):
+            type_name = "signed char" if destination.signed else "unsigned char"
+        else:
+            type_name = destination.c_repr(name=None)
+        yield type_name, destination
         yield ")", parenthesis
         wrap_expression = isinstance(self.expr, structured_c.CBinaryOp)
         if wrap_expression:

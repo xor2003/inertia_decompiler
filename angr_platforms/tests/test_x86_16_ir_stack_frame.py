@@ -109,6 +109,9 @@ def test_ir_stack_frame_artifact_proves_bp_entry_sp_coordinate() -> None:
     ("89e589c48b46fec3", 0),  # Changing SP alone does not invalidate the saved BP relation.
     ("5589e583ec0289e58b46fec3", -4),  # Only the reaching frame setup applies.
     ("5589e58b46fec3", -2),
+    ("c80000008b46fec3", -2),  # ENTER saves BP before allocating locals.
+    ("c80200008b46fec3", -2),
+    ("c81000008b46fec3", -2),
     ("5589e089c58b46fec3", -2),  # SP reaches BP through AX.
     ("89e083e80289c489e58b46fec3", -2),  # A proven AX expression restores SP's origin.
 ])

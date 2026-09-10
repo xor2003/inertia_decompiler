@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
     CBinaryOp,
     CConstant,
     CForLoop,
     CIfBreak,
+    CStatement,
     CStatements,
     CVariable,
     CWhileLoop,
@@ -71,9 +73,9 @@ def _surface(
     condition_reads_destination: bool = True,
     condition_in_leading_break: bool = False,
 ) -> tuple[
-    object,
-    object,
-    object,
+    SimpleNamespace,
+    SimpleNamespace,
+    SimpleNamespace,
     CStatements,
     CForLoop | CWhileLoop,
     CAssignment,
@@ -132,7 +134,7 @@ def _surface(
         codegen=codegen,
         tags={"ins_addr": 0x1025F},
     )
-    body_items = [assignment, body_marker] if assignment_in_body else [body_marker]
+    body_items: list[CStatement] = [assignment, body_marker] if assignment_in_body else [body_marker]
     if condition_in_leading_break:
         body_items.insert(0, CIfBreak(condition, codegen=codegen))
         body = CStatements(body_items, codegen=codegen)
@@ -191,6 +193,25 @@ def test_pretest_initializer_replay_is_idempotent() -> None:
     assert codegen.cfunc.statements.statements == [assignment, loop]
     stats = codegen._inertia_direct_stack_move_pretest_initializer_placement_8616
     assert stats.already_materialized_count == 1
+
+
+@pytest.mark.parametrize("sequence_depth", [0, 1, 2])
+def test_pretest_initializer_stays_before_intervening_read(sequence_depth):
+    project, function, codegen, _body, loop, assignment = _surface(assignment_in_body=False)
+    prefix = assignment
+    for _ in range(sequence_depth):
+        prefix = CStatements([prefix], codegen=codegen)
+    read = CAssignment(assignment.rhs.lhs, assignment.lhs, codegen=codegen,
+                       tags={"ins_addr": 0x10262})
+    root = codegen.cfunc.statements
+    root.statements = [prefix, read, loop]
+
+    assert not materialize_direct_stack_move_pretest_initializers_8616(project, codegen, function)
+
+    assert root.statements == [prefix, read, loop]
+    stats = codegen._inertia_direct_stack_move_pretest_initializer_placement_8616
+    assert stats.already_materialized_count == 1
+    assert stats.failure_count == 0
 
 
 def test_moves_initializer_when_header_evidence_is_in_leading_break() -> None:

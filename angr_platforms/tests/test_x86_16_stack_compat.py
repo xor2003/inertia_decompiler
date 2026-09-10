@@ -5,15 +5,93 @@ from types import SimpleNamespace
 from typing import Protocol, cast
 
 import pytest
+from angr import ailment
 from angr.ailment.expression import Convert, StackBaseOffset, VirtualVariable, VirtualVariableCategory
 from angr.ailment.manager import Manager
 from angr.analyses.s_propagator import SPropagator
+from angr.code_location import AILCodeLocation
 from angr.knowledge_plugins.key_definitions.live_definitions import LiveDefinitions
 from angr_platforms.X86_16.stack_compat import (
     StackPointerPropagationVerdict8616,
+    StackValueUse8616,
     apply_x86_16_stack_compatibility,
+    classify_stack_value_use_8616,
     normalize_stack_pointer_replacement_8616,
 )
+
+
+@pytest.mark.parametrize("kind", [
+    "address", "data", "mixed", "return", "call", "nested_call", "missing",
+    "load_address", "load_guard", "load_alt", "store_guard", "definition",
+])
+def test_stack_value_roles_do_not_turn_numeric_operands_into_addresses(kind):
+    value = VirtualVariable(1, 7, 16, VirtualVariableCategory.REGISTER, oident=16)
+    constant = ailment.Expr.Const(2, 0x200, 16)
+    if kind in {"address", "data", "mixed"}:
+        statement = ailment.Stmt.Store(
+            3, value if kind != "data" else constant,
+            value if kind != "address" else constant, 2, "Iend_LE",
+        )
+    elif kind == "return":
+        statement = ailment.Stmt.Return(3, [value])
+    elif kind.startswith("load_"):
+        load = ailment.Expr.Load(
+            3, value if kind == "load_address" else constant, 2, "Iend_LE",
+            guard=value if kind == "load_guard" else None,
+            alt=value if kind == "load_alt" else None,
+        )
+        statement = ailment.Stmt.Return(4, [load])
+    elif kind == "store_guard":
+        statement = ailment.Stmt.Store(3, value, constant, 2, "Iend_LE", guard=value)
+    elif kind == "definition":
+        statement = ailment.Stmt.Assignment(3, value, constant)
+    elif kind in {"call", "nested_call"}:
+        call = ailment.Expr.Call(3, constant, args=(value,), bits=16)
+        statement = (
+            ailment.Stmt.Return(4, [ailment.Expr.Load(5, call, 2, "Iend_LE")])
+            if kind == "nested_call" else ailment.Stmt.SideEffectStatement(4, call)
+        )
+    else:
+        statement = None
+    expected = (
+        StackValueUse8616.UNKNOWN if kind in {"missing", "definition"} else
+        StackValueUse8616.ADDRESS_ONLY if kind in {"address", "load_address"} else StackValueUse8616.VALUE
+    )
+    assert classify_stack_value_use_8616(statement, 7) is expected
+
+
+@pytest.mark.parametrize("kind", ["address", "data", "mixed", "missing"])
+@pytest.mark.parametrize("graph_mode", [False, True])
+@pytest.mark.parametrize("value_bits", [16, 32])
+def test_stack_propagator_filters_numeric_address_replacements(monkeypatch, kind, graph_mode, value_bits):
+    value = VirtualVariable(1, 7, value_bits, VirtualVariableCategory.REGISTER, oident=16)
+    constant = ailment.Expr.Const(2, 0x200, 16)
+    statement = ailment.Stmt.Store(
+        3, value if kind in {"address", "mixed"} else constant,
+        value if kind != "address" else constant, 2, "Iend_LE",
+    )
+    block = ailment.Block(0x1000, 1, statements=[statement])
+    location = AILCodeLocation(0x1000, None, 9 if kind == "missing" else 0)
+    replacement = StackBaseOffset(4, 16, -2)
+    entries = {location: {value: replacement}}
+
+    def original(receiver):
+        receiver.model.replacements = entries
+
+    monkeypatch.setattr(SPropagator, "_analyze", original)
+    apply_x86_16_stack_compatibility()
+    receiver = SimpleNamespace(
+        project=SimpleNamespace(arch=SimpleNamespace(name="86_16", sp_offset=16, bp_offset=20)),
+        model=SimpleNamespace(), func_graph=[block] if graph_mode else None,
+        block=None if graph_mode else block, _ail_manager=Manager(),
+    )
+    SPropagator._analyze(receiver)
+
+    accepted = kind == "address" and value_bits == 16
+    assert entries[location] == ({value: replacement} if accepted else {})
+    stats = receiver.model._inertia_stack_pointer_propagation_stats_8616
+    assert stats.raw_fact_count == 1
+    assert stats.failure_count == (0 if accepted else 1)
 
 
 class _StackOffsetToAddr(Protocol):

@@ -71,6 +71,8 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
+preview = true
+explicit-preview-rules = true
 select = [
     "ANN",
     "D",
@@ -80,8 +82,11 @@ select = [
     "PERF",
     "B",
     "C4",
+    "C901",
     "LOG",
     "PIE",
+    "PLR0916",
+    "PLR2004",
     "RSE",
     "RUF",
     "SIM",
@@ -93,6 +98,12 @@ ignore = [
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-bool-expr = 5
 
 [tool.ruff.lint.per-file-ignores]
 "angr_platforms/tests/*.py" = ["ANN", "D", "E402"]
@@ -186,6 +197,7 @@ include = [
 ]
 extraPaths = [
     "angr_platforms",
+    "angr_platforms/tests",
 ]
 exclude = [
     "**/__pycache__",

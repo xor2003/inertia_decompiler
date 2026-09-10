@@ -18,6 +18,7 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
 
 from ..analysis.stack_frame_ir import FrameAccessArtifact, FrameCoordinateStatus8616
+from ..ir.native_stack_anchor import native_stack_anchor_8616
 from .stack_variable_coordinates import stack_variable_coordinate_registry_8616
 
 
@@ -25,6 +26,27 @@ class _CodegenBoundary8616(Protocol):
     """Dynamic codegen boundary carrying the typed frame artifact."""
 
     _inertia_vex_ir_frame: object
+
+
+def machine_bp_offset_for_native_anchor_8616(codegen: object, node: object) -> int | None:
+    """Translate an explicitly published source anchor using complete frame proof."""
+    if not isinstance(node, structured_c.CUnaryOp) or node.op != "Reference":
+        return None
+    anchor = native_stack_anchor_8616(node.tags)
+    if anchor is None:
+        return None
+    try:
+        frame = cast(_CodegenBoundary8616, codegen)._inertia_vex_ir_frame
+    except AttributeError:
+        return None
+    if (
+        not isinstance(frame, FrameAccessArtifact)
+        or not frame.bp_coordinate.complete
+        or frame.bp_coordinate.status is not FrameCoordinateStatus8616.PROVEN
+        or type(frame.bp_coordinate.bp_entry_sp_delta) is not int
+    ):
+        return None
+    return anchor.entry_sp_offset - frame.bp_coordinate.bp_entry_sp_delta
 
 
 def machine_bp_offset_for_entry_sp_anchor_8616(

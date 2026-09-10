@@ -72,3 +72,24 @@ def test_movsb_uses_flags_for_single_and_repeated_address_widths(
         if repeated:
             assert result.solver.eval(result.regs.cx) == 1
     assert result.addr == (0x100 if repeated else 0x100 + len(code))
+
+
+@pytest.mark.parametrize("direction_flag", [0, 0x400])
+@pytest.mark.parametrize("encoded", ["83 c0 04", "83 e8 04", "40", "31 c0", "f8", "f9", "fd", "fc"])
+def test_flags_write_synchronizes_stale_direction_without_changing_df(encoded, direction_flag):
+    """Status updates preserve DF; STD/CLD still change it and resync stale d."""
+    code = bytes.fromhex(encoded)
+    project = angr.load_shellcode(code, arch=Arch86_16(), load_address=0x100, start_offset=0x100)
+    state = project.factory.blank_state(
+        add_options={o.ZERO_FILL_UNCONSTRAINED_MEMORY, o.ZERO_FILL_UNCONSTRAINED_REGISTERS},
+    )
+    state.regs.flags = direction_flag
+    state.regs.d = 1 if direction_flag else 0xffffffff
+    state.regs.ax = 0x7fff
+    manager = project.factory.simgr(state)
+    manager.step(num_inst=1, insn_bytes=code)
+    assert len(manager.active) == 1
+    result = manager.active[0]
+    expected_df = 0x400 if encoded == "fd" else 0 if encoded == "fc" else direction_flag
+    assert result.solver.eval(result.regs.flags) & 0x400 == expected_df
+    assert result.solver.eval(result.regs.d) == (0xffffffff if expected_df else 1)

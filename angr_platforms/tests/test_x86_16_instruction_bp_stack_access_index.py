@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
@@ -49,6 +50,21 @@ from angr_platforms.X86_16.lowering.stack_storage_evidence import (
 from angr_platforms.X86_16.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
 )
+
+
+@pytest.mark.parametrize("has_store", [False, True])
+def test_instruction_stack_write_selection_never_binds_load_evidence(has_store):
+    load = InstructionBpStackAccess8616(
+        -1, 1, StackMemoryAliasFactKind8616.LOAD, InstructionBpStackAccessEvidence8616.EXECUTION_SLICE,
+    )
+    store = replace(load, kind=StackMemoryAliasFactKind8616.STORE)
+    index = SimpleNamespace(by_instruction_addr={0x1000: (load, store) if has_store else (load,)})
+
+    selected = select_instruction_bp_stack_access_8616(
+        index, frozenset((0x1000,)), displacement=-1, size=1, kind=StackMemoryAliasFactKind8616.STORE,
+    )
+
+    assert selected == (store if has_store else None)
 
 
 def _alias_artifact():
@@ -203,7 +219,7 @@ def test_instruction_bp_stack_index_selects_exact_byte_among_sibling_views() -> 
     )
 
 
-def test_instruction_bp_stack_index_prefers_same_base_logical_word_owner() -> None:
+def test_instruction_bp_stack_index_keeps_byte_width_with_same_base_word_owner() -> None:
     index = ensure_instruction_bp_stack_access_index_8616(
         SimpleNamespace(),
         _byte_split_logical_alias_artifact(),
@@ -218,9 +234,9 @@ def test_instruction_bp_stack_index_prefers_same_base_logical_word_owner() -> No
 
     assert selected == InstructionBpStackAccess8616(
         -2,
-        2,
+        1,
         StackMemoryAliasFactKind8616.LOAD,
-        InstructionBpStackAccessEvidence8616.LOGICAL_ACCESS,
+        InstructionBpStackAccessEvidence8616.EXECUTION_SLICE,
     )
 
 

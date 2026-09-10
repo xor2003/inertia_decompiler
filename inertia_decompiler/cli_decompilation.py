@@ -50,6 +50,7 @@ from angr_platforms.X86_16.cod_known_objects import known_cod_object_spec
 from angr_platforms.X86_16.codegen_metadata import (
     GlobalDeclarationArrayExtent8616,
     get_codegen_sequence_attr,
+    snapshot_stack_local_candidates_8616,
 )
 from angr_platforms.X86_16.compiler_helpers import (
     CompilerHelperEvidenceKind8616,
@@ -1104,6 +1105,7 @@ def _emit_c_stage_trace(
 
 
 def _emit_typed_edge_switch_replacement_safety_stats_8616(codegen: object) -> None:
+    """Report latest switch outcomes and ordered history without aggregating attempts."""
     if os.environ.get("INERTIA_ENABLE_TYPED_SWITCH_AST_ARTIFACTS") != "1":
         return
     with contextlib.suppress(Exception):
@@ -1465,6 +1467,7 @@ def _emit_typed_edge_switch_replacement_safety_stats_8616(codegen: object) -> No
                 "[typed-switch-seqnode-replacement] "
                 + json.dumps(
                     {
+                        "attempt_history": [dict(record) for record in relevant_seqnode_replacements],
                         "attempted_count": int(latest_replacement.get("attempted_count", 0) or 0),
                         "case_count": int(latest_replacement.get("case_count", 0) or 0),
                         "changed": bool(latest_replacement.get("changed", False)),
@@ -4409,17 +4412,7 @@ def _decompile_function(
         if synthetic_globals:
             typing.cast(typing.Any, project)._inertia_synthetic_globals = synthetic_globals
             typing.cast(typing.Any, dec.codegen)._inertia_synthetic_globals = synthetic_globals
-        stack_local_candidates = {
-            id(variable): (variable, cvar)
-            for variable, cvar in getattr(dec.codegen.cfunc, "variables_in_use", {}).items()
-            if isinstance(variable, SimStackVariable)
-            and id(variable)
-            not in {
-                id(getattr(arg, "variable", None))
-                for arg in getattr(dec.codegen.cfunc, "arg_list", ()) or ()
-                if getattr(arg, "variable", None) is not None
-            }
-        }
+        stack_local_candidates = snapshot_stack_local_candidates_8616(dec.codegen)
         typing.cast(typing.Any, dec.codegen)._inertia_stack_local_declaration_candidates = stack_local_candidates
         changed = False
         small_function = bool(profile.get("wrapper_like") or profile.get("tiny_single_call_helper"))

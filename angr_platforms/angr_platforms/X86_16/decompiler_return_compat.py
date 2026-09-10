@@ -8,6 +8,7 @@ Inertia contracts must use typed fields and dot access.
 Producer evidence decides whether a scalar return exists, not when its inputs
 are read. ReturnMaker must capture the architectural return register at RET;
 only SSA may propagate earlier definitions across intervening state changes.
+An existing native dereference is a return value, not a missing-value placeholder.
 """
 
 from __future__ import annotations
@@ -68,7 +69,6 @@ from .callsite_summary import (
 )
 from .lowering.return_type_evidence import proven_function_result_observation_8616
 from .lowering.terminal_return_expressions import (
-    return_expression_contains_dereference_8616,
     uncollapse_safe_scalar_expression_8616,
 )
 from .lowering.unobserved_returns import (
@@ -2234,6 +2234,7 @@ def apply_x86_16_decompiler_return_compatibility() -> None:
     _orig_handle_c_return = MakeTypecastsImplicit.handle_CReturn
 
     def _handle_CReturn_8616(self: object, obj: object) -> object | None:
+        """Preserve native return expressions; infer only genuinely missing values."""
         self_dynamic = cast(Any, self)
         obj_dynamic = cast(Any, obj)
         codegen = getattr(self_dynamic, "codegen", None)
@@ -2253,10 +2254,9 @@ def apply_x86_16_decompiler_return_compatibility() -> None:
             and _return_compat_proven_result_observation_8616(observation_function) is CallerReturnUseVerdict8616.UNUSED
         )
         current_retval = getattr(obj_dynamic, "retval", None)
-        recoverable_dereference = return_expression_contains_dereference_8616(current_retval)
         if (
             codegen is not None
-            and (recoverable_dereference or (current_retval is None and not unobserved_result))
+            and current_retval is None and not unobserved_result
             and return_type is not None
             and not isinstance(return_type, SimTypeBottom)
             and isinstance(return_type_size, int)

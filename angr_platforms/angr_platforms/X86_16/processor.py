@@ -8,15 +8,16 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from pyvex.const import get_type_size, is_int_ty
 from pyvex.expr import Binop, Const, Get, Load, Unop
 from pyvex.lifting.util.syntax_wrapper import VexValue
 from pyvex.lifting.util.vex_helper import Type
 from pyvex.stmt import Put
 
 from .cr import CR
+from .direction_step import lifted_direction_step_8616
 from .eflags import Eflags
 from .regs import dtreg_t, reg8_t, reg16_t, reg32_t, register_name_8616, sgreg_t
-from .vex_value_contract import require_vex_value_8616
 
 # Constants for general-purpose registers
 
@@ -378,8 +379,10 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
         return _impl()
 
     def constant(self, n: int, type_: object = Type.int_8) -> RegisterValue:
-        """Return a concrete integer or matching VEX constant for the current mode."""
+        """Keep concrete values; encode lifted integers as width-bounded bits."""
         if self.lifter_instruction is not None:
+            if is_int_ty(type_):
+                n &= (1 << get_type_size(type_)) - 1
             return VexValue(self.lifter_instruction, self.lifter_instruction.mkconst(n, type_))
         return n
 
@@ -394,18 +397,7 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
         """Derive the lifted string-index step from authoritative architectural FLAGS."""
         if self.lifter_instruction is None:
             raise RuntimeError("Lifted direction-step recovery requires an active lifter instruction")
-        flags = require_vex_value_8616(
-            self.constant(flags_value, Type.int_16)
-            if isinstance(flags_value, int)
-            else require_vex_value_8616(flags_value).cast_to(Type.int_16)
-        )
-        shifted = require_vex_value_8616(flags >> 10)
-        direction_bit = require_vex_value_8616(shifted & self.constant(1, Type.int_16))
-        direction = require_vex_value_8616(direction_bit.cast_to(Type.int_1))
-        negative = require_vex_value_8616(self.constant(0xFFFFFFFF, Type.int_32))
-        positive = require_vex_value_8616(self.constant(1, Type.int_32))
-        step = self.lifter_instruction.irsb_c.ite(direction.rdt, negative.rdt, positive.rdt)
-        return VexValue(self.lifter_instruction, step)
+        return lifted_direction_step_8616(self.lifter_instruction, flags_value)
 
     def _sync_lifted_direction_step(self, flags_value: object) -> None:
         """Synchronize the derived artificial VEX direction step after a FLAGS write."""
@@ -591,14 +583,16 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
         return self.update_gpreg(reg16_t.IP, value)
 
     def update_gpreg(self, n: reg16_t | reg32_t, value: object) -> RegisterValue:
-        """Add a value to a general-purpose register and store the result."""
+        """Apply a register delta, retaining known decrements as typed subtraction."""
         result = self.get_gpreg(n)
         if self.lifter_instruction is not None:
             if isinstance(value, int):
-                value = self.constant(value, TYPES[type(n)])
-            elif not isinstance(value, VexValue):
-                value = VexValue(self.lifter_instruction, self.lifter_instruction._settmp(value))
-            result = result + cast(VexValue, value)
+                amount = self.constant(abs(value), TYPES[type(n)])
+                result = result - amount if value < 0 else result + amount
+            else:
+                if not isinstance(value, VexValue):
+                    value = VexValue(self.lifter_instruction, self.lifter_instruction._settmp(value))
+                result = result + cast(VexValue, value)
         else:
             if not isinstance(result, int) or not isinstance(value, int):
                 raise TypeError("Concrete register update requires concrete integer values")

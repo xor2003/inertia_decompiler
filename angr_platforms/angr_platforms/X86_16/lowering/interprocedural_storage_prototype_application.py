@@ -2,7 +2,9 @@
 
 Layer: Types/Lowering.
 Responsibility: preflight one accepted function storage contract, then update
-the structured callee, angr function metadata, and argument variables together.
+the structured callee, angr function metadata, argument variables and the
+authoritative replay snapshot together. A stale snapshot must not undo an
+accepted pointer/value contract during annotation or codegen replay.
 Consumes alias, widening, and typed facts through the atomic interprocedural
 storage publication and the pure storage-to-``SimType`` projection.
 Do not recover semantics from COD, source, assembly, or rendered C text.
@@ -14,10 +16,12 @@ import contextlib
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
+from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimType, SimTypeFunction
 from angr.sim_variable import SimStackVariable
 from archinfo import Arch
 
+from .authoritative_function_prototypes import publish_authoritative_function_prototype_8616
 from .interprocedural_storage_prototype_types import (
     FunctionStoragePrototypeApplicationResult8616,
     FunctionStoragePrototypeApplicationVerdict8616,
@@ -226,6 +230,9 @@ def apply_accepted_function_storage_prototype_8616(
     if function_surface.is_prototype_guessed:
         function_surface.is_prototype_guessed = False
         changed = True
+    publish_authoritative_function_prototype_8616(
+        project, function_addr, new_cfunc_prototype, source=PrototypeSource.CCA_DECOMPILER,
+    )
     if changed:
         cast(_CodegenSurface8616, codegen)._inertia_codegen_decl_refresh_required_8616 = True
     return _record_result_8616(

@@ -2,7 +2,9 @@
 
 Layer: Types/Lowering.
 Responsibility: turn a proven byte range inside one canonical stack value into
-an unsigned structured-C load expression. This preserves the ``SEG_U*`` load
+an unsigned structured-C load expression or exact writable byte view. Byte
+writes use the existing little-endian C storage layout and never read other
+bytes of the scalar owner. This preserves the ``SEG_U*`` load
 contract while reusing the owning function argument instead of materializing a
 second stack object. Storage identity remains owned by
 ``stack_variable_coordinates``.
@@ -19,6 +21,7 @@ from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimType, SimTypeChar, SimTypeFunction, SimTypeInt, SimTypeLong, SimTypePointer, SimTypeShort
+from archinfo import Arch
 
 from .semantic_cast import CSemanticCast8616
 from .stack_variable_coordinates import (
@@ -38,6 +41,7 @@ class StackValueProjectionStatus8616(StrEnum):
     OUTSIDE_VALUE = "outside-value"
     OWNER_NOT_EXPRESSION = "owner-not-expression"
     UNSUPPORTED_POINTER_WIDTH = "unsupported-pointer-width"
+    UNSUPPORTED_WRITE_VIEW = "unsupported-write-view"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +93,7 @@ class StackValueProjectionStats8616:
 class _ProjectBoundary8616(Protocol):
     """Third-party project field used to bind C integer widths."""
 
-    arch: object
+    arch: Arch
 
 
 class _CodegenBoundary8616(Protocol):
@@ -185,6 +189,7 @@ def project_stack_value_range_8616(
     size: int,
     *,
     owner_hint: StackValueOwnerHint8616 | None = None,
+    require_lvalue: bool = False,
 ) -> StackValueProjectionResult8616:
     """Project one proven stack value range as a typed C expression.
 
@@ -258,6 +263,24 @@ def project_stack_value_range_8616(
     except (AttributeError, ValueError):
         source_type = None
     expression: structured_c.CExpression = owner.cvar
+    if require_lvalue:
+        status = StackValueProjectionStatus8616.EXACT_VALUE
+        if relative_offset != 0 or size != owner.value_size:
+            if size != 1 or owner.value_size != 2 or not isinstance(source_type, SimTypeShort):
+                return _publish_result_8616(codegen, StackValueProjectionResult8616(
+                    StackValueProjectionStatus8616.UNSUPPORTED_WRITE_VIEW, owner=owner,
+                ))
+            byte_pointer = SimTypePointer(SimTypeChar(False, label="unsigned char")).with_arch(
+                cast(_CodegenBoundary8616, codegen).project.arch,
+            )
+            reference = structured_c.CUnaryOp("Reference", expression, codegen=codegen)
+            expression = structured_c.CIndexedVariable(
+                CSemanticCast8616(None, byte_pointer, reference, codegen=codegen),
+                structured_c.CConstant(relative_offset, _unsigned_type_for_width_8616(codegen, 2), codegen=codegen),
+                codegen=codegen,
+            )
+            status = StackValueProjectionStatus8616.CONTAINED_VALUE
+        return _publish_result_8616(codegen, StackValueProjectionResult8616(status, expression, owner))
     if (
         isinstance(source_type, SimTypePointer)
         and isinstance(source_type.pts_to, SimTypeFunction)

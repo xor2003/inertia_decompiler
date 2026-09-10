@@ -7,6 +7,9 @@ Consumes alias, widening, and typed facts; it does not create those facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 Typed runtime-GP ownership and exact frame width are required; this module does
 not discover calls or remove statements.
+Only an owned SP view or an existing stack object's address is a passive base.
+Unknown arithmetic, calls and memory reads must survive rather than be discarded
+with the consumed CALL carrier.
 """
 
 from __future__ import annotations
@@ -15,7 +18,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
     CBinaryOp,
     CConstant,
+    CUnaryOp,
+    CVariable,
 )
+from angr.sim_variable import SimStackVariable
 
 from .gp_register_state import runtime_gp_expression_view_8616
 
@@ -59,6 +65,20 @@ def is_runtime_sp_call_decrement_8616(
         and preserved_view.width == 4
         and isinstance(inserted, CBinaryOp)
         and inserted.op == "Sub"
+        and _passive_stack_base_8616(inserted.lhs)
         and isinstance(inserted.rhs, CConstant)
         and inserted.rhs.value == return_frame_width
+    )
+
+
+def _passive_stack_base_8616(expression: object) -> bool:
+    """Require a bounded stack base with no nested evaluation effects."""
+    view = runtime_gp_expression_view_8616(expression)
+    if view is not None:
+        return view.parent_name == "esp" and view.bit_shift == 0 and view.width in {2, 4}
+    return bool(
+        isinstance(expression, CUnaryOp)
+        and expression.op == "Reference"
+        and isinstance(expression.operand, CVariable)
+        and isinstance(expression.operand.variable, SimStackVariable)
     )

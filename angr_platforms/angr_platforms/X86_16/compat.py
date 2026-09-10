@@ -13,7 +13,11 @@ from angr import ailment
 from angr.analyses.decompiler.clinic import Clinic
 from angr.knowledge_plugins.functions.function import Function, PrototypeSource
 
+from .ail_displacement_compat import apply_register_displacement_compatibility_8616
+from .call_frame_compat import apply_call_frame_compatibility_8616
+from .codegen_parentheses import apply_codegen_parentheses_8616
 from .patch_dirty import apply_patch as _apply_dirty_patch
+from .stack_anchor_compat import apply_native_stack_anchor_compatibility_8616
 from .stack_compat import apply_x86_16_stack_compatibility as _apply_stack_compatibility
 from .typehoon_compat import apply_x86_16_typehoon_compatibility as _apply_typehoon_compatibility
 
@@ -201,6 +205,10 @@ def apply_x86_16_compatibility() -> None:
     """Install all frontend/runtime compatibility patches for x86-16 support."""
     _apply_function_prototype_source_compatibility()
     _apply_clinic_custom_lifter_compatibility()
+    apply_call_frame_compatibility_8616()
+    apply_register_displacement_compatibility_8616()
+    apply_codegen_parentheses_8616()
     _apply_stack_compatibility()
+    apply_native_stack_anchor_compatibility_8616()
     _apply_typehoon_compatibility()
     _apply_dirty_patch()

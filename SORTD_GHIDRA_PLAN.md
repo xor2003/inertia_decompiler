@@ -18,7 +18,579 @@ Numeric function and global names are acceptable when the executable has no
 debug information. Source names below identify addresses for this report only;
 they must not become recovery evidence.
 
-## Current Checkpoint (2026-09-09)
+## Current Checkpoint (2026-09-10)
+
+ExchangeSort's initializer ordering and unsafe stack-probe deletion have focused
+repairs: 32 focused tests pass and the uninitialized read is gone. The unchanged
+function acceptance still fails on its outer-loop guard; P0 remains open.
+See the [initializer preservation report](reference/p0-exchangesort-initializer-preservation.md)
+for the two proven causes, owner boundaries, remaining investigation, DoD and
+Definition of Failure. Do not treat this as accepted ExchangeSort decompilation.
+Final fast/default lanes each pass 3,476 tests; three executable quality guards
+and seven MS C full round trips pass. The combined gate still fails on the
+existing 6,322 promoted-scope Ruff findings; the full repository audit is not
+rerun by these lanes.
+
+QuickSort's corrupt partition expression has a focused passing repair: the
+legacy structured simplifier reused widening results for discarded temporary
+node IDs. Removing that unsafe cache preserves the original subtraction;
+the uninstrumented QuickSort acceptance and five focused simplifier tests pass.
+See the [root-cause report](reference/p0-quicksort-partition-comparison.md).
+MyPy/Pyright pass on the owner; 99 pre-existing Ruff findings under the newly
+enabled clarity rules remain. Fast/default suites each pass 3,463 tests, all
+three executable guards pass, and seven MS C round trips pass. The combined
+quality command still fails on 6,322 promoted-scope Ruff findings. This does not
+close the complete audit or wider plan.
+
+The [fresh complete audit](reference/p0-full-suite-audit-20260910.md) accounts for
+all 11,536 tests: **11,326 passed, 40 failed, 170 skipped**, in 1,326.65 seconds.
+Source was stable, no nodes were missing/duplicated, and peak RSS stayed below
+2 GiB. This supersedes the older 52-failure baseline; routine passing counts
+must not be presented as a green full suite. Its QuickSort self-comparison was
+subsequently repaired as recorded above; the separate sidecar-free QuickSort
+guard-shape acceptance remains open. Preserve binary partition-size comparisons;
+do not suppress warnings or delete branches. The [QuickSort trace](reference/p0-quicksort-partition-comparison.md)
+records the investigation and accepted repair. The audit report retains all
+40 failing nodes and the slowest tests. The [test-overlap review](reference/p0-test-overlap-review.md)
+records the executed deduplication pilot and ordered work with reasons, DoD
+and Definitions of Failure; no test removal or full-suite speedup is claimed.
+
+The direction helper's positive IR/SSA cache-source manifest entry was then
+added with a failing-before regression. Eight cache tests and scoped
+Ruff/MyPy/Pyright pass. This invalidation correction does not constitute a new
+full-suite rerun or close the semantic failures above.
+
+The [direction-bit projection](reference/p0-direction-bit-projection.md) removes
+InitMenu's remaining SP/BP bookkeeping at the Frontend/IR boundary. The cause
+was false liveness through status calculations feeding an unchanged DF bit.
+InitMenu's unchanged acceptance and behavior harness now pass; 49 focused tests
+pass, live C compiles and validates, and all 18 call inventories are unchanged.
+Scoped Ruff/MyPy/Pyright pass. Fast/default gates each pass 3,443 tests;
+executable guards, QuickC and seven MS C roundtrips pass. The separate no-sidecar
+InitMenu compile/call/validation regression also passes. InitMenu's bookkeeping
+checkpoint is closed in both tested modes; the full-repository audit and wider
+plan remain open. The default unit lane is still over its configured budget.
+
+The [callee argument-cleanup projection](reference/p0-callee-argument-cleanup.md)
+now represents binary-proven cleanup at the native source-call/IR boundary.
+InitMenu's eight-byte drift becomes an identity update, with all 18 call
+inventories unchanged, strict compilation and validation passed. Sixty-one
+focused tests pass; InitMenu's unchanged final `SP - 4` acceptance still fails.
+Final fast/default gates each pass 3,402 tests; executable guards, QuickC and
+all seven MS C roundtrips pass. Scoped Ruff/MyPy/Pyright pass. The default unit
+lane remains over budget; the complete function and full-repository audit stay
+open. This is a verified cleanup-projection checkpoint, not full P0 closure.
+
+The [IR register-displacement normalization](reference/p0-ail-register-displacement.md)
+now removes redundant constant chains without stack-ownership guessing. InitMenu
+has three short SP updates instead of nine long ones; strict C compilation and
+validation pass with identical callsite inventories. Forty-five new tests pass;
+fast/default gates each pass 3,387 tests, executable guards, QuickC and seven
+MS C roundtrips. The remaining bookkeeping acceptance failure stays open.
+
+The [stack-address operand-role guard](reference/p0-stack-address-operand-roles.md)
+now refuses nonlinear, subtractive and repeated stack bases before native
+propagation. Fifty-seven focused tests pass; fast/default gates each pass 3,342
+tests, executable guards, QuickC and seven MS C roundtrips. InitMenu C remains
+unchanged with validation passed; its acceptance stays open because the stack
+bookkeeping remains. Pre-SSA calls still consume native stack loads.
+
+The [accepted argument-shape publication fix](reference/p0-call-argument-shape-publication.md)
+repairs stale inventory metadata using existing Lowering proof. All 18 observed
+InitMenu callsites now agree with their node summaries; generated C is unchanged
+and validation passes. Fast/default gates each pass 3,321 tests, executable
+guards, QuickC and seven MS C roundtrips. InitMenu acceptance still fails its
+unchanged bookkeeping assertion; the next step is proven argument-effect consumption.
+
+The [C renderer fix](reference/p0-c-render-parentheses.md) removes InitMenu's
+20 strict-GCC parenthesis errors without changing its expression trees.
+Strict compilation and tail validation pass; the unchanged stack-bookkeeping
+acceptance assertion remains red. Sixteen new routine tests cover warning-clean
+grouping, expression values, installation and architecture delegation. Final
+fast/default gates each pass 3,273 tests, all executable quality guards, QuickC
+and seven MS C tiny roundtrips. The unit lane remains over budget. The
+[test-telemetry follow-up](reference/p0-test-telemetry-typing.md) closes all 11
+legacy test-file typing diagnostics and passes 3,290 fast tests. The subsequent
+[switch-attempt reporting repair](reference/p0-switch-attempt-history.md)
+preserves successful Structuring evidence followed by the final idempotent
+pre-codegen no-op. All 20 focused tests, including RunMenu, pass; the broader
+fast gate passes 3,292 tests and all three executable quality guards. Two
+CLI Pyright diagnostics remained at that checkpoint. This reporting fix does not close
+output-quality debt or establish a full-repository suite pass.
+
+The [typed stack-declaration snapshot](reference/p0-stack-declaration-snapshot.md)
+subsequently removes those two CLI diagnostics while preserving native object
+identity and excluding arguments. Four new routine tests pass; InitMenu still
+fails the unchanged bookkeeping assertion. Scoped Ruff/MyPy/Pyright pass;
+the combined fast/default gate passes 3,296 tests in each lane, all executable
+guards, QuickC and seven MS C tiny roundtrips. The default unit lane remains
+over budget; full-repository verification and InitMenu acceptance remain open.
+
+The subsequent [pre-SSA caller inventory](reference/p0-call-frame-base-effects.md#pre-ssa-caller-evidence-2026-09-10)
+verifies that all 19 InitMenu CALL frames consume their 93 exact effects with
+zero failures. The remaining argument PUSH/cleanup effects retain individual
+tags at that boundary, including duplicated CFG projections of one cleanup.
+The nested-expression follow-up finds complete existing producer keys on all
+60 arithmetic nodes across ten retained SP/BP assignments. Reuse those keys
+and resolve exact VEX SP-write dependencies; do not build another cross-SSA
+provenance transport without evidence that it is needed. Next is argument-effect
+consumption after proven argument materialization, not another return-frame patch. The unchanged InitMenu test
+still fails; the observation produces byte-identical C with validation passed.
+
+The [exact SP producer-link artifact](reference/p0-stack-pointer-provenance.md)
+now connects existing arithmetic tags to physical writes at the pre-SSA IR
+boundary. Its 66 published links cover all 60 observed final arithmetic keys,
+while one unsupported SP assignment refuses. Seventeen new routine tests and
+twelve existing CALL-frame tests pass; InitMenu's unchanged bookkeeping test
+remains red. This is provenance publication, not permission to delete code.
+Scoped Ruff/MyPy/Pyright and the 3,313-test fast quality gate pass, including
+all executable quality guards. The default external pipeline was not rerun
+for this metadata-publication step. The next consumer must prove argument
+ownership and complete live-use closure.
+
+The [lifted-constant repair](reference/p0-lifted-integer-constants.md) and
+[signed-delta preservation](reference/p0-native-stack-tracker-width.md) remain
+accepted. Correcting 12 proven return-segment pops in a temporary tracker probe
+did not change generated C; do not install that experiment as an InitMenu fix.
+Next output work is evidence-backed caller PUSH/cleanup ownership, not deleting
+numeric SP state or weakening acceptance. General tracker subview/return-effect
+correctness and the full-repository audit remain open.
+
+The [InitMenu return-evidence repair](reference/p0-initmenu-return-evidence.md)
+now supplies width-aware binary callee proof through Semantics, following the
+exact source-project mapping for callees outside a rebased slice. Twelve
+return-segment sequences now classify successfully; generated C improves and
+validation passes. Seventeen routine regressions were added; 62 focused tests
+pass, but InitMenu's unchanged final SP-bookkeeping assertion still fails and
+strict GCC reports 20 parenthesization errors. Scoped Ruff/MyPy/Pyright pass;
+final fast/default gates each pass 3,195 tests, all executable guards, QuickC
+and the MS C tiny full pipeline. The default unit lane remains over budget.
+Next, trace the remaining caller stack effects before native SSA;
+do not relax liveness or claim complete InitMenu acceptance.
+
+The [SP carrier safety review](reference/p0-call-frame-base-effects.md) fixes a
+CALL-frame classifier that could delete nested evaluation effects with a
+carrier. All 21 focused tests and scoped Ruff/MyPy/Pyright pass; six new cases
+are routine. Final fast/default gates pass 3,178 tests each, all executable
+guards, QuickC and seven MS C tiny roundtrips. An InitMenu probe records 18 callsites
+but zero candidate frame assignments at their tags, with byte-identical C and
+validation passed. Trace the surviving SP definitions and combined-effect
+provenance earlier; do not relax the consumer's external-use refusal.
+The follow-up inventory observes ten SP assignment tags outside those 18
+callsite tags. Their native value provenance is the next investigation target;
+address proximity is not a consumption proof.
+
+InitMenu's double-segmentation of materialized object pointers is corrected in
+`lowering/call_argument_expression.py`. The pointer-boundary probe observed
+`ach` as `char[16]` and the format constant as a decoded string reference bound
+to its active `char*` type; both were wrongly converted through DS a second
+time. The existing compatibility bridge now consumes Lowering's concrete
+object-address classification before conversion. Numeric constants, ordinary
+pointer-typed carriers, wrong-type string references, and integer casts do not
+qualify. No rendered-text or function-name rule was added.
+
+Nine focused argument/state tests pass (final rerun 8.20s). The existing expression tests
+were absent from routine selection; their five cases now have explicit Make,
+test-pipeline, and ownership admission. Ruff, MyPy, and Pyright pass on the
+changed surface. `quality-fast` passes 3,143 tests (135.92s pytest) and all
+executable guards. The unchanged InitMenu acceptance test now passes validation
+and its exact `sprintf(ach, "%3.3u", aNldiv(clPause, 30))` assertion, but still
+fails the final pause-zero output-shape assertion (35.76s call / 43.76s pytest).
+Register execution carriers remain; do not weaken that assertion or claim the
+function fully accepted. Logs: `/tmp/inertia-initmenu-pointer-probe.log`,
+`/tmp/inertia-object-address-focused.log`,
+`/tmp/inertia-object-address-initmenu.log`, and
+`/tmp/inertia-object-address-quality-fast.log`.
+The default pipeline passes 3,143 unit tests (113.67s pytest / 114.085s lane),
+QuickC (41.158s), and all seven MSC6 full roundtrip examples (64.472s lane).
+Its unit lane remains over budget. Broad gates ran on the final production
+change; subsequent test-only type-narrowing assertions passed the nine-test
+rerun and explicit test-file Pyright. No failing acceptance assertion was
+removed. Pipeline log: `/tmp/inertia-object-address-test-pipeline.log`.
+
+InitMenu's embedded division-call loss is now prevented at the Types/Lowering
+argument-mutation boundary. The decisive trace showed normalization correctly
+embedding the producer in `sprintf` and deleting its standalone carrier; a
+later argument candidate then replaced that embedded call with GP-register
+expressions. `lowering/call_argument_call_preservation.py` now owns a typed,
+occurrence-counted veto for losing exact machine-call instruction identities.
+The legacy bridge only consumes this veto, through a documented startup-guard
+exception; it does not recover new call semantics. Three routine regressions
+cover dropped producers, cloned identities/shared-node multiplicity, and
+different callsites with equal target spelling. Twelve focused tests pass.
+Ruff (`check --fix`), MyPy, and Pyright pass on the changed Python surface.
+`quality-fast` passes 3,138 tests (134.84s pytest) and all executable guards.
+The default `test-pipeline` also passes: 3,138 unit tests (114.90s pytest /
+115.312s lane), QuickC (41.185s), and all seven MSC6 build/decompile/recompile/run
+examples (60.889s lane). The unit lane remains over its configured time budget.
+These gates do not supersede the unresolved full-audit failures. Gate logs:
+`/tmp/inertia-call-preservation-quality-fast.log` and
+`/tmp/inertia-call-preservation-test-pipeline.log`.
+
+The [GP zeroing correction](reference/p0-initmenu-gp-zeroing.md) now normalizes
+exact same-register SUB/XOR values at the optimized frontend, retaining original
+flag inputs. Native AIL had preserved self-subtraction, and later syntactic C
+live-in collection promoted the entire AX parent before cancellation. Fresh
+InitMenu output has no EAX runtime state and retains `validation=passed`, the
+division call and materialized pointers. Its unchanged acceptance test still
+fails on SP/BP carriers; strict GCC reports 22 parenthesization errors there.
+New XOR/JNZ execution cases caught an existing flag-publication error: recording
+condition metadata suppressed live architectural flags. The frontend now omits
+only proven-dead flag writes. All 115 focused arithmetic/condition/liveness
+tests pass. The second fast gate reports 3,162 passed and one DOS load-program
+wrapper regression: correct direct segment stores now have AX runtime carriers.
+Validation still passes, but that acceptance assertion remains red and must
+not be weakened. Resolve its newly exposed value dependency without restoring
+the unsound flag-elision shortcut. The default pipeline repeats the single unit
+failure (3,162 passed, one failed); QuickC and all seven MS C tiny roundtrips
+pass. The wrapper probe locates the undefined AX use in a flags-derived native
+assignment, not a missing C call-result destination. The subsequent
+[definition-preservation repair](reference/p0-call-result-definition-preservation.md)
+fixes the actual Structuring mutation: retargeting the call to a stack local
+had orphaned old SSA reads. An immediate same-width scalar capture preserves
+them without replaying the call. All 14 focused tests, including the unchanged
+wrapper regression, pass; scoped Ruff/MyPy/Pyright pass. The new regression
+and seven previously non-routine assignment tests are now admitted. A second
+regression protects captures with store-instruction tags from artifact pruning.
+Final fast/default gates pass 3,172 tests each, all executable quality guards,
+QuickC and all seven MS C tiny roundtrips. The unit lane remains over budget.
+This closes the introduced DOS wrapper regression, not InitMenu or full-suite
+acceptance. See the linked report for exact timings and evidence.
+The final InitMenu rerun still fails its unchanged final pause-zero shape
+assertion (40.07 seconds call), after passing validation and prior call checks.
+SP bookkeeping remains; the subsequent behavioral oracle is not reached.
+Neither GP live-in policy nor the acceptance assertion was weakened.
+
+InitMenu call-loss investigation now narrows the remaining division defect:
+the call at rebased 0x10d3 to 0x23da (original target 0x1143a) survives
+native Clinic callsite construction, SSA, post-SSA simplification, variable
+recovery, and extern collection. Native SSA initially represents its result
+as a 32-bit register assignment; the primary candidate subsequently narrows
+the observed result to 16 bits while retaining the call. This is not evidence
+of native SSA deleting the call.
+At the C-AST boundary, `_attach_callsite_summaries_8616` clears the callee
+binding but initially retains the same constant-target call at that exact
+instruction. `_materialize_callsite_stack_arguments_8616` subsequently removes
+it. Legacy missing-call recovery also inserts an untagged `aNldiv()`; the
+boundary snapshot places that replacement after `return`, not at the original
+execution point. Later argument replay reconstructs a tagged call, too late
+for the Structuring baseline. Do not repair this by adding a call-count floor
+or another replay pass. Next: isolate the destructive argument consumer and
+preserve the original call/result dependency in the owning Lowering contract,
+with a failing regression before repair. Identity rebinding alone is not call
+loss; follow exact instruction provenance and AST membership together.
+The separate removed-condition fingerprint is a DF-bit test whose native
+rendered arms both return, not evidence that the menu pause condition vanished.
+Any acceptance of that removal still needs explicit equivalent-return and
+condition-effect evidence; do not suppress arbitrary condition deltas.
+Observation-only reruns still exit 4 with Structuring changed. No production
+semantic fix or new green gate is claimed for this investigation. Logs:
+`/tmp/inertia-initmenu-call-lifetime-3.log`,
+`/tmp/inertia-initmenu-c-call-lifetime.log`, and
+`/tmp/inertia-initmenu-c-call-lifetime-2.log`.
+
+Call-address object preservation is now corrected in Types/Lowering:
+`containing_stack_cvariable_8616` consumes the unique published containing
+object extent before falling back to the backing variable's size. A word-sized
+address request no longer narrows an existing `char[16]` object to a scalar.
+The focused regression reproduced that exact type overwrite before repair;
+38 coordinate/validation/replay tests now pass (11.07s). Ruff, MyPy, and Pyright pass.
+The current InitMenu rerun has one `ach` buffer, no BP-0x12/BP-0x10 dependency
+mismatch, and no missing storage-object failure; postprocess validation is
+stable. It still exits 4 because Structuring reports an added helper at 0x1143a
+and a removed condition/control-flow effect, and runtime-register carriers
+remain. InitMenu is not fixed or accepted yet. See `/tmp/inertia-call-array-after.log`.
+After this correction, quality-fast passes 3,135 tests (223.54s), configured
+checks, and all three executable guards. Default test-pipeline passes 3,135
+unit tests (121.85s pytest / 122.275s lane), QuickC (43.904s), and MSC6 7/7
+(65.088s), with matching original/recompiled exit codes at 255. Unit timing
+remains above its configured 30s budget. Logs:
+`/tmp/inertia-call-object-quality-fast.log` and
+`/tmp/inertia-call-object-test-pipeline.log`. These routine gates do not replace
+the full audit or close InitMenu's remaining semantic acceptance requirements.
+
+InitMenu investigation baseline after the full audit: focused execution still
+fails (68.35s baseline; 64.34s combined rerun with 48 other tests passing).
+Binary call sources require BP-0x12, while emitted reads use BP-0x10; writes
+and reads split between two C arrays. Narrow-backing aggregate restoration is
+now covered: three new cases failed before, and restoration now accepts only
+an exact already-materialized array extent on a narrower backing variable.
+Wrong extent, untyped backing, and unrelated views refuse. Focused tests and
+scoped Ruff/MyPy/Pyright pass, but this alone does not fix InitMenu.
+
+The latest observation-only trace found the remaining destructive transition:
+`call_argument_stack_sources.materialize_call_argument_stack_cvariable_8616`
+calls `stack_lowering_from_facts.materialize_stack_cvar_at_offset_from_facts_8616`,
+whose `_promote_direct_stack_cvariable` overwrites proven `char[16]` with an
+unsigned word. The legacy call-argument pass invokes this during address
+materialization. Correct the Types/Lowering consumer, not rendered C or the
+validator; preserve the aggregate and materialize the requested address/value
+view explicitly. Evidence: `/tmp/inertia-initmenu-type.log`,
+`/tmp/inertia-initmenu-narrow-after.log`. No InitMenu completion claim yet;
+broader gates must be rerun after the remaining correction.
+
+Whole-repository audit started after the routine gates passed. `make pytest-all`
+collected 11,230 tests but stopped before execution on missing ownership for
+the DOS-free oracle tests and native return-preservation test (10 nodes).
+Ownership entries are now explicit; verbose C-source parameter IDs were
+replaced with descriptive case IDs without changing cases or assertions.
+69 focused tests and Ruff pass. The full rerun completed: 11,008 passed,
+52 failed, 170 skipped in 1833.57 seconds; all 11,230 nodes accounted for,
+source stable, peak aggregate RSS 1,818,484 KiB. This supersedes routine-gate
+counts as the whole-repository status. Failures span 12 modules, including
+SORTD validation/output, CLI, native return recovery, and architecture checks.
+Do not treat all failures as obsolete expectations or claim the full suite green.
+The authoritative audit is `.cache/pytest/partitioned-summary.json`; full log:
+`/tmp/inertia-full-suite-audit.log`.
+
+First audit root cause: CLI-first access-hint import enters X86_16 bootstrap,
+whose storage-object bridge imports the same partially initialized CLI shim.
+The package swallows that ImportError, leaving compatibility hooks absent.
+Import the hint contract from its existing Lowering owner instead. Fresh-process
+CLI-first/frontend-first RETF cleanup tests must pass without explicit bootstrap;
+changing cleanup expectations or explicitly initializing only the test is failure.
+Other legacy CLI dependencies of the storage bridge remain separate layer debt.
+The CLI-first regression fails before the import correction (cleanup 8, expected
+6) and passes afterward. CLI-first/frontend-first plus package/access/return
+checks pass 58 tests in 15.53s; scoped Ruff, MyPy, and Pyright pass. Architecture
+audit also exposed four missing layer-header markers, four mandatory compiler
+tests with optional-GCC skips, and a missing subview ownership entry. These are
+corrected without weakening checks: architecture plus compiler regressions pass
+404 tests in 37.77s. Full-suite failures have not yet all been rerun or resolved.
+Post-fix quality-fast passes 3,129 tests (171.89s), configured checks, and
+three executable guards. Default test-pipeline passes 3,129 unit tests
+(135.59s pytest / 136.081s lane), QuickC (48.804s), and MSC6 7/7 (74.020s).
+All seven original/recompiled exit codes match at 255. The unit lane is still
+over its configured 30s budget; no timing gate or assertion was weakened.
+Quality-fast reported a fork-from-multithreaded-process deprecation warning in
+`inertia_decompiler/fork_timeout.py:187`, in addition to dependency warnings;
+this concurrency risk remains open. Logs: `/tmp/inertia-bootstrap-quality-fast.log`
+and `/tmp/inertia-bootstrap-test-pipeline.log`.
+
+Audit performance evidence: tidshowrange is the longest test at 130.97s.
+Three separate EGAME2 `_openFileWrapper` tests take 88.35s, 85.61s, and 83.48s.
+Investigate shared immutable decompilation fixtures with unchanged assertions
+before deleting tests: matching function inputs do not establish redundant
+behavioral coverage. Performance work must not hide the 52 audit failures.
+
+Step 3 snapshot coherence: the remaining pick_ptr warnings were caused by
+annotation replay restoring an integer snapshot after an accepted binary
+pointer contract was already applied. Storage-prototype application now
+publishes the same interface to the existing authoritative snapshot owner.
+Two new regressions fail before repair; six focused tests and scoped linters
+pass afterward. Fresh output retains void-pointer parameters/return, validates
+cleanly and passes strict GCC -O0/-O2 pointer-identity checks. quality-fast
+passes 3,127 tests (150.01s), configured checks and all three executable guards.
+The default pipeline passes 3,127 unit tests (132.04s), QuickC (45.045s), and
+MSC6 7/7 (67.955s), with matching original/recompiled exit codes. The prior
+pick_ptr indirection warnings are gone without suppression or harness casts.
+Broader SORTD acceptance and whole-repository checks remain open.
+See [snapshot evidence](reference/p0-storage-prototype-snapshot.md).
+
+The function_pointers carrier repair is now implemented in call-argument
+Lowering with exact PUSH provenance, materialized argument evidence and a
+runtime/native SP suffix-use check. Refusal coverage and adjacent tests pass
+(32 tests, 8.85s); scoped Ruff/MyPy/Pyright pass. Fresh select_and_apply has no
+ESP/EBP dependency, validates cleanly and runs both selector cases after GCC
+-O0/-O2 compilation with callee stubs. Quality-fast passes 3,125 tests
+(156.61s), configured checks and three executable guards. The default
+pipeline now exits 0: 3,125 unit tests pass (120.71s), QuickC passes
+(41.911s), and MSC6 passes 7/7 (70.428s). All original/recompiled exit codes
+match. function_pointers no longer has unresolved ESP/EBP; scalar_types_io
+still reports pick_ptr indirection warnings. The 6/7 records below are
+historical. This closes the routine compiler-lane blocker, not the full
+SORTD plan or a whole-repository test audit.
+
+The original function_pointers failure was narrowed to a consumed argument
+PUSH whose runtime ESP lvalue is rejected by the legacy native-register
+carrier classifier. Its surviving BP read correctly blocks frame deletion.
+The next fix must reconcile typed runtime-register identity with consumed
+PUSH provenance and liveness, not weaken the frame guard. Fresh runtime
+evidence and acceptance/refusal obligations are recorded in
+[PUSH carrier investigation](reference/p0-function-pointer-push-carrier.md).
+
+Native stack-anchor provenance is now integrated at the native SSA boundary,
+with an IR-owned source coordinate consumed by Lowering only with complete
+frame proof. Untagged references keep existing behavior. Two new coordinate
+cases fail before repair; 80 focused tests and scoped Ruff/MyPy/Pyright pass.
+Fresh production byteops has no EBP reference, validation=passed, and returns
+0xC000 after GCC -O0/-O2 compilation without supplied register globals.
+Quality-fast passes 3,116 tests (159.91s), configured checks and all three
+executable guards. Default pipeline passes 3,116 unit tests (138.04s) and
+QuickC (47.890s). MSC6 improves from 5/7 to 6/7 (64.175s): scalar_types_io
+now recompiles and runs with exit code 255, though pick_ptr indirection
+warnings remain. function_pointers still fails to link unresolved ESP/EBP;
+that is the next semantic investigation. The previous 5/7 results below are
+historical. See [native anchor evidence](reference/p0-native-stack-anchor.md).
+
+Prerequisite return repair: the compatibility hook overwrote a present native
+dereference return with an offset/name-selected stack variable. It now infers
+only absent values. One regression fails before repair; 73 focused tests and
+scoped Ruff/MyPy/Pyright pass afterward. Combined diagnostic provenance now
+passes all four smoke cases, and byteops validates and returns 0xC000 in GCC
+-O0/-O2 without EBP references. The native-anchor hook remains diagnostic-only; explicit
+native-anchor production integration is still required. Combined `quality-fast`
+exits 0: 3,101 tests pass (170.07s), configured checks and three executable
+guards pass. Default pipeline exits 2: 3,101 unit tests pass (124.15s),
+QuickC passes (43.275s), MSC6 remains 5/7 (64.787s), with the same undefined
+EBP in scalar_types_io and unresolved ESP/EBP in function_pointers. The next
+implementation is explicit native entry-SP provenance, not blanket rebasing
+or dummy runtime-register globals. No whole-suite or P0 completion is claimed.
+See [native return evidence](reference/p0-native-return-preservation.md).
+
+Newest identity repair: Widening's subview pass used raw native stack offsets
+instead of published BP-coordinate bindings, merging saved-frame bytes into a
+local. A read-only coordinate reader now preserves bindings across view, owner,
+read and recomposition selection without importing Lowering. Eight new cases
+fail before repair; 39 focused tests and scoped Ruff/MyPy/Pyright pass afterward.
+At this intermediate revision the disabled anchor experiment passed three of
+four smoke cases; the later return repair above resolves the fourth. The
+combined quality gate passes, but production anchor integration remains open.
+See [binding evidence](reference/p0-subview-coordinate-bindings.md).
+
+Newest projection repair: instruction selection preferred a logical word owner
+over an exact byte execution slice. Exact execution width now takes precedence,
+while owner evidence stays available. A low-byte regression fails before the
+change; 80 focused tests pass afterward, including compiled byte writes. Scoped
+Ruff/MyPy/Pyright pass. Fresh byteops retains EBP. `quality-fast` passes 3,092
+tests (161.48s), configured checks and three executable guards. Default pipeline
+exits 2: 3,092 unit tests pass (148.86s), QuickC passes, MSC6 remains 5/7 with
+the same undefined EBP / unresolved ESP+EBP rebuild failures. Timing is not a
+controlled performance comparison: an unrelated indexer consumed about five
+CPU cores during the compiler lanes.
+At this historical checkpoint the native anchor-provenance experiment failed
+four smoke tests. Later repairs above resolve those diagnostic failures; the
+hook remains undeployed. See [execution-width evidence](reference/p0-stack-execution-width.md).
+
+Newest frame repair: captured SP expressions were treated as current register
+reads, double-counting updates and falsely proving ENTER's BP delta as -4.
+Captured values now use the existing SSA affine trace. Three new binary tests
+fail before repair; 80 frame/address/smoke tests pass afterward, with scoped
+Ruff/MyPy/Pyright clean. Fresh byteops still retains EBP. `quality-fast` passes
+3,090 tests (138.88s), configured checks and executable guards. The default
+pipeline still fails: 3,090 unit tests pass (122.30s), QuickC passes, MSC6 remains
+5/7 with the same undefined EBP and unresolved ESP/EBP rebuild failures.
+This is not a full-suite pass or completion of P0.
+See [captured-SP evidence](reference/p0-captured-stack-frame.md).
+
+Current rejected candidate: unconditional entry-SP anchor conversion improved
+`byteops_unsigned`, but `quality-fast` found four stack-annotation/ENTER failures
+(3,081 passed, 134.17s). All four pass with the previous resolver behavior in a
+controlled diagnostic run. The conversion has been withdrawn: a proven frame
+delta alone does not prove an unbound variable's coordinate domain. Preserve
+explicit coordinate bindings; establish durable native-anchor provenance before
+retrying. The byte example and MSC6 lane remain open. See
+[entry-SP consumer evidence](reference/p0-entry-sp-anchor.md).
+
+Verified after withdrawal: `quality-fast` exits 0 with 3,087 tests passing
+(133.22s), configured checks and executable guards. Default pipeline exits 2:
+3,087 unit tests pass (116.97s), QuickC passes, MSC6 remains 5/7. The two failures
+are the existing undefined EBP / unresolved ESP+EBP rebuild failures, not the
+four withdrawn-candidate regressions. A scoped `pytest_deduplicate` audit also
+ran successfully (7 passed); its one 4ms coverage-overlap pair is retained
+because different coordinate values are not redundant assertions.
+
+Newest candidate: direct stack-update AST lookup now uses the active coordinate
+registry instead of a snapshot variable's older codegen context. Four failing
+context regressions now pass; the focused group passes 110 tests and scoped
+Ruff/MyPy/Pyright pass. Broad gates are pending for this revision. This is not
+the cause of the MSC6 byte example's retained BP assignment: fresh C remains
+byte-identical. The next lead is logical word access versus byte-local projection
+at the native AIL boundary. See [context and frame evidence](reference/p0-stack-coordinate-context.md).
+
+Current follow-up: required byte casts lost their typed signedness because the
+native unnamed `SimTypeChar` representation is plain `char`. Lowering's required
+cast renderer now emits explicit signed/unsigned char from its existing type
+contract. Exhaustive compiled conversions reproduce two failures before repair;
+25 focused tests pass afterward. Fresh `byteops_unsigned` tail validation passes,
+but its fixed-input result passed before too, so it is not the regression oracle.
+`quality-fast` passes 3,069 tests (137.24s), static checks and three executable
+guards. Default pipeline passes 3,069 unit tests (123.04s), QuickC and five of
+seven MSC6 constructs; the same declaration/link failures remain in the other
+two. See [byte-cast evidence](reference/p0-byte-cast-contract.md).
+
+Latest bounded follow-up: operand-32 near/far RET immediate cleanup now updates
+SP without clearing upper ESP. Four new execution failures were reproduced
+before repair; the focused helper/80386/call-return group now passes 237 tests.
+Scoped Ruff/MyPy/Pyright pass. The newest `quality-fast` passes 3,058 tests
+(160.50s) and three executable guards. The default pipeline passes its 3,058
+unit tests (127.37s) and QuickC lane, but still fails the same two MSC6 constructs
+below. The register-cleanup repair is focused-test verified; P0 and broad
+semantic acceptance remain open. See the linked evidence for logs and timings.
+
+Latest repair: typed return-segment ownership before SSA now fixes the
+PUSH CS / near-CALL / RETF numeric-SP mismatch. Extended tests also found and
+repaired full-ESP clobbering in dword PUSH/POP and a cancelling LEAVE defect;
+implicit stack updates use SP while operand size still controls transfer width.
+Byte-safe memory access methods are preserved. **65 focused tests pass**
+(17.27s), including ten binary-versus-compiled-C cases with call counts and
+upper-ESP checks. Scoped Ruff/MyPy/Pyright pass. Broad acceptance is pending;
+unknown prefixes, explicit callee cleanup and unsupported return-frame widths
+remain typed refusals. See [repair and evidence](reference/p0-call-return-stack-effects.md).
+The subsequent broad gate exposed eight prefixed-RET return regressions
+(3,034 passed, 8 failed): native ABI inference counted the extra return-address
+bytes as argument cleanup and skipped return-register capture. Decoded return
+frames now separate operand width from explicit cleanup; 89 return/smoke tests
+and 17 cleanup/prefix contract tests pass. The rerun of `quality-fast` passes:
+3,050 unit tests (129.97s), configured linters/types and three executable guards.
+The default pipeline still fails: its unit lane passes 3,050 tests (112.67s),
+QuickC passes, but two of seven MSC6 tiny constructs fail rebuilding generated C.
+`scalar_types_io` loses the standalone EBP declaration during DOS assembly;
+`function_pointers` retains ESP/EBP references without runtime definitions.
+Stack-local provenance and unsigned-byte expressions also require investigation;
+adding register definitions alone is not semantic acceptance. See the
+[default-pipeline diagnosis](reference/p0-call-return-stack-effects.md#default-pipeline-checkpoint-2026-09-09).
+
+Previous candidate and failing-gate evidence:
+
+Latest uncommitted CALL-frame candidate: the pre-SSA consumer repairs the
+minimal numeric SP return for near and direct far calls. The saved focused
+InitMenu, RunMenu ESC and InitBars executable tests all pass (3 passed, 62.83s).
+An expanded binary-versus-compiled-C regression exposes the remaining PUSH CS /
+near-CALL / RETF mismatch: 0x7ffc instead of 0x7ffe. This is a semantic blocker,
+not cosmetic ESP clutter; 2 variants pass and 1 fails. Establish typed
+return-segment ownership and callee return behavior before extending consumption.
+Do not infer stack-address width from operand width. Details and next acceptance
+cases: [CALL-frame evidence](reference/p0-call-return-stack-effects.md).
+After repairing ownership wiring, quality-fast reaches pytest: **3,011 passed,
+1 failed**, 8 warnings, 104.27s. The sole failure is the new PUSH CS / near-CALL
+numeric-SP case. Configured pre-test checks pass; Make exits 2. The executable
+regression remains in the routine pipeline and fast ownership selects the
+tool-independent adapter tests. This is not a full-suite or green-gate result.
+
+Earlier candidate evidence (superseded where explicitly updated above):
+
+Uncommitted candidate: numeric stack-use preservation plus read/write-aware
+stack lowering. Exact byte-write projections now make the InitBars executable
+regression pass. A focused sidecar-disabled InitMenu run exits 0 with
+validation=passed and clean whole-tail validation in 41.85s. RunMenu still fails
+its no-raw-ESP assertion; raw frame-state lifetime and restoration remain open,
+including in InitMenu. Ten byte-write tests pass, including six GCC execution
+cases for signed/unsigned words. The latest fast gate reports 2,992 passed and one
+failed (RunMenu), 135.57s; Make exits 2. This is not full function acceptance or a
+green broader gate. Do not treat the verified
+committed checkpoint below as evidence that this working-tree candidate passes.
+The existing isolated InitMenu call-preservation/compilation regression also
+passes (41.98s); whole-binary acceptance and frame-state proof remain open.
+The runtime call-frame consumer now refuses deletion when SP/ESP has external
+observers, closing six demonstrated unsafe-deletion cases (15 focused tests
+pass). This safety prerequisite does not remove RunMenu's retained stack state.
+Next: trace surviving frame-state definitions and their call/restoration
+consumers, without turning numeric stack offsets into host pointers.
+The next defect now has a machine-versus-compiled-C regression: a returning
+near call leaks two frame bytes into numeric SP (0x7ffc versus 0x7ffe).
+It initially failed and is admitted to the routine lane. Repair call-return
+effect projection before SSA/folding, not the lifter or late text cleanup;
+see [evidence, repair order and acceptance](reference/p0-call-return-stack-effects.md).
+A tracker-checked use-closure prototype was tested and removed: RunMenu C was
+byte-identical, and its executable regression still failed. Before retrying,
+locate the exact missing/unused frame fact in the actual worker; see the
+[experiment and failure criteria](reference/p0-stack-flow-experiment.md).
+The frontend now enforces its width-refusal verdict by removing an unproven
+16-to-32-bit stack replacement. Both integrated failure cases are covered;
+36 stack-compatibility tests and scoped Ruff/MyPy/Pyright pass. The broader gate
+counts above precede this additional width fix and are not a fresh full-suite run.
+Details and failed experiments: [candidate ledger](reference/p0-return-value-capture.md).
 
 Latest scalar-return repair: [return-time value capture](reference/p0-return-value-capture.md).
 Verified checkpoint: the default executable run accepts 19/20 (191.08s, exit 2),
@@ -1409,6 +1981,11 @@ other than `255`; or any required type, lint, architecture, validation, unit,
 compile, or runtime gate failure.
 
 #### InitMenu step 5c closure contract
+
+Current revalidation (2026-09-10): the subsequent frame-bookkeeping regression
+is closed by [Frontend/IR direction-bit projection](reference/p0-direction-bit-projection.md).
+The unchanged behavior acceptance, isolated no-sidecar regression, strict C
+compilation, validation and routine gates all pass; no Rewrite recovery was added.
 
 Reason: a block-local dword zero test, unused physical call-result carriers, and
 multi-statement C bracing had distinct owners; conflating them would move

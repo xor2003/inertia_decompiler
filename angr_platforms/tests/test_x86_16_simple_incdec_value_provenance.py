@@ -1,4 +1,4 @@
-"""Regress exact condition value provenance through optimized INC/DEC lifting."""
+"""Regress exact value and condition provenance through optimized arithmetic."""
 
 from types import SimpleNamespace
 
@@ -10,6 +10,69 @@ from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.ir import IRBinaryValue, IRValue, MemSpace
 from angr_platforms.X86_16.ir.condition_ir import ConditionIR
 from angr_platforms.X86_16.lift_86_16 import Instruction_ANY
+
+
+@pytest.mark.parametrize("opcode", ["2bc0", "29c0", "33c0", "31c0", "2bc9", "33c9"])
+def test_self_zeroing_register_write_has_no_incoming_value_dependency(opcode):
+    """Publish zero before native SSA can invent an incoming-register carrier."""
+    arch = Arch86_16()
+    block = pyvex.lift(bytes.fromhex(opcode + "7400"), 0x100, arch, opt_level=0, max_inst=1)
+    register = "cx" if opcode.endswith("c9") else "ax"
+    writes = [statement.data for statement in block.statements
+              if isinstance(statement, pyvex.stmt.Put) and statement.offset == arch.registers[register][0]]
+    assert len(writes) == 1
+    assert isinstance(writes[0], pyvex.expr.Const)
+    assert writes[0].con.value == 0
+    assert writes[0].result_size(block.tyenv) == 16
+
+
+@pytest.mark.parametrize("opcode,flag_mask", [("2bc0", 0x8D5), ("33c0", 0x8C5)])
+@pytest.mark.parametrize("initial", [0, 0x8000, 0xFFFF])
+def test_self_zeroing_preserves_upper_register_and_defined_flags(opcode, flag_mask, initial):
+    """Zero AX without clearing upper EAX or losing defined flag effects."""
+    project = angr.load_shellcode(bytes.fromhex(opcode), arch=Arch86_16(), load_address=0x100)
+    state = project.factory.blank_state(
+        addr=0x100, add_options={o.ZERO_FILL_UNCONSTRAINED_MEMORY, o.ZERO_FILL_UNCONSTRAINED_REGISTERS},
+    )
+    state.regs.eax = 0xA5A50000 | initial
+    state.regs.flags = 0xED7
+    successors = project.factory.successors(state, num_inst=1).flat_successors
+    assert len(successors) == 1
+    result = successors[0]
+    assert result.solver.eval(result.regs.eax) == 0xA5A50000
+    flags = result.solver.eval(result.regs.flags)
+    assert flags & flag_mask == 0x44
+    assert flags & 0x600 == 0x600
+
+
+@pytest.mark.parametrize("opcode,expected", [("2bc1", 0xFFFD), ("33c1", 5)])
+def test_distinct_register_arithmetic_keeps_value_dependency(opcode, expected):
+    """Different source registers are not zeroing idioms."""
+    project = angr.load_shellcode(bytes.fromhex(opcode), arch=Arch86_16(), load_address=0x100)
+    state = project.factory.blank_state(
+        addr=0x100, add_options={o.ZERO_FILL_UNCONSTRAINED_MEMORY, o.ZERO_FILL_UNCONSTRAINED_REGISTERS},
+    )
+    state.regs.ax, state.regs.cx = 3, 6
+    successors = project.factory.successors(state, num_inst=1).flat_successors
+    assert len(successors) == 1
+    assert successors[0].solver.eval(successors[0].regs.ax) == expected
+
+
+@pytest.mark.parametrize("opcode", ["2bc0", "33c0"])
+@pytest.mark.parametrize("initial", [0, 0x8000, 0xFFFF])
+def test_self_zeroing_branch_uses_new_zero_condition(opcode, initial):
+    """The optimized logical path must not branch using stale incoming flags."""
+    project = angr.load_shellcode(
+        bytes.fromhex(opcode + "7502909090"), arch=Arch86_16(), load_address=0x100,
+    )
+    state = project.factory.blank_state(
+        addr=0x100, add_options={o.ZERO_FILL_UNCONSTRAINED_MEMORY, o.ZERO_FILL_UNCONSTRAINED_REGISTERS},
+    )
+    state.regs.eax, state.regs.flags = 0xA5A50000 | initial, 0
+    successors = project.factory.successors(state, num_inst=2).flat_successors
+    assert len(successors) == 1
+    assert successors[0].addr == 0x104
+    assert successors[0].solver.eval(successors[0].regs.eax) == 0xA5A50000
 
 
 @pytest.mark.parametrize("address_bits", [16, 32])
@@ -76,13 +139,13 @@ def test_simple_inc_preserves_exact_stack_value_for_following_cmp(monkeypatch) -
     instruction.addr = 0x400D
     instruction.cs = SimpleNamespace(size=3)
     flag_inputs = []
-    instruction.emu = SimpleNamespace(
+    monkeypatch.setattr(instruction, "emu", SimpleNamespace(
         _inertia_current_block_addr=0x4000, update_eflags_inc=flag_inputs.append
-    )
-    instruction._get_reg16 = lambda _name: 4
+    ), raising=False)
+    instruction._get_reg16 = lambda reg_name: 4
     instruction._const16 = lambda value: value
     instruction._next_instruction_is_simple_jcc = lambda: False
-    instruction.put = lambda _value, _name: None
+    instruction.put = lambda val, reg: None
 
     try:
         Instruction_ANY._inertia_condition_index_reg_state_8616 = {}
@@ -101,9 +164,11 @@ def test_simple_inc_preserves_exact_stack_value_for_following_cmp(monkeypatch) -
         assert flag_inputs == [4]
         instruction.addr = 0x4011
         instruction.cs = SimpleNamespace(size=3)
-        lhs, rhs = instruction._condition_operands_from_cmp_semantics_8616(
+        operands = instruction._condition_operands_from_cmp_semantics_8616(
             ("cmp_reg_mem16", "ax", ("bp", 4, 4)),
         )
+        assert operands is not None
+        lhs, rhs = operands
     finally:
         Instruction_ANY._inertia_condition_index_reg_state_8616 = (
             original_index_state

@@ -1,9 +1,11 @@
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeShort
 from angr.sim_variable import SimStackVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
+from angr_platforms.X86_16.lowering import real_mode_linear
 from angr_platforms.X86_16.lowering.assignment_lvalue_casts import (
     AssignmentLvalueCastStats8616,
     normalize_scalar_assignment_lvalues_8616,
@@ -79,3 +81,39 @@ def test_width_mismatched_assignment_cast_is_refused() -> None:
     assignment = codegen.cfunc.statements.statements[0]
     assert isinstance(assignment.lhs, structured_c.CTypeCast)
     assert codegen._inertia_assignment_lvalue_cast_stats_8616.failure_count == 1
+
+
+@pytest.mark.parametrize("write", [False, True])
+def test_stack_lowering_requests_lvalues_only_for_assignment_targets(monkeypatch, write):
+    codegen = _Codegen()
+    scalar_type = SimTypeShort(False).with_arch(codegen.project.arch)
+    memory = structured_c.CUnaryOp(
+        "Dereference", structured_c.CConstant(0x200, scalar_type, codegen=codegen), codegen=codegen,
+    )
+    scalar = structured_c.CConstant(7, scalar_type, codegen=codegen)
+    destination = structured_c.CVariable(
+        SimStackVariable(-8, 2, base="bp"), variable_type=scalar_type, codegen=codegen,
+    )
+    assignment = structured_c.CAssignment(
+        memory if write else destination, scalar if write else memory, codegen=codegen,
+    )
+    root = structured_c.CStatements([assignment], codegen=codegen)
+    codegen.cfunc = SimpleNamespace(
+        addr=0x1000, statements=root, body=root, arg_list=[], variables_in_use={}, unified_local_vars={},
+    )
+    requests = []
+
+    def materialize(_codegen, _access, *, require_lvalue=False, **_kwargs):
+        requests.append(require_lvalue)
+        return None if require_lvalue else scalar
+
+    monkeypatch.setattr(real_mode_linear, "match_stable_ss_linear_stack_access_8616",
+                        lambda *_args: real_mode_linear.RealModeLinearStackAccess8616(-2, 1))
+    monkeypatch.setattr(real_mode_linear, "_has_stack_storage_evidence_for_displacement_8616", lambda *_args: True)
+    monkeypatch.setattr(real_mode_linear, "stack_cvar_for_stable_ss_linear_access_8616", materialize)
+
+    real_mode_linear.lower_stable_ss_linear_stack_dereferences_8616(codegen, project=codegen.project)
+
+    assert requests == [write]
+    assert assignment.lhs is (memory if write else destination)
+    assert assignment.rhs is scalar

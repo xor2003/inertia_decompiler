@@ -1,7 +1,10 @@
 """Tests for required Lowering-owned C casts."""
 
+import shutil
+import subprocess
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeChar, SimTypeShort
 from angr.sim_variable import SimStackVariable
@@ -28,6 +31,38 @@ def _codegen() -> SimpleNamespace:
     next_ident = lambda name: f"{name}_0", next_node_idx = lambda : 1)
 
 
+@pytest.mark.parametrize("signed", [False, True], ids=["unsigned-byte", "signed-byte"])
+@pytest.mark.parametrize("char_default", ["-fsigned-char", "-funsigned-char"])
+def test_semantic_byte_cast_preserves_all_values_independent_of_plain_char(tmp_path, signed, char_default):
+    compiler = shutil.which("gcc")
+    assert compiler is not None, "gcc is required for semantic byte-cast execution"
+    codegen = _codegen()
+    codegen.display_vvar_ids = False
+    codegen.show_casts = False
+    source = structured_c.CVariable(
+        SimStackVariable(-2, 2, base="bp", name="value"),
+        variable_type=SimTypeShort(False), codegen=codegen,
+    )
+    expression = CSemanticCast8616(
+        SimTypeShort(False), SimTypeChar(signed), source, codegen=codegen,
+    )
+    rendered = "".join(text for text, _node in expression.c_repr_chunks())
+    value_name = source.name
+    expected = f"({value_name} >= 128 ? (int){value_name} - 256 : (int){value_name})" if signed else value_name
+    program = (
+        f"int main(void) {{ unsigned short {value_name};"
+        f" for ({value_name}=0; {value_name}<256; ++{value_name}) {{"
+        f" int actual = {rendered}; if (actual != {expected}) return 1; }} return 0; }}"
+    )
+    executable = tmp_path / "semantic-byte-cast"
+    compiled = subprocess.run(
+        [compiler, "-std=c99", "-Wall", "-Werror", "-O2", char_default, "-x", "c", "-", "-o", str(executable)],
+        input=program, text=True, capture_output=True, check=False,
+    )
+    assert compiled.returncode == 0, compiled.stderr + program
+    assert subprocess.run([str(executable)], check=False).returncode == 0, program
+
+
 def test_semantic_cast_renders_when_cosmetic_casts_are_hidden() -> None:
     codegen = SimpleNamespace(
         next_idx=lambda _name: 1,
@@ -49,7 +84,7 @@ def test_semantic_cast_renders_when_cosmetic_casts_are_hidden() -> None:
 
     rendered = "".join(text for text, _node in expression.c_repr_chunks())
 
-    assert rendered == "(char)local_8"
+    assert rendered == "(signed char)local_8"
 
 
 def test_semantic_cast_remains_traversable_as_structured_c() -> None:

@@ -13,6 +13,7 @@ Dynamic boundary: angr codegen and C AST nodes expose third-party attributes at
 runtime, so access to those objects remains guarded. `CallsiteSummary8616`,
 typed evidence records, enums, and materialization state are owned contracts;
 they must use direct attributes so contract drift fails clearly.
+Accepted logical-shape publication is owned by Lowering, not this bridge.
 
 Ownership rule:
 - This file is a compatibility migration shim.
@@ -125,9 +126,11 @@ from .decompiler_postprocess_utils import (
     _same_c_expression_8616,
 )
 from .frontend_block_inventory import decoded_function_callsite_addresses_8616
+from .lowering.call_argument_call_preservation import classify_call_argument_call_preservation_8616
 from .lowering.call_argument_expression import (
     CALL_ARGUMENT_INTEGER_OPERATION_NAMES_8616,
     CALL_ARGUMENT_SOURCE_OPERATION_NAMES_8616,
+    call_argument_has_materialized_object_address_8616,
     materialize_call_argument_operations_8616,
 )
 from .lowering.call_argument_semantic_token import (
@@ -147,6 +150,7 @@ from .lowering.call_argument_shape import (
     exact_caller_stack_object_shape_evidence_8616,
     reconcile_materialized_call_argument_shape_8616,
 )
+from .lowering.call_argument_shape_publication import publish_reconciled_call_argument_shape_8616
 from .lowering.call_argument_stack_sources import (
     call_argument_source_requires_exact_address_identity_8616,
     call_argument_stack_variable_offset_8616,
@@ -8079,6 +8083,8 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
     def _materialize_pointer_arg_8616(
         expr: StructuredAstValue, *, target_name: str, arg_index: int, force_pointer: bool = False
     ) -> tuple[StructuredAstValue | None, bool]:
+        if call_argument_has_materialized_object_address_8616(expr):
+            return expr, False
         if not force_pointer and not _callee_expects_pointer_arg_8616(
             target_name,
             arg_index,
@@ -10246,6 +10252,9 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
                 int(getattr(codegen, "_inertia_call_arg_self_reference_refused_8616", 0) or 0) + 1
             )
             return refused_call_argument_mutation_8616(target_changed=target_changed)
+        preservation = classify_call_argument_call_preservation_8616(args_before, args_after)
+        if not preservation.preserves_calls:
+            return refused_call_argument_mutation_8616(target_changed=target_changed)
         args_equal = _call_args_match_materialized_args_8616(call, args_after)
         summary_push_sources = (
             _boundary_tuple_8616(summary.push_arg_sources or ())
@@ -10895,6 +10904,9 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
             projected_inventory_summary = carry_forward_logical_call_argument_shape_8616(
                 inventory_summary,
                 updated,
+            )
+            projected_inventory_summary = publish_reconciled_call_argument_shape_8616(
+                projected_inventory_summary, updated, reconciliation,
             )
             if projected_inventory_summary is not inventory_summary:
                 summary_inventory[updated.callsite_addr] = projected_inventory_summary
@@ -12491,6 +12503,7 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
         later_statements: tuple[StructuredAstValue, ...] = (),
         later_identity_keys: frozenset[tuple[StructuredAstValue, ...]] | None = None,
     ) -> bool:
+        """Recognize legacy scalar artifacts, never infer dead stack storage."""
         if _statement_contains_call(stmt):
             return False
         assignment = _top_level_assignment_node_8616(stmt)
@@ -12554,7 +12567,9 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
                 )
             return False
         if isinstance(variable, SimStackVariable):
-            return True
+            # A nested sequence's suffix omits outer reads and alias uses.
+            # Only the storage owner can prove this memory definition dead.
+            return False
         if isinstance(variable, SimRegisterVariable) and _generic_stack_carrier_keys_8616(lhs_node):
             return True
         accepted = isinstance(name, str) and (

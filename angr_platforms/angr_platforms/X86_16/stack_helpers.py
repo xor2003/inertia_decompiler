@@ -190,12 +190,12 @@ def pop16_register(emu: StackEmulator, reg: reg16_t) -> None:
 
 
 def push32_register(emu: StackEmulator, reg: reg32_t) -> None:
-    """Push a 32-bit register value through SS:ESP."""
+    """Push a 32-bit register value through the 16-bit SS:SP stack."""
     push32(emu, emu.get_gpreg(reg))
 
 
 def pop32_register(emu: StackEmulator, reg: reg32_t) -> None:
-    """Pop a 32-bit SS:ESP value into a general-purpose register."""
+    """Pop a 32-bit SS:SP value into a general-purpose register."""
     emu.set_gpreg(reg, pop32(emu))
 
 
@@ -290,31 +290,17 @@ def pop_all16(emu: StackEmulator) -> None:
 
 
 def push32(emu: StackEmulator, value: object) -> None:
-    """Push a 32-bit value through the real-mode 16-bit SS:SP address."""
-    raw_sp = emu.get_gpreg(reg32_t.ESP)
-    sp = (
-        emu.constant(raw_sp & 0xFFFF, Type.int_16)
-        if isinstance(raw_sp, int)
-        else raw_sp.cast_to(Type.int_16)
-    )
-    sp = sp - emu.constant(4, Type.int_16)
-    next_esp = sp & 0xFFFF if isinstance(sp, int) else sp.cast_to(Type.int_32)
-    emu.set_gpreg(reg32_t.ESP, next_esp)
+    """Push a dword through SS:SP, preserving the untouched upper ESP lane."""
+    emu.update_gpreg(reg16_t.SP, -4)
+    sp = emu.get_gpreg(reg16_t.SP)
     emu.write_mem32_seg(sgreg_t.SS, sp, value, address_bits=16)
 
 
 def pop32(emu: StackEmulator) -> StackExpr:
-    """Pop a 32-bit value through the real-mode 16-bit SS:SP address."""
-    raw_sp = emu.get_gpreg(reg32_t.ESP)
-    sp = (
-        emu.constant(raw_sp & 0xFFFF, Type.int_16)
-        if isinstance(raw_sp, int)
-        else raw_sp.cast_to(Type.int_16)
-    )
+    """Pop a dword through SS:SP, preserving the untouched upper ESP lane."""
+    sp = emu.get_gpreg(reg16_t.SP)
     value = emu.read_mem32_seg(sgreg_t.SS, sp, address_bits=16)
-    next_sp = sp + emu.constant(4, Type.int_16)
-    next_esp = next_sp & 0xFFFF if isinstance(next_sp, int) else next_sp.cast_to(Type.int_32)
-    emu.set_gpreg(reg32_t.ESP, next_esp)
+    emu.update_gpreg(reg16_t.SP, 4)
     return value
 
 
@@ -453,16 +439,10 @@ def return_near16(emu: StackEmulator, stack_adjust: int = 0) -> StackExpr:
 
 
 def return_near32(emu: StackEmulator, stack_adjust: int = 0) -> StackExpr:
-    """Emit a 32-bit near return and apply an optional stack adjustment."""
+    """Pop EIP and apply argument cleanup through SP, preserving upper ESP."""
     eip = pop32(emu)
     if stack_adjust:
-        raw_sp = emu.get_gpreg(reg32_t.ESP)
-        if isinstance(raw_sp, int):
-            adjusted_sp = (raw_sp + stack_adjust) & 0xFFFF
-        else:
-            sp16 = raw_sp.cast_to(Type.int_16)
-            adjusted_sp = (sp16 + emu.constant(stack_adjust, Type.int_16)).cast_to(Type.int_32)
-        emu.set_gpreg(reg32_t.ESP, adjusted_sp)
+        emu.update_gpreg(reg16_t.SP, stack_adjust)
     emu.set_eip(eip)
     emu.lifter_instruction.jump(None, eip, JumpKind.Ret)
     return eip
@@ -576,16 +556,10 @@ def return_interrupt16(emu: StackEmulator) -> StackTriple:
 
 
 def return_far32(emu: StackEmulator, stack_adjust: int = 0) -> StackPair:
-    """Emit a 32-bit far return and restore CS:EIP."""
+    """Restore CS:EIP and clean arguments through SP, preserving upper ESP."""
     eip, seg = pop_far_return_frame32(emu)
     if stack_adjust:
-        raw_sp = emu.get_gpreg(reg32_t.ESP)
-        if isinstance(raw_sp, int):
-            adjusted_sp = (raw_sp + stack_adjust) & 0xFFFF
-        else:
-            sp16 = raw_sp.cast_to(Type.int_16)
-            adjusted_sp = (sp16 + emu.constant(stack_adjust, Type.int_16)).cast_to(Type.int_32)
-        emu.set_gpreg(reg32_t.ESP, adjusted_sp)
+        emu.update_gpreg(reg16_t.SP, stack_adjust)
     selector = seg & 0xFFFF if isinstance(seg, int) else seg.cast_to(Type.int_16)
     emu.set_segment(sgreg_t.CS, selector)
     emu.set_eip(eip)
@@ -730,7 +704,7 @@ def leave16(emu: StackEmulator) -> None:
 
 
 def leave32(emu: StackEmulator) -> None:
-    """Execute LEAVE for a 32-bit frame through SS:EBP/ESP state."""
-    ebp = emu.get_gpreg(reg32_t.EBP)
-    emu.set_gpreg(reg32_t.ESP, ebp)
+    """Restore SP from BP, then pop full EBP through the 16-bit stack."""
+    bp = emu.get_gpreg(reg16_t.BP)
+    emu.set_gpreg(reg16_t.SP, bp)
     emu.set_gpreg(reg32_t.EBP, pop32(emu))

@@ -60,6 +60,7 @@ from .vex_condition_transport import (
     build_vex_condition_transport_layout_8616,
 )
 from .vex_control_flow import terminal_control_flow_instr_8616
+from .vex_integer_displacement import canonical_vex_integer_displacement_8616
 from .vex_types import vex_expr_size_bytes
 
 __all__ = (
@@ -478,7 +479,7 @@ def _binary_value_from_operands_8616(
     left: IRValue,
     right: IRValue,
 ) -> IRValue:
-    """Build one binary IR value from operands already normalized once."""
+    """Build binary IR values with width-canonical integer displacements."""
     cond = build_condition_from_binop(op, left, right)
     if cond is not None:
         return IRValue(MemSpace.TMP, name=f"cond:{cond.op}", size=1, expr=(op,))
@@ -486,7 +487,7 @@ def _binary_value_from_operands_8616(
         return IRValue(
             left.space,
             name=left.name,
-            offset=left.offset + int(right.const),
+            offset=canonical_vex_integer_displacement_8616(op, left.offset + int(right.const), left.size),
             size=left.size,
             expr=(op,),
         )
@@ -494,7 +495,7 @@ def _binary_value_from_operands_8616(
         return IRValue(
             left.space,
             name=left.name,
-            offset=left.offset - int(right.const),
+            offset=canonical_vex_integer_displacement_8616(op, left.offset - int(right.const), left.size),
             size=left.size,
             expr=(op,),
         )
