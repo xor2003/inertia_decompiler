@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CUnaryOp
+from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CBreak, CConstant, CContinue, CStatements, CUnaryOp
 from angr.sim_type import SimTypeShort
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.ir.condition_ir import ConditionIR
@@ -71,3 +71,20 @@ def test_failed_chain_proof_cannot_replace_compound_with_root(monkeypatch, opera
     else:
         assert result is root_expression
         assert len(replayed) == 1
+
+
+@pytest.mark.parametrize("jump_type", [CBreak, CContinue])
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize("source_address", [0x110, 0x120])
+def test_loop_jump_origin_is_not_a_branch_destination(jump_type, wrapped, source_address):
+    codegen = _Codegen()
+    fact = ConditionIR(
+        op="ne", lhs=3, rhs=5, block_addr=0x100, src_insn=0x102,
+        taken_target=0x110, fallthrough_target=0x120,
+    )
+    body = jump_type(codegen=codegen, tags={"ins_addr": source_address, "vex_block_addr": source_address})
+    if wrapped:
+        body = CStatements([CStatements([body], codegen=codegen)], codegen=codegen)
+    assert owner._single_branch_body_orientation_8616(
+        fact, body, {0x100: (0x110, 0x120), 0x110: (0x100,), 0x120: ()},
+    ) is None

@@ -94,7 +94,14 @@ def _publish_block_local_ssa_8616(block: IRBlock, result: SSABlock) -> SSABlock:
 
 
 def _version_key(value: IRValue) -> _VersionKey:
-    return (value.space.value, value.name, value.offset)
+    """Key named registers independently of arithmetic value displacement.
+
+    For REG values, the register name identifies storage and offset belongs to
+    the expression (for example SP minus four). Memory and unnamed-register
+    offsets still distinguish storage. Never erase displacement from the value.
+    """
+    storage_offset = 0 if value.space is MemSpace.REG and value.name is not None else value.offset
+    return (value.space.value, value.name, storage_offset)
 
 
 def _versioned(value: IRValue, version: int) -> IRValue:
@@ -205,14 +212,11 @@ def _record_temporary_snapshot(
     snapshots: _TemporarySnapshots,
 ) -> None:
     """Record the exact scalar version captured by one VEX temporary MOV."""
-    if (
-        instruction.op == "MOV"
-        and destination is not None
-        and destination.space is MemSpace.TMP
-        and destination.source_tmp is not None
-        and len(arguments) == 1
-        and isinstance(arguments[0], IRValue)
-    ):
+    if instruction.op != "MOV" or destination is None:
+        return
+    if destination.space is not MemSpace.TMP or destination.source_tmp is None:
+        return
+    if len(arguments) == 1 and isinstance(arguments[0], IRValue):
         snapshots[destination.source_tmp] = arguments[0]
 
 

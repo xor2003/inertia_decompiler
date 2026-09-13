@@ -69,7 +69,7 @@ def _global(addr: int, codegen, *, size: int = 1):
     return CVariable(SimMemoryVariable(addr, size, name=f"g_{addr:x}"), codegen=codegen)
 
 
-def test_simplify_structured_expressions_folds_joinable_memory_byte_pair_to_word():
+def test_simplify_structured_expressions_keeps_memory_byte_bindings():
     codegen = _codegen([])
     low = _global(0x2000, codegen, size=1)
     high = _global(0x2001, codegen, size=1)
@@ -84,12 +84,11 @@ def test_simplify_structured_expressions_folds_joinable_memory_byte_pair_to_word
 
     changed = _simplify_structured_expressions_8616(codegen)
 
-    assert changed is True
+    assert changed is False
     result = codegen.cfunc.statements
-    assert isinstance(result, CVariable)
-    assert isinstance(result.variable, SimMemoryVariable)
-    assert result.variable.addr == 0x2000
-    assert result.variable.size == 2
+    assert result is expr
+    assert result.lhs is low
+    assert result.rhs.lhs is high
 
 
 def test_simplify_structured_expressions_folds_nested_literal_arithmetic_to_one_constant():

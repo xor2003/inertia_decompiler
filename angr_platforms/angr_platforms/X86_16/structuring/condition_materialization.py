@@ -36,6 +36,8 @@ from typing import Any, Protocol, cast
 from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
     CBinaryOp,
+    CBreak,
+    CContinue,
     CDirtyExpression,
     CDoWhileLoop,
     CExpression,
@@ -76,24 +78,36 @@ from ..lowering.call_output_stack_objects import (
 from ..lowering.condition_argument_type_facts import (
     record_wide_condition_argument_type_evidence_8616,
 )
+from ..lowering.condition_operand_views import materialize_condition_operand_views_8616
+from ..lowering.packed_flags_liveness import PackedFlagsCycleStats8616, prune_unobserved_flag_cycles_8616
 from ..lowering.scalar_return_types import record_scalar_return_type_evidence_8616
+from ..lowering.wide_call_condition_capture import (
+    build_proven_wide_call_condition_8616,
+    commit_wide_call_condition_captures_8616,
+)
 from ..lowering.wide_stack_pair_evidence import proven_wide_stack_ir_pair_8616
 from ..pipeline.errors import PipelineHardError
 from ..postprocess import flags_cleanup as _flags_cleanup
 from ..structured_tags import copy_structured_tags_8616
 from ..validation_condition_precision import record_condition_precision_evidence_8616
 from .branch_return_expressions import (
+    binary_return_arm_polarity_8616,
     recover_branch_target_return_expression_8616,
     sole_return_expression_8616,
     sole_return_statement_8616,
 )
+from .composite_pretest_conditions import CompositePretestStats8616, materialize_composite_pretest_conditions_8616
 from .condition_binding import select_unique_condition_by_expression_8616
 from .condition_chain_provenance import bind_condition_chain_provenance_8616
 from .condition_evidence_closure import (
     ConditionEvidenceClosure8616,
     classify_condition_evidence_closure_8616,
 )
-from .condition_exit_normalization import transparent_condition_exit_8616
+from .condition_exit_normalization import (
+    conditional_goto_polarity_8616,
+    exact_condition_exit_polarity_8616,
+    transparent_condition_exit_8616,
+)
 from .condition_lowering import (
     SameBlockRegisterAssignmentIndex8616,
     build_same_block_register_assignment_index_8616,
@@ -102,6 +116,7 @@ from .condition_lowering import (
     lower_ir_value_to_c_expr_8616,
     materialize_same_block_register_projection_8616,
 )
+from .condition_ownership import select_composite_preheader_root_8616
 from .condition_ownership import structured_node_owns_condition_fact_8616 as _structured_node_owns_condition_fact_8616
 from .condition_provenance import (
     StructuredConditionProvenanceStats8616,
@@ -114,15 +129,20 @@ from .condition_replay import (
     record_condition_replay_fact_8616,
     select_condition_replay_fact_8616,
 )
+from .existing_loop_exit_conditions import ExistingLoopExitStats8616, materialize_existing_loop_exit_conditions_8616
+from .local_condition_regions import local_condition_continuations_8616, prove_local_condition_region_8616
 from .local_wide_stack_condition_chains import (
     recover_local_wide_stack_condition_chain_8616,
 )
+from .loop_break_topology import collect_loop_break_topology_8616
 from .loop_condition_materialization import (
     LoopConditionMaterializationStats8616,
     materialize_typed_loop_continuation_conditions_8616,
 )
 from .multi_arm_condition_ownership import (
+    first_statement_block_8616,
     materialize_multi_arm_condition_owners_8616,
+    select_exact_multi_arm_condition_owners_8616,
     select_multi_arm_condition_owners_8616,
 )
 from .multi_arm_return_chains import (
@@ -145,6 +165,7 @@ from .total_return_suffixes import (
     TotalReturnSuffixPruneStats8616,
     prune_unreachable_total_return_suffixes_8616,
 )
+from .wide_call_condition_plan import plan_wide_call_condition_8616
 from .wide_call_return_guard_chains import (
     WideCallReturnGuardCollapseStats8616,
     WideCallReturnGuardCollapseStatus8616,
@@ -178,35 +199,36 @@ def materialize_condition_ir_expression_8616(
         lhs=condition_operand_storage_binding_8616(condition, condition.lhs),
         rhs=condition_operand_storage_binding_8616(condition, condition.rhs),
     )
-    expression = _legacy_typed_conditions._build_c_condition_expr(
-        project,
-        bound_condition,
-        codegen,
-    )
     projection_stats = []
-    if isinstance(expression, CBinaryOp):
-        lhs_projection = materialize_same_block_register_projection_8616(
-            bound_condition.lhs,
-            bound_condition,
-            project,
-            codegen,
-            assignment_index=assignment_index,
-        ) if isinstance(bound_condition.lhs, IRValue) else None
-        rhs_projection = materialize_same_block_register_projection_8616(
-            bound_condition.rhs,
-            bound_condition,
-            project,
-            codegen,
-            assignment_index=assignment_index,
-        ) if isinstance(bound_condition.rhs, IRValue) else None
-        if lhs_projection is not None:
-            projection_stats.append(lhs_projection.stats)
-            if isinstance(lhs_projection.expression, CExpression):
-                expression.lhs = lhs_projection.expression
-        if rhs_projection is not None:
-            projection_stats.append(rhs_projection.stats)
-            if isinstance(rhs_projection.expression, CExpression):
-                expression.rhs = rhs_projection.expression
+    projected_operands: dict[int, CExpression] = {}
+    for value in (bound_condition.lhs, bound_condition.rhs):
+        if isinstance(value, IRValue):
+            projection = materialize_same_block_register_projection_8616(
+                value, bound_condition, project, codegen, assignment_index=assignment_index,
+            )
+            projection_stats.append(projection.stats)
+            if isinstance(projection.expression, CExpression):
+                projected_operands[id(value)] = projection.expression
+
+    def build_operand(value: object) -> object | None:
+        """Use a proven view before attempting the general register binding."""
+        projected = projected_operands.get(id(value))
+        if projected is not None:
+            return cast(object, projected)
+        expression: object | None = _legacy_typed_conditions._build_c_expr_for_operand(
+            project, value, codegen, bound_condition,
+        )
+        return expression
+
+    expression = (
+        _legacy_typed_conditions._build_c_condition_expr(
+            project, bound_condition, codegen, operand_builder=build_operand,
+        )
+        if projected_operands
+        else _legacy_typed_conditions._build_c_condition_expr(project, bound_condition, codegen)
+    )
+    if isinstance(expression, CExpression):
+        expression = materialize_condition_operand_views_8616(expression, condition)
     if isinstance(expression, CExpression):
         bind_condition_replay_identity_8616(expression, condition)
     if os.environ.get("INERTIA_DEBUG_CONDITION_MATERIALIZATION") == "1":
@@ -234,10 +256,13 @@ class _ConditionMaterializationCodegen8616(Protocol):
     _inertia_structuring_condition_materialization_result_8616: StructuringConditionMaterializationResult8616
     _inertia_structuring_condition_replay_cleanup_8616: dict[str, object]
     _inertia_structuring_dead_flag_cleanup_8616: dict[str, object]
+    _inertia_packed_flags_cycle_stats_8616: PackedFlagsCycleStats8616
     _inertia_condition_materialization_structuring_pass_ran_8616: bool
     _inertia_structuring_condition_chain_stats_8616: StructuringConditionChainStats8616
     _inertia_structuring_condition_evidence_closure_8616: ConditionEvidenceClosure8616
     _inertia_typed_loop_condition_stats_8616: LoopConditionMaterializationStats8616
+    _inertia_composite_pretest_condition_stats_8616: CompositePretestStats8616
+    _inertia_existing_loop_exit_condition_stats_8616: ExistingLoopExitStats8616
     _inertia_structured_condition_provenance_stats_8616: StructuredConditionProvenanceStats8616
     _inertia_same_block_condition_register_projection_stats_8616: SameBlockConditionRegisterProjectionStats8616
     _inertia_multi_arm_return_chain_materialized_8616: bool
@@ -487,17 +512,18 @@ def _first_tagged_block_addr_8616(node: object) -> int | None:
 
 
 def _first_tagged_cfg_target_8616(node: object) -> int | None:
-    """Return the CFG block identity before falling back to an instruction tag.
+    """Return the first executed statement's exact CFG block identity.
 
-    ConditionIR successors are block-address keyed.  Structured arms often
-    start with a later instruction in the same VEX block, which is not a valid
-    successor key and can make a terminal branch look disconnected.
+    A subtree's lowest address may belong to a later statement or an operand
+    definition. Neither proves its entry, especially for backward dispatch.
+    Keep subtree tag inventories for membership queries, not execution order.
     """
-    entry_tags = cast(
-        _StructuredSubtreeEntryTagsBoundary8616,
-        collect_structured_subtree_entry_tags_8616(node),
-    )
-    return entry_tags.first_block_addr or entry_tags.first_instruction_addr
+    # A tagged arm container retains its entry even after its body is folded
+    # into a return. Do not replace that explicit identity with a child tag.
+    block = _copied_condition_tags_8616(node).get("vex_block_addr")
+    if isinstance(block, int) and not isinstance(block, bool):
+        return block
+    return first_statement_block_8616(node)
 
 
 def _cfg_reaches_address_8616(
@@ -890,13 +916,26 @@ def _materialize_cfg_condition_chain_expr_8616(
         function_addr = cast(_ConditionMaterializationCFunction8616, metadata.cfunc).addr
     except AttributeError:
         function_addr = None
+    condition_ssa = None
     if isinstance(function_addr, int):
         resolution = registered_function_ssa_artifact_8616(project, function_addr)
+        condition_ssa = resolution.artifact
         false_target = transparent_condition_exit_8616(
             resolution.artifact, false_target, successors, stop_at=true_target
         )
     consumed_conditions: list[ConditionIR] = []
     assignment_index = build_same_block_register_assignment_index_8616(codegen)
+    call_plan = plan_wide_call_condition_8616(
+        root_condition, conditions_by_block, successors, true_target, false_target,
+        artifact=condition_ssa,
+    )
+    if call_plan is not None and all(condition in call_plan.conditions for condition in required_conditions):
+        call_expression = build_proven_wide_call_condition_8616(
+            codegen, call_plan.conditions, call_plan.low_stack, call_plan.operator,
+        )
+        if call_expression is not None:
+            bind_condition_chain_provenance_8616(call_expression, call_plan.conditions)
+            return call_expression
 
     def prove_wide_pair(high_value: IRValue, low_value: IRValue) -> bool:
         high_expression = lower_ir_value_to_c_expr_8616(high_value, project, codegen)
@@ -1371,8 +1410,32 @@ def _materialize_cfg_single_branch_expr_8616(
     successors: dict[int, tuple[int, ...]],
     *,
     materialize_return: bool = True,
+    continuation: int | None = None,
 ) -> CExpression | None:
     """Orient one no-else branch from typed targets and exclusive CFG reachability."""
+    artifact = None
+    if continuation is not None:
+        metadata = cast(_ConditionMaterializationCodegen8616, codegen)
+        function = cast(_ConditionMaterializationCFunction8616, metadata.cfunc)
+        artifact = registered_function_ssa_artifact_8616(project, function.addr).artifact
+    goto_polarity = conditional_goto_polarity_8616(body, artifact, condition, continuation, successors)
+    if goto_polarity is not None:
+        replacement = materialize_condition_ir_expression_8616(project, codegen, condition)
+        if replacement is not None:
+            return replacement if goto_polarity else invert_structured_condition_8616(replacement, codegen)
+    body_target = first_statement_block_8616(body)
+    if continuation is not None and body_target is not None:
+        region = prove_local_condition_region_8616(
+            condition, body_target, continuation, conditions_by_block, successors, artifact,
+        )
+        if region is not None:
+            replacement = _materialize_cfg_condition_chain_expr_8616(
+                project, codegen, condition, conditions_by_block, successors,
+                region.body_target, region.continuation, required_conditions=region.conditions,
+            )
+            if replacement is not None:
+                record_condition_replay_fact_8616(codegen, condition, region.body_target, region.continuation)
+                return replacement
     proven_return_orientation: bool | None = None
     body_return = sole_return_statement_8616(body)
     expected_return = sole_return_expression_8616(body)
@@ -1608,7 +1671,13 @@ def _single_branch_body_orientation_8616(
     body: object,
     successors: dict[int, tuple[int, ...]],
 ) -> bool | None:
-    """Resolve ownership from an exact body instruction, then its broader block."""
+    """Resolve body ownership; loop-jump origins cannot prove their destinations."""
+    terminal = body
+    while isinstance(terminal, CStatements) and len(terminal.statements) == 1:
+        terminal = terminal.statements[0]
+    if isinstance(terminal, (CBreak, CContinue)):
+        # Their tags identify source instructions, not loop exit/header targets.
+        return None
     exact_target = _first_tagged_ins_addr_8616(body)
     if exact_target is not None:
         orientation = _single_branch_orientation_8616(condition, exact_target, successors)
@@ -1852,6 +1921,9 @@ def materialize_structuring_condition_chains_8616(project: object, codegen: obje
     preserved_side_effect_count = 0
     changed = False
     tag_session = StructuredSubtreeEntryTagQuerySession8616(root)
+    local_continuations = local_condition_continuations_8616(
+        _iter_c_nodes_deep_8616(root), conditions_by_src,
+    )
     typed_surface_ids_by_key: dict[tuple[int, int], set[int]] = {}
     for candidate_node in _iter_c_nodes_deep_8616(root):
         if not isinstance(candidate_node, CIfElse):
@@ -2061,6 +2133,41 @@ def materialize_structuring_condition_chains_8616(project: object, codegen: obje
                 failure_count += 1
                 continue
             if node.else_node is not None:
+                exact_ownership = select_exact_multi_arm_condition_owners_8616(
+                    tuple(first_statement_block_8616(body) for _condition, body in condition_and_nodes),
+                    proven_facts, else_target=first_statement_block_8616(node.else_node),
+                    successors=successors,
+                    artifact=registered_function_ssa_artifact_8616(project, cfunc.addr).artifact,
+                )
+                if exact_ownership.selected:
+                    owned = materialize_multi_arm_condition_owners_8616(
+                        condition_and_nodes, exact_ownership,
+                        lambda fact: materialize_condition_ir_expression_8616(project, codegen, fact),
+                        invert=lambda expression: invert_structured_condition_8616(expression, codegen),
+                    )
+                    raw_count += owned.raw_fact_count
+                    classified_count += owned.classified_fact_count
+                    materialized_count += owned.materialized_count
+                    failure_count += owned.failure_count
+                    if owned.materialized_count:
+                        for (before, _body), (after, _), fact, taken in zip(
+                            condition_and_nodes, owned.condition_and_nodes,
+                            proven_facts, exact_ownership.taken_polarities, strict=True,
+                        ):
+                            taken_target = fact.taken_target
+                            fallthrough_target = fact.fallthrough_target
+                            # Exact ladder selection proves two concrete CFG edges.
+                            assert taken_target is not None and fallthrough_target is not None
+                            record_condition_precision_evidence_8616(project, codegen, before, after)
+                            record_condition_replay_fact_8616(
+                                codegen, fact,
+                                taken_target if taken else fallthrough_target,
+                                fallthrough_target if taken else taken_target,
+                            )
+                        node.condition_and_nodes = list(owned.condition_and_nodes)
+                        tag_session.record_mutation()
+                        changed = True
+                    continue
                 multi_arm = recover_structured_multi_arm_wide_return_chain_8616(
                     codegen,
                     cast(tuple[tuple[CExpression, object], ...], condition_and_nodes),
@@ -2214,6 +2321,7 @@ def materialize_structuring_condition_chains_8616(project: object, codegen: obje
         condition_fact = conditions_by_src.get(condition_ins_addr) if condition_ins_addr is not None else None
         node_fact = conditions_by_src.get(node_ins_addr) if node_ins_addr is not None else None
         node_owner_overrode_condition_origin = False
+        composite_root_selected = False
         semantic_owner_proven = False
         root_fact: ConditionIR | None
         if node_fact is not None and node_fact is not condition_fact:
@@ -2228,6 +2336,14 @@ def materialize_structuring_condition_chains_8616(project: object, codegen: obje
             )
         else:
             root_fact = condition_fact or node_fact
+        if node.else_node is not None:
+            composite_root = select_composite_preheader_root_8616(
+                node_ins_addr, condition, root_fact, targeted, successors,
+            )
+            if composite_root is not None:
+                root_fact = composite_root
+                composite_root_selected = True
+                node_owner_overrode_condition_origin = True
         if node.else_node is None:
             tagged_fact = root_fact
             has_tagged_owner = condition_ins_addr is not None or node_ins_addr is not None
@@ -2378,6 +2494,7 @@ def materialize_structuring_condition_chains_8616(project: object, codegen: obje
                 body,
                 conditions_by_block,
                 successors,
+                continuation=local_continuations.get(id(node)),
             )
             if replacement is None:
                 replay = select_condition_replay_fact_8616(
@@ -2421,17 +2538,21 @@ def materialize_structuring_condition_chains_8616(project: object, codegen: obje
             true_polarity = arm_orientation.true_polarity
             true_target = _first_tagged_cfg_target_8616(body)
             false_target = _first_tagged_cfg_target_8616(node.else_node)
-            direct_true_target = (
-                root_fact.taken_target if true_polarity else root_fact.fallthrough_target
+            exact_polarity = exact_condition_exit_polarity_8616(
+                registered_function_ssa_artifact_8616(project, cfunc.addr).artifact,
+                root_fact, true_target, false_target, successors,
             )
-            direct_false_target = (
-                root_fact.fallthrough_target if true_polarity else root_fact.taken_target
-            )
-            direct_complementary_arms = (
-                arm_orientation.is_complementary
-                and true_target == direct_true_target
-                and false_target == direct_false_target
-            )
+            direct_complementary_arms = exact_polarity is not None
+            if exact_polarity is not None:
+                true_polarity = exact_polarity
+            if not direct_complementary_arms:
+                return_polarity = binary_return_arm_polarity_8616(
+                    root_fact, body, node.else_node,
+                    lambda target: recover_branch_target_return_expression_8616(project, codegen, target),
+                )
+                if return_polarity is not None:
+                    true_polarity = return_polarity
+                    direct_complementary_arms = True
             replay_true_target = replay.true_target if replay is not None else true_target
             replay_false_target = replay.false_target if replay is not None else false_target
             replacement = None
@@ -2457,7 +2578,7 @@ def materialize_structuring_condition_chains_8616(project: object, codegen: obje
                 )
                 failure_count += 1
                 continue
-            if replacement is None and direct_complementary_arms:
+            if replacement is None and direct_complementary_arms and not composite_root_selected:
                 materialized = materialize_condition_ir_expression_8616(project, codegen, root_fact)
                 if materialized is not None:
                     replacement = materialized if true_polarity else invert_structured_condition_8616(
@@ -2485,6 +2606,7 @@ def materialize_structuring_condition_chains_8616(project: object, codegen: obje
                     successors,
                     replay_true_target,
                     replay_false_target,
+                    required_conditions=(condition_fact,) if composite_root_selected and condition_fact is not None else (),
                 )
             if replacement is not None:
                 if replay_true_target is not None and replay_false_target is not None:
@@ -2584,6 +2706,7 @@ def materialize_structuring_condition_chains_8616(project: object, codegen: obje
             suffix_prune.stats
         )
         changed = bool(suffix_prune.removed_statement_count) or changed
+    changed = bool(commit_wide_call_condition_captures_8616(codegen)) or changed
     wide_changed, wide_stats = _materialize_existing_wide_call_return_conditions_8616(
         codegen,
         targeted,
@@ -2681,6 +2804,31 @@ def materialize_structuring_conditions_8616(
         ),
     )
     metadata_codegen._inertia_typed_loop_condition_stats_8616 = loop_stats
+    exit_stats = materialize_existing_loop_exit_conditions_8616(
+        root, typed_conditions, collect_loop_break_topology_8616(project, codegen),
+        condition_key=condition_key_from_tags_8616,
+        lower=lambda condition: materialize_condition_ir_expression_8616(project, codegen, condition),
+        invert=lambda condition: invert_structured_condition_8616(condition, codegen),
+        record_precision=lambda before, after: record_condition_precision_evidence_8616(project, codegen, before, after),
+    )
+    metadata_codegen._inertia_existing_loop_exit_condition_stats_8616 = exit_stats
+    _debug_condition_chain_8616("existing-loop-exits", stats=exit_stats)
+    function_addr = cast(_ConditionMaterializationCFunction8616, metadata_codegen.cfunc).addr if root is not None else None
+    composite_stats = materialize_composite_pretest_conditions_8616(
+        root, typed_conditions, condition_chain_successors_8616(project, codegen),
+        registered_function_ssa_artifact_8616(project, function_addr).artifact if isinstance(function_addr, int) else None,
+        lambda plan: _materialize_cfg_condition_chain_expr_8616(
+            project, codegen, plan.root_condition,
+            {cast(int, fact.block_addr): fact for fact in plan.conditions},
+            condition_chain_successors_8616(project, codegen),
+            plan.exit_target, plan.body_target, required_conditions=plan.conditions,
+        ),
+        lambda before, after: record_condition_precision_evidence_8616(project, codegen, before, after),
+    )
+    metadata_codegen._inertia_composite_pretest_condition_stats_8616 = composite_stats
+    _debug_condition_chain_8616("composite-pretests", stats=composite_stats)
+    if composite_stats.classified_fact_count > 0 and composite_stats.materialized_count == 0:
+        raise PipelineHardError(f"function={function_addr!r}: classified composite pretest condition was not materialized")
     _debug_condition_chain_8616("typed-loops", stats=loop_stats)
     if loop_stats.classified_fact_count > 0 and loop_stats.materialized_count == 0:
         raise PipelineHardError("classified typed loop condition was not materialized")
@@ -2704,7 +2852,7 @@ def materialize_structuring_conditions_8616(
         typed_conditions_changed=typed_changed,
         condition_chains_changed=chains_changed,
         decoded_jcc_changed=jcc_changed,
-        loop_conditions_changed=loop_stats.changed,
+        loop_conditions_changed=loop_stats.changed or composite_stats.changed or bool(exit_stats.changed_count),
         segment_access_provenance_changed=provenance_stats.changed,
         condition_evidence_complete=(
             condition_closure.complete
@@ -2796,16 +2944,19 @@ def prune_dead_flag_assignments_after_structuring_8616(
 
     Callsite lowering can replace register-carrier argument setup with a
     self-contained expression after normal condition cleanup. Run only the
-    existing proof-based flag DCE here; never initialize unknown incoming flags.
+    Lowering-owned dependency proof before cleanup; never initialize unknown incoming flags.
     """
     metadata_codegen = cast(_ConditionMaterializationCodegen8616, codegen)
+    evidence_recorded = True
     try:
         evidence_complete = (
             metadata_codegen._inertia_structuring_condition_materialization_result_8616.condition_evidence_complete
         )
     except AttributeError:
+        evidence_recorded = False
         evidence_complete = True
     if not evidence_complete:
+        metadata_codegen._inertia_packed_flags_cycle_stats_8616 = PackedFlagsCycleStats8616(failure_count=1)
         result = StructuringDeadFlagCleanupResult8616(
             overwritten_flag_assignments_pruned=False,
             unused_flag_assignments_pruned=False,
@@ -2820,6 +2971,19 @@ def prune_dead_flag_assignments_after_structuring_8616(
         return result
     legacy_project = cast(SimpleNamespace, project)
     legacy_codegen = cast(SimpleNamespace, codegen)
+    try:
+        flags_offset = legacy_project.arch.registers["flags"][0]
+        root = legacy_codegen.cfunc.statements
+    except (AttributeError, KeyError, TypeError):
+        cycle_stats = PackedFlagsCycleStats8616(failure_count=1)
+    else:
+        # The stronger cycle proof requires positive evidence, unlike the
+        # historical unread-definition cleanup retained below.
+        if not evidence_recorded:
+            cycle_stats = PackedFlagsCycleStats8616(failure_count=1)
+        else:
+            cycle_stats = prune_unobserved_flag_cycles_8616(root, flags_offset)
+    metadata_codegen._inertia_packed_flags_cycle_stats_8616 = cycle_stats
     overwritten = bool(
         _flags_cleanup._prune_overwritten_flag_assignments_8616(
             legacy_project,
@@ -2833,12 +2997,12 @@ def prune_dead_flag_assignments_after_structuring_8616(
         )
     )
     result = StructuringDeadFlagCleanupResult8616(
-        overwritten_flag_assignments_pruned=overwritten,
+        overwritten_flag_assignments_pruned=overwritten or cycle_stats.materialized_count > 0,
         unused_flag_assignments_pruned=unused,
     )
     metadata_codegen._inertia_structuring_dead_flag_cleanup_8616 = {
         "condition_evidence_complete": True,
-        "overwritten_flag_assignments_pruned": overwritten,
+        "overwritten_flag_assignments_pruned": result.overwritten_flag_assignments_pruned,
         "unused_flag_assignments_pruned": unused,
         "changed": result.changed,
         "owner": "structuring.condition_materialization",

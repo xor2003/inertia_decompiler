@@ -49,6 +49,7 @@ from ..c_ast_utils import _iter_c_nodes_deep_8616, _same_c_expression_8616
 from ..ir.condition_ir import inverted_comparison_op_8616
 from ..semantics.alias_query import describe_alias_storage
 from .loop_break_jcc import loop_branch_guard_facts_8616
+from .shared_loop_exit_publication import publish_shared_loop_exit_report_8616
 from .simple_loop_recovery import InsnSummary8616, _function_instruction_summaries_8616, _summarize_capstone_insn_8616
 
 log: logging.Logger = logging.getLogger(__name__)
@@ -373,6 +374,7 @@ class SwitchLoopExitReturnRepairStats8616:
     refused_loop_has_break: int = 0
     refused_no_switch: int = 0
     refused_case_already_present: int = 0
+    preserved_shared_exit_count: int = 0
 
     def record(self, decision: SwitchLoopExitReturnRepairDecision8616) -> None:
         """Record one repair decision."""
@@ -1030,7 +1032,7 @@ def repair_conditional_continue_guards_from_evidence_8616(project: object, codeg
 
 
 def repair_switch_loop_exit_returns_from_evidence_8616(project: object, codegen: object) -> bool:
-    """Add proven switch exit-return cases to one uniquely owned loop body."""
+    """Preserve proven shared exits or add missing exact switch-return cases."""
     stats = SwitchLoopExitReturnRepairStats8616()
     cfunc = _codegen_cfunc_8616(codegen)
     if cfunc is None:
@@ -1050,6 +1052,11 @@ def repair_switch_loop_exit_returns_from_evidence_8616(project: object, codegen:
     stats.classified_fact_count = len(evidence)
     if not evidence:
         stats.record(SwitchLoopExitReturnRepairDecision8616.REFUSED_NO_EVIDENCE)
+        _store_switch_loop_exit_return_stats_8616(codegen, stats)
+        return False
+    shared = publish_shared_loop_exit_report_8616(project, codegen, evidence)
+    if shared.materialized_count == len(evidence):
+        stats = SwitchLoopExitReturnRepairStats8616(preserved_shared_exit_count=shared.materialized_count)
         _store_switch_loop_exit_return_stats_8616(codegen, stats)
         return False
     candidate_count = _switch_loop_exit_return_candidate_count_8616(roots)

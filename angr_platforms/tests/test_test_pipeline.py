@@ -154,7 +154,7 @@ def test_makefile_exposes_expanded_pipeline_targets():
         "test-ownership-check pytest test-pipeline-expanded"
     ) in makefile
     assert (
-        "\ntest-pipeline-expanded:\n"
+        "\ntest-pipeline-expanded: decompiler-contracts\n"
         '\tflock "/tmp/vextest-test-pipeline.lock" $(PYTHON) '
         "scripts/test_pipeline.py --tier expanded --require-external"
     ) in makefile
@@ -167,11 +167,11 @@ def test_makefile_exposes_fast_quality_target_with_linters():
     assert "\ntype-ratchet-changed:\n" in makefile
     assert "decompiler-check-fast: architecture-check-fast agent-context-check test-ownership-check test-pipeline-fast" in makefile
     assert (
-        '\ntest-pipeline:\n\tflock "/tmp/vextest-test-pipeline.lock" $(PYTHON) '
+        '\ntest-pipeline: decompiler-contracts\n\tflock "/tmp/vextest-test-pipeline.lock" $(PYTHON) '
         "scripts/test_pipeline.py --require-external"
     ) in makefile
     assert (
-        '\ntest-pipeline-fast:\n\tflock "/tmp/vextest-test-pipeline.lock" $(PYTHON) '
+        '\ntest-pipeline-fast: decompiler-contracts\n\tflock "/tmp/vextest-test-pipeline.lock" $(PYTHON) '
         "scripts/test_pipeline.py --tier fast --require-external"
     ) in makefile
     assert "\narchitecture-check-fast:\n\t$(PYTHON) -m scripts.check_decompiler_architecture --startup-only" in makefile

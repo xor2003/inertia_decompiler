@@ -21,6 +21,10 @@ from angr_platforms.X86_16.calling_convention_compat import (
     apply_x86_16_wide_stack_prototype_evidence,
     apply_x86_16_wide_stack_prototype_evidence_at_address,
 )
+from angr_platforms.X86_16.lowering.terminal_call_return_types import (
+    TerminalCallReturnTypeEvidence8616,
+    TerminalCallReturnTypeResult8616,
+)
 
 
 def test_seed_calling_conventions_preserves_binary_proven_stub_prototype() -> None:
@@ -62,16 +66,10 @@ def test_seed_calling_conventions_caches_progress_per_cfg_function(monkeypatch) 
         wide_stack_calls.append(_analysis_function_addr_8616(function))
         return False
 
-    def _track_terminal(project: object, function: SimpleNamespace) -> object:
+    def _track_terminal(project: object, function: SimpleNamespace) -> TerminalCallReturnTypeResult8616:
         terminal_calls.append(_analysis_function_addr_8616(function))
-        return SimpleNamespace(
-            evidence=SimpleNamespace(
-                raw_fact_count=0,
-                normalized_fact_count=0,
-                classified_fact_count=0,
-                materialized_count=0,
-                failure_count=0,
-            ),
+        return TerminalCallReturnTypeResult8616(
+            evidence=TerminalCallReturnTypeEvidence8616(),
             changed=False,
         )
 

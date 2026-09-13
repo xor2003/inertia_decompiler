@@ -115,8 +115,8 @@ def is_runtime_segment_state_symbol_8616(name: str) -> bool:
 
 
 def runtime_segment_name_for_variable_8616(variable: object) -> str | None:
-    """Return the segment represented by one lowered runtime-state variable."""
-    if not isinstance(variable, SimMemoryVariable):
+    """Identify lowered state by its owned category and reserved symbol, not name alone."""
+    if not isinstance(variable, SimMemoryVariable) or variable.category != "inertia_segment_state":
         return None
     variable_name = variable.name
     if not isinstance(variable_name, str):

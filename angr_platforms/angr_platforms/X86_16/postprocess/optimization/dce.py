@@ -54,6 +54,7 @@ from .dce_walk import (
     _dynamic_dce_setattr_8616,
     _walk_statements_8616,
 )
+from .local_declarations import prune_dce_proven_declarations_8616
 
 __all__ = ["_dead_code_elimination_8616"]
 
@@ -1304,35 +1305,14 @@ def _dead_code_elimination_8616(codegen: object) -> bool:
 
     def _drop_pruned_codegen_declarations_8616() -> bool:
         """Remove declaration table entries whose generated assignments were eliminated."""
-        if not pruned_decl_keys and not pruned_decl_names:
+        if not pruned_decl_keys:
             return False
-        live_reads, _block_reads = _collect_read_counts_by_block(root)
-        # Dynamic codegen compatibility boundary.
-        cfunc_obj = _dynamic_dce_getattr_8616(codegen, "cfunc", None)
-        if cfunc_obj is None:
-            return False
-        local_changed = False
-        for attr_name in ("variables_in_use", "unified_local_vars"):
-            # Dynamic codegen CFunction compatibility boundary.
-            mapping = _dynamic_dce_getattr_8616(cfunc_obj, attr_name, None)
-            if not isinstance(mapping, dict):
-                continue
-            for variable, cvar in tuple(mapping.items()):
-                cvar_key = _var_key(cvar) if isinstance(cvar, CVariable) else None
-                cvar_name = _var_name(cvar) if isinstance(cvar, CVariable) else None
-                # Dynamic angr SimVariable compatibility boundary.
-                variable_name = _dynamic_dce_getattr_8616(variable, "name", None)
-                key_is_dead = cvar_key in pruned_decl_keys and int(live_reads.get(cvar_key, 0)) <= 0
-                name_is_dead = (
-                    (isinstance(cvar_name, str)
-                    and cvar_name in pruned_decl_names)
-                    or (isinstance(variable_name, str)
-                    and variable_name in pruned_decl_names)
-                )
-                if key_is_dead or name_is_dead:
-                    del mapping[variable]
-                    local_changed = True
-        return local_changed
+        referenced_keys = {_var_key(node) for node in _iter_with_root(root) if isinstance(node, CVariable)}
+        argument_keys, _argument_names = _argument_keys_8616()
+        dead_keys = frozenset(pruned_decl_keys - referenced_keys - argument_keys)
+        return prune_dce_proven_declarations_8616(
+            codegen, dead_keys=dead_keys, key_of=_var_key,
+        )
 
     def _collect_defined_keys_8616(root_node: object) -> set[tuple[str, int | str]]:
         defined: set[tuple[str, int | str]] = set()

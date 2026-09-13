@@ -19,6 +19,7 @@ from angr.sim_variable import SimStackVariable, SimVariable
 
 from ..pipeline.errors import PipelineHardError
 from .stack_variable_coordinates import (
+    StackCoordinateProducer8616,
     StackVariableCoordinateProjection8616,
     bind_stack_variable_coordinate_cvar_8616,
     record_stack_variable_coordinate_alias_8616,
@@ -89,12 +90,14 @@ def publish_call_output_object_projection_8616(
         return record_stack_variable_coordinate_projection_8616(
             codegen, variable=variable, cvar=base, bp_offset=bp_offset,
             entry_sp_offset=variable.offset, size=byte_size,
+            producer=StackCoordinateProducer8616.CALL_OUTPUT_OBJECT,
         )
     record_stack_variable_coordinate_alias_8616(
         codegen, bp_offset=bp_offset, size=byte_size, variable=variable,
     )
     rebound = bind_stack_variable_coordinate_cvar_8616(
         codegen, bp_offset=bp_offset, size=byte_size, cvar=base,
+        producer=StackCoordinateProducer8616.CALL_OUTPUT_OBJECT,
     )
     if rebound is None:
         raise PipelineHardError("call-output object lost its canonical projection during binding",

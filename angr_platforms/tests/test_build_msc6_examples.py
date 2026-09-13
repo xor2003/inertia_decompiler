@@ -63,6 +63,9 @@ def test_build_fallback_source_includes_dos_header_for_mk_fp():
     assert "#include <dos.h>" in source
     assert "#define MK_FP(seg, off)" in source
     assert "void f(void)" in source
+    prepared = _prepare_decompiled_source_for_c89(source)
+    for macro in ("PTR_U16", "PTR_U32"):
+        assert f"#define {macro}(ptr)" in prepared
 
 
 def test_prepare_decompiled_source_for_c89_normalizes_merged_signature_arg_collisions():
@@ -95,7 +98,18 @@ int sum_globals(void)
     assert "return 13;" in body
 
 
-def test_generated_function_source_contract_accepts_value_returned_call():
+@pytest.mark.parametrize("body,accepted", [
+    ("return apply_twice(inc_one, value);", True),
+    ("unsigned short ax; ax = apply_twice(inc_one, value); inertia_esi = 0; return ax;", True),
+    ("unsigned short ax = apply_twice(inc_one, value); unsigned short result = ax; return result;", True),
+    ("unsigned short ax = apply_twice(inc_one, value); ax = 0; return ax;", False),
+    ("unsigned short ax = apply_twice(inc_one, value); return ax + 1;", False),
+    ("unsigned short ax = apply_twice(inc_one, value); consume(&ax); return ax;", False),
+    ("unsigned short ax = apply_twice(inc_one, value); if (which) ax = 0; return ax;", False),
+    ("unsigned short ax = apply_twice(inc_one, value); *ptr = 0; return ax;", False),
+    ("unsigned short ax = other(inc_one, value); return ax;", False),
+])
+def test_generated_function_source_contract_accepts_value_returned_call(body, accepted):
     contract = GeneratedFunctionSourceContract(
         function_name="select_and_apply",
         required_return_class=GeneratedFunctionReturnClass.VALUE,
@@ -103,19 +117,17 @@ def test_generated_function_source_contract_accepts_value_returned_call():
     )
 
     result = _evaluate_generated_function_source_contract(
-        """
-unsigned short select_and_apply(unsigned short which, unsigned short value)
-{
-    return apply_twice(inc_one, value);
-}
-""",
+        "unsigned short select_and_apply(unsigned short which, unsigned short value) {" + body + "}",
         contract,
     )
 
-    assert result.passed is True
-    assert result.status is GeneratedFunctionSourceContractStatus.PASSED
+    assert result.passed is accepted
+    assert result.status is (
+        GeneratedFunctionSourceContractStatus.PASSED if accepted
+        else GeneratedFunctionSourceContractStatus.RETURNED_CALL_MISSING
+    )
     assert result.materialized_return_class is GeneratedFunctionReturnClass.VALUE
-    assert result.returned_call_present is True
+    assert result.returned_call_present is accepted
 
 
 def test_generated_function_source_contract_rejects_void_accidental_runtime_return():
@@ -1172,6 +1184,7 @@ def test_runtime_gate_links_generic_runtime_support(monkeypatch, tmp_path):
 
     def fake_compile_and_link(_source_path, out_dir, **kwargs):
         seen["runtime_support"] = kwargs.get("runtime_support")
+        seen["source"] = _source_path.read_text(encoding="utf-8")
         (out_dir / kwargs["exe_name"]).write_bytes(b"MZ")
         return True, "", "", "", ""
 
@@ -1190,6 +1203,12 @@ def test_runtime_gate_links_generic_runtime_support(monkeypatch, tmp_path):
 
     assert rebuilt.name == "TESTRT.EXE"
     assert seen["runtime_support"] is True
+    source = seen["source"]
+    assert isinstance(source, str)
+    for register in ("eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"):
+        declaration = f"extern unsigned long inertia_{register};"
+        assert declaration in source
+        assert source.index(declaration) < source.index("int main(")
 
 
 def test_runtime_gate_decompiles_functions_with_bounded_parallelism(monkeypatch, tmp_path):

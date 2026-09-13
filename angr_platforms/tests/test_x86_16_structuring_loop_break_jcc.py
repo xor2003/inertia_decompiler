@@ -276,7 +276,10 @@ def test_structuring_refuses_partial_collapsed_loop_header_materialization(
     assert evidence == []
 
 
-def test_structuring_unconsumed_loop_break_jcc_inserts_guard_before_taken_body():
+def test_structuring_unconsumed_loop_break_jcc_inserts_guard_before_taken_body(monkeypatch):
+    from test_x86_16_loop_break_topology import topology
+
+    monkeypatch.setattr(loop_break_jcc, "collect_loop_break_topology_8616", lambda *_: topology())
     project = SimpleNamespace(arch=Arch86_16())
     codegen = _DummyCodegen()
     pre_stmt = CAssignment(_reg("ax", codegen), _const(1, codegen), codegen=codegen, tags={"ins_addr": 0x4002})
@@ -766,6 +769,7 @@ def test_structuring_does_not_classify_existing_ordinary_if_as_loop_guard() -> N
 
 
 def test_structuring_does_not_persist_unanchored_loop_guard_fact() -> None:
+    """Missing placement proof must remain a refusal, not a classified guard."""
     project = SimpleNamespace(arch=Arch86_16())
     codegen = _DummyCodegen()
     taken_stmt = CAssignment(
@@ -788,7 +792,11 @@ def test_structuring_does_not_persist_unanchored_loop_guard_fact() -> None:
     assert changed is False
     assert loop_branch_guard_facts_8616(codegen) == ()
     stats = codegen._inertia_unconsumed_loop_break_jcc_stats_8616
-    assert stats.classified_fact_count == 1
+    assert stats.raw_fact_count == 1
+    assert stats.normalized_fact_count == 1
+    assert stats.classified_fact_count == 0
+    assert stats.materialized_count == 0
+    assert stats.failure_count == 1
     assert stats.refused_no_loop_anchor == 1
 
 

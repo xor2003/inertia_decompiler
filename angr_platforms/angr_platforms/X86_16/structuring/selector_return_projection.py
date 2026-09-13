@@ -2,7 +2,8 @@
 
 Layer: Structuring.
 Responsibility: compare CFG-proven selector-return fingerprints with the live
-structured AST before Structuring publishes its validation baseline.
+structured AST and refuse unconsumed storage writes before whole-body replacement
+or publication of the Structuring validation baseline.
 Owns CFG shape, loops, switches, and structured condition lowering from proven IR/semantic evidence.
 Do not perform alias-state ownership, widening, type/materialization recovery,
 rewrite cleanup, postprocess, or CLI/reporting work here.
@@ -15,13 +16,22 @@ third-party codegen objects, so boundary reads are isolated and typed here.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
 
-from angr.analyses.decompiler.structured_codegen.c import CIfElse, CReturn, CStatements
+from angr.analyses.decompiler.structured_codegen.c import (
+    CAssignment,
+    CFunctionCall,
+    CIfElse,
+    CReturn,
+    CStatements,
+    CVariable,
+)
+from angr.sim_variable import SimRegisterVariable
 
+from ..c_ast_utils import _iter_c_nodes_deep_8616
 from ..pipeline.errors import PipelineHardError
 
 __all__ = [
@@ -30,8 +40,85 @@ __all__ = [
     "SelectorReturnProjectionVerdict8616",
     "assess_selector_return_projection_8616",
     "collect_selector_return_projection_8616",
+    "mask_accumulator_has_unconsumed_effects_8616",
     "require_selector_return_projection_8616",
+    "require_storage_reconstruction_effects_8616",
+    "selector_return_storage_write_obligations_8616",
+    "storage_reconstruction_has_unconsumed_effects_8616",
 ]
+
+_MINIMUM_SELECTOR_STATEMENTS = 2
+
+
+def selector_return_storage_write_obligations_8616(root: object) -> tuple[CAssignment, ...]:
+    """Collect storage writes a return-only replacement cannot silently discard.
+
+    Selector recovery proves return-register values separately. It provides no
+    elimination proof for stack bytes, materialized runtime state, global memory
+    or unknown lvalues. Keep those writes until an owning analysis proves them
+    dead or a replacement explicitly preserves them. Do not infer dead storage
+    from variable names, balanced PUSH/POP syntax or return-value equivalence.
+    """
+    obligations: dict[int, CAssignment] = {}
+    for node in (root, *_iter_c_nodes_deep_8616(root)):
+        if not isinstance(node, CAssignment):
+            continue
+        lhs = node.lhs
+        if isinstance(lhs, CVariable) and isinstance(lhs.variable, SimRegisterVariable):
+            continue
+        obligations[id(node)] = node
+    return tuple(obligations.values())
+
+
+def mask_accumulator_has_unconsumed_effects_8616(root: object, mask: object) -> bool:
+    """Refuse body replacement unless all storage writes belong to its mask.
+
+    The mask callback supplies the already recovered C storage object. Equal
+    names or offsets do not establish identity; other storage and all calls
+    remain obligations not covered by accumulator reconstruction.
+    """
+    return storage_reconstruction_has_unconsumed_effects_8616(root, (mask,))
+
+
+def storage_reconstruction_has_unconsumed_effects_8616(root: object, consumed: tuple[object, ...]) -> bool:
+    """Refuse reconstruction that has no proof for existing calls or other writes.
+
+    Consumers supply exact recovered storage objects whose updates they rebuild.
+    This is an exclusion check, not proof of the reconstructed values or control
+    flow. Equal names and offsets do not identify the same storage object.
+    """
+    if any(isinstance(node, CFunctionCall) for node in (root, *_iter_c_nodes_deep_8616(root))):
+        return True
+    for assignment in selector_return_storage_write_obligations_8616(root):
+        lhs = assignment.lhs
+        known_storage = isinstance(lhs, CVariable) and lhs.variable is not None
+        consumed_storage = known_storage and any(
+            isinstance(storage, CVariable) and lhs.variable is storage.variable for storage in consumed
+        )
+        if not consumed_storage:
+            return True
+    return False
+
+
+def require_storage_reconstruction_effects_8616(
+    root: object, consumed: tuple[object, ...], *, function_addr: int
+) -> None:
+    """Stop a required reconstruction before it discards unconsumed effects.
+
+    Use for recovered bodies whose original projection is not certified as a
+    valid fallback. Optional optimizations can instead use the Boolean refusal
+    predicate and keep an independently valid original body.
+    """
+    if not storage_reconstruction_has_unconsumed_effects_8616(root, consumed):
+        return
+    raise PipelineHardError(
+        f"function {function_addr:#x}: required storage reconstruction has unconsumed "
+        "writes or calls; keep the original AST and repair the owning projection",
+        layer="Structuring",
+        function_addr=function_addr,
+        details={"consumed_storage_count": len(consumed),
+                 "storage_write_count": len(selector_return_storage_write_obligations_8616(root))},
+    )
 
 
 class SelectorReturnProjectionVerdict8616(StrEnum):
@@ -130,6 +217,23 @@ class _SelectorReturnCodegenBoundary8616(Protocol):
     _inertia_return_expr_chain_materialized_return_fingerprints_8616: tuple[str, ...]
 
 
+def _selector_branch_values_8616(statement: object) -> tuple[object, object] | None:
+    """Read one condition and its sole valued return without guessing a shape."""
+    if not isinstance(statement, CIfElse) or statement.else_node is not None:
+        return None
+    condition_nodes = tuple(statement.condition_and_nodes)
+    if len(condition_nodes) != 1:
+        return None
+    condition, body = condition_nodes[0]
+    if not isinstance(body, CStatements):
+        return None
+    body_statements = tuple(cast(Iterable[object], body.statements or ()))
+    if len(body_statements) != 1 or not isinstance(body_statements[0], CReturn):
+        return None
+    returned = body_statements[0].retval
+    return None if returned is None else (condition, returned)
+
+
 def collect_selector_return_projection_8616(
     root: object,
     project: object,
@@ -138,8 +242,8 @@ def collect_selector_return_projection_8616(
     """Collect one exact flat selector-return projection from an angr C AST."""
     if not isinstance(root, CStatements):
         return None
-    statements = tuple(root.statements or ())
-    if len(statements) < 2 or not isinstance(statements[-1], CReturn):
+    statements = tuple(cast(Iterable[object], root.statements or ()))
+    if len(statements) < _MINIMUM_SELECTOR_STATEMENTS or not isinstance(statements[-1], CReturn):
         return None
     final_return = statements[-1]
     if final_return.retval is None:
@@ -148,22 +252,12 @@ def collect_selector_return_projection_8616(
     returns: list[str] = []
     try:
         for statement in statements[:-1]:
-            if not isinstance(statement, CIfElse) or statement.else_node is not None:
+            values = _selector_branch_values_8616(statement)
+            if values is None:
                 return None
-            condition_nodes = tuple(statement.condition_and_nodes or ())
-            if len(condition_nodes) != 1:
-                return None
-            condition, body = condition_nodes[0]
-            if not isinstance(body, CStatements):
-                return None
-            body_statements = tuple(body.statements or ())
-            if len(body_statements) != 1 or not isinstance(body_statements[0], CReturn):
-                return None
-            branch_return = body_statements[0]
-            if branch_return.retval is None:
-                return None
+            condition, returned = values
             conditions.append(expr_fingerprint(condition, project))
-            returns.append(expr_fingerprint(branch_return.retval, project))
+            returns.append(expr_fingerprint(returned, project))
         returns.append(expr_fingerprint(final_return.retval, project))
     except (AttributeError, TypeError, ValueError):
         return None

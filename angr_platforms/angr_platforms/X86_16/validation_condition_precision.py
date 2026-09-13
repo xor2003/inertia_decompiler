@@ -33,6 +33,7 @@ __all__ = [
     "ConditionPrecisionValidationResult8616",
     "ConditionPrecisionValidationStats8616",
     "condition_precision_evidence_8616",
+    "condition_precision_token_8616",
     "condition_precision_validation_delta_8616",
     "record_condition_precision_evidence_8616",
 ]
@@ -52,6 +53,7 @@ class ConditionPrecisionEvidence8616:
     before: str
     after: str
     jcc_addr: int | None = None
+    after_integer_view: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,8 +82,12 @@ def record_condition_precision_evidence_8616(
     after: CExpression,
 ) -> bool:
     """Record one exact, nontrivial C-AST condition replacement."""
-    before_fingerprint = _condition_token_8616(_expr_fingerprint(before, project))
-    after_fingerprint = _condition_token_8616(_expr_fingerprint(after, project))
+    # The identity bridge also materializes ConditionIR; defer its import until
+    # Structuring has initialized.
+    from .validation_condition_identity import condition_precision_view_fingerprint_8616
+
+    before_fingerprint = condition_precision_token_8616(_expr_fingerprint(before, project))
+    after_fingerprint = condition_precision_token_8616(_expr_fingerprint(after, project))
     if not before_fingerprint or not after_fingerprint or before_fingerprint == after_fingerprint:
         return False
     jcc_addr = after.tags.get("ins_addr")
@@ -89,6 +95,9 @@ def record_condition_precision_evidence_8616(
         before_fingerprint,
         after_fingerprint,
         jcc_addr if isinstance(jcc_addr, int) else None,
+        condition_precision_token_8616(condition_precision_view_fingerprint_8616(
+            after, lambda expression: _expr_fingerprint(expression, project),
+        )),
     )
     surface = cast(_ConditionPrecisionCodegen8616, codegen)
     try:
@@ -130,8 +139,13 @@ def _delta_tokens_8616(field: object) -> tuple[tuple[str, ...], tuple[str, ...]]
     return tuple(added_value), tuple(removed_value)
 
 
-def _condition_token_8616(token: str) -> str:
-    """Normalize one condition fingerprint without changing its semantics."""
+def condition_precision_token_8616(token: str) -> str:
+    """Normalize and compact a raw condition fingerprint for precision matching.
+
+    Stored evidence already contains these tokens. Consumers must tokenize the
+    current raw fingerprint once, not compare raw text with a recorded digest
+    or repeatedly compact the stored token.
+    """
     normalized = str(
         normalize_condition_fingerprint_string_8616(
             canonicalize_condition_storage_fingerprint_8616(token)
@@ -145,7 +159,7 @@ def _condition_token_8616(token: str) -> str:
 
 def _control_condition_token_8616(token: str) -> str | None:
     """Extract a condition from one supported control-flow fingerprint."""
-    normalized = _condition_token_8616(token)
+    normalized = condition_precision_token_8616(token)
     for prefix in ("if:", "ifbreak:", "while:", "dowhile:", "for:"):
         if normalized.startswith(prefix):
             return normalized[len(prefix) :]
@@ -161,7 +175,7 @@ def _evidence_covers_delta_8616(
     if not removed or len(removed) != len(added):
         return False
     pair_counts = Counter(
-        (_condition_token_8616(item.before), _condition_token_8616(item.after))
+        (condition_precision_token_8616(item.before), condition_precision_token_8616(item.after))
         for item in evidence
     )
 
@@ -229,8 +243,8 @@ def condition_precision_validation_delta_8616(
     control_tokens = parsed["control_flow_effects"]
     if condition_tokens is None or control_tokens is None:
         raise AssertionError("validated condition fields must be present")
-    condition_added = tuple(_condition_token_8616(item) for item in condition_tokens[0])
-    condition_removed = tuple(_condition_token_8616(item) for item in condition_tokens[1])
+    condition_added = tuple(condition_precision_token_8616(item) for item in condition_tokens[0])
+    condition_removed = tuple(condition_precision_token_8616(item) for item in condition_tokens[1])
     control_added = tuple(_control_condition_token_8616(item) for item in control_tokens[0])
     control_removed = tuple(_control_condition_token_8616(item) for item in control_tokens[1])
     normalized_count = len(condition_added) + len(condition_removed)

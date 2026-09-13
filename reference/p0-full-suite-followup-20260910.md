@@ -34,6 +34,43 @@ debt remains independent of pytest results.
 
 ## Remaining Repair Order
 
+### Current Blocker: Proven Private Stack-Write Lifetime
+
+The new `test_x86_16_bios_strict_compilation.py` constructs a sidecar-free MZ
+from the BIOS machine bytes and a separate CALL/exit entry stub. It requires
+successful decompilation, `validation=passed`, clean whole-tail validation,
+and `gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only`. It fails on unread
+`local_4` and `local_2`; the preceding decompilation/validation assertions pass.
+Focused result: **one failed, 109 passed in 8.35s**. This test is admitted to
+both routine selectors, ownership and Make. It is neither skipped nor xfailed;
+previous green routine results predate its admission.
+
+In-process tracing confirms `dce_keep_protected` increases while the generic
+protected-variable set is empty. The exact guard is in `dce_walk.py`: an
+assignment matching direct stack-move/update evidence is preserved before
+ordinary dead-local analysis. This is a deliberate memory-effect safeguard,
+not a formatting failure. Do not remove it merely because a C variable is
+unread. `FrameAccessArtifact` classifies slot coordinates, and
+`StackPointerProvenance8616` records producers; neither contract grants
+permission to discard stack writes.
+
+Required next implementation: establish exact frame-owned byte ranges and
+their lifetime/escape/read closure from IR and Alias, publish typed verdicts
+with source identities, consume them in materialization and validation, then
+permit cleanup only for the proven unobservable effects. Calls, address
+escapes, overlapping reads, unknown coordinates and incomplete CFG evidence
+must refuse unless independently resolved. Add positive and refusal regressions
+at the proof owner before relying on a downstream deletion.
+
+Reason: pass strict compilation without losing machine memory effects.
+DoD: the admitted CLI regression passes unchanged; ES/BDA effects survive;
+the proof has a closed evidence census; refusal tests, whole-tail validation,
+and routine executable gates pass. Definition of failure: source/address
+special cases, treating negative BP offsets alone as private lifetime proof,
+adding dummy uses or suppressing compiler warnings, or deleting protected
+writes directly in Rewrite. Evidence: `/tmp/inertia-bios-dce.log` and
+`/tmp/inertia-bios-strict-regression.log`. Production DCE was not changed.
+
 ### Live Segment Effect Blocker
 
 Investigation at 16:43-16:47 CEST found real semantic loss, not merely a brittle

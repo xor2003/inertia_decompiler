@@ -46,6 +46,7 @@ from .semantics.terminal_stack_cleanup import (
     TerminalReturnFrameKind8616,
     terminal_stack_cleanup_at_address_8616,
 )
+from .simos_86_16 import get_interrupt_handler_class
 
 __all__ = (
     "DOS_SERVICE_BASE_ADDR",
@@ -784,7 +785,7 @@ def interrupt_service_name(call: InterruptCall, api_style: str = "pseudo") -> st
             return "bios_int17_printer" if api_style == "pseudo" else "_bios_printer"
         if call.vector == 0x1A:
             return "bios_timeofday" if api_style == "pseudo" else "_bios_timeofday"
-        return f"int{call.vector:02x}"
+        return get_interrupt_handler_class(call.vector).INT_NAME
 
     return _impl()
 
@@ -2568,6 +2569,10 @@ def patch_dos_int21_call_sites(function: object, binary_path: Path | str | None 
 
 def seed_calling_conventions(cfg: object) -> None:
     """Initialize and refine x86-16 calling conventions for CFG functions."""
+    from .calling_convention_seed_cache import (
+        CallingConventionSeedRevision8616,
+        calling_convention_seed_revision_8616,
+    )
     from .lowering.terminal_call_return_types import apply_terminal_call_return_type_evidence_8616
     from .lowering.terminal_register_return_types import apply_terminal_register_return_type_evidence_8616
 
@@ -2597,30 +2602,27 @@ def seed_calling_conventions(cfg: object) -> None:
 
     def _function_seed_revision_8616(
         function: object,
-    ) -> tuple[tuple[int, ...], str | None, str | None, bool]:
-        """Fingerprint CFG and prototype state that can change seed evidence."""
-        raw_blocks = _dynamic_analysis_getattr_8616(function, "block_addrs_set", ()) or ()
-        blocks = tuple(sorted(int(addr) for addr in raw_blocks if isinstance(addr, int)))
-        prototype = _dynamic_analysis_getattr_8616(function, "prototype", None)
-        return_type = _dynamic_analysis_getattr_8616(prototype, "returnty", None)
-        guessed = bool(_dynamic_analysis_getattr_8616(function, "is_prototype_guessed", True))
-        return (
-            blocks,
-            type(prototype).__name__ if prototype is not None else None,
-            type(return_type).__name__ if return_type is not None else None,
-            guessed,
-        )
+        inspected_targets: tuple[int, ...] | None = None,
+    ) -> CallingConventionSeedRevision8616:
+        """Refresh the exact dependencies recorded by terminal-call typing."""
+        if inspected_targets is None:
+            previous = seeded_revisions.get(_function_identity_8616(function))
+            inspected_targets = tuple(item.target_addr for item in previous.callees) if previous is not None else ()
+        return calling_convention_seed_revision_8616(project, function, inspected_targets)
 
     def _seeded_calling_convention_revisions_8616(
         cfg_obj: object,
-    ) -> dict[int, tuple[tuple[int, ...], str | None, str | None, bool]]:
+    ) -> dict[int, CallingConventionSeedRevision8616]:
         """Read revision-aware cache state across the dynamic CFG boundary."""
         cached = _dynamic_analysis_getattr_8616(
             cfg_obj,
             "_inertia_seeded_calling_convention_revisions_8616",
             None,
         )
-        return dict(cached) if isinstance(cached, Mapping) else {}
+        return {
+            key: value for key, value in cached.items()
+            if isinstance(key, int) and isinstance(value, CallingConventionSeedRevision8616)
+        } if isinstance(cached, Mapping) else {}
 
     def _is_stack_probe_helper_name(name: str | None) -> bool:
         if not isinstance(name, str):
@@ -2717,7 +2719,7 @@ def seed_calling_conventions(cfg: object) -> None:
             if result.changed:
                 terminal_call_return_count += 1
             seeded_ids.add(function_id)
-            seeded_revisions[function_id] = _function_seed_revision_8616(function)
+            seeded_revisions[function_id] = _function_seed_revision_8616(function, result.evidence.inspected_target_addrs)
         try:
             cast(Any, cfg)._inertia_seeded_calling_conventions = seeded_ids
             cast(Any, cfg)._inertia_seeded_calling_convention_revisions_8616 = seeded_revisions

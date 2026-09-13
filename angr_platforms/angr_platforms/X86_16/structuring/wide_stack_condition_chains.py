@@ -22,8 +22,13 @@ from ..alias.condition_register_bindings import (
 )
 from ..ir.condition_ir import ConditionIR, ConditionOp
 from ..ir.core import IRValue
+from . import wide_condition_ordering
 
 type WideStackPairProver8616 = Callable[[IRValue, IRValue], bool]
+
+_WORD_BYTES: int = 2
+_MAX_EVALUATED_BLOCKS: int = 24
+_MAX_DISCOVERED_BLOCKS: int = 48
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +71,7 @@ def _stack_word_8616(value: object) -> IRValue | None:
     """Return one exact typed BP-relative stack word."""
     if not isinstance(value, IRValue):
         return None
-    if value.name != "bp" or value.size != 2:
+    if value.name != "bp" or value.size != _WORD_BYTES:
         return None
     return value
 
@@ -85,7 +90,7 @@ def _adjacent_stack_words_8616(high: IRValue, low: IRValue) -> bool:
     return (
         isinstance(high.offset, int)
         and isinstance(low.offset, int)
-        and high.offset == low.offset + 2
+        and high.offset == low.offset + _WORD_BYTES
     )
 
 
@@ -194,19 +199,7 @@ def relation_for_wide_stack_condition_8616(
 
 def wide_stack_operator_result_8616(op: ConditionOp, relation: int) -> bool | None:
     """Evaluate a typed comparison operator over an abstract relation."""
-    if op == "eq":
-        return relation == 0
-    if op == "ne":
-        return relation != 0
-    if op in {"slt", "ult"}:
-        return relation < 0
-    if op in {"sle", "ule"}:
-        return relation <= 0
-    if op in {"sgt", "ugt"}:
-        return relation > 0
-    if op in {"sge", "uge"}:
-        return relation >= 0
-    return None
+    return wide_condition_ordering.wide_operator_result_8616(op, relation)
 
 
 def _chain_outcome_8616(
@@ -222,7 +215,7 @@ def _chain_outcome_8616(
     """Evaluate one typed CFG chain without materializing a C expression."""
     condition = root
     visited: set[int] = set()
-    while len(visited) < 24:
+    while len(visited) < _MAX_EVALUATED_BLOCKS:
         relation = relation_for_wide_stack_condition_8616(
             condition, pair, high_relation, low_relation
         )
@@ -260,11 +253,7 @@ def _chain_outcome_8616(
 
 def candidate_wide_stack_ops_8616(signed: bool | None) -> tuple[ConditionOp, ...]:
     """Return possible direct operators for one high-word family."""
-    if signed is True:
-        return ("eq", "ne", "slt", "sle", "sgt", "sge")
-    if signed is False:
-        return ("eq", "ne", "ult", "ule", "ugt", "uge")
-    return ("eq", "ne")
+    return wide_condition_ordering.candidate_wide_ops_8616(signed)
 
 
 def reachable_wide_stack_conditions_8616(
@@ -279,7 +268,7 @@ def reachable_wide_stack_conditions_8616(
     result: list[ConditionIR] = []
     seen_conditions: set[int] = set()
     visited: set[int] = set()
-    while pending and len(visited) < 48:
+    while pending and len(visited) < _MAX_DISCOVERED_BLOCKS:
         condition = pending.pop()
         condition_identity = id(condition)
         if condition_identity in seen_conditions:
@@ -327,37 +316,14 @@ def recover_wide_stack_condition_chain_8616(
             stats=WideStackConditionChainStats8616(len(conditions), len(conditions), 0, 0, 0),
         )
     pair = pairs[0]
-    outcomes: dict[tuple[int, int], bool] = {}
-    for high_relation in (-1, 0, 1):
-        for low_relation in (-1, 0, 1):
-            outcome = _chain_outcome_8616(
-                root,
-                pair,
-                conditions_by_block,
-                successors,
-                true_target,
-                false_target,
-                high_relation,
-                low_relation,
-            )
-            if outcome is None:
-                return WideStackConditionChainResult8616(
-                    condition=None,
-                    stats=WideStackConditionChainStats8616(len(conditions), len(conditions), 1, 0, 1),
-                )
-            outcomes[(high_relation, low_relation)] = outcome
-
-    matching_ops: list[ConditionOp] = []
-    for op in candidate_wide_stack_ops_8616(pair.signed):
-        if all(
-            wide_stack_operator_result_8616(
-                op, high_relation if high_relation != 0 else low_relation
-            )
-            == outcome
-            for (high_relation, low_relation), outcome in outcomes.items()
-        ):
-            matching_ops.append(op)  # noqa: PERF401
-    if len(matching_ops) != 1:
+    operator = wide_condition_ordering.prove_wide_ordering_operator_8616(
+        pair.signed,
+        lambda high, low: _chain_outcome_8616(
+            root, pair, conditions_by_block, successors,
+            true_target, false_target, high, low,
+        ),
+    )
+    if operator is None:
         return WideStackConditionChainResult8616(
             condition=None,
             stats=WideStackConditionChainStats8616(len(conditions), len(conditions), 1, 0, 1),
@@ -365,10 +331,13 @@ def recover_wide_stack_condition_chain_8616(
 
     condition = replace(
         root,
-        op=matching_ops[0],
+        op=operator,
         lhs=replace(pair.low_left, size=4),
         rhs=replace(pair.low_right, size=4),
         width_bits=32,
+        # Keep source addresses, but not obsolete word-register operand bindings.
+        producer_semantics=None,
+        register_bindings=(),
         source=(*root.source, "wide-stack-condition-chain"),
     )
     return WideStackConditionChainResult8616(

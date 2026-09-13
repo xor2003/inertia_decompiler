@@ -60,7 +60,6 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CBinaryOp,
     CBreak,
     CConstant,
-    CContinue,
     CDirtyExpression,
     CDoWhileLoop,
     CExpression,
@@ -179,6 +178,10 @@ from .lowering.stack_prototype_materialization import (
     positive_stack_specs_8616,
     reconcile_callsite_interface_declarations_8616,
     reconcile_exact_stack_argument_prototype_8616,
+)
+from .lowering.stack_value_projection import (
+    StackValueProjectionStatus8616,
+    project_stack_value_range_8616,
 )
 from .lowering.stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
@@ -555,6 +558,7 @@ from .structuring.return_chains import (
 from .structuring.return_chains import (
     tail_call_payload_from_statement_8616 as _structuring_tail_call_payload_from_statement_8616,
 )
+from .structuring.selector_return_projection import storage_reconstruction_has_unconsumed_effects_8616
 from .tail_validation import (
     X86_16TailValidationSummary,
     build_x86_16_tail_validation_cached_result,
@@ -1185,7 +1189,7 @@ def _clone_c_expr_8616(expr: StructuredAstValue) -> StructuredAstValue:
 def _terminal_stack_arg_expr_8616(
     project: StructuredAstValue, codegen: StructuredAstValue, disp: int, size: int
 ) -> StructuredAstValue:
-    """Materialize a terminal stack arg through dynamic angr/codegen compatibility objects."""
+    """Consume Lowering's stack views before legacy dynamic slot compatibility."""
 
     def _record_stack_arg_decision(decision: _TerminalStackArgDecision8616) -> None:
         if codegen is None:
@@ -1204,11 +1208,25 @@ def _terminal_stack_arg_expr_8616(
     assert codegen is not None
     project_arch = getattr(project, "arch", None)
 
-    width = max(2, int(size) or 2)
+    # ABI slot rounding does not change the width of a machine load.
+    width = int(size) or 2
     canonical_disp = _canonical_stack_offset_8616(int(disp))
     if canonical_disp is None:
         _record_stack_arg_decision(_TerminalStackArgDecision8616.FALLBACK)
         return _clone_c_expr_8616(_jcc._stack_slot_expr_8616(codegen, int(disp), width))
+
+    projection = project_stack_value_range_8616(codegen, canonical_disp, width)
+    if projection.status is StackValueProjectionStatus8616.CONTAINED_VALUE:
+        _record_stack_arg_decision(_TerminalStackArgDecision8616.EXISTING_STACK_SLOT)
+        return projection.expression
+    if projection.status not in {
+        StackValueProjectionStatus8616.NO_OWNER,
+        StackValueProjectionStatus8616.EXACT_VALUE,
+    }:
+        # A proven conflict or out-of-value access must not create competing storage.
+        return None
+
+    # Exact reads retain their existing interface identity and prototype binding.
 
     prototype = getattr(cfunc, "functy", None) or getattr(cfunc, "prototype", None)
     if prototype is None:
@@ -3251,6 +3269,11 @@ def _materialize_global_byte_index_sum_loop_8616(project: StructuredAstValue, co
             stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
             continue
 
+        if storage_reconstruction_has_unconsumed_effects_8616(codegen.cfunc.statements, (total_expr, i_expr)):
+            # Optional reconstruction cannot consume unrelated effects; keep the native body.
+            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
+            continue
+
         stats["classified_fact_count"] = int(stats.get("classified_fact_count", 0) or 0) + 1
         word_addr = int(word_global[0]) & 0xFFFF
         byte_addr = int(byte_global[0]) & 0xFFFF
@@ -3341,246 +3364,6 @@ def _materialize_global_byte_index_sum_loop_8616(project: StructuredAstValue, co
     return False
 
 
-def _materialize_stack_arg_accumulator_loop_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
-    """Recover a stack-slot accumulator loop from CFG/instruction evidence.
-
-    Pattern:
-        local = 0;
-    loop:
-        if (arg <= 0) return local;
-        local += arg;
-        --arg;
-        if (arg & mask) continue;
-        local += const;
-        goto loop;
-
-    This is a generic C89 backward-edge shape emitted by MS C for goto/while
-    accumulators. It uses only instruction, CFG, and stack-slot evidence.
-    """
-    if getattr(codegen, "_inertia_stack_arg_accumulator_loop_materialized_8616", False):
-        return False
-    insns = _linear_function_insns_for_codegen_8616(project, codegen)
-    if len(insns) < 10:
-        return False
-    index_by_addr = {int(getattr(insn, "address", -1)): idx for idx, insn in enumerate(insns)}
-
-    for cmp_idx, cmp_insn in enumerate(insns[:-2]):
-        if str(getattr(cmp_insn, "mnemonic", "")).lower() != "cmp":
-            continue
-        cmp_ops = _boundary_tuple_8616(getattr(cmp_insn, "operands", ()) or ())
-        if len(cmp_ops) != 2:
-            continue
-        arg_slot = _stack_mem_disp_size_8616(cmp_insn, cmp_ops[0])
-        if arg_slot is None or _imm_from_operand_8616(cmp_ops[1]) != 0:
-            continue
-        arg_disp, _arg_size = arg_slot
-        if arg_disp <= 0:
-            continue
-        if any(str(getattr(insn, "mnemonic", "")).lower() in {"call", "lcall"} for insn in insns[cmp_idx:]):
-            continue
-        jcc = insns[cmp_idx + 1]
-        if str(getattr(jcc, "mnemonic", "")).lower() not in {"jle", "jng"}:
-            continue
-        loop_start = int(getattr(cmp_insn, "address", -1))
-        exit_target = _jcc._branch_target_imm_8616(jcc)
-        body_target = _resolve_one_hop_jmp_target_8616(project, _next_linear_jmp_target_8616(insns, cmp_idx + 1))
-        if exit_target is None or body_target is None:
-            continue
-        try:
-            body_block = project.factory.block(int(body_target), opt_level=0)
-        except Exception:
-            continue
-        body_insns = _boundary_tuple_8616(getattr(getattr(body_block, "capstone", None), "insns", ()) or ())
-        if len(body_insns) < 5:
-            continue
-        mov_arg, add_arg, dec_arg, test_arg, continue_jcc = body_insns[:5]
-        if str(getattr(mov_arg, "mnemonic", "")).lower() != "mov":
-            continue
-        mov_ops = _boundary_tuple_8616(getattr(mov_arg, "operands", ()) or ())
-        if len(mov_ops) != 2 or _reg_name_from_operand_8616(mov_arg, mov_ops[0]) != "ax":
-            continue
-        mov_arg_slot = _stack_mem_disp_size_8616(mov_arg, mov_ops[1])
-        if mov_arg_slot is None or int(mov_arg_slot[0]) != int(arg_disp):
-            continue
-        if str(getattr(add_arg, "mnemonic", "")).lower() != "add":
-            continue
-        add_ops = _boundary_tuple_8616(getattr(add_arg, "operands", ()) or ())
-        if len(add_ops) != 2 or _reg_name_from_operand_8616(add_arg, add_ops[1]) != "ax":
-            continue
-        local_slot = _stack_mem_disp_size_8616(add_arg, add_ops[0])
-        if local_slot is None:
-            continue
-        local_disp, _local_size = local_slot
-        if local_disp >= 0:
-            continue
-        if str(getattr(dec_arg, "mnemonic", "")).lower() != "dec":
-            continue
-        dec_ops = _boundary_tuple_8616(getattr(dec_arg, "operands", ()) or ())
-        if len(dec_ops) != 1:
-            continue
-        dec_slot = _stack_mem_disp_size_8616(dec_arg, dec_ops[0])
-        if dec_slot is None or int(dec_slot[0]) != int(arg_disp):
-            continue
-        if str(getattr(test_arg, "mnemonic", "")).lower() != "test":
-            continue
-        test_ops = _boundary_tuple_8616(getattr(test_arg, "operands", ()) or ())
-        if len(test_ops) != 2:
-            continue
-        test_slot = _stack_mem_disp_size_8616(test_arg, test_ops[0])
-        test_mask = _imm_from_operand_8616(test_ops[1])
-        if test_slot is None or int(test_slot[0]) != int(arg_disp) or test_mask is None:
-            continue
-        if str(getattr(continue_jcc, "mnemonic", "")).lower() not in {"jne", "jnz"}:
-            continue
-        continue_target = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(continue_jcc))
-        if continue_target is None or int(continue_target) != loop_start:
-            continue
-        continue_idx = index_by_addr.get(int(getattr(continue_jcc, "address", -1)))
-        if continue_idx is None:
-            continue
-        add_const_target = _resolve_one_hop_jmp_target_8616(project, _next_linear_jmp_target_8616(insns, continue_idx))
-        if add_const_target is None:
-            continue
-        try:
-            add_const_block = project.factory.block(int(add_const_target), opt_level=0)
-        except Exception:
-            continue
-        add_const_insns = _boundary_tuple_8616(getattr(getattr(add_const_block, "capstone", None), "insns", ()) or ())
-        if len(add_const_insns) < 2:
-            continue
-        add_const, back_jmp = add_const_insns[:2]
-        if str(getattr(add_const, "mnemonic", "")).lower() != "add":
-            continue
-        add_const_ops = _boundary_tuple_8616(getattr(add_const, "operands", ()) or ())
-        if len(add_const_ops) != 2:
-            continue
-        add_const_slot = _stack_mem_disp_size_8616(add_const, add_const_ops[0])
-        add_const_value = _imm_from_operand_8616(add_const_ops[1])
-        if add_const_slot is None or int(add_const_slot[0]) != int(local_disp) or add_const_value is None:
-            continue
-        if str(getattr(back_jmp, "mnemonic", "")).lower() not in {"jmp", "ljmp"}:
-            continue
-        back_target = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(back_jmp))
-        if back_target is None or int(back_target) != loop_start:
-            continue
-        initialized = False
-        for init_insn in insns[:cmp_idx]:
-            if str(getattr(init_insn, "mnemonic", "")).lower() != "mov":
-                continue
-            init_ops = _boundary_tuple_8616(getattr(init_insn, "operands", ()) or ())
-            if len(init_ops) != 2:
-                continue
-            init_slot = _stack_mem_disp_size_8616(init_insn, init_ops[0])
-            if (
-                init_slot is not None
-                and int(init_slot[0]) == int(local_disp)
-                and _imm_from_operand_8616(init_ops[1]) == 0
-            ):
-                initialized = True
-                break
-        if not initialized:
-            continue
-        exit_expr = _branch_target_return_expr_8616(project, codegen, int(exit_target))
-        local_expr = _jcc._stack_slot_expr_8616(codegen, int(local_disp), 2)
-        arg_expr = _jcc._stack_slot_expr_8616(codegen, int(arg_disp), 2)
-        if exit_expr is None or local_expr is None or arg_expr is None:
-            continue
-        if _expr_fingerprint(exit_expr, project) != _expr_fingerprint(local_expr, project):
-            continue
-        local0 = _clone_c_value_for_codegen_tree_8616(local_expr)
-        zero = CConstant(0, SimTypeShort(False), codegen=codegen)
-        one = CConstant(1, SimTypeShort(False), codegen=codegen)
-        mask = CConstant(int(test_mask), SimTypeShort(False), codegen=codegen)
-        add_value = CConstant(int(add_const_value), SimTypeShort(False), codegen=codegen)
-        loop_body = CStatements(
-            statements=[
-                CIfElse(
-                    [
-                        (
-                            CBinaryOp(
-                                "CmpLE",
-                                _clone_c_value_for_codegen_tree_8616(arg_expr),
-                                CConstant(0, SimTypeShort(False), codegen=codegen),
-                                codegen=codegen,
-                            ),
-                            CStatements(
-                                statements=[CReturn(_clone_c_value_for_codegen_tree_8616(local_expr), codegen=codegen)],
-                                codegen=codegen,
-                            ),
-                        )
-                    ],
-                    else_node=None,
-                    cstyle_ifs=True,
-                    codegen=codegen,
-                ),
-                CAssignment(
-                    _clone_c_value_for_codegen_tree_8616(local_expr),
-                    CBinaryOp(
-                        "Add",
-                        _clone_c_value_for_codegen_tree_8616(local_expr),
-                        _clone_c_value_for_codegen_tree_8616(arg_expr),
-                        codegen=codegen,
-                    ),
-                    codegen=codegen,
-                ),
-                CAssignment(
-                    _clone_c_value_for_codegen_tree_8616(arg_expr),
-                    CBinaryOp(
-                        "Sub",
-                        _clone_c_value_for_codegen_tree_8616(arg_expr),
-                        one,
-                        codegen=codegen,
-                    ),
-                    codegen=codegen,
-                ),
-                CIfElse(
-                    [
-                        (
-                            CBinaryOp(
-                                "CmpNE",
-                                CBinaryOp(
-                                    "And",
-                                    _clone_c_value_for_codegen_tree_8616(arg_expr),
-                                    mask,
-                                    codegen=codegen,
-                                ),
-                                CConstant(0, SimTypeShort(False), codegen=codegen),
-                                codegen=codegen,
-                            ),
-                            CStatements(statements=[CContinue(codegen=codegen)], codegen=codegen),
-                        )
-                    ],
-                    else_node=None,
-                    cstyle_ifs=True,
-                    codegen=codegen,
-                ),
-                CAssignment(
-                    _clone_c_value_for_codegen_tree_8616(local_expr),
-                    CBinaryOp(
-                        "Add",
-                        _clone_c_value_for_codegen_tree_8616(local_expr),
-                        add_value,
-                        codegen=codegen,
-                    ),
-                    codegen=codegen,
-                ),
-            ],
-            codegen=codegen,
-        )
-        statements = [
-            CAssignment(local0, zero, codegen=codegen),
-            CWhileLoop(CConstant(1, SimTypeShort(False), codegen=codegen), loop_body, codegen=codegen),
-        ]
-        codegen.cfunc.statements = CStatements(statements=statements, codegen=codegen)
-        codegen._inertia_stack_arg_accumulator_loop_materialized_8616 = True
-        codegen._inertia_stack_arg_accumulator_loop_stack_slots_8616 = {
-            "arg_disp": int(arg_disp),
-            "local_disp": int(local_disp),
-            "test_mask": int(test_mask),
-            "add_const": int(add_const_value),
-        }
-        return True
-    return False
 
 
 def _block_insns_8616(project: StructuredAstValue, addr: int) -> tuple[StructuredAstValue, ...]:
@@ -4169,234 +3952,8 @@ def _set_codegen_return_type_8616(
         func.is_prototype_guessed = False
 
 
-def _materialize_byte_pointer_fill_loop_8616(
-    project: StructuredAstValue,
-    codegen: StructuredAstValue,
-    insns: tuple[StructuredAstValue, ...],
-    index_by_addr: dict[int, int],
-) -> bool:
-    for init_idx in range(len(insns) - 10):
-        i_disp = _match_stack_zero_init_8616(insns[init_idx])
-        if i_disp is None or i_disp >= 0:
-            continue
-        first_jmp = insns[init_idx + 1]
-        if str(getattr(first_jmp, "mnemonic", "")).lower() not in {"jmp", "ljmp"}:
-            continue
-        inc_addr = int(getattr(insns[init_idx + 2], "address", -1))
-        if not _match_stack_inc_8616(insns[init_idx + 2], i_disp):
-            continue
-        cond_target = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(first_jmp))
-        if cond_target is None or int(cond_target) != int(getattr(insns[init_idx + 3], "address", -1)):
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[init_idx + 3], "ax", 8):
-            continue
-        if not _match_cmp_stack_ax_8616(insns[init_idx + 4], i_disp):
-            continue
-        jcc = insns[init_idx + 5]
-        if str(getattr(jcc, "mnemonic", "")).lower() not in {"jl", "jnge"}:
-            continue
-        body_target = _jcc._branch_target_imm_8616(jcc)
-        exit_target = _resolve_one_hop_jmp_target_8616(
-            project,
-            _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(jcc, "address", -1)), -1)),
-        )
-        if body_target is None or exit_target is None:
-            continue
-        body = _block_insns_8616(project, int(body_target))
-        if len(body) < 5:
-            continue
-        if not _match_stack_mov_to_reg_8616(body[0], "al", 6, size=1):
-            continue
-        if not _match_stack_mov_to_reg_8616(body[1], "bx", i_disp):
-            continue
-        if not _match_stack_mov_to_reg_8616(body[2], "si", 4):
-            continue
-        if not _match_indexed_reg_store_8616(body[3], base_reg="bx", index_reg="si", src_reg="al", size=1):
-            continue
-        if _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(body[4])) != inc_addr:
-            continue
-        dst_expr = _ensure_pointer_stack_arg_expr_8616(
-            project,
-            codegen,
-            4,
-            pointee_size=1,
-            fallback_name="dst",
-        ) or _stack_expr_8616(codegen, 4, 2)
-        value_expr = _stack_expr_8616(codegen, 6, 1)
-        count_expr = _stack_expr_8616(codegen, 8, 2)
-        i_expr = _stack_expr_8616(codegen, int(i_disp), 2)
-        if any(expr is None for expr in (dst_expr, value_expr, count_expr, i_expr)):
-            continue
-        indexed = CIndexedVariable(
-            _clone_c_value_for_codegen_tree_8616(dst_expr),
-            _clone_c_value_for_codegen_tree_8616(i_expr),
-            codegen=codegen,
-        )
-        body_node = CStatements(
-            statements=[
-                CAssignment(indexed, _clone_c_value_for_codegen_tree_8616(value_expr), codegen=codegen),
-                _inc_assignment_8616(i_expr, codegen),
-            ],
-            codegen=codegen,
-        )
-        codegen.cfunc.statements = CStatements(
-            statements=[
-                CAssignment(
-                    _clone_c_value_for_codegen_tree_8616(i_expr),
-                    CConstant(0, SimTypeShort(False), codegen=codegen),
-                    codegen=codegen,
-                ),
-                CWhileLoop(
-                    CBinaryOp(
-                        "CmpLT",
-                        _clone_c_value_for_codegen_tree_8616(i_expr),
-                        _clone_c_value_for_codegen_tree_8616(count_expr),
-                        codegen=codegen,
-                    ),
-                    body_node,
-                    codegen=codegen,
-                ),
-            ],
-            codegen=codegen,
-        )
-        codegen._inertia_pointer_memory_materialized_8616 = "byte_fill_loop"
-        return True
-    return False
 
 
-def _materialize_word_pointer_sum_loop_8616(
-    project: StructuredAstValue,
-    codegen: StructuredAstValue,
-    insns: tuple[StructuredAstValue, ...],
-    index_by_addr: dict[int, int],
-) -> bool:
-    for init_idx in range(len(insns) - 14):
-        total_disp = _match_stack_zero_init_8616(insns[init_idx])
-        i_disp = _match_stack_zero_init_8616(insns[init_idx + 1])
-        if total_disp is None or i_disp is None or total_disp >= 0 or i_disp >= 0 or total_disp == i_disp:
-            continue
-        first_jmp = insns[init_idx + 2]
-        if str(getattr(first_jmp, "mnemonic", "")).lower() not in {"jmp", "ljmp"}:
-            continue
-        inc_addr = int(getattr(insns[init_idx + 3], "address", -1))
-        if not _match_stack_inc_8616(insns[init_idx + 3], i_disp):
-            continue
-        cond_target = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(first_jmp))
-        if cond_target is None or int(cond_target) != int(getattr(insns[init_idx + 4], "address", -1)):
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[init_idx + 4], "ax", 6):
-            continue
-        if not _match_cmp_stack_ax_8616(insns[init_idx + 5], i_disp):
-            continue
-        jcc = insns[init_idx + 6]
-        if str(getattr(jcc, "mnemonic", "")).lower() not in {"jl", "jnge"}:
-            continue
-        body_target = _jcc._branch_target_imm_8616(jcc)
-        exit_target = _resolve_one_hop_jmp_target_8616(
-            project,
-            _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(jcc, "address", -1)), -1)),
-        )
-        if body_target is None or exit_target is None:
-            continue
-        exit_expr = _branch_target_return_expr_8616(project, codegen, int(exit_target))
-        total_expr = _stack_expr_8616(codegen, int(total_disp), 2)
-        if (
-            exit_expr is None
-            or total_expr is None
-            or _expr_fingerprint(exit_expr, project) != _expr_fingerprint(total_expr, project)
-        ):
-            continue
-        body = _block_insns_8616(project, int(body_target))
-        if len(body) < 6:
-            continue
-        if not _match_stack_mov_to_reg_8616(body[0], "bx", i_disp):
-            continue
-        if str(getattr(body[1], "mnemonic", "")).lower() != "shl":
-            continue
-        shl_ops = _boundary_tuple_8616(getattr(body[1], "operands", ()) or ())
-        if (
-            len(shl_ops) != 2
-            or _reg_name_from_operand_8616(body[1], shl_ops[0]) != "bx"
-            or _imm_from_operand_8616(shl_ops[1]) != 1
-        ):
-            continue
-        if not _match_stack_mov_to_reg_8616(body[2], "si", 4):
-            continue
-        if not _match_indexed_reg_load_8616(body[3], dst_reg="ax", base_reg="bx", index_reg="si", size=2):
-            continue
-        if str(getattr(body[4], "mnemonic", "")).lower() != "add":
-            continue
-        add_ops = _boundary_tuple_8616(getattr(body[4], "operands", ()) or ())
-        add_slot = _stack_mem_disp_size_8616(body[4], add_ops[0]) if len(add_ops) == 2 else None
-        if (
-            add_slot is None
-            or int(add_slot[0]) != int(total_disp)
-            or _reg_name_from_operand_8616(body[4], add_ops[1]) != "ax"
-        ):
-            continue
-        if _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(body[5])) != inc_addr:
-            continue
-        src_expr = _ensure_pointer_stack_arg_expr_8616(
-            project,
-            codegen,
-            4,
-            pointee_size=2,
-            fallback_name="src",
-        ) or _stack_expr_8616(codegen, 4, 2)
-        count_expr = _stack_expr_8616(codegen, 6, 2)
-        i_expr = _stack_expr_8616(codegen, int(i_disp), 2)
-        if any(expr is None for expr in (src_expr, count_expr, i_expr)):
-            continue
-        indexed = CIndexedVariable(
-            _clone_c_value_for_codegen_tree_8616(src_expr),
-            _clone_c_value_for_codegen_tree_8616(i_expr),
-            codegen=codegen,
-        )
-        body_node = CStatements(
-            statements=[
-                CAssignment(
-                    _clone_c_value_for_codegen_tree_8616(total_expr),
-                    CBinaryOp(
-                        "Add",
-                        _clone_c_value_for_codegen_tree_8616(total_expr),
-                        indexed,
-                        codegen=codegen,
-                    ),
-                    codegen=codegen,
-                ),
-                _inc_assignment_8616(i_expr, codegen),
-            ],
-            codegen=codegen,
-        )
-        codegen.cfunc.statements = CStatements(
-            statements=[
-                CAssignment(
-                    _clone_c_value_for_codegen_tree_8616(total_expr),
-                    CConstant(0, SimTypeShort(False), codegen=codegen),
-                    codegen=codegen,
-                ),
-                CAssignment(
-                    _clone_c_value_for_codegen_tree_8616(i_expr),
-                    CConstant(0, SimTypeShort(False), codegen=codegen),
-                    codegen=codegen,
-                ),
-                CWhileLoop(
-                    CBinaryOp(
-                        "CmpLT",
-                        _clone_c_value_for_codegen_tree_8616(i_expr),
-                        _clone_c_value_for_codegen_tree_8616(count_expr),
-                        codegen=codegen,
-                    ),
-                    body_node,
-                    codegen=codegen,
-                ),
-                CReturn(_clone_c_value_for_codegen_tree_8616(total_expr), codegen=codegen),
-            ],
-            codegen=codegen,
-        )
-        codegen._inertia_pointer_memory_materialized_8616 = "word_sum_loop"
-        return True
-    return False
 
 
 def _materialize_word_pair_pointer_accumulation_loop_8616(
@@ -5035,9 +4592,7 @@ def _materialize_pointer_memory_idioms_8616(project: StructuredAstValue, codegen
         return False
     index_by_addr = {int(getattr(insn, "address", -1)): idx for idx, insn in enumerate(insns)}
     changed = (
-        _materialize_byte_pointer_fill_loop_8616(project, codegen, insns, index_by_addr)
-        or _materialize_word_pointer_sum_loop_8616(project, codegen, insns, index_by_addr)
-        or _materialize_word_pair_pointer_accumulation_loop_8616(project, codegen, insns, index_by_addr)
+        _materialize_word_pair_pointer_accumulation_loop_8616(project, codegen, insns, index_by_addr)
         or _materialize_word_pointer_first_gt_loop_8616(project, codegen, insns, index_by_addr)
         or _materialize_word_pointer_rotate3_8616(project, codegen, insns, index_by_addr)
         or _materialize_pointer_swap_8616(project, codegen, insns, index_by_addr)
@@ -5061,279 +4616,6 @@ def _materialize_pointer_memory_idioms_postprocess_8616(
     if getattr(codegen, "_inertia_pointer_memory_idiom_lowering_pass_ran_8616", False):
         return False
     return _materialize_pointer_memory_idioms_8616(project, codegen)
-
-
-def _materialize_nested_stack_counter_accumulator_loop_8616(
-    project: StructuredAstValue, codegen: StructuredAstValue
-) -> bool:
-    """Recover nested counter loops with stack-slot locals and threshold breaks."""
-    if getattr(codegen, "_inertia_nested_stack_counter_loop_materialized_8616", False):
-        return False
-    insns = _linear_function_insns_for_codegen_8616(project, codegen)
-    if len(insns) < 20:
-        return False
-    index_by_addr = {int(getattr(insn, "address", -1)): idx for idx, insn in enumerate(insns)}
-    for init_idx in range(len(insns) - 5):
-        total_disp = _match_stack_zero_init_8616(insns[init_idx])
-        i_disp = _match_stack_zero_init_8616(insns[init_idx + 1])
-        if total_disp is None or i_disp is None or total_disp >= 0 or i_disp >= 0 or total_disp == i_disp:
-            continue
-        outer_start = int(getattr(insns[init_idx + 2], "address", -1))
-        if not _match_mov_ax_stack_8616(insns[init_idx + 2], 4):
-            continue
-        if not _match_cmp_stack_ax_8616(insns[init_idx + 3], i_disp):
-            continue
-        outer_jl = insns[init_idx + 4]
-        if str(getattr(outer_jl, "mnemonic", "")).lower() not in {"jl", "jnge"}:
-            continue
-        inner_init_target = _jcc._branch_target_imm_8616(outer_jl)
-        return_target = _resolve_one_hop_jmp_target_8616(
-            project,
-            _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(outer_jl, "address", -1)), -1)),
-        )
-        if inner_init_target is None or return_target is None:
-            continue
-        inner_init = _block_insns_8616(project, int(inner_init_target))
-        if len(inner_init) < 4:
-            continue
-        j_disp = _match_stack_zero_init_8616(inner_init[0])
-        if j_disp is None or j_disp >= 0 or j_disp in {total_disp, i_disp}:
-            continue
-        inner_start = int(getattr(inner_init[1], "address", -1))
-        if not _match_mov_ax_stack_8616(inner_init[1], i_disp):
-            continue
-        if not _match_cmp_stack_ax_8616(inner_init[2], j_disp):
-            continue
-        j_eq = inner_init[3]
-        if str(getattr(j_eq, "mnemonic", "")).lower() not in {"je", "jz"}:
-            continue
-        continue_inc_target = _jcc._branch_target_imm_8616(j_eq)
-        body_target = _resolve_one_hop_jmp_target_8616(
-            project,
-            _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(j_eq, "address", -1)), -1)),
-        )
-        if continue_inc_target is None or body_target is None:
-            continue
-        continue_inc = _block_insns_8616(project, int(continue_inc_target))
-        if len(continue_inc) < 2 or not _match_stack_inc_8616(continue_inc[0], j_disp):
-            continue
-        inner_cond_target = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(continue_inc[1]))
-        if inner_cond_target is None:
-            continue
-        body = _block_insns_8616(project, int(body_target))
-        if len(body) < 5:
-            continue
-        if not _match_mov_ax_stack_8616(body[0], j_disp):
-            continue
-        if str(getattr(body[1], "mnemonic", "")).lower() != "add":
-            continue
-        body_add_ops = _boundary_tuple_8616(getattr(body[1], "operands", ()) or ())
-        if len(body_add_ops) != 2 or _reg_name_from_operand_8616(body[1], body_add_ops[0]) != "ax":
-            continue
-        add_i_slot = _stack_mem_disp_size_8616(body[1], body_add_ops[1])
-        if add_i_slot is None or int(add_i_slot[0]) != int(i_disp):
-            continue
-        if str(getattr(body[2], "mnemonic", "")).lower() != "add":
-            continue
-        body_total_add_ops = _boundary_tuple_8616(getattr(body[2], "operands", ()) or ())
-        if len(body_total_add_ops) != 2 or _reg_name_from_operand_8616(body[2], body_total_add_ops[1]) != "ax":
-            continue
-        body_total_slot = _stack_mem_disp_size_8616(body[2], body_total_add_ops[0])
-        if body_total_slot is None or int(body_total_slot[0]) != int(total_disp):
-            continue
-        if str(getattr(body[3], "mnemonic", "")).lower() != "cmp":
-            continue
-        threshold_ops = _boundary_tuple_8616(getattr(body[3], "operands", ()) or ())
-        if len(threshold_ops) != 2:
-            continue
-        threshold_slot = _stack_mem_disp_size_8616(body[3], threshold_ops[0])
-        threshold = _imm_from_operand_8616(threshold_ops[1])
-        if threshold_slot is None or int(threshold_slot[0]) != int(total_disp) or threshold is None:
-            continue
-        inner_break_jcc = body[4]
-        if str(getattr(inner_break_jcc, "mnemonic", "")).lower() not in {"jg", "jnle"}:
-            continue
-        inner_done_target = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(inner_break_jcc))
-        post_body_inc_target = _resolve_one_hop_jmp_target_8616(
-            project,
-            _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(inner_break_jcc, "address", -1)), -1)),
-        )
-        if inner_done_target is None or post_body_inc_target is None:
-            continue
-        post_body = _block_insns_8616(project, int(post_body_inc_target))
-        if len(post_body) < 4 or not _match_stack_inc_8616(post_body[0], j_disp):
-            continue
-        if int(getattr(post_body[1], "address", -1)) != int(inner_cond_target):
-            continue
-        if not _match_mov_ax_stack_8616(post_body[1], 4) or not _match_cmp_stack_ax_8616(post_body[2], j_disp):
-            continue
-        inner_cond_jcc = post_body[3]
-        if str(getattr(inner_cond_jcc, "mnemonic", "")).lower() not in {"jge", "jnl"}:
-            continue
-        if _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(inner_cond_jcc)) != int(
-            inner_done_target
-        ):
-            continue
-        inner_back = _resolve_one_hop_jmp_target_8616(
-            project,
-            _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(inner_cond_jcc, "address", -1)), -1)),
-        )
-        if inner_back is None or int(inner_back) != int(inner_start):
-            continue
-        outer_done = _block_insns_8616(project, int(inner_done_target))
-        if len(outer_done) < 2:
-            continue
-        if str(getattr(outer_done[0], "mnemonic", "")).lower() != "cmp":
-            continue
-        outer_done_ops = _boundary_tuple_8616(getattr(outer_done[0], "operands", ()) or ())
-        if len(outer_done_ops) != 2:
-            continue
-        outer_threshold_slot = _stack_mem_disp_size_8616(outer_done[0], outer_done_ops[0])
-        outer_threshold = _imm_from_operand_8616(outer_done_ops[1])
-        if (
-            outer_threshold_slot is None
-            or int(outer_threshold_slot[0]) != int(total_disp)
-            or int(outer_threshold or -1) != int(threshold)
-        ):
-            continue
-        outer_break_jcc = outer_done[1]
-        if str(getattr(outer_break_jcc, "mnemonic", "")).lower() not in {"jg", "jnle"}:
-            continue
-        outer_break_target = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(outer_break_jcc))
-        inc_i_target = _resolve_one_hop_jmp_target_8616(
-            project,
-            _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(outer_break_jcc, "address", -1)), -1)),
-        )
-        if outer_break_target is None or inc_i_target is None:
-            continue
-        if int(outer_break_target) != int(return_target):
-            continue
-        inc_i = _block_insns_8616(project, int(inc_i_target))
-        if len(inc_i) < 2 or not _match_stack_inc_8616(inc_i[0], i_disp):
-            continue
-        if _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(inc_i[1])) != int(outer_start):
-            continue
-        total_expr = _jcc._stack_slot_expr_8616(codegen, int(total_disp), 2)
-        i_expr = _jcc._stack_slot_expr_8616(codegen, int(i_disp), 2)
-        j_expr = _jcc._stack_slot_expr_8616(codegen, int(j_disp), 2)
-        limit_expr = _jcc._stack_slot_expr_8616(codegen, 4, 2)
-        exit_expr = _branch_target_return_expr_8616(project, codegen, int(return_target))
-        if any(expr is None for expr in (total_expr, i_expr, j_expr, limit_expr, exit_expr)):
-            continue
-        if _expr_fingerprint(exit_expr, project) != _expr_fingerprint(total_expr, project):
-            continue
-
-        def _var(expr: StructuredAstValue) -> StructuredAstValue:
-            return _clone_c_value_for_codegen_tree_8616(expr)
-
-        def _const(value: int) -> StructuredAstValue:
-            return CConstant(int(value), SimTypeShort(False), codegen=codegen)
-
-        def total_gt_threshold() -> StructuredAstValue:
-            return CBinaryOp("CmpGT", _var(total_expr), _const(int(threshold)), codegen=codegen)  # noqa: B023
-
-        inner_body = CStatements(
-            statements=[
-                CIfElse(
-                    [
-                        (
-                            CBinaryOp("CmpEQ", _var(j_expr), _var(i_expr), codegen=codegen),
-                            CStatements(
-                                statements=[
-                                    CAssignment(
-                                        _var(j_expr),
-                                        CBinaryOp("Add", _var(j_expr), _const(1), codegen=codegen),
-                                        codegen=codegen,
-                                    ),
-                                    CContinue(codegen=codegen),
-                                ],
-                                codegen=codegen,
-                            ),
-                        )
-                    ],
-                    else_node=None,
-                    cstyle_ifs=True,
-                    codegen=codegen,
-                ),
-                CAssignment(
-                    _var(total_expr),
-                    CBinaryOp(
-                        "Add",
-                        _var(total_expr),
-                        CBinaryOp("Add", _var(i_expr), _var(j_expr), codegen=codegen),
-                        codegen=codegen,
-                    ),
-                    codegen=codegen,
-                ),
-                CIfElse(
-                    [
-                        (
-                            total_gt_threshold(),
-                            CStatements(statements=[CBreak(codegen=codegen)], codegen=codegen),
-                        )
-                    ],
-                    else_node=None,
-                    cstyle_ifs=True,
-                    codegen=codegen,
-                ),
-                CAssignment(
-                    _var(j_expr),
-                    CBinaryOp("Add", _var(j_expr), _const(1), codegen=codegen),
-                    codegen=codegen,
-                ),
-            ],
-            codegen=codegen,
-        )
-        outer_body = CStatements(
-            statements=[
-                CAssignment(_var(j_expr), _const(0), codegen=codegen),
-                CDoWhileLoop(
-                    CBinaryOp("CmpLT", _var(j_expr), _var(limit_expr), codegen=codegen),
-                    inner_body,
-                    codegen=codegen,
-                ),
-                CIfElse(
-                    [
-                        (
-                            total_gt_threshold(),
-                            CStatements(statements=[CBreak(codegen=codegen)], codegen=codegen),
-                        )
-                    ],
-                    else_node=None,
-                    cstyle_ifs=True,
-                    codegen=codegen,
-                ),
-                CAssignment(
-                    _var(i_expr),
-                    CBinaryOp("Add", _var(i_expr), _const(1), codegen=codegen),
-                    codegen=codegen,
-                ),
-            ],
-            codegen=codegen,
-        )
-        codegen.cfunc.statements = CStatements(
-            statements=[
-                CAssignment(_var(total_expr), _const(0), codegen=codegen),
-                CAssignment(_var(i_expr), _const(0), codegen=codegen),
-                CWhileLoop(
-                    CBinaryOp("CmpLT", _var(i_expr), _var(limit_expr), codegen=codegen),
-                    outer_body,
-                    codegen=codegen,
-                ),
-                CReturn(_var(total_expr), codegen=codegen),
-            ],
-            codegen=codegen,
-        )
-        codegen._inertia_nested_stack_counter_loop_materialized_8616 = True
-        codegen._inertia_nested_stack_counter_loop_stack_slots_8616 = {
-            "total_disp": int(total_disp),
-            "i_disp": int(i_disp),
-            "j_disp": int(j_disp),
-            "limit_disp": 4,
-            "threshold": int(threshold),
-        }
-        return True
-    return False
 
 
 def _ordered_32bit_conditional_return_pairs_from_cfg_8616(
@@ -7648,26 +6930,6 @@ def _materialize_global_byte_index_sum_loop_postprocess_8616(
     return _materialize_global_byte_index_sum_loop_8616(project, codegen)
 
 
-def _materialize_nested_stack_counter_accumulator_loop_postprocess_8616(
-    project: StructuredAstValue, codegen: StructuredAstValue
-) -> bool:
-    """Compatibility fallback for structuring-owned nested stack counter loops."""
-    # Dynamic boundary: legacy angr codegen only has this flag after structuring loop idiom priming runs.
-    if getattr(codegen, "_inertia_loop_idiom_structuring_pass_ran_8616", False):
-        return False
-    return _materialize_nested_stack_counter_accumulator_loop_8616(project, codegen)
-
-
-def _materialize_stack_arg_accumulator_loop_postprocess_8616(
-    project: StructuredAstValue, codegen: StructuredAstValue
-) -> bool:
-    """Compatibility fallback for structuring-owned stack-argument accumulator loops."""
-    # Dynamic boundary: legacy angr codegen only has this flag after structuring loop idiom priming runs.
-    if getattr(codegen, "_inertia_loop_idiom_structuring_pass_ran_8616", False):
-        return False
-    return _materialize_stack_arg_accumulator_loop_8616(project, codegen)
-
-
 def _materialize_direct_global_incdec_instructions_postprocess_8616(
     project: StructuredAstValue, codegen: StructuredAstValue
 ) -> bool:
@@ -7992,16 +7254,6 @@ def _build_decompiler_postprocess_passes() -> tuple[DecompilerPostprocessPassSpe
         DecompilerPostprocessPassSpec(
             "_materialize_global_byte_index_sum_loop_8616",
             _materialize_global_byte_index_sum_loop_postprocess_8616,
-            True,
-        ),
-        DecompilerPostprocessPassSpec(
-            "_materialize_nested_stack_counter_accumulator_loop_8616",
-            _materialize_nested_stack_counter_accumulator_loop_postprocess_8616,
-            True,
-        ),
-        DecompilerPostprocessPassSpec(
-            "_materialize_stack_arg_accumulator_loop_8616",
-            _materialize_stack_arg_accumulator_loop_postprocess_8616,
             True,
         ),
         DecompilerPostprocessPassSpec(
@@ -10271,8 +9523,6 @@ def _selector_return_contract_active_8616(codegen: StructuredAstValue) -> bool:
         getattr(codegen, "_inertia_return_selector_materialized_8616", False)
         or getattr(codegen, "_inertia_pointer_memory_materialized_8616", None)
         or getattr(codegen, "_inertia_global_byte_sum_loop_materialized_8616", False)
-        or getattr(codegen, "_inertia_nested_stack_counter_loop_materialized_8616", False)
-        or getattr(codegen, "_inertia_stack_arg_accumulator_loop_materialized_8616", False)
     )
 
 
@@ -10417,18 +9667,6 @@ def _postprocess_run_bootstrap_steps_8616(
             ),
             materialize_global_byte_index_sum_loop=lambda: (
                 _materialize_global_byte_index_sum_loop_postprocess_8616(
-                    project,
-                    codegen,
-                )
-            ),
-            materialize_nested_stack_counter_loop=lambda: (
-                _materialize_nested_stack_counter_accumulator_loop_postprocess_8616(
-                    project,
-                    codegen,
-                )
-            ),
-            materialize_stack_arg_accumulator_loop=lambda: (
-                _materialize_stack_arg_accumulator_loop_postprocess_8616(
                     project,
                     codegen,
                 )

@@ -180,6 +180,9 @@ def recover_wide_stack_single_body_condition_8616(
         lhs=replace(pair.low_left, size=4),
         rhs=replace(pair.low_right, size=4),
         width_bits=32,
+        # Keep source addresses, but not obsolete word-register operand bindings.
+        producer_semantics=None,
+        register_bindings=(),
         source=(*root.source, "wide-stack-single-body"),
     )
     return WideStackConditionChainResult8616(

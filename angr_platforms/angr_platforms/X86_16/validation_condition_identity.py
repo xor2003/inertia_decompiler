@@ -13,11 +13,16 @@ from collections.abc import Callable
 from copy import copy
 from typing import Protocol, cast
 
-from angr.analyses.decompiler.structured_codegen.c import CBinaryOp
+from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CVariable
+from angr.sim_type import SimTypeChar, SimTypeInt, SimTypeLong, SimTypeLongLong, SimTypeShort
 
 from .ir.condition_ir import ConditionIR
 from .ir.core import IRBinaryValue, IRValue, MemSpace
-from .lowering.semantic_cast import CSemanticCast8616, is_identity_semantic_variable_cast_8616
+from .lowering.semantic_cast import (
+    CSemanticCast8616,
+    declared_variable_type_8616,
+    is_identity_semantic_variable_cast_8616,
+)
 from .structuring.condition_materialization import materialize_condition_ir_expression_8616
 from .tail_validation_fingerprint import _expr_fingerprint
 
@@ -27,6 +32,50 @@ class _IntegerTypeBoundary8616(Protocol):
 
     size: int | None
     signed: bool | None
+
+
+def condition_precision_view_fingerprint_8616(
+    expression: object,
+    fingerprint: Callable[[object], str],
+) -> str:
+    """Preserve integer views across explicit casts and declaration refinement.
+
+    A same-width variable cast and a variable declared with that destination
+    type have identical value interpretations. Keep the width and signedness
+    in the immutable token; removing a non-identity cast must not match.
+    Other casts retain their original fingerprint, including narrowing casts.
+    """
+    if isinstance(expression, CBinaryOp):
+        lhs = condition_precision_view_fingerprint_8616(expression.lhs, fingerprint)
+        rhs = condition_precision_view_fingerprint_8616(expression.rhs, fingerprint)
+        return f"{expression.op}({lhs},{rhs})"
+    integer_types = (SimTypeChar, SimTypeShort, SimTypeInt, SimTypeLong, SimTypeLongLong)
+    variable = expression
+    type_ = None
+    if isinstance(expression, CSemanticCast8616) and isinstance(expression.expr, CVariable):
+        source = expression.src_type
+        destination = expression.dst_type
+        if not isinstance(source, integer_types) or not isinstance(destination, integer_types):
+            return fingerprint(expression)
+        try:
+            if source.size != destination.size:
+                return fingerprint(expression)
+        except ValueError:
+            return fingerprint(expression)
+        variable = expression.expr
+        type_ = destination
+    elif isinstance(expression, CVariable):
+        type_ = declared_variable_type_8616(expression)
+    if not isinstance(type_, integer_types):
+        return fingerprint(expression)
+    try:
+        width = type_.size
+    except ValueError:
+        return fingerprint(expression)
+    if not isinstance(width, int) or width <= 0 or not isinstance(type_.signed, bool):
+        return fingerprint(expression)
+    signedness = "signed" if type_.signed else "unsigned"
+    return f"IntegerView({width},{signedness},{fingerprint(variable)})"
 
 
 def _typed_operand_fingerprint_8616(
@@ -39,15 +88,16 @@ def _typed_operand_fingerprint_8616(
         lhs = _typed_operand_fingerprint_8616(operand.lhs, expression.lhs, project)
         rhs = _typed_operand_fingerprint_8616(operand.rhs, expression.rhs, project)
         return f"{expression.op}({lhs},{rhs})"
-    if (
-        isinstance(operand, IRValue)
-        and operand.space is MemSpace.DS
-        and operand.expr is None
-        and operand.index is None
-        and operand.name is None
-        and operand.offset >= 0
-    ):
-        return f"global:{operand.offset:#x}"
+    if isinstance(operand, IRValue):
+        direct_global = (
+            operand.space is MemSpace.DS
+            and operand.expr is None
+            and operand.index is None
+            and operand.name is None
+            and operand.offset >= 0
+        )
+        if direct_global:
+            return f"global:{operand.offset:#x}"
     if isinstance(operand, IRValue) and operand.space is not MemSpace.CONST:
         return str(_expr_fingerprint(expression, project))
     return str(_expr_fingerprint(expression, project))
@@ -79,7 +129,16 @@ def project_identity_semantic_casts_8616(
     """
     if isinstance(expression, CSemanticCast8616):
         if not is_identity_semantic_variable_cast_8616(expression):
-            return expression
+            operand = project_identity_semantic_casts_8616(
+                expression.expr, required_signedness=required_signedness,
+            )
+            if operand is expression.expr:
+                return expression
+            # Preserve the outer conversion and all metadata; only its proven
+            # identity children differ in this detached comparison view.
+            projected_cast = copy(expression)
+            projected_cast.expr = operand
+            return projected_cast
         destination = cast(_IntegerTypeBoundary8616, expression.dst_type)
         if required_signedness is not None and destination.signed is not required_signedness:
             return expression

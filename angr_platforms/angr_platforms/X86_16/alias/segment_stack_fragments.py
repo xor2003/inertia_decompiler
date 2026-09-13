@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 
 from ..ir.core import AddressStatus, IRAddress, IRAtom, IRInstr, IRValue, MemSpace
 from ..ir.segment_state_transfer import SEGMENT_REGISTER_SET
+from .stack_pointer_snapshots import StackFrameBase8616
 
 __all__ = [
     "SegmentStackByteOrigin8616",
@@ -131,28 +132,30 @@ def _merge_fragments(
     return merged
 
 
-def _stack_offset(address: IRAddress, sp_delta: int | None) -> int | None:
-    """Resolve an exact same-block SS:SP byte offset from entry SP."""
+def _stack_offset(address: IRAddress, sp_delta: int | StackFrameBase8616 | None) -> int | None:
+    """Resolve an SS frame byte from its proven SP/BP base coordinate."""
     if (
         sp_delta is None
         or address.space is not MemSpace.SS
         or address.status is not AddressStatus.STABLE
-        or address.base != ("sp",)
+        or address.base not in {("sp",), ("bp",)}
     ):
         return None
-    # The lifter folds negative PUSH displacements into the typed address
-    # (for example PUSH AX exposes SS:SP-2 after SP became SP-2), while POP
-    # byte offsets remain relative to the current SP. Do not count a folded,
-    # entry-relative negative displacement twice.
-    if address.offset < 0:
-        return int(address.offset)
+    if isinstance(sp_delta, StackFrameBase8616):
+        if address.base != (sp_delta.register,):
+            return None
+        return sp_delta.entry_sp_offset + int(address.offset)
+    if address.base != ("sp",):
+        return None
+    # The caller supplies the exact current or captured base. A displacement's
+    # sign says nothing about which SP definition owns it.
     return sp_delta + int(address.offset)
 
 
 def stack_load_fragments_8616(
     address: IRAddress,
     width: int,
-    sp_delta: int | None,
+    sp_delta: int | StackFrameBase8616 | None,
     stack_bytes: dict[int, SegmentStackByteOrigin8616],
 ) -> SegmentStackFragments8616:
     """Load only when every requested stack byte has proven identity."""
@@ -172,7 +175,7 @@ def store_stack_fragments_8616(
     address: IRAddress,
     value: IRValue,
     fragments: SegmentStackFragments8616,
-    sp_delta: int | None,
+    sp_delta: int | StackFrameBase8616 | None,
     stack_bytes: dict[int, SegmentStackByteOrigin8616],
 ) -> None:
     """Overwrite exact stack bytes, retaining only fully proved fragments."""

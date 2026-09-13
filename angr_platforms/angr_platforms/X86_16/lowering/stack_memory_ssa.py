@@ -291,7 +291,10 @@ def lower_x86_16_stack_memory_ssa_alias_artifact(
         )
         boundary._inertia_wide_carry_borrow_stack_artifact = wide_stack
     if candidates:
-        reset_local_stack_coordinate_projections_8616(codegen)
+        reset_local_stack_coordinate_projections_8616(
+            codegen,
+            replaced_bp_ranges=frozenset((candidate.address.offset, candidate.address.size) for candidate in candidates),
+        )
     boundary._inertia_semantic_alias_facts = [candidate.storage for candidate in candidates]
     result = (
         lower_stack_accesses_from_alias_facts_8616(

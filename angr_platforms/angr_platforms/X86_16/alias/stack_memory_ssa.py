@@ -10,20 +10,26 @@ Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting wor
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Protocol, cast
 
 from ..ir.core import IRAddress, IRInstr, IRRefusal, MemSpace
 from ..ir.ssa_function import SSAFunctionArtifact
 from ..ir.ssa_memory_contracts import SSAMemoryOverlap8616, SSAMemoryOverlapRelation8616
+from ..ir.ssa_memory_ranges import stack_coordinate_agreement_8616
+from ..ir.stack_extent_evidence import build_stack_extent_evidence_8616
 from ..pipeline.errors import PipelineHardError
 from .alias_model_impl import AliasStorageFacts
 from .logical_stack_memory_projection import project_logical_stack_memory_alias_8616
 from .logical_stack_storage_identity import (
     project_logical_stack_storage_identities_8616,
 )
+from .private_stack_writes import classify_private_stack_writes_8616
+from .stack_address_escape import classify_function_stack_address_escape_8616
 from .stack_memory_access_projection import (
     alias_stack_memory_storage_8616,
     project_stack_memory_access_8616,
+    project_stack_memory_phi_8616,
 )
 from .stack_memory_ssa_contracts import (
     StackMemoryAliasFactKind8616,
@@ -138,6 +144,7 @@ def _incomplete_upstream_artifact_8616(
     logical_storage = project_logical_stack_storage_identities_8616(
         function_ssa.function_addr,
         function_ssa.logical_memory,
+        coordinate_agreement=stack_coordinate_agreement_8616(function_ssa.blocks),
     )
     return StackMemorySSAAliasArtifact8616(
         function_addr=function_ssa.function_addr,
@@ -159,39 +166,21 @@ def _incomplete_upstream_artifact_8616(
     )
 
 
-def build_x86_16_stack_memory_ssa_alias_artifact(
-    function_ssa: SSAFunctionArtifact,
-) -> StackMemorySSAAliasArtifact8616:
-    """Project all function stack-memory SSA inputs into exact Alias facts."""
-    raw_accesses = tuple(
-        (block.addr, instr_index, address)
-        for block in sorted(function_ssa.blocks, key=lambda item: item.addr)
-        for instr_index, instruction in enumerate(block.instrs)
-        if (address := _stack_access_8616(instruction)) is not None
-    )
-    if not function_ssa.memory_stats.complete:
-        return _incomplete_upstream_artifact_8616(function_ssa, raw_accesses)
+def _upstream_refusals_by_block_8616(refusals: tuple[IRRefusal, ...]) -> dict[int | None, list[IRRefusal]]:
+    """Index mutable refusal queues without changing source order or ownership."""
+    grouped: dict[int | None, list[IRRefusal]] = {}
+    for refusal in refusals:
+        grouped.setdefault(refusal.block_addr, []).append(refusal)
+    return grouped
 
-    upstream_by_block: dict[int | None, list[IRRefusal]] = {}
-    for refusal in function_ssa.memory_refusals:
-        upstream_by_block.setdefault(refusal.block_addr, []).append(refusal)
-    facts: list[StackMemorySSAAliasFact8616] = []
-    composed_accesses: list[StackMemorySSAAliasAccess8616] = []
-    overlaps: list[StackMemorySSAAliasOverlap8616] = []
+
+def _unprojected_access_refusals_8616(
+    raw_accesses: tuple[tuple[int, int, IRAddress], ...],
+    accepted_positions: set[tuple[int, int]],
+    upstream_by_block: dict[int | None, list[IRRefusal]],
+) -> list[StackMemoryAliasRefusal8616]:
+    """Pair unmatched accesses with ordered refusals, retaining orphan evidence."""
     refusals: list[StackMemoryAliasRefusal8616] = []
-
-    accepted_positions = {
-        (access.block_addr, access.instr_index) for access in function_ssa.memory_accesses
-    }
-    for access in function_ssa.memory_accesses:
-        projected_access = project_stack_memory_access_8616(access)
-        if isinstance(projected_access, StackMemoryAliasRefusal8616):
-            refusals.append(projected_access)
-        elif isinstance(projected_access, StackMemorySSAAliasAccess8616):
-            composed_accesses.append(projected_access)
-        else:
-            facts.append(projected_access)
-
     for block_addr, instr_index, address in raw_accesses:
         if (block_addr, instr_index) in accepted_positions:
             continue
@@ -210,6 +199,41 @@ def build_x86_16_stack_memory_ssa_alias_artifact(
                 address,
             )
         )
+    return refusals
+
+
+def build_x86_16_stack_memory_ssa_alias_artifact(
+    function_ssa: SSAFunctionArtifact,
+) -> StackMemorySSAAliasArtifact8616:
+    """Project all function stack-memory SSA inputs into exact Alias facts."""
+    raw_accesses = tuple(
+        (block.addr, instr_index, address)
+        for block in sorted(function_ssa.blocks, key=lambda item: item.addr)
+        for instr_index, instruction in enumerate(block.instrs)
+        if (address := _stack_access_8616(instruction)) is not None
+    )
+    if not function_ssa.memory_stats.complete:
+        return _incomplete_upstream_artifact_8616(function_ssa, raw_accesses)
+
+    upstream_by_block = _upstream_refusals_by_block_8616(function_ssa.memory_refusals)
+    facts: list[StackMemorySSAAliasFact8616] = []
+    composed_accesses: list[StackMemorySSAAliasAccess8616] = []
+    overlaps: list[StackMemorySSAAliasOverlap8616] = []
+    refusals: list[StackMemoryAliasRefusal8616] = []
+
+    accepted_positions = {
+        (access.block_addr, access.instr_index) for access in function_ssa.memory_accesses
+    }
+    for access in function_ssa.memory_accesses:
+        projected_access = project_stack_memory_access_8616(access)
+        if isinstance(projected_access, StackMemoryAliasRefusal8616):
+            refusals.append(projected_access)
+        elif isinstance(projected_access, StackMemorySSAAliasAccess8616):
+            composed_accesses.append(projected_access)
+        else:
+            facts.append(projected_access)
+
+    refusals.extend(_unprojected_access_refusals_8616(raw_accesses, accepted_positions, upstream_by_block))
 
     for overlap in function_ssa.memory_overlaps:
         projected_overlap = _alias_overlap_8616(overlap)
@@ -219,48 +243,11 @@ def build_x86_16_stack_memory_ssa_alias_artifact(
             overlaps.append(projected_overlap)
 
     for phi in function_ssa.memory_phi_nodes:
-        addresses = (phi.target, *(incoming.address for incoming in phi.incoming))
-        if any(address.version is None for address in addresses):
-            refusals.append(
-                StackMemoryAliasRefusal8616(
-                    StackMemoryAliasRefusalKind8616.UNVERSIONED_PHI,
-                    phi.block_addr,
-                    None,
-                    "memory phi target and inputs must all carry SSA versions",
-                    phi.target,
-                )
-            )
-            continue
-        storages = tuple(alias_stack_memory_storage_8616(address) for address in addresses)
-        failed = next((storage for storage in storages if isinstance(storage, tuple)), None)
-        if failed is not None:
-            refusals.append(StackMemoryAliasRefusal8616(failed[0], phi.block_addr, None, failed[1], phi.target))
-            continue
-        typed_storages = tuple(storage for storage in storages if not isinstance(storage, tuple))
-        if any(storage != typed_storages[0] for storage in typed_storages[1:]):
-            refusals.append(
-                StackMemoryAliasRefusal8616(
-                    StackMemoryAliasRefusalKind8616.INCONSISTENT_PHI_STORAGE,
-                    phi.block_addr,
-                    None,
-                    "memory phi inputs do not have one exact Alias storage identity",
-                    phi.target,
-                )
-            )
-            continue
-        incoming_versions = tuple(
-            cast(int, incoming.address.version) for incoming in phi.incoming
-        )
-        facts.append(
-            StackMemorySSAAliasFact8616(
-                StackMemoryAliasFactKind8616.PHI,
-                phi.block_addr,
-                None,
-                phi.target,
-                typed_storages[0],
-                incoming_versions,
-            )
-        )
+        projected_phi = project_stack_memory_phi_8616(phi)
+        if isinstance(projected_phi, StackMemoryAliasRefusal8616):
+            refusals.append(projected_phi)
+        else:
+            facts.append(projected_phi)
 
     for source_refusals in upstream_by_block.values():
         refusals.extend(
@@ -289,8 +276,9 @@ def build_x86_16_stack_memory_ssa_alias_artifact(
     logical_storage = project_logical_stack_storage_identities_8616(
         function_ssa.function_addr,
         function_ssa.logical_memory,
+        coordinate_agreement=stack_coordinate_agreement_8616(function_ssa.blocks),
     )
-    return StackMemorySSAAliasArtifact8616(
+    artifact = StackMemorySSAAliasArtifact8616(
         function_addr=function_ssa.function_addr,
         source_ssa=function_ssa,
         facts=tuple(facts),
@@ -306,7 +294,15 @@ def build_x86_16_stack_memory_ssa_alias_artifact(
         logical_storage_identities=logical_storage.identities,
         logical_storage_refusals=logical_storage.refusals,
         logical_storage_stats=logical_storage.stats,
+        stack_extent_evidence=tuple(
+            build_stack_extent_evidence_8616(block)
+            for block in sorted(function_ssa.blocks, key=lambda item: item.addr)
+        ),
     )
+    artifact = replace(artifact, frame_address_escape=classify_function_stack_address_escape_8616(
+        function_ssa, artifact.stack_extent_evidence,
+    ))
+    return replace(artifact, private_write_decisions=classify_private_stack_writes_8616(artifact))
 
 
 def apply_x86_16_stack_memory_ssa_alias_artifact(_project: object, codegen: object) -> bool:

@@ -1,8 +1,8 @@
 """Clean stack declaration maps from exact storage-ownership evidence.
 
 Layer: Types/Lowering.
-Responsibility: remove declaration-only BP control-slot variables after body and
-function-header ownership have been checked by exact alias identity.
+Responsibility: reconcile stack declaration ownership with body and header
+variables, using exact alias identity or already-bound formal argument members.
 Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 This module does not infer arguments, locals, types, or semantics. It never
@@ -22,6 +22,10 @@ from angr.sim_variable import SimStackVariable
 
 from ..alias.alias_model_impl import _stack_slot_identity_for_variable
 from ..c_ast_utils import _iter_c_nodes_deep_8616
+from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+
+_FIRST_BP_ARGUMENT_OFFSET_8616: int = 4
+_DECLARATION_ENTRY_FIELD_COUNT_8616: int = 2
 
 
 class _StackSlotIdentityLike8616(Protocol):
@@ -87,6 +91,41 @@ def _stack_variable_8616(node: object) -> SimStackVariable | None:
     return variable if isinstance(variable, SimStackVariable) else None
 
 
+def declaration_members_are_argument_owned_8616(
+    entries: object, argument_variable_ids: frozenset[int],
+) -> bool:
+    """Recognize a stale declaration whose members all belong to one formal.
+
+    This proves member ownership only. The caller must separately refuse a key
+    still used by the body; byte/word proximity and matching names are not proof.
+    """
+    if not isinstance(entries, (list, tuple, set)) or not entries:
+        return False
+    owners: set[int] = set()
+    for entry in entries:
+        if not isinstance(entry, tuple) or len(entry) != _DECLARATION_ENTRY_FIELD_COUNT_8616:
+            return False
+        variable = _stack_variable_8616(entry[0])
+        if variable is None or id(variable) not in argument_variable_ids:
+            return False
+        owners.add(id(variable))
+    return len(owners) == 1
+
+
+def body_declaration_owner_ids_8616(
+    root: object, argument_variable_ids: frozenset[int],
+) -> frozenset[int]:
+    """Keep physical and unified body owners, excluding stale formal indexes."""
+    owners: set[int] = set()
+    for node in _iter_c_nodes_deep_8616(root):
+        if not isinstance(node, structured_c.CVariable):
+            continue
+        owners.add(id(node.variable))
+        if id(node.variable) not in argument_variable_ids and node.unified_variable is not None:
+            owners.add(id(node.unified_variable))
+    return frozenset(owners)
+
+
 def _stack_identity_8616(
     variable: SimStackVariable,
 ) -> _StackSlotIdentityLike8616 | None:
@@ -129,14 +168,16 @@ def _stack_identities_overlap_8616(
 def _pre_argument_declaration_decision_8616(
     identity: _StackSlotIdentityLike8616,
     *,
+    bp_offset: int | None,
     body_identities: frozenset[_StackSlotIdentityLike8616],
     header_identities: frozenset[_StackSlotIdentityLike8616],
 ) -> PreArgumentStackDeclarationDecision8616:
-    """Classify one declaration without inferring semantics from rendered names."""
-    if identity.base != "bp" or not 0 < identity.offset < 4:
+    """Classify in machine-BP coordinates; compare ownership in native storage coordinates."""
+    if bp_offset is None:
+        return PreArgumentStackDeclarationDecision8616.UNKNOWN_REFUSE
+    if identity.base != "bp" or not 0 < bp_offset < _FIRST_BP_ARGUMENT_OFFSET_8616:
         return PreArgumentStackDeclarationDecision8616.OUTSIDE_PRE_ARGUMENT_RANGE
-    end_offset = identity.end_offset()
-    if end_offset is None or end_offset > 4:
+    if identity.width is None or bp_offset + identity.width > _FIRST_BP_ARGUMENT_OFFSET_8616:
         return PreArgumentStackDeclarationDecision8616.UNKNOWN_REFUSE
     if any(
         _stack_identities_overlap_8616(identity, owned)
@@ -164,25 +205,35 @@ def _declaration_variables_8616(
     return tuple(declarations.values())
 
 
-def prune_unreferenced_pre_argument_declarations_8616(codegen: object) -> bool:
-    """Remove unowned BP control-slot declarations and retain uncertain views."""
+@dataclass(frozen=True, slots=True)
+class _DeclarationSurface8616:
+    """Snapshot the angr declaration maps and their ownership roots."""
+
+    arguments: tuple[object, ...]
+    statements: object
+    variables_in_use: object
+    unified_local_vars: object
+
+
+def _declaration_surface_8616(codegen: object) -> _DeclarationSurface8616 | None:
+    """Read the dynamic angr surface, refusing incomplete ownership roots."""
     typed_codegen = cast(_StackDeclarationCodegen8616, codegen)
     try:
         cfunc = typed_codegen.cfunc
     except AttributeError:
-        return False
+        return None
     if cfunc is None:
-        return False
+        return None
     try:
         if typed_codegen._inertia_return_selector_materialized_8616:
-            return False
+            return None
     except AttributeError:
         pass
     try:
         argument_list = tuple(cfunc.arg_list or ())
         statements = cfunc.statements
     except AttributeError:
-        return False
+        return None
     try:
         variables_in_use = cfunc.variables_in_use
     except AttributeError:
@@ -191,11 +242,32 @@ def prune_unreferenced_pre_argument_declarations_8616(codegen: object) -> bool:
         unified_local_vars = cfunc.unified_local_vars
     except AttributeError:
         unified_local_vars = None
+    return _DeclarationSurface8616(argument_list, statements, variables_in_use, unified_local_vars)
 
-    body_identities = _stack_identities_in_tree_8616(statements)
+
+def _remove_declaration_variable_8616(variable: SimStackVariable, *mappings: object) -> bool:
+    """Remove one classified declaration from every available map."""
+    removed = False
+    for mapping in mappings:
+        if isinstance(mapping, dict) and variable in mapping:
+            del mapping[variable]
+            removed = True
+    return removed
+
+
+def prune_unreferenced_pre_argument_declarations_8616(codegen: object) -> bool:
+    """Remove unowned BP control-slot declarations and retain uncertain views."""
+    surface = _declaration_surface_8616(codegen)
+    if surface is None:
+        return False
+    typed_codegen = cast(_StackDeclarationCodegen8616, codegen)
+    variables_in_use = surface.variables_in_use
+    unified_local_vars = surface.unified_local_vars
+
+    body_identities = _stack_identities_in_tree_8616(surface.statements)
     header_identities = frozenset(
         identity
-        for candidate in argument_list
+        for candidate in surface.arguments
         if (variable := _stack_variable_8616(candidate)) is not None
         if (identity := _stack_identity_8616(variable)) is not None
     )
@@ -217,6 +289,7 @@ def prune_unreferenced_pre_argument_declarations_8616(codegen: object) -> bool:
         normalized_count += 1
         decision = _pre_argument_declaration_decision_8616(
             identity,
+            bp_offset=machine_bp_offset_for_stack_variable_8616(codegen, variable),
             body_identities=body_identities,
             header_identities=header_identities,
         )
@@ -226,11 +299,7 @@ def prune_unreferenced_pre_argument_declarations_8616(codegen: object) -> bool:
         if decision is not PreArgumentStackDeclarationDecision8616.REMOVE_UNREFERENCED:
             continue
         classified_count += 1
-        removed = False
-        for mapping in (variables_in_use, unified_local_vars):
-            if isinstance(mapping, dict) and variable in mapping:
-                del mapping[variable]
-                removed = True
+        removed = _remove_declaration_variable_8616(variable, variables_in_use, unified_local_vars)
         if removed:
             materialized_count += 1
             changed = True
@@ -259,5 +328,7 @@ def prune_unreferenced_pre_argument_declarations_8616(codegen: object) -> bool:
 __all__ = [
     "PreArgumentStackDeclarationDecision8616",
     "PreArgumentStackDeclarationStats8616",
+    "body_declaration_owner_ids_8616",
+    "declaration_members_are_argument_owned_8616",
     "prune_unreferenced_pre_argument_declarations_8616",
 ]

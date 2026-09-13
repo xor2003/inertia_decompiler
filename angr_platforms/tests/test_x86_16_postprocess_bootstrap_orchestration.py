@@ -27,8 +27,6 @@ def _operations(
         materialize_direct_stack_incdec=operation("incdec"),
         apply_typed_conditions=operation("conditions"),
         materialize_global_byte_index_sum_loop=operation("byte-loop"),
-        materialize_nested_stack_counter_loop=operation("nested-loop"),
-        materialize_stack_arg_accumulator_loop=operation("arg-loop"),
         materialize_selector_return_branches=operation("selector"),
         rewrite_decoded_jcc_conditions=operation("jcc"),
         selector_return_contract_active=lambda: selector_active,
@@ -58,8 +56,6 @@ def test_bootstrap_preserves_order_and_skip_policy() -> None:
         "mov",
         "incdec",
         "byte-loop",
-        "nested-loop",
-        "arg-loop",
         "selector",
         "jcc",
     ]

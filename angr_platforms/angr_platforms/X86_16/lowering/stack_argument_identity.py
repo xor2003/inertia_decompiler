@@ -21,6 +21,8 @@ from angr.sim_variable import SimStackVariable
 from ..alias.alias_model_impl import _stack_slot_identity_for_variable, _StackSlotIdentity
 from ..c_ast_utils import _replace_c_children_8616
 from .stack_declaration_identity import (
+    body_declaration_owner_ids_8616,
+    declaration_members_are_argument_owned_8616,
     prune_unreferenced_pre_argument_declarations_8616,
 )
 from .stack_variable_coordinates import (
@@ -286,11 +288,17 @@ def unify_positive_bp_argument_identity_8616(
             changed = True
 
     if isinstance(unified_local_vars, dict):
+        argument_variable_ids = frozenset(id(variable) for variable in canonical_variables)
+        body_variable_ids = body_declaration_owner_ids_8616(cfunc.statements, argument_variable_ids)
         for variable in tuple(unified_local_vars):
             if not isinstance(variable, SimStackVariable):
                 continue
             identity = machine_bp_stack_identity_8616(typed_codegen, variable)
-            if identity in canonical_by_identity:
+            # Widening can replace declaration members while leaving a byte key.
+            header_owned_members = id(variable) not in body_variable_ids and declaration_members_are_argument_owned_8616(
+                unified_local_vars[variable], argument_variable_ids,
+            )
+            if identity in canonical_by_identity or header_owned_members:
                 del unified_local_vars[variable]
                 changed = True
 

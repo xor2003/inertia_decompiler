@@ -5,11 +5,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import archinfo
+import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
+from angr_platforms.X86_16.postprocess.optimization.dce import _dead_code_elimination_8616
 from angr_platforms.X86_16.postprocess.optimization.local_declarations import (
     dedupe_equivalent_stack_local_declarations_8616,
+    prune_dce_proven_declarations_8616,
 )
 
 
@@ -121,3 +124,41 @@ def test_dedupe_refuses_conflicting_unified_stack_types() -> None:
 
     assert dedupe_equivalent_stack_local_declarations_8616(codegen) is False
     assert tuple(unified) == (first, regenerated)
+
+
+def test_dce_removes_dead_frame_declarations_without_removing_same_named_live_storage():
+    """DCE must retire declarations by storage key, never by a colliding name."""
+    codegen = _FakeCodegen()
+    dead = _stack_cvar(SimStackVariable(0, 2, base="bp", name="local_1"), codegen)
+    live = _stack_cvar(SimStackVariable(-2, 2, base="bp", name="local_1"), codegen)
+    value = structured_c.CConstant(7, SimTypeShort(False), codegen=codegen)
+    root = structured_c.CStatements([
+        structured_c.CAssignment(dead, value, codegen=codegen),
+        structured_c.CReturn(live, codegen=codegen),
+    ], codegen=codegen)
+    codegen.cfunc = SimpleNamespace(
+        statements=root, arg_list=[],
+        variables_in_use={dead.variable: dead, live.variable: live},
+        unified_local_vars={
+            dead.variable: {(dead, dead.variable_type)},
+            live.variable: {(live, live.variable_type)},
+        },
+    )
+    assert _dead_code_elimination_8616(codegen)
+    assert len(root.statements) == 1
+    assert tuple(codegen.cfunc.variables_in_use) == (live.variable,)
+    assert tuple(codegen.cfunc.unified_local_vars) == (live.variable,)
+
+
+@pytest.mark.parametrize("entry", [None, set(), [(object(), None)], ["unknown"]])
+def test_dce_declaration_cleanup_refuses_unknown_unified_entries(entry):
+    """Missing declaration identity is not evidence that storage is dead."""
+    codegen = _FakeCodegen()
+    variable = SimStackVariable(0, 2, base="bp", name="slot")
+    declarations = {variable: entry}
+    codegen.cfunc = SimpleNamespace(variables_in_use={}, unified_local_vars=declarations)
+    assert not prune_dce_proven_declarations_8616(
+        codegen, dead_keys=frozenset({("stack", 0)}),
+        key_of=lambda cvar: ("stack", cvar.variable.offset),
+    )
+    assert declarations == {variable: entry}

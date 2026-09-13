@@ -37,6 +37,11 @@ from inertia_decompiler.cli_c_text_postprocess import (  # noqa: E402
 from inertia_decompiler.flair_paths import default_flair_startup_root  # noqa: E402
 from inertia_decompiler.project_loading import _build_project  # noqa: E402
 from inertia_decompiler.sidecar_metadata import _load_lst_metadata  # noqa: E402
+from scripts.generated_c_return_contract import has_returned_call_8616  # noqa: E402
+from scripts.msc6_runtime_support import (  # noqa: E402
+    msc6_runtime_state_declarations,
+    msc6_runtime_support_source,
+)
 from scripts.msc6_toolchain_lock import msc6_toolchain_lock  # noqa: E402
 from signature_catalog import build_signature_catalog  # noqa: E402
 
@@ -489,7 +494,8 @@ int main(void)
     if (add_int(10, 20) != 30) {
         return 5;
     }
-    if (rot_ui(9U) != 18U) {
+    if (rot_ui(9U) != 18U || rot_ui(0x8000U) != 1U ||
+        rot_ui(0xffffU) != 0xffffU || rot_ui(0x0080U) != 0x0100U) {
         return 6;
     }
     if (add_long(1000L, 2000L) != 3000L) {
@@ -520,7 +526,7 @@ unsigned char g_table[4] = { 1, 2, 3, 4 };
 unsigned short seen = 10;
 """
 
-STORAGE_CLASSES_HARNESS_MAIN = """
+STORAGE_CLASSES_HARNESS_MAIN: str = """
 int main(void)
 {
     int total;
@@ -534,6 +540,15 @@ int main(void)
     }
     if (bump_static() != 14) {
         return 3;
+    }
+    /* Exercise pre-store values on both sides of a byte carry. */
+    g_counter = 242;
+    if (_sum_globals() != 252) {
+        return 4;
+    }
+    g_counter = 246;
+    if (_sum_globals() != 256) {
+        return 5;
     }
     return 255;
 }
@@ -900,14 +915,6 @@ def _evaluate_generated_function_source_contract(
         )
 
     returned_call_present = contract.required_returned_call is None
-    if contract.required_returned_call is not None:
-        returned_call_present = (
-            re.search(
-                rf"\breturn\s+{re.escape(contract.required_returned_call)}\s*\(",
-                definition,
-            )
-            is not None
-        )
 
     materialized_global_writes: tuple[str, ...] = ()
     shadowed_global_writes: tuple[str, ...] = ()
@@ -919,6 +926,8 @@ def _evaluate_generated_function_source_contract(
     except ParseError:
         parse_failed = True
     else:
+        if contract.required_returned_call is not None:
+            returned_call_present = has_returned_call_8616(function, contract.required_returned_call)
         if contract.required_global_writes:
             storage = _GeneratedFunctionStorageCollector8616()
             storage.visit(function.body)
@@ -1027,6 +1036,9 @@ def _declares_c89_local_identifier(function_body: str, identifier: str) -> bool:
 
 
 def _build_fallback_source(function_bodies: list[str], harness_main: str, *, prefix: str = "") -> str:
+    """Combine extracted bodies with their target runtime ABI and behavior harness."""
+    from angr_platforms.X86_16.lowering.c_runtime_header import render_pointer_storage_macros_8616
+
     prefix_text = textwrap.dedent(prefix).strip()
     prefix_lines = [prefix_text, ""] if prefix_text else []
     return "\n".join(
@@ -1037,6 +1049,7 @@ def _build_fallback_source(function_bodies: list[str], harness_main: str, *, pre
             "#ifndef MK_FP",
             "#define MK_FP(seg, off) ((void far *)((((unsigned long)(seg)) << 16) | (unsigned short)(off)))",
             "#endif",
+            render_pointer_storage_macros_8616("msc-dos"),
             "",
             *prefix_lines,
             *function_bodies,
@@ -1172,7 +1185,8 @@ def _prepare_signature_catalog(
         f"unique_modules={result.unique_module_count} "
         f"duplicates={result.duplicate_module_count}"
     )
-    return cast(Path, result.output_path)
+    catalog_path: Path = result.output_path
+    return catalog_path
 
 
 def _dos_safe_names(stem: str, counter: int | None = None) -> tuple[str, str, str, str]:
@@ -1233,6 +1247,7 @@ def _prepare_decompiled_source_for_c89(raw_c_text: str) -> str:
       appear before function bodies are compiled with correct signatures.
     """
     sanitized = _sanitize_decompiled_source(raw_c_text)
+    sanitized = msc6_runtime_state_declarations() + sanitized
     with_decls = _inject_ms_c89_forward_decls(sanitized)
     with_decls = _normalize_function_signature_arg_names(with_decls)
     with_decls = _alias_generic_globals_to_existing_harness_globals(with_decls)
@@ -1463,9 +1478,7 @@ def _compile_and_link_unlocked(
     if runtime_support:
         runtime_src = out_dir / "INERTIA.C"
         runtime_src.write_text(
-            "/* Generic compiler/runtime helper models for rebuilt decompiler output. */\n"
-            "void aNchkstk(void) {}\n"
-            "void __aNchkstk(void) {}\n",
+            msc6_runtime_support_source(),
             encoding="utf-8",
         )
         runtime_compile_cmd = [

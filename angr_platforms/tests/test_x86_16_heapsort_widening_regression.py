@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from x86_16_heapsort_behavior import assert_heapsort_behavior
 from x86_16_timeout_support import scaled_decompile_timeout as _scaled_timeout
 
 from scripts.check_sortd_sidecar_free import mz_executable_image
@@ -51,15 +52,15 @@ def _run_decompile_addr(
     )
 
 
-def test_sortdemo_heapsort_uses_widened_word_access_for_crow_anchor():
+def test_sortdemo_heapsort_uses_widened_word_access_for_crow_anchor(tmp_path: Path) -> None:
     result = _run_decompile_addr(SORTDEMO_EXE, 0x10970, analysis_timeout=30, subprocess_timeout=120)
 
     assert result.returncode == 0, result.stderr + result.stdout
     assert "function: 0x10970 HeapSort" in result.stdout
     assert "whole-tail validation clean" in f"{result.stderr}{result.stdout}"
     assert "| ir_" not in result.stdout
-    assert "cRow > local_2" in result.stdout or "cRow > i" in result.stdout
-    assert "Swaps(&abarWork[0], &abarWork[local_2]);" in result.stdout or "Swaps(&abarWork[0], &abarWork[i]);" in result.stdout
+    assert "validation=passed" in result.stderr + result.stdout
+    assert_heapsort_behavior(result.stdout, tmp_path, named=True)
     assert "SEG_PTR(ds" not in result.stdout
 
 
@@ -81,28 +82,9 @@ def test_sortd_heapsort_sidecar_free_accepts_typed_segment_live_in(tmp_path: Pat
     assert "validation=passed" in combined
     assert "whole-tail validation clean across 1 functions" in combined
     assert "uninitialized-read:segment-carrier" not in combined
-    # SORTDEMO.C uses ``i = 1; i < cRow``.  Keep the direct source-oriented
-    # condition instead of pinning this gate to an older inverted-break render.
-    first_loop = re.search(
-        r"(?:for \(local_2 = 1; g_0BA2 > (?:\(short\))?local_2;|"
-        r"local_2 = 1;\s+while \(g_0BA2 > (?:\(short\))?local_2\))",
-        result.stdout,
-    )
-    assert first_loop is not None, result.stdout
-    second_loop = re.search(
-        r"local_2 = g_0BA2 - 1;\s+for \(; (?:\(short\))?local_2 > 0;",
-        result.stdout,
-    )
-    assert second_loop is not None, result.stdout
-    assert re.search(r"sub_109e8\((?:\(unsigned short\))?local_2\);", result.stdout)
-    assert re.search(
-        r"sub_107b8\(&g_0B4C\[0\], &g_0B4C\[(?:\(unsigned short\))?local_2\]\);",
-        result.stdout,
-    )
+    assert_heapsort_behavior(result.stdout, tmp_path)
     assert "SEG_PTR(inertia_ds, 2892)" not in result.stdout
-    assert "sub_10768(0, local_2);" in result.stdout
     assert re.search(r"^\s+sub_1075b\(", result.stdout, re.MULTILINE) is None
-    assert re.search(r"sub_10a88\((?:\(unsigned short\))?local_2 - 1\);", result.stdout)
 
 
 def test_sortd_shellsort_sidecar_free_accepts_typed_segment_live_in(tmp_path: Path) -> None:

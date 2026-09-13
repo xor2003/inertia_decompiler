@@ -35,5 +35,14 @@ int main(void)
     if (bump_static() != 14) {
         return 3;
     }
+    /* Exercise pre-store values on both sides of a byte carry. */
+    g_counter = 242;
+    if (sum_globals() != 252) {
+        return 4;
+    }
+    g_counter = 246;
+    if (sum_globals() != 256) {
+        return 5;
+    }
     return 255;
 }

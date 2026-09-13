@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import CVariable
+from angr.sim_type import SimType, SimTypeFunction
 from angr.sim_variable import SimStackVariable
 
 from ..lowering.stack_function_coordinates import (
@@ -25,6 +26,9 @@ from ..lowering.stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
 )
 from ..validation_dataflow import DefUseEntryStackRange8616
+
+_BITS_PER_BYTE_8616 = 8
+_FIRST_ARGUMENT_BP_OFFSET_8616 = 4
 
 __all__ = [
     "EntryStackRangeCollection8616",
@@ -68,6 +72,7 @@ class _CFunctionBoundary8616(Protocol):
     """Third-party structured function fields needed by this collector."""
 
     arg_list: Iterable[object] | None
+    functy: object
 
 
 class _CodegenBoundary8616(Protocol):
@@ -84,6 +89,29 @@ def _stack_argument_variable_8616(argument: object) -> SimStackVariable | None:
     if not isinstance(variable, SimStackVariable):
         variable = argument.variable
     return variable if isinstance(variable, SimStackVariable) else None
+
+
+def _declared_argument_type_8616(prototype: object, index: int, argument: CVariable) -> SimType | None:
+    """Read the rendered signature type, falling back only for a partial C AST."""
+    if isinstance(prototype, SimTypeFunction):
+        arguments = prototype.args or ()
+        return arguments[index] if index < len(arguments) else None
+    return argument.variable_type if prototype is None else None
+
+
+def _argument_value_width_8616(argument_type: SimType | None, slot_width: object) -> int | None:
+    """Limit initialized bytes to the C value, never padding or a unified owner."""
+    if not isinstance(slot_width, int) or slot_width <= 0:
+        return None
+    if argument_type is None:
+        return None
+    try:
+        bits = argument_type.size
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if not isinstance(bits, int) or bits <= 0 or bits % _BITS_PER_BYTE_8616:
+        return None
+    return min(slot_width, bits // _BITS_PER_BYTE_8616)
 
 
 def entry_stack_ranges_from_codegen_8616(
@@ -109,6 +137,10 @@ def entry_stack_ranges_from_codegen_8616(
     function_projection = c_function_stack_coordinate_projection_8616(
         boundary.cfunc
     )
+    try:
+        prototype = boundary.cfunc.functy
+    except AttributeError:
+        prototype = None
 
     raw_fact_count = 0
     materialized_count = 0
@@ -119,7 +151,9 @@ def entry_stack_ranges_from_codegen_8616(
         if variable is None:
             continue
         raw_fact_count += 1
-        width = variable.size
+        slot_width = variable.size
+        argument_type = _declared_argument_type_8616(prototype, index, cast(CVariable, argument))
+        width = _argument_value_width_8616(argument_type, slot_width)
         projected_argument = (
             function_projection.arguments[index]
             if function_projection is not None
@@ -130,7 +164,7 @@ def entry_stack_ranges_from_codegen_8616(
             projected_argument.machine_bp_offset
             if projected_argument is not None
             and projected_argument.entry_sp_offset == variable.offset
-            and projected_argument.size == width
+            and projected_argument.size == slot_width
             else machine_bp_offset_for_stack_variable_8616(codegen, variable)
         )
         if (
@@ -138,7 +172,7 @@ def entry_stack_ranges_from_codegen_8616(
             or not isinstance(width, int)
             or width <= 0
             or not isinstance(bp_offset, int)
-            or bp_offset < 4
+            or bp_offset < _FIRST_ARGUMENT_BP_OFFSET_8616
         ):
             failure_count += 1
             continue

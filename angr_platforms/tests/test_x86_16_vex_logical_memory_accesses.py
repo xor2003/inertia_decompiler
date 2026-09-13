@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import pyvex
+from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.ir import MemSpace
+from angr_platforms.X86_16.ir.logical_memory_capture import collect_accesses_for_function
 from angr_platforms.X86_16.ir.logical_memory_contracts import (
     IRLogicalMemoryFailureKind8616,
     IRMemoryAccessKind8616,
@@ -14,6 +17,18 @@ from x86_16_logical_memory_fixtures import (
     memory_instruction,
     resolve_logical_memory,
 )
+
+
+def test_direct_byte_test_records_only_its_executed_byte() -> None:
+    """A TEST byte must not claim the adjacent byte as part of its operand."""
+    with collect_accesses_for_function(0x1000) as captured:
+        pyvex.lift(bytes.fromhex("f6 06 34 12 01 74 02 90 c3"), 0x1000, Arch86_16(), opt_level=0)
+    access = captured.accesses[0]
+    assert access.kind is IRMemoryAccessKind8616.READ
+    assert access.address is not None
+    assert (access.address.space, access.address.offset, access.address.size) == (
+        MemSpace.DS, 0x1234, 1,
+    )
 
 
 def test_real_vex_import_retains_direct_ds_words_as_two_logical_byte_slices() -> None:

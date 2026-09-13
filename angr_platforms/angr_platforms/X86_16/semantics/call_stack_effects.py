@@ -17,26 +17,31 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
 from ..callsite_summary import (
-    CallsitePushExprOp8616,
-    CallsitePushSourceKind8616,
     CallsiteSummary8616,
     callsite_machine_frame_kind_8616,
 )
 from ..ir import (
-    AddressStatus,
     IRAddress,
     IRBlock,
     IRCallStackEffect8616,
     IRFunctionArtifact,
     IRInstr,
-    MemSpace,
 )
+from ..ir.frame_memory_accesses import stable_bp_memory_ranges_8616
+from ..ir.stack_range_overlap import stack_ranges_may_overlap_8616
+from .call_register_effects import (
+    SyntheticCallRegisterEffectVerdict8616,
+    classify_synthetic_call_register_effect_8616,
+)
+from .call_return_segment import ReturnSegmentFrame8616
+from .call_stack_allocation import CallStackAllocationProof8616, resolve_call_stack_allocation_8616
 from .call_stack_effect_contracts import (
     CallStackEffectFact8616,
     CallStackEffectFailure8616,
     CallStackEffectStats8616,
     CallStackEffectVerdict8616,
 )
+from .call_stack_provenance import stack_address_offset_8616
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,20 +78,8 @@ class CallStackEffectArtifact8616:
 
 
 def _stable_bp_ranges_8616(artifact: IRFunctionArtifact) -> tuple[IRAddress, ...]:
-    """Return byte-exact stable BP ranges observed by typed LOAD/STORE facts."""
-    ranges = {
-        address
-        for block in artifact.blocks
-        for instruction in block.instrs
-        if instruction.op in {"LOAD", "STORE"}
-        and instruction.args
-        and isinstance((address := instruction.args[0]), IRAddress)
-        and address.space is MemSpace.SS
-        and address.base == ("bp",)
-        and address.status is AddressStatus.STABLE
-        and address.size > 0
-    }
-    return tuple(sorted(ranges, key=lambda item: (item.offset, item.size)))
+    """Consume both logical operands and exact execution cells from typed IR."""
+    return stable_bp_memory_ranges_8616(artifact)
 
 
 def _refused_effect_8616(
@@ -98,77 +91,6 @@ def _refused_effect_8616(
     return IRCallStackEffect8616(escaped_ranges=escaped, complete=False), failure
 
 
-def _source_kind_8616(source: object) -> CallsitePushSourceKind8616 | None:
-    """Normalize one structured physical source kind without text heuristics."""
-    if not isinstance(source, tuple) or not source:
-        return None
-    raw_kind = source[0]
-    if isinstance(raw_kind, CallsitePushSourceKind8616):
-        return raw_kind
-    if not isinstance(raw_kind, str):
-        return None
-    try:
-        return CallsitePushSourceKind8616(raw_kind)
-    except ValueError:
-        return None
-
-
-def _expression_stack_offset_8616(
-    source: tuple[object, ...],
-) -> tuple[int | None, CallStackEffectFailure8616 | None]:
-    """Resolve an exact BP-derived address expression or retain typed uncertainty."""
-    if len(source) != 3 or not isinstance(source[1], tuple) or not isinstance(source[2], tuple):
-        return None, CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE
-    offset, failure = _stack_address_offset_8616(source[1])
-    if failure is not None:
-        return None, failure
-    for operation in source[2]:
-        if not isinstance(operation, tuple) or not operation:
-            return None, CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE
-        raw_op = operation[0]
-        try:
-            op = raw_op if isinstance(raw_op, CallsitePushExprOp8616) else CallsitePushExprOp8616(raw_op)
-        except (TypeError, ValueError):
-            return None, CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE
-        if op in {CallsitePushExprOp8616.ADD, CallsitePushExprOp8616.SUB}:
-            if len(operation) != 2 or not isinstance(operation[1], int):
-                return None, CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE
-            if offset is not None:
-                offset += operation[1] if op is CallsitePushExprOp8616.ADD else -operation[1]
-            continue
-        if op in {
-            CallsitePushExprOp8616.ADD_SOURCE,
-            CallsitePushExprOp8616.ADC_SOURCE,
-            CallsitePushExprOp8616.SUB_SOURCE,
-            CallsitePushExprOp8616.SBB_SOURCE,
-        }:
-            if len(operation) != 2 or not isinstance(operation[1], tuple):
-                return None, CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE
-            nested_offset, nested_failure = _stack_address_offset_8616(operation[1])
-            if nested_failure is not None:
-                return None, nested_failure
-            if offset is not None or nested_offset is not None:
-                return None, CallStackEffectFailure8616.POINTER_ARGUMENT_MAY_ESCAPE
-            continue
-        if offset is not None:
-            return None, CallStackEffectFailure8616.POINTER_ARGUMENT_MAY_ESCAPE
-    return offset, None
-
-
-def _stack_address_offset_8616(source: object) -> tuple[int | None, CallStackEffectFailure8616 | None]:
-    """Return exact caller-frame address provenance from one physical PUSH source."""
-    kind = _source_kind_8616(source)
-    if kind is None or not isinstance(source, tuple):
-        return None, CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE
-    if kind is CallsitePushSourceKind8616.BP_ADDRESS:
-        if len(source) < 2 or not isinstance(source[1], int):
-            return None, CallStackEffectFailure8616.ARGUMENT_SOURCES_INCOMPLETE
-        return source[1], None
-    if kind is CallsitePushSourceKind8616.BP_INDEX_ADDRESS:
-        return None, CallStackEffectFailure8616.POINTER_ARGUMENT_MAY_ESCAPE
-    if kind is CallsitePushSourceKind8616.EXPR:
-        return _expression_stack_offset_8616(source)
-    return None, None
 
 
 def _stack_address_offsets_8616(
@@ -193,7 +115,7 @@ def _stack_address_offsets_8616(
             continue
         if address_break is not None:
             return (), CallStackEffectFailure8616.ARGUMENT_ADDRESS_PROVENANCE_CONFLICT
-        offset, failure = _stack_address_offset_8616(source)
+        offset, failure = stack_address_offset_8616(source)
         if failure is not None:
             return (), failure
         if offset is not None:
@@ -202,15 +124,20 @@ def _stack_address_offsets_8616(
 
 
 def _range_contains_bp_offset_8616(address: IRAddress, offset: int) -> bool:
-    """Return whether one exact BP address lies inside a tracked byte range."""
-    return bool(address.offset <= offset < address.offset + address.size)
+    """Compare a BP-derived argument against a range in the 16-bit coordinate."""
+    pointed_byte = replace(address, offset=offset, size=1)
+    return stack_ranges_may_overlap_8616(address, pointed_byte)
 
 
 def _effect_from_summary_8616(
     summary: CallsiteSummary8616,
     ranges: tuple[IRAddress, ...],
+    allocation: CallStackAllocationProof8616 | None = None,
 ) -> tuple[IRCallStackEffect8616, CallStackEffectFailure8616 | None]:
     """Classify caller-frame preservation from one authoritative summary."""
+    allocation_effect = resolve_call_stack_allocation_8616(summary, ranges, allocation)
+    if allocation_effect is not None:
+        return allocation_effect
     if summary.target_addr is None:
         return _refused_effect_8616(ranges, CallStackEffectFailure8616.TARGET_UNRESOLVED)
     if callsite_machine_frame_kind_8616(summary) is None:
@@ -243,6 +170,10 @@ def _effect_from_summary_8616(
             for offset in stack_address_offsets
         )
     )
+    # A logical word may share independently executed byte ranges. Escape of
+    # that operand forbids claiming preservation of any overlapping byte.
+    escaped_ranges = tuple(address for address in ranges
+                           if any(stack_ranges_may_overlap_8616(address, escaped) for escaped in escaped_ranges))
     escaped_identities = {
         (item.space, item.base, item.offset, item.size) for item in escaped_ranges
     }
@@ -262,9 +193,29 @@ def _effect_from_summary_8616(
     )
 
 
+def _with_synthetic_bp_proof_8616(
+    effect: IRCallStackEffect8616,
+    project: object | None,
+    summary: CallsiteSummary8616,
+    callsite_addr: int,
+) -> IRCallStackEffect8616:
+    """Keep frame-register preservation independent of stack cleanup evidence."""
+    if not effect.complete or project is None or summary.callsite_addr != callsite_addr:
+        return effect
+    proof = classify_synthetic_call_register_effect_8616(
+        project, callsite_addr=callsite_addr, target_addr=summary.target_addr, register="bp",
+    )
+    proven = proof.closes_evidence and proof.verdict is SyntheticCallRegisterEffectVerdict8616.PRESERVED
+    return replace(effect, bp_preserved=True) if proven else effect
+
+
 def materialize_call_stack_effects_8616(
     artifact: IRFunctionArtifact,
     summaries: Mapping[int, CallsiteSummary8616],
+    *,
+    project: object | None = None,
+    allocation_proofs: Mapping[int, CallStackAllocationProof8616] | None = None,
+    return_segment_frames: Mapping[int, ReturnSegmentFrame8616] | None = None,
 ) -> CallStackEffectArtifact8616:
     """Attach one summary-derived stack effect to every exact IR CALL."""
     ranges = _stable_bp_ranges_8616(artifact)
@@ -302,7 +253,14 @@ def materialize_call_stack_effects_8616(
                     CallStackEffectFailure8616.SUMMARY_MISSING,
                 )
             else:
-                effect, failure = _effect_from_summary_8616(summary, ranges)
+                allocation = allocation_proofs.get(instruction.addr) if allocation_proofs is not None else None
+                effect, failure = _effect_from_summary_8616(summary, ranges, allocation)
+                effect = _with_synthetic_bp_proof_8616(effect, project, summary, instruction.addr)
+                frame = return_segment_frames.get(instruction.addr) if return_segment_frames is not None else None
+                if failure is None and frame is not None and frame.callsite_addr == instruction.addr:
+                    adjustment = frame.additional_return_bytes
+                    if adjustment is not None and effect.net_stack_delta is not None:
+                        effect = replace(effect, net_stack_delta=effect.net_stack_delta + adjustment)
             if instruction.call_stack_effect is not None and instruction.call_stack_effect != effect:
                 effect, failure = _refused_effect_8616(
                     ranges,

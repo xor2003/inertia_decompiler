@@ -20,6 +20,7 @@ from angr.sim_variable import SimStackVariable
 
 from ..c_ast_utils import _iter_c_nodes_deep_8616
 from .stack_variable_coordinates import (
+    StackCoordinateProducer8616,
     StackVariableCoordinateProjection8616,
     record_stack_variable_coordinate_alias_8616,
     record_stack_variable_coordinate_projection_8616,
@@ -136,6 +137,7 @@ def _retain_projection_8616(
         entry_sp_offset=projection.entry_sp_offset,
         size=projection.size,
         display_name=projection.display_name,
+        producer=projection.producer,
     )
     for variable in projection.equivalent_variables:
         record_stack_variable_coordinate_alias_8616(
@@ -146,16 +148,20 @@ def _retain_projection_8616(
         )
 
 
-def reset_local_stack_coordinate_projections_8616(codegen: object) -> None:
+def reset_local_stack_coordinate_projections_8616(
+    codegen: object, *, replaced_bp_ranges: frozenset[tuple[int, int]],
+) -> None:
     """Drop local projections while preserving nonlocal coordinate owners.
 
     Stack-memory SSA materializes only negative-BP local ranges. Its replay
-    must not erase positive-BP argument projections owned by prototype and
-    argument lowering.
+    must not erase unrelated locals, positive-BP arguments or call-output
+    objects. Ranges are machine-BP identities, never raw variable offsets.
     """
     registry = stack_variable_coordinate_registry_8616(codegen)
     retained = tuple(
-        projection for projection in registry.projections if projection.bp_offset >= 0
+        projection for projection in registry.projections
+        if projection.bp_offset >= 0 or projection.producer is not StackCoordinateProducer8616.STACK_STORAGE
+        or (projection.bp_offset, projection.size) not in replaced_bp_ranges
     )
     reset_stack_variable_coordinate_registry_8616(codegen)
     for projection in retained:
@@ -206,6 +212,7 @@ def rebind_restored_stack_coordinate_registry_8616(
             entry_sp_offset=projection.entry_sp_offset,
             size=projection.size,
             display_name=projection.display_name or variable.name,
+            producer=projection.producer,
         )
         for cvar in live_cvars[1:]:
             alias = cvar.variable

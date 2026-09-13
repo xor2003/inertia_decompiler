@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass, replace
+from enum import StrEnum
 
 from .core import AddressStatus, IRAddress, IRInstr, MemSpace
 from .ssa import SSABlock
@@ -22,6 +23,37 @@ from .ssa_memory_contracts import (
 )
 
 type StackMemoryAccessInput8616 = tuple[int, int, IRAddress]
+
+
+class StackCoordinateAgreement8616(StrEnum):
+    """A contradiction census, not proof of frame lifetime or cross-block equality."""
+
+    NO_CONFLICT_OBSERVED = "no_conflict_observed"
+    CONFLICT = "conflicting_stack_coordinates"
+
+
+def stack_coordinate_agreement_8616(blocks: tuple[SSABlock, ...]) -> StackCoordinateAgreement8616:
+    """Refuse shared BP geometry when one block observes different BP definitions.
+
+    Scalar versions are block-local: comparing version numbers from different
+    blocks would invent equality or conflict. Missing legacy provenance is not
+    a contradiction proof. Separate VEX snapshots of the same BP version agree.
+    Rebased coordinates require an explicit normalization proof before ranges
+    can be compared; different textual offsets do not establish disjointness.
+    """
+    for block in blocks:
+        versions: set[int] = set()
+        for instruction in block.instrs:
+            address = stack_memory_access_8616(instruction)
+            if address is None or address.base != ("bp",):
+                continue
+            versions.update(
+                value.version for value in address.base_values
+                if value.space is MemSpace.REG and value.name == "bp" and value.version is not None
+            )
+        if len(versions) > 1:
+            return StackCoordinateAgreement8616.CONFLICT
+    return StackCoordinateAgreement8616.NO_CONFLICT_OBSERVED
 
 
 @dataclass(frozen=True, slots=True)

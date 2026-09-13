@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from angr.analyses.decompiler.structured_codegen.c import CFunction, CStatements, CVariable
+import pytest
+from angr.analyses.decompiler.structured_codegen.c import CFunction, CIndexedVariable, CStatements, CVariable
 from angr.knowledge_plugins.functions.function import PrototypeSource
-from angr.sim_type import SimTypeFunction, SimTypeLong
-from angr.sim_variable import SimStackVariable
+from angr.sim_type import SimTypeFunction, SimTypeLong, SimTypeShort
+from angr.sim_variable import SimMemoryVariable, SimStackVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.ir.condition_ir import ConditionIR
 from angr_platforms.X86_16.ir.core import IRValue, MemSpace
@@ -18,8 +19,11 @@ from angr_platforms.X86_16.lowering.condition_argument_type_facts import (
     record_wide_condition_argument_type_evidence_8616,
 )
 from angr_platforms.X86_16.lowering.condition_argument_types import (
+    _set_argument_surface_type_8616,
     apply_condition_argument_types_8616,
 )
+from angr_platforms.X86_16.lowering.semantic_cast import CSemanticCast8616
+from angr_platforms.X86_16.tail_validation_fingerprint import _expr_fingerprint
 
 
 class _DummyCodegen:
@@ -43,6 +47,38 @@ class _FunctionManager:
     def function(self, *, addr: int, create: bool) -> SimpleNamespace | None:
         assert create is False
         return self._function if addr == self._function.addr else None
+
+
+@pytest.mark.parametrize("requested_offset,requested_width", [(4, 2), (6, 2), (4, 1)])
+def test_argument_refinement_preserves_existing_unsigned_array_index(requested_offset, requested_width) -> None:
+    """A signed declaration must not turn an unsigned address index negative."""
+    codegen = _DummyCodegen(Arch86_16())
+    unsigned = SimTypeShort(False).with_arch(codegen.project.arch)
+    signed = SimTypeShort(True).with_arch(codegen.project.arch)
+    index = CVariable(SimStackVariable(4, 2, base="bp", name="index"),
+                      variable_type=unsigned, codegen=codegen)
+    base = CVariable(SimMemoryVariable(0x200, 2, name="items"), variable_type=unsigned, codegen=codegen)
+    indexed = CIndexedVariable(base, index, variable_type=unsigned, codegen=codegen)
+    root = CStatements([indexed], codegen=codegen)
+    cfunc = SimpleNamespace(statements=root, body=root)
+
+    _set_argument_surface_type_8616(codegen, cfunc, requested_offset, requested_width, signed)
+
+    if requested_offset != index.variable.offset or requested_width != index.variable.size:
+        assert index.variable_type == unsigned
+        assert indexed.index is index
+        return
+
+    assert index.variable_type == signed
+    assert isinstance(indexed.index, CSemanticCast8616)
+    assert indexed.index.src_type == signed and indexed.index.dst_type == unsigned
+    assert indexed.index.expr is index
+    assert "SemanticCast(" in _expr_fingerprint(indexed, codegen.project)
+    bare_indexed = CIndexedVariable(base, index, variable_type=unsigned, codegen=codegen)
+    assert _expr_fingerprint(indexed, codegen.project) != _expr_fingerprint(bare_indexed, codegen.project)
+    first_view = indexed.index
+    _set_argument_surface_type_8616(codegen, cfunc, 4, 2, signed)
+    assert indexed.index is first_view
 
 
 def _fixture(*, signed: bool) -> tuple[SimpleNamespace, _DummyCodegen]:

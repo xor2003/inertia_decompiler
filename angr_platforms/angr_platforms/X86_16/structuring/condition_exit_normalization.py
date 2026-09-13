@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from angr.analyses.decompiler.structured_codegen.c import CGoto, CStatements
+
+from ..ir.condition_ir import ConditionIR
 from ..ir.ssa_function import SSAFunctionArtifact
 
 
@@ -20,13 +23,16 @@ def transparent_condition_exit_8616(
     target: int,
     successors: Mapping[int, tuple[int, ...]],
     *,
-    stop_at: int,
+    stop_at: int | None,
+    retained_targets: frozenset[int] = frozenset(),
 ) -> int:
     """Follow empty, refusal-free SSA blocks; retain the input on uncertain edges.
 
     The opposite outcome is a boundary, never an equivalent exit. Instructions,
-    bindings and phi nodes stop traversal before their effects. Missing blocks,
+    bindings and phi nodes stop traversal before their effects, even if those
+    destination effects have refusals: only bypassed blocks need that proof. Missing blocks,
     conflicting graphs and cycles invalidate normalization altogether.
+    Explicit retained targets are endpoints, never blocks to bypass.
     """
     if artifact is None:
         return target
@@ -39,14 +45,18 @@ def transparent_condition_exit_8616(
     current = target
     visited: set[int] = set()
     while current != stop_at:
+        if current in retained_targets:
+            return current
         if current in visited:
             return target
         visited.add(current)
         block = blocks.get(current)
-        if block is None or block.refusals or current in refused_blocks:
+        if block is None:
             return target
         if block.instrs or block.bindings or current in phi_blocks:
             return current
+        if block.refusals or current in refused_blocks:
+            return target
         edges = successors.get(current, ())
         ssa_edges = tuple(
             sorted(addr for addr, preds in artifact.predecessor_map.items() if current in preds)
@@ -55,3 +65,58 @@ def transparent_condition_exit_8616(
             return target
         current = edges[0]
     return target
+
+
+def exact_condition_exit_polarity_8616(
+    artifact: SSAFunctionArtifact | None,
+    fact: ConditionIR,
+    true_target: int | None,
+    false_target: int | None,
+    successors: Mapping[int, tuple[int, ...]],
+    *,
+    retained_targets: frozenset[int] = frozenset(),
+) -> bool | None:
+    """Orient two exact bodies without bypassing effects or changing CFG facts.
+
+    Physical edges must match the typed branch before empty connectors may be
+    normalized. Both bodies and the branch itself are mandatory boundaries.
+    """
+    taken, fallthrough = fact.taken_target, fact.fallthrough_target
+    block = fact.block_addr
+    if block is None or taken is None or fallthrough is None:
+        return None
+    if true_target is None or false_target is None or true_target == false_target:
+        return None
+    if taken == fallthrough or set(successors.get(block, ())) != {taken, fallthrough}:
+        return None
+    boundaries = retained_targets | {true_target, false_target, block}
+    resolved_taken, resolved_fallthrough = (
+        transparent_condition_exit_8616(
+            artifact, edge, successors, stop_at=None, retained_targets=boundaries,
+        )
+        for edge in (taken, fallthrough)
+    )
+    if (true_target, false_target) == (resolved_taken, resolved_fallthrough):
+        return True
+    if (true_target, false_target) == (resolved_fallthrough, resolved_taken):
+        return False
+    return None
+
+
+def conditional_goto_polarity_8616(
+    body: object,
+    artifact: SSAFunctionArtifact | None,
+    fact: ConditionIR,
+    continuation: int | None,
+    successors: Mapping[int, tuple[int, ...]],
+) -> bool | None:
+    """Prove a plain conditional jump against its immediate continuation.
+
+    A goto's destination is not its source block. Consume its structured target
+    directly and require both physical branch paths, without moving the jump.
+    """
+    while isinstance(body, CStatements) and len(body.statements) == 1:
+        body = body.statements[0]
+    if not isinstance(body, CGoto) or not isinstance(body.target, int) or isinstance(body.target, bool):
+        return None
+    return exact_condition_exit_polarity_8616(artifact, fact, body.target, continuation, successors)

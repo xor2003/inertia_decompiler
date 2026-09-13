@@ -28,6 +28,14 @@ class _CodegenBoundary8616(Protocol):
     _inertia_vex_ir_frame: object
 
 
+def native_entry_sp_offset_for_anchor_8616(node: object) -> int | None:
+    """Read a published entry-SP origin without inventing a machine-BP relation."""
+    if not isinstance(node, structured_c.CUnaryOp) or node.op != "Reference":
+        return None
+    anchor = native_stack_anchor_8616(node.tags)
+    return anchor.entry_sp_offset if anchor is not None else None
+
+
 def machine_bp_offset_for_native_anchor_8616(codegen: object, node: object) -> int | None:
     """Translate an explicitly published source anchor using complete frame proof."""
     if not isinstance(node, structured_c.CUnaryOp) or node.op != "Reference":
@@ -157,4 +165,5 @@ __all__ = [
     "absolute_machine_bp_offset_from_wrapped_anchor_8616",
     "consume_indexed_stack_frame_terms_8616",
     "machine_bp_offset_for_entry_sp_anchor_8616",
+    "native_entry_sp_offset_for_anchor_8616",
 ]

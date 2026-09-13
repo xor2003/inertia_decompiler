@@ -76,6 +76,7 @@ from .stack_variable_coordinates import (
     machine_bp_offset_for_stack_variable_8616,
     stack_variable_coordinate_registry_8616,
 )
+from .wide_call_condition_source import proven_wide_condition_callsite_8616
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -459,9 +460,9 @@ def select_wide_call_return_condition_chain_8616(
 
 def _wide_condition_call_8616(
     codegen: _CallOutputCodegen8616,
-    first_condition_insn: int,
+    conditions: tuple[ConditionIR, ...],
 ) -> tuple[CFunctionCall, CallsiteSummary8616] | None:
-    """Return one typed DX:AX condition-return call immediately preceding the chain."""
+    """Return the unique typed DX:AX call proven to reach the whole chain."""
     try:
         summary_map = codegen._inertia_callsite_summaries
     except AttributeError:
@@ -489,19 +490,19 @@ def _wide_condition_call_8616(
             and summary.return_shape == CallsiteReturnShape8616.DX_AX.value
             and isinstance(summary.callsite_addr, int)
             and isinstance(summary.return_addr, int)
-            and summary.callsite_addr < first_condition_insn
-            and summary.return_addr <= first_condition_insn
         ):
             continue
         candidates.setdefault(summary.callsite_addr, []).append(node)
     if not candidates:
         return None
-    nearest_callsite = max(candidates)
-    nearest = tuple({id(call): call for call in candidates[nearest_callsite]}.values())
-    if len(nearest) != 1:
+    proven_callsite = proven_wide_condition_callsite_8616(codegen, conditions, frozenset(candidates))
+    if proven_callsite is None:
         return None
-    call = nearest[0]
-    summary = inventory.get(nearest_callsite) or summary_map.get(id(call))
+    proven_calls = tuple({id(call): call for call in candidates[proven_callsite]}.values())
+    if len(proven_calls) != 1:
+        return None
+    call = proven_calls[0]
+    summary = inventory.get(proven_callsite) or summary_map.get(id(call))
     if not isinstance(summary, CallsiteSummary8616):
         return None
     rebound = dict(summary_map)
@@ -595,19 +596,14 @@ def lower_wide_call_return_condition_chain_8616(
     lowered = expression
     if ir_pair is not None and expression_parts is not None:
         normalized_count = 1
-        first_condition_insn = conditions[0].src_insn
-        call_selection = (
-            _wide_condition_call_8616(boundary, first_condition_insn)
-            if isinstance(first_condition_insn, int)
-            else None
-        )
+        call_selection = _wide_condition_call_8616(boundary, conditions)
         call, callsite = call_selection if call_selection is not None else (None, None)
-        wide_stack = _wide_condition_stack_cvar_8616(
-            boundary,
-            expression_parts[0],
-            expression_parts[1],
-            ir_pair[0],
-            ir_pair[1],
+        wide_stack = (
+            _wide_condition_stack_cvar_8616(
+                boundary, expression_parts[0], expression_parts[1], ir_pair[0], ir_pair[1],
+            )
+            if call is not None
+            else None
         )
         if call is not None and wide_stack is not None:
             classified_count = 1

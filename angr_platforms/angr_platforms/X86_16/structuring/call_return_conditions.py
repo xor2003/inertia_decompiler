@@ -55,6 +55,7 @@ from ..lowering.call_return_stack_stores import (
 )
 from ..pipeline.errors import PipelineHardError
 from ..structured_tags import copy_structured_tags_8616
+from .bound_call_condition import materialize_bound_call_condition_8616
 from .call_return_register_index import (
     CallReturnRegisterIndex8616,
     build_call_return_register_index_8616,
@@ -775,6 +776,9 @@ def materialize_call_return_conditions_8616(project: object, codegen: object) ->
                 continue
             bind_structured_callsite_identity_8616(exact_calls[0], summary)
             summary_map[id(exact_calls[0])] = summary
+            replacement = materialize_bound_call_condition_8616(expression, exact_calls[0], condition, codegen)
+            node.condition_and_nodes = [(replacement, body)]
+            changed = replacement is not expression or changed
             classified += 1
             materialized += 1
             continue

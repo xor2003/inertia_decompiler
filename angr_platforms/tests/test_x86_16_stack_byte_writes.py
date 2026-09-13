@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import CIndexedVariable, CVariable
-from angr.sim_type import SimTypePointer, SimTypeShort
+from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.lowering.real_mode_linear import (
@@ -19,6 +19,7 @@ from angr_platforms.X86_16.lowering.stack_value_projection import (
 )
 from angr_platforms.X86_16.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
+    stack_variable_coordinate_registry_8616,
 )
 
 
@@ -75,6 +76,28 @@ def test_partial_stack_pointer_write_does_not_mutate_host_pointer_bytes():
         codegen, RealModeLinearStackAccess8616(-1, 1), require_lvalue=True,
     )
     assert target is None
+
+
+@pytest.mark.parametrize("offset", [-6, -4, -2])
+def test_reused_native_byte_publishes_storage_coordinate(offset):
+    """Reusing a native save slot must retain its identity for later consumers."""
+    codegen = _word_owner()
+    storage = SimStackVariable(offset, 1, base="bp", name=f"local_{-offset:x}")
+    value = CVariable(
+        storage, variable_type=SimTypeChar(False).with_arch(codegen.project.arch), codegen=codegen,
+    )
+    codegen.cfunc.variables_in_use = {storage: value}
+    # Use an unregistered native surface, as produced before byte lowering.
+    codegen._inertia_stack_variable_coordinate_registry_8616 = type(
+        stack_variable_coordinate_registry_8616(codegen)
+    )()
+    target = stack_cvar_for_stable_ss_linear_access_8616(
+        codegen, RealModeLinearStackAccess8616(offset, 1), require_lvalue=True,
+    )
+    assert target is value
+    projection = stack_variable_coordinate_registry_8616(codegen).for_variable(storage)
+    assert projection is not None
+    assert (projection.bp_offset, projection.entry_sp_offset, projection.size) == (offset, offset, 1)
 
 
 @pytest.mark.parametrize("offset,size", [(-3, 1), (0, 1), (-1, 2)])

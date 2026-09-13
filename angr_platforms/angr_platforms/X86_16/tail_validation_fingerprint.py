@@ -72,6 +72,7 @@ from .lowering.stack_variable_coordinates import machine_bp_offset_for_stack_var
 from .lowering.structured_intrinsics import lower_structured_insert_call_8616
 from .validation_additive_terms import flatten_additive_terms_8616 as _flatten_additive_terms_8616
 from .validation_aggregate_storage import aggregate_field_storage_8616
+from .validation_stack_projection import proven_stack_projection_fingerprint_8616
 
 __all__ = [
     "TAIL_VALIDATION_FINGERPRINT_VERSION",
@@ -377,13 +378,16 @@ def _source_arg_sizes_by_offset_8616(function: Any, project: Any) -> dict[int, i
     return sizes_by_offset
 
 
-def _cfunc_source_arg_names_by_offset_8616(cfunc: Any) -> dict[int, str]:
+def _cfunc_source_arg_names_by_offset_8616(cfunc: object, codegen: object | None = None) -> dict[int, str]:
+    """Map argument labels in machine BP coordinates, never rendered offsets."""
     names_by_offset: dict[int, str] = {}
     for arg in tuple(_dynamic_tail_validation_getattr_8616(cfunc, "arg_list", ()) or ()):
+        if not isinstance(arg, CVariable):
+            continue
         variable = _dynamic_tail_validation_getattr_8616(arg, "variable", None)
         if not isinstance(variable, SimStackVariable) or _dynamic_tail_validation_getattr_8616(variable, "base", None) != "bp":
             continue
-        offset = _dynamic_tail_validation_getattr_8616(variable, "offset", None)
+        offset = machine_bp_offset_for_stack_variable_8616(codegen if codegen is not None else arg.codegen, variable)
         if not isinstance(offset, int) or offset <= 0:
             continue
         name = _dynamic_tail_validation_getattr_8616(arg, "name", None) or _dynamic_tail_validation_getattr_8616(variable, "name", None)
@@ -393,13 +397,16 @@ def _cfunc_source_arg_names_by_offset_8616(cfunc: Any) -> dict[int, str]:
     return names_by_offset
 
 
-def _cfunc_source_arg_sizes_by_offset_8616(cfunc: Any) -> dict[int, int]:
+def _cfunc_source_arg_sizes_by_offset_8616(cfunc: object, codegen: object | None = None) -> dict[int, int]:
+    """Map storage widths using the same projected identity as argument labels."""
     sizes_by_offset: dict[int, int] = {}
     for arg in tuple(_dynamic_tail_validation_getattr_8616(cfunc, "arg_list", ()) or ()):
+        if not isinstance(arg, CVariable):
+            continue
         variable = _dynamic_tail_validation_getattr_8616(arg, "variable", None)
         if not isinstance(variable, SimStackVariable) or _dynamic_tail_validation_getattr_8616(variable, "base", None) != "bp":
             continue
-        offset = _dynamic_tail_validation_getattr_8616(variable, "offset", None)
+        offset = machine_bp_offset_for_stack_variable_8616(codegen if codegen is not None else arg.codegen, variable)
         size = _dynamic_tail_validation_getattr_8616(variable, "size", None)
         if isinstance(offset, int) and offset > 0 and isinstance(size, int) and size > 0:
             sizes_by_offset[offset] = size
@@ -485,10 +492,10 @@ def _source_arg_location_fingerprint_8616(node: Any, project: Any) -> str | None
             offset,
             variable_size if isinstance(variable_size, int) and variable_size > 0 else None,
         )
-    source_name = _cfunc_source_arg_names_by_offset_8616(cfunc).get(offset)
+    source_name = _cfunc_source_arg_names_by_offset_8616(cfunc, codegen).get(offset)
     if not isinstance(source_name, str) or not source_name:
         return None
-    size = _cfunc_source_arg_sizes_by_offset_8616(cfunc).get(offset, variable_size)
+    size = _cfunc_source_arg_sizes_by_offset_8616(cfunc, codegen).get(offset, variable_size)
     return _source_arg_fingerprint_from_slot_8616(
         source_name,
         offset,
@@ -1171,9 +1178,9 @@ def _source_arg_stack_slot_fingerprint_8616(offset: int, codegen: Any, *, size: 
         source_offset = offset
         source_size = size
     else:
-        source_name = _cfunc_source_arg_names_by_offset_8616(cfunc).get(offset) or ""
+        source_name = _cfunc_source_arg_names_by_offset_8616(cfunc, codegen).get(offset) or ""
         source_offset = offset
-        source_size = _cfunc_source_arg_sizes_by_offset_8616(cfunc).get(offset, size)
+        source_size = _cfunc_source_arg_sizes_by_offset_8616(cfunc, codegen).get(offset, size)
     if not isinstance(source_name, str) or not source_name:
         _debug_source_arg_stack_slot_8616(
             codegen,
@@ -1228,21 +1235,17 @@ def _debug_source_arg_stack_slot_8616(
 
 
 def _canonical_or_unresolved_stack_fingerprint_8616(offset: int, codegen: Any, *, source: str, node: Any = None) -> str:
+    """Preserve exact typed storage ranges before considering legacy carriers."""
     def _impl() -> str:
         if source == "stack_var":
             variable = _dynamic_tail_validation_getattr_8616(node, "variable", None)
             size = _dynamic_tail_validation_getattr_8616(variable, "size", None)
             if isinstance(variable, SimStackVariable) and _dynamic_tail_validation_getattr_8616(variable, "base", None) == "bp":
-                if offset > 0:
-                    source_arg = _source_arg_stack_slot_fingerprint_8616(
-                        offset,
-                        codegen,
-                        size=size if isinstance(size, int) and size > 0 else None,
-                    )
-                    if source_arg is not None:
-                        return source_arg
+                machine_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
+                if machine_offset is None:
+                    return f"unresolved_stack_carrier:SS:BP{offset:+#x}:{source}"
                 return _stack_slot_fingerprint_from_slot_8616(
-                    offset,
+                    machine_offset,
                     size if isinstance(size, int) and size > 0 else None,
                 )
         if source == "word_pair":
@@ -2217,7 +2220,7 @@ def _scaled_additive_expr_parts_8616(
     outer_sign: int = 1,
 ) -> tuple[tuple[str, ...], int]:
     """Scale an additive address expression while keeping constants separate."""
-    stripped_expr = _strip_validation_casts(expr)
+    stripped_expr = _strip_cosmetic_validation_casts_8616(expr)
     terms = (
         _flatten_additive_terms_8616(stripped_expr)
         if isinstance(stripped_expr, CBinaryOp) and stripped_expr.op in {"Add", "Sub"}
@@ -2268,6 +2271,7 @@ def _deref_operand_fingerprint_8616(operand: object, project: object) -> str:
 
 
 def _expr_fingerprint(node: object, project: object, _seen: set[int] | None = None) -> str:
+    """Fingerprint expression semantics while retaining proven storage coordinates."""
     def _impl() -> str:
         nonlocal node, _seen
         if _seen is None:
@@ -2278,6 +2282,10 @@ def _expr_fingerprint(node: object, project: object, _seen: set[int] | None = No
         if node_id in _seen:
             return "expr_cycle"
         _seen.add(node_id)
+
+        projection = proven_stack_projection_fingerprint_8616(node)
+        if projection is not None:
+            return projection
 
         def _child_seen() -> set[int]:
             return set(_seen or ())
@@ -3086,7 +3094,7 @@ def _global_indexed_ds_deref_fingerprint_8616(
     if not isinstance(node, CIndexedVariable):
         return None
     base = _strip_validation_casts(_dynamic_tail_validation_getattr_8616(node, "variable", None))
-    index = _strip_validation_casts(_dynamic_tail_validation_getattr_8616(node, "index", None))
+    index = _strip_cosmetic_validation_casts_8616(node.index)
     if isinstance(base, CUnaryOp) and base.op == "Reference":
         base = _strip_validation_casts(base.operand)
     if not isinstance(base, CVariable):

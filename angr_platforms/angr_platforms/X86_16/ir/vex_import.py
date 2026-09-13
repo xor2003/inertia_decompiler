@@ -74,6 +74,9 @@ _TmpConditions = Mapping[int, IRCondition]
 _MutableTmpValues = dict[int, IRValue]
 _MutableTmpConditions = dict[int, IRCondition]
 _TmpExprs = dict[int, object]
+_DIRECT_INTEGER_CONSTANT_TAGS_8616: frozenset[str] = frozenset(
+    {"Ico_U1", "Ico_U8", "Ico_U16", "Ico_U32", "Ico_U64", "Ico_U128"}
+)
 
 
 class _VexConstBoundary(Protocol):
@@ -573,7 +576,8 @@ def _expr_to_value(
                 name=name,
                 size=size,
             )
-        if tag == "Iex_Const":
+        # Exit.dst is an IRConst, unlike wrapped expression constants.
+        if tag == "Iex_Const" or tag in _DIRECT_INTEGER_CONSTANT_TAGS_8616:
             return IRValue(
                 MemSpace.CONST,
                 const=_const(expr),
@@ -809,7 +813,13 @@ def _block_to_ir(
                         tmps[tmp_id] = replacement
                         continue
             instrs.append(instr)
-        terminal = terminal_control_flow_instr_8616(vex, instruction_addr)
+        terminal = terminal_control_flow_instr_8616(
+            vex, instruction_addr,
+            resolve_target=partial(
+                _expr_to_value, tmps=tmps, conditions=conditions,
+                type_environment=type_environment,
+            ),
+        )
         if terminal is not None:
             instrs.append(terminal)
         successor_addrs: list[int] = []

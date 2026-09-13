@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen.c import CStatements, CVariable
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimStackVariable
@@ -11,6 +12,9 @@ from angr_platforms.X86_16.lowering.stack_argument_identity import (
 )
 from angr_platforms.X86_16.lowering.stack_declaration_identity import (
     prune_unreferenced_pre_argument_declarations_8616,
+)
+from angr_platforms.X86_16.lowering.stack_variable_coordinates import (
+    record_stack_variable_coordinate_projection_8616,
 )
 
 
@@ -56,11 +60,12 @@ def test_unify_prunes_unreferenced_control_slot_but_keeps_negative_local() -> No
         },
     )
 
+    declaration_count = len(codegen.cfunc.variables_in_use)
     assert unify_positive_bp_argument_identity_8616(codegen) is True
     assert list(codegen.cfunc.variables_in_use.values()) == [local]
     assert tuple(codegen.cfunc.unified_local_vars) == (local.variable,)
     stats = codegen._inertia_pre_argument_declaration_stats_8616
-    assert stats.raw_fact_count == stats.normalized_fact_count == 2
+    assert stats.raw_fact_count == stats.normalized_fact_count == declaration_count
     assert stats.classified_fact_count == stats.materialized_count == 1
     assert stats.failure_count == stats.refusal_count == 0
     assert codegen._inertia_codegen_decl_refresh_required_8616 is True
@@ -161,3 +166,24 @@ def test_control_slot_crossing_abi_boundary_is_unknown_and_retained() -> None:
     stats = codegen._inertia_pre_argument_declaration_stats_8616
     assert stats.refusal_count == 1
     assert stats.classified_fact_count == stats.materialized_count == 0
+
+
+@pytest.mark.parametrize("bp_offset,entry_offset,remove", [(1, -1, True), (4, 2, False), (-1, 1, False)])
+@pytest.mark.parametrize("referenced", [False, True])
+def test_control_slot_cleanup_consumes_projected_coordinate(bp_offset, entry_offset, remove, referenced):
+    """A negative entry-SP offset can be a control byte, not a local."""
+    codegen = _codegen()
+    value = _stack_cvar(codegen, offset=entry_offset, size=1, name="slot")
+    codegen.cfunc = SimpleNamespace(
+        arg_list=[], statements=CStatements([value] if referenced else [], codegen=codegen),
+        variables_in_use={value.variable: value},
+        unified_local_vars={value.variable: {(value, value.variable_type)}},
+    )
+    record_stack_variable_coordinate_projection_8616(
+        codegen, variable=value.variable, cvar=value, bp_offset=bp_offset,
+        entry_sp_offset=entry_offset, size=1,
+    )
+    expected_removal = remove and not referenced
+    assert prune_unreferenced_pre_argument_declarations_8616(codegen) is expected_removal
+    assert (value.variable not in codegen.cfunc.variables_in_use) is expected_removal
+    assert (value.variable not in codegen.cfunc.unified_local_vars) is expected_removal

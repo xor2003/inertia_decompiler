@@ -24,6 +24,10 @@ simplification needs proof, add the proof to the earliest owning layer and make
 this pass consume a structured fact. Unknown or unproven cases must keep the
 original C AST.
 
+Adjacent byte variables must remain a byte expression unless an earlier owner
+has materialized and bound a wider object. Creating a new word variable here
+can lose its stores and inherit a byte type despite word-sized storage.
+
 Dynamic attributes in this codegen boundary are limited to third-party angr C
 AST/codegen compatibility objects.
 """
@@ -56,7 +60,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CWhileLoop,
 )
 from angr.sim_type import SimTypeLong, SimTypeShort
-from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
 
 from .decompiler_postprocess_flags import _bool_cite_values_8616
 from .decompiler_postprocess_utils import (
@@ -67,7 +71,6 @@ from .decompiler_postprocess_utils import (
 )
 from .lowering.stack_lowering_from_facts import (
     _canonical_stack_offset_8616,
-    _stack_object_name,
 )
 from .semantics.alias_query import _storage_domain_for_expr
 from .widening_alias import join_adjacent_register_slices
@@ -1044,85 +1047,20 @@ def _simplify_structured_expressions_8616(codegen: object) -> bool:
         return int(word_domain.width or 0) == 2 and high_offset == word_offset + 1
 
     def _materialize_joined_word_expr_8616(low_expr: object, high_expr: object) -> object | None:
-        low_domain = _storage_domain_for_expr(low_expr)
-        high_domain = _storage_domain_for_expr(high_expr)
+        """Consume register-view joins; never invent stack or memory C objects."""
+        if not (
+            isinstance(low_expr, CVariable) and isinstance(high_expr, CVariable)
+            and isinstance(low_expr.variable, SimRegisterVariable)
+            and isinstance(high_expr.variable, SimRegisterVariable)
+        ):
+            return None
         alias_state = getattr(codegen, "_inertia_alias_state", None)
         if alias_state is None:
             alias_state = getattr(getattr(codegen, "cfunc", None), "_inertia_alias_state", None)
         proof = prove_adjacent_storage_slices(low_expr, high_expr, alias_state=alias_state)
-        if isinstance(low_expr, CVariable) and isinstance(high_expr, CVariable):
-            widened_register = join_adjacent_register_slices(
-                low_expr,
-                high_expr,
-                codegen,
-                alias_state=alias_state,
-                proof=proof,
-            )
-            if widened_register is not None:
-                return cast(object | None, widened_register)
-            if isinstance(low_expr.variable, SimRegisterVariable) or isinstance(
-                high_expr.variable, SimRegisterVariable
-            ):
-                return None
-        joined = proof.merged_domain if proof.ok else None
-        if joined is None and alias_state is None:
-            joined = low_domain.join(high_domain)
-        if joined is None or joined.width != 2:
-            return None
-        if not isinstance(low_expr, CVariable) or not isinstance(high_expr, CVariable):
-            return None
-
-        region = getattr(getattr(codegen, "cfunc", None), "addr", None)
-        vartype = low_expr.variable_type or high_expr.variable_type or SimTypeShort(False)
-
-        if joined.space == "stack" and joined.stack_slot is not None:
-            stack_slot = joined.stack_slot
-            offset = _canonical_stack_offset_8616(stack_slot.offset)
-            if not isinstance(offset, int):
-                return None
-            variable = SimStackVariable(
-                offset,
-                2,
-                base=stack_slot.base,
-                name=_stack_object_name(offset, codegen=codegen),
-                region=stack_slot.region if stack_slot.region is not None else region,
-            )
-            return cast(object | None, CVariable(variable, variable_type=vartype, codegen=codegen))
-
-        if joined.space == "memory":
-            # Keep structuring-stage guard operands in register form.
-            # Folding to a global memory word here can perturb whole-tail
-            # validation fingerprints (reg -> memory read) even when the
-            # expression is algebraically equivalent.
-            stage = str(getattr(getattr(codegen, "project", None), "_inertia_decompiler_stage", "") or "")
-            if stage in {"core", "structuring"}:
-                return None
-            low_var = low_expr.variable
-            high_var = high_expr.variable
-            if not isinstance(low_var, SimMemoryVariable) or not isinstance(high_var, SimMemoryVariable):
-                return None
-            low_addr = low_var.addr
-            high_addr = high_var.addr
-            if not isinstance(low_addr, int) or not isinstance(high_addr, int):
-                return None
-            addr = min(low_addr, high_addr)
-            variable = SimMemoryVariable(addr, 2, name=f"g_{addr:x}", region=region)
-            return cast(object | None, CVariable(variable, variable_type=vartype, codegen=codegen))
-
-        if joined.space == "register":
-            low_var = low_expr.variable
-            high_var = high_expr.variable
-            if not isinstance(low_var, SimRegisterVariable) or not isinstance(high_var, SimRegisterVariable):
-                return None
-            low_reg = low_var.reg
-            high_reg = high_var.reg
-            if not isinstance(low_reg, int) or not isinstance(high_reg, int):
-                return None
-            reg = min(low_reg, high_reg)
-            variable = SimRegisterVariable(reg, 2, name=low_var.name or high_var.name)
-            return cast(object | None, CVariable(variable, variable_type=vartype, codegen=codegen))
-
-        return None
+        return cast(object | None, join_adjacent_register_slices(
+            low_expr, high_expr, codegen, alias_state=alias_state, proof=proof,
+        ))
 
     def _simplify_zero_flag_comparison_8616(expr: object) -> object:
         if not isinstance(expr, CBinaryOp) or expr.op not in {"CmpEQ", "CmpNE"}:

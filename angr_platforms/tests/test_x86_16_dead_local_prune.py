@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeInt, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
+from angr_platforms.X86_16.lowering.semantic_cast import CSemanticCast8616
 from angr_platforms.X86_16.postprocess.optimization.dce import _dead_code_elimination_8616
 
 import decompile
@@ -50,7 +52,8 @@ def test_prune_dead_local_assignments_keeps_side_effecting_rhs() -> None:
     assert len(codegen.cfunc.statements.statements) == 1
 
 
-def test_prune_dead_local_assignments_keeps_read_ssa_register_carrier() -> None:
+@pytest.mark.parametrize("semantic_cast", [False, True])
+def test_prune_dead_local_assignments_keeps_read_ssa_register_carrier(semantic_cast: bool) -> None:
     codegen = _FakeCodegen()
     assigned_var = SimRegisterVariable(6, 2, ident="ir_6", name="v9", region=0x10678)
     read_var = SimRegisterVariable(6, 2, ident="ir_6", name="v9", region=0x10678)
@@ -69,7 +72,10 @@ def test_prune_dead_local_assignments_keeps_read_ssa_register_carrier() -> None:
         structured_c.CConstant(2, SimTypeShort(False), codegen=codegen),
         codegen=codegen,
     )
-    returned = structured_c.CReturn(read_cvar, codegen=codegen)
+    value = CSemanticCast8616(
+        SimTypeShort(False), SimTypeShort(False), read_cvar, codegen=codegen,
+    ) if semantic_cast else read_cvar
+    returned = structured_c.CReturn(value, codegen=codegen)
     codegen.cfunc = SimpleNamespace(
         statements=structured_c.CStatements([assignment, returned], codegen=codegen),
         variables_in_use={assigned_var: assigned_cvar, read_var: read_cvar},

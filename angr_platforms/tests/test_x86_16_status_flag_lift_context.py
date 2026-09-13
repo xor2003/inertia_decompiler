@@ -92,8 +92,9 @@ def test_cfg_context_suppresses_writes_across_call_and_block_boundary() -> None:
     assert function.info["status_flag_lift_stats_8616"] == session.stats.to_dict()
 
 
-def test_cfg_context_keeps_flags_consumed_by_successor_condition() -> None:
-    code = bytes.fromhex("050100 7500 c3")
+@pytest.mark.parametrize("producer", ("050100", "a90100", "f646fc01"))
+def test_cfg_context_keeps_flags_consumed_by_successor_condition(producer: str) -> None:
+    code = bytes.fromhex(producer + "7500 c3")
     project, function = _project_function(code, function_starts=(0x1000,))
 
     with active_status_flag_lift_context_8616(project, function) as session:
@@ -148,7 +149,7 @@ def test_cfg_context_rejects_nested_different_function() -> None:
     ):
         pass
 
-    assert error.value.function_addr == 0x1004
+    assert error.value.function_addr == other.addr
     assert error.value.details == {"active_function_addr": 0x1000}
 
 
@@ -166,14 +167,16 @@ def test_cfg_context_suppresses_cmp_flags_overwritten_before_use() -> None:
     assert session.stats.complete
 
 
-def test_cfg_context_emits_only_the_status_bit_live_at_successor_condition() -> None:
-    code = bytes.fromhex("050100 7500 39d8 c3")
+@pytest.mark.parametrize("producer", ("050100", "a90100", "f646fc01"))
+def test_cfg_context_emits_only_the_status_bit_live_at_successor_condition(producer: str) -> None:
+    code = bytes.fromhex(producer + "7500 39d8 c3")
+    overwrite_address = 0x1000 + len(bytes.fromhex(producer)) + 2
     project, function = _project_function(code, function_starts=(0x1000,))
 
     with active_status_flag_lift_context_8616(project, function) as session:
         assert len(session.candidates) == 1
         candidate = session.candidates[0]
-        assert candidate.instruction_address == 0x1000
+        assert candidate.instruction_address == function.addr
         assert candidate.written == STATUS_FLAGS_8616
         assert candidate.dead_writes == STATUS_FLAGS_8616 & ~StatusFlag8616.ZERO
         block = project.factory.block(0x1000, opt_level=0)
@@ -190,7 +193,7 @@ def test_cfg_context_emits_only_the_status_bit_live_at_successor_condition() -> 
         artifact = active_status_flag_lift_artifact_8616(function.addr)
         assert isinstance(artifact, StatusFlagLiftArtifact8616)
         assert artifact.partial_write_addresses == frozenset({0x1000})
-        assert artifact.packed_preservation_addresses == frozenset({0x1000, 0x1005})
+        assert artifact.packed_preservation_addresses == frozenset({0x1000, overwrite_address})
         active_resolution = resolve_status_flag_lift_artifact_8616(project, function.addr)
         assert active_resolution is not None
         assert active_resolution.artifact == artifact
@@ -199,7 +202,7 @@ def test_cfg_context_emits_only_the_status_bit_live_at_successor_condition() -> 
     assert session.stats.complete
     published = published_status_flag_lift_artifact_8616(function)
     assert isinstance(published, StatusFlagLiftArtifact8616)
-    assert published.packed_preservation_addresses == frozenset({0x1000, 0x1005})
+    assert published.packed_preservation_addresses == frozenset({0x1000, overwrite_address})
     published_resolution = resolve_status_flag_lift_artifact_8616(project, function.addr)
     assert published_resolution is not None
     assert published_resolution.artifact == published
@@ -247,7 +250,7 @@ def test_cfg_context_retains_live_incdec_flags_for_typed_jcc() -> None:
     with active_status_flag_lift_context_8616(project, function) as session:
         assert len(session.candidates) == 1
         candidate = session.candidates[0]
-        assert candidate.instruction_address == 0x1000
+        assert candidate.instruction_address == function.addr
         assert candidate.written == INCDEC_STATUS_FLAG_WRITES_8616
         assert candidate.dead_writes == INCDEC_STATUS_FLAG_WRITES_8616 & ~(
             StatusFlag8616.SIGN | StatusFlag8616.OVERFLOW
@@ -274,7 +277,7 @@ def test_cfg_context_omits_dead_carry_arithmetic_output_flags(opcode: str) -> No
         assert carry_arithmetic.written == STATUS_FLAGS_8616
         assert carry_arithmetic.dead_writes == STATUS_FLAGS_8616
         _flags_puts(project, 0x1000)
-        assert 0x1002 in session.materialized_addresses
+        assert carry_arithmetic.instruction_address in session.materialized_addresses
 
     assert session.stats.complete
 
@@ -293,7 +296,8 @@ def test_cfg_context_rejects_classified_but_unmaterialized_decisions() -> None:
         assert session.candidates
 
     assert error.value.layer == "ir:status_flag_lift_context"
-    assert error.value.details["classified_fact_count"] == 2
+    expected_decision_count = 2
+    assert error.value.details["classified_fact_count"] == expected_decision_count
     assert error.value.details["materialized_count"] == 0
 
 
@@ -354,9 +358,9 @@ def test_cfg_context_consumes_defined_multibit_shift_writes() -> None:
     )
 
     with active_status_flag_lift_context_8616(project, function) as session:
-        candidate = next(candidate for candidate in session.candidates if candidate.instruction_address == 0x1000)
+        candidate = next(candidate for candidate in session.candidates if candidate.instruction_address == function.addr)
         assert candidate.written == SHIFT_COUNT_MANY_STATUS_FLAG_WRITES_8616
         _flags_puts(project, 0x1000)
-        assert 0x1000 in session.materialized_addresses
+        assert function.addr in session.materialized_addresses
 
     assert session.stats.complete

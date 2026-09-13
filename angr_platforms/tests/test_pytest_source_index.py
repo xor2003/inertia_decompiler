@@ -17,6 +17,18 @@ from scripts.pytest_source_index import (
 SKIP_CALLS = frozenset(("pytest.mark.skip", "pytest.skip", "pytest.xfail"))
 
 
+def test_parameterized_source_lookup_retains_skip_evidence(tmp_path):
+    source = "class TestCases:\n    def test_case(self, value):\n        pytest.skip('unavailable')\n"
+    index = build_pytest_source_index(source, tmp_path / "test_sample.py", SKIP_CALLS)
+    selector = "TestCases::test_case[value::with-separator]"
+
+    assert index.has_node(selector)
+    assert index.skip_xfail_lines(selector) == index.skip_xfail_lines("TestCases::test_case")
+    assert index.skip_xfail_lines(selector)
+    assert index.facts(selector) == index.facts("TestCases::test_case")
+    assert not index.has_node("TestCases::test_missing[value]")
+
+
 class _ParameterizedItem:
     pass
 

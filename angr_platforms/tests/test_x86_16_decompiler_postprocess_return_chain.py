@@ -247,21 +247,9 @@ def test_loop_idiom_postprocess_fallback_refuses_after_structuring_pass(monkeypa
         calls.append("global")
         return True
 
-    def nested_stack_counter(_project, _codegen):
-        calls.append("nested")
-        return True
-
-    def stack_arg(_project, _codegen):
-        calls.append("stack-arg")
-        return True
-
     monkeypatch.setattr(post_stage, "_materialize_global_byte_index_sum_loop_8616", global_byte_sum)
-    monkeypatch.setattr(post_stage, "_materialize_nested_stack_counter_accumulator_loop_8616", nested_stack_counter)
-    monkeypatch.setattr(post_stage, "_materialize_stack_arg_accumulator_loop_8616", stack_arg)
 
     assert post_stage._materialize_global_byte_index_sum_loop_postprocess_8616(object(), codegen) is False
-    assert post_stage._materialize_nested_stack_counter_accumulator_loop_postprocess_8616(object(), codegen) is False
-    assert post_stage._materialize_stack_arg_accumulator_loop_postprocess_8616(object(), codegen) is False
     assert calls == []
 
 

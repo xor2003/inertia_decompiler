@@ -25,6 +25,10 @@ if str(REPO_ROOT) not in sys.path:
 from inertia_decompiler.generated_c_function_extraction import (  # noqa: E402
     generated_function_definition_span,
 )
+from scripts.runmenu_behavior import (  # noqa: E402
+    RunMenuExecutionEvidence,
+    collect_runmenu_execution_evidence,
+)
 
 EXPECTED_SORTD_FUNCTION_ADDRS: tuple[int, ...] = (
     0x10010,
@@ -95,7 +99,7 @@ _RUNMENU_REDUNDANT_TAIL_RE = re.compile(
 )
 _DRAWTIME_ADDR = 0x10498
 _DRAWTIME_SIGNATURE_RE = re.compile(
-    rf"\bvoid\s+sub_10498\s*\(\s*{_WORD_TYPE_RE}\s+(?P<row>[A-Za-z_]\w*)\s*\)"
+    rf"\bvoid\s+sub_10498\s*\(\s*(?P<row_type>{_WORD_TYPE_RE})\s+(?P<row>[A-Za-z_]\w*)\s*\)"
 )
 _UNSUPPORTED_INSTRUCTION_RE = re.compile(r"\b(?:unsupported|unknown)\s+instruction\b", re.IGNORECASE)
 _FLAG_ARTIFACT_RE = re.compile(r"\b(?:e?flags|cc_op|cc_dep[12]?)\b", re.IGNORECASE)
@@ -176,6 +180,7 @@ def evaluate_sortd_transcript(
     maximum_empty: int,
     maximum_timeouts: int,
     maximum_tracebacks: int,
+    runmenu_execution: RunMenuExecutionEvidence | None = None,
 ) -> SortdRatchetResult:
     """Evaluate exact whole-binary coverage and gradual acceptance thresholds."""
     violations: list[str] = []
@@ -242,10 +247,15 @@ def evaluate_sortd_transcript(
             + ", ".join(f"{address:#x}" for address in missing_decompiled_addrs)
         )
     runmenu_segment = _function_transcript_segment(transcript, _RUNMENU_ADDR)
-    if not _RUNMENU_SIGNATURE_RE.search(runmenu_segment) or not _RUNMENU_EXIT_CASE_RE.search(
-        runmenu_segment
-    ):
+    escape_proven = (
+        runmenu_execution.accepts(runmenu_segment)
+        if runmenu_execution is not None
+        else _RUNMENU_EXIT_CASE_RE.search(runmenu_segment) is not None
+    )
+    if not _RUNMENU_SIGNATURE_RE.search(runmenu_segment) or not escape_proven:
         violations.append("RunMenu lacks its void binary-proven ESC exit")
+    if runmenu_execution is not None and runmenu_execution.failure is not None:
+        violations.append(f"RunMenu execution gate failed: {runmenu_execution.failure}")
     if _RUNMENU_REDUNDANT_TAIL_RE.search(runmenu_segment):
         violations.append("RunMenu retains a redundant switch-to-loop-tail goto")
     drawtime_segment = _function_transcript_segment(transcript, _DRAWTIME_ADDR)
@@ -253,7 +263,8 @@ def evaluate_sortd_transcript(
     if drawtime_signature is None or _UNINITIALIZED_BP4_LOCAL_RE.search(drawtime_segment):
         violations.append("DrawTime lacks its canonical void positive-BP signature")
     elif re.search(
-        rf"\bsub_10e70\s*\(\s*{re.escape(drawtime_signature.group('row'))}\s*\*\s*60\s*,\s*75\s*\)",
+        rf"\bsub_10e70\s*\(\s*(?:\(\s*{re.escape(drawtime_signature.group('row_type'))}\s*\)\s*)?"
+        rf"{re.escape(drawtime_signature.group('row'))}\s*\*\s*60\s*,\s*75\s*\)",
         drawtime_segment,
     ) is None:
         violations.append("DrawTime lacks its binary-proven frequency and duration arguments")
@@ -342,6 +353,9 @@ def main(argv: list[str] | None = None) -> int:
 
     with tempfile.TemporaryDirectory(prefix="inertia-sortd-sidecar-free-") as temp_dir:
         isolated_binary = Path(temp_dir) / "SORTD.EXE"
+        function_c_dir = args.function_c_dir or Path(temp_dir) / "functions"
+        function_c_dir.mkdir(parents=True, exist_ok=True)
+        env["INERTIA_OUTPUT_C_DIR"] = str(function_c_dir)
         isolated_binary.write_bytes(image)
         command = default_decompiler_command(isolated_binary)
         with args.transcript_out.open("w", encoding="utf-8") as transcript_stream:
@@ -359,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
                 returncode = completed.returncode
             except subprocess.TimeoutExpired:
                 returncode = 124
+        runmenu_execution = collect_runmenu_execution_evidence(function_c_dir, Path(temp_dir))
 
     transcript = args.transcript_out.read_text(encoding="utf-8", errors="replace")
     result = evaluate_sortd_transcript(
@@ -368,6 +383,7 @@ def main(argv: list[str] | None = None) -> int:
         maximum_empty=max(0, args.maximum_empty),
         maximum_timeouts=max(0, args.maximum_timeouts),
         maximum_tracebacks=max(0, args.maximum_tracebacks),
+        runmenu_execution=runmenu_execution,
     )
     args.report_out.write_text(json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(asdict(result), sort_keys=True))

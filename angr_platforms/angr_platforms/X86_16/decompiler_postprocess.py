@@ -6,6 +6,9 @@ Forbidden work: semantic recovery from source, COD, assembly, or rendered C text
 Owning layer: cleanup only; proof belongs in IR, alias, widening, lowering, or structuring.
 Dynamic attribute access here is a third-party angr C AST and codegen telemetry
 boundary; owned Inertia state should stay typed before this cleanup bridge.
+Void-return normalization must not delete call-result assignments: a void caller
+can consume its callees' results in other scopes. Carrier DCE requires complete
+owned liveness evidence, never synthetic names or a local statement-list scan.
 """
 
 from __future__ import annotations
@@ -3197,7 +3200,7 @@ def _choose_return_type_for_shape_8616(
 
 
 def _prune_void_function_return_values_8616(project: object, codegen: SimpleNamespace) -> bool:
-    """Drop return values and unused call-result carriers from proven-void functions."""
+    """Normalize proven-void returns, retaining all internal call-result bindings."""
     if getattr(codegen, "cfunc", None) is None:
         return False
 
@@ -3215,7 +3218,6 @@ def _prune_void_function_return_values_8616(project: object, codegen: SimpleName
 
     changed = False
     root = getattr(codegen.cfunc, "statements", None)
-    pruned_carrier_names: set[str] = set()
     for container in tuple(node for node in (root, *_iter_c_nodes_deep_8616(root)) if isinstance(node, CStatements)):
         if not isinstance(container, CStatements):
             continue
@@ -3224,24 +3226,7 @@ def _prune_void_function_return_values_8616(project: object, codegen: SimpleName
             continue
         rewritten: list[object] = []
         local_changed = False
-        for index, stmt in enumerate(statements):
-            if isinstance(stmt, CAssignment):
-                # Dynamic angr/codegen compatibility boundary.
-                lhs_name = _c_variable_name_8616(stmt.lhs)
-                # Dynamic angr/codegen compatibility boundary.
-                rhs = stmt.rhs
-                following_statements = tuple(statements[index + 1 :])
-                if (
-                    _is_unresolved_synthetic_carrier_name_8616(lhs_name)
-                    and isinstance(rhs, CFunctionCall)
-                    and lhs_name is not None
-                    and not any(_node_references_c_variable_name_8616(candidate, lhs_name) for candidate in following_statements)
-                ):
-                    # Dynamic angr/codegen compatibility boundary.
-                    rewritten.append(CExpressionStatement(rhs, codegen=stmt.codegen))
-                    pruned_carrier_names.add(lhs_name)
-                    local_changed = True
-                    continue
+        for stmt in statements:
             if not isinstance(stmt, CReturn):
                 rewritten.append(stmt)
                 continue
@@ -3259,8 +3244,6 @@ def _prune_void_function_return_values_8616(project: object, codegen: SimpleName
         if local_changed:
             container.statements = rewritten
             changed = True
-    for name in sorted(pruned_carrier_names):
-        changed = _drop_codegen_variable_name_if_unreferenced_8616(codegen, name) or changed
     if changed:
         with contextlib.suppress(Exception):
             codegen._inertia_codegen_decl_refresh_required_8616 = True

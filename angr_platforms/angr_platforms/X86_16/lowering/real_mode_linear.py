@@ -170,7 +170,11 @@ from .global_declarations import (
     record_global_declaration_spec_8616,
     record_scalar_global_declaration_spec_8616,
 )
-from .gp_register_state import runtime_gp_expression_view_8616
+from .gp_register_state import (
+    runtime_gp_expression_view_8616,
+    runtime_gp_live_in_name_8616,
+    runtime_gp_state_names_8616,
+)
 from .instruction_bp_stack_access import (
     InstructionBpStackAccess8616,
     InstructionBpStackAccessEvidence8616,
@@ -213,6 +217,7 @@ from .stack_address_coordinates import (
     consume_indexed_stack_frame_terms_8616,
     machine_bp_offset_for_entry_sp_anchor_8616,
     machine_bp_offset_for_native_anchor_8616,
+    native_entry_sp_offset_for_anchor_8616,
 )
 from .stack_aggregate_objects import StackAggregateObjectFact8616, materialize_stack_aggregate_objects_8616
 from .stack_frame_projection import entry_sp_offset_for_machine_bp_range_8616
@@ -222,7 +227,11 @@ from .stack_lowering_from_facts import (
     materialize_stack_cvar_at_offset_from_facts_8616,
 )
 from .stack_probe_return_facts import TypedStackProbeReturnFact8616
-from .stack_storage_evidence import alias_proves_stack_range_8616
+from .stack_storage_evidence import (
+    alias_proves_private_stack_source_8616,
+    alias_proves_stack_range_8616,
+    proven_bp_entry_sp_delta_8616,
+)
 from .stack_value_projection import (
     StackValueOwnerHint8616,
     StackValueProjectionStatus8616,
@@ -399,6 +408,7 @@ class RealModeLinearStackAccess8616:
 
     displacement: int
     width: int | None
+    entry_sp_offset: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -984,9 +994,6 @@ def _apply_preferred_stack_cvar_name_8616(
         with contextlib.suppress(Exception):
             if target.name != preferred_name:
                 target.name = preferred_name
-    with contextlib.suppress(Exception):
-        if cvar.name != preferred_name:
-            cast(Any, cvar).name = preferred_name
 
 
 def _copy_existing_arg_surface_to_stack_cvar_8616(existing_arg: StructuredAstValue, cvar: StructuredAstValue) -> bool:
@@ -1008,10 +1015,6 @@ def _copy_existing_arg_surface_to_stack_cvar_8616(existing_arg: StructuredAstVal
                 if getattr(target, "name", None) != existing_name:
                     target.name = existing_name
                     changed = True
-        with contextlib.suppress(Exception):
-            if getattr(cvar, "name", None) != existing_name:
-                cast(Any, cvar).name = existing_name
-                changed = True
     return changed
 
 
@@ -1175,6 +1178,12 @@ def stack_cvar_for_stable_ss_linear_access_8616(
     require_lvalue: bool = False,
 ) -> StructuredAstValue | None:
     """Materialize a proven SS access, retaining exact instruction evidence."""
+    if access.entry_sp_offset is not None:
+        if access.width is None or access.width <= 0:
+            return None
+        return materialize_stack_cvar_at_offset_from_facts_8616(
+            codegen, access.entry_sp_offset, access.width, publish_machine_bp=False,
+        )
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
         return None
@@ -1258,6 +1267,9 @@ def stack_cvar_for_stable_ss_linear_access_8616(
             if isinstance(variables_in_use, dict):
                 variables_in_use.setdefault(variable, arg)
             _ensure_positive_bp_stack_arg_8616(codegen, arg, target_type)
+            publish_selected_stack_cvar_projection_8616(
+                codegen, arg, bp_offset=displacement, size=variable.size,
+            )
             return arg
     if isinstance(variables_in_use, dict):
         for variable, cvar in variables_in_use.items():
@@ -1284,6 +1296,9 @@ def stack_cvar_for_stable_ss_linear_access_8616(
                     cvar.variable_type = target_type
                 _apply_preferred_stack_cvar_name_8616(cvar, displacement, codegen)
                 _ensure_positive_bp_stack_arg_8616(codegen, cvar, target_type)
+                publish_selected_stack_cvar_projection_8616(
+                    codegen, cvar, bp_offset=displacement, size=variable.size,
+                )
                 return cvar
     storage_size = requested_size or 1
     entry_sp_offset = entry_sp_offset_for_machine_bp_range_8616(
@@ -3526,7 +3541,14 @@ def match_stable_ss_linear_stack_access_8616(
         ):
             _log_refusal_8616(codegen, "no_inferred_ss_stack_alias_fact", displacement=displacement, width=width)
             return None
-        return RealModeLinearStackAccess8616(displacement=displacement, width=width)
+        native_offset = (
+            native_entry_sp_offset_for_anchor_8616(offset_terms[0])
+            if len(offset_terms) == 1 and proven_bp_entry_sp_delta_8616(codegen) is None else None
+        )
+        entry_sp_offset = (
+            _canonical_stack_offset_8616(native_offset + offset_total) if native_offset is not None else None
+        )
+        return RealModeLinearStackAccess8616(displacement, width, entry_sp_offset=entry_sp_offset)
 
     return cast(RealModeLinearStackAccess8616 | None, _impl())
 
@@ -4020,11 +4042,18 @@ def _remove_callee_saved_stack_spills_8616(
     if not round_trip_regs:
         return False
     frame_pairs = callee_saved_frame_pairs_8616(decoded_insns, round_trip_regs)
+    runtime_gp_names = runtime_gp_state_names_8616(codegen)
     frame_instruction_roles: dict[
         int,
         tuple[CalleeSavedFramePair8616, CalleeSavedFrameInstructionRole8616],
     ] = {}
     for pair in frame_pairs:
+        runtime_owned = (
+            pair.register_name in {"ds", "es"}
+            or runtime_gp_live_in_name_8616(pair.register_name) in runtime_gp_names
+        )
+        if runtime_owned:
+            continue
         frame_instruction_roles[pair.push_addr] = (
             pair,
             CalleeSavedFrameInstructionRole8616.PUSH,
@@ -7159,8 +7188,6 @@ def _rename_generated_same_addr_global_cvars_8616(
         unified = getattr(node, "unified_variable", None)
         if isinstance(unified, SimMemoryVariable):
             unified.name = preferred_name
-        with contextlib.suppress(Exception):
-            cast(Any, node).name = preferred_name
         renamed += 1
     return renamed
 
@@ -7375,11 +7402,11 @@ def _ensure_stack_cvar_has_identifier_8616(
     )
     if not _valid_c_identifier_8616(preferred_name):
         return
+    # CVariable.name is read-only and derives from these backing variables.
     variable.name = preferred_name
     unified = cvar.unified_variable
     if isinstance(unified, SimStackVariable):
         unified.name = preferred_name
-    cast(Any, cvar).name = preferred_name
 
 
 def _is_generated_stack_cvar_name_8616(name: StructuredAstValue) -> bool:
@@ -7449,8 +7476,6 @@ def _apply_annotation_names_to_existing_stack_cvars_8616(codegen: StructuredAstV
         before = current_names
         if variable.name != preferred_name:
             variable.name = preferred_name
-        if cvar.name != preferred_name:
-            cast(Any, cvar).name = preferred_name
         if isinstance(unified, SimVariable) and unified.name != preferred_name:
             unified.name = preferred_name
         after = (
@@ -8795,6 +8820,14 @@ def _replace_tagged_assignment_8616(
     already_materialized_attr: str | None = None,
     candidate_position_predicate: Callable[[StructuredAstValue], bool] | None = None,
 ) -> bool:
+    """Replace tagged fragments only when their execution scopes can agree."""
+    from .stack_update_scope_guard import require_stack_update_scope_8616
+
+    if allow_tagged_iterator_expression and remove_duplicate_tagged_assignments:
+        require_stack_update_scope_8616(
+            root, ins_addr,
+            lambda node: _node_has_instruction_address_8616(node, project, ins_addr),
+        )
     changed = False
     materialized = False
     seen: set[int] = set()
@@ -15921,6 +15954,9 @@ def _materialize_direct_stack_mov_instructions_impl_8616(
         dict.fromkeys(existing_typed_facts + facts)
     )
     stats["raw_fact_count"] = int(stats.get("raw_fact_count", 0) or 0) + len(facts)
+    required_facts = tuple(fact for fact in facts if not alias_proves_private_stack_source_8616(codegen, fact.ins_addr))
+    stats["private_write_elided_count"] = int(stats.get("private_write_elided_count", 0) or 0) + len(facts) - len(required_facts)
+    facts = required_facts
     if not facts:
         if debug_stack_noise:
             log.warning(
@@ -17786,6 +17822,7 @@ def lower_stable_ss_linear_stack_dereferences_8616(
     _seen = set()
 
     def replace_children(node: StructuredAstValue) -> bool:
+        """Visit expression-bearing fields, including loads returned directly."""
         if node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
             return False
         _node_count[0] += 1
@@ -17814,10 +17851,23 @@ def lower_stable_ss_linear_stack_dereferences_8616(
             "iterator",
             "body",
             "else_node",
+            "retval",
+            "switch",
+            "cases",
+            "default",
         ):
             if not hasattr(node, attr):
                 continue
             value = getattr(node, attr)
+            if isinstance(value, dict):
+                for key, item in tuple(value.items()):
+                    replacement = transform(item)
+                    if replacement is not item:
+                        value[key] = replacement
+                        local_changed = True
+                    if replace_children(value[key]):
+                        local_changed = True
+                continue
             if isinstance(value, list):
                 for index, item in enumerate(tuple(value)):
                     replacement = transform(item)

@@ -6,7 +6,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.rustylib.ailment import Tags
 from angr.sim_type import SimTypeChar, SimTypeShort
-from angr.sim_variable import SimStackVariable
+from angr.sim_variable import SimRegisterVariable, SimStackVariable
 from angr_platforms.X86_16.alias.stack_memory_ssa import (
     build_x86_16_stack_memory_ssa_alias_artifact,
 )
@@ -147,7 +147,8 @@ def test_stack_word_load_materializes_exact_alias_projection() -> None:
     assert result.artifact.refusals == ()
 
 
-def test_stack_word_load_uses_tagged_canonical_argument_projection() -> None:
+@pytest.mark.parametrize("captured_half", [None, "low", "high", "both"])
+def test_stack_word_load_uses_tagged_canonical_argument_projection(captured_half) -> None:
     codegen = _Codegen(_alias_artifact((0x1010, 4)))
     owner_variable = SimStackVariable(2, 2, base="bp", name="lhs")
     owner = structured_c.CVariable(owner_variable, codegen=codegen)
@@ -161,6 +162,10 @@ def test_stack_word_load_uses_tagged_canonical_argument_projection() -> None:
     high = structured_c.CUnaryOp(
         "Dereference", structured_c.CConstant(0x101, SimTypeShort(False), codegen=codegen), codegen=codegen
     )
+    if captured_half in {"low", "both"}:
+        low = structured_c.CVariable(SimRegisterVariable(0, 1), codegen=codegen)
+    if captured_half in {"high", "both"}:
+        high = structured_c.CVariable(SimRegisterVariable(1, 1), codegen=codegen)
     root = structured_c.CBinaryOp(
         "Or", low,
         structured_c.CBinaryOp(
@@ -173,8 +178,11 @@ def test_stack_word_load_uses_tagged_canonical_argument_projection() -> None:
 
     result = materialize_stack_word_load_recompositions_8616(codegen, root)
 
-    assert result.root is owner
-    assert result.changed and result.artifact.complete
+    assert result.root is (owner if captured_half is None else root)
+    assert result.changed is (captured_half is None)
+    assert result.artifact.complete
+    if captured_half is not None:
+        assert result.artifact.refusals[0].kind is StackWordLoadRefusalKind8616.CAPTURED_VALUE
 
 
 def test_stack_word_load_materializes_registered_byte_pair_projection() -> None:

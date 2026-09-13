@@ -225,5 +225,7 @@ def test_classified_restore_without_push_carriers_hard_fails() -> None:
     )
     codegen._inertia_stack_register_restore_artifact_8616 = _artifact()
 
-    with pytest.raises(PipelineHardError, match="classified but none materialized"):
+    with pytest.raises(PipelineHardError, match="classified but none materialized") as failure:
         materialize_gp_stack_restores_8616(codegen)
+    assert failure.value.function_addr == codegen.cfunc.addr
+    assert failure.value.details["restore_obligations"] == ((0x1008, "ax", (-2, -1)),)

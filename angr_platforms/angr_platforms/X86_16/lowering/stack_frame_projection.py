@@ -21,7 +21,7 @@ def entry_sp_offset_for_machine_bp_range_8616(
     bp_offset: int,
     size: int,
 ) -> int | None:
-    """Return the proven entry-SP coordinate for one machine-BP range."""
+    """Use an exact binding or typed frame proof, never extrapolate local views."""
     registry = stack_variable_coordinate_registry_8616(codegen)
     projection = registry.for_bp_range(
         bp_offset,
@@ -30,14 +30,8 @@ def entry_sp_offset_for_machine_bp_range_8616(
     if projection is not None:
         entry_sp_offset = projection.entry_sp_offset
         return entry_sp_offset if isinstance(entry_sp_offset, int) else None
-    registry_deltas: set[int] = set()
-    for item in registry.projections:
-        entry_sp_offset = item.entry_sp_offset
-        projected_bp_offset = item.bp_offset
-        if isinstance(entry_sp_offset, int) and isinstance(projected_bp_offset, int):
-            registry_deltas.add(entry_sp_offset - projected_bp_offset)
-    if len(registry_deltas) == 1:
-        return bp_offset + next(iter(registry_deltas))
+    # A per-object view is not a function-wide frame relation. In particular,
+    # native saved-frame views can coexist with machine-BP local projections.
     delta = proven_bp_entry_sp_delta_8616(codegen)
     return bp_offset + delta if isinstance(delta, int) else None
 

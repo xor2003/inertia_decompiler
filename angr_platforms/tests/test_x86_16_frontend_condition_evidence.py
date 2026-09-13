@@ -13,6 +13,9 @@ from angr_platforms.X86_16.ir.core import IRBinaryValue, IRCondition, IRValue, M
 from angr_platforms.X86_16.lift_86_16 import Instruction_ANY
 from angr_platforms.X86_16.lowering.condition_transfer import collect_typed_conditions_from_emulator_8616
 
+CODE_BASE = 0x4000
+BYTE_WIDTH = 8
+
 
 class _ConditionEmulator:
     """Minimal owned test double for the lifter's typed-condition state."""
@@ -65,8 +68,8 @@ def test_frame_byte_test_mask_emits_exact_typed_condition(monkeypatch) -> None:
     [condition] = Instruction_ANY._inertia_module_condition_cache[0x4000]
     assert isinstance(condition, ConditionIR)
     assert condition.op == "zero"
-    assert condition.src_insn == 0x4004
-    assert condition.producer_insn == 0x4000
+    assert condition.src_insn == CODE_BASE + 4
+    assert condition.producer_insn == CODE_BASE
     assert condition.producer_semantics == (
         "test_mem_imm8",
         ("bp", 0xFFFC, -4),
@@ -86,14 +89,24 @@ def test_frame_byte_test_mask_emits_exact_typed_condition(monkeypatch) -> None:
     )
 
 
-def test_direct_word_test_full_lift_emits_exact_typed_condition(monkeypatch) -> None:
-    """A segmented word TEST must retain typed evidence through full lifting."""
+@pytest.mark.parametrize(
+    ("machine_code", "size", "mask", "branch_op"),
+    (
+        ("f706b8030002740290c3", 2, 0x0200, "zero"),
+        ("f606b80301740290c3", 1, 1, "zero"),
+        ("f606b80304750290c3", 1, 4, "nonzero"),
+    ),
+)
+def test_direct_test_full_lift_emits_exact_typed_condition(
+    monkeypatch, machine_code: str, size: int, mask: int, branch_op: str,
+) -> None:
+    """Byte and word TEST must retain masks and branch polarity through lifting."""
     monkeypatch.setattr(Instruction_ANY, "_inertia_module_condition_cache", {})
     monkeypatch.setattr(Instruction_ANY, "_inertia_pending_condition_sources_by_addr", {})
     monkeypatch.setattr(Instruction_ANY, "_inertia_condition_reg_value_state_8616", {})
 
     pyvex.lift(
-        bytes.fromhex("f706b8030002740290c3"),
+        bytes.fromhex(machine_code),
         0x4000,
         Arch86_16(),
         opt_level=0,
@@ -101,22 +114,23 @@ def test_direct_word_test_full_lift_emits_exact_typed_condition(monkeypatch) -> 
 
     [condition] = Instruction_ANY._inertia_module_condition_cache[0x4000]
     assert isinstance(condition, ConditionIR)
-    assert condition.op == "zero"
-    assert condition.src_insn == 0x4006
-    assert condition.producer_insn == 0x4000
-    assert condition.producer_semantics == ("test_abs_imm16", 0x03B8, 0x0200)
+    assert condition.op == branch_op
+    assert condition.width_bits == size * 8
+    assert condition.src_insn == 0x4004 + size
+    assert condition.producer_insn == CODE_BASE
+    assert condition.producer_semantics == (f"test_abs_imm{size * 8}", 0x03B8, mask)
     assert condition.lhs == IRBinaryValue(
         op="and",
         lhs=IRValue(
             MemSpace.DS,
             offset=0x03B8,
-            size=2,
+            size=size,
             expr=("cmp-ds",),
-            memory_access_size=2,
+            memory_access_size=size,
             memory_access_insn=0x4000,
         ),
-        rhs=IRValue(MemSpace.CONST, const=0x0200, size=2, expr=("cmp-imm",)),
-        size=2,
+        rhs=IRValue(MemSpace.CONST, const=mask, size=size, expr=("cmp-imm",)),
+        size=size,
     )
 
 
@@ -164,14 +178,15 @@ def test_plain_loop_emits_exact_address_sized_counter_condition(
         1,
     )
     assert condition.source == ("loop",)
-    assert condition.src_insn == 0x4000
-    assert condition.producer_insn == 0x4000
-    assert condition.taken_target == 0x4000
+    assert condition.src_insn == CODE_BASE
+    assert condition.producer_insn == CODE_BASE
+    assert condition.taken_target == CODE_BASE
     assert condition.fallthrough_target == fallthrough
 
 
 def test_inc_ax_before_jne_emits_exact_zero_boundary_condition(monkeypatch) -> None:
-    """The simple frontend path must retain INC-produced branch evidence."""
+    """An unbound input becomes a zero test of AX at the following JCC."""
+    monkeypatch.delenv("INERTIA_ENABLE_AFFINE_SWITCH_CONDITIONS", raising=False)
     monkeypatch.setattr(Instruction_ANY, "_inertia_module_condition_cache", {})
     monkeypatch.setattr(Instruction_ANY, "_inertia_pending_condition_sources_by_addr", {})
     monkeypatch.setattr(Instruction_ANY, "_inertia_condition_reg_value_state_8616", {})
@@ -187,7 +202,7 @@ def test_inc_ax_before_jne_emits_exact_zero_boundary_condition(monkeypatch) -> N
     assert len(conditions) == 1
     condition = conditions[0]
     assert isinstance(condition, ConditionIR)
-    assert condition.op == "ne"
+    assert condition.op == "nonzero"
     assert condition.lhs == IRValue(
         MemSpace.REG,
         name="ax",
@@ -195,14 +210,10 @@ def test_inc_ax_before_jne_emits_exact_zero_boundary_condition(monkeypatch) -> N
         size=2,
         expr=("cmp-reg",),
     )
-    assert condition.rhs == IRValue(
-        MemSpace.CONST,
-        const=0xFFFF,
-        size=2,
-        expr=("cmp-imm",),
-    )
-    assert condition.producer_insn == 0x4003
-    assert condition.src_insn == 0x4004
+    assert condition.rhs is None
+    assert condition.operand_bind_insn == condition.src_insn
+    assert condition.producer_insn == CODE_BASE + 3
+    assert condition.src_insn == CODE_BASE + 4
     assert condition.producer_semantics == ("inc_reg16", "ax", 1)
 
 
@@ -214,13 +225,14 @@ def test_inc_ax_before_jne_emits_exact_zero_boundary_condition(monkeypatch) -> N
     ),
     ids=("two-increments", "two-decrements"),
 )
-def test_repeated_inc_dec_before_jne_uses_original_value_boundary(
+def test_repeated_inc_dec_result_test_preserves_original_value_boundary(
     monkeypatch,
     machine_code: str,
     producer_semantics: tuple[str, str, int],
     expected_boundary: int,
 ) -> None:
-    """Repeated unary updates compare the pre-chain value with the exact boundary."""
+    """A JCC-bound result test agrees with the pre-chain boundary for every word."""
+    monkeypatch.delenv("INERTIA_ENABLE_AFFINE_SWITCH_CONDITIONS", raising=False)
     monkeypatch.setattr(Instruction_ANY, "_inertia_module_condition_cache", {})
     monkeypatch.setattr(Instruction_ANY, "_inertia_pending_condition_sources_by_addr", {})
     monkeypatch.setattr(Instruction_ANY, "_inertia_condition_reg_value_state_8616", {})
@@ -234,13 +246,20 @@ def test_repeated_inc_dec_before_jne_uses_original_value_boundary(
 
     condition = Instruction_ANY._inertia_module_condition_cache[0x4000][0]
     assert isinstance(condition, ConditionIR)
-    assert condition.op == "ne"
-    assert isinstance(condition.rhs, IRValue)
-    assert condition.rhs.space is MemSpace.CONST
-    assert condition.rhs.const == expected_boundary
-    assert condition.producer_insn == 0x4001
-    assert condition.src_insn == 0x4002
+    assert condition.op == "nonzero"
+    assert condition.rhs is None
+    assert condition.operand_bind_insn == condition.src_insn
+    assert isinstance(condition.lhs, IRValue)
+    assert condition.lhs.space is MemSpace.REG
+    assert condition.lhs.name == "ax"
+    assert condition.producer_insn == CODE_BASE + 1
+    assert condition.src_insn == CODE_BASE + 2
     assert condition.producer_semantics == producer_semantics
+    kind, _register, count = producer_semantics
+    delta = count if kind == "inc_reg16" else -count
+    for initial in range(0x10000):
+        updated = (initial + delta) & 0xFFFF
+        assert (updated != 0) == (initial != expected_boundary), initial
 
 
 @pytest.mark.parametrize(
@@ -336,8 +355,8 @@ def test_byte_register_copy_preserves_direct_load_condition_evidence(monkeypatch
     condition = conditions[0]
     assert isinstance(condition, ConditionIR)
     assert condition.op == "ne"
-    assert condition.width_bits == 8
-    assert condition.producer_insn == 0x4005
+    assert condition.width_bits == BYTE_WIDTH
+    assert condition.producer_insn == CODE_BASE + 5
     assert condition.producer_semantics == ("cmp_reg_imm8", "bl", 0)
     assert condition.lhs == IRValue(
         MemSpace.DS,
@@ -398,7 +417,7 @@ def test_direct_byte_test_mask_emits_exact_typed_access_evidence() -> None:
     assert instruction._lift_simple_test_8616("test_abs_imm8")
     source = instruction.emu._inertia_last_condition_source
     assert isinstance(source, ConditionSource)
-    assert source.width_bits == 8
+    assert source.width_bits == BYTE_WIDTH
     assert source.normalized_lhs == IRBinaryValue(
         op="and",
         lhs=IRValue(
@@ -426,6 +445,8 @@ def test_dec_jcc_does_not_mutate_disabled_affine_state(monkeypatch) -> None:
     monkeypatch.setattr(Instruction_ANY, "_inertia_condition_reg_value_state_8616", {})
     instruction = Instruction_ANY.__new__(Instruction_ANY)
     instruction.addr = 0x4000
+    instruction.arch = Arch86_16()
+    instruction._future_instructions = (SimpleNamespace(simple_semantics=("jne", 0x4000)),)
     flag_inputs = []
     instruction.emu = SimpleNamespace(
         _inertia_current_block_addr=0x4000, update_eflags_dec=flag_inputs.append
@@ -438,14 +459,13 @@ def test_dec_jcc_does_not_mutate_disabled_affine_state(monkeypatch) -> None:
     instruction._lift_simple_jcc_8616 = lambda _kind: False
     instruction._get_reg16 = lambda _name: 4
     instruction._const16 = lambda value: value
-    instruction._next_instruction_is_simple_jcc = lambda: True
     instruction._same_preceding_incdec_reg16_count_8616 = lambda _name, mnemonic: 1
     instruction._condition_proven_reg_value_8616 = lambda _name, width_bits: None
     instruction._normalized_reg_imm_condition_operands_8616 = lambda *_args, **_kwargs: (_ for _ in ()).throw(
         AssertionError("disabled affine state was read")
     )
-    recorded: list[tuple[object, object]] = []
-    instruction._record_cmp_condition_source = lambda lhs, rhs, **_kwargs: recorded.append((lhs, rhs))
+    recorded = []
+    instruction._record_test_condition_source = lambda value, **kwargs: recorded.append((value, kwargs))
     instruction.put = lambda _value, _name: None
     instruction._update_condition_reg_affine_offset_8616 = lambda *_args, **_kwargs: (_ for _ in ()).throw(
         AssertionError("disabled affine state was mutated")
@@ -455,7 +475,11 @@ def test_dec_jcc_does_not_mutate_disabled_affine_state(monkeypatch) -> None:
 
     instruction._lift_simple()
 
-    assert recorded == [(4, 1)]
+    assert recorded == [(3, {
+        "normalized_value": IRValue(MemSpace.REG, name="ax", offset=0, size=2, expr=("cmp-reg",)),
+        "bind_operand_at_jcc": True,
+        "producer_semantics": ("dec_reg16", "ax", 1),
+    })]
     assert flag_inputs == [4]
 
 

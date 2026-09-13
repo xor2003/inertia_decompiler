@@ -60,7 +60,8 @@ def _type_token_size(expr: object) -> int | None:
     try:
         constant = boundary.con
     except AttributeError:
-        return None
+        # Bare Exit destinations expose their type directly, without .con.
+        constant = cast(_VexConstantBoundary, expr)
     if constant is None:
         return None
     try:

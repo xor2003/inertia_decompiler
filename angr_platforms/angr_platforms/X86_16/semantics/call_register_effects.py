@@ -35,8 +35,10 @@ __all__ = (
     "classify_synthetic_call_register_effect_8616",
 )
 
-MSC16_CALLEE_SAVED_GENERAL_REGISTERS_8616: frozenset[str] = frozenset({"bx", "di", "si"})
-MSC16_CALLER_SAVED_GENERAL_REGISTERS_8616: frozenset[str] = frozenset({"ax", "cx", "dx"})
+# Microsoft C 6.0 Advanced Programming Techniques, sections 12.8.3-12.8.5:
+# BP/SI/DI survive calls; BX is scratch. This proves only the 16-bit views.
+MSC16_CALLEE_SAVED_GENERAL_REGISTERS_8616: frozenset[str] = frozenset({"bp", "di", "si"})
+MSC16_CALLER_SAVED_GENERAL_REGISTERS_8616: frozenset[str] = frozenset({"ax", "bx", "cx", "dx"})
 
 
 class SyntheticCallRegisterEffectVerdict8616(StrEnum):

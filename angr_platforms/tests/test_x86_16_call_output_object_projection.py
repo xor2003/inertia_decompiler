@@ -11,12 +11,22 @@ from angr_platforms.X86_16.lowering.call_output_stack_object_replay import reapp
 from angr_platforms.X86_16.lowering.call_output_stack_objects import (
     lower_call_output_stack_fields_in_condition_8616,
 )
+from angr_platforms.X86_16.lowering.stack_coordinate_rebinding import reset_local_stack_coordinate_projections_8616
+from angr_platforms.X86_16.lowering.stack_lowering_impl import _canonicalize_stack_cvar_expr
 from angr_platforms.X86_16.lowering.stack_variable_coordinates import (
+    StackCoordinateProducer8616,
     machine_bp_offset_for_stack_variable_8616,
+    record_stack_variable_coordinate_projection_8616,
     stack_variable_coordinate_registry_8616,
 )
 from angr_platforms.X86_16.pipeline.errors import PipelineHardError
 from test_x86_16_call_output_stack_objects import _condition, _fixture, _VariableManager
+
+_OBJECT_BP = -112
+_OBJECT_SIZE = 22
+_BACKING_SIZE = 112
+_FIRST_FIELD_BP = -94
+_FIELD_COUNT = 2
 
 
 def test_call_output_publishes_missing_projection_before_field_materialization():
@@ -36,16 +46,76 @@ def test_call_output_publishes_missing_projection_before_field_materialization()
 
     result = lower_call_output_stack_fields_in_condition_8616(codegen, condition, conditions)
 
-    assert result.stats.materialized_count == 2
+    assert result.stats.materialized_count == _FIELD_COUNT
     field = result.expression.lhs.lhs
     assert isinstance(field, CVariableField)
     bp_offset = machine_bp_offset_for_stack_variable_8616(codegen, field.variable.variable)
-    assert bp_offset == -112
-    assert bp_offset + field.field.offset == -94
+    assert bp_offset == _OBJECT_BP
+    assert bp_offset + field.field.offset == _FIRST_FIELD_BP
     projection = stack_variable_coordinate_registry_8616(codegen).for_variable(narrow)
     assert projection is not None
     assert (projection.bp_offset, projection.entry_sp_offset, projection.size) == (-112, -114, 22)
     assert narrow.size == 1
+
+
+def test_local_storage_replay_keeps_call_object_coordinate_owner():
+    codegen, _condition_expr, _carriers = _fixture(include_array_boundary=True, entry_sp_bias=-2)
+    base = codegen.cfunc.statements.statements[0].expr.args[0].operand
+    publish_call_output_object_projection_8616(codegen, base, bp_offset=-112, byte_size=22)
+    scalar = SimStackVariable(-10, 2, base="bp", name="scalar")
+    record_stack_variable_coordinate_projection_8616(
+        codegen, variable=scalar, cvar=CVariable(scalar, codegen=codegen),
+        bp_offset=-8, entry_sp_offset=-10, size=2,
+    )
+
+    reset_local_stack_coordinate_projections_8616(codegen, replaced_bp_ranges=frozenset({(-8, 2)}))
+
+    projection = stack_variable_coordinate_registry_8616(codegen).for_variable(base.variable)
+    assert projection is not None
+    assert (projection.bp_offset, projection.entry_sp_offset, projection.size) == (-112, -114, 22)
+    assert projection.producer is StackCoordinateProducer8616.CALL_OUTPUT_OBJECT
+    assert stack_variable_coordinate_registry_8616(codegen).for_variable(scalar) is None
+    assert machine_bp_offset_for_stack_variable_8616(codegen, base.variable) == _OBJECT_BP
+
+
+def test_partial_replay_preserves_distinct_coordinates_with_equal_numeric_offsets():
+    codegen, _condition_expr, _carriers = _fixture(include_array_boundary=True, entry_sp_bias=-2)
+    saved_bp, buffer_bp = -20, -18
+    saved = SimStackVariable(saved_bp, 1, base="bp", name="saved")
+    buffer = SimStackVariable(saved_bp, 16, base="bp", name="buffer")
+    replaced = SimStackVariable(-4, 2, base="bp", name="counter")
+    for variable, bp_offset in ((saved, saved_bp), (buffer, buffer_bp), (replaced, -2)):
+        record_stack_variable_coordinate_projection_8616(
+            codegen, variable=variable, cvar=CVariable(variable, codegen=codegen),
+            bp_offset=bp_offset, entry_sp_offset=variable.offset, size=variable.size,
+        )
+
+    reset_local_stack_coordinate_projections_8616(codegen, replaced_bp_ranges=frozenset({(-2, 2)}))
+
+    registry = stack_variable_coordinate_registry_8616(codegen)
+    assert registry.for_variable(replaced) is None
+    assert registry.for_variable(saved) is not None
+    assert registry.for_variable(buffer) is not None
+    assert machine_bp_offset_for_stack_variable_8616(codegen, saved) == saved_bp
+    assert machine_bp_offset_for_stack_variable_8616(codegen, buffer) == buffer_bp
+
+
+def test_canonical_stack_view_never_falls_through_to_numeric_lookup():
+    codegen, _condition_expr, _carriers = _fixture(include_array_boundary=True, entry_sp_bias=-2)
+    saved = SimStackVariable(-20, 1, base="bp", name="saved")
+    view = CVariable(saved, variable_type=SimTypeShort(False), codegen=codegen)
+    record_stack_variable_coordinate_projection_8616(
+        codegen, variable=saved, cvar=view, bp_offset=-20, entry_sp_offset=-20, size=1,
+    )
+
+    def forbidden_lookup(*args, **kwargs):
+        pytest.fail("an authoritative canonical view must not use raw-offset lookup")
+
+    result = _canonicalize_stack_cvar_expr(
+        view, codegen, unwrap_c_casts=lambda value: value,
+        resolve_stack_cvar_at_offset=forbidden_lookup,
+    )
+    assert result is view
 
 
 @pytest.mark.parametrize("byte_size,bp_offset", [(0, -112), (-1, -112), (22, -110)])
@@ -74,10 +144,10 @@ def test_call_output_projection_replay_preserves_existing_aliases(bias):
     assert rebound.variable is first.variable
     assert replayed.variable is first.variable
     assert alias_variable in replayed.equivalent_variables
-    assert replayed.size == 22
-    assert base.variable.size == 112
+    assert replayed.size == _OBJECT_SIZE
+    assert base.variable.size == _BACKING_SIZE
     assert alias_variable.size == 1
-    assert machine_bp_offset_for_stack_variable_8616(codegen, alias_variable) == -112
+    assert machine_bp_offset_for_stack_variable_8616(codegen, alias_variable) == _OBJECT_BP
 
 
 @pytest.mark.parametrize("stale_ast", [False, True])

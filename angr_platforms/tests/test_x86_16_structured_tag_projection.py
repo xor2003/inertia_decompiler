@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 from angr.analyses.decompiler.structured_codegen.c import (
+    CAssignment,
     CBinaryOp,
     CConstant,
     CIfElse,
@@ -65,13 +66,36 @@ def test_structured_subtree_entry_tags_collect_both_projections_once() -> None:
     """One read-only walk must publish instruction and block entry tags."""
     codegen = _Codegen()
 
-    result = collect_structured_subtree_entry_tags_8616(
-        _tagged_body(codegen, 0x1000)
-    )
+    lowest_block, lowest_instruction = 0x1000, 0x1008
+    result = collect_structured_subtree_entry_tags_8616(_tagged_body(codegen, lowest_block))
 
-    assert result.first_instruction_addr == 0x1008
+    assert result.first_instruction_addr == lowest_instruction
     assert result.block_addrs == (0x1000, 0x1010)
-    assert result.first_block_addr == 0x1000
+    assert result.first_block_addr == lowest_block
+
+
+def test_condition_arm_entry_follows_execution_order_not_address_order():
+    codegen = _Codegen()
+    body = _tagged_body(codegen, 0x1000)
+    first_executed_block = 0x1010
+    assert condition_materialization._first_tagged_cfg_target_8616(body) == first_executed_block
+
+
+def test_condition_arm_entry_preserves_explicit_container_identity():
+    codegen = _Codegen()
+    body = _tagged_body(codegen, 0x1000)
+    container_entry = 0x2000
+    body.tags = {"vex_block_addr": container_entry}
+    assert condition_materialization._first_tagged_cfg_target_8616(body) == container_entry
+
+
+def test_condition_arm_entry_does_not_use_operand_origin():
+    codegen = _Codegen()
+    operand = CConstant(1, SimTypeShort(False), codegen=codegen,
+                        tags={"ins_addr": 0x1000, "vex_block_addr": 0x1000})
+    assignment = CAssignment(operand, operand, codegen=codegen)
+    body = CStatements([assignment, *_tagged_body(codegen, 0x2000).statements], codegen=codegen)
+    assert condition_materialization._first_tagged_cfg_target_8616(body) is None
 
 
 def test_condition_surface_collects_each_branch_body_once(monkeypatch) -> None:

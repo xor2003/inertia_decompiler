@@ -28,6 +28,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 
 from ..ir.condition_ir import ConditionIR
+from .condition_chain_provenance import bind_condition_chain_provenance_8616
 from .wide_stack_condition_chains import WideStackPairProver8616
 from .wide_stack_predicate_graphs import (
     WidePredicateExpr8616,
@@ -254,7 +255,7 @@ def materialize_wide_stack_return_predicate_8616(
         materialize_condition,
         codegen,
     )
-    if materialized is None:
+    if materialized is None or bind_condition_chain_provenance_8616(materialized, conditions) is None:
         result = _refused_8616(
             WideStackReturnPredicateStatus8616.EXPRESSION_MATERIALIZATION_FAILED,
             raw_count,

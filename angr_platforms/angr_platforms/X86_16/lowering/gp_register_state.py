@@ -30,6 +30,7 @@ from .global_declarations import (
     GlobalDeclarationCType8616,
     record_global_declaration_spec_8616,
 )
+from .stack_value_projection import project_pointer_storage_value_8616
 
 __all__ = [
     "GPRegisterStateLoweringStats8616",
@@ -42,6 +43,8 @@ __all__ = [
     "runtime_gp_name_for_variable_8616",
     "runtime_gp_state_assignment_8616",
     "runtime_gp_state_expr_8616",
+    "runtime_gp_state_names_8616",
+    "runtime_gp_state_symbols_8616",
 ]
 
 _RUNTIME_GP_STATE_SYMBOLS_8616 = {
@@ -64,6 +67,13 @@ _RUNTIME_GP_STATE_ADDRESSES_8616 = {
     "esp": 0x1_0018,
     "ebp": 0x1_001C,
 }
+
+
+def runtime_gp_state_symbols_8616() -> tuple[str, ...]:
+    """Expose the emitted GP storage ABI to target runtime providers."""
+    return tuple(sorted(_RUNTIME_GP_STATE_SYMBOLS_8616.values()))
+
+
 _GP_REGISTER_VIEWS_8616 = {
     "eax": ("eax", 0, 4),
     "ax": ("eax", 0, 2),
@@ -90,6 +100,8 @@ _GP_REGISTER_VIEWS_8616 = {
     "ebp": ("ebp", 0, 4),
     "bp": ("ebp", 0, 2),
 }
+
+_POINTER_WORD_BYTES_8616 = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,7 +263,8 @@ def runtime_gp_state_assignment_8616(
         codegen=codegen,
     )
     if view_width == 4:
-        return structured_c.CAssignment(source, value, codegen=codegen)
+        projected = project_pointer_storage_value_8616(codegen, value, view_width)
+        return None if projected is None else structured_c.CAssignment(source, projected, codegen=codegen)
     return _runtime_gp_subview_write_8616(
         parent_name,
         bit_shift,
@@ -495,6 +508,10 @@ def _runtime_gp_subview_write_8616(
     """Project one narrow-register write while preserving its origin tags."""
     codegen = source.codegen
     _bind_gp_write_value_type_8616(codegen, value)
+    # Byte-register writes consume the low byte of the pointer's offset word.
+    projected = project_pointer_storage_value_8616(codegen, value, max(view_width, _POINTER_WORD_BYTES_8616))
+    assert projected is not None
+    value = projected
     lane_type = _runtime_gp_lane_type_8616(codegen)
     parent_lhs = _runtime_gp_cvar_8616(register_name, source, function_addr)
     parent_read = _runtime_gp_cvar_8616(register_name, source, function_addr)
@@ -618,19 +635,20 @@ def _addressed_gp_high_byte_view_8616(
     return register_name, source
 
 
-def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
-    """Materialize SSA-proven GP live-ins as explicit runtime globals."""
+def runtime_gp_state_names_8616(codegen: object) -> frozenset[str]:
+    """Return authoritative runtime lanes for both lowering and effect retention."""
     boundary = cast(_CodegenGPRegisters8616, codegen)
     cfunc = boundary.cfunc
     project = boundary.project
     if cfunc is None or project is None:
-        boundary._inertia_gp_register_state_lowering_stats_8616 = GPRegisterStateLoweringStats8616(0, 0, 0, 0, 0)
-        return False
+        return frozenset()
     resolution = registered_function_ssa_artifact_8616(project, cfunc.addr)
     live_ins: set[str] = set()
     if resolution.verdict is FunctionSSAArtifactVerdict8616.PROVEN and resolution.artifact is not None:
         live_ins.update(gp_live_in_names_from_ssa_8616(resolution.artifact))
-    live_ins.update(gp_live_in_names_from_c_ast_8616(cfunc.statements, project))
+    else:
+        # Missing C assignments cannot contradict an authoritative SSA definition.
+        live_ins.update(gp_live_in_names_from_c_ast_8616(cfunc.statements, project))
     state_owned_names = set(live_ins)
     state_owned_names.update(
         register_name
@@ -639,6 +657,18 @@ def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
         for register_name in (runtime_gp_name_for_variable_8616(node.variable),)
         if register_name is not None
     )
+    return frozenset(state_owned_names)
+
+
+def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
+    """Materialize SSA-proven GP live-ins as explicit runtime globals."""
+    boundary = cast(_CodegenGPRegisters8616, codegen)
+    cfunc = boundary.cfunc
+    project = boundary.project
+    if cfunc is None or project is None:
+        boundary._inertia_gp_register_state_lowering_stats_8616 = GPRegisterStateLoweringStats8616(0, 0, 0, 0, 0)
+        return False
+    state_owned_names = runtime_gp_state_names_8616(codegen)
     raw_ids: set[int] = set()
     materialized_ids: set[int] = set()
 

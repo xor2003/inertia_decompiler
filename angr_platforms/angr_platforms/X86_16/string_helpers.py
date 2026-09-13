@@ -1,4 +1,4 @@
-"""Layer: Helper boundary.
+"""Layer: Helper boundary (frontend instruction execution).
 
 Responsibility: execute string-instruction repeat, segment, direction, and branch helper effects.
 Forbidden: replacing string-instruction semantics with source-backed or rendered-C rewrites.
@@ -15,6 +15,10 @@ from pyvex.lifting.util.vex_helper import Type
 from .alu_helpers import compare_operation
 from .instruction import REPNZ, REPZ
 from .regs import reg16_t, reg32_t, sgreg_t
+
+_WORD_BYTES = 2
+_DWORD_BYTES = 4
+_WIDE_ADDRESS_BITS = 32
 
 
 @runtime_checkable
@@ -177,7 +181,7 @@ def string_delta(emu: StringEmulator, width: int, value_type: str = Type.int_16)
     if width == 1:
         return step
     doubled = cast(_AddSubValue, step + step)
-    return doubled if width == 2 else doubled + doubled
+    return doubled if width == _WORD_BYTES else doubled + doubled
 
 
 def string_source_segment(instr: StringInstruction) -> sgreg_t:
@@ -204,8 +208,8 @@ def repeat_prefix_cond(emu: StringEmulator, instr: StringInstruction) -> _Castab
     if repeat_kind(instr) == "none":
         return None
 
-    counter_reg = reg32_t.ECX if instr.address_bits == 32 else reg16_t.CX
-    counter_type = Type.int_32 if instr.address_bits == 32 else Type.int_16
+    counter_reg = reg32_t.ECX if instr.address_bits == _WIDE_ADDRESS_BITS else reg16_t.CX
+    counter_type = Type.int_32 if instr.address_bits == _WIDE_ADDRESS_BITS else Type.int_16
     counter = cast(_AddSubValue, emu.get_gpreg(counter_reg))
     zero = emu.constant(0, counter_type)
     execute_operation = counter != zero
@@ -230,26 +234,27 @@ def repeat_jump(
     repeat_cond: _CastableToRdt | bool | None,
     zf_sensitive: bool = False,
 ) -> None:
-    """Emit the repeat backedge for a string instruction when its condition holds."""
+    """Use the header count guard for non-comparing REP, preserving native SSA.
+
+    An internal zero-count exit plus a conditional tail confuses native
+    head-controlled-loop state selection. Count-only operations return to the
+    existing header guard; compare/scan operations still need their ZF test.
+    """
     if repeat_cond is None:
         return
 
     cond: object = repeat_cond if isinstance(repeat_cond, bool) else repeat_cond.cast_to(Type.int_1)
-    if zf_sensitive:
-        kind = repeat_kind(instr)
-        if kind == "repz":
-            cond = cast(_AndValue, cond) & emu.is_zero()
-        elif kind == "repnz":
-            cond = cast(_AndValue, cond) & (emu.is_zero() == emu.constant(0, Type.int_1))
-    else:
-        counter_name = "ecx" if instr.address_bits == 32 else "cx"
-        counter_size = 4 if instr.address_bits == 32 else 2
-        emu.lifter_instruction.record_loop_counter_condition_8616(
-            counter_name,
-            counter_size,
-            -instr.size,
-            instr.size,
-        )
+    if not zf_sensitive:
+        known_condition = cond if isinstance(cond, bool) else cond.rdt if _has_rdt(cond) else None
+        if known_condition is not False:
+            repeat_target = emu.constant(emu.lifter_instruction.addr, Type.int_32)
+            emu.lifter_instruction.jump(None, repeat_target, JumpKind.Boring)
+        return
+    kind = repeat_kind(instr)
+    if kind == "repz":
+        cond = cast(_AndValue, cond) & emu.is_zero()
+    elif kind == "repnz":
+        cond = cast(_AndValue, cond) & (emu.is_zero() == emu.constant(0, Type.int_1))
     repeat_target = emu.constant(emu.lifter_instruction.addr, Type.int_32)
     if isinstance(cond, bool):
         if not cond:
@@ -285,9 +290,9 @@ def string_load(emu: StringEmulator, segment: sgreg_t, offset: object, width: in
     """Load a segmented string operand with the requested width."""
     if width == 1:
         return emu.get_data8(segment, offset)
-    if width == 2:
+    if width == _WORD_BYTES:
         return emu.get_data16(segment, offset)
-    if width == 4:
+    if width == _DWORD_BYTES:
         return emu.get_data32(segment, offset)
     raise ValueError(f"unsupported string width: {width}")
 
@@ -297,10 +302,10 @@ def string_store(emu: StringEmulator, segment: sgreg_t, offset: object, value: o
     if width == 1:
         emu.put_data8(segment, offset, value)
         return
-    if width == 2:
+    if width == _WORD_BYTES:
         emu.put_data16(segment, offset, value)
         return
-    if width == 4:
+    if width == _DWORD_BYTES:
         emu.put_data32(segment, offset, value)
         return
     raise ValueError(f"unsupported string width: {width}")

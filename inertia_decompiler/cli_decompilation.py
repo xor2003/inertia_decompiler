@@ -103,6 +103,7 @@ from angr_platforms.X86_16.lowering.real_mode_linear import (
 from angr_platforms.X86_16.lowering.segment_global_materialization import (
     run_segment_global_materialization_8616,
 )
+from angr_platforms.X86_16.lowering.segment_register_state import runtime_segment_name_for_variable_8616
 from angr_platforms.X86_16.lowering.segmented_global_loads import (
     SegmentedGlobalLoadStats8616,
     materialize_compare_register_global_carriers_8616,
@@ -1620,6 +1621,8 @@ def _typed_switch_seqnode_case_segment_quality_8616(codegen: object) -> dict[str
             return False
         # Dynamic angr/codegen compatibility boundary.
         variable = node.variable
+        if runtime_segment_name_for_variable_8616(variable) in {"ds", "es", "ss"}:
+            return True
         if not isinstance(variable, SimRegisterVariable):
             return False
         # Dynamic angr/codegen compatibility boundary.
@@ -7273,15 +7276,12 @@ def _preferred_expr_collapse_depth(
     wrapper_like: bool = False,
     tiny_single_call_helper: bool = False,
 ) -> int:
-    if block_count <= 1 and byte_count <= 96:
-        return 2
-    if wrapper_like or tiny_single_call_helper:
-        return 2
-    if block_count <= 24 and byte_count <= 256:
-        return 32
-    if block_count <= 64 and byte_count <= 1024:
-        return 24
-    return 16
+    """Disable UI-only ellipses when exporting complete, recompilable source.
+
+    Keep the caller's function-profile interface, but never use complexity to
+    hide an expression. Angr expects an integer cutoff, not an optional value.
+    """
+    return sys.maxsize
 
 
 @cast(Callable[..., Any], trace_function(name="function.decompile_with_stats"))

@@ -26,6 +26,7 @@ from angr_platforms.X86_16.tail_validation_fingerprint import _expr_fingerprint
 from angr_platforms.X86_16.validation_condition_identity import (
     condition_ir_semantic_fingerprint_8616,
 )
+from angr_platforms.X86_16.validation_condition_storage_views import condition_storage_views_match_8616
 from angr_platforms.X86_16.validation_control_flow import (
     LoopBranchGuardIssueKind8616,
     validate_structured_control_flow_8616,
@@ -248,6 +249,9 @@ def _validate_indexed(condition: ConditionIR) -> object:
         condition_fingerprint=lambda expression: _expr_fingerprint(expression, project),
         condition_ir_fingerprint=lambda typed: condition_ir_semantic_fingerprint_8616(
             project, codegen, typed
+        ),
+        condition_storage_matcher=lambda typed, candidate, inverted: condition_storage_views_match_8616(
+            project, codegen, typed, candidate, inverted,
         ),
     )
 

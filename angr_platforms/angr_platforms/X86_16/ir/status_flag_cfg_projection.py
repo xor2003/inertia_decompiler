@@ -38,7 +38,7 @@ from .status_flag_binary_cfg import summarize_binary_status_flag_entry_reads_861
 from .vex_import import build_x86_16_ir_function_artifact
 
 _CFG_SUPPRESSION_MNEMONICS_8616 = frozenset(
-    {"adc", "add", "and", "cmp", "dec", "inc", "or", "sal", "sar", "sbb", "shl", "shr", "sub", "xor"}
+    {"adc", "add", "and", "cmp", "dec", "inc", "or", "sal", "sar", "sbb", "shl", "shr", "sub", "test", "xor"}
 )
 
 

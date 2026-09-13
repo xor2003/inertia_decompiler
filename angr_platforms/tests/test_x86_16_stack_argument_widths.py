@@ -65,6 +65,7 @@ def _short_parameter_fixture() -> tuple[object, object, object]:
         addr=0x1000,
         arg_list=[wait],
         functy=prototype,
+        statements=None,
         unified_local_vars={},
     )
     codegen = SimpleNamespace(cfunc=cfunc, _inertia_callsite_summaries={})
@@ -131,6 +132,7 @@ def _surplus_long_parameter_fixture() -> tuple[object, object, object]:
         addr=0x1000,
         arg_list=list(cvars),
         functy=prototype,
+        statements=None,
         unified_local_vars={},
         variables_in_use=dict(zip(variables, cvars, strict=False)),
     )
@@ -447,6 +449,7 @@ def test_annotated_slots_ignore_overlapping_high_byte_argument_type() -> None:
         addr=0x1000,
         arg_list=list(cvars),
         functy=stale_prototype,
+        statements=None,
         unified_local_vars={},
         variables_in_use=dict(zip(variables, cvars, strict=False)),
     )
@@ -499,6 +502,7 @@ def test_annotated_slots_preserve_width_correct_prototype_signedness() -> None:
         variables_in_use=dict(zip(variables, cvars, strict=False)),
     )
 
+    codegen.cfunc.statements = None
     materialize_annotated_stack_prototype_8616(project, codegen)
 
     assert all(isinstance(arg_type, SimTypeShort) for arg_type in codegen.cfunc.functy.args)
@@ -542,6 +546,7 @@ def test_shifted_header_keeps_char_value_width_separate_from_word_slot_spacing()
     )
     codegen._inertia_callsite_summaries = {}
 
+    codegen.cfunc.statements = None
     assert materialize_annotated_stack_prototype_8616(project, codegen) is True
     assert all(isinstance(arg_type, SimTypeChar) for arg_type in codegen.cfunc.functy.args)
     assert codegen._inertia_function_parameter_width_facts_8616 == (

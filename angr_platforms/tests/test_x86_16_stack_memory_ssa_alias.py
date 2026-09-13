@@ -76,8 +76,9 @@ def test_stack_memory_ssa_alias_projects_accesses_and_phi_exactly() -> None:
 
     assert artifact.source_ssa is function_ssa
     assert artifact.complete is True
-    assert artifact.stats.raw_fact_count == 4
-    assert artifact.stats.materialized_count == 4
+    expected_accesses_and_phi = 4
+    assert artifact.stats.raw_fact_count == expected_accesses_and_phi
+    assert artifact.stats.materialized_count == expected_accesses_and_phi
     assert artifact.stats.failure_count == 0
     assert [fact.kind for fact in artifact.facts] == [
         StackMemoryAliasFactKind8616.STORE,
@@ -112,9 +113,11 @@ def test_stack_memory_ssa_alias_projects_partial_overlap_as_composed_views() -> 
 
     assert artifact.complete is True
     assert artifact.facts == ()
-    assert len(artifact.accesses) == 2
-    assert artifact.stats.raw_fact_count == 3
-    assert artifact.stats.materialized_count == 3
+    expected_accesses = 2
+    expected_accesses_and_overlap = expected_accesses + 1
+    assert len(artifact.accesses) == expected_accesses
+    assert artifact.stats.raw_fact_count == expected_accesses_and_overlap
+    assert artifact.stats.materialized_count == expected_accesses_and_overlap
     assert artifact.stats.failure_count == 0
     alias_overlap = artifact.overlaps[0]
     assert alias_overlap.source.relation is SSAMemoryOverlapRelation8616.PARTIAL
@@ -151,11 +154,14 @@ def test_stack_memory_ssa_alias_preserves_contained_byte_view() -> None:
     assert artifact.complete is True
     assert len(artifact.facts) == 1
     assert artifact.facts[0].kind is StackMemoryAliasFactKind8616.LOAD
-    assert artifact.facts[0].address.version == 2
+    expected_written_byte_version = 2
+    expected_word_slices = 2
+    expected_accesses_and_overlap = 3
+    assert artifact.facts[0].address.version == expected_written_byte_version
     assert len(artifact.accesses) == 1
-    assert len(artifact.accesses[0].slices) == 2
-    assert artifact.stats.raw_fact_count == 3
-    assert artifact.stats.materialized_count == 3
+    assert len(artifact.accesses[0].slices) == expected_word_slices
+    assert artifact.stats.raw_fact_count == expected_accesses_and_overlap
+    assert artifact.stats.materialized_count == expected_accesses_and_overlap
     assert artifact.stats.failure_count == 0
     alias_overlap = artifact.overlaps[0]
     assert alias_overlap.source.relation is SSAMemoryOverlapRelation8616.LEFT_CONTAINS_RIGHT
@@ -221,8 +227,13 @@ def test_stack_memory_ssa_alias_refuses_incomplete_composed_access() -> None:
     assert artifact.refusals[0].kind is StackMemoryAliasRefusalKind8616.INCOMPLETE_ACCESS_SLICES
 
 
-@pytest.mark.parametrize("provisional_position", (None, 0, 1, 2))
-def test_stack_memory_ssa_alias_refuses_phi_with_mixed_storage_identity(provisional_position) -> None:
+@pytest.mark.parametrize("provisional_position,missing_version", [
+    (None, False), (0, False), (1, False), (2, False),
+    (0, True), (1, True), (2, True),
+])
+def test_stack_memory_ssa_alias_refuses_phi_with_mixed_storage_identity(
+    provisional_position: int | None, missing_version: bool,
+) -> None:
     target = _bp_slot(-2, 2, version=3)
     function_ssa = SSAFunctionArtifact(
         function_addr=0x1000,
@@ -243,7 +254,11 @@ def test_stack_memory_ssa_alias_refuses_phi_with_mixed_storage_identity(provisio
     if provisional_position is not None:
         phi = function_ssa.memory_phi_nodes[0]
         addresses = [phi.target, *(item.address for item in phi.incoming)]
-        addresses[provisional_position] = replace(addresses[provisional_position], status=AddressStatus.PROVISIONAL)
+        address = addresses[provisional_position]
+        addresses[provisional_position] = (
+            replace(address, version=None) if missing_version
+            else replace(address, status=AddressStatus.PROVISIONAL)
+        )
         phi = replace(phi, target=addresses[0], incoming=tuple(
             replace(item, address=address) for item, address in zip(phi.incoming, addresses[1:], strict=True)
         ))
@@ -255,6 +270,8 @@ def test_stack_memory_ssa_alias_refuses_phi_with_mixed_storage_identity(provisio
     assert artifact.stats.raw_fact_count == artifact.stats.failure_count == 1
     expected = (StackMemoryAliasRefusalKind8616.INCONSISTENT_PHI_STORAGE
                 if provisional_position is None else StackMemoryAliasRefusalKind8616.ALIAS_FAILURE)
+    if missing_version:
+        expected = StackMemoryAliasRefusalKind8616.UNVERSIONED_PHI
     assert artifact.refusals[0].kind is expected
 
 

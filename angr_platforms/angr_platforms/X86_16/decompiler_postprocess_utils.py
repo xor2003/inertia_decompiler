@@ -45,13 +45,10 @@ from functools import lru_cache
 from typing import Any, cast
 
 from angr.analyses.decompiler.structured_codegen.c import (
-    CITE,
     CAssignment,
     CBinaryOp,
     CConstant,
-    CDirtyExpression,
     CFunctionCall,
-    CIndexedVariable,
     CStatements,
     CTypeCast,
     CUnaryOp,
@@ -63,6 +60,7 @@ from .c_ast_utils import (
     _safe_assign_cfunc_statements_8616,
     _structured_codegen_node_8616,
 )
+from .c_ast_utils import _same_c_expression_8616 as _shared_same_c_expression_8616
 from .lowering.real_mode_linear import _stack_base_bp_bias_8616, _stack_pointer_carrier_offset_8616
 
 _SEGMENT_REGISTER_NAMES_8616 = {"cs", "ds", "es", "ss"}
@@ -626,108 +624,8 @@ def _make_word_global_8616(codegen: Any, addr: int) -> CVariable:
 
 
 def _same_c_expression_8616(lhs: object, rhs: object) -> bool:
-    def _same_stack_variable_8616(lvar: SimStackVariable, rvar: SimStackVariable) -> bool:
-        return bool(
-            _dynamic_c_ast_getattr_8616(lvar, "offset", None) == _dynamic_c_ast_getattr_8616(rvar, "offset", None)
-            and _dynamic_c_ast_getattr_8616(lvar, "size", None) == _dynamic_c_ast_getattr_8616(rvar, "size", None)
-            and _dynamic_c_ast_getattr_8616(lvar, "base", None) == _dynamic_c_ast_getattr_8616(rvar, "base", None)
-            and _dynamic_c_ast_getattr_8616(lvar, "region", None) == _dynamic_c_ast_getattr_8616(rvar, "region", None)
-        )
-
-    def _dirty_identity_8616(node: object) -> tuple[str, object] | None:
-        dirty = _dynamic_c_ast_getattr_8616(node, "dirty", None)
-        reg_offset = None
-        for attr in ("reg_offset", "reg", "variable_offset"):
-            value = None
-            with suppress(AttributeError, TypeError, ValueError):
-                value = _dynamic_c_ast_getattr_8616(dirty, attr, None)
-            if isinstance(value, int):
-                reg_offset = value
-                break
-        if isinstance(reg_offset, int):
-            bits = None
-            with suppress(AttributeError, TypeError, ValueError):
-                bits = _dynamic_c_ast_getattr_8616(dirty, "bits", None)
-            size = None
-            with suppress(AttributeError, TypeError, ValueError):
-                size = _dynamic_c_ast_getattr_8616(dirty, "size", None)
-            size_bits = bits if isinstance(bits, int) else size * 8 if isinstance(size, int) else None
-            return ("dirty-reg", (reg_offset, size_bits))
-        if isinstance(dirty, str) and dirty:
-            return ("dirty-name", dirty)
-        varid = _dynamic_c_ast_getattr_8616(dirty, "varid", None)
-        if isinstance(varid, int):
-            return ("dirty-varid", varid)
-        tmp_idx = _dynamic_c_ast_getattr_8616(dirty, "tmp_idx", None)
-        if isinstance(tmp_idx, int):
-            return ("dirty-tmp", tmp_idx)
-        name = _dynamic_c_ast_getattr_8616(dirty, "name", None)
-        if isinstance(name, str) and name:
-            return ("dirty-name", name)
-        return None
-
-    def _impl() -> bool:
-        if type(lhs) is not type(rhs):
-            return False
-        rhs_node = cast(Any, rhs)
-        if isinstance(lhs, CConstant):
-            return bool(lhs.value == rhs_node.value)
-        if isinstance(lhs, CTypeCast):
-            return _same_c_expression_8616(lhs.expr, rhs_node.expr)
-        if isinstance(lhs, CUnaryOp):
-            return lhs.op == rhs_node.op and _same_c_expression_8616(lhs.operand, rhs_node.operand)
-        if isinstance(lhs, CBinaryOp):
-            return (
-                lhs.op == rhs_node.op
-                and _same_c_expression_8616(lhs.lhs, rhs_node.lhs)
-                and _same_c_expression_8616(lhs.rhs, rhs_node.rhs)
-            )
-        if isinstance(lhs, CITE):
-            return (
-                _same_c_expression_8616(lhs.cond, rhs_node.cond)
-                and _same_c_expression_8616(lhs.iftrue, rhs_node.iftrue)
-                and _same_c_expression_8616(lhs.iffalse, rhs_node.iffalse)
-            )
-        if isinstance(lhs, CFunctionCall):
-            if not _same_call_target_8616(lhs, rhs_node):
-                return False
-            lhs_args = tuple(_dynamic_c_ast_getattr_8616(lhs, "args", ()) or ())
-            rhs_args = tuple(_dynamic_c_ast_getattr_8616(rhs_node, "args", ()) or ())
-            return len(lhs_args) == len(rhs_args) and all(
-                _same_c_expression_8616(lhs_arg, rhs_arg) for lhs_arg, rhs_arg in zip(lhs_args, rhs_args, strict=True)
-            )
-        if isinstance(lhs, CIndexedVariable):
-            return _same_c_expression_8616(lhs.variable, rhs_node.variable) and _same_c_expression_8616(
-                lhs.index, rhs_node.index
-            )
-        if isinstance(lhs, CDirtyExpression):
-            lhs_key = _dirty_identity_8616(lhs)
-            rhs_key = _dirty_identity_8616(rhs_node)
-            if lhs_key is not None or rhs_key is not None:
-                return lhs_key == rhs_key
-            return _dynamic_c_ast_getattr_8616(lhs, "dirty", None) is _dynamic_c_ast_getattr_8616(rhs_node, "dirty", None)
-        if isinstance(lhs, CVariable):
-            lvar = _dynamic_c_ast_getattr_8616(lhs, "variable", None)
-            rvar = _dynamic_c_ast_getattr_8616(rhs_node, "variable", None)
-            if type(lvar) is not type(rvar):
-                return False
-            if isinstance(lvar, SimRegisterVariable):
-                return bool(
-                    _dynamic_c_ast_getattr_8616(lvar, "reg", None)
-                    == _dynamic_c_ast_getattr_8616(rvar, "reg", None)
-                )
-            if isinstance(lvar, SimMemoryVariable):
-                return bool(
-                    _dynamic_c_ast_getattr_8616(lvar, "addr", None)
-                    == _dynamic_c_ast_getattr_8616(rvar, "addr", None)
-                    and _dynamic_c_ast_getattr_8616(lvar, "size", None)
-                    == _dynamic_c_ast_getattr_8616(rvar, "size", None)
-                )
-            if isinstance(lvar, SimStackVariable) and isinstance(rvar, SimStackVariable):
-                return _same_stack_variable_8616(lvar, rvar)
-        return lhs is rhs
-
-    return _impl()
+    """Delegate expression identity to the shared typed boundary owner."""
+    return _shared_same_c_expression_8616(lhs, rhs)
 
 
 def _same_call_target_8616(lhs: CFunctionCall, rhs: CFunctionCall) -> bool:

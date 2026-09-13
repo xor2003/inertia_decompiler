@@ -4333,29 +4333,16 @@ def _prune_undefined_fragment_carrier_assignments_text(c_text: str) -> str:
 
 
 def _prune_non_lvalue_arithmetic_assignments(c_text: str) -> str:
-    """Drop invalid assignments whose left side is an arithmetic expression.
+    """Preserve assignment effects at the legacy text-cleanup boundary.
 
-    This is compile-hygiene cleanup only: real variable, member, index, and
-    dereference assignments are preserved.
+    Compatibility only: retire this entry point with its formatter callers.
+    Text patterns cannot distinguish invalid arithmetic targets from valid
+    cast/index/member lvalues, and invalid assignments can contain live calls.
+    Keep all statements; AST owners must repair invalid targets and strict
+    recompilation must report any unresolved defect. Never delete code here
+    to make generated C compile after its semantic validation has finished.
     """
-    assign_re = re.compile(r"^(?P<indent>\s*)(?P<lhs>[^=;]+?)\s*(?<![!<>=+\-*/%&|^])=(?!=)\s*(?P<rhs>[^;]+);\s*$")
-    kept: list[str] = []
-    for line in c_text.splitlines():
-        match = assign_re.match(line)
-        if match is None:
-            kept.append(line)
-            continue
-        lhs = match.group("lhs").strip()
-        if lhs.startswith(("*", "SEG_", "MK_FP")):
-            kept.append(line)
-            continue
-        if re.fullmatch(r"[A-Za-z_]\w*(?:\[[^\]]+\]|\.[A-Za-z_]\w*|->[A-Za-z_]\w*)*", lhs):
-            kept.append(line)
-            continue
-        if re.search(r"(?:\+|-|\*|/|<<|>>|\bSEG_PTR\b|\bstack_base\b)", lhs):
-            continue
-        kept.append(line)
-    return "\n".join(kept)
+    return c_text
 
 
 def _normalize_seg_offset_void_pointer_args_text(c_text: str) -> str:

@@ -29,6 +29,7 @@ from scripts.build_msc6_examples import (  # noqa: E402
     _compile_and_link,
     _run_example,
 )
+from scripts.msc6_runtime_support import msc6_runtime_state_declarations  # noqa: E402
 
 DEFAULT_DECOMPILE = REPO_ROOT / "decompile.py"
 DEFAULT_BUILD_DIR = REPO_ROOT / "examples" / "build_msc6"
@@ -298,7 +299,8 @@ int main(void)
     if (add_int(10, 20) != 30) {
         return 5;
     }
-    if (rot_ui(9U) != 18U) {
+    if (rot_ui(9U) != 18U || rot_ui(0x8000U) != 1U ||
+        rot_ui(0xffffU) != 0xffffU || rot_ui(0x0080U) != 0x0100U) {
         return 6;
     }
     if (add_long(1000L, 2000L) != 3000L) {
@@ -524,10 +526,12 @@ def _find_function_definition(c_text: str, function_name: str) -> str:
 
 
 def _build_full_source(example: ExampleSpec, function_bodies: list[str]) -> str:
+    """Assemble generated bodies with the ABI supplied by the linked runtime."""
     return "\n".join(
         [
             "#include <stdbool.h>",
             "#include <stdint.h>",
+            msc6_runtime_state_declarations(),
             "",
             *function_bodies,
             "",

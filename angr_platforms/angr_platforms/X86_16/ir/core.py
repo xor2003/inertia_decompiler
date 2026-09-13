@@ -177,30 +177,40 @@ class IRAddress:
 
 @dataclass(frozen=True, slots=True)
 class IRCallStackEffect8616:
-    """Typed net stack and escape effect for one call boundary."""
+    """Typed stack storage and frame-register effects for one call boundary.
+
+    ``bp_preserved`` proves the incoming BP word survives the callee. False is
+    absence of that proof, not a claim that BP must change. Memory preservation
+    alone never establishes the value of a register used to address that memory.
+    """
 
     net_stack_delta: int | None = None
     preserved_ranges: tuple[IRAddress, ...] = ()
     escaped_ranges: tuple[IRAddress, ...] = ()
     complete: bool = False
+    bp_preserved: bool = False
 
     def preserves(self, address: IRAddress) -> bool:
-        """Check one range; known SP movement does not rebase BP/entry-SP coordinates."""
+        """Require explicit preservation and no overlapping or unresolved escape."""
+        # Imported here because the range predicate consumes this module's types.
+        from .stack_range_overlap import stack_ranges_may_overlap_8616
+
         identity = (address.space, address.base, address.offset, address.size)
         preserved = {
             (item.space, item.base, item.offset, item.size) for item in self.preserved_ranges
         }
-        escaped = {(item.space, item.base, item.offset, item.size) for item in self.escaped_ranges}
+        escaped = any(stack_ranges_may_overlap_8616(address, item) for item in self.escaped_ranges)
         coordinate_is_stable = address.base != ("sp",) or self.net_stack_delta == 0
         return bool(
             self.complete and self.net_stack_delta is not None and coordinate_is_stable
-            and identity in preserved and identity not in escaped
+            and identity in preserved and not escaped
         )
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this call effect for diagnostics and clean workers."""
         return {
             "net_stack_delta": self.net_stack_delta,
+            "bp_preserved": self.bp_preserved,
             "preserved_ranges": [item.to_dict() for item in self.preserved_ranges],
             "escaped_ranges": [item.to_dict() for item in self.escaped_ranges],
             "complete": self.complete,

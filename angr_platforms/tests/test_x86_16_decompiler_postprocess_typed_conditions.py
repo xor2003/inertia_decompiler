@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import angr_platforms.X86_16.decompiler_postprocess_typed_conditions as typed_condition_postprocess
+import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
     CITE,
     CAssignment,
@@ -32,6 +33,7 @@ from angr_platforms.X86_16.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
 )
 from angr_platforms.X86_16.widening.segmented_load_identity import segmented_load_identity_8616
+from x86_16_condition_definition_fixtures import install_condition_definition_block
 
 
 class _DummyCodegen:
@@ -111,6 +113,7 @@ def test_indexed_condition_resolves_register_index_at_producer(
     """Nested register indices retain the condition's producer binding address."""
     project = _project()
     codegen = _codegen([])
+    install_condition_definition_block(monkeypatch, project, address=0x4000, data=b"\xbe\x07\x00\x3a\x04")
     index_value = _const(7, codegen)
     monkeypatch.setattr(
         typed_condition_postprocess,
@@ -231,9 +234,10 @@ def test_build_c_condition_expr_materializes_typed_stack_subtractions():
     assert expr.rhs.rhs.variable.name == "local_6"
 
 
-def test_build_c_condition_expr_preserves_signed_register_resolved_stack_operand_type():
+def test_build_c_condition_expr_preserves_signed_register_resolved_stack_operand_type(monkeypatch):
     project = _project()
     codegen = _codegen([])
+    install_condition_definition_block(monkeypatch, project, address=0x4010, data=b"\x8b\x46\x04\x3d\x00\x00")
     stack_arg = CVariable(
         SimStackVariable(4, 2, base="bp", name="a"),
         variable_type=SimTypeShort(False),
@@ -246,7 +250,7 @@ def test_build_c_condition_expr_preserves_signed_register_resolved_stack_operand
         "slt",
         IRValue(MemSpace.REG, name="ax", size=2),
         IRValue(MemSpace.CONST, const=0, size=2),
-        producer_insn=0x4012,
+        producer_insn=0x4013,
         src_insn=0x4018,
         block_addr=0x4000,
     )
@@ -261,10 +265,11 @@ def test_build_c_condition_expr_preserves_signed_register_resolved_stack_operand
     assert stack_arg.variable_type.signed is False
 
 
-def test_signed_register_stack_view_keeps_projected_argument_identity() -> None:
+def test_signed_register_stack_view_keeps_projected_argument_identity(monkeypatch) -> None:
     """Keep adjacent BP arguments distinct across entry-SP projection."""
     project = _project()
     codegen = _codegen([])
+    install_condition_definition_block(monkeypatch, project, address=0x4010, data=b"\x8b\x46\x04\x3b\x46\x06")
     word_type = SimTypeShort(False)
     left = CVariable(
         SimStackVariable(2, 2, base="bp", name="a"),
@@ -305,7 +310,7 @@ def test_signed_register_stack_view_keeps_projected_argument_identity() -> None:
         "sgt",
         IRValue(MemSpace.SS, name="bp", offset=6, size=2),
         IRValue(MemSpace.REG, name="ax", size=2),
-        producer_insn=0x4012,
+        producer_insn=0x4013,
         src_insn=0x4018,
         block_addr=0x4000,
     )
@@ -841,9 +846,13 @@ def test_apply_typed_conditions_skips_already_explicit_equivalent_condition():
     assert getattr(codegen, "_inertia_semantic_condition_materialized_count", 0) == 0
 
 
-def test_apply_typed_conditions_materializes_irvalue_operands():
+@pytest.mark.parametrize("proven_definition", [False, True])
+def test_apply_typed_conditions_materializes_only_bound_irvalue_operands(monkeypatch, proven_definition):
     project = _project()
     codegen = _codegen([])
+    install_condition_definition_block(
+        monkeypatch, project, address=0x4010, data=b"\xb8\x01\x00" + b"\x90" * 10 + b"\x83\xf8\x07\x76\x00",
+    )
     flags = _reg(project, "flags", codegen, var_name="flags_tmp")
     cond = CBinaryOp(
         "CmpEQ",
@@ -853,7 +862,8 @@ def test_apply_typed_conditions_materializes_irvalue_operands():
         tags={"ins_addr": 0x4020, "vex_block_addr": 0x4000},
     )
     if_stmt = CIfElse([(cond, CStatements([], codegen=codegen))], codegen=codegen)
-    codegen.cfunc.statements = CStatements([if_stmt], addr=0x4010, codegen=codegen)
+    assignment = CAssignment(_reg(project, "ax", codegen), _const(1, codegen), codegen=codegen, tags={"ins_addr": 0x4010})
+    codegen.cfunc.statements = CStatements([assignment, if_stmt] if proven_definition else [if_stmt], addr=0x4010, codegen=codegen)
     codegen.cfunc.body = codegen.cfunc.statements
     codegen._inertia_typed_conditions = [
         ConditionIR(
@@ -867,6 +877,10 @@ def test_apply_typed_conditions_materializes_irvalue_operands():
 
     changed = _apply_typed_conditions_to_codegen_8616(project, codegen)
 
+    if not proven_definition:
+        assert changed is False
+        assert if_stmt.condition_and_nodes[0][0] is cond
+        return
     assert changed is True
     updated = if_stmt.condition_and_nodes[0][0]
     assert isinstance(updated, CBinaryOp)
@@ -878,9 +892,10 @@ def test_apply_typed_conditions_materializes_irvalue_operands():
     }
 
 
-def test_apply_typed_conditions_binds_register_operand_before_flag_producer():
+def test_apply_typed_conditions_binds_register_operand_before_flag_producer(monkeypatch):
     project = _project()
     codegen = _codegen([])
+    install_condition_definition_block(monkeypatch, project, address=0x401E, data=b"\x89\xd8\x90\x90\x83\xe8\x1b")
     flags = _reg(project, "flags", codegen, var_name="flags_tmp")
     local_ax = _reg(project, "ax", codegen, var_name="local_2")
     pre_sub = CAssignment(

@@ -13,7 +13,8 @@ stack variable, and whole-function unread proof. When angr omits SSA identity,
 an exact same-block physical-register overwrite before any read is also
 sufficient. It does not infer storage, recover semantics, or perform general
 dead-code elimination. Unknown, effectful, memory-reading, and live carriers
-are preserved for validation.
+are preserved for validation. Segment-register writes are caller-visible even
+without C AST reads; this local-carrier pass cannot prove them dead.
 """
 
 from __future__ import annotations
@@ -36,8 +37,10 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 
-from ..c_ast_utils import _iter_c_nodes_deep_8616, _structured_slot_names_8616
+from ..c_ast_utils import _iter_c_nodes_deep_8616, _structured_codegen_node_8616, _structured_slot_names_8616
+from ..ir.segment_state_transfer import SEGMENT_REGISTER_SET
 from ..pipeline.errors import PipelineHardError
+from .gp_register_state import runtime_gp_live_in_name_8616, runtime_gp_state_names_8616
 from .register_overwrite_evidence import (
     StackMoveRegisterOverwriteFact8616,
     stack_initializer_overwrites_register_8616,
@@ -138,7 +141,7 @@ def _physical_register_identity_8616(node: object) -> PhysicalRegisterIdentity86
 
 
 def _walk_structured_values_8616(value: object, visit: object, active: set[int]) -> None:
-    """Walk third-party structured-C values without following ownership cycles."""
+    """Walk shared structured-C nodes, including owned casts, without ownership cycles."""
     if value is None:
         return
     if isinstance(value, dict):
@@ -149,7 +152,7 @@ def _walk_structured_values_8616(value: object, visit: object, active: set[int])
         for child in value:
             _walk_structured_values_8616(child, visit, active)
         return
-    if not type(value).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+    if not _structured_codegen_node_8616(value):
         return
     marker = id(value)
     if marker in active:
@@ -338,6 +341,7 @@ def prune_unread_stack_lowered_register_carriers_8616(codegen: object) -> bool:
         stack_move_facts = ()
 
     read_owner_ids = _register_read_owner_ids_8616(root)
+    runtime_gp_names = runtime_gp_state_names_8616(codegen)
     raw = 0
     normalized = 0
     classified = 0
@@ -371,6 +375,10 @@ def prune_unread_stack_lowered_register_carriers_8616(codegen: object) -> bool:
             else ("unknown", None)
         )
         physical_overwrite_proven = physical_next_event[0] == "overwrite"
+        register_name = node.lhs.codegen.project.arch.register_names.get(node.lhs.variable.reg)
+        caller_visible_state = register_name in SEGMENT_REGISTER_SET or (
+            register_name is not None and runtime_gp_live_in_name_8616(register_name) in runtime_gp_names
+        )
         if identity is None and not physical_overwrite_proven:
             identity_refused += 1
             continue
@@ -387,7 +395,9 @@ def prune_unread_stack_lowered_register_carriers_8616(codegen: object) -> bool:
         elif not has_stack_source:
             no_stack_refused += 1
             decision = LoweredRegisterCarrierDecision8616.NO_STACK_SOURCE
-        elif identity is not None and any(owner != id(node) for owner in read_owner_ids.get(identity, ())):
+        elif caller_visible_state or (
+            identity is not None and any(owner != id(node) for owner in read_owner_ids.get(identity, ()))
+        ):
             live_refused += 1
             decision = LoweredRegisterCarrierDecision8616.LIVE_USE
         else:

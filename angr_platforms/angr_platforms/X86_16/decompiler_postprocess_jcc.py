@@ -24,6 +24,8 @@ Ownership rule:
   removed.
 
 Allowed work in this file:
+- preserve exact Structuring-owned loop continuation polarity; never replace
+  it with the raw taken-branch comparison during compatibility replay;
 - consume already-collected evidence and replace leaked raw flag carriers;
 - prune duplicate raw if-breaks after an explicit condition is present;
 - keep validation/reporting honest while older pipeline stages still leak state.
@@ -3102,6 +3104,10 @@ def _rewrite_decoded_jcc_conditions_8616(project: object, codegen: object) -> bo
             body: object | None = None,
             polarity_evidence: _JccPolarityEvidence8616 | None = None,
         ) -> object | None:
+            from .structuring.condition_ownership import requires_composite_condition_ownership_8616
+
+            if requires_composite_condition_ownership_8616(cond):
+                return None
             if classify_condition_call_effects_8616(cond).has_semantic_call:
                 return None
             key = _condition_tags_8616(cond)
@@ -3277,6 +3283,10 @@ def _rewrite_decoded_jcc_conditions_8616(project: object, codegen: object) -> bo
             polarity_evidence: _JccPolarityEvidence8616 | None = None,
         ) -> object:
             nonlocal changed
+            from .structuring.loop_condition_identity import is_owned_loop_continuation_8616
+
+            if is_owned_loop_continuation_8616(node):
+                return node
             replacement = _rewrite_condition(node, body=body, polarity_evidence=polarity_evidence)
             if replacement is not None:
                 return replacement

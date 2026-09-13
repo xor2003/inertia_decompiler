@@ -95,6 +95,8 @@ from .structuring.return_chains import (
     ExpressionFingerprintCallbacks8616,
     identical_assignment_arm_condition_8616,
 )
+from .structuring.shared_loop_exit import shared_exit_fingerprint_8616
+from .structuring.shared_loop_exit_publication import shared_loop_exit_report_8616
 from .tail_validation_condition_context import build_x86_16_contextual_condition_fingerprints
 from .tail_validation_fingerprint import (
     TAIL_VALIDATION_FINGERPRINT_VERSION,
@@ -121,7 +123,7 @@ from .tail_validation_selector_returns import (
     collect_selector_return_fingerprints_8616,
     compact_selector_return_fingerprint_8616,
 )
-from .tail_validation_stack_policy import include_x86_16_tail_validation_stack_write
+from .tail_validation_stack_policy import StackObservedLocations8616, include_x86_16_tail_validation_stack_write
 from .validation.entry_stack_ranges import entry_stack_ranges_from_codegen_8616
 from .validation.status_flag_preservation import packed_status_flag_preservation_evidence_8616
 from .validation_branch_conditions import validate_materialized_branch_conditions_8616
@@ -143,6 +145,7 @@ from .validation_calls import (
     validate_required_callsites_8616,
 )
 from .validation_condition_identity import condition_ir_semantic_fingerprint_8616
+from .validation_condition_storage_views import condition_storage_views_match_8616
 from .validation_control_flow import (
     ControlFlowValidationReport8616,
     validate_structured_control_flow_8616,
@@ -266,6 +269,7 @@ _TAIL_VALIDATION_OBSERVABLE_FIELDS = (
     "helper_calls",
     "register_writes",
     "stack_writes",
+    "exposed_stack_values",
     "global_writes",
     "segmented_writes",
     "returns",
@@ -1309,6 +1313,7 @@ class X86_16TailValidationSummary:
     function_return_class_issues: tuple[str, ...] = ()
     storage_identity_issues: tuple[str, ...] = ()
     callsite_multiplicity_issues: tuple[str, ...] = ()
+    exposed_stack_values: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, tuple[str, ...]]:
         """Return a serializable mapping of summary fields to fingerprints."""
@@ -3963,8 +3968,9 @@ def summarize_x86_16_tail_validation_records(
 
 
 def _record_expr_locations(
-    node: TailValidationValue, project: TailValidationValue, observed_locations: set[str]
+    node: TailValidationValue, project: TailValidationValue, observed_locations: StackObservedLocations8616
 ) -> None:
+    """Retain direct address exposure separately from ordinary value reads."""
     if node is None:
         return
     if isinstance(node, CVariable):
@@ -3975,6 +3981,8 @@ def _record_expr_locations(
         return
     if isinstance(node, CUnaryOp):
         observed_locations.add(_location_fingerprint(node, project))
+        if node.op == "Reference":
+            observed_locations.address_exposed_locations.add(_location_fingerprint(node.operand, project))
         _record_expr_locations(node.operand, project, observed_locations)
         return
     if isinstance(node, CBinaryOp):
@@ -4000,8 +4008,9 @@ def _collect_observed_locations(
     project: TailValidationValue,
     mode: str,
     contextual_conditions: Mapping[int, str] | None = None,
-) -> set[str]:
-    observed_locations: set[str] = set()
+) -> StackObservedLocations8616:
+    """Collect observable reads and explicit address exposure in one summary."""
+    observed_locations = StackObservedLocations8616()
     if mode != "live_out":
         return observed_locations
 
@@ -5020,6 +5029,8 @@ def _process_tail_validation_node_8616(
                         location, mode=mode, observed_locations=observed_locations
                     ):
                         stack_writes.add(location)
+                        if isinstance(observed_locations, StackObservedLocations8616):
+                            observed_locations.record_write(location, _expr_fingerprint(node.rhs, project))
                 elif location.startswith("global:"):
                     global_writes.add(location)
                 elif location.startswith("deref:"):
@@ -5298,6 +5309,9 @@ def _validate_final_control_flow_8616(
             project, codegen, condition
         ),
         condition_fingerprint_normalizer=_canonicalize_final_branch_condition_fingerprint_8616,
+        condition_storage_matcher=lambda condition, candidate, inverted: condition_storage_views_match_8616(
+            project, codegen, condition, candidate, inverted,
+        ),
     )
     branch_conditions = validate_materialized_branch_conditions_8616(
         codegen,
@@ -5314,9 +5328,12 @@ def _validate_final_control_flow_8616(
         ),
         condition_fingerprint_normalizer=_canonicalize_final_branch_condition_fingerprint_8616,
     )
+    shared_exits = shared_loop_exit_report_8616(codegen)
     obligations = validate_switch_exit_obligations_8616(
         root,
         switch_exit_obligations_from_codegen_8616(codegen),
+        shared_bindings=shared_exits.bindings if shared_exits is not None else (),
+        fingerprint=lambda expression: shared_exit_fingerprint_8616(expression, project),
     )
     return ControlFlowValidationReport8616(
         raw_fact_count=(
@@ -5857,6 +5874,7 @@ def collect_x86_16_tail_validation_summary(
                     helper_calls=capped_helper_calls,
                     register_writes=_sorted_unique(register_writes),
                     stack_writes=_sorted_unique(stack_writes),
+                    exposed_stack_values=observed_locations.write_fingerprints(),
                     global_writes=_sorted_unique(global_writes),
                     segmented_writes=_sorted_unique(canonical_segmented_writes),
                     returns=_sorted_unique(returns),

@@ -3,6 +3,7 @@
 Layer: Types/Lowering.
 Responsibility: preserve the exact byte lane of a structured C access when
 binary load-site evidence proves that the originating machine load was wider.
+Consume exact source width and unsigned word views when rebuilding raw indexes.
 Consumes typed load width, segmented-address decomposition, and the already
 materialized indexed-global value. It does not infer objects from rendered C,
 names, samples, or postprocess shape.
@@ -14,13 +15,42 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CExpression
-from angr.sim_type import SimTypeLong, SimTypeShort
+from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CExpression, CVariable
+from angr.sim_type import SimTypeInt, SimTypeLong, SimTypeNum, SimTypeShort
+from angr.sim_variable import SimStackVariable
 
 from .real_mode_linear import RealModeLinearGlobalAddress8616
 from .runtime_memory_helpers import memory_pointer_helper_8616, segmented_memory_read_helper_8616
+from .semantic_cast import CSemanticCast8616
 
-__all__ = ["IndexedLoadSubviewProjection8616", "project_indexed_load_subview_8616"]
+__all__ = ["IndexedLoadSubviewProjection8616", "project_indexed_load_subview_8616", "project_word_load_index_8616"]
+
+_WORD_BYTES = 2
+_WORD_BITS = 16
+_DWORD_BYTES = 4
+
+
+def project_word_load_index_8616(expression: object, source_width: int) -> CExpression | None:
+    """Consume exact word-index evidence without borrowing declaration signedness.
+
+    The decoded MOV/shift address index is a word bit pattern, not a signed
+    array displacement. Other widths require their own address-domain proof.
+    """
+    if source_width != _WORD_BYTES or not isinstance(expression, CVariable):
+        return None
+    variable = expression.variable
+    source = expression.type
+    if not isinstance(variable, SimStackVariable) or variable.size != source_width:
+        return None
+    if not isinstance(source, (SimTypeShort, SimTypeInt, SimTypeNum)):
+        return None
+    source = source.with_arch(expression.codegen.project.arch)
+    if source.size != _WORD_BITS or not isinstance(source.signed, bool):
+        return None
+    if not source.signed:
+        return expression
+    target = SimTypeShort(False).with_arch(expression.codegen.project.arch)
+    return CSemanticCast8616(source, target, expression, codegen=expression.codegen)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +104,7 @@ def project_indexed_load_subview_8616(
     if byte_offset + access_width > site_width:
         return None
 
-    scalar_type = SimTypeLong(False) if site_width == 4 else SimTypeShort(False)
+    scalar_type = SimTypeLong(False) if site_width == _DWORD_BYTES else SimTypeShort(False)
     projected: CExpression = full_value
     if byte_offset:
         projected = CBinaryOp(

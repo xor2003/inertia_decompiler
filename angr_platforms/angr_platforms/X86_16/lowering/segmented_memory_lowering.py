@@ -34,6 +34,7 @@ from ..pipeline.contracts import SemanticLaneState
 from ..structuring.string_io_loop_carriers import materialize_string_io_loop_carriers_8616
 from ..widening.segmented_load_identity import SegmentedLoadIdentity8616, segmented_load_tags_8616
 from .assignment_lvalue_casts import normalize_scalar_assignment_lvalues_8616
+from .authoritative_function_prototypes import publish_codegen_function_prototype_8616
 from .balanced_memory_stack_restore import materialize_balanced_immediate_register_restores_8616
 from .direction_flag_state import lower_direction_flag_state_8616
 from .gp_register_state import (
@@ -49,6 +50,7 @@ from .near_pointer_argument import (
     NearPointerArgumentFact8616,
     collect_near_pointer_argument_facts_8616,
 )
+from .near_pointer_index_binding import bind_byte_pointer_index_8616
 from .near_pointer_type import near_pointer_type_8616, with_near_pointer_parameter_8616
 from .packed_flags_state import lower_packed_flags_live_in_8616
 from .physical_registers import physical_register_name_8616
@@ -646,6 +648,7 @@ def _materialize_binary_proven_near_pointer_argument_8616(
         if canonical_prototype is not None:
             typed_function.prototype = canonical_prototype
     codegen._inertia_near_pointer_argument_materialized_offsets_8616.add(stack_offset)
+    publish_codegen_function_prototype_8616(codegen.project, codegen)
     return cvar
 
 
@@ -945,8 +948,21 @@ def _near_pointer_arg_access_8616(
     *,
     provenance_node: object | None = None,
 ) -> structured_c.CIndexedVariable | None:
+    """Bind near accesses using exact pointer storage and carrier provenance."""
     if matched.space != "DS":
         return None
+    try:
+        available_facts = codegen._inertia_near_pointer_argument_facts_8616 if codegen is not None else ()
+    except AttributeError:
+        available_facts = ()
+    if matched.width_bits == 8 and codegen is not None and codegen.cfunc is not None:
+        bound = bind_byte_pointer_index_8616(
+            _strip_casts_8616(matched.offset_expr), available_facts,
+            instruction_addrs_from_node_8616(provenance_node), tuple(codegen.cfunc.arg_list or ()),
+            lambda argument: _stack_offset_for_cvar_8616(argument, codegen), codegen=codegen,
+        )
+        if bound is not None:
+            matched = replace(matched, offset_expr=bound)
     fact_cvar = _zero_plus_cvar_8616(matched.offset_expr)
     if fact_cvar is None and matched.width_bits % 8 == 0:
         indexed_fact_cvar = _cvar_plus_scaled_index_8616(
@@ -956,10 +972,6 @@ def _near_pointer_arg_access_8616(
         if indexed_fact_cvar is not None:
             fact_cvar, _fact_index = indexed_fact_cvar
     fact_stack_offset = _stack_offset_for_cvar_8616(fact_cvar, codegen)
-    try:
-        available_facts = codegen._inertia_near_pointer_argument_facts_8616 if codegen is not None else ()
-    except AttributeError:
-        available_facts = ()
     width_facts = tuple(
         fact
         for fact in available_facts
@@ -992,6 +1004,8 @@ def _near_pointer_arg_access_8616(
             matched.width_bits // 8,
         )
         if indexed is not None:
+            if provenance_stack_offset is not None:
+                return None
             pointer_arg, index = indexed
             pointer_type = _near_pointer_arg_type_8616(pointer_arg, codegen)
             if pointer_type is None or _pointer_element_width_bits_8616(pointer_type) != matched.width_bits:
@@ -2172,7 +2186,6 @@ def apply_runtime_segment_lowering_8616(
     changed = lower_direction_flag_state_8616(codegen) or changed
     changed = materialize_string_io_loop_carriers_8616(project, codegen) or changed
     changed = lower_architectural_gp_register_state_8616(codegen) or changed
-    changed = materialize_gp_stack_restores_8616(codegen) or changed
     initial_segment_changed = lower_architectural_segment_register_state_8616(codegen)
     if initial_segment_changed:
         _invalidate_segmented_address_caches_8616()
@@ -2243,6 +2256,9 @@ def apply_runtime_segment_lowering_8616(
         typed_codegen._inertia_assignment_maps = None
     if normalize_scalar_assignment_lvalues_8616(codegen):
         changed = True
+    # GP binding consumes stack variables, including whole-word local reloads.
+    # Validate only after the SS access and lvalue projections exist.
+    changed = materialize_gp_stack_restores_8616(codegen) or changed
     final_segment_stats = typed_codegen._inertia_segment_register_state_lowering_stats_8616
     typed_codegen._inertia_segment_register_state_lowering_stats_8616 = (
         SegmentRegisterStateLoweringStats8616(

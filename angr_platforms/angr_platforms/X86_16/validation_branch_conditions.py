@@ -55,10 +55,12 @@ from .ir.ssa_cfg import build_ssa_cfg_snapshot_8616, compute_ssa_dominators_8616
 from .ir.ssa_cfg_contracts import SSACFGSnapshot8616, SSADominators8616
 from .pipeline.structured_ast_query_index import StructuredAstQueryIndex8616
 from .validation_condition_chains import validate_complete_condition_chain_8616
+from .validation_condition_coverage import missing_required_condition_keys_8616
 from .validation_condition_identity import (
+    condition_precision_view_fingerprint_8616,
     condition_semantic_view_projection_fingerprint_8616,
 )
-from .validation_condition_precision import condition_precision_evidence_8616
+from .validation_condition_precision import condition_precision_evidence_8616, condition_precision_token_8616
 
 __all__ = [
     "BranchConditionIssue8616",
@@ -74,6 +76,7 @@ class BranchConditionIssueKind8616(StrEnum):
     DUPLICATE_SURFACE = "duplicate-surface"
     INVALID_FINGERPRINT = "invalid-fingerprint"
     MISSING_FACT = "missing-fact"
+    MISSING_SURFACE = "missing-surface"
     PREDICATE_MISMATCH = "predicate-mismatch"
 
 
@@ -87,6 +90,7 @@ class BranchConditionIssue8616:
     expected: str | None = None
     actual: str | None = None
     precision_candidates: tuple[str, ...] = ()
+    block_addr: int | None = None
 
     def token(self) -> str:
         """Return a deterministic validation issue token."""
@@ -96,6 +100,8 @@ class BranchConditionIssue8616:
         )
         if self.expected is not None:
             token += f":expected={self.expected}"
+        if self.block_addr is not None:
+            token += f":block={self.block_addr:#x}"
         if self.actual is not None:
             token += f":actual={self.actual}"
         if self.precision_candidates:
@@ -638,20 +644,19 @@ def validate_materialized_branch_conditions_8616(
     for jcc_addr, condition in surfaces:
         surfaces_by_jcc.setdefault(jcc_addr, []).append(condition)
     facts_by_jcc: dict[int, dict[tuple[object, ...], ConditionIR]] = {}
-    for fact in _typed_conditions_8616(codegen):
+    typed_conditions = _typed_conditions_8616(codegen)
+    for fact in typed_conditions:
         if isinstance(fact.src_insn, int):
             facts_by_jcc.setdefault(fact.src_insn, {})[
                 condition_sort_key_8616(fact)
             ] = fact
     precision_after_by_jcc: dict[int, set[str]] = {}
+    precision_views_by_jcc: dict[int, set[str]] = {}
     for evidence in condition_precision_evidence_8616(codegen):
         if isinstance(evidence.jcc_addr, int):
-            precision_after_by_jcc.setdefault(evidence.jcc_addr, set()).add(
-                _normalized_fingerprint_8616(
-                    evidence.after,
-                    condition_fingerprint_normalizer,
-                )
-            )
+            precision_after_by_jcc.setdefault(evidence.jcc_addr, set()).add(evidence.after)
+            if evidence.after_integer_view is not None:
+                precision_views_by_jcc.setdefault(evidence.jcc_addr, set()).add(evidence.after_integer_view)
 
     logical_reload_context: _LogicalReloadValidationContext8616 | None = None
     classified_count = 0
@@ -686,6 +691,11 @@ def validate_materialized_branch_conditions_8616(
                 )
             )
             continue
+        # Exact typed call-return proof does not depend on rendering its former
+        # register carrier, which may no longer exist in the final C surface.
+        if _proven_call_return_condition_8616(codegen, facts[0], candidates[0]):
+            materialized_count += 1
+            continue
         expected_raw = condition_ir_fingerprint(facts[0])
         if expected_raw is None:
             issues.append(
@@ -695,8 +705,10 @@ def validate_materialized_branch_conditions_8616(
                 )
             )
             continue
+        actual_raw = condition_fingerprint(candidates[0])
+        actual_precision = condition_precision_token_8616(actual_raw)
         actual = _normalized_fingerprint_8616(
-            condition_fingerprint(candidates[0]),
+            actual_raw,
             condition_fingerprint_normalizer,
         )
         semantic_view_raw = condition_semantic_view_projection_fingerprint_8616(
@@ -739,6 +751,12 @@ def validate_materialized_branch_conditions_8616(
             else None
         )
         precision_after = precision_after_by_jcc.get(jcc_addr, set())
+        precision_views = precision_views_by_jcc.get(jcc_addr, set())
+        precision_view_matches = bool(precision_views) and precision_views == {
+            condition_precision_token_8616(
+                condition_precision_view_fingerprint_8616(candidates[0], condition_fingerprint)
+            )
+        }
         if logical_reload_context is None and _condition_register_operands_8616(facts[0]):
             logical_reload_context = _build_logical_reload_validation_context_8616(codegen)
         logical_reload_fingerprints = _proven_logical_reload_condition_fingerprints_8616(
@@ -752,17 +770,26 @@ def validate_materialized_branch_conditions_8616(
             candidates[0],
             root_jcc_addr=jcc_addr,
             facts_by_jcc=facts_by_jcc,
-            actual_fingerprint=actual,
+            actual_fingerprint=actual_precision,
             precision_candidates=frozenset(precision_after),
         )
-        if (
+        fingerprint_matches = (
             actual in {expected, inverted}
             or semantic_view_actual in {expected, inverted}
             or post_body_actual in {expected, inverted}
-            or precision_after == {actual}
             or actual in logical_reload_fingerprints
+        )
+        # Proven storage-view normalization must happen before compaction:
+        # a digest cannot recover the original low/high-word expressions.
+        precision_matches = (
+            precision_view_matches
+            or precision_after == {actual_precision}
+            or precision_after == {condition_precision_token_8616(actual)}
+        )
+        if (
+            fingerprint_matches
+            or precision_matches
             or chain_validation.proven
-            or _proven_call_return_condition_8616(codegen, facts[0], candidates[0])
             or _proven_stored_call_return_condition_8616(codegen, facts[0], candidates[0])
         ):
             materialized_count += 1
@@ -776,10 +803,17 @@ def validate_materialized_branch_conditions_8616(
                 precision_candidates=tuple(sorted(precision_after)),
             )
         )
+    missing_keys = missing_required_condition_keys_8616(codegen, root, typed_conditions)
+    issues.extend(
+        BranchConditionIssue8616(
+            BranchConditionIssueKind8616.MISSING_SURFACE, jcc_addr, block_addr=block_addr,
+        )
+        for jcc_addr, block_addr in missing_keys
+    )
     return BranchConditionValidationReport8616(
-        raw_fact_count=len(surfaces),
-        normalized_fact_count=len(surfaces_by_jcc),
-        classified_fact_count=classified_count,
+        raw_fact_count=len(surfaces) + len(missing_keys),
+        normalized_fact_count=len(surfaces_by_jcc) + len(missing_keys),
+        classified_fact_count=classified_count + len(missing_keys),
         materialized_count=materialized_count,
         issues=tuple(issues),
     )

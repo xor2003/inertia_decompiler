@@ -166,6 +166,7 @@ exclude = [
 [[tool.mypy.overrides]]
 module = [
     "inertia_decompiler.cache_io",
+    "angr_platforms.angr_platforms.X86_16.ir.native_stack_anchor",
     "angr_platforms.angr_platforms.X86_16.callsite_summary",
     "angr_platforms.angr_platforms.X86_16.lowering.linear_global_decomposition_cache",
     "angr_platforms.angr_platforms.X86_16.pipeline.result_contracts",

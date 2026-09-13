@@ -1104,6 +1104,12 @@ def test_loop_exit_return_repair_postprocess_refuses_after_structuring_pass():
 
 
 def test_materialize_unconsumed_loop_break_jcc_inserts_guard_before_taken_body(monkeypatch):
+    from test_x86_16_loop_break_topology import topology
+
+    monkeypatch.setattr(
+        "angr_platforms.X86_16.structuring.loop_break_jcc.collect_loop_break_topology_8616",
+        lambda *_: topology(),
+    )
     project = _project()
     codegen = _codegen([])
     pre_stmt = CAssignment(

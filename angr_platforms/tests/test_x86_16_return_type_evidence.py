@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
     CConstant,
@@ -10,7 +11,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CStatements,
     CVariable,
 )
-from angr.sim_type import SimTypeFunction, SimTypeShort
+from angr.sim_type import SimTypeBottom, SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimRegisterVariable, SimStackVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.callsite_summary import (
@@ -27,7 +28,32 @@ from angr_platforms.X86_16.lowering.return_type_evidence import (
 from angr_platforms.X86_16.lowering.unobserved_returns import (
     UnobservedReturnLoweringStats8616,
     neutralize_unobserved_unresolved_returns_8616,
+    return_value_needs_neutralization_8616,
 )
+
+
+@pytest.mark.parametrize("bare", [False, True])
+def test_void_contract_never_synthesizes_a_scalar_return(bare):
+    arch = Arch86_16()
+    project = SimpleNamespace(arch=arch)
+    return_type = SimTypeBottom(label="void").with_arch(arch)
+    prototype = SimTypeFunction([], return_type).with_arch(arch)
+    codegen = SimpleNamespace(project=project, next_idx=lambda _name: 1,
+                              next_ident=lambda name: name, next_node_idx=lambda: 1)
+    carrier = None if bare else CVariable(
+        SimRegisterVariable(0, 2, ident="unassigned", region=0x1000),
+        variable_type=SimTypeShort(False).with_arch(arch), codegen=codegen,
+    )
+    statement = CReturn(carrier, codegen=codegen)
+    codegen.cfunc = SimpleNamespace(addr=0x1000, arg_list=[], prototype=prototype, functy=prototype,
+                                    statements=CStatements([statement], codegen=codegen))
+    record_caller_return_use_evidence_8616(
+        project, 0x1000, _evidence(CallerReturnUseVerdict8616.UNUSED, raw=1, classified=1, failures=0),
+    )
+    assert not return_value_needs_neutralization_8616(carrier, return_type)
+    assert not neutralize_unobserved_unresolved_returns_8616(project, codegen)
+    assert statement.retval is carrier
+    assert codegen._inertia_unobserved_return_lowering_stats_8616.materialized_count == 0
 
 
 def _evidence(

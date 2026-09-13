@@ -152,10 +152,12 @@ def return_expr_is_unresolved_carrier_8616(expr: object) -> bool:
 
 def return_value_needs_neutralization_8616(retval: object, return_type: object) -> bool:
     """Classify a pure unusable scalar result without inferring a void ABI."""
+    if not isinstance(return_type, _SCALAR_RETURN_TYPES_8616):
+        return False
     pure, unresolved = _pure_return_expr_state_8616(retval)
     if pure and unresolved:
         return True
-    if not pure or not isinstance(return_type, _SCALAR_RETURN_TYPES_8616):
+    if not pure:
         return False
     try:
         retval_type = cast(Any, retval).type
@@ -236,7 +238,7 @@ def neutralize_unobserved_unresolved_returns_8616(project: object, codegen: obje
     materialized = 0
     unobserved = (
         isinstance(function_addr, int)
-        and return_type is not None
+        and isinstance(return_type, _SCALAR_RETURN_TYPES_8616)
         and function_result_is_proven_unobserved_8616(project, function_addr)
     )
     if os.environ.get("INERTIA_DEBUG_UNOBSERVED_RETURN") == "1":

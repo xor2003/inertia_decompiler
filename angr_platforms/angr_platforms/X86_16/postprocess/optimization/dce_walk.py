@@ -26,6 +26,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 
 from ...decompiler_postprocess_utils import _same_c_expression_8616
+from ...lowering.stack_storage_evidence import alias_proves_private_stack_write_8616
 
 _DceKey8616 = tuple[str, int | str]
 _DceNameKey8616 = tuple[str, str]
@@ -342,7 +343,12 @@ def _walk_statements_8616(
                 _stack_offset_from_plain_lvalue_8616(lhs)
             )
         )
-        if is_exact_direct_stack_evidence or is_ambiguous_direct_stack_evidence:
+        private_write_proven = (
+            is_exact_direct_stack_evidence
+            and alias_proves_private_stack_write_8616(codegen, stmt)
+            and context.expr_is_pure_local_value(rhs)
+        )
+        if (is_exact_direct_stack_evidence and not private_write_proven) or is_ambiguous_direct_stack_evidence:
             _bump_codegen_counter_8616(
                 "dce_keep_unknown" if is_ambiguous_direct_stack_evidence else "dce_keep_protected"
             )
@@ -483,6 +489,7 @@ def _walk_statements_8616(
                 _bump_codegen_counter_8616("dce_candidates")
                 _bump_codegen_counter_8616("dce_deleted")
                 _bump_codegen_counter_8616("dce_frame_anchor_deleted")
+                pruned_decl_keys.add(key)
                 changed = True
                 block_changed = True
                 continue
@@ -669,6 +676,7 @@ def _walk_statements_8616(
                 total_reads=total_reads,
                 dirty_carrier_reads=dirty_carrier_reads,
             ):
+                pruned_decl_keys.add(key)
                 changed = True
                 block_changed = True
                 continue
@@ -751,6 +759,7 @@ def _walk_statements_8616(
                 flush=True,
             )
         if removable:
+            pruned_decl_keys.add(key)
             typing.cast(typing.Any, codegen).dce_deleted = (
                 int(_dynamic_dce_getattr_8616(codegen, "dce_deleted", 0)) + 1
             )

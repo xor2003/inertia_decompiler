@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
@@ -116,11 +116,17 @@ def _condition_const_value_8616(value: object) -> int | None:
 
 
 def _single_eq_edge_guard_8616(region: Region) -> ConditionIR | None:
+    """Project one equality guard, including an explicit unary zero test."""
     guards = _metadata_sequence_8616(region, "typed_condition_edge_guards")
     typed_guards = tuple(guard for guard in guards if isinstance(guard, ConditionIR))
     if len(typed_guards) != 1:
         return None
     guard = typed_guards[0]
+    if guard.op == "zero" and guard.rhs is None:
+        guard = replace(
+            guard, op="eq",
+            rhs=IRValue(MemSpace.CONST, const=0, size=guard.width_bits // 8),
+        )
     if guard.op != "eq":
         return None
     if _condition_const_value_8616(guard.rhs) is None:

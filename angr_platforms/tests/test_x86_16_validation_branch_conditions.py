@@ -550,7 +550,9 @@ def test_bound_do_while_condition_accepts_proven_terminal_induction_state() -> N
     assert report.materialized_count == 1
 
 
-def test_materialized_branch_accepts_exact_bound_call_return_predicate() -> None:
+@pytest.mark.parametrize("ir_fingerprint", ["CmpNE(reg:ax,const:0)", None])
+@pytest.mark.parametrize("wrong_return_block", [False, True])
+def test_materialized_branch_accepts_exact_bound_call_return_predicate(ir_fingerprint, wrong_return_block) -> None:
     """An exact callsite binding proves replacement of its AX zero test."""
     fact = ConditionIR(
         "ne",
@@ -565,7 +567,7 @@ def test_materialized_branch_accepts_exact_bound_call_return_predicate() -> None
     summary = CallsiteSummary8616(
         callsite_addr=0x400D,
         target_addr=0x4000,
-        return_addr=0x4010,
+        return_addr=0x4020 if wrong_return_block else 0x4010,
         kind="near",
         arg_count=0,
         arg_widths=(),
@@ -598,11 +600,11 @@ def test_materialized_branch_accepts_exact_bound_call_return_predicate() -> None
         condition_fingerprint=lambda expression: (
             "CmpNE(call:addr:0x4000,const:0)" if expression is condition else _fingerprint(expression)
         ),
-        condition_ir_fingerprint=lambda _condition: "CmpNE(reg:ax,const:0)",
+        condition_ir_fingerprint=lambda _condition: ir_fingerprint,
     )
 
-    assert report.passed
-    assert report.materialized_count == 1
+    assert report.passed is not wrong_return_block
+    assert report.materialized_count == (0 if wrong_return_block else 1)
 
 
 def test_materialized_branch_accepts_bound_call_return_comparison_with_nonzero_constant() -> None:

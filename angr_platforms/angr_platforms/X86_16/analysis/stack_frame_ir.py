@@ -3,6 +3,7 @@
 Responsibility: summarize SS frame accesses from typed IR artifacts.
 Entry-frame proof must follow the last BP write before use; overwritten setup
 candidates are neither live evidence nor conflicting alternatives.
+Later contradictory BP access coordinates invalidate the published relation.
 Captured register views retain their source temporary: trace that SSA value
 instead of adding an old SP displacement to the current stack delta again.
 Forbidden: inventing locals/args without segmented SS:BP/SP evidence.
@@ -13,11 +14,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from ..ir.core import IRAddress, IRFunctionArtifact, IRInstr, IRValue, MemSpace
+from ..ir.core import IRAddress, IRBlock, IRFunctionArtifact, IRInstr, IRValue, MemSpace
+from ..ir.frame_memory_accesses import frame_memory_accesses_8616
 from ..ir.scalar_affine_contracts import ScalarAffineEntryRegister8616
 from ..ir.scalar_affine_trace import trace_scalar_affine_expression_8616
 from ..ir.ssa import build_x86_16_block_local_ssa
 from ..ir.ssa_function import SSAFunctionArtifact, build_x86_16_ir_predecessor_map
+from ..ir.ssa_memory_ranges import StackCoordinateAgreement8616, stack_coordinate_agreement_8616
+
+_FIRST_NEAR_ARGUMENT_OFFSET = 4
 
 __all__ = [
     "BPFrameCoordinateEvidence8616",
@@ -133,7 +138,7 @@ class FrameAccessArtifact:
 def _slot_role(base: str, offset: int) -> str:
     """Classify one exact frame slot without naming it."""
     if base == "bp":
-        if offset >= 4:
+        if offset >= _FIRST_NEAR_ARGUMENT_OFFSET:
             return "arg"
         if offset < 0:
             return "local"
@@ -170,6 +175,55 @@ def _sp_relative_value_8616(instruction: IRInstr) -> IRValue | None:
     return None
 
 
+def _traced_entry_sp_delta_8616(ssa_artifact: SSAFunctionArtifact, index: int) -> int | None:
+    """Resolve indirect setup through exact entry-block SSA provenance."""
+    block = ssa_artifact.blocks[0]
+    root = block.instrs[index].dst
+    if root is None:
+        return None
+    trace = trace_scalar_affine_expression_8616(
+        ssa_artifact, root, block_addr=block.addr,
+        before_index=index + 1, allow_entry_registers=True,
+    )
+    expression = trace.expression
+    if not trace.complete or expression is None or len(expression.terms) != 1:
+        return None
+    term = expression.terms[0]
+    if not (
+        isinstance(term.source, ScalarAffineEntryRegister8616)
+        and term.source.register_name == "sp" and term.coefficient == 1
+    ):
+        return None
+    return (expression.constant + 0x8000) % 0x10000 - 0x8000
+
+
+def _reaching_bp_delta_8616(entry_block: IRBlock, ssa_artifact: SSAFunctionArtifact) -> tuple[int | None, int]:
+    """Follow setup until first BP use, retaining the last reaching definition."""
+    sp_delta = 0
+    sp_delta_known = True
+    bp_delta: int | None = None
+    bp_write_count = 0
+    for index, instruction in enumerate(entry_block.instrs):
+        if _bp_access_8616(instruction):
+            break
+        if _writes_register_8616(instruction, "sp"):
+            source = _sp_relative_value_8616(instruction)
+            if source is None or not sp_delta_known:
+                recovered = _traced_entry_sp_delta_8616(ssa_artifact, index)
+                sp_delta_known = recovered is not None
+                if recovered is not None:
+                    sp_delta = recovered
+            else:
+                sp_delta += source.offset
+            continue
+        if _writes_register_8616(instruction, "bp"):
+            bp_write_count += 1
+            source = _sp_relative_value_8616(instruction)
+            bp_delta = (sp_delta + source.offset if source is not None and sp_delta_known
+                        else _traced_entry_sp_delta_8616(ssa_artifact, index))
+    return bp_delta, bp_write_count
+
+
 def _build_bp_coordinate_evidence_8616(artifact: IRFunctionArtifact) -> BPFrameCoordinateEvidence8616:
     """Prove BP's entry-SP delta from typed register effects before first use."""
     has_bp_access = any(_bp_access_8616(instruction) for block in artifact.blocks for instruction in block.instrs)
@@ -191,55 +245,20 @@ def _build_bp_coordinate_evidence_8616(artifact: IRFunctionArtifact) -> BPFrameC
             stats=FrameCoordinateStats8616(1, 1, 1, 0, 1),
         )
 
-    sp_delta = 0
-    sp_delta_known = True
-    bp_delta: int | None = None
-    bp_write_count = 0
-    ssa_artifact: SSAFunctionArtifact | None = None
-
-    def traced_delta(index: int) -> int | None:
-        """Resolve indirect setup through exact SSA, keeping compact MOV facts local."""
-        nonlocal ssa_artifact
-        if ssa_artifact is None:
-            ssa_artifact = SSAFunctionArtifact(
-                artifact.function_addr, (build_x86_16_block_local_ssa(entry_block),),
-            )
-        root = ssa_artifact.blocks[0].instrs[index].dst
-        if root is None:
-            return None
-        trace = trace_scalar_affine_expression_8616(
-            ssa_artifact, root, block_addr=entry_block.addr,
-            before_index=index + 1, allow_entry_registers=True,
+    coordinate_blocks = (
+        build_x86_16_block_local_ssa(entry_block),
+        *(build_x86_16_block_local_ssa(block) for block in artifact.blocks
+          if block.addr != entry_block.addr and any(_bp_access_8616(item) for item in block.instrs)),
+    )
+    if stack_coordinate_agreement_8616(coordinate_blocks) is StackCoordinateAgreement8616.CONFLICT:
+        return BPFrameCoordinateEvidence8616(
+            status=FrameCoordinateStatus8616.CONFLICT,
+            detail="captured BP accesses have contradictory frame coordinates",
+            stats=FrameCoordinateStats8616(1, 1, 1, 0, 1),
         )
-        expression = trace.expression
-        if not trace.complete or expression is None or len(expression.terms) != 1:
-            return None
-        term = expression.terms[0]
-        if not (
-            isinstance(term.source, ScalarAffineEntryRegister8616)
-            and term.source.register_name == "sp" and term.coefficient == 1
-        ):
-            return None
-        return (expression.constant + 0x8000) % 0x10000 - 0x8000
+    ssa_artifact = SSAFunctionArtifact(artifact.function_addr, coordinate_blocks)
 
-    for index, instruction in enumerate(entry_block.instrs):
-        if _bp_access_8616(instruction):
-            break
-        if _writes_register_8616(instruction, "sp"):
-            source = _sp_relative_value_8616(instruction)
-            if source is None or not sp_delta_known:
-                recovered = traced_delta(index)
-                sp_delta_known = recovered is not None
-                if recovered is not None:
-                    sp_delta = recovered
-            else:
-                sp_delta += source.offset
-            continue
-        if _writes_register_8616(instruction, "bp"):
-            bp_write_count += 1
-            source = _sp_relative_value_8616(instruction)
-            bp_delta = sp_delta + source.offset if source is not None and sp_delta_known else traced_delta(index)
-
+    bp_delta, bp_write_count = _reaching_bp_delta_8616(entry_block, ssa_artifact)
     raw_count = max(1, bp_write_count)
     if bp_delta is not None:
         stats = FrameCoordinateStats8616(raw_count, 1, 1, 1, 0)
@@ -263,25 +282,14 @@ def build_x86_16_ir_frame_access_artifact(artifact: IRFunctionArtifact) -> Frame
     def _impl() -> FrameAccessArtifact:
         slots: dict[tuple[str, int, int], StackFrameSlot] = {}
         refusals: list[str] = []
-        for block in artifact.blocks:
-            for instr in block.instrs:
-                values = tuple(arg for arg in instr.args if isinstance(arg, IRAddress) and arg.space == MemSpace.SS)
-                for value in values:
-                    base = value.base[0] if len(value.base) == 1 else None
-                    if base not in {"bp", "sp"}:
-                        refusals.append("non_frame_ss_access")
-                        continue
-                    size = int(value.size or instr.size or 0)
-                    key = (base or "", value.offset, size)
-                    slots.setdefault(
-                        key,
-                        StackFrameSlot(
-                            base=base or "sp",
-                            offset=value.offset,
-                            role=_slot_role(base or "sp", value.offset),
-                            size=size,
-                        ),
-                    )
+        for value, size in frame_memory_accesses_8616(artifact):
+            base = value.base[0] if len(value.base) == 1 else None
+            if base not in {"bp", "sp"}:
+                refusals.append("non_frame_ss_access")
+                continue
+            key = (base, value.offset, size)
+            slots.setdefault(key, StackFrameSlot(base=base, offset=value.offset,
+                                                role=_slot_role(base, value.offset), size=size))
         return FrameAccessArtifact(
             slots=tuple(sorted(slots.values(), key=lambda item: (item.base, item.offset, item.size))),
             refusals=tuple(sorted(set(refusals))),

@@ -230,15 +230,17 @@ def _wide_stack_word_projection(
         ),
     )
     word_type = _condition_integer_type(codegen, 2, signed=signed)
+    direct_word_view = prefer_word_view and shift == 0
     view = structured_c.CVariable(
         variable,
         unified_variable=declaration.unified_variable,
-        variable_type=word_type if prefer_word_view else declaration.variable_type,
+        # A high-word shift must still read the complete wide storage value.
+        variable_type=word_type if direct_word_view else declaration.variable_type,
         codegen=codegen,
         tags=projection_tags,
     )
     projected: structured_c.CExpression = view
-    if prefer_word_view and shift == 0:
+    if direct_word_view:
         return view
     if shift == 2:
         projected = CBinaryOp(
@@ -306,7 +308,7 @@ def project_contained_stack_integer_view_8616(
         unified_variable=declaration.unified_variable,
         variable_type=owner_type,
         codegen=codegen,
-        tags=projection_tags,
+        tags=dict(declaration.tags or {}),
     )
     if byte_delta:
         view = CBinaryOp(

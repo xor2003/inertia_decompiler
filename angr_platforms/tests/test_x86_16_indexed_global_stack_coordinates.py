@@ -38,6 +38,7 @@ from angr_platforms.X86_16.lowering.segmented_global_loads import (
     _make_indexed_global_expr_8616,
     materialize_indexed_segmented_global_loads_from_evidence_8616,
 )
+from angr_platforms.X86_16.lowering.semantic_cast import CSemanticCast8616
 from angr_platforms.X86_16.lowering.stack_lowering_from_facts import (
     lower_stack_accesses_from_alias_facts_8616,
 )
@@ -67,11 +68,11 @@ class _Codegen:
         return name
 
 
-def _fixture(*, record_projection: bool) -> tuple[_Codegen, CAssignment, SegmentedGlobalLoadStats8616]:
+def _fixture(*, record_projection: bool, signed_index: bool = False) -> tuple[_Codegen, CAssignment, SegmentedGlobalLoadStats8616]:
     project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
     codegen = _Codegen(project)
     stack_index = SimStackVariable(-6, 2, base="bp", name="local_6")
-    index = CVariable(stack_index, variable_type=SimTypeShort(False), codegen=codegen)
+    index = CVariable(stack_index, variable_type=SimTypeShort(signed_index), codegen=codegen)
     if record_projection:
         record_stack_variable_coordinate_projection_8616(
             codegen,
@@ -89,7 +90,7 @@ def _fixture(*, record_projection: bool) -> tuple[_Codegen, CAssignment, Segment
     )
     scaled_index = CBinaryOp(
         "Shl",
-        index,
+        CSemanticCast8616(index.type, SimTypeShort(False), index, codegen=codegen) if signed_index else index,
         CConstant(1, SimTypeShort(False), codegen=codegen),
         codegen=codegen,
     )
@@ -162,6 +163,18 @@ def test_indexed_global_load_refuses_unprojected_coordinate_mismatch() -> None:
     assert isinstance(assignment.rhs, CFunctionCall)
     assert assignment.rhs.callee_target == "SEG_U8"
     assert stats.indexed_load_site_materialized_count == 0
+
+
+def test_indexed_load_site_preserves_unsigned_view_of_signed_stack_index() -> None:
+    """Joining an exact stack identity must not discard its address value view."""
+    _codegen, assignment, stats = _fixture(record_projection=True, signed_index=True)
+
+    assert isinstance(assignment.rhs, CVariableField)
+    index = assignment.rhs.variable.index
+    assert isinstance(index, CSemanticCast8616)
+    assert index.dst_type.signed is False
+    assert index.expr.variable_type.signed is True
+    assert stats.indexed_load_site_materialized_count == 1
 
 
 def test_indexed_global_scalar_expression_type_is_arch_bound() -> None:

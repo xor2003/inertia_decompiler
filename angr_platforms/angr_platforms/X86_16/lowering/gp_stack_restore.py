@@ -31,8 +31,13 @@ from ..alias.segment_stack_restore import (
 from ..c_ast_utils import _iter_c_nodes_deep_8616, _replace_c_children_8616
 from ..pipeline.errors import PipelineHardError
 from .gp_register_state import runtime_gp_state_expr_8616
+from .gp_stack_local_reload import has_materialized_gp_local_reload_8616
+from .gp_stack_local_return import has_materialized_gp_local_return_8616
+from .gp_stack_restore_identity import (
+    has_materialized_gp_stack_bytes_8616,
+    matches_gp_restore_stack_bytes_8616,
+)
 from .segment_access_policy import instruction_addrs_from_node_8616
-from .stack_word_recomposition import recognize_stack_word_recomposition_8616
 
 __all__ = [
     "GPStackRestoreLoweringStats8616",
@@ -208,11 +213,9 @@ def _snapshot_variable_8616(
         variable = exact_exemplar.variable
     else:
         base = naming_exemplar.variable.base if naming_exemplar is not None else "bp"
-        name = (
-            naming_exemplar.variable.name
-            if naming_exemplar is not None
-            else f"local_{abs(offset):x}"
-        )
+        # This local is a materialized value snapshot, not an unresolved SP
+        # address placeholder inherited from its byte-sized backing view.
+        name = f"gp_saved_{fact.saved_register}_{fact.saved_instruction_addr:x}"
         variable = SimStackVariable(
             offset,
             2,
@@ -303,7 +306,7 @@ def _materialize_fact_8616(
         ):
             replacement_count += 1
             return node
-        if recognize_stack_word_recomposition_8616(node) is None:
+        if not matches_gp_restore_stack_bytes_8616(codegen, node, fact):
             return node
         replacement_count += 1
         replacement = copy.copy(snapshot)
@@ -316,6 +319,13 @@ def _materialize_fact_8616(
 
     for container in containers:
         for statement in tuple(container.statements):
+            # Compound statements aggregate descendant tags, not ownership.
+            # Their leaf statements are visited through their own containers.
+            if not isinstance(statement, (
+                structured_c.CAssignment, structured_c.CReturn,
+                structured_c.CFunctionCall, structured_c.CExpressionStatement,
+            )):
+                continue
             if fact.restore_instruction_addr not in instruction_addrs_from_node_8616(statement):
                 continue
             _replace_c_children_8616(statement, replace_restore)
@@ -337,7 +347,7 @@ def _materialize_fact_8616(
             "inertia_x86_16_gp_stack_save": (
                 fact.saved_instruction_addr,
                 fact.restore_instruction_addr,
-                fact.saved_register,
+                fact.restore_register,
             ),
         },
     )
@@ -427,6 +437,11 @@ def materialize_gp_stack_restores_8616(codegen: object) -> bool:
         )
         if key in completed_pairs:
             continue
+        if (has_materialized_gp_stack_bytes_8616(codegen, containers, fact)
+                or has_materialized_gp_local_reload_8616(codegen, containers, fact)
+                or has_materialized_gp_local_return_8616(codegen, containers, fact)):
+            completed_pairs.add(key)
+            continue
         if _materialize_fact_8616(
             fact,
             containers,
@@ -445,7 +460,7 @@ def materialize_gp_stack_restores_8616(codegen: object) -> bool:
                 == (
                     fact.saved_instruction_addr,
                     fact.restore_instruction_addr,
-                    fact.saved_register,
+                    fact.restore_register,
                 )
                 for node in (statement.lhs,)
                 if isinstance(node, structured_c.CVariable)
@@ -490,7 +505,11 @@ def materialize_gp_stack_restores_8616(codegen: object) -> bool:
         raise PipelineHardError(
             "GP stack-restore facts were classified but none materialized",
             layer="stack_lowering",
+            function_addr=cfunc.addr,
             details={
+                "restore_obligations": tuple(
+                    (fact.restore_instruction_addr, fact.restore_register, fact.stack_offsets) for fact in facts
+                ),
                 "raw_fact_count": stats.raw_fact_count,
                 "normalized_fact_count": stats.normalized_fact_count,
                 "classified_fact_count": stats.classified_fact_count,

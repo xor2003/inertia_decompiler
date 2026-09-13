@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
@@ -550,8 +551,9 @@ def test_insertion_uses_statement_ancestry_of_exact_loop_condition() -> None:
     assert loop.body.statements == [nested]
 
 
-def test_inserted_assignment_owns_subsequent_read_replay() -> None:
-    """Read-side replay cannot fold an inserted saved value back into memory."""
+@pytest.mark.parametrize("existing_definition", [False, True])
+def test_inserted_assignment_owns_subsequent_read_replay(monkeypatch, existing_definition: bool) -> None:
+    """Neither existing nor inserted SSA definitions may be replayed as loads."""
     codegen = _Codegen(project=SimpleNamespace(arch=SimpleNamespace()))
     identity = carriers._RegisterSSAIdentity8616(0, 2, 0x100, "ir_3")
     read = structured_c.CVariable(
@@ -575,10 +577,30 @@ def test_inserted_assignment_owns_subsequent_read_replay() -> None:
         ),
     )
 
+    if existing_definition:
+        definition = structured_c.CVariable(
+            SimRegisterVariable(0, 2, ident="ir_3", region=0x100),
+            variable_type=SimTypeShort(False),
+            codegen=codegen,
+        )
+        codegen.cfunc.statements.statements.insert(
+            0,
+            structured_c.CAssignment(
+                definition,
+                structured_c.CConstant(7, SimTypeShort(False), codegen=codegen),
+                codegen=codegen,
+                tags={"ins_addr": 0x107},
+            ),
+        )
+
+    def reject_reload(*_args):
+        pytest.fail("An owned SSA value must not be classified for memory replay")
+
+    monkeypatch.setattr(carriers, "_same_block_reload_for_read_8616", reject_reload)
     replacements = carriers._read_side_logical_replacements_8616(
         codegen,
         {},
-        frozenset({identity}),
+        frozenset() if existing_definition else frozenset({identity}),
     )
 
     assert replacements == {}

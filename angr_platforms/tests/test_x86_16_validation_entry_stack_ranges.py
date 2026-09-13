@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen.c import CStatements, CVariable
-from angr.sim_type import SimTypeBottom, SimTypeFunction, SimTypeShort
+from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimStackVariable
 from angr_platforms.X86_16.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
@@ -146,3 +147,82 @@ def test_final_tail_validation_refuses_read_overlapping_argument_boundary() -> N
     assert report.def_use.issue_tokens() == (
         "uninitialized-read:stack-local:SS:BP+0x5:size2:root.stmt0",
     )
+
+
+@pytest.mark.parametrize("slot_width", [2, 4])
+@pytest.mark.parametrize("unified", [False, True])
+def test_byte_argument_cannot_initialize_the_rest_of_its_abi_slot(slot_width, unified):
+    codegen = _codegen()
+    argument = _cvar(codegen, 2, slot_width)
+    argument.variable_type = SimTypeChar().with_arch(codegen.project.arch)
+    if unified:
+        argument.unified_variable = SimStackVariable(2, slot_width, base="bp", name="arg")
+    storage = argument.unified_variable if unified else argument.variable
+    record_stack_variable_coordinate_projection_8616(
+        codegen, variable=storage, cvar=argument, bp_offset=4,
+        entry_sp_offset=2, size=slot_width,
+    )
+    read = _cvar(codegen, 3, 1, "local_5")
+    read.variable_type = SimTypeChar().with_arch(codegen.project.arch)
+    codegen.cfunc = SimpleNamespace(
+        arg_list=[argument], statements=CStatements([read], codegen=codegen),
+    )
+    collection = entry_stack_ranges_from_codegen_8616(codegen)
+    assert collection.ranges == (DefUseEntryStackRange8616(base_offset=4, width=1),)
+    report = refresh_x86_16_final_semantic_validation_8616(codegen.project, codegen, persist_failures=False)
+    assert not report.def_use.passed
+
+
+def test_unknown_argument_value_width_does_not_initialize_a_storage_slot():
+    codegen = _codegen()
+    argument = _cvar(codegen, 4)
+    argument.variable_type = None
+    codegen.cfunc = SimpleNamespace(arg_list=[argument])
+    collection = entry_stack_ranges_from_codegen_8616(codegen)
+    assert not collection.ranges
+    assert collection.stats.failure_count == 1
+    assert collection.stats.complete
+
+
+@pytest.mark.parametrize("slot_width", [2, 4])
+def test_byte_argument_read_does_not_consume_abi_padding(slot_width):
+    codegen = _codegen()
+    argument = _cvar(codegen, 2, slot_width)
+    argument.variable_type = SimTypeChar().with_arch(codegen.project.arch)
+    record_stack_variable_coordinate_projection_8616(
+        codegen, variable=argument.variable, cvar=argument, bp_offset=4,
+        entry_sp_offset=2, size=slot_width,
+    )
+    codegen.cfunc = SimpleNamespace(
+        arg_list=[argument], statements=CStatements([argument], codegen=codegen),
+    )
+    report = refresh_x86_16_final_semantic_validation_8616(
+        codegen.project, codegen, persist_failures=False,
+    )
+    assert report.def_use.passed, report.def_use.issue_tokens()
+
+
+@pytest.mark.parametrize("declared_byte", [False, True])
+def test_entry_range_uses_the_type_rendered_in_the_function_signature(declared_byte):
+    codegen = _codegen()
+    argument = _cvar(codegen, 4)
+    byte = SimTypeChar().with_arch(codegen.project.arch)
+    word = SimTypeShort(False).with_arch(codegen.project.arch)
+    argument.variable_type = word if declared_byte else byte
+    codegen.cfunc = SimpleNamespace(
+        arg_list=[argument],
+        functy=SimTypeFunction([byte if declared_byte else word], word).with_arch(codegen.project.arch),
+    )
+    collection = entry_stack_ranges_from_codegen_8616(codegen)
+    assert collection.ranges == (DefUseEntryStackRange8616(base_offset=4, width=1 if declared_byte else 2),)
+
+
+def test_missing_parameter_declaration_cannot_initialize_a_variable():
+    codegen = _codegen()
+    codegen.cfunc = SimpleNamespace(
+        arg_list=[_cvar(codegen, 4)],
+        functy=SimTypeFunction([], SimTypeShort(False)).with_arch(codegen.project.arch),
+    )
+    collection = entry_stack_ranges_from_codegen_8616(codegen)
+    assert not collection.ranges
+    assert collection.stats.failure_count == 1

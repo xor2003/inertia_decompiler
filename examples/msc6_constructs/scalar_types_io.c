@@ -113,7 +113,9 @@ int main(void)
     if (add_int(10, 20) != 30) {
         return 5;
     }
-    if (rot_ui(9U) != 18U) {
+    /* Exercise both input bytes, especially the bit shifted into bit zero. */
+    if (rot_ui(9U) != 18U || rot_ui(0x8000U) != 1U ||
+        rot_ui(0xffffU) != 0xffffU || rot_ui(0x0080U) != 0x0100U) {
         return 6;
     }
     if (add_long(1000L, 2000L) != 3000L) {

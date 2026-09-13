@@ -809,6 +809,8 @@ def test_full_lift_inc_preserves_exact_stack_value_for_following_cmp() -> None:
         offset=4,
         size=2,
         expr=("cmp-stack", "bp"),
+        memory_access_size=2,
+        memory_access_insn=instruction.addr,
     )
 
 
@@ -916,6 +918,8 @@ def test_indexed_byte_load_provenance_survives_word_cmp_operand_recovery():
         offset=-6,
         size=2,
         expr=("cmp-stack", "bp"),
+        memory_access_size=2,
+        memory_access_insn=instr.addr,
     )
     assert source.normalized_lhs == lhs
     assert source.normalized_rhs == rhs
@@ -987,6 +991,7 @@ def test_stack_cmp_register_operand_uses_unshifted_stack_register_state():
     original_index_state = dict(getattr(Instruction_ANY, "_inertia_condition_index_reg_state_8616", {}))
     instr = Instruction_ANY.__new__(Instruction_ANY)
     instr.arch = Arch86_16()
+    instr.addr = 0x4000
 
     try:
         Instruction_ANY._inertia_condition_index_reg_state_8616 = {
@@ -999,7 +1004,7 @@ def test_stack_cmp_register_operand_uses_unshifted_stack_register_state():
     finally:
         Instruction_ANY._inertia_condition_index_reg_state_8616 = original_index_state
 
-    assert lhs == IRValue(MemSpace.SS, name="bp", offset=-4, size=2, expr=("cmp-stack", "bp"))
+    assert lhs == IRValue(MemSpace.SS, name="bp", offset=-4, size=2, expr=("cmp-stack", "bp"), memory_access_size=2, memory_access_insn=instr.addr)
     assert rhs == IRValue(MemSpace.SS, name="bp", offset=-6, size=2)
 
 
@@ -1010,6 +1015,7 @@ def test_stack_cmp_register_operand_uses_unshifted_direct_global_register_state(
     original_index_state = dict(getattr(Instruction_ANY, "_inertia_condition_index_reg_state_8616", {}))
     instr = Instruction_ANY.__new__(Instruction_ANY)
     instr.arch = Arch86_16()
+    instr.addr = 0x4000
 
     try:
         Instruction_ANY._inertia_condition_index_reg_state_8616 = {
@@ -1022,7 +1028,7 @@ def test_stack_cmp_register_operand_uses_unshifted_direct_global_register_state(
     finally:
         Instruction_ANY._inertia_condition_index_reg_state_8616 = original_index_state
 
-    assert lhs == IRValue(MemSpace.SS, name="bp", offset=-2, size=2, expr=("cmp-stack", "bp"))
+    assert lhs == IRValue(MemSpace.SS, name="bp", offset=-2, size=2, expr=("cmp-stack", "bp"), memory_access_size=2, memory_access_insn=instr.addr)
     assert rhs == IRValue(MemSpace.DS, offset=0xBA2, size=2, expr=("cmp-ds",))
 
 

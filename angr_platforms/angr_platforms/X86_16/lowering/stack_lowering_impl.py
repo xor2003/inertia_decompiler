@@ -1593,7 +1593,7 @@ def _canonicalize_stack_cvar_expr(
                             machine_bp_offset,
                             variable.size,
                         )
-                        if isinstance(projected, structured_c.CVariable) and projected is not expr:
+                        if isinstance(projected, structured_c.CVariable):
                             active_expr_ids.discard(expr_id)
                             return projected
                     if isinstance(canonical_offset, int) and exact_binding is None:

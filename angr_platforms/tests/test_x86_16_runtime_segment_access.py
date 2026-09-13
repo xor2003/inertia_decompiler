@@ -281,7 +281,7 @@ def test_runtime_indexed_load_joins_exact_entry_ds_instruction() -> None:
             load,
             {site.ins_addr: site},
             copies=None,
-        )
+        )[0]
         is site
     )
 
@@ -302,7 +302,7 @@ def test_runtime_indexed_load_joins_exact_entry_ds_instruction() -> None:
             load,
             {site.ins_addr: site, equivalent_site.ins_addr: equivalent_site},
             copies=None,
-        )
+        )[0]
         is site
     )
 

@@ -31,6 +31,16 @@ def stack_word_load_expression_has_side_effect_8616(node: object) -> bool:
     )
 
 
+def stack_word_operand_is_captured_value_8616(node: object) -> bool:
+    """Distinguish saved scalar bytes from current stack-storage projections.
+
+    Load instruction provenance identifies where a capture originated, not
+    whether the original memory still holds that value at its later use.
+    Replacing such a scalar needs a separate value-lifetime proof.
+    """
+    return isinstance(node, structured_c.CVariable) and not isinstance(node.variable, SimStackVariable)
+
+
 def stack_word_byte_pair_matches_machine_bp_view_8616(
     low: object,
     high: object,
@@ -75,4 +85,5 @@ __all__ = [
     "direct_machine_bp_word_owner_8616",
     "stack_word_byte_pair_matches_machine_bp_view_8616",
     "stack_word_load_expression_has_side_effect_8616",
+    "stack_word_operand_is_captured_value_8616",
 ]

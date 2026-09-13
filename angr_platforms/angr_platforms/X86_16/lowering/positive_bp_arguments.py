@@ -40,6 +40,7 @@ from .callee_argument_interface import (
     reconcile_callee_argument_interface_8616,
 )
 from .callee_argument_width_evidence import collect_callee_argument_width_evidence_8616
+from .live_stack_word_inputs import collect_live_stack_word_inputs_8616
 from .near_return_address_arguments import prune_near_return_address_argument_8616
 from .positive_bp_argument_plan import (
     PositiveBpArgumentPlanDecision8616,
@@ -158,6 +159,21 @@ def _existing_interface_matches_8616(
     if not isinstance(prototype, SimTypeFunction):
         return False
     existing = tuple(cfunc.arg_list or ())
+    if not existing:
+        # A typed interface can precede its CVariable materialization. Require
+        # exact ABI storage before preserving those types over body defaults.
+        try:
+            layout = stack_prototype_argument_layout_8616(prototype, cast(Any, codegen).project.arch)
+        except AttributeError:
+            return False
+        return bool(layout) and len(layout) == len(desired) and all(
+            isinstance(wanted.variable, SimStackVariable)
+            and machine_bp_offset_for_stack_variable_8616(codegen, wanted.variable) == slot.offset
+            and isinstance(wanted.variable.size, int)
+            and wanted.variable.size > 0
+            and max(2, wanted.variable.size) == slot.storage_width
+            for slot, wanted in zip(layout, desired, strict=False)
+        )
     if len(existing) != len(desired) or len(tuple(prototype.args or ())) != len(desired):
         return False
     cursor = 4
@@ -205,7 +221,7 @@ def _argument_type_for_proven_stack_width_8616(
     """Apply an exact decoded stack-access width to one scalar argument type."""
     if (
         proven_width == 4
-        and isinstance(argument_type, SimTypeInt)
+        and isinstance(argument_type, (SimTypeInt, SimTypeChar))
         and not isinstance(argument_type, SimTypeLong)
     ):
         wide_type = SimTypeLong(argument_type.signed)
@@ -275,6 +291,7 @@ def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> 
         if function is not None
         else ()
     )
+    word_access_offsets |= collect_live_stack_word_inputs_8616(codegen, cfunc.statements).offsets
     word_access_ranges = frozenset((offset, 2) for offset in word_access_offsets)
     wide_argument_offsets = frozenset(
         collect_wide_stack_argument_width_evidence_8616(

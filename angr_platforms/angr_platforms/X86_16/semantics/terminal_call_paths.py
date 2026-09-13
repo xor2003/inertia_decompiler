@@ -129,7 +129,8 @@ def _frame_teardown_8616(insn: object) -> bool:
     if mnemonic in {"leave", "nop"}:
         return True
     if mnemonic == "pop" and len(operands) == 1 and _dynamic_attr_8616(operands[0], "type", -1) == 1:
-        return _register_name_8616(insn, operands[0]) not in {"ax", "al", "ah", "dx", "dl", "dh"}
+        register = _register_name_8616(insn, operands[0])
+        return bool(register) and register not in {"eax", "ax", "al", "ah", "edx", "dx", "dl", "dh"}
     return (
         mnemonic == "mov"
         and len(operands) == 2

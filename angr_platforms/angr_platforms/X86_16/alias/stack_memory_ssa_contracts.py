@@ -22,9 +22,11 @@ from ..ir.ssa_memory_contracts import (
     SSAMemoryOverlap8616,
 )
 from .alias_model_impl import AliasStorageFacts
+from .stack_address_escape import StackAddressEscape8616
 
 if TYPE_CHECKING:
     from ..ir.ssa_function import SSAFunctionArtifact
+    from ..ir.stack_extent_evidence import ReleasedStackExtent8616, StackExtentEvidence8616
     from .logical_stack_memory_projection import (
         LogicalStackMemoryAliasAccess8616,
         LogicalStackMemoryAliasRefusal8616,
@@ -33,6 +35,7 @@ if TYPE_CHECKING:
         LogicalStackStorageIdentity8616,
         LogicalStackStorageIdentityRefusal8616,
     )
+    from .private_stack_writes import PrivateStackWriteDecision8616
 
 
 class StackMemoryAliasFactKind8616(StrEnum):
@@ -213,6 +216,26 @@ class StackMemorySSAAliasArtifact8616:
     logical_storage_identities: tuple[LogicalStackStorageIdentity8616, ...] = ()
     logical_storage_refusals: tuple[LogicalStackStorageIdentityRefusal8616, ...] = ()
     logical_storage_stats: StackMemoryAliasStats8616 = StackMemoryAliasStats8616()
+    stack_extent_evidence: tuple[StackExtentEvidence8616, ...] = ()
+    frame_address_escape: StackAddressEscape8616 = StackAddressEscape8616.UNKNOWN_REFUSE
+    private_write_decisions: tuple[PrivateStackWriteDecision8616, ...] = ()
+
+    @property
+    def private_write_census(self) -> dict[str, int]:
+        """Count source-group proofs, not downstream deleted C assignments."""
+        proven = sum(decision.proven for decision in self.private_write_decisions)
+        return {
+            "raw_fact_count": len(self.private_write_decisions),
+            "normalized_fact_count": sum(decision.source_addr is not None for decision in self.private_write_decisions),
+            "classified_fact_count": proven,
+            "materialized_count": proven,
+            "failure_count": len(self.private_write_decisions) - proven,
+        }
+
+    @property
+    def released_stack_extents(self) -> tuple[ReleasedStackExtent8616, ...]:
+        """Derive coordinate spans without hiding the authoritative verdicts."""
+        return tuple(extent for evidence in self.stack_extent_evidence for extent in evidence.extents)
 
     def __post_init__(self) -> None:
         """Reject artifacts whose function identity disagrees with their source."""
@@ -254,6 +277,11 @@ class StackMemorySSAAliasArtifact8616:
         return {
             "function_addr": self.function_addr,
             "source_ssa_function_addr": self.source_ssa.function_addr,
+            "released_stack_extents": [extent.to_dict() for extent in self.released_stack_extents],
+            "stack_extent_evidence": [evidence.to_dict() for evidence in self.stack_extent_evidence],
+            "frame_address_escape": self.frame_address_escape.name,
+            "private_write_decisions": [decision.to_dict() for decision in self.private_write_decisions],
+            "private_write_census": self.private_write_census,
             "facts": [fact.to_dict() for fact in self.facts],
             "accesses": [access.to_dict() for access in self.accesses],
             "overlaps": [overlap.to_dict() for overlap in self.overlaps],

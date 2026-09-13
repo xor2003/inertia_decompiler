@@ -14,6 +14,7 @@ and refuses leaves whose return expression cannot be proved.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -26,14 +27,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
 )
 from angr.sim_type import SimTypeLong, SimTypeShort
 
+from ..c_ast_utils import _same_c_expression_8616
+from ..ir.condition_ir import ConditionIR
 from ..ir.core import IRValue, MemSpace
-from ..semantics.branch_target_return import (
-    BranchTargetReturnEffectKind8616,
-    branch_target_return_effect_8616,
-)
-from ..semantics.return_register_preservation import (
-    instruction_preserves_return_registers_8616,
-)
 from .condition_lowering import lower_ir_value_to_c_expr_8616
 from .return_chains import (
     BranchTargetReturnBlockResult8616,
@@ -41,6 +37,8 @@ from .return_chains import (
     branch_target_return_expr_8616,
     scan_branch_target_return_block_8616,
 )
+from .return_path_preservation import branch_target_imm_8616 as branch_target_imm_8616
+from .return_path_preservation import return_path_preserves_return_registers_8616
 
 
 class _BlockFactory8616(Protocol):
@@ -70,16 +68,6 @@ def _signed_i16_8616(value: int) -> int:
     return normalized - 0x10000 if normalized & 0x8000 else normalized
 
 
-def branch_target_imm_8616(insn: object) -> int | None:
-    """Read one direct target at the dynamic third-party Capstone boundary."""
-    # Dynamic third-party Capstone boundary: operands and immediates are decoded fields.
-    operands = tuple(getattr(insn, "operands", ()) or ())
-    if len(operands) != 1 or int(getattr(operands[0], "type", -1)) != 2:
-        return None
-    value = getattr(operands[0], "imm", None)
-    return int(value) if isinstance(value, int) else None
-
-
 def branch_target_preserves_return_registers_8616(
     project: object,
     target_addr: int,
@@ -88,43 +76,11 @@ def branch_target_preserves_return_registers_8616(
 ) -> bool:
     """Prove a bounded jump path reaches return without changing AX or DX."""
     typed_project = cast(_Project8616, project)
-    target = int(target_addr)
-    seen: set[int] = set()
-    for _ in range(max_depth + 1):
-        if target in seen:
-            return False
-        seen.add(target)
-        try:
-            block = typed_project.factory.block(target, opt_level=0)
-        except Exception:
-            return False
-        # Dynamic third-party angr block boundary: decoded Capstone is optional.
-        capstone = getattr(block, "capstone", None)
-        # Dynamic third-party Capstone boundary: instruction wrappers are external.
-        insns = tuple(getattr(capstone, "insns", ()) or ())
-        classified = tuple(
-            (insn, branch_target_return_effect_8616(insn, branch_target_imm_8616))
-            for insn in insns
-        )
-        if not classified:
-            return False
-        for index, (insn, effect) in enumerate(classified):
-            if instruction_preserves_return_registers_8616(insn):
-                continue
-            terminal = index == len(classified) - 1
-            if effect.kind is BranchTargetReturnEffectKind8616.RETURN:
-                return terminal
-            if (
-                effect.kind is BranchTargetReturnEffectKind8616.JUMP
-                and terminal
-                and isinstance(effect.jump_target, int)
-            ):
-                target = effect.jump_target
-                break
-            return False
-        else:
-            return False
-    return False
+    return return_path_preserves_return_registers_8616(
+        int(target_addr),
+        lambda addr: typed_project.factory.block(addr, opt_level=0),
+        max_depth=max_depth,
+    )
 
 
 def _stack_ir_value_8616(value: _StackReturnSlice8616, *, size: int | None = None) -> IRValue:
@@ -217,6 +173,34 @@ def sole_return_expression_8616(body: object) -> CExpression | None:
     """Return the expression from one body containing exactly one return."""
     statement = sole_return_statement_8616(body)
     return statement.retval if statement is not None and isinstance(statement.retval, CExpression) else None
+
+
+def binary_return_arm_polarity_8616(
+    condition: ConditionIR,
+    true_body: object,
+    false_body: object,
+    recover: Callable[[int], CExpression | None],
+) -> bool | None:
+    """Orient sole-return arms by distinct binary-proven successor values.
+
+    Cloned shared epilogues have the same statement origin. Their return values
+    may distinguish the paths, but only when both complete binary paths agree.
+    """
+    true_value = sole_return_expression_8616(true_body)
+    false_value = sole_return_expression_8616(false_body)
+    if true_value is None or false_value is None:
+        return None
+    taken, fallthrough = condition.taken_target, condition.fallthrough_target
+    if taken is None or fallthrough is None or taken == fallthrough:
+        return None
+    taken_value, fallthrough_value = recover(taken), recover(fallthrough)
+    if taken_value is None or fallthrough_value is None:
+        return None
+    if _same_c_expression_8616(taken_value, fallthrough_value):
+        return None
+    direct = _same_c_expression_8616(true_value, taken_value) and _same_c_expression_8616(false_value, fallthrough_value)
+    inverse = _same_c_expression_8616(true_value, fallthrough_value) and _same_c_expression_8616(false_value, taken_value)
+    return direct if direct != inverse else None
 
 
 def sole_return_statement_8616(body: object) -> CReturn | None:

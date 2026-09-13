@@ -30,6 +30,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CForLoop,
     CIfBreak,
     CIfElse,
+    CStatement,
     CStatements,
     CUnaryOp,
     CVariable,
@@ -47,6 +48,7 @@ from ..c_ast_utils import (
 from ..ir.condition_ir import ConditionIR, ConditionRegisterUpdateIR
 from ..ir.core import IRBinaryValue, IRValue, MemSpace
 from .condition_lowering import lower_ir_value_to_c_expr_8616
+from .loop_condition_identity import loop_condition_keys_8616
 from .loop_condition_ownership import (
     CompositeLoopExitOwnershipStatus8616,
     classify_composite_loop_exit_ownership_8616,
@@ -178,9 +180,11 @@ def _reaches_8616(successors: Mapping[int, tuple[int, ...]], start: int, target:
 
 
 def _structured_body_block_addrs_8616(body: object) -> frozenset[int]:
-    """Return exact CFG block addresses carried by one structured loop body."""
+    """Return statement-owned blocks, excluding reused operand provenance."""
     addresses: set[int] = set()
     for node in _iter_c_nodes_deep_8616(body):
+        if not isinstance(node, CStatement):
+            continue
         boundary = cast(_TaggedExpressionBoundary8616, node)
         try:
             tags = boundary.tags
@@ -742,7 +746,7 @@ def materialize_typed_loop_continuation_conditions_8616(
             if isinstance(node, (CForLoop, CWhileLoop))
             else None
         )
-        current_keys = _tag_pairs_8616(current).intersection(conditions_by_key)
+        current_keys = loop_condition_keys_8616(current, _tag_pairs_8616(current), conditions_by_key, successors)
         body_keys = _tag_pairs_8616(loop.body).intersection(conditions_by_key)
         matching_keys = current_keys | body_keys
         if not matching_keys:

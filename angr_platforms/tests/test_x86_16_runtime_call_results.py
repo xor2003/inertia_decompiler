@@ -9,13 +9,16 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CFunctionCall,
     CIfElse,
     CStatements,
+    CVariable,
 )
 from angr.sim_type import SimTypeFunction, SimTypeShort
+from angr.sim_variable import SimStackVariable
 from angr_platforms.X86_16.c_ast_utils import _iter_c_nodes_deep_8616
 from angr_platforms.X86_16.callsite_summary import CallsiteSummary8616
 from angr_platforms.X86_16.decompiler_postprocess_calls import (
     _materialize_callsite_stack_arguments_8616,
 )
+from angr_platforms.X86_16.lowering.call_argument_semantic_gap import has_literal_push_stack_carrier_8616
 from angr_platforms.X86_16.lowering.gp_register_state import (
     RuntimeGPExpressionView8616,
     runtime_gp_expression_view_8616,
@@ -26,6 +29,9 @@ from angr_platforms.X86_16.lowering.runtime_call_results import (
     materialize_runtime_call_result_read_8616,
 )
 from test_x86_16_decompiler_postprocess_calls import _empty_codegen, _project
+
+_PRODUCER_CALLSITE = 0x1001
+_PROVEN_LITERAL_ARGUMENT = 37
 
 
 def _runtime_producer():
@@ -77,12 +83,82 @@ def test_call_argument_reuses_masked_runtime_result_without_duplicate_execution(
 
     calls = [node for node in _iter_c_nodes_deep_8616(codegen.cfunc.statements)
              if isinstance(node, CFunctionCall)]
-    assert sum(call.tags.get("ins_addr") == 0x1001 for call in calls) == 1
+    assert sum(call.tags.get("ins_addr") == _PRODUCER_CALLSITE for call in calls) == 1
     assert len(consumer.args) == 1
     assert not any(isinstance(node, CFunctionCall)
                    for node in _iter_c_nodes_deep_8616(consumer.args[0]))
     assert codegen.cfunc.statements.statements[0] is assignment
     assert runtime_gp_expression_view_8616(consumer.args[0]) == RuntimeGPExpressionView8616("ax", "eax", 0, 2)
+
+
+@pytest.mark.parametrize("masked", [False, True])
+@pytest.mark.parametrize("has_source", [False, True])
+def test_proven_arguments_reach_masked_calls_without_replacing_statements(masked, has_source):
+    project, codegen, producer, assignment = _runtime_producer()
+    statement = assignment if masked else CExpressionStatement(producer, codegen=codegen)
+    original_rhs = assignment.rhs
+    root = CStatements([statement], addr=0x4010, codegen=codegen)
+    codegen.cfunc.statements = root
+    codegen.cfunc.body = root
+    codegen._inertia_callsite_summaries = {
+        id(producer): CallsiteSummary8616(
+            callsite_addr=0x1001, target_addr=0x2000, return_addr=0x1004,
+            kind="direct_near", arg_count=1, arg_widths=(2,), stack_cleanup=2,
+            return_register="ax", return_used=True, return_shape="ax",
+            push_arg_sources=(("imm", 37),) if has_source else (),
+        ),
+    }
+
+    for _ in range(2):
+        _materialize_callsite_stack_arguments_8616(project, codegen)
+        assert producer.args[0].value == (37 if has_source else 0)
+        assert root.statements == [statement]
+        assert assignment.rhs is original_rhs
+        assert sum(node is producer for node in _iter_c_nodes_deep_8616(root)) == 1
+
+
+@pytest.mark.parametrize("masked", [False, True])
+@pytest.mark.parametrize("has_source", [False, True])
+def test_literal_push_evidence_is_not_overruled_by_a_named_stack_carrier(masked, has_source):
+    project, codegen, producer, assignment = _runtime_producer()
+    producer.args = [CVariable(
+        SimStackVariable(-28, 2, base="bp", name="local_1a", ident="is_carrier"),
+        variable_type=SimTypeShort(False).with_arch(project.arch), codegen=codegen,
+    )]
+    original_argument = producer.args[0]
+    statement = assignment if masked else CExpressionStatement(producer, codegen=codegen)
+    root = CStatements([statement], addr=0x4010, codegen=codegen)
+    codegen.cfunc.statements = root
+    codegen.cfunc.body = root
+    codegen._inertia_callsite_summaries = {
+        id(producer): CallsiteSummary8616(
+            callsite_addr=0x1001, target_addr=0x2000, return_addr=0x1004,
+            kind="direct_near", arg_count=1, arg_widths=(2,), stack_cleanup=2,
+            return_register="ax", return_used=True, return_shape="ax",
+            push_arg_sources=(("imm", _PROVEN_LITERAL_ARGUMENT),) if has_source else (),
+        ),
+    }
+
+    _materialize_callsite_stack_arguments_8616(project, codegen)
+
+    if has_source:
+        assert isinstance(producer.args[0], CConstant)
+        assert producer.args[0].value == _PROVEN_LITERAL_ARGUMENT
+    else:
+        assert producer.args[0] is original_argument
+    assert root.statements == [statement]
+
+
+@pytest.mark.parametrize("source", [None, (), ("imm",), ("imm", True), ("imm", 37, 2), ("bp", -28, 2)])
+def test_literal_source_classifier_refuses_other_or_malformed_sources(source):
+    project, codegen, producer, _assignment = _runtime_producer()
+    producer.args = [CVariable(
+        SimStackVariable(-28, 2, base="bp", name="local_1a", ident="is_carrier"),
+        variable_type=SimTypeShort(False).with_arch(project.arch), codegen=codegen,
+    )]
+
+    assert not has_literal_push_stack_carrier_8616(producer, (source,))
+    assert not has_literal_push_stack_carrier_8616(producer, ())
 
 
 @pytest.mark.parametrize("barrier", ["ax", "al", "call", "branch", "none", "bx"])

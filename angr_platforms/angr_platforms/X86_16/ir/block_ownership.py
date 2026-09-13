@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from .block_successor_chain import proven_suffix_owner_chain_8616
 from .core import IRBlock
 
 __all__ = [
@@ -202,8 +203,11 @@ def canonicalize_ir_block_ownership_8616(
     successor_rewrites: list[IRBlockSuccessorRewrite8616] = []
     successor_refusals: list[IRBlockSuccessorRewriteRefusal8616] = []
     canonical_blocks: list[IRBlock] = []
+    canonical_by_addr: dict[int, IRBlock] = {}
 
-    for block_index, block in enumerate(ordered):
+    # Canonicalize suffixes first so prefix CFG edges can consume their proof.
+    for block_index in reversed(range(len(ordered))):
+        block = ordered[block_index]
         removal_start = len(removals)
         later_starts = starts[block_index + 1 :]
         next_start = later_starts[0] if later_starts else None
@@ -252,7 +256,9 @@ def canonicalize_ir_block_ownership_8616(
                         IRBlockSuccessorRewriteFailure8616.SOURCE_PREFIX_EMPTY,
                     )
                 )
-            elif len(owner_addrs) != 1:
+            elif len(owner_addrs) != 1 and not proven_suffix_owner_chain_8616(
+                block, tuple(retained), owner_addrs, by_addr, canonical_by_addr,
+            ):
                 successor_refusals.append(
                     IRBlockSuccessorRewriteRefusal8616(
                         block.addr,
@@ -290,6 +296,7 @@ def canonicalize_ir_block_ownership_8616(
                 successor_addrs=successors,
             )
         )
+        canonical_by_addr[block.addr] = canonical_blocks[-1]
 
     raw_count = sum(len(block.instrs) for block in ordered)
     stats = IRBlockOwnershipStats8616(
@@ -301,12 +308,12 @@ def canonicalize_ir_block_ownership_8616(
     )
     successor_raw_count = len(successor_rewrites) + len(successor_refusals)
     return IRBlockOwnershipArtifact8616(
-        blocks=tuple(canonical_blocks),
-        removals=tuple(removals),
-        refusals=tuple(refusals),
+        blocks=tuple(reversed(canonical_blocks)),
+        removals=tuple(sorted(removals, key=lambda item: (item.source_block_addr, item.instr_index))),
+        refusals=tuple(sorted(refusals, key=lambda item: (item.source_block_addr, item.instr_index))),
         stats=stats,
-        successor_rewrites=tuple(successor_rewrites),
-        successor_refusals=tuple(successor_refusals),
+        successor_rewrites=tuple(sorted(successor_rewrites, key=lambda item: item.source_block_addr)),
+        successor_refusals=tuple(sorted(successor_refusals, key=lambda item: item.source_block_addr)),
         successor_stats=IRBlockSuccessorRewriteStats8616(
             raw_fact_count=successor_raw_count,
             normalized_fact_count=successor_raw_count,

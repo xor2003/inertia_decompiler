@@ -19,6 +19,17 @@ else:
 type PytestFactsByNode = tuple[tuple[str, PytestNodeFacts], ...]
 
 
+def _source_selector(node_id: str) -> str:
+    """Resolve source ownership, not runtime parameter-ID validity.
+
+    Parameter values may themselves contain ``::``. Remove the parameter
+    suffix before splitting scopes so skip and assertion evidence stay with
+    the test function. Pytest collection validates the concrete case ID.
+    """
+    source_id = node_id.partition("[")[0]
+    return "::".join(part for part in source_id.split("::") if part)
+
+
 @dataclass(slots=True)
 class PytestFactsProvider:
     """Memoize full assertion and call facts on first consumer access."""
@@ -45,21 +56,21 @@ class PytestSourceIndex:
     def has_node(self, node_id: str) -> bool:
         """Return whether a pytest node ID names an indexed source object."""
 
-        normalized = "::".join(part for part in node_id.split("::") if part)
+        normalized = _source_selector(node_id)
         return not normalized or normalized in self.nodes
 
     def skip_xfail_lines(self, node_id: str) -> tuple[int, ...]:
         """Return skip/xfail call lines within the selected pytest node."""
 
-        normalized = "::".join(part for part in node_id.split("::") if part)
+        normalized = _source_selector(node_id)
         return dict(self.skip_xfail_lines_by_node).get(normalized, ())
 
     def facts(self, node_id: str) -> PytestNodeFacts:
         """Return static facts for one normalized pytest selector."""
 
         normalized = "::".join(
-            part.split("[", 1)[0].split("@", 1)[0]
-            for part in node_id.split("::")
+            part.split("@", 1)[0]
+            for part in _source_selector(node_id).split("::")
             if part
         )
         return dict(self._facts.get()).get(normalized, PytestNodeFacts())

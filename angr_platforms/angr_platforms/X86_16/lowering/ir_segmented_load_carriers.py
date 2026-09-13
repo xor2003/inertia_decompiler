@@ -1224,29 +1224,28 @@ def _read_side_logical_replacements_8616(
     cfunc = codegen.cfunc
     if cfunc is None:
         return {}
-    lhs_nodes = {
-        id(node.lhs)
+    definitions = tuple(
+        node.lhs
         for node in _iter_c_nodes_deep_8616(cfunc.statements)
         if isinstance(node, structured_c.CAssignment)
-    }
+    )
+    lhs_nodes = {id(node) for node in definitions}
+    # Existing SSA definitions own their saved values, just like inserted ones.
+    # Replaying their reads can discard lowered address terms and reread memory.
+    assignment_owned_identities = assignment_owned_identities.union(
+        identity for node in definitions if (identity := _register_ssa_identity_8616(node)) is not None
+    )
     inherited_addresses = _inherited_instruction_addresses_8616(cfunc.statements)
     replacements: dict[int, _LogicalRegisterWriteFact8616] = {}
     for node in _iter_c_nodes_deep_8616(cfunc.statements):
         if id(node) in lhs_nodes or not isinstance(node, structured_c.CVariable):
             continue
         identity = _register_ssa_identity_8616(node)
-        variable = node.variable
-        display_name = variable.name if isinstance(variable, SimRegisterVariable) else None
         if identity is None:
-            if (
-                os.environ.get("INERTIA_DEBUG_IR_SEGMENTED_LOAD_CARRIERS")
-                and isinstance(display_name, str)
-                and display_name in {"ir_3", "ir_4", "ir_5", "ir_6", "ir_9"}
-            ):
+            if os.environ.get("INERTIA_DEBUG_IR_SEGMENTED_LOAD_CARRIERS"):
                 logging.getLogger(__name__).warning(
-                    "IR segmented-load read refused identity name=%s variable=%r unified=%r",
-                    display_name,
-                    variable,
+                    "IR segmented-load read refused identity variable=%r unified=%r",
+                    node.variable,
                     node.unified_variable,
                 )
             continue

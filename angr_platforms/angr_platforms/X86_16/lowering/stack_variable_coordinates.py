@@ -12,9 +12,11 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from enum import StrEnum
 from typing import Protocol, cast
 
+from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_variable import SimStackVariable
 
 from ..alias.stack_coordinate_projection import (
@@ -30,6 +32,13 @@ from .stack_storage_evidence import (
 )
 
 
+class StackCoordinateProducer8616(StrEnum):
+    """Identify the Lowering producer allowed to refresh a coordinate entry."""
+
+    STACK_STORAGE = "stack_storage"
+    CALL_OUTPUT_OBJECT = "call_output_object"
+
+
 @dataclass(frozen=True, slots=True)
 class StackVariableCoordinateProjection8616:
     """One machine-BP storage slot and its typed semantic value projection."""
@@ -41,6 +50,7 @@ class StackVariableCoordinateProjection8616:
     size: int
     display_name: str = ""
     equivalent_variables: tuple[SimStackVariable, ...] = ()
+    producer: StackCoordinateProducer8616 = StackCoordinateProducer8616.STACK_STORAGE
 
     @property
     def value_size(self) -> int:
@@ -260,6 +270,7 @@ def record_stack_variable_coordinate_projection_8616(
     entry_sp_offset: int,
     size: int,
     display_name: str | None = None,
+    producer: StackCoordinateProducer8616 = StackCoordinateProducer8616.STACK_STORAGE,
 ) -> StackVariableCoordinateProjection8616:
     """Record one exact projection, replacing prior data for that variable."""
     if size <= 0:
@@ -270,6 +281,7 @@ def record_stack_variable_coordinate_projection_8616(
         bp_offset=bp_offset,
         entry_sp_offset=entry_sp_offset,
         size=size,
+        producer=producer,
         display_name=(
             display_name
             if isinstance(display_name, str) and display_name
@@ -314,6 +326,7 @@ def record_stack_variable_coordinate_alias_8616(
         size=projection.size,
         display_name=projection.display_name,
         equivalent_variables=(*projection.equivalent_variables, variable),
+        producer=projection.producer,
     )
     boundary = cast(_CodegenBoundary8616, codegen)
     boundary._inertia_stack_variable_coordinate_registry_8616 = (
@@ -331,6 +344,7 @@ def bind_stack_variable_coordinate_cvar_8616(
     size: int,
     cvar: object,
     display_name: str | None = None,
+    producer: StackCoordinateProducer8616 | None = None,
 ) -> StackVariableCoordinateProjection8616 | None:
     """Bind an existing projection to its canonical C interface variable.
 
@@ -350,6 +364,7 @@ def bind_stack_variable_coordinate_cvar_8616(
         size=projection.size,
         display_name=display_name or projection.display_name,
         equivalent_variables=projection.equivalent_variables,
+        producer=producer if producer is not None else projection.producer,
     )
     boundary = cast(_CodegenBoundary8616, codegen)
     boundary._inertia_stack_variable_coordinate_registry_8616 = (
@@ -423,6 +438,26 @@ def publish_selected_stack_cvar_projection_8616(
         ),
         size=size,
         display_name=variable.name,
+    )
+
+
+def refresh_stack_variable_coordinate_cvar_8616(codegen: object, cvar: CVariable) -> None:
+    """Grow accepted storage and replay names; value narrowing cannot shrink ABI slots."""
+    variable = cvar.variable
+    if not isinstance(variable, SimStackVariable) or variable.size <= 0:
+        return
+    registry = stack_variable_coordinate_registry_8616(codegen)
+    projection = registry.for_variable(variable)
+    if projection is None:
+        return
+    refreshed = replace(
+        projection, cvar=cvar, size=max(projection.size, variable.size),
+        display_name=variable.name or projection.display_name,
+    )
+    cast(_CodegenBoundary8616, codegen)._inertia_stack_variable_coordinate_registry_8616 = (
+        StackVariableCoordinateRegistry8616(tuple(
+            refreshed if item is projection else item for item in registry.projections
+        ))
     )
 
 
@@ -534,6 +569,7 @@ def stack_cvar_for_machine_bp_value_range_8616(
 
 
 __all__ = [
+    "StackCoordinateProducer8616",
     "StackVariableCoordinateProjection8616",
     "StackVariableCoordinateRegistry8616",
     "bind_stack_variable_coordinate_cvar_8616",

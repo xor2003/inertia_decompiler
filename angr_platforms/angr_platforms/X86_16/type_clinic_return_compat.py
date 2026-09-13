@@ -22,6 +22,7 @@ from .callsite_summary import CallerReturnUseVerdict8616
 from .lowering.authoritative_function_prototypes import (
     capture_authoritative_function_prototype_8616,
 )
+from .lowering.native_terminal_return_values import apply_native_terminal_return_values_8616
 from .lowering.return_type_evidence import proven_function_result_observation_8616
 from .lowering.unused_void_return_types import (
     TerminalReturnValueEvidence8616,
@@ -43,6 +44,7 @@ class _GraphSurface8616(Protocol):
 
     def nodes(self) -> Iterable[object]:
         """Return graph blocks."""
+        ...
 
 
 class _BlockSurface8616(Protocol):
@@ -193,6 +195,7 @@ def apply_x86_16_clinic_return_type_compatibility() -> None:
     """Install the post-prototype Clinic lowering adapter once."""
     _capture_strong_prototype_at_decompiler_entry_8616()
     _preserve_strong_prototype_during_cc_recovery_8616()
+    apply_native_terminal_return_values_8616()
     original = Clinic._make_function_prototype
     if original.__name__ == "_make_function_prototype_8616":
         return

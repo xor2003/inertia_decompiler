@@ -19,7 +19,6 @@ from typing import Final, Protocol, cast
 from ..ir.core import IRAddress, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from ..ir.segment_state_transfer import SEGMENT_REGISTER_SET, SegmentRestoreSource
 from .segment_stack_fragments import (
-    SegmentStackByteOrigin8616,
     SegmentStackFragments8616,
     complete_stack_constant_8616,
     complete_stack_register_restore_8616,
@@ -27,6 +26,16 @@ from .segment_stack_fragments import (
     register_value_fragments_8616,
     stack_load_fragments_8616,
     store_stack_fragments_8616,
+)
+from .stack_pointer_snapshots import StackPointerSnapshots8616
+from .stack_restore_state import (
+    StackRestoreState8616 as _SegmentStackAliasState8616,
+)
+from .stack_restore_state import (
+    join_stack_restore_states_8616 as _join_stack_states,
+)
+from .stack_restore_state import (
+    stack_restore_state_8616 as _stack_state,
 )
 
 __all__ = [
@@ -116,46 +125,6 @@ StackRegisterRestoreFact8616: Final[type[SegmentStackRestoreFact8616]] = Segment
 StackRegisterRestoreArtifact8616: Final[type[SegmentStackRestoreArtifact8616]] = SegmentStackRestoreArtifact8616
 
 
-@dataclass(frozen=True, slots=True)
-class _SegmentStackAliasState8616:
-    """Must-state for exact SP displacement and saved stack-byte identities."""
-
-    sp_delta: int | None
-    stack_bytes: tuple[tuple[int, SegmentStackByteOrigin8616], ...] = ()
-
-    def byte_map(self) -> dict[int, SegmentStackByteOrigin8616]:
-        """Return a mutable byte map for one block transfer."""
-        return dict(self.stack_bytes)
-
-
-def _stack_state(
-    sp_delta: int | None,
-    stack_bytes: dict[int, SegmentStackByteOrigin8616],
-) -> _SegmentStackAliasState8616:
-    """Freeze one deterministic Alias stack state."""
-    return _SegmentStackAliasState8616(sp_delta, tuple(sorted(stack_bytes.items())))
-
-
-def _join_stack_states(
-    states: tuple[_SegmentStackAliasState8616, ...],
-) -> _SegmentStackAliasState8616:
-    """Keep only SP and stack-byte identities proven on every predecessor."""
-    if not states:
-        return _SegmentStackAliasState8616(None)
-    first = states[0]
-    sp_delta = first.sp_delta if all(state.sp_delta == first.sp_delta for state in states[1:]) else None
-    predecessor_maps = tuple(state.byte_map() for state in states)
-    common_offsets = set(predecessor_maps[0])
-    for byte_map in predecessor_maps[1:]:
-        common_offsets.intersection_update(byte_map)
-    common_bytes = {
-        offset: predecessor_maps[0][offset]
-        for offset in common_offsets
-        if all(byte_map[offset] == predecessor_maps[0][offset] for byte_map in predecessor_maps[1:])
-    }
-    return _stack_state(sp_delta, common_bytes)
-
-
 def _predecessor_map(artifact: IRFunctionArtifact) -> dict[int, tuple[int, ...]]:
     """Build deterministic in-function predecessors from typed IR edges."""
     block_addrs = {block.addr for block in artifact.blocks}
@@ -167,19 +136,6 @@ def _predecessor_map(artifact: IRFunctionArtifact) -> dict[int, tuple[int, ...]]
     return {addr: tuple(sorted(values)) for addr, values in predecessors.items()}
 
 
-def _update_sp_delta(instruction: IRInstr, sp_delta: int | None) -> int | None:
-    """Track exact function-entry-relative SP displacement or refuse an unknown assignment."""
-    dst = instruction.dst
-    if not isinstance(dst, IRValue) or dst.space is not MemSpace.REG or dst.name != "sp":
-        return sp_delta
-    if not instruction.args or not isinstance(instruction.args[0], IRValue):
-        return None
-    source = instruction.args[0]
-    if source.space is not MemSpace.REG or source.name != "sp" or sp_delta is None:
-        return None
-    return sp_delta + int(source.offset)
-
-
 def _transfer_block(
     block_addr: int,
     instructions: tuple[IRInstr, ...],
@@ -188,8 +144,10 @@ def _transfer_block(
 ) -> tuple[list[SegmentStackRestoreFact8616], _SegmentStackAliasState8616]:
     """Transfer exact stack identities and classify restorations in one block."""
     values: dict[str, SegmentStackFragments8616] = {}
+    stack_pointers = StackPointerSnapshots8616()
     stack_bytes = entry_state.byte_map()
     sp_delta = entry_state.sp_delta
+    bp_delta = entry_state.bp_delta
     facts: list[SegmentStackRestoreFact8616] = []
     machine_instruction_addr: int | None = None
     instruction_entry_state = entry_state
@@ -198,11 +156,15 @@ def _transfer_block(
             continue
         if instruction.addr != machine_instruction_addr:
             machine_instruction_addr = instruction.addr
-            instruction_entry_state = _stack_state(sp_delta, stack_bytes)
+            instruction_entry_state = _stack_state(sp_delta, stack_bytes, bp_delta)
+        stack_pointers.observe(instruction, sp_delta, bp_delta)
         if instruction.op == "LOAD" and isinstance(instruction.dst, IRValue) and instruction.args:
             address = instruction.args[0]
             if isinstance(address, IRAddress) and instruction.dst.name is not None:
-                fragments = stack_load_fragments_8616(address, max(1, instruction.dst.size), sp_delta, stack_bytes)
+                fragments = stack_load_fragments_8616(
+                    address, max(1, instruction.dst.size),
+                    stack_pointers.address_base(address, sp_delta, bp_delta), stack_bytes,
+                )
                 values[instruction.dst.name] = fragments
                 values[f"load_{instruction.dst.name}"] = fragments
         elif instruction.op == "STORE" and len(instruction.args) >= 2:
@@ -217,7 +179,7 @@ def _transfer_block(
                         values,
                         tracked_registers=tracked_registers,
                     ),
-                    sp_delta,
+                    stack_pointers.address_base(address, sp_delta, bp_delta),
                     stack_bytes,
                 )
         elif isinstance(instruction.dst, IRValue) and instruction.dst.space is MemSpace.TMP:
@@ -272,21 +234,26 @@ def _transfer_block(
                         SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE,
                     )
                 )
-        sp_delta = _update_sp_delta(instruction, sp_delta)
+        next_sp = stack_pointers.updated_register("sp", instruction, sp_delta, bp_delta)
+        bp_delta = stack_pointers.updated_register("bp", instruction, sp_delta, bp_delta)
+        sp_delta = next_sp
         if instruction.op == "CALL":
             effect = instruction.call_stack_effect
+            bp_delta = (instruction_entry_state.bp_delta
+                        if effect is not None and effect.complete and effect.bp_preserved else None)
             if (
                 effect is not None
                 and effect.complete
-                and effect.net_stack_delta == 0
+                and effect.net_stack_delta is not None
                 and not effect.escaped_ranges
             ):
-                sp_delta = instruction_entry_state.sp_delta
+                call_entry_sp = instruction_entry_state.sp_delta
+                sp_delta = None if call_entry_sp is None else call_entry_sp + effect.net_stack_delta
                 stack_bytes = instruction_entry_state.byte_map()
             else:
                 sp_delta = None
                 stack_bytes.clear()
-    return facts, _stack_state(sp_delta, stack_bytes)
+    return facts, _stack_state(sp_delta, stack_bytes, bp_delta)
 
 
 def _solve_stack_states(
@@ -297,14 +264,18 @@ def _solve_stack_states(
     blocks_by_addr = {block.addr: block for block in artifact.blocks}
     predecessors = _predecessor_map(artifact)
     unknown = _SegmentStackAliasState8616(None)
-    exit_states = dict.fromkeys(blocks_by_addr, unknown)
+    # An unvisited edge is not an analyzed unknown value. Seeding loop edges
+    # with unknown would erase entry evidence before the first back-edge visit.
+    exit_states: dict[int, _SegmentStackAliasState8616] = {}
     changed = True
     while changed:
         changed = False
         for block_addr in sorted(blocks_by_addr):
-            incoming = tuple(exit_states[pred] for pred in predecessors[block_addr])
+            incoming = tuple(exit_states[pred] for pred in predecessors[block_addr] if pred in exit_states)
             if block_addr == artifact.function_addr:
                 incoming = (_SegmentStackAliasState8616(0), *incoming)
+            if not incoming:
+                continue
             entry_state = _join_stack_states(incoming)
             new_exit = _transfer_block(
                 block_addr,
@@ -312,10 +283,10 @@ def _solve_stack_states(
                 entry_state,
                 tracked_registers,
             )[1]
-            if new_exit != exit_states[block_addr]:
+            if new_exit != exit_states.get(block_addr):
                 exit_states[block_addr] = new_exit
                 changed = True
-    return exit_states
+    return {addr: exit_states.get(addr, unknown) for addr in blocks_by_addr}
 
 
 def build_x86_16_segment_stack_restore_artifact(artifact: IRFunctionArtifact) -> SegmentStackRestoreArtifact8616:

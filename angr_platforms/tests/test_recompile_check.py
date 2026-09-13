@@ -122,6 +122,34 @@ def test_portable_recompile_rejects_real_invalid_c(source: str) -> None:
     assert result.exit_code != 0
 
 
+@pytest.mark.parametrize(
+    ("source", "expected_pass"),
+    [
+        pytest.param("unsigned short demo(void) {}", False, id="missing-return"),
+        pytest.param("int demo(int x) { if (x) return 1; }", False, id="partial-return"),
+        pytest.param("int demo(void) { return; }", False, id="bare-return"),
+        pytest.param("int demo(void) { int value; return value; }", False, id="uninitialized-return"),
+        pytest.param("int demo(void) { return 1; }", True, id="value-return"),
+        pytest.param("void demo(void) {}", True, id="void-fallthrough"),
+        pytest.param("int demo(void) { for (;;) {} }", True, id="no-fallthrough"),
+        pytest.param(
+            "extern int target(void); int demo(void) { return target(); }",
+            True,
+            id="external-return-no-link-required",
+        ),
+    ],
+)
+def test_portable_recompile_checks_return_paths(source: str, expected_pass: bool) -> None:
+    """A syntax-only pass is not evidence that value-returning C compiles."""
+    result = check_c_recompiles_8616(source)
+
+    assert result.compiler is not None
+    assert result.passed is expected_pass, result.stderr
+    if not expected_pass:
+        assert "return" in result.stderr
+        assert result.source_path is not None
+
+
 def test_msc_recompile_rejects_nonzero_exit_without_diagnostic_keyword(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

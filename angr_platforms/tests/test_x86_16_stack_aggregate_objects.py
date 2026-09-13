@@ -46,6 +46,7 @@ from capstone.x86_const import (
     X86_OP_MEM,
     X86_OP_REG,
 )
+from x86_16_frame_coordinate_fixtures import proven_frame_coordinate
 
 _AX = 1
 _BP = 2
@@ -680,6 +681,7 @@ def test_materialization_supports_addressed_top_partition(monkeypatch) -> None:
 
 def test_materialization_promotes_projected_entry_sp_aggregate_base(monkeypatch) -> None:
     codegen = _AggregateCodegen()
+    codegen._inertia_vex_ir_frame = proven_frame_coordinate(-2)
     base_var, base_cvar = _stack_cvar(
         codegen,
         -92,
@@ -724,6 +726,7 @@ def test_materialization_promotes_projected_entry_sp_aggregate_base(monkeypatch)
 
 def test_materialization_creates_missing_base_at_projected_entry_sp(monkeypatch) -> None:
     codegen = _AggregateCodegen()
+    codegen._inertia_vex_ir_frame = proven_frame_coordinate(-2)
     boundary_var, boundary_cvar = _stack_cvar(
         codegen,
         -4,

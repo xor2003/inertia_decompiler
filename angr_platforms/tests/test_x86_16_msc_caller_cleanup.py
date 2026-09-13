@@ -66,7 +66,7 @@ def test_stack_cleanup_immediate_lifts_as_typed_word_constant() -> None:
     assert "8Sto16" not in vex_text
 
 
-def test_caller_cleanup_loop_preserves_affine_stack_pointer() -> None:
+def test_caller_cleanup_loop_preserves_affine_stack_pointer(tmp_path: Path) -> None:
     """A call-cleanup backedge must survive MZ loader-width stack propagation."""
     code = bytes.fromhex("558bec5050e8180083c4044975f58be55dc3") + b"\x90" * 14 + b"\xc3"
     project = _project_from_bytes(code)
@@ -90,6 +90,50 @@ def test_caller_cleanup_loop_preserves_affine_stack_pointer() -> None:
     assert decompiler.codegen is not None
     assert "/* unsupported instruction */" not in decompiler.codegen.text
     assert "sub_1020();" in decompiler.codegen.text
+    _assert_native_countdown_behavior(decompiler.codegen.text, tmp_path)
+
+
+def _assert_native_countdown_behavior(body: str, tmp_path: Path) -> None:
+    """Check native loop effects independently of the CLI's strict C syntax gate."""
+    prelude = """
+#include <stdint.h>
+#include <stdio.h>
+static uint32_t inertia_eax, inertia_ecx;
+static uint16_t inertia_flags;
+static unsigned calls;
+static void sub_1020(void) { ++calls; }
+#define _start decompiled_subject
+"""
+    harness = """
+#undef _start
+int main(void) {
+    unsigned failed = 0;
+    for (unsigned initial = 0; initial <= 3; ++initial) {
+        unsigned expected_calls = initial ? initial : 65536U;
+        calls = 0;
+        inertia_eax = 0xcafe1234U;
+        inertia_ecx = 0xabcd0000U | initial;
+        inertia_flags = 0x202;
+        decompiled_subject();
+        if (calls != expected_calls || inertia_ecx != 0xabcd0000U || inertia_eax != 0xcafe1234U) {
+            fprintf(stderr, "initial=%u calls=%u ecx=%08x\\n", initial, calls, inertia_ecx);
+            ++failed;
+        }
+    }
+    return failed != 0;
+}
+"""
+    executable = tmp_path / "countdown"
+    compiled = subprocess.run(
+        ["gcc", "-x", "c", "-std=c11", "-O2", "-o", str(executable), "-"],
+        input=prelude + body + harness, capture_output=True, text=True,
+        check=False, timeout=30,
+    )
+    assert compiled.returncode == 0, compiled.stderr
+    executed = subprocess.run(
+        [str(executable)], capture_output=True, text=True, check=False, timeout=5,
+    )
+    assert executed.returncode == 0, executed.stderr
 
 
 @pytest.mark.parametrize(
@@ -179,3 +223,8 @@ def test_sortd_percolateup_caller_cleanup_has_no_opaque_sp_expression(
     declaration_and_call_count = 2
     assert result.stdout.count("sub_107b8(") == declaration_and_call_count
     assert result.stdout.count("sub_10768(") == declaration_and_call_count
+    compiled = subprocess.run(
+        ["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-fsyntax-only", "-x", "c", "-"],
+        input=result.stdout, capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert compiled.returncode == 0, compiled.stderr

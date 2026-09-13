@@ -638,6 +638,10 @@ def _canonicalize_ds_storage_fingerprint_8616(
     ]
     if op == "Or":
         normalized = list(dict.fromkeys(normalized))
+        # Deduplicating identical proven storage views must retain their
+        # scalar identity, not introduce a synthetic unary OR operation.
+        if len(normalized) == 1 and normalized[0].startswith(("stack_slot:", "ds_global:")):
+            return normalized[0]
     return f"{op}({','.join(normalized)})"
 
 
@@ -828,7 +832,7 @@ def normalize_condition_fingerprint_algebraic_8616(value: str) -> str:
         # Rule: CmpEQ(Sub(x,const:c),const:0) → CmpEQ(x,const:c)
         # Rule: CmpNE(Sub(x,const:c),const:0) → CmpNE(x,const:c)
         if op in ("CmpEQ", "CmpNE") and len(args) == 2 and args[1] == "const:0":
-            lhs_call = _split_fingerprint_call_8616(args[0])
+            lhs_call = _split_fingerprint_call_8616(_normalize_arg_fingerprint_8616(args[0]))
             if lhs_call is not None:
                 lhs_op, lhs_args = lhs_call
                 if lhs_op == "Sub":
@@ -904,6 +908,9 @@ def _canonicalize_add_neg_fingerprint_8616(
     if op != "Add" or len(args) != 2:
         return None
     for value, negated in ((args[0], args[1]), (args[1], args[0])):
+        # Unit decrement is exact at every width, including modular wraparound.
+        if negated == "const:-1":
+            return f"Sub({value},const:1)"
         negated_call = _split_fingerprint_call_8616(negated)
         if negated_call is None or negated_call[0] != "Neg":
             continue

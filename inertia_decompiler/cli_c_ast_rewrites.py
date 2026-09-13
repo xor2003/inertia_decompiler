@@ -42,6 +42,7 @@ from angr_platforms.X86_16.analysis_helpers import (
     render_interrupt_call,
 )
 from angr_platforms.X86_16.annotations import _normalize_bp_disp
+from angr_platforms.X86_16.c_ast_utils import _structured_codegen_node_8616
 from angr_platforms.X86_16.cod_extract import CODProcMetadata
 from angr_platforms.X86_16.cod_source_rewrites import rewrite_cod_proc_from_source as _rewrite_cod_proc_from_source
 from angr_platforms.X86_16.lowering.c_runtime_header import (
@@ -570,7 +571,8 @@ def _make_unique_identifier(base: str, used: set[str]) -> str:
 
 
 def _structured_codegen_node(value: StructuredAstValue) -> bool:
-    return type(value).__module__.startswith("angr.analyses.decompiler.structured_codegen")
+    """Consume the shared AST boundary, including owned semantic node subclasses."""
+    return bool(_structured_codegen_node_8616(value))
 
 
 def _structured_slot_names_8616(value: StructuredAstValue) -> tuple[str, ...]:
@@ -2624,7 +2626,7 @@ def _simplify_structured_c_expressions(codegen: StructuredCodegenValue) -> bool:
                     lhs = _resolve_copy_alias_expr(_unwrap_c_casts(node.lhs))
                     rhs = _resolve_copy_alias_expr(_unwrap_c_casts(node.rhs))
                 try:
-                    resolved = structured_c.CBinaryOp(node.op, lhs, rhs, codegen=codegen)
+                    resolved = structured_c.CBinaryOp(node.op, lhs, rhs, tags=node.tags, codegen=codegen)
                 except ValueError:
                     # Keep original node when angr cannot resolve operand sizes for
                     # transient synthetic types lacking arch context.

@@ -14,6 +14,16 @@ They do not relax its architecture or function-fix acceptance contract.
   behavioral checks when useful. Prove important oracles reject corrupted cases.
 - Admit important new regressions to the appropriate routine pipeline. Document
   genuinely slow or external-only coverage and why it is not in the fast lane.
+- Add general gates when a demonstrated failure class justifies their runtime
+  and maintenance cost. Require an owning layer, clear diagnostics, valid and
+  deliberately corrupted controls, and routine-pipeline enrollment. Never treat
+  machine-storage validity as proof of emitted-C variable initialization.
+- Introduce valuable gates proactively; separate approval is not required.
+  Prefer extending an existing gate over adding a duplicate. Check invariants
+  at the earliest boundary with sufficient evidence, and report the function,
+  stage, violated invariant and relevant typed evidence. Measure added runtime;
+  keep cheap checks in the normal path and expensive checks in an explicit
+  test lane without weakening mandatory semantic validation.
 - Run linters periodically on changed files, not just at the end. Use the project
   venv, global tool configuration, and `ruff check --fix`; retain mandatory types
   and docs for touched non-test code. Do not expand into unrelated cleanup.

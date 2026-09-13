@@ -228,6 +228,7 @@ def test_condition_chains_materialize_before_loop_conditions(monkeypatch):
     project = _Project()
     codegen = _Codegen()
     codegen.cfunc = SimpleNamespace(
+        addr=0x4010,
         statements=CStatements([], codegen=codegen),
     )
     codegen._inertia_typed_conditions = ()

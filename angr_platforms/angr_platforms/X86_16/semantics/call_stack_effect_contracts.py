@@ -37,6 +37,7 @@ class CallStackEffectFailure8616(StrEnum):
     FRAME_KIND_UNKNOWN = "frame_kind_unknown"
     POINTER_ARGUMENT_MAY_ESCAPE = "pointer_argument_may_escape"
     RETURN_ADDRESS_UNKNOWN = "return_address_unknown"
+    STACK_ALLOCATION_UNPROVEN = "stack_allocation_unproven"
     STACK_CLEANUP_MISMATCH = "stack_cleanup_mismatch"
     STACK_CLEANUP_UNKNOWN = "stack_cleanup_unknown"
     SUMMARY_MISSING = "summary_missing"

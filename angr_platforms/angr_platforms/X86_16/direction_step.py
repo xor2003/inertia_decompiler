@@ -46,7 +46,8 @@ def lifted_direction_step_8616(instruction: object, flags_value: object) -> VexV
     if not isinstance(proof.source, (RdTmp, Const)):
         raise TypeError("Direction projection must retain a captured VEX atom")
     flags = VexValue(builder, proof.source)
-    direction = require_vex_value_8616(((flags >> 10) & 1).cast_to(Type.int_1))
-    negative = builder.mkconst(0xFFFFFFFF, Type.int_32)
-    positive = builder.mkconst(1, Type.int_32)
-    return VexValue(builder, boundary.irsb_c.ite(direction.rdt, negative, positive))
+    direction = require_vex_value_8616(((flags >> 10) & 1).cast_to(Type.int_32))
+    # In 32-bit arithmetic 1 - 2*DF is exactly +1/-1. An ITE here gives
+    # downstream structuring a false branch after every architectural FLAGS write.
+    positive = VexValue(builder, builder.mkconst(1, Type.int_32))
+    return require_vex_value_8616(positive - (direction << 1))

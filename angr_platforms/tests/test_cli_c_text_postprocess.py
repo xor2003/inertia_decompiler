@@ -1765,7 +1765,8 @@ int f(int x)
 
     assert "x -= 1;" in rewritten
     assert "x += 2;" in rewritten
-    assert "a + b = c;" not in rewritten
+    # Invalid targets must remain visible to recompilation, not be deleted.
+    assert "a + b = c;" in rewritten
 
 
 def test_materialize_missing_generic_local_declarations_text_handles_mangled_function_names():

@@ -133,6 +133,8 @@ def test_cod_timeout_target_is_classified_deterministically():
     ("_dos_alloc", "_dos_resize", "_dos_mcbInfo"),
 )
 def test_cod_runner_hotspots_fall_back_through_scan_safe_classifier(monkeypatch, tmp_path, proc_name: str):
+    """Attach bounded scan diagnostics without promoting a timed-out child."""
+    child_returncode = 3
     item = _runner.CodWorkItem(
         cod_path=tmp_path / "DOSFUNC.COD",
         proc_name=proc_name,
@@ -163,7 +165,7 @@ def test_cod_runner_hotspots_fall_back_through_scan_safe_classifier(monkeypatch,
     def fake_run(*args, **kwargs):
         stdout_file = kwargs["stdout"]
         stdout_file.write("/* Timed out while recovering a function after 20s. */\n")
-        return subprocess.CompletedProcess(args=args[0], returncode=3, stdout="", stderr="")
+        return subprocess.CompletedProcess(args=args[0], returncode=child_returncode, stdout="", stderr="")
 
     monkeypatch.setattr(_runner.subprocess, "run", fake_run)
     monkeypatch.setattr(_runner, "_run_scan_safe_fallback", lambda *_args, **_kwargs: scan_result)
@@ -171,8 +173,11 @@ def test_cod_runner_hotspots_fall_back_through_scan_safe_classifier(monkeypatch,
     result = _runner._run_work_item(item, timeout=20, max_memory_mb=1024)
     rendered = _runner._render_result_block(result)
 
-    assert result.exit_kind == "fallback"
+    assert result.exit_kind == "timeout"
     assert result.child_exit_kind == "timeout"
+    assert result.returncode == child_returncode
+    assert result.tail_validation_records == ()
+    assert result.tail_validation_scanned == 0
     assert result.scan_safe_result is scan_result
     assert "fallback kind: cfg_only" in rendered
     assert "confidence status: bounded_recovery" in rendered
@@ -607,7 +612,9 @@ def test_prune_unused_local_declarations_text_drops_unused_stack_bp_placeholder_
     assert "char s_fffa;" in pruned
 
 
-def test_cod_dos_loadprogram_wrapper_keeps_err_guard_and_segment_stores(monkeypatch):
+def test_cod_dos_loadprogram_wrapper_keeps_err_guard_and_segment_stores(monkeypatch, tmp_path):
+    from x86_16_loadprogram_behavior import assert_loadprogram_behavior
+
     monkeypatch.setenv("INERTIA_DEBUG_TIMING", "1")
     result = _run_cod_proc(COD_DIR / "DOSFUNC.COD", "_dos_loadProgram")
 
@@ -617,12 +624,12 @@ def test_cod_dos_loadprogram_wrapper_keeps_err_guard_and_segment_stores(monkeypa
     _assert_has_all(
         result.stdout,
         (
-            "if (err)\n        return err;",
             "cs[0] = exeLoadParams[10];",
             "ss[0] = exeLoadParams[8];",
             "return 0;",
         ),
     )
+    assert_loadprogram_behavior(result.stdout, tmp_path)
     _assert_has_none(
         result.stdout,
         (

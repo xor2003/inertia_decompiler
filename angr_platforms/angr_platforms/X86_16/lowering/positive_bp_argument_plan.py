@@ -12,11 +12,17 @@ from __future__ import annotations
 from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from itertools import accumulate
 
 from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_type import SimType
 
+from ..callsite_summary import CallsiteSummary8616
 from .callee_argument_width_evidence import CalleeArgumentWidthEvidence8616
+
+_FIRST_ARGUMENT_OFFSET = 4
+_WORD_BYTES = 2
+_WIDE_BYTES = 4
 
 
 class PositiveBpArgumentPlanDecision8616(StrEnum):
@@ -63,12 +69,12 @@ def complete_positive_bp_body_word_access_plan_8616(
     gap ends recovery.
     """
     entries_by_offset = {entry.bp_offset: entry for entry in body_entries}
-    accesses = frozenset(offset for offset in word_access_offsets if offset >= 4)
+    accesses = frozenset(offset for offset in word_access_offsets if offset >= _FIRST_ARGUMENT_OFFSET)
     wide_accesses = frozenset(
-        offset for offset in wide_access_offsets if offset >= 4
+        offset for offset in wide_access_offsets if offset >= _FIRST_ARGUMENT_OFFSET
     )
     completed: list[PositiveBpArgumentPlanEntry8616] = []
-    cursor = 4
+    cursor = _FIRST_ARGUMENT_OFFSET
     while (
         cursor in entries_by_offset
         or cursor in accesses
@@ -78,19 +84,33 @@ def complete_positive_bp_body_word_access_plan_8616(
         if entry is None:
             entry = PositiveBpArgumentPlanEntry8616(
                 bp_offset=cursor,
-                width=4 if cursor in wide_accesses else 2,
+                width=_WIDE_BYTES if cursor in wide_accesses else _WORD_BYTES,
                 name=f"arg_{cursor:x}",
                 argument_type=default_argument_type,
             )
         elif cursor in wide_accesses:
-            if entry.width not in {2, 4}:
+            if entry.width not in {_WORD_BYTES, _WIDE_BYTES}:
                 break
-            entry = replace(entry, width=4)
-        if entry.width < 2 or entry.width % 2:
+            entry = replace(entry, width=_WIDE_BYTES)
+        if entry.width < _WORD_BYTES or entry.width % _WORD_BYTES:
             break
         completed.append(entry)
         cursor += entry.width
     return tuple(completed)
+
+
+def _physical_call_covers_body_8616(widths: tuple[int, ...], summary: CallsiteSummary8616) -> bool:
+    """Check physical coverage without inventing or splitting logical operands."""
+    physical = tuple(reversed(summary.arg_widths))
+    if not physical or summary.arg_count != len(physical):
+        return False
+    if any(width <= 0 for width in (*widths, *physical)):
+        return False
+    if summary.logical_arg_widths and summary.logical_arg_widths != widths:
+        return False
+    # PUSH order is opposite to BP argument order. A body-proven wide operand
+    # may consume several complete pushes, never part of a caller-owned slot.
+    return sum(widths) == sum(physical) and set(accumulate(widths)) <= set(accumulate(physical))
 
 
 def _body_layout_matches_all_physical_calls_8616(
@@ -105,10 +125,7 @@ def _body_layout_matches_all_physical_calls_8616(
     if len(summaries) != count_evidence.raw_fact_count:
         return False
     widths = tuple(entry.width for entry in body_entries)
-    return all(
-        summary.arg_count == len(widths) and tuple(summary.arg_widths) == widths
-        for summary in summaries
-    )
+    return all(_physical_call_covers_body_8616(widths, summary) for summary in summaries)
 
 
 def complete_positive_bp_argument_plan_8616(

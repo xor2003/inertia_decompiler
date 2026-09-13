@@ -17,11 +17,16 @@ Ownership rule:
   a compatibility delegate.
 
 Allowed work in this file:
+- preserve exact Structuring-owned loop continuation polarity; a taken-branch
+  ConditionIR fact is not a replacement for an oriented loop guard;
 - map ConditionIR operands to C AST nodes;
 - replace matching tagged conditions without changing branch meaning;
 - record materialization traces for validation/debugging.
 
 Current migration debt:
+- register operand selection delegates to Structuring's Alias-proof consumer;
+  never restore the removed numeric-address predecessor lookup here;
+- typed stack operand construction delegates to Lowering's condition_stack_value;
 - compatibility operand handling still accepts raw VEX-like wrappers;
 - stack/global operand rendering still constructs fallback C expressions here;
 - delta/tag fallback lookup exists because transfer is not complete.
@@ -40,6 +45,7 @@ import contextlib
 import logging
 import os
 import typing
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -48,7 +54,6 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
     CBinaryOp,
     CConstant,
-    CExpression,
     CFunctionCall,
     CIfElse,
     CReturn,
@@ -71,6 +76,10 @@ from .ir.core import (
     IRValue,
     MemSpace,
 )
+from .lowering.condition_stack_value import complete_storage_signedness_requests_8616
+from .lowering.condition_stack_value import (
+    materialize_condition_stack_value_8616 as _build_stack_operand_expr_8616,
+)
 from .pipeline.contracts import SemanticLaneState
 from .structuring.condition_lowering import (
     attach_condition_segment_access_provenance_8616,
@@ -79,9 +88,8 @@ from .structuring.condition_lowering import (
     materialize_binary_ir_value_8616,
     materialize_condition_stack_declaration_view_8616,
     materialize_indexed_segmented_condition_value_8616,
-    materialize_typed_condition_stack_operand_8616,
-    stable_stack_condition_binding_tags_8616,
 )
+from .structuring.condition_register_expression import condition_register_expression_8616
 from .tail_validation_fingerprint import _expr_fingerprint
 
 __all__ = [
@@ -212,24 +220,6 @@ def _register_exprs_by_ins_addr_8616(codegen: object, project: object) -> dict[t
     return reg_exprs
 
 
-def _lookup_register_expr_before_8616(
-    reg_exprs: dict[tuple[int, str, int], object], ins_addr: int, reg_name: str, size: int
-) -> object | None:
-    best_addr = None
-    best_expr = None
-    for (candidate_addr, candidate_name, candidate_size), candidate_expr in reg_exprs.items():
-        if candidate_name != reg_name.lower():
-            continue
-        if int(size) and int(candidate_size) != int(size):
-            continue
-        if int(candidate_addr) >= int(ins_addr):
-            continue
-        if best_addr is None or int(candidate_addr) > best_addr:
-            best_addr = int(candidate_addr)
-            best_expr = candidate_expr
-    return best_expr
-
-
 def _type_for_operand_size_8616(size: int, *, signed: bool = False) -> object:
     """Return the scalar C type for a typed-condition operand width."""
     if size <= 1:
@@ -295,37 +285,6 @@ def _build_indexed_segmented_operand_expr_8616(
     )
 
 
-def _build_stack_operand_expr_8616(
-    operand: IRValue,
-    codegen: object,
-    *,
-    signed: bool = False,
-    cond: ConditionIR | None = None,
-) -> CExpression | None:
-    """Build a stack CVariable preserving signed ConditionIR operand evidence."""
-    if operand.space != MemSpace.SS:
-        return None
-    base = operand.name if operand.name in {"bp", "sp"} else "bp"
-    offset = int(operand.offset)
-    size = int(operand.size or 2)
-    if cond is not None and isinstance(cond.width_bits, int) and cond.width_bits > 0:
-        condition_size = max(1, (cond.width_bits + 7) // 8)
-        if size > condition_size:
-            size = condition_size
-    prefix = "arg" if base == "bp" and offset > 0 else "local"
-    name = f"{prefix}_{abs(offset):x}"
-    return materialize_typed_condition_stack_operand_8616(
-        codegen,
-        base=base,
-        offset=offset,
-        size=max(size, 1),
-        name=name,
-        signed=signed,
-        prefer_signed_local_storage=signed,
-        tags=stable_stack_condition_binding_tags_8616(offset, max(size, 1), name=name),
-    )
-
-
 def _clone_stack_expr_with_condition_signedness_8616(expr: object, cond: ConditionIR | None, codegen: object) -> object:
     """Build a signed expression view when ConditionIR proves signed comparison."""
     if cond is None or not cond.is_signed or not isinstance(expr, CVariable):
@@ -364,16 +323,21 @@ def _build_c_expr_for_operand(
                 if not isinstance(bind_addr, int):
                     bind_addr = cond.src_insn if cond is not None else None
                 if isinstance(bind_addr, int):
-                    expr = _lookup_register_expr_before_8616(
+                    expr = condition_register_expression_8616(
+                        project,
+                        codegen,
                         _register_exprs_by_ins_addr_8616(codegen, project),
-                        bind_addr,
-                        operand.name,
-                        max(1, int(operand.size or 2)),
+                        instruction_addr=bind_addr,
+                        register=operand.name,
+                        size=max(1, int(operand.size or 2)),
                     )
                     if expr is not None:
                         if apply_condition_value_view:
                             return _clone_stack_expr_with_condition_signedness_8616(expr, cond, codegen)
                         return expr
+                    # Failed binding must retain the existing condition, not
+                    # invent a register carrier without a reaching definition.
+                    return None
                 return _build_reg_var(project, operand.name, codegen, size=max(1, int(operand.size or 2)))
             if operand.space in {MemSpace.DS, MemSpace.ES}:
                 indexed_expr = _build_indexed_segmented_operand_expr_8616(
@@ -517,11 +481,13 @@ def _stack_arg_offset_from_condition_operand_8616(
     bind_addr = cond.producer_insn if isinstance(cond.producer_insn, int) else cond.src_insn
     if not isinstance(bind_addr, int):
         return None
-    expr = _lookup_register_expr_before_8616(
+    expr = condition_register_expression_8616(
+        project,
+        codegen,
         _register_exprs_by_ins_addr_8616(codegen, project),
-        bind_addr,
-        operand.name,
-        max(1, int(operand.size or 2)),
+        instruction_addr=bind_addr,
+        register=operand.name,
+        size=max(1, int(operand.size or 2)),
     )
     variable = _dynamic_typed_condition_getattr_8616(expr, "variable", None)
     if not isinstance(variable, SimStackVariable) or _dynamic_typed_condition_getattr_8616(variable, "base", None) != "bp":
@@ -778,15 +744,23 @@ def _restore_signed_stack_arg_type_state_8616(
 
 
 def _apply_signed_stack_arg_types_to_prototype_8616(project: object, codegen: object, signed_offsets: dict[int, int]) -> bool:
+    """Apply sign-only type changes authorized by complete storage-owner proof."""
     cfunc = _dynamic_typed_condition_getattr_8616(codegen, "cfunc", None)
     if cfunc is None or not signed_offsets:
+        return False
+    stack_nodes = _iter_signedness_stack_arg_cvars_8616(cfunc)
+    signed_offsets = complete_storage_signedness_requests_8616(
+        signed_offsets,
+        (node.variable for node in stack_nodes if isinstance(node.variable, SimStackVariable)),
+    )
+    if not signed_offsets:
         return False
     changed = False
     changed_fields: set[str] = set()
     changed_offsets: set[int] = set()
     changed_nodes: list[tuple[int, str | None, str]] = []
     arg_list = list(_dynamic_typed_condition_getattr_8616(cfunc, "arg_list", ()) or ())
-    for node in _iter_signedness_stack_arg_cvars_8616(cfunc):
+    for node in stack_nodes:
         variable = _dynamic_typed_condition_getattr_8616(node, "variable", None)
         offset = _dynamic_typed_condition_getattr_8616(variable, "offset", None)
         if not isinstance(offset, int) or offset not in signed_offsets:
@@ -1015,15 +989,19 @@ def _apply_typed_condition_stack_arg_signedness_8616(project: SimpleNamespace, c
     return True
 
 
-def _build_c_condition_expr(project: object, cond: ConditionIR, codegen: object) -> CBinaryOp | None:
-    """Build a CBinaryOp (comparison) from a ConditionIR."""
-    lhs_expr = _build_c_expr_for_operand(project, cond.lhs, codegen, cond)
+def _build_c_condition_expr(
+    project: object, cond: ConditionIR, codegen: object,
+    *, operand_builder: Callable[[object], object | None] | None = None,
+) -> CBinaryOp | None:
+    """Build comparison syntax from operands supplied by the owning proof consumer."""
+    build_operand = operand_builder or (lambda value: _build_c_expr_for_operand(project, value, codegen, cond))
+    lhs_expr = build_operand(cond.lhs)
     if lhs_expr is None:
         return None
     if cond.op in ("zero", "nonzero"):
         rhs_expr = CConstant(0, SimTypeShort(signed=False), codegen=codegen)
     else:
-        rhs_expr = _build_c_expr_for_operand(project, cond.rhs, codegen, cond)
+        rhs_expr = build_operand(cond.rhs)
         if rhs_expr is None:
             return None
 
@@ -1250,9 +1228,9 @@ def _typed_condition_carrier_polarity_8616(node: object) -> bool | None:
 def _apply_typed_conditions_to_codegen_8616(project: SimpleNamespace, codegen: SimpleNamespace) -> bool:
     """Replace flag-based conditions in C AST with explicit comparisons from ConditionIR.
 
-    This is a rewrite pass (AGENTS rule: rewrite only for cleanup/formatting).
-    The ConditionIR facts are already proven by the lifting stage; this pass
-    only replaces their representation in the C AST.
+    Compatibility consumer invoked by Structuring, not a Rewrite semantic
+    recovery pass. A single fact cannot replace a compound condition; its
+    complete CFG ownership belongs to Structuring's chain materializer.
     """
     conditions = _dynamic_typed_condition_getattr_8616(codegen, "_inertia_typed_conditions", None)
     if not conditions:
@@ -1273,7 +1251,12 @@ def _apply_typed_conditions_to_codegen_8616(project: SimpleNamespace, codegen: S
         return isinstance(node, CConstant) and isinstance(_dynamic_typed_condition_getattr_8616(node, "value", None), int)
 
     def _replacement_for_condition_node(cond: object) -> object | None:
-        if isinstance(cond, CBinaryOp) and cond.op in {"LogicalAnd", "LogicalOr"}:
+        from .structuring.condition_ownership import requires_composite_condition_ownership_8616
+        from .structuring.loop_condition_identity import is_owned_loop_continuation_8616
+
+        if is_owned_loop_continuation_8616(cond):
+            return None
+        if requires_composite_condition_ownership_8616(cond):
             return None
         if classify_condition_call_effects_8616(cond).has_semantic_call:
             return None
@@ -1310,7 +1293,7 @@ def _apply_typed_conditions_to_codegen_8616(project: SimpleNamespace, codegen: S
             return None
         carrier_polarity = _typed_condition_carrier_polarity_8616(cond)
         if carrier_polarity is False:
-            new_cond = CUnaryOp("Not", new_cond, codegen=codegen)
+            new_cond = CUnaryOp("Not", new_cond, tags=dict(new_cond.tags), codegen=codegen)
         record_materialized_condition_trace_8616(project, codegen, key, new_cond)
         if key is not None:
             matched_condition_keys.add(key)

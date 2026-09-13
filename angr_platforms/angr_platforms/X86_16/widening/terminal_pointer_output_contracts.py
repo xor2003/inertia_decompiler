@@ -56,6 +56,11 @@ class TerminalPointerOutputViewFact8616:
         """Return whether all lanes form one exact gap-free output view."""
         if self.width <= 0 or not self.alias_outputs:
             return False
+        conditional_blocks = {
+            fact.terminal_output.conditional_store_blocks for fact in self.alias_outputs
+        }
+        if len(conditional_blocks) != 1:
+            return False
         intervals = sorted(
             (
                 fact.terminal_output.relative_offset,

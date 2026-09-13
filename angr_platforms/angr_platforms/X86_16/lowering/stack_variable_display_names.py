@@ -4,6 +4,8 @@ Layer: Types/Lowering.
 Responsibility: consume the authoritative BP/entry-SP coordinate registry and
 replay only its display-name projection onto exact angr stack ranges. This
 module does not discover storage identity or infer names from rendered text.
+Historical projections retain their evidence but reserve a display name only
+while a corresponding C owner remains in the body, arguments or declarations.
 Dynamic boundary: angr codegen and C-AST objects are third-party contracts.
 Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
@@ -166,6 +168,14 @@ def _matches_entry_sp_range_8616(variable: object, entry_sp_offset: int, size: i
     )
 
 
+def _rename_declaration_entries_8616(entries: object, name: str) -> None:
+    """Synchronize angr's declaration views for an already matched stack owner."""
+    if isinstance(entries, (list, set, tuple)):
+        for entry in entries:
+            if isinstance(entry, tuple) and entry:
+                _rename_projected_cvariable_8616(entry[0], name)
+
+
 def apply_stack_variable_projection_name_8616(
     codegen: object,
     *,
@@ -199,10 +209,7 @@ def apply_stack_variable_projection_name_8616(
             if not _matches_entry_sp_range_8616(variable, entry_sp_offset, size):
                 continue
             _rename_generated_stack_variable_8616(variable, name)
-            if isinstance(entries, (list, set, tuple)):
-                for entry in entries:
-                    if isinstance(entry, tuple) and entry:
-                        _rename_projected_cvariable_8616(entry[0], name)
+            _rename_declaration_entries_8616(entries, name)
 
 
 def _projected_display_name_8616(
@@ -247,15 +254,25 @@ def _stack_variable_debug_key_8616(value: object) -> tuple[int, int, str | None]
     return variable.offset, variable.size, variable.name
 
 
-def reapply_stack_variable_projection_names_8616(codegen: object) -> bool:
-    """Restore durable projected names across maps and regenerated AST clones."""
-    registry = stack_variable_coordinate_registry_8616(codegen)
-    target_names = frozenset(item.display_name for item in registry.projections if item.display_name)
-    boundary = cast(_CodegenBoundary8616, codegen)
-    try:
-        cfunc = boundary.cfunc
-    except AttributeError:
-        return False
+def _live_projection_names_8616(
+    registry: StackVariableCoordinateRegistry8616,
+    variables: Sequence[object],
+) -> frozenset[str]:
+    """Reserve names for current storage views, not obsolete intermediate owners."""
+    live_names: set[str] = set()
+    for variable in variables:
+        if not isinstance(variable, SimStackVariable):
+            continue
+        projection = registry.for_variable(variable) or registry.for_entry_sp_range(variable.offset, variable.size)
+        if projection is not None and projection.display_name:
+            live_names.add(projection.display_name)
+    return frozenset(live_names)
+
+
+def _log_stack_coordinate_names_8616(
+    registry: StackVariableCoordinateRegistry8616, cfunc: _CFunctionBoundary8616,
+) -> None:
+    """Emit optional coordinate diagnostics without mixing them into replay."""
     if os.environ.get("INERTIA_DEBUG_STACK_COORDINATES") == "1":
         arguments = cfunc.arg_list if isinstance(cfunc.arg_list, (list, tuple)) else ()
         logger.warning(
@@ -272,22 +289,48 @@ def reapply_stack_variable_projection_names_8616(codegen: object) -> bool:
             ),
             tuple(_stack_variable_debug_key_8616(argument) for argument in arguments),
         )
-    changed = False
+
+
+def reapply_stack_variable_projection_names_8616(codegen: object) -> bool:
+    """Restore durable projected names across maps and regenerated AST clones."""
+    registry = stack_variable_coordinate_registry_8616(codegen)
+    boundary = cast(_CodegenBoundary8616, codegen)
+    try:
+        cfunc = boundary.cfunc
+    except AttributeError:
+        return False
+    _log_stack_coordinate_names_8616(registry, cfunc)
+    cvars: list[CVariable] = []
     try:
         variables_in_use = cfunc.variables_in_use
     except AttributeError:
         variables_in_use = None
     if isinstance(variables_in_use, dict):
-        for cvar in variables_in_use.values():
-            if isinstance(cvar, CVariable):
-                changed = _reapply_cvariable_name_8616(registry, target_names, cvar) or changed
+        cvars.extend(value for value in variables_in_use.values() if isinstance(value, CVariable))
     try:
         statements = cfunc.statements
     except AttributeError:
         statements = None
-    for node in _iter_c_nodes_deep_8616(statements):
-        if isinstance(node, CVariable):
-            changed = _reapply_cvariable_name_8616(registry, target_names, node) or changed
+    cvars.extend(node for node in _iter_c_nodes_deep_8616(statements) if isinstance(node, CVariable))
+    try:
+        current_arguments = cfunc.arg_list
+    except AttributeError:
+        current_arguments = ()
+    try:
+        declarations = cfunc.unified_local_vars
+    except AttributeError:
+        declarations = {}
+    if isinstance(current_arguments, (list, tuple)):
+        cvars.extend(argument for argument in current_arguments if isinstance(argument, CVariable))
+    variables = [cvar.variable for cvar in cvars]
+    if isinstance(declarations, dict):
+        variables.extend(declarations)
+    # Registry entries outlive intermediate expressions. Reserving their names
+    # after those owners disappear invents collisions with unrelated live locals.
+    target_names = _live_projection_names_8616(registry, variables)
+    changed = False
+    for cvar in cvars:
+        changed = _reapply_cvariable_name_8616(registry, target_names, cvar) or changed
     return changed
 
 

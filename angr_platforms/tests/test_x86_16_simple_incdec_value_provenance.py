@@ -12,6 +12,40 @@ from angr_platforms.X86_16.ir.condition_ir import ConditionIR
 from angr_platforms.X86_16.lift_86_16 import Instruction_ANY
 
 
+@pytest.mark.parametrize("opcode", [0x40, 0x48])
+def test_new_block_rejects_stale_index_provenance_for_repeated_incdec(monkeypatch, opcode):
+    monkeypatch.delenv("INERTIA_ENABLE_AFFINE_SWITCH_CONDITIONS", raising=False)
+    monkeypatch.setattr(Instruction_ANY, "_inertia_module_condition_cache", {})
+    monkeypatch.setattr(Instruction_ANY, "_inertia_pending_condition_sources_by_addr", {})
+    monkeypatch.setattr(Instruction_ANY, "_inertia_condition_reg_value_state_8616", {})
+    stale = IRValue(MemSpace.SS, name="bp", offset=-4, size=2)
+    monkeypatch.setattr(Instruction_ANY, "_inertia_condition_index_reg_state_8616", {"ax": (stale, 0)})
+    address = 0x4000
+    pyvex.lift(bytes([opcode, opcode, 0x75, 1, 0x90, 0xC3]), address, Arch86_16(), opt_level=0)
+    condition = Instruction_ANY._inertia_module_condition_cache[address][0]
+    assert condition.op == "nonzero"
+    assert condition.lhs.space is MemSpace.REG
+    assert condition.lhs.name == "ax"
+    assert condition.operand_bind_insn == address + 2
+
+
+@pytest.mark.parametrize("opcode", [0x41, 0x49])
+@pytest.mark.parametrize("jcc,expected_op", [(0x74, "zero"), (0x75, "nonzero")])
+def test_unbound_incdec_condition_reads_the_post_update_register(monkeypatch, opcode, jcc, expected_op):
+    monkeypatch.delenv("INERTIA_ENABLE_AFFINE_SWITCH_CONDITIONS", raising=False)
+    monkeypatch.setattr(Instruction_ANY, "_inertia_module_condition_cache", {})
+    monkeypatch.setattr(Instruction_ANY, "_inertia_condition_reg_value_state_8616", {})
+    address = 0x5300
+    pyvex.lift(bytes([opcode, jcc, 2, 0x90, 0x90, 0xC3]), address, Arch86_16(), opt_level=0)
+
+    condition = Instruction_ANY._inertia_module_condition_cache[address][0]
+    assert condition.op == expected_op
+    assert condition.lhs.space is MemSpace.REG
+    assert condition.lhs.name == "cx"
+    assert condition.rhs is None
+    assert condition.operand_bind_insn == address + 1
+
+
 @pytest.mark.parametrize("opcode", ["2bc0", "29c0", "33c0", "31c0", "2bc9", "33c9"])
 def test_self_zeroing_register_write_has_no_incoming_value_dependency(opcode):
     """Publish zero before native SSA can invent an incoming-register carrier."""
@@ -200,6 +234,8 @@ def test_simple_inc_preserves_exact_stack_value_for_following_cmp(monkeypatch) -
         offset=4,
         size=2,
         expr=("cmp-stack", "bp"),
+        memory_access_size=2,
+        memory_access_insn=instruction.addr,
     )
 
 
@@ -255,6 +291,8 @@ def test_machine_block_preserves_inc_stack_value_in_cmp_condition(monkeypatch) -
         offset=4,
         size=2,
         expr=("cmp-stack", "bp"),
+        memory_access_size=2,
+        memory_access_insn=0x4004,
     )
 
 

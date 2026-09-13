@@ -1,3 +1,6 @@
+from dataclasses import replace
+
+import pytest
 from angr_platforms.X86_16.ir.core import (
     AddressStatus,
     IRAddress,
@@ -42,6 +45,61 @@ def _load(address: IRAddress) -> IRInstr:
     )
 
 
+@pytest.mark.parametrize("offset,size", [(-4, 1), (-3, 1), (-5, 2), (-5, 4)])
+def test_call_escape_invalidates_containing_word_without_separate_byte_access(offset: int, size: int) -> None:
+    """An escaped subrange need not occur as a separate caller load/store."""
+    word = _bp_slot(-4, 2)
+    effect = IRCallStackEffect8616(
+        net_stack_delta=0, preserved_ranges=(word,),
+        escaped_ranges=(_bp_slot(offset, size),), complete=True,
+    )
+    assert not effect.preserves(word)
+    artifact = IRFunctionArtifact(
+        function_addr=0x1000,
+        blocks=(IRBlock(addr=0x1000, instrs=(
+            _store(word), IRInstr("CALL", None, (), call_stack_effect=effect), _load(word),
+        )),),
+    )
+    result = build_x86_16_function_ssa(artifact)
+    assert result.memory_refusals
+
+
+@pytest.mark.parametrize("offset", [-6, -2])
+def test_disjoint_call_escape_keeps_word_preservation(offset: int) -> None:
+    word = _bp_slot(-4, 2)
+    effect = IRCallStackEffect8616(
+        net_stack_delta=0, preserved_ranges=(word,),
+        escaped_ranges=(_bp_slot(offset, 2),), complete=True,
+    )
+    assert effect.preserves(word)
+
+
+@pytest.mark.parametrize("escaped", [
+    replace(_bp_slot(100, 1), base=("sp",)),
+    replace(_bp_slot(100, 1), status=AddressStatus.UNKNOWN),
+    replace(_bp_slot(100, 1), space=MemSpace.UNKNOWN),
+    _bp_slot(100, 0),
+    replace(_bp_slot(100, 1), base_values=(IRValue(MemSpace.REG, name="bp", version=2),)),
+])
+def test_call_escape_with_unresolved_coordinate_refuses_preservation(escaped: IRAddress) -> None:
+    word = _bp_slot(-4, 2)
+    effect = IRCallStackEffect8616(0, (word,), (escaped,), True)
+    assert not effect.preserves(word)
+
+
+@pytest.mark.parametrize("offset", [0, 0xffff])
+def test_call_escape_overlap_honors_word_offset_wrap(offset: int) -> None:
+    word = _bp_slot(0xffff, 2)
+    effect = IRCallStackEffect8616(0, (word,), (_bp_slot(offset, 1),), True)
+    assert not effect.preserves(word)
+
+
+def test_call_escape_in_distinct_segment_keeps_stack_word() -> None:
+    word = _bp_slot(-4, 2)
+    escaped = replace(word, space=MemSpace.DS)
+    assert IRCallStackEffect8616(0, (word,), (escaped,), True).preserves(word)
+
+
 def test_memory_ssa_versions_partial_overlap_as_disjoint_cells() -> None:
     word = _bp_slot(-4, 2)
     shifted_word = _bp_slot(-3, 2)
@@ -53,8 +111,9 @@ def test_memory_ssa_versions_partial_overlap_as_disjoint_cells() -> None:
     function_ssa = build_x86_16_function_ssa(artifact)
 
     assert function_ssa.memory_stats.complete is True
-    assert function_ssa.memory_stats.raw_fact_count == 3
-    assert function_ssa.memory_stats.materialized_count == 3
+    expected_facts = 3
+    assert function_ssa.memory_stats.raw_fact_count == expected_facts
+    assert function_ssa.memory_stats.materialized_count == expected_facts
     assert function_ssa.memory_stats.failure_count == 0
     assert function_ssa.memory_refusals == ()
     assert [binding.address.version for binding in function_ssa.memory_bindings] == [1, 2]
@@ -88,13 +147,14 @@ def test_memory_ssa_contained_byte_load_reaches_word_store_slice() -> None:
     function_ssa = build_x86_16_function_ssa(artifact)
 
     assert function_ssa.memory_refusals == ()
-    assert len(function_ssa.memory_accesses[0].slices) == 2
+    assert len(function_ssa.memory_accesses[0].slices) == word.size
     byte_access = function_ssa.memory_accesses[1]
     assert len(byte_access.slices) == 1
-    assert byte_access.slices[0].address.version == 2
+    high_byte_version = 2
+    assert byte_access.slices[0].address.version == high_byte_version
     load_address = function_ssa.blocks[0].instrs[1].args[0]
     assert isinstance(load_address, IRAddress)
-    assert load_address.version == 2
+    assert load_address.version == high_byte_version
     assert function_ssa.memory_overlaps[0].relation is SSAMemoryOverlapRelation8616.LEFT_CONTAINS_RIGHT
 
 
@@ -114,7 +174,7 @@ def test_memory_ssa_joins_each_cell_before_contained_byte_load() -> None:
     function_ssa = build_x86_16_function_ssa(artifact)
 
     assert function_ssa.memory_stats.complete is True
-    assert len(function_ssa.memory_phi_nodes) == 2
+    assert len(function_ssa.memory_phi_nodes) == word.size
     phi_by_offset = {phi.target.offset: phi for phi in function_ssa.memory_phi_nodes}
     assert [item.address.version for item in phi_by_offset[-4].incoming] == [1, 3]
     assert [item.address.version for item in phi_by_offset[-3].incoming] == [2, 4]
@@ -187,7 +247,8 @@ def test_memory_ssa_refuses_connected_overlap_component_on_byte_escape() -> None
 
     assert function_ssa.memory_stats.complete is True
     assert function_ssa.memory_stats.materialized_count == 1
-    assert function_ssa.memory_stats.failure_count == 2
+    refused_access_count = 2
+    assert function_ssa.memory_stats.failure_count == refused_access_count
     assert function_ssa.memory_accesses == ()
     assert function_ssa.memory_bindings == ()
     assert {refusal.kind for refusal in function_ssa.memory_refusals} == {

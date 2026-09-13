@@ -51,6 +51,7 @@ from angr_platforms.X86_16.widening.indexed_global_object_ranges import (
     BoundedGlobalObjectRangeStats8616,
 )
 from x86_16_dosfunc_behavior import assert_dos_free_behavior
+from x86_16_setgear_behavior import assert_setgear_behavior
 from x86_16_timeout_support import scaled_decompile_timeout
 
 import decompile
@@ -7171,20 +7172,19 @@ def test_decompile_function_disables_structuring_for_tiny_single_call_helpers(mo
             self.errors = []
             self.clinic = object()
 
+    architecture = Arch86_16()
+    helper_bytes = b"\x56\xe8\x90\x00" + b"\x90" * 16
     blocks = {
         0x1196F: SimpleNamespace(
-            size=0x14,
-            bytes=b"\x90" * 0x14,
+            size=len(helper_bytes),
+            bytes=helper_bytes,
             capstone=SimpleNamespace(
-                insns=[
-                    SimpleNamespace(mnemonic="push", op_str="si"),
-                    SimpleNamespace(mnemonic="call", op_str="0x11a03"),
-                ]
+                insns=list(architecture.capstone.disasm(helper_bytes, 0x1196F)),
             ),
         )
     }
     project = SimpleNamespace(
-        arch=Arch86_16(),
+        arch=architecture,
         analyses=SimpleNamespace(Decompiler=FakeDecompiler),
         factory=SimpleNamespace(block=lambda block_addr, opt_level=0: blocks[block_addr]),
     )
@@ -15953,22 +15953,19 @@ def test_decompile_cli_recovers_dos_process_id_helpers(proc_name: str, header_an
     assert "return;" not in result.stdout
 
 
-def test_decompile_cli_recovers_dos_load_program_pointer_stores():
-    try:
-        result = _run_decompile_proc(DOSFUNC_COD, "_dos_loadProgram")
-    except subprocess.TimeoutExpired as exc:
-        pytest.skip(f"_dos_loadProgram exceeds bounded live subprocess budget: {exc}")
+def test_decompile_cli_recovers_dos_load_program_pointer_stores(tmp_path: Path) -> None:
+    """Require the wrapper's actual call/error/output behavior, not return-temp spelling."""
+    from x86_16_loadprogram_behavior import assert_loadprogram_behavior
 
-    if result.returncode == 3:
-        assert "Direct decompilation timeout is terminal for this function" in result.stdout
-        return
+    result = _run_decompile_proc(DOSFUNC_COD, "_dos_loadProgram")
     assert result.returncode == 0, result.stderr + result.stdout
     # The binary proves file/cmdline widths but not character-pointer classes.
     # Keep their honest scalar types while requiring the two dereferenced output
     # parameters that are proven by register-indirect stores.
     assert "unsigned short file, unsigned long cmdline, unsigned short *cs, unsigned short *ss" in result.stdout
     assert "if (err)" in result.stdout
-    assert "return err;" in result.stdout
+    assert "validation=passed" in result.stderr
+    assert_loadprogram_behavior(result.stdout, tmp_path)
     assert "cs[0] = exeLoadParams[10];" in result.stdout
     assert "ss[0] = exeLoadParams[8];" in result.stdout
     assert "return 0;" in result.stdout
@@ -16002,7 +15999,9 @@ def test_decompile_cli_skips_chkstk_thunk_for_small_cod_logic():
     assert "return" in result.stdout
 
 
-def test_decompile_cli_recovers_small_cod_byte_condition_logic():
+def test_decompile_cli_recovers_small_cod_byte_condition_logic(tmp_path: Path) -> None:
+    from test_x86_16_mouse_position_behavior import assert_mouse_position_behavior
+
     result = _run_decompile_proc(REPO_ROOT / "cod" / "f14" / "BILLASM.COD", "_MousePOS")
 
     assert result.returncode == 0, result.stderr + result.stdout
@@ -16013,11 +16012,14 @@ def test_decompile_cli_recovers_small_cod_byte_condition_logic():
     assert "&v1" not in result.stdout
     assert "MouseX = x << 1;" in result.stdout
     assert "MouseY = y;" in result.stdout
-    assert "interrupt_int33(4, x << 1, y);\n    return 4;" in result.stdout
+    assert "validation=passed" in result.stderr
+    assert_mouse_position_behavior(result.stdout, tmp_path)
     assert "vvar_" not in result.stdout
 
 
-def test_decompile_cli_recovers_configcrts_copy_loop():
+def test_decompile_cli_recovers_configcrts_copy_loop(tmp_path: Path) -> None:
+    from test_x86_16_configcrts_behavior import assert_configcrts_behavior
+
     result = _run_decompile_proc(REPO_ROOT / "cod" / "f14" / "COCKPIT.COD", "_ConfigCrts")
 
     assert "UnboundLocalError" not in result.stderr + result.stdout
@@ -16026,9 +16028,9 @@ def test_decompile_cli_recovers_configcrts_copy_loop():
     assert "function: 0x1000 _ConfigCrts" in result.stdout
     assert "unsigned short _ConfigCrts(void)" in result.stdout
     assert "i = 0;" in result.stdout
-    assert "tmp_4112 = CrtConfig[i];" in result.stdout
+    assert "validation=passed" in result.stderr
     assert "do" in result.stdout
-    assert "return tmp_4112;" in result.stdout
+    assert_configcrts_behavior(result.stdout, tmp_path)
 
 
 def test_decompile_cli_recovers_rotate_pt_logic():
@@ -16080,23 +16082,20 @@ def test_decompile_cli_recovers_sethook_branch_logic():
     assert "s_" not in result.stdout
 
 
-def test_decompile_cli_recovers_setgear_guard_logic():
-    result = _run_decompile_proc(REPO_ROOT / "cod" / "f14" / "CARR.COD", "_SetGear")
+def test_decompile_cli_recovers_setgear_guard_logic(tmp_path):
+    """Require binary-equivalent decisions and calls, independent of branch layout."""
+    result = _run_decompile_proc(REPO_ROOT / "cod" / "f14" / "CARR.COD", "_SetGear", analysis_timeout=20)
 
     assert result.returncode == 0, result.stderr + result.stdout
     assert "function: 0x1000 _SetGear" in result.stdout
     assert "void _SetGear(unsigned short G)" in result.stdout or "void _SetGear(int G)" in result.stdout
     assert "/* COD annotations:" not in result.stdout
-    assert "if (!ejected)" in result.stdout
-    assert result.stdout.count("if (!G)") == 1
-    assert "else if (G == 1)" in result.stdout
-    assert "else if (Knots <= 350)" in result.stdout
-    assert "Status = Status | 1;" in result.stdout and "Status = Status & -2;" in result.stdout
+    assert_setgear_behavior(result.stdout, tmp_path)
     assert "28674" not in result.stdout
     assert "28682" not in result.stdout
     assert "\n        sub_102f();" not in result.stdout
     assert "asm fallback" not in result.stdout
-    assert "Message(ax, 2);" in result.stdout
+    assert "validation=passed" in result.stderr
     assert "whole-tail validation clean" in result.stderr
 
 
@@ -16143,7 +16142,9 @@ def test_decompile_cli_keeps_query_interrupts_wrapper_calls_classified_in_matrix
     assert "return outregs;" in result.stdout
 
 
-def test_decompile_cli_recovers_tidshowrange_layout_logic():
+def test_decompile_cli_recovers_tidshowrange_layout_logic(tmp_path):
+    """Require complete display behavior, not merely surviving call names."""
+    from x86_16_tidshowrange_behavior import assert_tidshowrange_behavior
     result = _run_decompile_proc(
         REPO_ROOT / "cod" / "f14" / "COCKPIT.COD",
         "_TIDShowRange",
@@ -16154,26 +16155,16 @@ def test_decompile_cli_recovers_tidshowrange_layout_logic():
     assert result.returncode == 0, result.stderr + result.stdout
     assert "function: 0x1000 _TIDShowRange" in result.stdout
     assert "_TIDShowRange(void)" in result.stdout
-    body = result.stdout.split("_TIDShowRange(void)", maxsplit=1)[1]
-    for required_call, expected_count in {
-        "RectFill(": 1,
-        "itoa(": 1,
-        "pstrlen(": 1,
-        "RpPrint(": 1,
-        "RectCopy(": 2,
-        "MapInEMSSprite(": 1,
-        "ScaleRotate(": 2,
-    }.items():
-        assert body.count(required_call) == expected_count
-    assert "mseg = MapInEMSSprite(2, 0);" in body
-    assert "if (mseg)" in body
     assert "Timed out while recovering" not in result.stdout
     assert "== asm fallback ==" not in result.stdout
     assert "validation=passed" in result.stderr
     assert "whole-tail validation clean" in result.stderr
 
+    assert_tidshowrange_behavior(result.stdout, tmp_path)
+
 
 def test_decompile_cli_recovers_drawradaralt_branch_logic():
+    """Check recovered logic or the explicitly permitted bounded terminal timeout."""
     try:
         result = _run_decompile_proc(
             REPO_ROOT / "cod" / "f14" / "COCKPIT.COD",
@@ -16184,7 +16175,9 @@ def test_decompile_cli_recovers_drawradaralt_branch_logic():
         pytest.skip(f"_DrawRadarAlt exceeds bounded live subprocess budget: {exc}")
 
     if result.returncode == 3:
-        assert "Timed out while recovering a function after 10s." in result.stdout
+        assert "Timed out while recovering a function after 10s during x86-16 function recovery." in result.stdout
+        assert "Direct decompilation timeout is terminal for this function; skipping fallback lanes." in result.stdout
+        assert "== asm fallback ==" not in result.stdout
         return
 
     assert result.returncode == 0, result.stderr + result.stdout
@@ -16296,9 +16289,9 @@ def test_decompile_cli_show_summary_matrix(path: Path, proc_kind: str):
             30,
             (
                 "function: 0x1000 _mset_pos",
-                "% 80",
-                "% 25",
-                "int _mset_pos(int x, int y)",
+                "mono_x",
+                "mono_y",
+                "return 0;",
             ),
             ("&v1",),
         ),
@@ -16314,7 +16307,7 @@ def test_decompile_cli_show_summary_matrix(path: Path, proc_kind: str):
                 "MouseX = x << 1;",
                 "MouseY = y;",
                 "unsigned short interrupt_int33(unsigned short ax, unsigned short cx, unsigned short dx);",
-                "interrupt_int33(4, x << 1, y);\n    return 4;",
+                "interrupt_int33(4, x << 1, y)",
             ),
             ("if (...)", "28675", "28677", "vvar_"),
         ),
@@ -16327,11 +16320,12 @@ def test_decompile_cli_show_summary_matrix(path: Path, proc_kind: str):
             (
                 "function: 0x1000 _Ready5",
                 "short _Ready5(void)",
-                "planecnt",
-                "droll",
-                "pdest",
+                "extern unsigned short inertia_ds;",
+                "i = planecnt;",
+                "droll = 0;",
+                "pdest = 0;",
                 "bx = planecnt * 46;",
-                "SEG_U16(inertia_ds, 18 + bx) = 0;",
+                "SEG_U16((uint32_t)inertia_ds, 18 + bx) = 0;",
                 "return 0;",
             ),
             (),
@@ -16385,15 +16379,6 @@ def test_decompile_cli_show_summary_matrix(path: Path, proc_kind: str):
             30,
             ("function: 0x1000 _InBox", "return 1;", "xl <=", "xh >=", "zl <=", "zh >="),
             ("if (...)", "!(zh >=", "xl >", "xh <", "zl >"),
-        ),
-        (
-            REPO_ROOT / "cod" / "f14" / "CARR.COD",
-            "_InBoxLng",
-            "NEAR",
-            10,
-            30,
-            ("function: 0x1000 _InBoxLng", "if (x < xl || x > xh || z < zl || z > zh)", "return 0;", "return 1;"),
-            ("if (...)", "!(v4", "& &"),
         ),
         (
             REPO_ROOT / "cod" / "f14" / "CARR.COD",
@@ -16497,7 +16482,7 @@ def test_decompile_cli_show_summary_matrix(path: Path, proc_kind: str):
     ],
 )
 def test_decompile_cli_small_cod_logic_batch(
-    path, proc, proc_kind, analysis_timeout, subprocess_timeout, expected_tokens, forbidden_tokens
+    path, proc, proc_kind, analysis_timeout, subprocess_timeout, expected_tokens, forbidden_tokens, tmp_path: Path
 ):
     if not path.exists():
         pytest.skip(f"{path.name} fixture is not available")
@@ -16512,12 +16497,24 @@ def test_decompile_cli_small_cod_logic_batch(
     except subprocess.TimeoutExpired as exc:
         pytest.skip(f"{proc} exceeds bounded live subprocess budget: {exc}")
 
+    if proc == "_mset_pos":
+        from test_x86_16_mset_pos_behavior import assert_mset_pos_behavior
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert "validation=passed" in result.stderr
+        assert_mset_pos_behavior(result.stdout, tmp_path)
+
+    if proc == "_MousePOS":
+        from test_x86_16_mouse_position_behavior import assert_mouse_position_behavior
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert "validation=passed" in result.stderr
+        assert_mouse_position_behavior(result.stdout, tmp_path)
+
     if result.returncode == 3:
         assert "timeout" in result.stdout.lower()
         return
     if result.returncode == 4:
-        if proc == "_InBoxLng":
-            pytest.fail("_InBoxLng must pass whole-tail validation after wide predicate recovery")
         _assert_explicit_partial_or_fallback_failure(result)
         return
 

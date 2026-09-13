@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeFunction, SimTypeShort
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
@@ -48,7 +49,7 @@ class _Insn:
         self.operands = operands
 
     def reg_name(self, register_id: int) -> str:
-        return {1: "ax", 2: "bp"}.get(register_id, "")
+        return {1: "ax", 2: "bp", 3: "eax", 4: "edx", 5: "si", 6: "edi"}.get(register_id, "")
 
 
 class _Block:
@@ -161,10 +162,22 @@ def test_callee_result_contract_accepts_explicit_void_prototype() -> None:
     assert callee_result_contract_8616(callee) is CalleeResultContract8616.VOID
 
 
-def test_terminal_call_path_proves_frame_teardown_to_return() -> None:
+@pytest.mark.parametrize(
+    ("register_id", "expected_status"),
+    [
+        pytest.param(2, TerminalCallPathStatus8616.PROVEN, id="bp"),
+        pytest.param(5, TerminalCallPathStatus8616.PROVEN, id="si"),
+        pytest.param(6, TerminalCallPathStatus8616.PROVEN, id="edi"),
+        pytest.param(1, TerminalCallPathStatus8616.UNSAFE_POST_CALL_EFFECT, id="ax-clobber"),
+        pytest.param(3, TerminalCallPathStatus8616.UNSAFE_POST_CALL_EFFECT, id="eax-clobber"),
+        pytest.param(4, TerminalCallPathStatus8616.UNSAFE_POST_CALL_EFFECT, id="edx-clobber"),
+        pytest.param(0, TerminalCallPathStatus8616.UNSAFE_POST_CALL_EFFECT, id="unknown-register"),
+    ],
+)
+def test_terminal_call_path_proves_frame_teardown_to_return(register_id, expected_status) -> None:
     project, function = _project_and_function(
         post_call_instructions=(
-            _Insn(0x1002, "pop", (_Operand(1, reg=2),)),
+            _Insn(0x1002, "pop", (_Operand(1, reg=register_id),)),
             _Insn(0x1003, "ret"),
         )
     )
@@ -174,7 +187,7 @@ def test_terminal_call_path_proves_frame_teardown_to_return() -> None:
         angr_terminal_call_path_callbacks_8616(project, function),
     )
 
-    assert result.status is TerminalCallPathStatus8616.PROVEN
+    assert result.status is expected_status
     assert result.path_block_addrs == (0x1000,)
 
 

@@ -19,8 +19,10 @@ from angr_platforms.X86_16.lowering.positive_bp_arguments import (
 )
 
 
+@pytest.mark.parametrize("body_signed", [False, True])
 def test_body_owned_wide_slot_is_not_narrowed_by_contained_word_access(
     monkeypatch: pytest.MonkeyPatch,
+    body_signed: bool,
 ) -> None:
     arch = Arch86_16()
     long_type = SimTypeLong(True).with_arch(arch)
@@ -71,7 +73,7 @@ def test_body_owned_wide_slot_is_not_narrowed_by_contained_word_access(
         next_node_idx=lambda: 1,
     )
     body_variable = SimStackVariable(4, 4, base="bp", name="local_4", region=0x10F38)
-    body_cvar = CVariable(body_variable, variable_type=long_type, codegen=codegen)
+    body_cvar = CVariable(body_variable, variable_type=SimTypeLong(body_signed).with_arch(arch), codegen=codegen)
     codegen.cfunc = SimpleNamespace(
         addr=0x10F38,
         arg_list=[],
@@ -93,6 +95,18 @@ def test_body_owned_wide_slot_is_not_narrowed_by_contained_word_access(
     assert argument.variable.size == 4
     assert argument.variable.name == "arg_4"
     assert argument.variable_type.size == 32
+    assert argument.variable_type.signed is True
     stats = codegen._inertia_positive_bp_argument_stats_8616
     assert stats.materialized_count == 1
     assert stats.failure_count == 0
+
+
+@pytest.mark.parametrize("offset,width", [(6, 2), (4, 4), (4, 0), (4, -1)])
+def test_unmaterialized_prototype_refuses_mismatched_storage(offset, width):
+    arch = Arch86_16()
+    word = SimTypeShort(True).with_arch(arch)
+    prototype = SimTypeFunction([word], word).with_arch(arch)
+    codegen = SimpleNamespace(project=SimpleNamespace(arch=arch), next_node_idx=lambda: 0, next_ident=lambda name: name)
+    candidate = CVariable(SimStackVariable(offset, width, base="bp"), variable_type=word, codegen=codegen)
+    cfunc = SimpleNamespace(functy=prototype, prototype=prototype, arg_list=[])
+    assert not positive_bp_arguments._existing_interface_matches_8616(codegen, cfunc, [candidate])

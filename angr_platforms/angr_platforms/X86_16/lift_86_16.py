@@ -53,6 +53,7 @@ from .ir.condition_register_bindings import snapshot_condition_register_bindings
 from .ir.core import AddressStatus, IRAddress, IRBinaryValue, IRCondition, IRValue, MemSpace, SegmentOrigin
 from .ir.status_flag_lift_context import cfg_status_flag_dead_write_mask_8616
 from .jcc_condition import _direct_jcc_condition_from_last_condition_8616
+from .jcc_result_condition import direct_register_result_zero_jcc_8616
 from .parse import CHSZ_AD, CHSZ_OP
 from .regs import reg16_t
 from .segment_offset_execution import advance_segment_offset_8616
@@ -69,6 +70,7 @@ from .vex_value_contract import require_vex_value_8616
 logger: logging.Logger = logging.getLogger(__name__)
 
 _BPMemorySpec8616 = tuple[str, int, int]
+_BP_MEMORY_SPEC_FIELD_COUNT_8616 = 3
 
 
 @dataclass(frozen=True)
@@ -204,6 +206,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         actual_irsb = getattr(self.emu.irsb, "irsb", self.emu.irsb)
         block_addr = getattr(actual_irsb, "addr", self.addr)
         cast(Any, self.emu)._inertia_current_block_addr = block_addr
+        self._reset_condition_reg_value_state_at_block_entry_8616()
         self.emu.set_lifter_instruction(_LifterInstructionFacade(irsb_c, self))
         if self.instr.invalid_lock or self.instr.invalid_opcode_extension:
             guard = cast(VexValue, self.emu.constant(1, Type.int_1))
@@ -1057,8 +1060,9 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         self._record_mem_access("ds", offset, 1)
         self._store_real_mode16("ds", self._const16(offset), value)
 
-    def _load_abs8(self, offset: int) -> Any:
-        self._record_mem_access("ds", offset, 0)
+    def _load_abs8(self, offset: int) -> VexValue:
+        """Load one DS byte and publish the same logical operand width."""
+        self._record_mem_access("ds", offset, 0, size=1)
         return self.load(self._real_mode_linear("ds", self._const16(offset)), Type.int_8)
 
     def _addr_from_indexed_mem(self, mem_spec: Any) -> Any:
@@ -1425,6 +1429,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         return not (written is not None and self._flags_fully_overwritten_before_use_8616(written))
 
     def _direct_jcc_condition(self, kind: str) -> Any | None:
+        """Prefer proven typed predicates or adjacent arithmetic result tests."""
         def _impl() -> Any | None:
             past_instructions = getattr(self, "_past_instructions", None)
             prev = past_instructions[-1] if past_instructions else None
@@ -1447,6 +1452,11 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
                 branch_cond = _direct_jcc_condition_from_last_condition_8616(cast(Any, self), kind, last_condition)
                 if branch_cond is not None:
                     return _finish(branch_cond)
+            result_condition = direct_register_result_zero_jcc_8616(
+                cast(Any, self), kind, instruction_addr=int(self.addr), previous=prev,
+            )
+            if result_condition is not None:
+                return _finish(result_condition)
             prev_semantics = getattr(prev, "simple_semantics", None) if prev is not None else None
             if prev_semantics is None:
                 pending = Instruction_ANY._inertia_pending_condition_sources_by_addr.get(int(self.addr))
@@ -1576,8 +1586,10 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         mem_spec: _BPMemorySpec8616,
         *,
         width_bits: int = 16,
+        memory_access_insn: int | None = None,
     ) -> IRValue | None:
-        if not (isinstance(mem_spec, tuple) and len(mem_spec) >= 3):
+        """Build a stack operand, retaining supplied exact memory-access evidence."""
+        if not (isinstance(mem_spec, tuple) and len(mem_spec) >= _BP_MEMORY_SPEC_FIELD_COUNT_8616):
             return None
         base, _offset, signed_disp = mem_spec
         if base not in {"bp", "sp"} or not isinstance(signed_disp, int):
@@ -1588,6 +1600,8 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             offset=int(signed_disp),
             size=max(1, int(width_bits) // 8),
             expr=("cmp-stack", str(base)),
+            memory_access_size=max(1, int(width_bits) // 8) if memory_access_insn is not None else None,
+            memory_access_insn=memory_access_insn,
         )
 
     @staticmethod
@@ -1662,7 +1676,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             lhs = self._condition_proven_reg_value_8616(
                 lhs_reg, width_bits=16
             ) or self._condition_reg_value_8616(lhs_reg, width_bits=16)
-            rhs = self._condition_stack_value_8616(mem_spec, width_bits=16)
+            rhs = self._condition_stack_value_8616(mem_spec, width_bits=16, memory_access_insn=self.addr)
             return (lhs, rhs) if lhs is not None and rhs is not None else None
         if kind == "cmp_reg_abs16":
             _, lhs_reg, offset = semantics
@@ -1671,14 +1685,14 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             return (lhs, rhs) if lhs is not None else None
         if kind == "cmp_mem_reg16":
             _, mem_spec, rhs_reg = semantics
-            lhs = self._condition_stack_value_8616(mem_spec, width_bits=16)
+            lhs = self._condition_stack_value_8616(mem_spec, width_bits=16, memory_access_insn=self.addr)
             rhs = self._condition_unshifted_index_reg_value_8616(
                 rhs_reg, width_bits=16
             ) or self._condition_reg_value_8616(rhs_reg, width_bits=16)
             return (lhs, rhs) if lhs is not None and rhs is not None else None
         if kind == "cmp_mem_imm16":
             _, mem_spec, imm = semantics
-            lhs = self._condition_stack_value_8616(mem_spec, width_bits=16)
+            lhs = self._condition_stack_value_8616(mem_spec, width_bits=16, memory_access_insn=self.addr)
             if lhs is None and isinstance(mem_spec, tuple) and mem_spec:
                 base_reg = str(mem_spec[0]).lower()
                 index_state = Instruction_ANY._inertia_condition_index_reg_state_8616.get(base_reg)
@@ -1928,7 +1942,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         state.pop((int(block_addr), parent), None)
 
     def _reset_condition_reg_value_state_at_block_entry_8616(self) -> None:
-        """Discard stale provenance when a basic block is lifted again."""
+        """Discard unproven prior-block value and index provenance on entry."""
         state = Instruction_ANY._inertia_condition_reg_value_state_8616
         instruction_addr = getattr(self, "addr", None)
         if not isinstance(instruction_addr, int):
@@ -1945,6 +1959,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             or instruction_addr != int(block_addr)
         ):
             return
+        Instruction_ANY._inertia_condition_index_reg_state_8616.clear()
         stale_keys = tuple(
             key
             for key in state
@@ -2791,6 +2806,8 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             self.emu.update_eflags_inc(self._eflags_value_8616(value))
         else:
             self.emu.update_eflags_dec(self._eflags_value_8616(value))
+        one = self._const16(1)
+        updated_value = value + one if is_increment else value - one
         if self._next_instruction_is_simple_jcc():
             operation_count = self._same_preceding_incdec_reg16_count_8616(
                 reg_name, mnemonic=mnemonic
@@ -2809,14 +2826,27 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
                 normalized_operands = self._normalized_reg_imm_condition_operands_8616(
                     reg_name, zero_boundary, width_bits=16
                 )
-            self._record_cmp_condition_source(
-                value,
-                self._const16(zero_boundary),
-                normalized_lhs=normalized_operands[0] if normalized_operands is not None else None,
-                normalized_rhs=normalized_operands[1] if normalized_operands is not None else None,
-                producer_semantics=(kind, reg_name, operation_count),
+            next_semantics = self._future_instructions[0].simple_semantics
+            use_current_result = (
+                normalized_operands is None
+                and next_semantics is not None
+                and next_semantics[0] in {"je", "jz", "jne", "jnz"}
             )
-        one = self._const16(1)
+            if use_current_result:
+                # Without an independent input binding, a bare register denotes
+                # its updated value at JCC, not the value consumed by INC/DEC.
+                self._record_test_condition_source(
+                    updated_value, normalized_value=self._condition_reg_value_8616(reg_name),
+                    bind_operand_at_jcc=True, producer_semantics=(kind, reg_name, operation_count),
+                )
+            else:
+                self._record_cmp_condition_source(
+                    value,
+                    self._const16(zero_boundary),
+                    normalized_lhs=normalized_operands[0] if normalized_operands is not None else None,
+                    normalized_rhs=normalized_operands[1] if normalized_operands is not None else None,
+                    producer_semantics=(kind, reg_name, operation_count),
+                )
         arithmetic_result = self._arithmetic_result_value_from_semantics_8616(
             (
                 "add_reg_imm16" if is_increment else "sub_reg_imm16",
@@ -2824,7 +2854,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
                 1,
             )
         )
-        self.put(value + one if is_increment else value - one, reg_name)
+        self.put(updated_value, reg_name)
         if _affine_switch_conditions_enabled_8616():
             self._update_condition_reg_affine_offset_8616(
                 reg_name, -1 if is_increment else 1, width_bits=16
@@ -2839,7 +2869,6 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         def _impl() -> None:
             """Dispatch one operation without reconstructing symbolic operand constants."""
             self._restore_condition_reg_affine_snapshot_8616()
-            self._reset_condition_reg_value_state_at_block_entry_8616()
             semantics = cast(tuple[Any, ...], self.simple_semantics)
             kind = semantics[0]
             if os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):

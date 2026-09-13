@@ -17,7 +17,22 @@ from .string_instruction_lowering import (
     render_x86_16_string_intrinsic_c,
 )
 
-__all__ = ["apply_x86_16_string_codegen_override"]
+__all__ = ["apply_x86_16_string_codegen_override", "render_complete_string_function_8616"]
+
+
+def render_complete_string_function_8616(name: str, artifact: StringIntrinsicArtifact) -> str | None:
+    """Admit whole-body rendering only under the shared typed coverage contract.
+
+    Diagnostic intrinsic rendering alone does not authorize replacing a function.
+    CLI fallbacks and normal codegen must consume this same admission decision.
+    """
+    if (
+        artifact.coverage is not StringInstructionCoverage8616.EXACT_FUNCTION
+        or artifact.refusals
+        or not artifact.records
+    ):
+        return None
+    return render_x86_16_string_intrinsic_c(name, artifact)
 
 
 def _render_override_text(codegen: object) -> str | None:
@@ -32,14 +47,8 @@ def _render_override_text(codegen: object) -> str | None:
     artifact = getattr(codegen, "_inertia_string_intrinsic_artifact", None)
     if not isinstance(artifact, StringIntrinsicArtifact):
         return None
-    if (
-        artifact.coverage is not StringInstructionCoverage8616.EXACT_FUNCTION
-        or artifact.refusals
-        or not artifact.records
-    ):
-        return None
     name = getattr(cfunc, "name", None) or f"sub_{getattr(cfunc, 'addr', 0):x}"
-    return render_x86_16_string_intrinsic_c(name, artifact)
+    return render_complete_string_function_8616(name, artifact)
 
 
 def apply_x86_16_string_codegen_override(project: object, codegen: object) -> bool:

@@ -18,6 +18,7 @@ from ..analysis.stack_frame_ir import (
     FrameCoordinateStatus8616,
 )
 from ..ir.core import AddressStatus, IRAddress, MemSpace
+from ..ir.ssa_function import SSAFunctionArtifact
 
 
 class _CodegenBoundary8616(Protocol):
@@ -30,6 +31,65 @@ class _FrameCodegenBoundary8616(Protocol):
     """Dynamic codegen boundary carrying the typed frame-access artifact."""
 
     _inertia_vex_ir_frame: FrameAccessArtifact
+
+
+class _FunctionBoundary8616(Protocol):
+    """Identity exposed by the third-party C function."""
+
+    addr: int
+
+
+class _PrivateWriteBoundary8616(_CodegenBoundary8616, Protocol):
+    """Current SSA and function identity needed to reject stale proofs."""
+
+    _inertia_vex_ir_function_ssa: SSAFunctionArtifact
+    cfunc: _FunctionBoundary8616
+
+
+class _SourceStatementBoundary8616(Protocol):
+    """Root source provenance exposed by an angr statement."""
+
+    tags: dict[str, object]
+
+
+def alias_proves_private_stack_write_8616(codegen: object, statement: object) -> bool:
+    """Consume a current Alias proof, never infer privacy from C expressions.
+
+    The caller must independently prove the assignment's exact stack identity,
+    deadness and RHS purity. Nested expression tags cannot authorize a parent
+    write: their source instruction may describe a different memory effect.
+    """
+    try:
+        tags = cast(_SourceStatementBoundary8616, statement).tags
+    except AttributeError:
+        return False
+    if not isinstance(tags, dict):
+        return False
+    source_addr = tags.get("ins_addr")
+    return type(source_addr) is int and alias_proves_private_stack_source_8616(codegen, source_addr)
+
+
+def alias_proves_private_stack_source_8616(codegen: object, source_addr: int) -> bool:
+    """Reject reconstruction of source stores already proved unobservable.
+
+    This applies to storage projection only, not other register or flag effects
+    of the source instruction. It grants no permission to discard an existing
+    C expression with side effects.
+    """
+    boundary = cast(_PrivateWriteBoundary8616, codegen)
+    try:
+        artifact = boundary._inertia_stack_memory_ssa_alias_artifact
+        source = boundary._inertia_vex_ir_function_ssa
+        function_addr = boundary.cfunc.addr
+    except AttributeError:
+        return False
+    if not isinstance(artifact, StackMemorySSAAliasArtifact8616):
+        return False
+    current = artifact.source_ssa is source and artifact.function_addr == function_addr
+    if not current or not artifact.complete:
+        return False
+    decisions = tuple(decision for decision in artifact.private_write_decisions if decision.source_addr == source_addr)
+    return bool(decisions) and all(decision.proven for decision in decisions)
 
 
 def _contains_bp_range_8616(address: IRAddress, offset: int, size: int) -> bool:

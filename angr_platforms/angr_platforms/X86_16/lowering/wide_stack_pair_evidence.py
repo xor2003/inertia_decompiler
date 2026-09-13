@@ -21,6 +21,12 @@ from angr.sim_variable import SimStackVariable
 from ..ir.core import IRValue, MemSpace
 from .real_mode_linear import proven_wide_stack_pair_low_offset_8616
 from .semantic_cast import CSemanticCast8616
+from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+
+_WORD_BYTES = 2
+_DWORD_BYTES = 4
+_WORD_BITS = 16
+_WORD_MASK = 0xFFFF
 
 
 def materialize_proven_wide_stack_pair_variable_8616(
@@ -42,14 +48,14 @@ def materialize_proven_wide_stack_pair_variable_8616(
         or candidate_variable.offset != low_offset
     ):
         return None
-    if candidate_variable.size == 4:
+    if candidate_variable.size == _DWORD_BYTES:
         return candidate_expression
-    if candidate_variable.size != 2:
+    if candidate_variable.size != _WORD_BYTES:
         return None
     return CVariable(
         SimStackVariable(
             low_offset,
-            4,
+            _DWORD_BYTES,
             base=candidate_variable.base,
             base_addr=candidate_variable.base_addr,
             ident=candidate_variable.ident,
@@ -67,7 +73,7 @@ def _word_projection_source_8616(expression: object, shift: int) -> CVariable | 
     if not isinstance(expression, structured_c.CBinaryOp) or expression.op != "And":
         return None
     mask = expression.rhs
-    if not isinstance(mask, structured_c.CConstant) or mask.value != 0xFFFF:
+    if not isinstance(mask, structured_c.CConstant) or mask.value != _WORD_MASK:
         return None
     source = expression.lhs
     if shift:
@@ -85,19 +91,21 @@ def _proven_projected_wide_pair_8616(
     low_expression: object,
     low_offset: int,
 ) -> bool:
-    """Accept low/high projections that share one four-byte stack declaration."""
-    high_source = _word_projection_source_8616(high_expression, 16)
+    """Join one four-byte owner to IR using its authoritative BP projection."""
+    high_source = _word_projection_source_8616(high_expression, _WORD_BITS)
     low_source = _word_projection_source_8616(low_expression, 0)
     if high_source is None or low_source is None:
         return False
     high_variable = high_source.variable
     low_variable = low_source.variable
+    if not isinstance(high_variable, SimStackVariable) or not isinstance(low_variable, SimStackVariable):
+        return False
+    if high_variable != low_variable or high_variable.size != _DWORD_BYTES or high_variable.base != "bp":
+        return False
+    # Rendered entry-SP offsets are not the machine-BP coordinates used by IR.
     return (
-        isinstance(high_variable, SimStackVariable)
-        and isinstance(low_variable, SimStackVariable)
-        and high_variable == low_variable
-        and high_variable.size == 4
-        and high_variable.offset == low_offset
+        machine_bp_offset_for_stack_variable_8616(high_source.codegen, high_variable) == low_offset
+        and machine_bp_offset_for_stack_variable_8616(low_source.codegen, low_variable) == low_offset
     )
 
 
@@ -121,9 +129,9 @@ def _proven_low_owner_with_high_slice_8616(
     return (
         isinstance(high_variable, SimStackVariable)
         and isinstance(low_variable, SimStackVariable)
-        and high_variable.size == 2
-        and low_variable.size == 4
-        and high_variable.offset == low_variable.offset + 2
+        and high_variable.size == _WORD_BYTES
+        and low_variable.size == _DWORD_BYTES
+        and high_variable.offset == low_variable.offset + _WORD_BYTES
         and high_variable.base == low_variable.base
         and high_variable.base_addr == low_variable.base_addr
         and high_variable.region == low_variable.region
@@ -137,15 +145,11 @@ def proven_wide_stack_ir_pair_8616(
     low_expression: object,
 ) -> bool:
     """Return whether typed IR slices and active stack objects prove a pair."""
-    if (
-        high_value.space is not MemSpace.SS
-        or low_value.space is not MemSpace.SS
-        or high_value.name != "bp"
-        or low_value.name != "bp"
-        or high_value.size != 2
-        or low_value.size != 2
-        or high_value.offset != low_value.offset + 2
-    ):
+    are_bp_words = all(
+        value.space is MemSpace.SS and value.name == "bp" and value.size == _WORD_BYTES
+        for value in (high_value, low_value)
+    )
+    if not are_bp_words or high_value.offset != low_value.offset + _WORD_BYTES:
         return False
     if proven_wide_stack_pair_low_offset_8616(high_expression, low_expression) == low_value.offset:
         return True
@@ -167,5 +171,5 @@ def proven_wide_stack_ir_pair_8616(
         and high_variable.offset == high_value.offset
         and low_variable.offset == low_value.offset
         and isinstance(low_variable.size, int)
-        and low_variable.size >= 4
+        and low_variable.size >= _DWORD_BYTES
     )

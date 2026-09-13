@@ -8,7 +8,7 @@ Forbidden: semantic recovery, AST mutation, rendered-C inspection, or repair.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
@@ -21,6 +21,9 @@ from angr.analyses.decompiler.structured_codegen.c import (
 
 from .c_ast_utils import _iter_c_nodes_deep_8616
 from .structuring.loop_body_repair import SwitchLoopExitReturnEvidence8616
+from .structuring.shared_loop_exit import SharedLoopExitBinding8616, matching_shared_loop_exits_8616
+
+_CASE_ENTRY_ARITY: int = 2
 
 __all__ = [
     "ControlFlowObligationIssue8616",
@@ -166,7 +169,7 @@ def _switch_case_entries_8616(switch: CSwitchCase) -> tuple[tuple[int, object], 
         items = (
             item
             for item in cast(Iterable[object], raw_cases)
-            if isinstance(item, tuple) and len(item) == 2
+            if isinstance(item, tuple) and len(item) == _CASE_ENTRY_ARITY
         )
     entries: list[tuple[int, object]] = []
     for raw_value, body in items:
@@ -212,11 +215,41 @@ def _issue_8616(
     )
 
 
+def _literal_case_issue_8616(
+    bodies: tuple[object, ...],
+    index: int,
+    evidence: SwitchLoopExitReturnEvidence8616,
+) -> ControlFlowObligationIssue8616 | None:
+    """Check target ownership and unconditional return shape of existing cases."""
+    anchored = tuple(
+        body for body in bodies if _body_has_target_anchor_8616(body, evidence.case_target)
+    )
+    if not anchored:
+        return _issue_8616(
+            ControlFlowObligationIssueKind8616.MISSING_TARGET_ANCHOR,
+            index, evidence, match_count=len(bodies),
+        )
+    if len(anchored) != 1:
+        return _issue_8616(
+            ControlFlowObligationIssueKind8616.AMBIGUOUS_CASE,
+            index, evidence, match_count=len(anchored),
+        )
+    if not _body_is_unconditional_return_8616(anchored[0]):
+        return _issue_8616(
+            ControlFlowObligationIssueKind8616.WRONG_EXIT_SHAPE,
+            index, evidence, match_count=1,
+        )
+    return None
+
+
 def validate_switch_exit_obligations_8616(
     root: object,
     evidence_items: tuple[object, ...],
+    *,
+    shared_bindings: tuple[SharedLoopExitBinding8616, ...] = (),
+    fingerprint: Callable[[object], str] | None = None,
 ) -> ControlFlowObligationValidationReport8616:
-    """Require one exact unconditional return for every binary switch-exit fact."""
+    """Require an exact case return or an unchanged proven shared-epilogue exit."""
     normalized: list[tuple[int, SwitchLoopExitReturnEvidence8616]] = []
     issues: list[ControlFlowObligationIssue8616] = []
     seen: set[SwitchLoopExitReturnEvidence8616] = set()
@@ -255,42 +288,14 @@ def validate_switch_exit_obligations_8616(
             continue
         bodies = _case_bodies_8616(root, evidence.case_value)
         if not bodies:
+            if fingerprint is not None and len(matching_shared_loop_exits_8616(root, evidence, shared_bindings, fingerprint)) == 1:
+                materialized_count += 1
+                continue
             issues.append(_issue_8616(ControlFlowObligationIssueKind8616.MISSING_CASE, index, evidence))
             continue
-        anchored = tuple(
-            body
-            for body in bodies
-            if _body_has_target_anchor_8616(body, evidence.case_target)
-        )
-        if not anchored:
-            issues.append(
-                _issue_8616(
-                    ControlFlowObligationIssueKind8616.MISSING_TARGET_ANCHOR,
-                    index,
-                    evidence,
-                    match_count=len(bodies),
-                )
-            )
-            continue
-        if len(anchored) != 1:
-            issues.append(
-                _issue_8616(
-                    ControlFlowObligationIssueKind8616.AMBIGUOUS_CASE,
-                    index,
-                    evidence,
-                    match_count=len(anchored),
-                )
-            )
-            continue
-        if not _body_is_unconditional_return_8616(anchored[0]):
-            issues.append(
-                _issue_8616(
-                    ControlFlowObligationIssueKind8616.WRONG_EXIT_SHAPE,
-                    index,
-                    evidence,
-                    match_count=1,
-                )
-            )
+        case_issue = _literal_case_issue_8616(bodies, index, evidence)
+        if case_issue is not None:
+            issues.append(case_issue)
             continue
         materialized_count += 1
 

@@ -27,10 +27,12 @@ from .ssa_memory_contracts import (
     SSAMemoryStats8616,
 )
 from .ssa_memory_ranges import (
+    StackCoordinateAgreement8616,
     build_stack_memory_cell_layout_8616,
     close_refused_stack_ranges_8616,
     collect_stack_memory_accesses_8616,
     memory_range_key_8616,
+    stack_coordinate_agreement_8616,
     stack_memory_access_8616,
     versioned_memory_address_8616,
 )
@@ -80,7 +82,8 @@ def build_x86_16_function_memory_ssa(
     ):
         raise ValueError("memory SSA requires closed function-owned logical memory")
     accesses = collect_stack_memory_accesses_8616(blocks)
-    layout = build_stack_memory_cell_layout_8616(accesses)
+    coordinate_conflict = stack_coordinate_agreement_8616(blocks) is StackCoordinateAgreement8616.CONFLICT
+    layout = build_stack_memory_cell_layout_8616(() if coordinate_conflict else accesses)
     range_addresses = {item.key: item.address for item in layout.ranges}
     cells_by_range = {
         item.key: tuple((cell.space.value, cell.base, cell.offset, cell.size) for cell in item.cells)
@@ -113,6 +116,9 @@ def build_x86_16_function_memory_ssa(
     refusals = tuple(
         IRRefusal(
             kind=(
+                StackCoordinateAgreement8616.CONFLICT
+                if coordinate_conflict and memory_range_key_8616(address) is not None
+                else
                 "stack_memory_cell_layout_incomplete"
                 if not layout.complete and memory_range_key_8616(address) is not None
                 else "unknown_call_stack_effect"
@@ -124,6 +130,7 @@ def build_x86_16_function_memory_ssa(
         )
         for block_addr, _index, address in accesses
         if memory_range_key_8616(address) is None
+        or memory_range_key_8616(address) not in range_addresses
         or memory_range_key_8616(address) in refused_ranges
     )
     accepted_ranges = frozenset(key for key in range_addresses if key not in refused_ranges)

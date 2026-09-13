@@ -1,7 +1,7 @@
 """Project versioned stack-memory accesses into canonical Alias identities.
 
 Layer: Alias.
-Responsibility: classify one IR stack address or composed byte-view access
+Responsibility: classify one IR stack address, composed byte-view access or phi
 without inferring C objects, types, widening, control flow, or rendered text.
 Owns storage identity only. Do not perform lowering, structuring, rewrite,
 postprocess, or CLI/reporting work here.
@@ -9,8 +9,10 @@ postprocess, or CLI/reporting work here.
 
 from __future__ import annotations
 
+from typing import cast
+
 from ..ir.core import IRAddress
-from ..ir.ssa_memory_contracts import SSAMemoryAccess8616, SSAMemoryAccessKind8616
+from ..ir.ssa_memory_contracts import SSAMemoryAccess8616, SSAMemoryAccessKind8616, SSAMemoryPhiNode8616
 from .alias_model_impl import AliasFailure, AliasStorageFacts, alias_facts_for_ir_address_8616
 from .stack_memory_ssa_contracts import (
     StackMemoryAliasFactKind8616,
@@ -88,4 +90,40 @@ def project_stack_memory_access_8616(
     return StackMemorySSAAliasAccess8616(access, storage, tuple(projected_slices))
 
 
-__all__ = ["alias_stack_memory_storage_8616", "project_stack_memory_access_8616"]
+def project_stack_memory_phi_8616(
+    phi: SSAMemoryPhiNode8616,
+) -> StackMemorySSAAliasFact8616 | StackMemoryAliasRefusal8616:
+    """Require every phi input and target to name the same versioned storage."""
+    addresses = (phi.target, *(incoming.address for incoming in phi.incoming))
+    if any(address.version is None for address in addresses):
+        return StackMemoryAliasRefusal8616(
+            StackMemoryAliasRefusalKind8616.UNVERSIONED_PHI,
+            phi.block_addr,
+            None,
+            "memory phi target and inputs must all carry SSA versions",
+            phi.target,
+        )
+    storages = tuple(alias_stack_memory_storage_8616(address) for address in addresses)
+    failed = next((storage for storage in storages if isinstance(storage, tuple)), None)
+    if failed is not None:
+        return StackMemoryAliasRefusal8616(failed[0], phi.block_addr, None, failed[1], phi.target)
+    typed_storages = tuple(storage for storage in storages if not isinstance(storage, tuple))
+    if any(storage != typed_storages[0] for storage in typed_storages[1:]):
+        return StackMemoryAliasRefusal8616(
+            StackMemoryAliasRefusalKind8616.INCONSISTENT_PHI_STORAGE,
+            phi.block_addr,
+            None,
+            "memory phi inputs do not have one exact Alias storage identity",
+            phi.target,
+        )
+    return StackMemorySSAAliasFact8616(
+        StackMemoryAliasFactKind8616.PHI,
+        phi.block_addr,
+        None,
+        phi.target,
+        typed_storages[0],
+        tuple(cast(int, incoming.address.version) for incoming in phi.incoming),
+    )
+
+
+__all__ = ["alias_stack_memory_storage_8616", "project_stack_memory_access_8616", "project_stack_memory_phi_8616"]

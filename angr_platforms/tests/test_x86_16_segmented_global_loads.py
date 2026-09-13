@@ -2483,6 +2483,7 @@ def test_indexed_load_site_materializes_raw_dereference_without_vvar_shape_guess
         tags={"ins_addr": 0x1057},
     )
     index_var = _stack(-4, codegen, name="i")
+    index_var.variable_type = SimTypeShort(False)
     index_seed = CAssignment(index_var, _const(0, codegen), codegen=codegen)
     assignment = CAssignment(_stack(-2, codegen), _deref(raw_pointer, codegen), codegen=codegen)
     root = CStatements([index_seed, assignment], addr=0x1050, codegen=codegen)

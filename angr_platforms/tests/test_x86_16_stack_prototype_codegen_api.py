@@ -14,6 +14,7 @@ from angr_platforms.X86_16.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
     stack_cvar_for_machine_bp_range_8616,
 )
+from x86_16_frame_coordinate_fixtures import proven_frame_coordinate
 
 
 class _CurrentAngrCodegen:
@@ -61,6 +62,7 @@ def test_stack_argument_materialization_uses_current_angr_node_allocator() -> No
 def test_stack_argument_materialization_keeps_formals_in_entry_sp_coordinates() -> None:
     """Machine-BP formals must preserve angr's distinct entry-SP coordinates."""
     codegen = _CurrentAngrCodegen()
+    codegen._inertia_vex_ir_frame = proven_frame_coordinate(-2)
     word = SimTypeShort(False).with_arch(codegen.project.arch)
     body_variable = SimStackVariable(4, 1, base="bp", name="local_6", ident="is_6")
     body_cvar = structured_c.CVariable(

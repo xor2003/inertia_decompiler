@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from angr_platforms.X86_16.ir.core import IRBlock
+from angr_platforms.X86_16.ir.core import IRBlock, IRCallStackEffect8616, IRInstr
 from angr_platforms.X86_16.ir.function_artifact import IRFunctionArtifact
 from angr_platforms.X86_16.ir.function_ir_registry import (
     FunctionIRArtifactVerdict8616,
@@ -37,8 +37,32 @@ from inertia_decompiler.function_ir_ssa_cache import (
     store_function_ir_ssa_catalog_8616,
 )
 from inertia_decompiler.function_ir_ssa_cache_codec import (
+    function_ir_ssa_bundle_from_record_8616,
     function_ir_ssa_bundle_record_8616,
 )
+
+
+@pytest.mark.parametrize("bp_preserved", [False, True])
+def test_call_frame_register_proof_survives_ir_cache_transport(bp_preserved):
+    effect = IRCallStackEffect8616(net_stack_delta=0, complete=True, bp_preserved=bp_preserved)
+    ir = IRFunctionArtifact(0x1000, (IRBlock(0x1000, (
+        IRInstr("CALL", None, (), addr=0x1000, call_stack_effect=effect),
+    )),))
+    bundle = FunctionIRSSABundle8616(ir, build_x86_16_function_ssa(ir))
+    record = function_ir_ssa_bundle_record_8616(bundle)
+
+    restored = function_ir_ssa_bundle_from_record_8616(record, ir.function_addr)
+
+    assert restored.ir.blocks[0].instrs[0].call_stack_effect == effect
+    assert effect.to_dict()["bp_preserved"] is bp_preserved
+
+
+def test_ir_cache_rejects_schema_before_frame_register_proofs():
+    record = function_ir_ssa_bundle_record_8616(_bundle(0x1000))
+    record["schema"] = 3
+
+    with pytest.raises(ValueError, match="unsupported function IR/SSA cache schema"):
+        function_ir_ssa_bundle_from_record_8616(record, 0x1000)
 
 
 @dataclass(frozen=True)
@@ -200,7 +224,7 @@ def test_function_ir_ssa_cache_rejects_class_outside_ir_ownership(
 ) -> None:
     payload = pickle.dumps(eval, protocol=5)
     record = {
-        "schema": 3,
+        "schema": function_ir_ssa_bundle_record_8616(_bundle(0x1000))["schema"],
         "payload": base64.b64encode(payload).decode("ascii"),
         "payload_sha256": hashlib.sha256(payload).hexdigest(),
     }

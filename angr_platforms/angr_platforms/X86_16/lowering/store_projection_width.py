@@ -2,6 +2,8 @@
 
 Layer: Types/Lowering.
 Responsibility: prevent a partial lvalue from consuming a complete store fact.
+Consumes alias, widening, and typed facts.
+Do not recover semantics from COD, source, assembly, or rendered C text.
 Instruction identity and equal immediate values do not prove byte coverage:
 both bytes of a zero word store have the same value and source instruction.
 Pair ownership and widening remain separate proof obligations. Unknown types

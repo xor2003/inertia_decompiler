@@ -43,8 +43,6 @@ class PostprocessBootstrapOperations8616:
     materialize_direct_stack_incdec: BootstrapOperation8616
     apply_typed_conditions: BootstrapOperation8616
     materialize_global_byte_index_sum_loop: BootstrapOperation8616
-    materialize_nested_stack_counter_loop: BootstrapOperation8616
-    materialize_stack_arg_accumulator_loop: BootstrapOperation8616
     materialize_selector_return_branches: BootstrapOperation8616
     rewrite_decoded_jcc_conditions: BootstrapOperation8616
     selector_return_contract_active: Callable[[], bool]
@@ -68,14 +66,6 @@ class PostprocessBootstrapOperations8616:
             (
                 "_materialize_global_byte_index_sum_loop_8616",
                 self.materialize_global_byte_index_sum_loop,
-            ),
-            (
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
-                self.materialize_nested_stack_counter_loop,
-            ),
-            (
-                "_materialize_stack_arg_accumulator_loop_8616",
-                self.materialize_stack_arg_accumulator_loop,
             ),
             (
                 "_materialize_cfg_selector_return_branches_early_8616",

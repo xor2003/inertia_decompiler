@@ -32,6 +32,8 @@ from ..ir.ssa_function import SSAFunctionArtifact, build_x86_16_function_ssa
 from ..ir.vex_import import build_x86_16_ir_function_artifact
 from ..pipeline.errors import PipelineHardError
 from .call_outputs import CallOutputArtifact8616, materialize_call_outputs_8616
+from .call_return_segment import collect_return_segment_frames_8616
+from .call_stack_allocation import collect_call_stack_allocation_proofs_8616
 from .call_stack_effects import (
     CallStackEffectArtifact8616,
     materialize_call_stack_effects_8616,
@@ -203,7 +205,15 @@ def build_semantic_function_ssa_8616(
         function,
         callsite_addrs,
     )
-    effects = materialize_call_stack_effects_8616(raw_ir, summaries)
+    allocations = collect_call_stack_allocation_proofs_8616(project, raw_ir, summaries)
+    return_frames = collect_return_segment_frames_8616(
+        project, function,
+        {address: summary.return_addr for address, summary in summaries.items() if summary.return_addr is not None},
+    )
+    effects = materialize_call_stack_effects_8616(
+        raw_ir, summaries, project=project, allocation_proofs=allocations,
+        return_segment_frames={frame.callsite_addr: frame for frame in return_frames},
+    )
     if not effects.stats.closed or (
         effects.stats.classified_fact_count > 0
         and effects.stats.materialized_count == 0

@@ -133,6 +133,10 @@ from .lowering.call_argument_expression import (
     call_argument_has_materialized_object_address_8616,
     materialize_call_argument_operations_8616,
 )
+from .lowering.call_argument_semantic_gap import (
+    has_call_argument_semantic_gap_8616,
+    has_literal_push_stack_carrier_8616,
+)
 from .lowering.call_argument_semantic_token import (
     call_argument_semantic_token_8616 as _call_arg_semantic_key_8616,
 )
@@ -10453,6 +10457,8 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
             )
 
         push_sources_tuple = push_arg_sources if isinstance(push_arg_sources, tuple) else ()
+        if has_literal_push_stack_carrier_8616(call, push_sources_tuple):
+            return True
         ordered_push_sources = (
             list(reversed(push_sources_tuple)) if len(push_sources_tuple) > 1 else list(push_sources_tuple)
         )
@@ -12328,6 +12334,7 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
         return rhs
 
     def _outgoing_arg_placeholder_rhs_from_statement(stmt: StructuredAstValue) -> StructuredAstValue:
+        """Refuse partial stores before considering legacy outgoing carriers."""
         candidates = _iter_assignment_nodes(stmt)
         if not candidates:
             return None
@@ -12338,6 +12345,10 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
         while isinstance(lhs_node, CTypeCast):
             lhs_node = lhs_node.expr
         if not isinstance(lhs_node, structured_c.CVariable):
+            return None
+        # A placeholder fallback cannot turn a byte rejected by the stack-store
+        # selector into a complete PUSH merely because its name looks local.
+        if classify_push_store_width_8616(lhs_node) is not PushStoreWidthVerdict8616.COMPLETE_WIDTH:
             return None
         variable = lhs_node.variable
         name = getattr(variable, "name", None) or lhs_node.name
@@ -16945,6 +16956,8 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
         with span("x86_16.call_args.conservative_seed_final"):
             if zero_arg_helpers_changed or _has_callsite_arg_materialization_gap_8616(
                 root, summary_map, project=project
+            ) or has_call_argument_semantic_gap_8616(
+                root, summary_map, _call_args_need_rematerialization_8616,
             ):
                 changed |= _conservative_call_arg_seed_8616(
                     root=root,

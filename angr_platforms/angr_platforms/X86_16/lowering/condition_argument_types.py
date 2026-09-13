@@ -17,7 +17,7 @@ import contextlib
 from dataclasses import dataclass
 from typing import Protocol, cast
 
-from angr.analyses.decompiler.structured_codegen.c import CVariable
+from angr.analyses.decompiler.structured_codegen.c import CIndexedVariable, CVariable
 from angr.sim_type import SimType, SimTypeChar, SimTypeFunction, SimTypeLong, SimTypeShort
 from angr.sim_variable import SimStackVariable
 from archinfo import Arch
@@ -29,6 +29,7 @@ from .condition_argument_type_facts import (
     collect_condition_argument_type_facts_8616,
     record_wide_condition_argument_type_evidence_8616,
 )
+from .semantic_cast import CSemanticCast8616
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
 
 __all__ = [
@@ -154,6 +155,28 @@ def _argument_cvars_8616(
     return tuple(arguments)
 
 
+def _preserve_argument_index_views_8616(
+    codegen: object, roots: list[object], offset: int, width: int, type_: SimType,
+) -> None:
+    """Keep existing integer index semantics before changing shared declarations."""
+    for root in roots:
+        for node in _iter_c_nodes_deep_8616(root):
+            if not isinstance(node, CIndexedVariable) or not isinstance(node.index, CVariable):
+                continue
+            index = node.index
+            variable = index.variable
+            previous = index.variable_type
+            if not isinstance(variable, SimStackVariable) or variable.base != "bp":
+                continue
+            matching_storage = (
+                variable.size == width
+                and machine_bp_offset_for_stack_variable_8616(codegen, variable) == offset
+                and _scalar_width_8616(previous) == width
+            )
+            if matching_storage and previous != type_:
+                node.index = CSemanticCast8616(type_, previous, index, codegen=index.codegen)
+
+
 def _set_argument_surface_type_8616(
     codegen: object,
     cfunc: _CFunctionSurface8616,
@@ -168,6 +191,7 @@ def _set_argument_surface_type_8616(
         roots.append(cfunc.statements)
     with contextlib.suppress(AttributeError):
         roots.append(cfunc.body)
+    _preserve_argument_index_views_8616(codegen, roots, offset, width, type_)
     seen: set[int] = set()
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):

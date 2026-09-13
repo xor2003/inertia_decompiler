@@ -1,9 +1,9 @@
 """Normalize proven register carriers across decrement dispatch chains.
 
 Layer: Alias.
-Responsibility: Owns storage identity by binding a condition register to one concrete storage identity only
-when duplicate typed facts prove both operands for the same CFG branch, then
-carry that identity through an exact fallthrough chain of ``DEC reg`` branches.
+Responsibility: Owns storage identity by binding a condition register to concrete
+storage when paired typed facts or self-test bindings prove it at the same branch, then
+carry that identity through unique typed CFG successors of ``DEC reg`` branches.
 This module never decodes assembly or inspects source, symbols, or rendered C.
 Do not perform lowering, structuring, rewrite, postprocess, or CLI/reporting work here.
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from ..ir.condition_ir import ConditionIR, condition_sort_key_8616
+from ..ir.condition_ir import ConditionIR, ConditionOp, condition_sort_key_8616
 from ..ir.core import IRValue, MemSpace
 from .condition_register_bindings import (
     condition_self_test_register_binding_8616,
@@ -53,7 +53,7 @@ class ConditionRegisterCarrierResult8616:
 
 @dataclass(frozen=True, slots=True)
 class _CarrierSeed8616:
-    """Proven concrete identity for one register at a branch fallthrough."""
+    """Proven concrete identity for one register at a selected branch successor."""
 
     next_block: int
     register_name: str
@@ -87,8 +87,9 @@ def _unique_values_8616(values: list[IRValue]) -> tuple[IRValue, ...]:
 
 def _carrier_seeds_8616(
     conditions: tuple[ConditionIR, ...],
+    by_block: dict[int, list[tuple[int, ConditionIR]]],
 ) -> tuple[tuple[_CarrierSeed8616, ...], int]:
-    """Collect unambiguous register-to-storage proofs from duplicate facts."""
+    """Collect unambiguous register-to-storage proofs and unique DEC edges."""
     grouped: dict[_BranchIdentity8616, list[ConditionIR]] = {}
     for condition in conditions:
         grouped.setdefault(_branch_identity_8616(condition), []).append(condition)
@@ -155,7 +156,16 @@ def _carrier_seeds_8616(
             failures += 1
             continue
         representative = group[0]
-        if not isinstance(representative.fallthrough_target, int):
+        next_block, ambiguous = _next_dec_block_8616(
+            representative, by_block, register_name=register_name,
+            width_bits=representative.width_bits,
+        )
+        if ambiguous:
+            failures += 1
+            continue
+        if next_block is None:
+            next_block = representative.fallthrough_target
+        if not isinstance(next_block, int):
             failures += 1
             continue
         if any(condition.rhs != representative.rhs for condition in group):
@@ -163,7 +173,7 @@ def _carrier_seeds_8616(
             continue
         candidates.append(
             _CarrierSeed8616(
-                next_block=representative.fallthrough_target,
+                next_block=next_block,
                 register_name=register_name,
                 value=storage,
                 width_bits=representative.width_bits,
@@ -235,13 +245,14 @@ def _next_dec_block_8616(
 def normalize_condition_register_carriers_8616(
     conditions: list[ConditionIR] | tuple[ConditionIR, ...],
 ) -> ConditionRegisterCarrierResult8616:
-    """Bind decrement-dispatch comparisons to a proven concrete input value."""
+    """Bind pre-input comparisons or JCC-bound result tests to proven storage."""
+    comparison_ops: dict[ConditionOp, ConditionOp] = {"zero": "eq", "nonzero": "ne"}
     ordered = tuple(sorted(conditions, key=condition_sort_key_8616))
-    seeds, failures = _carrier_seeds_8616(ordered)
     by_block: dict[int, list[tuple[int, ConditionIR]]] = {}
     for index, condition in enumerate(ordered):
         if isinstance(condition.block_addr, int):
             by_block.setdefault(condition.block_addr, []).append((index, condition))
+    seeds, failures = _carrier_seeds_8616(ordered, by_block)
 
     replacements: dict[int, ConditionIR] = {}
     classified = 0
@@ -261,41 +272,51 @@ def normalize_condition_register_carriers_8616(
                 _branch_identity_8616(condition)
                 for _index, condition, _semantics in dec_candidates
             }
-            if not dec_candidates:
-                break
             if len(identities) != 1:
-                failures += 1
+                # No DEC ends the chain; competing branch identities refuse it.
+                failures += bool(dec_candidates)
                 break
             representative = dec_candidates[0][1]
             semantics = dec_candidates[0][2]
             register_name, dec_count = semantics
             rhs = representative.rhs
+            post_update_test = (
+                representative.is_zero_test and rhs is None
+                and representative.operand_bind_insn == representative.src_insn
+                and representative.src_insn is not None
+            )
+            boundary_matches = post_update_test or (
+                isinstance(rhs, IRValue) and rhs.space is MemSpace.CONST and rhs.const == dec_count
+            )
+            register_matches = (
+                isinstance(representative.lhs, IRValue)
+                and representative.lhs.space is MemSpace.REG
+                and representative.lhs.name == register_name
+            )
             if (
                 register_name != seed.register_name
                 or representative.width_bits != seed.width_bits
-                or not isinstance(representative.lhs, IRValue)
-                or representative.lhs.space is not MemSpace.REG
-                or representative.lhs.name != register_name
-                or not isinstance(rhs, IRValue)
-                or rhs.space is not MemSpace.CONST
-                or rhs.const != dec_count
+                or not register_matches
+                or not boundary_matches
             ):
                 failures += 1
                 break
             classified += 1
             delta += dec_count
-            normalized_rhs = replace(rhs, const=delta)
+            normalized_rhs = replace(rhs, const=delta) if isinstance(rhs, IRValue) else IRValue(
+                MemSpace.CONST, const=delta, size=representative.width_bits // 8,
+            )
             for index, condition, candidate_semantics in dec_candidates:
-                if candidate_semantics != semantics:
-                    failures += 1
-                    continue
                 replacement = replace(
                     condition,
                     lhs=seed.value,
                     rhs=normalized_rhs,
+                    op=comparison_ops.get(condition.op, condition.op),
+                    operand_bind_insn=None if post_update_test else condition.operand_bind_insn,
                 )
                 existing = replacements.get(index)
-                if existing is not None and existing != replacement:
+                conflicting_replacement = existing is not None and existing != replacement
+                if candidate_semantics != semantics or conflicting_replacement:
                     failures += 1
                     continue
                 replacements[index] = replacement
@@ -306,10 +327,8 @@ def normalize_condition_register_carriers_8616(
                 register_name=seed.register_name,
                 width_bits=seed.width_bits,
             )
-            if ambiguous:
-                failures += 1
-                break
-            if next_block is None:
+            if ambiguous or next_block is None:
+                failures += ambiguous
                 break
             block_addr = next_block
 

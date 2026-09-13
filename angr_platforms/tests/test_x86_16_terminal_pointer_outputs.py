@@ -24,6 +24,8 @@ from angr_platforms.X86_16.semantics.terminal_pointer_outputs import (
 )
 
 FUNCTION = 0x1000
+WORD_BYTES = 2
+NEGATIVE_OUTPUT_OFFSET = -2
 
 
 def _decode_terminals(
@@ -89,7 +91,10 @@ def test_pointer_store_reaching_return_is_must_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _decode_terminals(monkeypatch, {FUNCTION: "ret"})
-    artifact = _artifact((_block(FUNCTION, _store(FUNCTION, offset=-2, width=2)),), {FUNCTION: ()})
+    artifact = _artifact(
+        (_block(FUNCTION, _store(FUNCTION, offset=NEGATIVE_OUTPUT_OFFSET, width=WORD_BYTES)),),
+        {FUNCTION: ()},
+    )
 
     evidence = collect_terminal_pointer_output_evidence_8616(object(), artifact)
 
@@ -101,8 +106,8 @@ def test_pointer_store_reaching_return_is_must_write(
     assert fact.segment is MemSpace.DS
     assert fact.base_register == "bx"
     assert fact.base_version == 0
-    assert fact.relative_offset == -2
-    assert fact.width == 2
+    assert fact.relative_offset == NEGATIVE_OUTPUT_OFFSET
+    assert fact.width == WORD_BYTES
     assert fact.store_sites[0].instr_addr == FUNCTION
     assert fact.terminal_block_addrs == fact.definitely_written_terminal_block_addrs == (
         FUNCTION,
@@ -130,6 +135,39 @@ def test_pointer_store_on_only_one_return_path_is_conditional(
     assert fact.disposition is TerminalPointerOutputDisposition8616.CONDITIONAL
     assert fact.terminal_block_addrs == (0x1010, 0x1020)
     assert fact.definitely_written_terminal_block_addrs == (0x1010,)
+
+
+def test_conditional_word_write_stays_conditional_at_shared_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A joined epilogue does not prove that both incoming paths wrote output."""
+    success, failure, epilogue = 0x1010, 0x1020, 0x1030
+    _decode_terminals(monkeypatch, {epilogue: "ret"})
+    artifact = _artifact(
+        (
+            _block(FUNCTION),
+            _block(success, _store(success, offset=0, width=WORD_BYTES)),
+            _block(failure),
+            _block(epilogue),
+        ),
+        {
+            FUNCTION: (),
+            success: (FUNCTION,),
+            failure: (FUNCTION,),
+            epilogue: (success, failure),
+        },
+    )
+
+    evidence = collect_terminal_pointer_output_evidence_8616(object(), artifact)
+
+    assert evidence.complete is True
+    assert len(evidence.facts) == 1
+    fact = evidence.facts[0]
+    assert fact.disposition is TerminalPointerOutputDisposition8616.CONDITIONAL
+    assert fact.width == WORD_BYTES
+    assert fact.terminal_block_addrs == (epilogue,)
+    assert fact.definitely_written_terminal_block_addrs == ()
+    assert evidence.must_write_facts == ()
 
 
 def test_separate_base_ssa_versions_remain_separate_outputs(

@@ -162,9 +162,11 @@ def test_repeat_prefix_cond_consumes_cx_for_repeated_string_ops():
 
     cond = repeat_prefix_cond(emu, instr)
 
-    assert emu.gpregs[reg16_t.CX] == 3
+    expected_remaining = 3
+    expected_reads = 2
+    assert emu.gpregs[reg16_t.CX] == expected_remaining
     assert cond is True
-    assert emu.gpreg_reads.count(reg16_t.CX) == 2
+    assert emu.gpreg_reads.count(reg16_t.CX) == expected_reads
 
 
 def test_repeat_prefix_cond_skips_operation_when_initial_count_is_zero():
@@ -175,7 +177,7 @@ def test_repeat_prefix_cond_skips_operation_when_initial_count_is_zero():
 
     args, _kwargs = emu.lifter_instruction.calls[0]
     assert args[0] is None
-    assert args[1] == 0x110FFB
+    assert args[1] == emu.lifter_instruction.addr + instr.size
 
 
 def test_repeat_kind_prefers_normalized_repeat_metadata():
@@ -192,7 +194,7 @@ def test_repeat_jump_uses_repz_and_current_zero_flag():
 
     assert emu.lifter_instruction.calls
     args, _kwargs = emu.lifter_instruction.calls[0]
-    assert args[1] == 0x110FF9
+    assert args[1] == emu.lifter_instruction.addr
 
 
 def test_repeat_jump_ignores_zf_for_non_compare_string_ops():
@@ -203,8 +205,9 @@ def test_repeat_jump_ignores_zf_for_non_compare_string_ops():
 
     assert emu.lifter_instruction.calls
     args, _kwargs = emu.lifter_instruction.calls[0]
-    assert args[1] == 0x110FF9
-    assert emu.lifter_instruction.counter_conditions == [("cx", 2, -2, 2)]
+    assert args[1] == emu.lifter_instruction.addr
+    assert args[0] is None
+    assert emu.lifter_instruction.counter_conditions == []
 
 
 def test_repeat_jump_can_be_zf_sensitive_for_compare_string_ops():
@@ -219,12 +222,15 @@ def test_repeat_jump_can_be_zf_sensitive_for_compare_string_ops():
 
 def test_string_advance_indices_applies_directional_delta_to_all_indices():
     emu = _StringEmu(direction=False)
+    initial_si = emu.get_gpreg(reg16_t.SI)
+    initial_di = emu.get_gpreg(reg16_t.DI)
+    word_bytes = 2
 
-    delta = string_advance_indices(emu, 2, reg16_t.SI, reg16_t.DI)
+    delta = string_advance_indices(emu, word_bytes, reg16_t.SI, reg16_t.DI)
 
-    assert delta == 2
-    assert emu.get_gpreg(reg16_t.SI) == 0x0202
-    assert emu.get_gpreg(reg16_t.DI) == 0x0302
+    assert delta == word_bytes
+    assert emu.get_gpreg(reg16_t.SI) == initial_si + word_bytes
+    assert emu.get_gpreg(reg16_t.DI) == initial_di + word_bytes
 
 
 def test_string_compare_values_delegates_to_flags_update():

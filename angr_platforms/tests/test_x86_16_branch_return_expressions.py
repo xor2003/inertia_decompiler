@@ -15,6 +15,7 @@ from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimStackVariable
 from angr_platforms.X86_16.annotations import ANNOTATION_KEY
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
+from angr_platforms.X86_16.ir.condition_ir import ConditionIR
 from angr_platforms.X86_16.lowering.stack_prototype_materialization import (
     materialize_annotated_stack_prototype_8616,
 )
@@ -94,10 +95,35 @@ def test_sole_return_expression_accepts_one_wrapped_return() -> None:
     assert sole_return_expression_8616(body) is expression
 
 
+@pytest.mark.parametrize("inverse", [False, True])
+@pytest.mark.parametrize("case", ["valid", "missing", "same", "wrong", "prefix"])
+def test_binary_return_arm_polarity_requires_both_complete_values(inverse, case):
+    codegen = _Codegen()
+    values = [CConstant(value, SimTypeShort(False), codegen=codegen) for value in (0, 1, 2)]
+    true_value, false_value = (values[1], values[0]) if inverse else (values[0], values[1])
+    true_body = CStatements([CReturn(true_value, codegen=codegen)], codegen=codegen)
+    false_body = CStatements([CReturn(false_value, codegen=codegen)], codegen=codegen)
+    recovered = {0x1010: values[0], 0x1020: values[1]}
+    if case == "missing":
+        recovered.pop(0x1020)
+    elif case == "same":
+        recovered[0x1020] = values[0]
+    elif case == "wrong":
+        recovered[0x1020] = values[2]
+    elif case == "prefix":
+        true_body.statements.insert(0, values[2])
+    condition = ConditionIR("eq", 1, 0, taken_target=0x1010, fallthrough_target=0x1020)
+    result = branch_return_expressions.binary_return_arm_polarity_8616(
+        condition, true_body, false_body, recovered.get,
+    )
+    assert result is (not inverse if case == "valid" else None)
+
+
 def test_branch_target_return_expression_recovers_signed_ax_immediate() -> None:
     codegen = _Codegen()
     project = _project(
         _Insn("mov", (_Operand(1, reg=1), _Operand(2, imm=0xFFFF))),
+        _Insn("ret", ()),
     )
 
     expression = recover_branch_target_return_expression_8616(project, codegen, 0x1000)
@@ -168,7 +194,7 @@ def test_branch_target_return_expression_uses_projected_machine_bp_argument() ->
         size=2,
     )
     memory = SimpleNamespace(base=3, index=0, disp=4)
-    project = _project(_Insn("mov", (_Operand(1, reg=1), _Operand(3, mem=memory))))
+    project = _project(_Insn("mov", (_Operand(1, reg=1), _Operand(3, mem=memory))), _Insn("ret", ()))
 
     expression = recover_branch_target_return_expression_8616(project, codegen, 0x1000)
 
@@ -247,7 +273,7 @@ def test_narrow_arguments_keep_word_storage_for_branch_returns() -> None:
 
     for expected, bp_offset in zip(arguments[:2], (4, 6), strict=True):
         memory = SimpleNamespace(base=3, index=0, disp=bp_offset)
-        project = _project(_Insn("mov", (_Operand(1, reg=1), _Operand(3, mem=memory))))
+        project = _project(_Insn("mov", (_Operand(1, reg=1), _Operand(3, mem=memory))), _Insn("ret", ()))
         expression = recover_branch_target_return_expression_8616(
             project,
             codegen,
@@ -273,6 +299,7 @@ def test_branch_target_return_expression_combines_adjacent_dx_ax_stack_slices(
     project = _project(
         _Insn("mov", (_Operand(1, reg=1), _Operand(3, mem=ax_mem))),
         _Insn("mov", (_Operand(1, reg=2), _Operand(3, mem=dx_mem))),
+        _Insn("ret", ()),
     )
 
     expression = recover_branch_target_return_expression_8616(project, codegen, 0x1000)

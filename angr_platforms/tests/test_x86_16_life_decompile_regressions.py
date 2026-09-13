@@ -134,7 +134,7 @@ def test_life_pause_screen_does_not_use_verbatim_source_sidecar() -> None:
     )
     function = cfg.kb.functions.floor_func(0x107E3)
 
-    _status, payload = decompile._decompile_function(
+    status, payload = decompile._decompile_function(
         project,
         cfg,
         function,
@@ -146,11 +146,13 @@ def test_life_pause_screen_does_not_use_verbatim_source_sidecar() -> None:
 
     source_text = render_local_source_sidecar_function(LIFE_EXE, "pause_screen")
 
+    assert status == "ok", payload
     assert source_text is not None
     assert payload != source_text
 
 
 def test_life_timer_does_not_use_verbatim_source_sidecar() -> None:
+    """Include the complete machine loop when checking source-sidecar independence."""
     project = decompile._build_project(LIFE_EXE, force_blob=False, base_addr=0x1000, entry_point=0)
     metadata = sidecar_metadata._load_lst_metadata(LIFE_EXE, project)
     cfg = project.analyses.CFGFast(
@@ -159,9 +161,11 @@ def test_life_timer_does_not_use_verbatim_source_sidecar() -> None:
         force_segment=True,
         resolve_indirect_jumps=False,
         show_progressbar=False,
-        regions=[(0x10467, 0x104B3)],
+        # The first loop branch is at 104AE; the function returns at 104E6.
+        regions=[(0x10467, 0x104E7)],
     )
     function = cfg.kb.functions.floor_func(0x10467)
+    assert {0x104C3, 0x104CE, 0x104E1} <= function.block_addrs_set
 
     _status, payload = decompile._decompile_function(
         project,
@@ -208,11 +212,30 @@ def test_life_rand_dist_does_not_use_verbatim_source_sidecar() -> None:
     assert payload != source_text
 
 
-def test_life_clear_mat_uses_compact_string_intrinsic_rendering() -> None:
+def test_life_clear_mat_keeps_string_diagnostics_without_body_replacement() -> None:
+    """Classify STOSB without discarding argument, segment and frame setup."""
+    from angr_platforms.X86_16.string_instruction_artifact import (
+        StringInstructionCoverage8616,
+        build_x86_16_string_instruction_artifact_from_linear_range,
+    )
+    from angr_platforms.X86_16.string_instruction_lowering import (
+        build_x86_16_string_intrinsic_artifact,
+        render_x86_16_string_intrinsic_c,
+    )
+
     project = decompile._build_project(LIFE_EXE, force_blob=False, base_addr=0x1000, entry_point=0)
-    payload = decompile._try_emit_string_intrinsic_c(project, start=0x10AB1, end=0x10AC5, name="clear_mat")
+    artifact = build_x86_16_string_instruction_artifact_from_linear_range(project, start=0x10AB1, end=0x10AC5)
+    assert artifact.coverage is StringInstructionCoverage8616.PARTIAL_FUNCTION
+    assert len(artifact.records) == 1
+    assert artifact.records[0].family == "stos"
+    assert artifact.records[0].width == 1
+    lowered = build_x86_16_string_intrinsic_artifact(artifact)
+    payload = render_x86_16_string_intrinsic_c("clear_mat", lowered)
 
     assert payload is not None
     assert "void __x86_16_stos(unsigned short width);" in payload
     assert "__x86_16_stos(1);" in payload
     assert "__x86_16_string_state" not in payload
+    assert decompile._try_emit_string_intrinsic_c(
+        project, start=0x10AB1, end=0x10AC5, name="clear_mat",
+    ) is None

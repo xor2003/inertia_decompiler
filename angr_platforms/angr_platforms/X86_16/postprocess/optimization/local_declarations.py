@@ -1,10 +1,12 @@
 """Layer: Rewrite/Postprocess cleanup.
 
-Responsibility: canonicalize equivalent declarations for already-proven local storage.
+Responsibility: canonicalize declarations and retire DCE-proven unused declarations.
 Consumes already-proven IR, alias, widening, typed, and structuring facts.
 Do not recover new semantics, storage identity, types, call signatures, control flow, or facts from rendered text, COD, source, or CLI/reporting evidence here.
 Consumes already-proven stack identity and type surfaces. This module may remove only
 declaration duplicates with identical BP-relative storage, name, size, and type.
+It may also retire declaration-only entries whose authoritative DCE keys have
+no remaining body or argument references. Names alone never prove dead storage.
 It must not merge expressions, infer alias/type facts, or repair rendered C text.
 """
 
@@ -12,11 +14,73 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Protocol
+from collections.abc import Callable
+from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimStackVariable
 
+_DeclarationKey8616 = tuple[str, int | str]
+_UNIFIED_ENTRY_ARITY_8616: int = 2
+
+
+def _declaration_entry_keys_8616(
+    entry: object, key_of: Callable[[structured_c.CVariable], _DeclarationKey8616],
+) -> frozenset[_DeclarationKey8616] | None:
+    """Read exact keys from an angr variable or unified declaration entry."""
+    if isinstance(entry, structured_c.CVariable):
+        return frozenset({key_of(entry)})
+    if not isinstance(entry, (set, list, tuple)) or not entry:
+        return None
+    keys: set[_DeclarationKey8616] = set()
+    for candidate in entry:
+        if not isinstance(candidate, tuple) or len(candidate) != _UNIFIED_ENTRY_ARITY_8616:
+            return None
+        cvar = candidate[0]
+        if not isinstance(cvar, structured_c.CVariable):
+            return None
+        keys.add(key_of(cvar))
+    return frozenset(keys)
+
+
+def _declaration_maps_8616(codegen: object) -> tuple[object, object]:
+    """Read optional third-party declaration maps without inventing surfaces."""
+    try:
+        cfunc = cast(_CodegenLike, codegen).cfunc
+    except AttributeError:
+        return None, None
+    if cfunc is None:
+        return None, None
+    try:
+        variables = cfunc.variables_in_use
+    except AttributeError:
+        variables = None
+    try:
+        unified = cfunc.unified_local_vars
+    except AttributeError:
+        unified = None
+    return variables, unified
+
+
+def prune_dce_proven_declarations_8616(
+    codegen: object,
+    *,
+    dead_keys: frozenset[_DeclarationKey8616],
+    key_of: Callable[[structured_c.CVariable], _DeclarationKey8616],
+) -> bool:
+    """Consume DCE deletion keys after all surviving references are excluded."""
+    if not dead_keys:
+        return False
+    changed = False
+    for mapping in _declaration_maps_8616(codegen):
+        if not isinstance(mapping, dict):
+            continue
+        for variable, entry in tuple(mapping.items()):
+            keys = _declaration_entry_keys_8616(entry, key_of)
+            if keys and keys <= dead_keys:
+                del mapping[variable]
+                changed = True
+    return changed
 
 class _CFunctionLike(Protocol):
     """Third-party C function fields that own emitted local declarations."""
@@ -62,7 +126,7 @@ def _unified_declaration_types(entries: object) -> frozenset[object] | None:
         return None
     types: list[object] = []
     for entry in entries:
-        if not isinstance(entry, tuple) or len(entry) != 2:
+        if not isinstance(entry, tuple) or len(entry) != _UNIFIED_ENTRY_ARITY_8616:
             return None
         types.append(entry[1])
     try:
@@ -130,4 +194,4 @@ def dedupe_equivalent_stack_local_declarations_8616(codegen: _CodegenLike) -> bo
     return changed
 
 
-__all__ = ["dedupe_equivalent_stack_local_declarations_8616"]
+__all__ = ["dedupe_equivalent_stack_local_declarations_8616", "prune_dce_proven_declarations_8616"]

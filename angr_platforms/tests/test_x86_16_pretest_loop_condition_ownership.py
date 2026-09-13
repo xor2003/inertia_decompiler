@@ -191,13 +191,14 @@ def test_structured_body_owner_cannot_override_unique_cfg_continuation() -> None
         1,
         value_type,
         codegen=codegen,
-        tags={"vex_block_addr": 0x1012B},
     )
+    # Execution ownership belongs to the statement, not reused operand tags.
+    body_guard = CIfBreak(body_marker, codegen=codegen, tags={"vex_block_addr": 0x1012B})
     loop = CForLoop(
         None,
         current,
         None,
-        CStatements([CIfBreak(body_marker, codegen=codegen)], codegen=codegen),
+        CStatements([body_guard], codegen=codegen),
         codegen=codegen,
     )
     typed = ConditionIR(

@@ -129,8 +129,9 @@ def test_subtraction_fingerprint_preserves_both_unsigned_views() -> None:
 
     fingerprint = _expr_fingerprint(expression, codegen.project)
 
-    assert fingerprint.count("SemanticCast(") == 2
-    assert fingerprint.count("signed=true->SimTypeShort:bits=16:signed=false") == 2
+    operand_count = 2
+    assert fingerprint.count("SemanticCast(") == operand_count
+    assert fingerprint.count("signed=true->SimTypeShort:bits=16:signed=false") == operand_count
     assert "stack_slot:SS:BP+0x6:size2" in fingerprint
     assert "stack_slot:SS:BP+0x4:size2" in fingerprint
 
@@ -319,3 +320,24 @@ def test_semantic_cast_identity_requires_unique_exact_declaration(conflicting: b
 
     other = _stack(codegen, -10, "local_8")
     assert not is_identity_semantic_variable_cast_8616(_semantic_view(codegen, other, signed=True))
+
+
+@pytest.mark.parametrize("current_signed", [False, True])
+def test_identity_projection_visits_arithmetic_inside_required_cast(current_signed: bool) -> None:
+    """An outer truncation survives while nested declaration identities project."""
+    codegen = _Codegen()
+    local = _stack(codegen, -8, "local_8", signed=current_signed)
+    inner = _semantic_view(codegen, local, signed=True)
+    arithmetic = CBinaryOp("Sub", inner, _constant(codegen, 1), codegen=codegen)
+    outer = CSemanticCast8616(
+        SimTypeShort(True), SimTypeChar(True), arithmetic, codegen=codegen,
+    )
+    before = _expr_fingerprint(outer, codegen.project)
+    projected = project_identity_semantic_casts_8616(outer, required_signedness=True)
+
+    assert isinstance(projected, CSemanticCast8616)
+    assert projected.src_type == outer.src_type and projected.dst_type == outer.dst_type
+    assert (projected.expr.lhs is local) is current_signed
+    assert (projected is outer) is not current_signed
+    assert outer.expr is arithmetic and arithmetic.lhs is inner
+    assert _expr_fingerprint(outer, codegen.project) == before

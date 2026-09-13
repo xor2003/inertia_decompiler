@@ -2,7 +2,9 @@
 
 Layer: Widening.
 Responsibility: group touching or overlapping output lanes only when Alias
-ownership and terminal-path coverage agree. This module does not inspect CFGs,
+ownership and terminal-path coverage agree.
+Conditional lanes additionally require matching store-block evidence; a shared
+return alone does not prove coexecution. This module does not inspect CFGs,
 recover aliases, infer pointee types, bind caller targets, mutate prototypes,
 or render C. Disjoint ranges remain distinct views.
 Consumes alias-proven storage identity.
@@ -32,6 +34,7 @@ from .terminal_pointer_output_contracts import (
 type _OwnerKey8616 = tuple[IRAddress, MemSpace]
 type _CoverageKey8616 = tuple[
     TerminalPointerOutputDisposition8616,
+    tuple[int, ...],
     tuple[int, ...],
     tuple[int, ...],
 ]
@@ -69,6 +72,7 @@ def _coverage_key_8616(fact: TerminalPointerAliasFact8616) -> _CoverageKey8616:
         output.disposition,
         output.terminal_block_addrs,
         output.definitely_written_terminal_block_addrs,
+        output.conditional_store_blocks,
     )
 
 

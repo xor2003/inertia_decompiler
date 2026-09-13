@@ -14,6 +14,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+from capstone.x86_const import X86_OP_IMM, X86_OP_MEM, X86_OP_REG
+
+from ..decoded_memory_width import decoded_memory_operand_width_8616
 from ..function_evidence_inventory import (
     FunctionEvidenceKind8616,
     collect_function_binary_evidence_8616,
@@ -222,20 +225,27 @@ def recover_counted_stack_loop_from_summaries_8616(
 
 
 def _summarize_capstone_insn_8616(insn: object) -> InsnSummary8616:
+    """Project decoded operands with frontend-normalized memory extents."""
     operands = _dynamic_sequence_8616(_dynamic_attr_8616(insn, "operands", ()))
 
     def _operand(index: int) -> tuple[str | None, int | str | None, int | None]:
+        """Project one operand without confusing offset width with memory extent."""
         if index >= len(operands):
             return None, None, None
         operand = operands[index]
         op_type = _dynamic_int_8616(_dynamic_attr_8616(operand, "type", -1), -1)
         raw_size = _dynamic_attr_8616(operand, "size", None)
         size = raw_size if isinstance(raw_size, int) else None
-        if op_type == 1:
+        if op_type == X86_OP_REG:
             return "reg", _capstone_reg_name_8616(insn, _dynamic_int_8616(_dynamic_attr_8616(operand, "reg", 0))), size
-        if op_type == 2:
+        if op_type == X86_OP_IMM:
             return "imm", _dynamic_int_8616(_dynamic_attr_8616(operand, "imm", 0)), size
-        if op_type == 3:
+        if op_type == X86_OP_MEM:
+            destination_width = _dynamic_attr_8616(operands[0], "size", None)
+            size = decoded_memory_operand_width_8616(
+                _dynamic_int_8616(_dynamic_attr_8616(insn, "id", 0)), index, size,
+                destination_width if isinstance(destination_width, int) else None,
+            )
             mem = _dynamic_attr_8616(operand, "mem", None)
             if mem is not None:
                 base = _dynamic_int_8616(_dynamic_attr_8616(mem, "base", 0))

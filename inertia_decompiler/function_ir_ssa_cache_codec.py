@@ -23,7 +23,7 @@ from angr_platforms.X86_16.ir.ssa_function import (
     build_x86_16_function_ssa,
 )
 
-_FUNCTION_IR_SSA_CACHE_SCHEMA_8616: int = 3
+_FUNCTION_IR_SSA_CACHE_SCHEMA_8616: int = 4
 _MAX_PICKLE_BYTES_8616: int = 64 * 1024 * 1024
 _ALLOWED_IR_MODULE_PREFIXES_8616: tuple[str, ...] = (
     "angr_platforms.X86_16.ir.",

@@ -18,7 +18,1772 @@ Numeric function and global names are acceptable when the executable has no
 debug information. Source names below identify addresses for this report only;
 they must not become recovery evidence.
 
-## Current Checkpoint (2026-09-10)
+User scope clarification (2026-09-11): LIFE's 80387/x87 decompilation is out
+of scope. Do not add FPU recovery work to this goal. The integer BIOS keyboard
+input path and conditional pointer-output/stack-initialization defects remain
+in scope. Preserve existing FPU behavior and tests; unsupported FPU handling
+must stay explicit rather than being counted as successful decompilation.
+
+## Current Checkpoint (2026-09-13)
+
+**DrawTime blocker narrowed:** live Alias and C storage disagree by eight bytes
+for both SI/DI saved-register restores. The hard gate correctly refuses their
+materialization. Both default and explicit-window commands fail. The existing
+DrawTime test was absent from the routine selection; it is now enrolled and
+uses the default path, so the prior routine-green checkpoint is not current
+acceptance of this expanded lane. Hard errors now carry the function address
+and exact restore obligations. See
+[evidence and remaining ownership investigation](reference/p0-drawtime-stack-coordinate-divergence.md).
+
+**Whole-file recheck and ESC gate reconciliation:** the full-file gate now
+executes the shared 2,560-case RunMenu oracle against the exported function,
+supplying the canonical portable runtime header and binding successful evidence
+to the exact function-definition digest. The current if/break/shared-epilogue
+output passes; no switch spelling is required when matching execution evidence
+is available. Missing exports, failed compilation/execution, stale evidence and
+scalar signatures remain failures. The transcript-only legacy check remains
+available for parser tests; the executable gate always requires execution.
+
+Two fresh whole-file runs accepted **12/20 functions**, not 20/20. The final run
+has no RunMenu violations. Remaining failing addresses are **0x10060, 0x10498,
+0x10808, 0x108d0, 0x10a88, 0x10c18, 0x10e70, 0x10f38**; DrawTime's argument
+contract and raw flag artifacts also fail the ratchet. These failures must be
+resolved, not hidden by lowering the floor. Evidence:
+`/home/xor/.cache/step9-runmenu-whole-fixed.{txt,json,log}`.
+The initial exported-artifact compilation missed its runtime prelude; that
+harness integration defect was corrected and the complete gate rerun.
+Focused gate/RunMenu tests passed **23 tests, 6.83s** before the additional
+prelude regression; scoped tooling MyPy passes. Full-suite acceptance remains
+open and the prior green routine pipeline does not supersede this result.
+
+**Routine pipeline fully green after branch-origin preservation:**
+`make test-pipeline PYTHON=./.venv/bin/python` exits 0: **5,402 routine tests
+passed in 326.70s**, plus **268 preliminary passes in 15.27s**. QuickC **4/4**
+passes with semantic validation (51.24s). MS C tiny **7/7** passes the complete
+original-build/run, decompile, generated-C recompile/run pipeline (105.75s),
+including the previously failing `simple_control` and `loops_jumps` fixtures.
+The final annotation-protocol regression batch passed **5 tests, 6.55s**;
+the new module passes Ruff and scoped MyPy. Quality-fast still exits 2 on
+global lint debt; its 39-module compiled-import smoke passes.
+Evidence: `/home/xor/.cache/step9-origin-{quality,pipeline}.log` and
+`angr_platforms/.cache/test_pipeline/summary.json`.
+This is not a full pytest collection or Step 9 completion: the full-file ESC
+oracle reconciliation, quality debt and complete-suite audit remain open.
+The routine duration increased from the previous 259.13s checkpoint; timings
+are not a controlled before/after benchmark, so performance remains to assess.
+
+**Symbolic branch provenance fix (live check 16:07 +02:00):** `nested_loops`
+now exits 0 with clean whole-tail validation. Root cause: angr's symbolic
+expression-keyed annotation dictionary overwrote the first comparison's source
+with a later equal comparison. A focused regression reproduced both recovered
+branches carrying the second address. The Structuring AIL-to-symbolic boundary
+now preserves complete instruction/block provenance on explicitly requested
+branch predicates using immutable, non-relocatable origin annotations. No
+predicate, break body, or validation obligation is replaced or removed.
+Focused loop/topology/origin checks: **42 passed, 7.85s** before the final
+typed annotation-protocol adaptation; the new owner passes scoped MyPy/Ruff.
+Routine test, ownership, architecture and typing lists include the new surface.
+Full round-trip, quality and performance acceptance remains pending; do not
+count the live function result as Step 9 closure.
+
+**Remaining tiny-loop branch diagnosis:** fresh read-only worker probes confirm
+both natural-loop owners are now proven. The inner break statement retains
+source `0x1043`, but its condition carries the outer comparison's identity
+`(0x105d, 0x1059)`; linked-address execution reproduces the same mismatch.
+The emitted inner `total > 40` break survives, but validation correctly refuses
+missing coverage for its own branch. Do not repair this by accepting expression
+equality or copying statement tags without CFG proof. Trace the upstream
+condition-origin conflation and preserve distinct branch occurrences there.
+Evidence: `/home/xor/.cache/step9-guard-site.{c,log}` (exit 4).
+The storage-OR regression is now enrolled in both routine Make lists, the
+pipeline, and test ownership. The individual switch-fold command passed; full
+tiny round trips and broad gates still need refreshing after these changes.
+
+**QuickC fixture lane green (15:36 +02:00):** routine pytest **5,385 passed,
+259.13s**, plus **268 preliminary passes, 9.66s**. QuickC **4/4 passed,
+35.88s**, including `args`; generated-C contract and semantic validation pass.
+MS C tiny remains **5/7, 136.94s**, with `simple_control` and `loops_jumps`
+failing. Quality-fast remains lint-blocked; scoped MyPy and 39-module compiled
+import smoke pass. This is not the full pytest collection or Step 9 closure.
+
+**QuickC call predicates (15:28 +02:00):** exact bound-call Boolean
+normalization and validation proof ordering remove the live `args` branch
+coverage failure. **50 focused tests pass, 6.63s**; a fresh live command exits
+successfully with passed semantic and whole-tail validation. Scoped MyPy and
+the new helper's Ruff pass. Broad pipeline refresh is pending; quality-fast
+is lint-blocked with the 39-module compiled-import smoke passing.
+See [cause, DoD, failure criteria and remaining fixture diagnoses](reference/p0-quickc-call-condition-ownership.md).
+
+**Routine pytest green (15:14 +02:00):** after the InitBars composite-root
+repair, **5,376 passed in 221.11s**, plus **268 preliminary passes in 9.58s**.
+This is the routine collection, not the complete pytest suite. The separate
+round-trip lanes remain QuickC **3/4 (36.04s)** and MS C tiny **5/7 (139.55s)**;
+`args`, `simple_control`, and `loops_jumps` remain unresolved. Quality-fast is
+still lint-blocked. Step 9 remains active; no gates were disabled or weakened.
+
+**InitBars composite-root repair (15:06 +02:00):** entry-owned composite
+selection now reaches the existing stack-object lowering without bypassing
+CFG-chain proof. Fresh InitBars reports `validation=passed` and clean tail
+validation; typed pointer/field output matches the source guard. **79 related
+tests pass, 38.99s**, including InitBars and RunMenu. Ownership tests are now
+explicitly enrolled in routine gates. Scoped MyPy and ownership Ruff pass;
+quality-fast remains lint-blocked with compiled-import smoke green. Routine
+pipeline refresh is running. No whole-suite or Step 9 completion is claimed.
+See [cause, DoD, failure criteria and timing](reference/p0-initbars-composite-root.md).
+
+**InitBars investigation / validator cleanup (14:58 +02:00):** the shared-exit
+validator now separates literal-case checks, retains all refusal behavior,
+and passes Ruff and scoped MyPy; **44 focused tests pass, 6.12s**. A fresh
+InitBars run still fails. Diagnostic tracing finds that its combined guard
+uses the last JCC's origin (`0x105b1`, block `0x105ad`) while the enclosing
+node is tagged at entry `0x10560`. Ownership rejects this pair before
+call-output stack-object lowering runs. The binary linear entry reaches the
+first predicate at `0x10598`; subsequent branches form the combined guard.
+Next: prove complete composite-root ownership and all consumed predicates
+with refusal tests, then recheck stack-object lowering and initialization.
+Do not bypass ownership, initialize unknown locals, or add rendered-C repair.
+Evidence: `/home/xor/.cache/step9-initbars-debug.{c,log}`. Broad gates have
+not been rerun after the behavior-preserving validator extraction.
+
+**RunMenu execution checkpoint (14:53 +02:00):** unchanged generated C passes
+2,560 key/pause/sound scenarios, including correct call order/arguments, ESC,
+default keys, counter resets and preserved SI/DI. Deliberate lost-call,
+lost-break and wrong-argument controls compile but are rejected at execution.
+The live regression, including mutation controls, passes in **7.60s**.
+Routine pipeline refreshed: **5,364 passed / 1 failed, 237.61s**, plus
+**268 preliminary passes, 9.09s**. InitBars remains the single routine pytest
+failure, with unchanged uninitialized storage and missing condition owners.
+QuickC remains **3/4, 43.44s**. MS C tiny lane remains failing (**138.36s**).
+Quality-fast is lint-blocked; 39-module compiled-import smoke passes.
+The full-file transcript ratchet still requires a literal ESC switch case;
+reconcile it with equivalent behavioral evidence before full-file acceptance.
+This is not a full-suite or Step 9 closure. Details and oracle obligations:
+[RunMenu evidence](reference/p0-runmenu-switch-coverage.md).
+
+**RunMenu validation checkpoint (14:40 +02:00):** the shared-epilogue exit
+proof and void-return preservation now survive final validation. Exact unit
+decrement fingerprint normalization removes the four remaining predicate
+mismatches without relocating ordered comparisons across wrapping arithmetic.
+Fail-first decrement regressions: **12 failed / 1 passed, 6.00s**. After the
+fix, the combined focused run is **105 passed / 1 failed, 36.30s**: RunMenu
+passes semantic and whole-tail validation, then fails the legacy literal
+`sub_11278(local_2)` assertion. Generated-call and dispatch behavior still need
+verification before replacing any output-shape assertions. No function closure
+or Step 9 closure is claimed. New shared-exit and decrement tests are enrolled
+in routine gates; broad gates have not been refreshed. Ruff reports existing
+fingerprint-module complexity/constant debt; the new decrement test is clean.
+
+**RunMenu branch ownership (14:02 +02:00):** all remaining missing branch-owner diagnostics
+are gone after exact unconditional-loop, label/nested-entry and conditional-goto
+proofs in Structuring. The function still fails the separate switch-exit
+obligation; no validator was relaxed. Related surface: **158 passed, 7.41s**.
+Scoped/promoted typing and compiled-import smoke pass; quality-fast remains
+lint-blocked. Routine pipeline: **5,338 passed / 2 failed, 241.36s**;
+QuickC **3/4**, MS C tiny **5/7**, unchanged failing fixtures.
+Next is a typed proof for
+the break/shared-epilogue form, not suppressing `missing-case`. See
+[RunMenu Switch Coverage](reference/p0-runmenu-switch-coverage.md).
+
+**Empty connector ownership (13:35 +02:00):** exact Structuring ladder ownership now follows
+only SSA-proven empty connectors, retaining physical CFG facts for replay.
+RunMenu's missing owners decrease from six to four, but its ESC-exit obligation
+and function regression remain red. Focused surface: **33 passed, 5.96s**;
+scoped MyPy passes, quality-fast remains lint-blocked. Routine pipeline:
+**5,312 passed / 2 failed, 234.82s**, QuickC **3/4**, MS C tiny **5/7**.
+No function or Step 9 closure. See
+[RunMenu Switch Coverage](reference/p0-runmenu-switch-coverage.md).
+
+**Direct result JCC prerequisite (13:14 +02:00):** adjacent word arithmetic
+now supplies direct JE/JNE result tests at the frontend without deleting flag
+writes. Thirty-three new tests are enrolled; 79 focused checks pass. Routine
+pipeline: **5,302 passed / 2 failed in 267.65s**, with RunMenu and InitBars
+still failing. QuickC 3/4 and MS C tiny 5/7 are unchanged. Scoped/promoted
+typing and compiled-import smoke pass; lint debt remains. No function closure
+or measured speedup is claimed. See
+[RunMenu Switch Coverage](reference/p0-runmenu-switch-coverage.md).
+
+**Switch definition-survival gate (12:53 +02:00):** tracing before codegen
+identifies Inertia's typed SeqNode replacement as the destructive owner: it
+discards ten SSA definitions still read by retained RunMenu code. A new
+Structuring gate refuses this loss atomically with exact IDs; it does not
+claim the switch fixed. Focused: 26 passed / RunMenu failed. Routine pipeline:
+**5,269 passed / 2 failed in 237.67s**; InitBars and RunMenu remain. QuickC
+3/4, MS C tiny 5/7, and lint blockers are unchanged. Scoped/promoted typing
+and compiled-import smoke pass. Next is definition-preserving switch proof,
+not tag-only acceptance. See
+[RunMenu Switch Coverage](reference/p0-runmenu-switch-coverage.md).
+
+**IR branch-target prerequisite (12:33 +02:00):** bare VEX exit constants no
+longer become unknown CJMP operands; integer values and widths are retained
+at IR import. Seven real-pyvex regressions are enrolled. Routine pipeline:
+**5,262 passed / 2 failed in 249.00s**, plus 268 preliminary passes. RunMenu
+and InitBars remain red; QuickC 3/4 and MS C tiny 5/7 are unchanged. Typing
+and compiled-import smoke pass; lint debt still blocks `quality-fast`.
+No RunMenu or Step 9 closure. Details:
+[RunMenu Switch Coverage](reference/p0-runmenu-switch-coverage.md).
+
+**RunMenu diagnosis (12:18 +02:00):** live constructor tracing locates the
+switch in angr's normal codegen, not the optional typed-switch replacement.
+Its nine initial cases become ten after the existing return-case repair;
+eleven dispatch predicates still lack shared ownership. The focused ESC-exit
+regression remains red (1 failed, 30.67s). No production or gate changes and
+no additional function closure. See
+[RunMenu Switch Coverage](reference/p0-runmenu-switch-coverage.md) for evidence,
+the next proof obligations, DoD and failure definition.
+
+**InBoxLng coverage checkpoint (12:08 +02:00):** the proven wide-predicate
+producer now publishes shared condition-chain provenance before replacing the
+body. Missing/duplicate identities fail atomically; no validation gate was
+relaxed. All 12 focused checks pass, including live tail validation, strict C
+compilation and signed-wide behavior. Final routine pipeline: **5,255 passed /
+2 failed in 242.29s**, plus 268 preliminary passes. Remaining curated failures:
+InitBars and RunMenu. QuickC remains 3/4; MS C tiny remains 5/7. Global Ruff
+debt keeps `quality-fast` red; promoted MyPy and 39-module mypyc smoke pass.
+Full-suite and Step 9 completion remain unproven. See
+[Wide Return Condition Coverage](reference/p0-wide-return-condition-coverage.md)
+for reason, DoD, failure definition and timings.
+
+**SetGear ownership checkpoint (11:52 +02:00):** the transfer boundary now
+checks Alias-normalized operators rather than historical producer labels.
+Structuring uses explicit/executed arm entries instead of subtree minimum
+addresses, with a separate binary-value proof for cloned return arms. SetGear
+passes tail validation and compiled behavior; the LoadProgram regression also
+passes. Four intermediate regressions were repaired without weakening their
+checks. Final focused set: 60/60. Refreshed routine pipeline: **5,251 passed /
+3 failed in 235.33s**, plus 268 preliminary passes. Remaining curated failures:
+InitBars, RunMenu, InBoxLng. QuickC remains 3/4; MS C tiny remains 5/7.
+Global Ruff debt keeps `quality-fast` red; promoted MyPy and 39-module mypyc
+smoke pass. Full-suite and Step 9 completion remain unproven. See
+[SetGear Condition Ownership](reference/p0-setgear-condition-ownership.md)
+for each repair's reason, DoD, failure definition and measured timings.
+
+**PercolateUp loop-exit proof follow-up (11:15 +02:00):** Structuring now
+normalizes only SSA-proven empty exit connectors in a detached topology view,
+retaining physical branch edges and header/latch identities. The existing
+break receives exact typed CFG ownership; no body replacement or validation
+relaxation. Before: one topology regression failed. After: 40 focused checks
+pass, including sidecar-free PercolateUp with clean tail validation. Its
+caller-cleanup regression now also requires strict GCC compilation: 15/15
+pass. Refreshed routine pipeline: **5,232 passed / 5 failed in 329.39s**, plus
+268 preliminary passes. Remaining: InitBars, RunMenu, InBoxLng, LoadProgram,
+SetGear. QuickC remains 3/4 and MS C tiny 5/7. Global Ruff debt still blocks
+`quality-fast`; promoted MyPy and 39-module mypyc smoke pass. Full-suite and
+Step 9 completion are not claimed. See
+[Existing Loop Exit Proof](reference/p0-existing-loop-exit-proof.md).
+
+**InitMenu precision follow-up:** the isolated producer trace proves its current
+masked/shifted global pair and recorded two-word global pair canonicalize to the
+same predicate. Precision matching now consumes the existing storage normalizer
+before compaction. Eight controls reject wrong masks, shifts and global offsets
+under short and default fingerprint limits. The live InitMenu regression and
+related checks pass: 57 tests in 40.11s. This closes the InitMenu failure from the
+last curated run individually. Refreshed routine pipeline: **5,213 passed /
+6 failed in 306.96s**, plus 268 preliminary passes. QuickC remains 3/4 (`args`
+fails); MS C tiny remains 5/7 (`simple_control`, `loops_jumps` fail). The six
+curated failures are PercolateUp, InitBars, RunMenu, InBoxLng, LoadProgram and
+SetGear. `quality-fast` remains red on Ruff; promoted typing and the 39-module
+mypyc smoke pass. No full-suite or Step 9 completion is claimed.
+
+**QuickSort focused acceptance is now green:** both named and sidecar-free live
+regressions pass validation, strict gcc, compiled sorting/call-effect checks,
+and preserved-call assertions. The oracle also checks empty/singleton ranges.
+Validation now records an immutable integer-view fingerprint alongside the exact
+fingerprint: explicit same-width casts match later declarations only when width
+and signedness agree. Operator changes and removal of non-identity casts remain
+rejected. This replaces the unsuccessful identity-projection-only experiment.
+Obsolete guard-shape assertions were replaced by behavioral proof, not disabled
+semantic checks. Final focused run: 38 passed in 9.00s (warm cached live outputs);
+the preceding producer run was 37 passed / one obsolete pivot-copy assertion in
+33.35s. Focused MyPy and full architecture pass. This closes two more original
+failure cases individually: 19 revalidated / 28 unclosed, not a fresh full-suite
+result. The broad refresh is red: 5,201 curated tests passed / 10 failed in
+262.73s; three unit failures were subsequently corrected (74 related tests
+passed in 9.42s). Seven live failures remain unclosed from that run. MS C tiny
+remains 5/7; QuickC also fails. Full MyPy reports 25 errors in three legacy
+files (`omf_pat.py`, `scripts/verify_borrow_real_mode.py`, and
+`scripts/report_compiler_matches.py`). The new composite-owner redundant cast
+found by promoted typing was removed. `quality-fast` remains red on lint debt;
+39-module mypyc import smoke passes. No refreshed all-green routine or complete
+suite is claimed; Step 9 remains open.
+
+**Latest QuickSort checkpoint (supersedes the paragraphs below):** the IR
+overlapping-block successor repair and Structuring composite-pretest owner make
+sidecar-free QuickSort pass validation, strict recompilation and the ten-case
+compiled behavior oracle. Its live test still fails old output-shape assertions;
+it is not counted closed. Precision matching now compares compacted tokens
+consistently. Named QuickSort additionally exposed CLI binary-expression
+reconstruction dropping provenance tags: a new regression fails before and
+passes after preserving those tags, and is enrolled in routine gates. Seven
+missing-owner failures disappear, but two composite predicate precision failures
+remain: declaration-identity cast removal changes immutable fingerprints.
+Resolve that with typed constituent evidence, not unconditional acceptance or
+new semantic recovery in CLI. Latest focused run: 3 passed / 1 named live failure
+in 56.65s. Ruff reports 99 legacy findings in the touched CLI module. Broad gates
+have not been refreshed after this batch; Step 9 remains open. Evidence:
+[QuickSort checkpoint](reference/p0-quicksort-condition-views.md#provenance-preservation-checkpoint).
+
+**QuickSort correctness blocker:** generated C reports passed validation and
+compiles strictly, but compiled execution fails. Single-fact typed/JCC consumers
+now preserve both composite partition guards; a fresh isolated trace confirms
+the pivot comparisons and break polarity survive. The remaining behavioral
+failure is case 8 (`{0, 3, -2}`), where the reconstructed pivot lacks its signed
+word interpretation. A diagnostic-only signed conversion at both comparisons
+makes all ten cases pass; no rendered-C production repair was applied. Latest
+focused controls: 28 passed; architecture passes. Both live cases remain open.
+Final validation now rejects missing required condition owners, including stale
+complete snapshots. Next lower the constituent typed conditions with correct
+signedness. Latest broad pipeline: 5,159 passed / 7 failed; the JCC neutral-root
+over-refusal was subsequently fixed (161 related tests pass). Six live cases
+remain unclosed from that run. QuickC: 3/4 pass; MS C tiny: 5/7 round trips pass.
+Architecture and focused MyPy pass; global lint/MyPy remain red. Details:
+[QuickSort behavioral evidence](reference/p0-quicksort-condition-views.md).
+
+QuickSort now passes whole-tail validation in both named and sidecar-free
+focused cases. The live producer trace identified shared argument signedness
+refinement losing existing array-index views, plus address fingerprints
+stripping semantic casts. Repairs are in Types/Lowering and Tail Validation.
+The cases still fail later control-flow/pivot output-shape assertions, so
+neither is counted closed. Focused controls: 34 passed; project MyPy passes.
+Broad gates and lint closure remain open. See the latest lifecycle section in
+[QuickSort evidence](reference/p0-quicksort-condition-views.md).
+
+Indexed load-site joins now retain the matched index value expression instead
+of replacing a proven unsigned view with a bare signed stack variable. The
+new regression fails before and passes after; 180 segmented-load tests pass,
+but both QuickSort cases remain open. Routine pipeline: 5,109 passed / one
+InitMenu text-assertion failure; QuickC and MS C tiny round trips pass. The
+identity-cast assertion is corrected and the sequential focused rerun passes
+15 tests. Quality-fast remains red on lint debt; 39-module mypyc smoke passes.
+See [the load-site and gate evidence](reference/p0-quicksort-condition-views.md).
+
+QuickSort follow-up: nested declaration-identity projection now traverses
+required outer casts without removing them or mutating the AST. Both live
+cases still fail, but final diagnostics narrow to the indexed-memory view
+mismatch. Related tests: 27 passed; Ruff and project MyPy pass. No additional
+original failure is closed. See [condition views](reference/p0-quicksort-condition-views.md).
+
+Original-failure refresh: 15 passed / 32 failed / 0 skipped in 409.12s,
+with unchanged source hashes. Subsequent HeapSort harness repair closes two
+of those failures in focused checks: 18 passed in 2.45s, including four
+register-corruption controls; Ruff passes. Generated C remains unchanged.
+This gives 17 individually revalidated original cases, not a fresh full-suite
+result or an effort percentage. Thirty original failures remain unclosed.
+See [HeapSort runtime contract](reference/p0-heapsort-behavior-oracle.md).
+
+Literal-source follow-up: TID's MapInEMSSprite now receives `(2, 0)`, reducing
+uninitialized reads from 22 to 20. The Lowering classifier prevents a named
+stack carrier from overriding proven immediate PUSH evidence. Focused checks:
+37 passed, live TID still failed (121.05s body); missing/malformed-source
+controls are included. The routine result below predates this follow-up.
+That literal-source repair alone closed no additional original failure.
+The subsequent refresh and HeapSort checkpoint above supersede its failure
+count; shared-cause grouping remains the priority for further acceptance work.
+
+Latest repair: Lowering now schedules the existing argument-only consumer for
+semantic gaps even when arity is already correct. Four direct/masked-call
+controls pass, and TID's itoa now receives the range value, buffer address and
+radix. Whole-tail findings fall from 25 uninitialized reads plus one argument
+mismatch to 22 reads and no argument mismatch; duplicate-call and switch
+defects remain. Routine pipeline passes 5,087 curated tests (238.49s), QuickC
+and all seven MS C tiny round trips. Full architecture and MyPy pass;
+quality-fast remains red on global lint debt. InBoxLng now has a dedicated
+non-skipping live regression, replacing its old matrix entry. Source-index
+lookup preserves skip evidence for parameterized nodes. No additional baseline
+closure is claimed. See the argument-only scheduling section of the TID report.
+
+TIDShowRange follow-up: corrected the exact synthetic MS C register contract
+(BP preserved, BX scratch) and connected its BP proof in Semantics before
+Alias. Eighteen ABI controls are enrolled. Also repaired GP Lowering's binding
+of whole-local reloads, including typed folded call stores and transparent
+container dominance, with twenty new controls. TID now passes GP binding but
+still fails whole-tail validation: its argument, storage and constant-switch
+defects are not closed. Routine gates pass 5,083 curated tests in 250.21s,
+QuickC and seven MS C tiny round trips. Quality-fast remains red on global
+lint debt; a follow-up project MyPy run passes and 39 compiled-import smokes
+pass. No additional baseline closure is claimed.
+The independent 180-input/nine-corruption oracle remains required. See
+[TIDShowRange recovery evidence](reference/p0-tidshowrange-recovery.md).
+
+Latest baseline accounting: **15 of 47 failures individually resolved;
+32 remain unresolved**, without a complete-suite refresh. InBoxLng now passes
+its compact-comparison, whole-tail validation, strict compilation and compiled
+behavior gates. A live observer proved the wide-pair proof compared rendered
+offsets with machine BP offsets; Types/Lowering now uses the authoritative
+projection for both sources. Four regression controls and the live function
+are enrolled. The final warm pipeline passes 5,035 curated tests (182.57s),
+QuickC and all seven MS C tiny constructs. A first run hit SetGear's analysis
+deadline; its bounded per-test budget was adjusted without weakening assertions.
+See [closure evidence](reference/p0-inbox-condition-ownership.md) for before/after
+proof, cache conditions, timings and remaining global lint failures. DrawRadarAlt's
+existing bounded-timeout branch expected an obsolete message; it now checks
+the contextual recovery timeout and terminal no-fallback policy (one pass,
+26.86s). This is a test-contract correction, not successful function recovery.
+SetGear now passes compiled behavior checks, including signed speed boundaries
+and exact Message effects; TIDShowRange still fails validation. Intermediate
+counts below describe earlier checkpoints.
+
+Typed comparison views checkpoint (02:50 +02:00): the Structuring proof
+consumer now delegates scalar ordering views to Types/Lowering rather than
+letting a storage declaration override ConditionIR signedness. Opposite-type
+operands on both comparison sides pass exhaustive 16-bit and sampled 32-bit
+compiled checks. Proven unsigned masks remain intact; 32-bit views use fixed
+width C types rather than host-dependent long. InitMenu now casts its unsigned
+cszMenu operand for the proven signed comparison; its acceptance passes.
+Final routine pipeline passes: 268 preliminary checks, 4,955 curated tests
+(218.48s), QuickC fixtures and MSC6 tiny full roundtrips. Architecture and
+scoped MyPy pass; new module/test Ruff pass. Global quality-fast remains red
+with 6,279 Ruff findings, no reported MyPy errors, 39 compiled import smokes
+passed. No full-suite refresh or additional baseline closure is claimed.
+SetGear follow-up: exact CFG decision-ladder ownership now includes mixed
+taken/fallthrough arms and a final else, using statement block provenance.
+This lets the existing typed comparison consumer preserve signed Knots rather
+than bypassing it. The old generated C fails the new 2,304-case behavior oracle;
+new output and five corruption controls pass. The oracle and live regression
+are enrolled in the routine pipeline. Routine gates pass: 268 preliminary,
+4,969 curated tests (215.85s), QuickC (32.788s), MSC6 roundtrips (81.095s).
+Quality-fast exposed two new optional-target type errors; explicit selected-edge
+invariants resolved them. The final focused run passes 17 tests (21.21s).
+Global quality-fast still fails with 6,278 Ruff findings; no MyPy errors are
+reported and 39 compiled import smokes pass. Full-suite/expanded/hard gates
+remain open. Details and exact artifacts are in the full-suite audit document.
+
+Small COD follow-up: Ready5's stale segment-cast spelling is corrected with
+stronger exact global-write assertions (one pass, 14.11s). InBoxLng remains
+genuinely incorrect: the independent compiled-C oracle rejects z equal to both
+bounds at INT32_MIN (expected 1, actual 0). Its diagnostic now prints the axis,
+inputs and result; all eight oracle/provenance tests pass. Investigate the
+wide comparison's equality-arm polarity and typed high-word storage binding;
+do not weaken validation or treat this as formatting debt.
+Fresh uncached tracing narrows the first defect to folded single-return guard
+ownership: a shared eventual return prevents local continuation classification,
+leaving an unsigned high-word predicate. The oracle's reported z case can fail
+in its preceding x guard. See [InBoxLng ownership evidence](reference/p0-inbox-condition-ownership.md)
+before implementing or repeating probes. InBoxLng is still unresolved.
+The local-region proof is now implemented in Structuring: production output
+passes the unchanged InBoxLng behavior oracle, with 20 refusal/ownership
+controls and 69 related checks passing. Routine pipeline passes 4,989 curated
+tests plus QuickC and MSC6 roundtrips. Scoped types and architecture pass;
+global quality-fast remains red with 6,278 Ruff findings and no MyPy errors.
+InBoxLng still exits 4 on width/subview and predicate-replay validation;
+there is no additional baseline closure. Continue from the detailed evidence,
+not the superseded diagnostic-only prototype.
+Storage-width follow-up prevents sign-only evidence from resizing arguments
+and preserves wide source types during high-word extraction. Eleven new
+regressions are enrolled. Fresh InBoxLng keeps all dword declarations and
+passes compiled behavior; the later coordinate-validation repair below resolves
+its two predicate identity mismatches.
+Routine pipeline passes 5,000 curated tests (228.06s), QuickC and MSC6;
+scoped types and architecture pass. Global lint debt and full acceptance
+remain open; the baseline closure count is unchanged.
+
+Validation-coordinate follow-up: InBoxLng now exits 0 with whole-tail
+validation passed and passes the unchanged strict compiled behavior oracle.
+Machine-BP argument maps and exact word-storage identity are corrected;
+high-word normalization requires matching typed evidence, AST mask/shift,
+storage owner and source width. Nine focused coordinate/refusal tests pass.
+The live test still fails its compact whole-width condition requirement, so
+InBoxLng is not counted as closed. Related validation checks pass 396 tests
+and expose one indexed-field signed-view mismatch, also reproduced with the
+HEAD fingerprint module against current dependencies. Routine pipeline passes
+5,009 curated tests in 222.27s plus QuickC and MSC6 roundtrips; quality-fast
+remains red on lint debt, with scoped MyPy and startup architecture passing.
+See the linked InBoxLng evidence document for logs and remaining acceptance.
+
+Indexed-field validation follow-up is now repaired at the validation layer:
+an explicit signed-word segmented load and an equivalent signed struct field
+are joined only with matching storage, width, signedness and branch polarity.
+The existing failure and two storage-refusal controls pass; eleven additional
+view/refusal controls are enrolled along with the previously omitted loop
+condition family. Routine pipeline passes 5,030 curated tests (226.50s), QuickC
+and all seven MSC6 roundtrips. Project MyPy and architecture pass; quality-fast
+remains red on lint debt, with 39 compiled imports and 53 subsequent focused
+control-flow tests passing. InBoxLng's compact-condition requirement and the
+original full-suite failure inventory remain open; no baseline closure is added.
+
+ReInitBars save/restore investigation now identifies an upstream proof gap:
+the ordinary call at rebased 0x100b retains a complete stack effect but lacks
+BP preservation. Alias drops its BP coordinate, then an unresolved BP-relative
+store clears the saved-byte inventory. All eight restore candidates end as
+UNKNOWN_REFUSE, including final SI/DI. Lowering receives no proven snapshots;
+changing its byte-acceptance shortcut would not solve this case. Next: derive
+BP preservation from authoritative callee register evidence and consume it in
+the call-effect contract, with clobbered/unknown callee refusal controls. Do
+not infer it from function names, compiler convention or argument cleanup.
+No production semantics changed or additional acceptance closed by this probe.
+
+ReInitBars execution harness repaired at 02:06 +02:00: extracted generated
+bodies now receive 32-bit GP runtime definitions from the authoritative symbol
+inventory. Execution checks additionally prove nonzero ESI/EDI preservation;
+five compile-valid corruption controls reject lost clock calls, wrong copies,
+draw-before-copy and low/high register corruption. Nine focused checks pass
+(6.14s), Ruff and scoped MyPy pass. Actual generated ReInitBars now passes
+compiled behavior but still fails the unchanged redundant-local assertion.
+No additional baseline failure is closed; **36 remain unresolved**.
+
+Routine verification refreshed at 02:01 +02:00 after the type/interface changes:
+`make test-pipeline` passes, including 268 preliminary checks, 4,941 curated
+tests (175.54s), QuickC fixtures and all seven MSC6 tiny constructs through
+the full roundtrip gate. Its first run caught pytest node selectors incorrectly
+enrolled as Ruff paths; Make now passes file paths to Ruff while preserving
+the focused pytest selections. The existing three Make input checks pass.
+These are warm-cache routine results, not a complete-suite refresh or a
+performance improvement claim. The focused stage remains over its recorded
+30s budget. Full-suite and quality-hard acceptance remain open.
+
+`sub_ulong` closes its unchanged acceptance test (91.56s) after fixing typed
+interface preservation in Types/Lowering. A prototype can exist before its C
+argument variables; exact ABI offset/width matches now preserve those types
+instead of substituting unsigned body defaults. Fail-first storage controls
+and 36 related tests pass; scoped MyPy passes. Eleven original failures are
+individually resolved; **36 remain unresolved against the original baseline**.
+This is not a complete-suite refresh. See the complete-audit trace and evidence.
+
+### Earlier Checkpoints (Historical, Not Current Counts)
+
+Wide-return preservation: width-only prototype promotion no longer overwrites
+an existing 32-bit return signedness. Two fail-first controls and 44 related
+tests pass; scoped MyPy passes. The `sub_ulong` acceptance test still fails on
+its mixed signature, so the retained unresolved count remains **37**. Trace
+initial return inference versus unsigned argument materialization next; no
+function or Step 9 acceptance is claimed.
+
+MSC runtime harness fix: assembled generated bodies now receive the GP ABI
+declarations corresponding to the linked runtime. Fail-first regression and
+four unit checks pass; scoped MyPy passes. Unchanged scalar acceptance now
+compiles/executes: `sub_ss` passes, while `add_sc` save/restore locals and
+`sub_ulong` return signedness remain failures. Ten original failures are
+individually resolved; **37 remain unresolved against the original baseline**.
+No complete-suite pass is inferred. See the complete-audit follow-up.
+
+COD runner follow-up closes three stale timeout expectations: a successful
+diagnostic scan must not replace the failed child's status. Updated tests
+retain diagnostics and explicitly require the nonzero return code and absent
+validation evidence. No production behavior changed. Related runner surface:
+37 passes (8.09s). Nine original failures are individually resolved;
+**38 remain unresolved against the original 47-failure baseline**. No complete
+suite refresh or semantic-function acceptance is claimed.
+
+Retained full-suite failure follow-up: the tiny-single-call CLI regression now
+uses real decoded operand evidence instead of mnemonic-only instruction mocks.
+Its assertions are unchanged; the original failure was reproduced, and all
+five related tests pass (9.30s). It is enrolled in routine gates. Six of the
+original 47 failures are individually resolved; **41 remain unresolved against
+that baseline**. This is not a refreshed complete-suite result. Sleep remains
+open. Details: [Complete Audit](reference/p0-full-suite-20260912.md).
+
+Routine gate refresh: `test-pipeline` passed on the current changes:
+268 preliminary checks, 4,929 curated tests (246.85s), QuickC fixtures,
+and MSC6 tiny full roundtrips. `quality-fast` remains failed with 6,242
+Ruff findings; no MyPy errors were reported and 39 compiled import smokes
+passed. No exact complete-suite refresh or Sleep acceptance is claimed.
+
+Latest ownership correction: generic branch materialization no longer treats
+break/continue source tags as destination proof. This reproduced Sleep's
+reversed break polarity. Eight fail-first cases now pass; 54 related checks
+pass and scoped MyPy passes. The existing large owner retains 12 Ruff findings.
+Sleep remains failing; loop-aware wide-predicate ownership and subsequent
+scalar rematerialization are unresolved. See the detailed Sleep checkpoint.
+
+Latest Sleep checkpoint: SSA-proven multi-jump wide planning and reusable
+in-place call capture are connected; 29 focused tests pass, scoped Ruff/MyPy
+pass. The unchanged executable regression still fails on two DX reads;
+capture no longer raises its ownership exception. New owners/regressions are
+enrolled in routine gates. No full-suite failure is closed by this checkpoint.
+
+Sleep follow-up: corrected SSA exit normalization to retain an effectful
+destination even when that destination has refusals, without bypassing its
+effects. Two fail-first controls; 21 focused tests pass; scoped Ruff/MyPy pass.
+Sleep still fails its unchanged executable-only regression. A fresh probe
+isolates the next refusal to a two-jump comparison path; intermediate blocks
+need SSA-backed emptiness proof before wide ordering can be accepted.
+See [the exit-proof checkpoint](reference/p0-sleep-wide-condition-binding.md).
+Step 9 remains active; no reduction in the unresolved full-suite count.
+
+00:36 +02:00: the existing wide-call selector now consumes Alias proof at every
+AX/DX operand boundary instead of choosing the nearest call address. Four
+fail-first clobber regressions now refuse; a later check also prevents stack
+type mutation on refusal. Final related surface: 70 passes; scoped MyPy and
+architecture pass. Before the last refusal-type guard, the default pipeline
+passed 4,903 curated tests, 268 preliminary tests, QuickC and all seven tiny
+round trips. Quality remains red (6,245 Ruff findings). This is a safety
+prerequisite, not Sleep recovery: its early wide-predicate materialization is
+still pending, and 42 retained failures remain unresolved. See
+[Sleep Wide Binding](reference/p0-sleep-wide-condition-binding.md).
+
+Sleep follow-up: fresh-cache worker probes locate a wide/scalar lowering
+dependency cycle. Exact scalar DX binding refuses before CFG composition;
+the later wide-call lowerer requires that already-composed C expression and
+therefore cannot recover the typed chain. Keep exact-definition refusal;
+introduce proven wide-call predicate lowering before scalar binding with
+CFG polarity and single-evaluation proof. No production fix or new pass count
+is claimed. See [Sleep Wide Binding](reference/p0-sleep-wide-condition-binding.md).
+
+00:04 +02:00: four retained fixture failures now close without production
+semantic changes: statement-owned loop evidence replaces an operand provenance
+tag, and three positive coordinate cases supply typed frame proof instead of
+extrapolating local bindings. Original offset/identity and refusal assertions
+remain. Related checks: 104 passes (14.12s); pipeline/helper Ruff and pipeline
+MyPy pass, legacy tests retain visible lint debt. Missing files are admitted to
+the routine gates. Together with the manifest correction, five of 47 retained
+failures are individually closed; **42 remain unresolved**, not a new full-suite
+count. Sleep's real uninitialized AX/DX failure is reproduced and remains open.
+See [Complete Audit](reference/p0-full-suite-20260912.md). Step 9 is NOT complete.
+
+23:57 +02:00: **Exact complete audit: 12,560 passed / 47 failed / 167 skipped**,
+12,774 nodes, 1,906.54s; source stable, complete node accounting, memory under
+2 GiB. The manifest-selection mismatch is subsequently fixed (60 focused
+passes, Ruff clean); 46 retained failures still require resolution or documented
+supersession. Do not treat this as a new full-suite count. The loop-refusal
+surface passes 125 tests and scoped MyPy. Expanded and required quality gates
+remain open. See [Complete Audit](reference/p0-full-suite-20260912.md) for
+failure groups, exact artifacts and ordered next actions. Step 9 is NOT complete.
+
+23:13 +02:00: **RunMenu's original sidecar-free regression and the mandatory
+pipeline pass.** Structuring switch analysis was dropping unary zero-test
+cases from DEC/JCC ladders; a fail-first parameterized regression proves the
+fix. Existing switch, Escape, call and validation assertions are unchanged.
+Source-frozen gate: 4,828 curated passes (310.01s), 268 preliminary passes,
+QuickC and all seven MS C tiny round trips pass. Wrapper/topology/layer checks:
+122 passes. MyPy and the compiled-import smoke pass; quality-fast remains red
+on 6,240 style/complexity findings. Complete collection, expanded acceptance,
+required quality closure and refusal-counter auditing remain open. Step 9 is
+NOT complete. See [RunMenu Definition Binding](reference/p0-runmenu-condition-definitions.md).
+
+22:39 +02:00: new break insertion now requires exact CFG loop-exit evidence,
+not absent AST tags. Internal-edge and missing-CFG controls fail before the fix;
+28 focused tests pass afterward (15.32s), with new-owner Ruff, scoped MyPy and
+architecture passing. RunMenu no longer contains the erroneous early guard,
+but its original test still fails. Escape exists as an if/break followed by
+register restoration and return, while the current obligation/test requires a
+switch case. Trace canonical switch recovery and validate equivalent control
+flow without weakening the gate or bypassing restoration. Details:
+[RunMenu Definition Binding](reference/p0-runmenu-condition-definitions.md).
+Broad/full/expanded acceptance is unrefreshed after this gate; Step 9 stays open.
+
+22:26 +02:00: source-frozen mandatory pipeline: 4,812 passed / 1 failed in
+257.38s, plus 268 preliminary passes; QuickC and all seven MS C tiny round trips
+pass. RunMenu is the sole curated failure. Subsequent fail-first tests show
+loop-break queries also lose Rust-backed Tags through Mapping-only checks;
+that boundary is fixed with four routine cases. Loop-specific tests: 22 pass,
+RunMenu still fails Escape-case validation. Scoped MyPy passes; quality-fast
+remains red on lint findings (39-module compiled import smoke passes).
+Broad results predate the final loop-tag fix; full/expanded acceptance remains
+open. Step 9 is not complete. Details and logs are in
+[RunMenu Definition Binding](reference/p0-runmenu-condition-definitions.md).
+
+22:14 +02:00: caller-cleanup loop regressions are repaired at Structuring's
+condition projection index: consume real angr `Tags` and category-proven GP
+runtime destinations, reading the stored value without repeating its update.
+The compiled countdown oracle and five-file focused set pass: 92 tests, 19.64s.
+Eight projection/refusal cases are in both routine test lists. Scoped MyPy and
+architecture pass; four legacy lowering lint findings remain. RunMenu still
+fails its missing Escape-case gate (45.33s). Earlier broad counts below predate
+this repair; full/expanded acceptance remains open. Step 9 is not complete.
+See [RunMenu Definition Binding](reference/p0-runmenu-condition-definitions.md).
+
+20:51 +02:00: RunMenu's typed-condition operand lookup now consumes an
+Alias CFG reaching-definition proof instead of numeric address proximity.
+Five fail-first regressions and three additional boundary controls are covered;
+49 focused tests pass. Curated lane: 4,735 passed / 1 failed in 246.50s;
+RunMenu remains the failure. QuickC and MS C tiny 7/7 pass. Architecture and
+new-owner Ruff/MyPy pass; global quality remains red, full/expanded unrefreshed.
+Call-result definition/use coherence and Escape-case validation remain open.
+Step 9 is not complete. See [RunMenu Definition Binding](reference/p0-runmenu-condition-definitions.md).
+
+20:16 +02:00: the order-dependent frontend condition failure is reproduced
+and fixed at the common lift boundary. Shared register-index provenance from
+an earlier block could reach an initial full-path INC. Seeded INC/DEC tests
+fail before the fix; 138 focused tests pass afterward. Default curated lane:
+4,727 passed / 1 failed in 267.80s, with RunMenu the remaining failure.
+InitMenu remains green; QuickC and MS C tiny 7/7 pass. Architecture/scoped
+MyPy pass; global quality remains red. Full/expanded acceptance is unrefreshed.
+Step 9 stays open. See [Frontend Index Isolation](reference/p0-frontend-index-isolation.md).
+
+20:00 +02:00: InitMenu passes semantic validation, strict C compilation and
+its pause-guard oracle, now also checking SI/DI preservation. Types/Lowering
+canonicalization incorrectly fell through to raw-offset lookup when its
+authoritative projection was already the current node; a fail-first test
+now guards that identity case. Default lane: 4,724 passed / 2 failed, 225.49s.
+RunMenu remains; the new frontend two-INC failure passes with its full file
+in isolation (21 tests), so order/intermittency investigation remains open.
+QuickC/MS C pass; architecture/scoped MyPy pass; global quality remains red.
+Full collection/expanded acceptance are unrefreshed. Step 9 stays open.
+See [Native Return Segment Coherence](reference/p0-native-return-segment.md).
+
+19:20 +02:00: native callee argument cleanup now consumes complete binary
+return evidence and reconciles cleanup already applied by angr. The fail-first
+near-return regression and prototype/refusal controls pass (36 related tests).
+InitMenu advances from uninitialized save reads to stable tail stages, but
+strict GCC rejects a buffer pointer incorrectly used as a DI-save byte.
+The function remains unaccepted; trace storage coordinates next. Default
+pipeline: 4,722 passed / 2 failed in 276.73s; QuickC and MS C tiny 7/7 pass.
+Scoped Ruff/MyPy and full architecture pass; global quality remains red.
+Full collection/expanded acceptance are not refreshed. Step 9 remains open.
+See [Native Return Segment Coherence](reference/p0-native-return-segment.md).
+
+18:59 +02:00: InitBars's missing saved-register bytes traced to an omitted CS
+pop for binary-proven PUSH CS/near CALL/far-return sequences. Native tracking
+and pre-Alias IR effects now consume the same Semantics proof. The original
+InitBars regression passes; 67 related tests pass. Refreshed curated lane:
+4,716 passed / 2 failures (RunMenu, InitMenu), 275.32s. QuickC and all seven
+MS C tiny roundtrips pass. Scoped typing/new-adapter Ruff and architecture pass;
+global quality remains red on lint debt, with compiled-import smoke passing.
+Full collection/expanded acceptance remain unrefreshed. Step 9 stays open.
+See [Native Return Segment Coherence](reference/p0-native-return-segment.md).
+
+18:31 +02:00: goto_accumulate now preserves its conditional update through
+CFG/provenance-owned instruction-fragment placement in Structuring. The
+whole-body callback and dispatch hooks are removed; Lowering retains its
+refusal guard. Normal CLI validates cleanly and compiled output passes the
+independent behavioral oracle with SI/DI preserved. 475 focused tests pass.
+MS C returns to 7/7, including loops_jumps with matching exit 255; QuickC passes.
+Curated pytest: 4,707 passed / the same three SORTD failures in 302.08s.
+Scoped typing/new-owner Ruff and architecture pass; global quality remains red
+on lint debt. Full collection/expanded acceptance, clear worker error details
+and validation-baseline auditing remain open. Step 9 is not complete. See
+[Conditional Stack Update Placement](reference/p0-conditional-stack-update-placement.md).
+
+17:48 +02:00: nested_loops uses the generic body-preserving path. Structuring
+binds unique block-origin JCC identities, excludes operand provenance from
+body ownership and owns loop-continuation polarity; legacy replay preserves
+that contract. The whole-body callback and all dispatch hooks are removed.
+Normal CLI validates cleanly and compiled output matches all 65,536 signed
+limits with SI/DI preserved. 477 focused tests pass. The MS C fixture now stops
+at goto_accumulate's GP-restore invariant. Its isolated generic path validates
+but returns 18 for input 4 instead of 14: the parity-controlled continuation is
+missing. Fix that producer before retiring its callback. Refreshed curated
+pytest: 4,689 passed / the same three SORTD failures in 252.06s; QuickC passes;
+MS C remains 6/7. Global quality remains red at linters; full collection and
+expanded acceptance are not refreshed. Step 9 stays open.
+See [Nested Loop Continuation](reference/p0-nested-loop-continuation.md).
+
+16:54 +02:00: word-sum whole-body substitution is retired. Generic sum_words
+passes normal CLI validation and a compiled behavior oracle, preserving SI/DI.
+The rebuild harness now consumes Lowering's authoritative pointer-storage
+macros; pointer_memory completes the real MS C roundtrip with matching exit
+255. Focused tests and architecture gates pass; quality-fast remains red at
+global linters. Refreshed curated pytest: 4,679 passed / the same three SORTD
+failures in 364.72s. QuickC passes; MS C improves to 6/7, with only loops_jumps
+remaining failed. Full collection and expanded acceptance are not refreshed.
+See [Word Sum Body Preservation](reference/p0-pointer-sum-body-preservation.md).
+
+16:25 +02:00 checkpoint: fill_bytes now uses the generic body-preserving path.
+Near-pointer promotion publishes its recovered type to the authoritative
+prototype owner, and GP writes consume the existing pointer-storage projection
+before integer masking. The destructive byte-fill callback and dispatch slot
+were removed. Normal CLI: validation=passed, clean whole-tail validation and
+strict GCC pass. Generated C passes a UBSan behavior oracle for signed counts,
+byte values, buffer canaries and SI/DI preservation; corrupt controls fail.
+The full pointer_memory MS C fixture still stops at sum_words's GP restore
+invariant. Next: trace that function's producer/generic path without bypassing
+validation. Final curated pytest: 4,673 passed / the same three SORTD failures
+in 381.57s; QuickC passes; MS C remains 5/7. Architecture/context/ownership and
+scoped MyPy pass; global quality remains red at linters. Full collection,
+expanded acceptance and Step 9 remain open. See
+[Pointer Fill Body Preservation](reference/p0-pointer-fill-body-preservation.md).
+
+15:53 +02:00 checkpoint: generic byte indexing now uses exact carrier-register
+evidence instead of selecting the first variable in an addition. Copies retain
+provenance; adjusted, unknown, mismatched or version-shifted carriers refuse
+pointer-base substitution. The real callback-disabled fill_bytes probe now
+keeps the induction index and SI/DI effects, but its parameter/type boundary
+still fails validation. No production callback bypass was landed. Focused
+tests: 279 passed; scoped MyPy and new-module Ruff pass. Architecture/context/
+ownership gates pass. Combined pytest: 4,663 passed / the same three SORTD
+failures in 358.12s; QuickC passes, MS C remains 5/7. Global quality, full-suite
+and expanded acceptance remain open. Next: inspect exact final parameter
+type/coordinate ownership, then retire the destructive loop callback only
+after the generic function passes. See
+[Pointer Fill Body Preservation](reference/p0-pointer-fill-body-preservation.md).
+
+15:29 +02:00 investigation: fill_bytes's GP restore refusal is downstream of
+a legacy byte-fill callback replacing the entire function body and discarding
+save/restore projections and provenance. An isolated callback-disabled probe
+preserves those effects but exposes incorrect generic pointer/index binding
+and still fails the pointer-parameter gate. No production bypass was landed.
+The next repair must fix that Types/Lowering binding, then retire or replace
+the destructive whole-body callback with preserved behavior and tests.
+See [Pointer Fill Body Preservation](reference/p0-pointer-fill-body-preservation.md)
+for evidence, ordered DoD/failure contracts and reproduction. Step 9 remains
+open; the 15:24 combined result below is still the last broad test result.
+
+15:24 +02:00 acceptance refresh: the returned-call oracle repair is confirmed
+in the combined pipeline, not only its targeted run. MS C improves to 5/7;
+function_pointers validates, recompiles and executes with original/rebuilt exit
+code 255. loops_jumps and pointer_memory remain failed. QuickC passes. The
+curated pytest lane has 4,647 passes / three failures in 289.42s, preceded by
+268 preliminary passes. The three failures remain SORTD InitBars, RunMenu and
+InitMenu. quality-fast remains red at global linters; scoped checks pass.
+Full collection and expanded acceptance are not refreshed. Step 9 stays open.
+Details: [Indirect Call IR Evidence](reference/p0-indirect-call-ir.md).
+
+15:15 +02:00 checkpoint: indirect CALL boundaries now survive typed IR import,
+preventing orphaned return-address pushes from producing false GP restore
+facts. The apply_twice CLI passes validation and strict GCC. The subsequent
+routine lane reports 4,639 passed / three SORTD failures in 312.53s; QuickC
+4/4 and MS C 4/7. A separate tooling oracle repair now accepts unchanged local
+returned-call results while rejecting corruption. Its 56-test module passes;
+the targeted function-pointer MS C compile/decompile/recompile/execute roundtrip
+passes for all four functions (24.51s decompilation). Scoped Ruff/MyPy and
+architecture/context/ownership checks pass. Remaining SORTD, loops_jumps and
+pointer_memory failures, global quality debt and full/expanded acceptance keep
+Step 9 open. See [Indirect Call IR Evidence](reference/p0-indirect-call-ir.md).
+
+14:32 +02:00 checkpoint: mset_pos's duplicate byte-local/formal declaration
+is repaired in Types/Lowering using exact declaration-member ownership.
+Live physical or unified declaration keys, mixed/unknown members and malformed
+entries refuse removal. Its native compiled oracle covers all signed-word
+inputs; the real CLI passes validation, whole-tail checks and strict GCC.
+Final focused run: 43 passed. Both argument-identity modules are enrolled in
+the routine pipeline. The broad run before the last refusal guard had 268
+preliminary passes and 4,632 passed / four failed in 362.88s: the three SORTD
+tests and MONOPRIN __fimemset's uncollected/timeout result. The latter passes
+isolated, not proven fixed under broad load. QuickC remains 4/4, MS C 4/7.
+Scoped MyPy passes; broader lint debt, full collection and expanded acceptance
+remain open. No Step 9 completion or fresh broad result for the last guard.
+Details: [Argument Declaration Ownership](reference/p0-argument-declaration-ownership.md).
+
+13:58 +02:00 checkpoint: QuickC args now retains its four saved bytes
+and distinct SI/DI restores after excluding SP Phi from machine-write timing
+and admitting owned semantic casts through the shared AST boundary. Its CLI
+passes validation and strict GCC; the refreshed QuickC lane passes 4/4.
+A second consumer-level regression proved Lowering could delete a live
+register used beneath a semantic cast; the same shared-boundary correction
+closes it. Five focused modules pass 261 tests. The first routine rerun had
+4,610 passed / four failed; one obsolete memory-copy expectation has since
+been replaced by register-copy and captured-memory preservation cases.
+Final routine rerun: 268 preliminary passes; 4,612 passed / five failed in
+402.47s. QuickC remains 4/4 and MS C 4/7. The three SORTD failures remain,
+plus a reproducible mset_pos byte-local/formal-argument declaration collision
+and a dos_loadProgram broad-run timeout. The latter passes isolated; the
+two-test recheck is one failed / one passed, not a green broad lane.
+Next: trace mset_pos declaration/storage ownership without deleting live code.
+Scoped MyPy and architecture/context/ownership pass; quality-fast remains
+red on lint debt. No full-suite or Step 9 completion is claimed.
+Details: [Captured Restores And Cast Traversal](reference/p0-semantic-cast-traversal.md).
+
+12:43 +02:00: caller-cleanup regressions pass after the legacy argument
+placeholder consumer was made to honor Lowering's existing partial-PUSH
+refusal. An independent compiled-C check then exposed a temporal condition
+defect: DEC's old input boundary was applied to its updated register. Frontend
+now publishes an explicit JCC-bound result test when no independent input is
+proven; Alias consumes that view for proven decrement dispatch chains.
+The final four-module focused run passes 115 tests, including initial CX=0
+(65,536 iterations), register preservation, exhaustive repeated INC/DEC word
+boundaries, and missing/inexact binding refusals. The normalizer's new
+complexity finding is resolved without suppression; scoped MyPy and full
+architecture/context/ownership checks pass. Routine acceptance before the
+final test-contract updates: 268 preliminary passes; 4,606 passed / 7 failed
+(408.64s). Four frontend test failures were subsequently corrected and pass
+in the focused run; do not relabel that earlier broad run as green. The three
+SORTD failures remain. QuickC stays 3/4 and MS C stays 4/7. quality-fast still
+fails on broader lint debt; full-suite and expanded acceptance remain open.
+Next shared investigation: QuickC args restores SI/DI from uninitialized byte
+locals, similar to the remaining stack-restore family. Details and timing:
+`reference/p0-byteops-storage.md`, Caller And Countdown Evidence.
+
+11:56 +02:00: repaired MONOPRIN's false stack-name collision in Types/Lowering
+by excluding obsolete intermediate owners from display-name reservations,
+without dropping their coordinate evidence. Its CLI, tail validation and
+strict compiled behavior oracle pass; 49 related tests pass. Fresh routine
+lane: 4,597 passed / 5 failed (327.07s), plus 268 preliminary passes. QuickC
+recovers to 3/4 and MS C to 4/7, with storage_classes and scalar_types_io both
+reproducing original exit 255. The three SORTD failures remain, alongside two
+caller-cleanup failures: the small reproduction incorrectly emits AH and AX
+for two PUSH AX values. Architecture/ownership and scoped Ruff/MyPy pass;
+broader quality gates and full-suite acceptance remain open. Details and next
+owner investigation: `reference/p0-byteops-storage.md`, Live Projection Repair.
+
+11:34 +02:00 focused follow-up: native entry-SP provenance repairs the direct
+bump_static and QuickC hello decompilations (validation=passed). MONOPRIN now
+passes tail validation but remains rejected by the final unresolved-stack-name
+guard. Its unchanged function body passes strict GCC and the existing behavior
+oracle; coordinate collision evidence and an additional harness macro-prelude
+conflict remain to resolve. No refreshed broad pipeline or Step 9 completion
+is claimed. See `reference/p0-byteops-storage.md`, Native Coordinate Follow-up.
+
+11:15 +02:00, unaccepted coordinate change: removing global registry-delta
+extrapolation repairs byteops_unsigned and the full scalar-types MS C fixture,
+but exposes missing entry-SP versus machine-BP provenance in other callers.
+Current main lane: 4,588 passed / 4 failed (286.63s), including a new MONOPRIN
+failure reproduced in isolation. MS C remains 3/7 but storage_classes now fails
+at bump_static while scalar_types_io passes; sum_globals stays green. QuickC
+regresses to 2/4 due to hello's GP restore failure. Do not count this change as
+accepted. Next: repair the typed coordinate-domain boundary and recover these
+regressions without reinstating unproven extrapolation. See the 11:15 checkpoint
+in `reference/p0-byteops-storage.md`. Earlier green-fixture claims below are
+historical, not current whole-pipeline status.
+
+10:50 +02:00 investigation: next scalar fixture blocker is byteops_unsigned.
+The restore matcher sees C byte coordinates two bytes above Alias's proven
+SI/DI ranges; the body still contains saves/restores, so no deletion diagnosis
+is assumed. Partial output also loses the word return. Producer-level tracing
+and acceptance steps are recorded in `reference/p0-byteops-storage.md`.
+No production fix or additional gate result since the 10:44 checkpoint.
+
+10:44 +02:00: storage_classes is repaired through native load-order protection
+and Lowering's captured-byte refusal, with no diagnostic bypass in production.
+The generated sum passes clean tail validation, strict GCC, all 65,536 counter
+inputs and SI/DI preservation. The actual MS C compile/decompile/recompile/run
+fixture passes with exit code 255, improving MS C from 2/7 to 3/7.
+Refreshed routine pipeline: 268 preliminary passes; main lane 4,583 passed and
+the same three SORTD failures in 273.33s; QuickC 3/4. Four MS C fixtures remain
+red. Full architecture/ownership and touched-module MyPy pass; quality-fast
+remains red on Ruff debt. No full-suite or Step 9 completion is claimed.
+Details and remaining obligations: `reference/p0-global-sum-effects.md`,
+captured-value repair checkpoint. Older checkpoints below are historical.
+
+10:24 +02:00: native load-order guard implemented in the existing propagation
+adapter, covering both block and function models. Fail-first native tests now
+pass; 61 related tests pass in 13.51s, compatibility Ruff/MyPy and full
+architecture/ownership pass. The real-function probe confirms captured-byte
+preservation before owned stack lowering. That lowering still erases captures,
+so the function and Step 9 remain incomplete. Broad acceptance gates are not
+refreshed; detailed evidence is in `reference/p0-global-sum-effects.md`.
+
+10:14 +02:00 diagnostic update: split-store corruption has two confirmed owners.
+Native function-level folding bypasses the earlier block-only load barrier;
+guarding the shared replacement consumer preserves captured bytes. Owned stack
+lowering then independently erases those captures across a partial write.
+See `reference/p0-global-sum-effects.md`, shared replacement boundary checkpoint.
+Neither production repair is complete; existing gate totals below are unchanged.
+
+Carry-oracle checkpoint (approximately 10:00 +02:00): original and rebuilt MS C
+storage harnesses now check counter=242/246 as well as 3. A compiled corruption
+control proves the old harness accepted split-store re-evaluation; the expanded
+oracle rejects it. Fifty related tests, new-test Ruff, harness MyPy, architecture
+and ownership pass. Original MS C compilation/execution passes in an isolated
+output directory; decompilation was explicitly skipped for that source check.
+Native raw C already re-reads the low byte before owned stack lowering, which
+then merges captured-value expressions. Investigate the native SSA low-byte
+definition/use path; diagnostic propagation restrictions did not fix the C and
+were not landed. Step 9 and the function remain open. No broad suite refresh.
+Details: [carry oracle and native boundary](reference/p0-global-sum-effects.md).
+
+CLI assignment-preservation checkpoint (approximately 09:42 +02:00): traced
+the missing sum to post-validation text pruning, not missing native IR. The
+legacy helper now preserves all statements; five loss controls fail before
+repair, and 101 focused CLI tests pass afterward. MyPy, architecture and
+ownership pass; legacy Ruff debt remains. The isolated native-body oracle now
+returns 13, but a wider oracle finds split-store re-evaluation: counter=242
+returns 508 instead of 252 because the high-byte RHS reads a changed low byte.
+Next: preserve the pre-store value at its earliest typed owner. Keep the
+required body-reconstruction guard and function/fixture acceptance open.
+The routine counts below predate this CLI change; no fresh broad audit or
+Step 9 completion is claimed. See the follow-up in
+[global-sum evidence](reference/p0-global-sum-effects.md).
+
+Global-sum guard checkpoint (09:27 +02:00): the legacy whole-body sum builder
+also erased unrelated storage/calls. Four fail-first controls now pass under a
+Structuring-owned required reconstruction gate. A simple refusal was rejected
+as insufficient: native C compiled and claimed validation=passed but returned
+3 rather than 13 because its loop lost the accumulator update. The real CLI
+now fails explicitly before replacement; `_sum_globals` remains unfixed.
+Routine pytest: 4,561 passed / the same three SORTD failures in 207.22s; 268
+early checks pass, MS C remains 2/7, QuickC 3/4. Scoped Ruff/MyPy/Pyright and
+full architecture pass; global lint debt remains. Next: trace the lost update
+and close binary-to-projection validation coverage, not a whole-body rescue.
+No full-suite or Step 9 completion is claimed. See
+[global-sum evidence, DoD and failure definition](reference/p0-global-sum-effects.md).
+
+Mask-effect checkpoint (09:03 +02:00): rel_i16's remaining defect was a
+whole-body mask reconstruction dropping SI/DI storage effects. Structuring now
+refuses that replacement unless all writes belong to its exact mask object;
+calls and other storage keep the original body. Three controls failed before
+repair. Direct rel_i16 now has validation=passed, clean whole-tail validation,
+strict GCC compilation and 327,680 passing comparison/ESI/EDI-preservation cases.
+Routine pytest: 4,556 passed / the same three SORTD failures in 201.98s.
+MS C compare16 is restored: 2/7 round trips pass; QuickC remains 3/4.
+Focused typing/projection Ruff and full architecture pass; global lint debt
+remains. The final type-only annotation adjustment has focused verification,
+not a second broad run. Step 9 remains open. See
+[mask-effect DoD, failure definition and evidence](reference/p0-mask-accumulator-effects.md).
+
+Native allocation adapter checkpoint (08:45 +02:00): the native tracker now
+consumes the same binary/reaching-IR allocation proof as Semantics/Alias, before
+successor analysis and variable recovery. The two previously failing allocation
+controls pass; 59 related tests, scoped Ruff/MyPy/Pyright and full architecture
+checks pass. A fresh rel_i16 probe confirms SP=-4 after the allocating call and
+SP=-8/-6 at the SI/DI POPs, matching Alias. rel_i16 still fails GP materialization
+because the expected save/restore projections cannot be located; do not weaken
+that gate or infer a completed function repair. Routine pytest: 4,550 passed /
+the same three SORTD failures in 212.12s; MS C remains 1/7, QuickC 3/4, global
+quality-fast remains red on Ruff debt. Step 9 remains open. Next: trace the
+missing GP projections/consumption evidence after native coordinates agree.
+
+Native tracker root-cause checkpoint (2026-09-12, after 08:22): live rel_i16
+evidence supersedes the non-terminal-spill hypothesis below. Its failing facts
+are genuine SI/DI POPs. Alias proves SI at entry-SP -8/-7 and DI at -6/-5, but
+the emitted SI bytes are -6/-5. Before C generation, angr's stack tracker keeps
+SP=-2 across a binary-proven two-byte allocating call instead of producing -4.
+A new native regression has two failures (allocations 2 and 18) and one passing
+zero-allocation control. Next: share the authoritative allocation proof with
+the native stack-tracking boundary before variable recovery. Do not offset C
+variables to hide the disagreement or widen the local-return acceptance path.
+No production fix or refreshed corpus result is claimed for this checkpoint.
+
+Local-return binding checkpoint (08:22 +02:00): the three new annotation
+regressions below are repaired without removing Alias facts or weakening the
+materialization gate. Semantics proves that an exact register definition reaches
+its block-local return unchanged; Lowering verifies the existing unique,
+initialized word local and every projection of that return. The existing three
+smoke tests pass unchanged. Focused/enrollment tests: 150 passes; new-owner Ruff,
+MyPy/Pyright and full architecture checks pass. Routine pytest: 4,542 passed /
+the original three SORTD failures in 217.43s. MS C tiny remains 1/7 and QuickC
+3/4, so BP integration and Step 9 remain unaccepted. Global quality-fast still
+fails on Ruff debt. Next: exact consumer bindings for the other evidenced
+reloads (start with rel_i16), without blanket BP-load exemptions. Details and
+actual elapsed time are in [the proof report](reference/p0-stack-allocation-proof.md).
+
+BP-coordinate checkpoint (08:03 +02:00): this work is **not accepted**.
+Alias now tracks explicit SP/BP captures and requires separate callee BP
+preservation evidence; allocating-call proofs provide that evidence, ordinary
+balanced calls do not. The 182-test focused run passed, but the subsequent
+routine lane regressed to 4,514 passes / six failures in 233.57s. Three new
+stack-annotation smoke failures reach the GP restore materialization hard gate;
+the three SORTD failures remain. MS C tiny regressed to 1/7 (only simple_control
+passes); QuickC remains 3/4. Do not use the earlier 7/7 checkpoint as current
+acceptance. Global quality-fast remains red on Ruff debt.
+
+The next repair must reconcile ordinary BP-relative register spills with the
+PUSH/POP-specific GP snapshot consumer. Keep the hard gate and existing local
+annotations; do not discard newly visible storage facts to restore green tests.
+Separately, six fail-first controls exposed unproven/narrow frame values being
+accepted as address bases. Address resolution now shares the register-value
+proof predicate; 44 related tests, scoped Ruff and seven-owner MyPy pass.
+The broad pipeline has not been rerun after that small refusal repair.
+See [the detailed evidence](reference/p0-stack-allocation-proof.md).
+
+Positive stack-allocation checkpoint (approximately 07:21 +02:00): Semantics
+now combines frontend binary evidence with an unclobbered IR AX constant,
+including relocated slice/original target identities. The live InitMenu probe
+collects the 18-byte proof. Alias now consumes proven nonzero call deltas without
+inventing unknown entry SP. Two Semantics and two Alias controls failed before
+repair; the expanded focused run has 179 passes. Final routine verification:
+4,505 passes / the same three SORTD failures in 208.89s, all seven MS C tiny
+round trips pass, QuickC remains 3/4. Four-owner MyPy, new-module Pyright and
+full architecture checks pass. Existing Ruff/global quality debt remains.
+InitMenu is not fixed: BP-coordinate propagation, callee BP preservation and
+saved-register C initialization remain open. No complete-suite or Step 9
+completion claim. Evidence and next-owner constraints are in
+[the allocation proof report](reference/p0-stack-allocation-proof.md).
+
+Stack-allocation proof checkpoint (approximately 06:53 +02:00): the InitMenu
+probe found an allocating prologue CALL carrying a false complete zero-delta
+effect before Alias lost SI/DI identities on a BP-relative store. Semantics
+now refuses the ordinary balanced-call proof for allocation requests, with
+the typed reason `STACK_ALLOCATION_UNPROVEN`. This is a safety guard, not an
+InitMenu fix: binary-proven allocation transfer and Alias BP/SP propagation
+remain required. Four controls failed before the guard; 135 related tests,
+scoped Ruff and MyPy pass. The routine lane has 4,486 passes / the same three
+SORTD failures in 210.51s, all seven MS C tiny round trips pass, and QuickC
+remains 3/4. Global quality-fast remains red on lint debt. No full-suite refresh
+or Step 9 completion is claimed. See
+[the evidence and remaining repair order](reference/p0-stack-allocation-proof.md).
+
+Decrement root-edge checkpoint (approximately 06:35 +02:00): fixed switch_fold's
+missing case 2 at Alias. Carrier seeds now follow either unique typed CFG
+successor and refuse ambiguous roots. Two controls failed before repair; the
+64-test related surface passes. Strict generated-C execution covers all 65,536
+input patterns and SI/DI preservation: one failing input before, none afterward.
+Direct decompilation has validation=passed and clean whole-tail validation.
+Routine pipeline: 268 early contracts pass; 4,481 pytest passes / the same three
+SORTD failures in 193.41s. All seven MS C tiny round trips pass again; QuickC
+remains 3/4 (args fails). Scoped MyPy and full architecture pass; global Ruff is
+still red. Both the root-edge tests and selector storage guards ran in this
+routine checkpoint. Next: the SORTD storage-provenance failures and QuickC args,
+then stable complete-suite and global quality acceptance. Step 9 is not complete.
+See [root-edge DoD, proof and timings](reference/p0-decrement-root-edges.md).
+
+Selector storage-effect checkpoint (06:18 +02:00): Structuring now refuses
+return-only replacements that discard unconsumed stack, runtime-register or
+indirect-memory writes, both at selector entry and in the shared unsafe-effects
+predicate. Six fail-first controls cover those two boundaries; 162 related tests
+pass. Routine: 268 early contracts pass, then 4,469 pytest passes / the same three
+SORTD failures in 197.29s. MS C tiny improves to 6/7; QuickC is 3/4 (args fails).
+simple_control recompiles but exits 5, exposing switch_fold's missing case-2
+condition. Fix that semantic condition next without weakening storage retention.
+The selector tests were missing from the Python routine list despite Make
+enrollment; they are now added and protected by an enrollment regression.
+Final selector/tooling check: 59 passed in 5.82s. The broad count predates only
+that test-list addition. Scoped MyPy and architecture pass; global Ruff stays red.
+See [effect-preservation gate, DoD and remaining failure](reference/p0-selector-storage-effects.md).
+Step 9 remains open, including the stable complete-suite acceptance audit.
+
+Stack-restore follow-up (05:53 +02:00): Lowering recognizes exact existing byte
+saves without duplicate snapshots. __fimemset now passes strict C compilation
+and behavioral execution; 46 focused tests pass in 15.58s. Routine pipeline:
+268 early contracts pass; 4,469 pytest passes / the same three SORTD failures
+in 197.70s. External acceptance regressed to four of seven MS C round trips;
+compare16, simple_control and scalar_types_io fail, as does the QuickC lane.
+The combined patch remains unaccepted. A normal-worker cmp_i16 probe
+identifies selector-return Structuring replacing 13 assignments with a return-only
+tree, after which restore replay correctly refuses missing materialization.
+Repair that effect-preservation boundary next, without weakening the gate.
+Scoped helper Ruff/MyPy and full architecture pass; global Ruff remains red. See
+[provenance evidence and next action](reference/p0-stack-restore-provenance.md).
+These are current routine counts, not a complete full-suite acceptance audit.
+
+Calling-seed dependency checkpoint: local cache reuse now includes the actual
+inspected terminal-callee contracts and observed caller-result use, including
+in-place prototype changes. Focused tests: 43 passed; owner MyPy and full
+architecture pass. The real four-function FPTR MS C round trip now passes its
+returned-call, recompilation, execution and final-tail checks. Direct FPTR type
+handling still fails before successful fallback; no direct or whole-Step-9
+closure is claimed. Regular gates: 268 traversal/storage tests pass; routine
+pytest has 4,440 passed / the same three SORTD failures in 207.44s; all seven
+MS C tiny round trips pass. QuickC and global Ruff remain red. See
+[dependency evidence](reference/p0-calling-seed-dependencies.md).
+
+Direct FPTR follow-up (05:02 +02:00): the normal forked worker reproduces the
+invalid saved-EDI/function-pointer binding, while observed pointer-coordinate
+lookups remain correct. No speculative offset adjustment was made. The
+in-process probe is not an equivalent reproduction. Preserve the evidence in
+[worker storage investigation](reference/p0-fptr-worker-storage-investigation.md);
+the three failing SORTD regressions remain the immediate routine-lane blockers.
+
+Jump-completion checkpoint: recovered values stay provisional until the shared
+Structuring owner proves their complete jump tail preserves AX/DX. Incomplete
+and unresolved paths refuse recovery. Final focused surface: 177 passed;
+routine lane: 4,435 passed / the same three SORTD failures; MS C tiny: 6/7.
+Scoped MyPy and full architecture pass; lint debt remains. The identified
+return-proof follow-ups are addressed; resume the outstanding FPTR/SORTD/QuickC
+failures next. See [jump proof and acceptance](reference/p0-return-jump-proof.md).
+
+Branch-return proof checkpoint: the scanner no longer certifies stale AX/DX
+values across unconsumed instructions or failed materialization. The real cast
+probe preserves `sub_ss` subtraction; 148 focused tests and 327,680 compiled
+input cases pass. Routine lane: 4,415 passed / the same three SORTD failures;
+MS C tiny remains 6/7. Jump-destination proof remains a related audit item.
+See [consumption guard and evidence](reference/p0-branch-return-consumption.md).
+
+Terminal stack-byte checkpoint: `rot_ui` now consumes its proven argument byte
+instead of inventing a word local. Actual generated C passes exhaustive word-input
+execution, and the strengthened ten-function scalar MS C round trip passes.
+Final routine lane: 4,396 passed / the same three SORTD failures; MS C tiny 6/7.
+Scoped MyPy and architecture pass; global lint debt remains. An intermediate
+exact-read cast expansion exposed a subtraction-loss validation blind spot and
+was removed. Step 9 remains open. See
+[byte-view evidence and remaining validation risk](reference/p0-terminal-stack-byte-views.md).
+
+Return-proof gates: reject full-width POP result clobbers and unknown register
+identity in Semantics; portable GCC acceptance now compiles instead of merely
+checking syntax, catching the actual missing FPTR return and an uninitialized
+argument-byte read in `rot_ui`. The routine lane has 4,382 passes / the same
+three SORTD failures; MS C tiny is 5/7, Ultra QuickC 3/4. The final focused
+surface has 84 passes. Global MyPy passes; lint debt remains. A reduced probe proves stale
+callee-prototype dependencies in caller seeding. See
+[gate evidence and remaining root cause](reference/p0-return-proof-gates.md).
+
+MS C runtime ABI checkpoint: GP definitions and C89 externs now share the
+authoritative Lowering inventory. Fresh real round trips improve from two to
+six passing out of seven; function_pointers still loses the returned
+`apply_twice` result. Fifty tooling tests and scoped MyPy pass. The latest
+routine pytest result remains 4,337 passing / three SORTD failures; full-suite
+and global quality closure remain open. See [runtime ABI evidence and DoD](reference/p0-msc6-runtime-gp-abi.md).
+
+DCE declaration-retirement checkpoint: both LES variants now compile, execute,
+and pass final semantic/def-use validation. The final focused run passes 50
+tests; the broad run passes 4,337 with three SORTD failures (266.82s), plus 268
+early contracts. MS C tiny remains two passing / five failing round trips;
+global linters remain red. The declaration tests are now routinely enrolled.
+See [root cause, scope, DoD and remaining blockers](reference/p0-dce-declaration-retirement.md).
+
+Control-slot classification checkpoint (approximately 01:48-01:53 +02:00):
+`lowering/stack_declaration_identity.py` now classifies the control-slot range
+using the authoritative machine-BP projection, while retaining native storage
+identity for body/header overlap checks. Three new controls failed before the
+fix: an unreferenced projected control byte was retained, while a projected
+argument and local were incorrectly removed. All six projected-coordinate
+cases now pass, including live-reference refusal controls. The focused set has
+34 passes in 15.46s; scoped Ruff, MyPy and architecture checks pass. Existing
+routine enrollment includes the new cases.
+
+This does not close the LES functions: the wider focused run still has 51
+passes / two compiled-C failures. A direct end-of-decompilation probe removes
+the stale control declaration, whereas the scheduled cleanup left it present.
+Investigate cleanup ordering/rebuilding rather than renaming emitted text.
+The probe also exposes duplicated declaration identities causing one failed
+removal in the accounting; reconcile equivalent map keys without dropping
+live owners. The previous broad pipeline result below remains the latest broad
+evidence, not a rerun after this classifier change. Logs:
+`/home/xor/.cache/fim-control-coordinate-{before,after,focused,ruff,mypy,architecture}.log`
+and `/home/xor/.cache/fim-les-{storage-inventory,declaration-prune}.log`.
+
+Runtime-preservation checkpoint (approximately 01:33-01:47 +02:00):
+the stable-SS variable reuse path now publishes the selected native variable
+through the existing Types/Lowering coordinate owner. Three native-byte reuse
+regressions failed before this change and pass afterward. `MONOPRIN.COD`
+`__fimemset` now passes final validation and unchanged generated-C execution for
+both DF directions and counts 0..3, checking all memory, return value, and
+ES/ESI/EDI preservation. Its harness supports byte stores and rejects an
+additional deliberately corrupted ESI restore. No validation gate was bypassed.
+
+This is NOT acceptance of the broader runtime-preservation candidate. The
+source-stable routine checkpoint is 268 early contracts passing, then 4,329
+pytest passes / 5 failures in 268.91s. Failures: two LES compiled-C regressions
+(duplicate local declarations, plus an undeclared ES surface), sidecar-free
+SORTD InitBars and RunMenu, and InitMenu's zero-pause guard. InitMenu retains
+restores from uninitialized locals. The two LES failures were reproduced with
+the new reuse-publication change removed, so that change is not their cause.
+The seven MS C tiny examples have two successful round trips (compare16,
+loops_jumps) and five failures (simple_control, storage_classes,
+function_pointers, pointer_memory, scalar_types_io). Restore/save coherence and
+declaration ownership remain blockers; do not remove required restores to pass.
+
+Scoped MyPy passes for `real_mode_linear.py`; both modified test modules pass
+Ruff. Ruff reports 243 findings in the existing large lowering module.
+`quality-fast` remains red at the linter gate; its 39-module mypyc import smoke
+passes. Step 9 remains open. Logs: `/home/xor/.cache/fim-reuse-coordinate-`
+`{before,after,verified,mypy,ruff,pipeline,quality}.log` and
+`/home/xor/.cache/fim-reuse-les-control.log`. Next: repair the missing save/restore
+coherence and duplicate declaration owners, repeat focused checks and both
+pipelines, then perform the full-suite acceptance audit.
+
+Rewrite binding checkpoint: removed stack/memory word-object invention from
+the byte-join simplifier. The constructor trace proved it created the narrowed,
+unbound restore object; the earlier type-promotion hypothesis was ruled out.
+New compiled-C controls pass; routine pytest has 4,326 passes / the same one
+`__fimemset` failure (270.00s), 268 early contracts pass, and both external
+lanes pass. Scoped MyPy passes; legacy/global Ruff debt remains. Full ES/EDI
+preservation and Step 9 acceptance are still open. See
+[binding evidence](reference/p0-rewrite-byte-word-bindings.md).
+
+Native instruction-order checkpoint: the frontend/IR adapter now prevents
+pre-instruction SP facts from replacing post-update SSA values within that
+instruction. This fixes the proven ES-save/SI-slot collision, not the complete
+function. Scoped Ruff/MyPy and 66 focused tests pass. Routine pytest now has
+4,324 passes / the same one `__fimemset` failure (251.19s), 268 early contracts
+pass, and both external lanes pass. Global Ruff remains red. See
+[ordering evidence and remaining validation gap](reference/p0-stack-pointer-instruction-order.md).
+
+Save/restore preflight checkpoint (00:42-00:47 +02:00, approximately five
+minutes including focused tests): Types/Lowering now refuses incomplete
+structured pairs before deleting or replacing any carrier. Refusal propagates
+to pairs sharing a protected instruction, with typed refusal reasons and
+closed accounting. The pass consumes shared AST traversal, including switch
+bodies, instead of its partial private child walk. Four before-fix controls
+failed; the expanded Alias/carrier/traversal/pipeline-wiring surface passes
+95 tests in 14.47s. Scoped Ruff and MyPy pass. The carrier tests are now
+enrolled in the routine pipeline. This is not register-preservation closure:
+the live `__fimemset` oracle still fails (22 sibling passes / one corpus
+failure in 15.15s). The broad pipeline checkpoint below predates this guard;
+repeat broad acceptance after the preservation fix. Logs:
+`/home/xor/.cache/fim-pair-{before,after,focused,ruff,mypy}.log`.
+
+Stack-coordinate collision repair (worker probe started 00:31 +02:00):
+`add_long` first published correct BP4/entry-SP2 and BP8/entry-SP6 argument
+bindings. Byte materialization then reused those same argument objects by
+their raw BP offsets as though they were entry-SP offsets, overwriting the
+bindings with BP6/entry-SP4 and BP10/entry-SP8. The Types/Lowering argument
+lookup now consumes the registered entry-SP coordinate. Temporary diagnostic
+instrumentation was removed. Two new collision controls failed before the
+fix; the focused stack surface now passes 64 tests in 13.97s. Scoped MyPy
+passes; Ruff reports ten existing findings elsewhere in the large owning
+module, not a clean linter gate. Actual `TYPES.EXE:add_long` now has
+`validation=passed` and emits `return a + b;`. The scalar MS C round trip
+passes all ten functions, including recompilation and execution (decompilation
+35.77s). Logs: `/home/xor/.cache/fim-byte-coordinate-{before,after,mypy,ruff}.log`,
+`/home/xor/.cache/fim-add-long-coordinate-owner/`, and
+`/home/xor/.cache/fim-scalar-coordinate-roundtrip/report.json`.
+
+Preceding narrow native-liveness candidate retains only GP stack-load outputs
+with authoritative negative entry-SP anchors that reach a return, rather than
+enabling every native callee-saved output. Native restore regression passes.
+Its routine checkpoint was 4,303 passes / one `__fimemset` corpus failure in
+207.24s, 268 contract checks passing, and the external scalar lane failing
+`add_long` (now repaired above). Final coordinate resolution also preserves
+registered primary/unified argument identities across interface clones; its
+focused coordinate controls pass. The latest architecture check and scoped
+native/coordinate MyPy pass. These are partial checks, not Step 9 closure.
+`__fimemset` still requires coherent initialized save/restore state for ES/EDI,
+and full-suite, routine/expanded pipeline and quality acceptance remain open.
+
+Source-stable acceptance refresh for the coordinate repair (00:31-00:42
++02:00, approximately 11 minutes elapsed including diagnostic and gate waits):
+`make test-pipeline` passed 268 early contracts and 4,308 routine pytest tests
+with one failure in 232.65s. Both external lanes passed, including the full
+MS C tiny lane; aggregate two lanes passed / one failed. The remaining
+`__fimemset` failure has correct memory and return values but clobbers ES/EDI
+for every direction/count case. `quality-fast` remains red on global Ruff
+findings; its 39-module mypyc import smoke passes. No full-suite or expanded
+rerun was claimed. Logs: `/home/xor/.cache/fim-coordinate-owner-pipeline.log`
+and `/home/xor/.cache/fim-coordinate-owner-quality.log`.
+
+Historical checkpoints follow; their failure counts describe their source
+snapshots, not the current tree.
+
+Rejected native-liveness candidate: forcing native callee-saved return uses
+retains SI/DI restore definitions after stack SSA conversion (confirmed by exact
+AIL statements), but is too broad for the current pipeline. It produced 13
+routine failures / 4,286 passes in 214.20s and also failed the external MS C
+lane, including carry/borrow materialization and extra runtime-register writes.
+The production candidate was removed, not accepted. Keep the new binary native
+restore regression as an open obligation; do not re-enable the blanket switch.
+After removal, REP-store/BIOS/native tests give 31 passes and that one expected
+open regression (8.58s); ALU/segment-call siblings give 22 passes (15.71s).
+Scoped Ruff passes. Full pipeline was not rerun after removal; the prior
+one-corpus-failure checkpoint predates the new failing native regression.
+Logs: `/home/xor/.cache/fim-native-restore-pipeline.log`,
+`/home/xor/.cache/fim-native-candidate-reverted.log`, and
+`/home/xor/.cache/fim-native-revert-siblings.log`.
+
+Saved-state investigation: the corrected binary-only probe accepts both
+positional and keyword arguments in its diagnostic hooks. Disabling segment
+restore pruning and generic callee-save pruning together executes one and six
+times respectively. With the segment-output DCE guard installed, the ES restore
+survives, but its saved stack bytes are uninitialized and Tail Validation rejects
+them. DI restoration is still missing. This supersedes any inference from the
+earlier combined probe whose callee-save hook did not execute. Log:
+`/home/xor/.cache/fim-full-signature-prune-probe.log`.
+
+A separate diagnostic suppressing ES/EDI global-state projection leaves their
+body values in C locals, confirming that save removal and runtime-global
+projection need a coherent contract. This is not an accepted optimization:
+the raw output still has declaration/storage defects and no compiled behavioral
+acceptance. Any localization must prove entry/exit preservation and retain
+intermediate call-visible effects; never exclude registers by sample address
+or simply disable global lowering. Log:
+`/home/xor/.cache/fim-local-state-probe.log`. Forcing native callee-saved return
+uses executed 32 times but did not repair final C; its native graph needs exact
+statement inspection before drawing conclusions about DI.
+
+Segment-output DCE checkpoint: stack-lowered register-carrier pruning no longer
+treats an unread segment SSA definition as dead. A diagnostic run identified
+the native ES restore (`vvar_id=23`) being classified `definitely_dead` at this
+Types/Lowering boundary. Six architecture-register regressions failed before
+the change and pass afterward. The carrier module is now enrolled in the
+routine pipeline as well as the Make inventory; 69 carrier/wiring tests pass
+in 6.16s. Scoped MyPy passes; Ruff reports two existing complexity violations
+in the carrier module. Script/test Ruff passes.
+
+The post-change routine run, before carrier-test enrollment, reached 4,281
+passed / one corpus failure in 210.84s, with 268 early contracts and the other
+two pipeline lanes passing. `quality-fast` remains red on global lint debt;
+39-module mypyc import smoke passes. This repairs one independently unsafe DCE
+rule, not the whole function: ES/EDI preservation still fails. Logs:
+`/home/xor/.cache/fim-segment-dce-before.log`,
+`/home/xor/.cache/fim-segment-dce-after.log`,
+`/home/xor/.cache/fim-segment-dce-pipeline.log`, and
+`/home/xor/.cache/fim-carrier-enrollment.log`.
+
+Register-oracle diagnostics now check every direction/count combination instead
+of exiting on the first mismatch. All eight cases pass memory and return checks
+but fail both ES and EDI preservation, including count zero. The oracle's valid
+control and five independent corruption controls pass (including an EDI-only
+mutation); the corpus regression remains red: 6 passed / 1 failed in 6.56s.
+Scoped Ruff `check --fix` passes. Evidence:
+`/home/xor/.cache/fim-oracle-diagnostics.log`. This is a focused gate improvement,
+not a refreshed full-suite result or a semantic fix.
+
+Latest subview checkpoint: the uninitialized high-byte local is repaired at
+Types/Lowering. Exact byte projections from proven four-byte arguments now
+materialize; writes, address-taking and ambiguous ownership remain refused.
+Focused run: 32 passed / one remaining corpus failure (13.89s). `__fimemset`
+now passes strict gcc and memory/return checks but fails saved ES/DI preservation.
+The generic emitted-variable validation gap remains open despite repairing this
+instance. See the newest subview evidence in `reference/p0-far-load-width.md`.
+Expanded routine pipeline: 4,280 passed / one saved-register behavioral failure
+in 193.68s; 268 early contract checks passed. The other two pipeline lanes pass,
+including MS C round trips. Scoped Ruff/MyPy/Pyright and full architecture pass.
+Disabling callee-save pruning in a fresh binary-only probe executed six times
+but retained saves without restoring the missing register restores. Do not
+repeat disabling that pass as a fix; trace the earlier output/state boundary.
+
+Live LES input recovery now passes its binary-only validation and compiled
+behavior regression; MOV and dead-segment controls remain green. Lowering
+consumes exact logical Alias word owners and resolves unbound types against
+the target architecture. A subsequent caller-layout repair accepts body-proven
+groups of complete physical PUSH slots, with split/conflicting layouts refused.
+Byte-to-dword type promotion now includes SimTypeChar, preserving signedness.
+Latest focused surface: 37 passed; the old corpus helper-spelling assertion
+failed. Replacing that assertion with strict compilation and memory/register
+behavior found a real residual bug, not just obsolete test expectations:
+`__fimemset` reports validation success but emits uninitialized `local_5`.
+The stronger oracle has 5 passes / 1 corpus failure (6.41s). Step 9 remains open.
+That corpus test is now enrolled in routine pipeline and owned-file selection.
+Last run before enrollment: 4,268 routine tests passed in 210.95s, 268 early
+contracts passed, and all three lanes/seven MS C round trips passed. Full
+architecture and scoped MyPy/Pyright passed. This does not describe the newly
+expanded lane as green: it now includes the known strict-compilation failure.
+Enrollment and oracle verification: 118 passed / one known corpus failure in
+7.57s. Scoped gate-file Ruff/MyPy/Pyright pass; refreshed global quality-fast
+remains red on lint debt and the 39-module mypyc smoke passes.
+Next: repair the argument subview binding and reject unbound emitted locals
+even when their storage coordinates overlap initialized argument bytes.
+Earlier routine checkpoint: 4,256 passed in 282.09s, 268 early contracts,
+three lanes/seven MS C round trips passed. That run predates the caller-group
+and byte-to-dword follow-ups. Scoped typing and final architecture passed at
+that checkpoint; global quality-fast still reports lint debt.
+See [live-segment reduction and DoD](reference/p0-far-load-width.md#live-segment-reduction-open).
+
+Latest ABI follow-up: exact stack-word evidence now rejects non-SS overrides
+and BP-indexed addresses. Four new refusal regressions pass. A broader far-load
+word expansion was rejected because it created an unused required parameter;
+the existing LES compile/run test caught this and is green again after removal.
+Final pipeline: 4,250 routine tests passed in 270.07s; 268 early contracts,
+all three lanes and seven MS C round trips pass. Scoped typing/full architecture
+pass; global lint debt and `__fimemset` remain open. See
+[accepted and rejected evidence](reference/p0-far-load-width.md#abi-consumer-follow-up).
+
+Previous Step 9 follow-up: frontend normalization now includes the segment word
+in LES/LDS/LSS/LFS/LGS memory extents. All 20 decoder-path/operand-width cases
+pass. Routine pipeline: 4,246 passed in 260.28s; all three lanes and seven MS C
+round trips pass. Final Make/ownership checks: 83 passed; scoped typing and full
+architecture pass. Global lint debt remains, and `__fimemset` still fails
+validation. See [evidence, DoD and remaining work](reference/p0-far-load-width.md).
+
+Traversal/storage protection: shared read/replacement child-schema coverage,
+native SS container regressions and pre-publication Alias displacement checks
+are implemented. Errors identify the failing field or storage ranges early;
+Make pipeline targets require the fast contract gate first. See
+[scope, DoD and failure definitions](reference/decompiler-contract-gates.md).
+Previous traversal checkpoint: 268 early contract checks passed; the routine pytest lane
+passed 4,226 tests in 246.26s, and all three pipeline lanes passed, including
+all seven MS C round trips. The two stale Makefile assertions from the first
+run now require the new prerequisite. Scoped MyPy/Pyright and full architecture
+pass. The new storage matrix exposed stack variables incorrectly taking the
+generic memory equality branch; base/region identity is now preserved, with
+one shared comparator for compatibility consumers. Shared AST utilities are
+Ruff-clean; global lint debt remains. A fresh `__fimemset` regression still
+fails whole-tail validation. Its native `CVariable.name` setter exception is now
+repaired, but BP+5/BP+6 argument-subview reads remain invalid; see
+[the naming checkpoint](reference/p0-cod-scan-verdict.md#native-variable-naming-exception).
+This is not a full-suite refresh or Step 9 completion.
+
+Prototype reconciliation now uses registry BP coordinates and preflights the
+whole proposed layout before mutation. Its initial `_dos_loadProgram` regression
+was caught and repaired; validation, compilation and behavior are green again.
+See [coordinate/layout evidence and DoD](reference/p0-stack-prototype-layout.md).
+
+Entry-stack validation now initializes only bytes supplied by the declared C
+parameter value, not its physical ABI slot or unified owner. This closes a real
+false-positive verdict: `__fimemset` had briefly reported validation success
+despite byte arguments and uninitialized subviews. It now correctly fails with
+BP+5/BP+6/BP+7 coordinates and AST paths. Fourteen focused entry-range tests pass,
+including valid byte reads from wider slots; these run in the early gate.
+Scoped Ruff/MyPy/Pyright and full architecture pass. `quality-fast` remains
+blocked by global lint debt; its 39-module mypyc smoke passes.
+Current logs: `/home/xor/.cache/entry-range-{pipeline,quality-fast,architecture,pyright}.log`.
+
+The reduced LES return regression is now green: SS stack-load lowering was
+missing `CReturn.retval` traversal. Existing Alias-backed projection now handles
+the return, including nonzero SS. Routine gate: 4,001 tests passed in 260.60s,
+all three pipeline lanes passed. Full `__fimemset` remains validation-failed;
+global Ruff remains red. See the latest section of
+[the investigation](reference/p0-cod-scan-verdict.md#return-traversal-repair).
+
+Step 9 reporting repair: diagnostic COD scans can no longer promote a failed
+child to success without replacement generated C. All 34 COD batch tests pass;
+the real `__fimemset` case now correctly fails the required zero-exit check.
+Scoped typing passes; legacy Ruff findings remain. The latest targeted retry
+of the 21 full-suite failures was 2 passed / 19 failed in 207.05s, not a new
+full-suite audit. See [verdict coherence evidence](reference/p0-cod-scan-verdict.md).
+The earlier binary-only LES reduction initially returned the wrong word.
+The variable-association displacement and return traversal repairs above now
+make both MOV and LES compile/run checks pass. Full `__fimemset` recovery still
+fails independently; this is not Step 9 completion.
+
+Latest repair: InitBars' call-output coordinates now survive local stack
+replay through explicit producer ownership. Its original regression passes;
+routine pipeline: 3,994 passed in 231.62s, all seven MS C round trips passed.
+Architecture and scoped typing pass; global Ruff remains red. Full-suite
+totals are not refreshed. See [coordinate ownership evidence](reference/p0-initbars-coordinate-ownership.md).
+
+mset_pos follow-up: IR remainder signedness and Lowering SSA precedence now
+preserve both arguments; executable checks and CLI whole-tail validation pass.
+The broader routine gate found 3,991 passed and two failed (196.25s): the
+bootstrap inventory failure was repaired and rerun, but InitBars stack-identity
+validation was subsequently repaired as described above. All seven MS C round trips passed;
+global Ruff remains red. See [root cause and current evidence](reference/p0-msetpos-signed-remainder.md).
+
+RunMenu diagnostic repair: the original failing regression now passes along
+with 16 focused/segment checks. Routine pipeline: 3,982 passed in 207.87s,
+all seven MS C round trips passed. Architecture and scoped typing pass;
+global Ruff remains red. Step 9 is open; stop after its full acceptance.
+See [repair evidence](reference/p0-failure-retry-20260911.md#runmenu-diagnostic-repair).
+
+Earlier targeted retry: all 21 previously failing full-suite nodes still failed
+(166.13s, pytest `-n 7`). The later RunMenu repair above supersedes that node. This
+is not a refreshed full-suite audit. See [retry evidence and next action](reference/p0-failure-retry-20260911.md).
+
+2026-09-11 return-address safety: fixed-slot return effects now refuse dynamic
+BP indexes and incompatible segment overrides instead of dropping them.
+Scoped Ruff/types and full architecture pass. Routine pipeline: 3,978 tests
+passed in 202.08s and all seven MS C round trips passed; global Ruff remains
+red. See [native evidence and boundaries](reference/p0-return-address-evidence.md).
+
+**Latest full audit, 2026-09-11:** 11,750 passed, 21 failed, 170 skipped out of
+11,941 tests; 1,180.89s, source stable, no missing/duplicate outcomes, memory
+below 2 GiB. This supersedes the historical baseline below. The goal remains
+open. See [current failures, repair order and slow tests](reference/p0-full-suite-post-bios-20260911.md).
+
+LIFE follow-up: repaired logical frame-word evidence and false preservation
+of escaped word bytes, including wrapped BP pointers. Operand load provenance
+now survives direct CMP and stack-expression lowering. Routine pipeline: 3,944
+tests (197.70s) and all seven MS C round trips pass; typing and architecture pass.
+LIFE still fails: uninitialized-read validation restores the older C snapshot.
+Its regression now rejects timeouts. See [evidence and next steps](reference/p0-life-stack-word-evidence.md).
+
+Conditional-output follow-up: Widening no longer combines conditional byte
+writes from different blocks merely because they share a return. Native
+LIFE input tests preserve both the logical word operand and its byte execution
+effects. Latest routine gate: 3,956 passed in 222.01s and all seven MS C round
+trips passed. Scoped lint/types and full architecture pass; global Ruff and
+the full-suite failures remain open. LIFE still needs return-qualified output
+definitions; this safety fix does not close its acceptance.
+
+Return-classification follow-up: shared Semantics self-clear decoding now
+recognizes LIFE's AX zero return and AH clear consistently. Latest routine
+gate: 3,964 passed in 238.99s and seven/seven MS C round trips passed.
+Scoped types and architecture pass; global Ruff remains red. LIFE was rerun
+separately and still fails the unresolved-stack-local guard in 23.48s.
+
+2026-09-11 BIOS checkpoint: the previously failing sidecar-free BIOS strict-C
+and behavior regression now passes. IR/Alias proves released unread private
+stack writes; both DCE and direct-stack Lowering replay consume that proof, so
+late rendering no longer recreates dead local stores. Routine pipeline is
+green: 3,898 pytest tests (206.58s), all seven MS C round trips, no failed or
+timed-out lanes. Global Ruff still fails `quality-fast`; the full-suite baseline
+below has not been rerun or arithmetically reduced. See the
+[BIOS evidence and remaining acceptance](reference/p0-bios-private-frame-proof.md).
+
+**Full-suite baseline, refreshed after user review:** 11,618 passed, 26 failed,
+170 skipped out of 11,814 inventoried tests; 1,360.94s execution, source stable,
+no missing or duplicate node IDs. This supersedes the older 23-failure audit.
+Three previous failing nodes pass, six additional nodes fail. A curated green
+lane would not establish repository-wide acceptance. The immediate priority is
+to clear this full list, not add unrelated semantic or performance work. See
+[full-suite baseline and repair order](reference/p0-full-suite-baseline-20260910.md).
+
+2026-09-11 follow-up: the full architecture checker now passes (374 related
+tests), and the CLI load-program regression passes stronger compiled behavior
+acceptance (nine tests including oracle controls, with timeout pass/skip paths
+removed). These close two verified failing nodes, not a refreshed full-suite
+total. Global lint and the separate COD loadprog failure remain open.
+
+Interrupt-helper follow-up: `_MousePOS` now calls the same runtime helper that
+its header declares. Unmodeled interrupt names come from the authoritative
+handler class. The wrapper passes strict UBSan execution and validation;
+45 focused checks include five corruption controls. Routine pipeline:
+3,803 passed, one known BIOS failure in 181.39s; all seven MS C round trips
+pass. Architecture/scoped types pass, global lint remains red. DrawRadarAlt
+still times out. SetGear completes in 31-36s in private-cache diagnostics with
+a larger diagnostic budget, but retains flag equations and fails its CLI
+regression even warm; neither function is treated as fixed. Byte TEST frontend
+evidence is verified, so follow-up starts at downstream predicate consumption.
+See the full-suite
+report for evidence and the runtime-ABI scope of the mouse oracle.
+
+SetGear investigation corrected a direct-byte logical access recorded as a word.
+32 focused tests pass; routine pipeline is 3,816 passed/one known BIOS failure,
+with all seven MS C round trips passing. SetGear C remains byte-identical and
+is not fixed. Next investigate derived direction-state ITEs and rejected DCE
+changes; see [the investigation](reference/p0-setgear-investigation-20260911.md).
+
+Experimental follow-up: branchless DF synchronization removes SetGear's flag
+equations, with clean validation and GCC compilation, but introduces/exposes a
+`simple_control` MS C harness failure on undeclared `inertia_flags`. Acceptance
+is red: six/seven MS C examples pass, routine pytest is 3,817 passed/one BIOS
+failure. Resolve this regression before accepting the direction change; the
+investigation records the exact artifacts and remaining proof obligations.
+Follow-up found TEST omitted from CFG dead-write proof consumption. That handoff
+is corrected, with 95 focused checks passing and scoped lint/types clean, but
+the simple_control round trip still exposes a self-dependent unused flag cycle.
+That round-trip blocker is now resolved: an observed worker showed the
+Lowering purity census omitted the ZF equality comparison. Recognizing `CmpEQ`
+with recursively pure operands allows the evidenced dead FLAGS cycle to be
+removed, without guessing incoming FLAGS. All seven MS C round trips pass
+again; routine pytest is 3,839 passed/one known BIOS failure in 194.43s, with
+47 focused FLAGS tests passing. Global lint and SetGear's remaining acceptance
+obligations are still open. These are not refreshed full-suite totals.
+The remaining routine BIOS failure now has a fresh binary IR/Alias inventory
+and bounded implementation obligations in
+[private-frame proof](reference/p0-bios-private-frame-proof.md). Its DCE guard
+must not be bypassed: allocation/release and read/escape closure remain missing.
+Subsequent evidence work now publishes block-local extent verdicts and exact
+SSA memory coordinates, and preserves terminal RET markers at VEX import.
+Routine pytest is 3,875 passed/one known BIOS failure in 193.83s; all seven
+MS C round trips pass. Escape/ownership closure and proof-consuming deletion
+remain open, as do global lint and the full-suite baseline refresh.
+
+Wide-predicate follow-up: `_InBoxLng` now retains full-width operands and six
+wide parameters. All three derived wide-condition constructors discard stale
+word-register bindings while preserving source addresses. Validation and strict
+UBSan boundary execution pass; 24 focused checks include corruption controls.
+Routine pipeline: 3,797 passed, one known BIOS failure in 253.38s, all seven
+MS C round trips passed. Architecture and scoped types pass; global lint and
+11 existing Ruff findings in the touched modules remain open. See the
+full-suite report for the producer trace, timing ledger and acceptance scope.
+
+Signed arithmetic follow-up: `_mset_pos` exposed undefined negative shifts in
+generated C despite passing tail validation. Native Lowering now preserves
+explicit dword shift/division types with existing semantic casts; unchanged C
+passes exhaustive per-input UBSan execution. Final focused checks: 51 passed.
+Routine pipeline: 3,789 passed, one known BIOS failure in 335.71s, all seven
+MS C round trips passed. Scoped types/Ruff pass; global lint remains red.
+This is a bounded arithmetic fix, not general modulo recovery or full-suite
+acceptance. Details and failure-sensitive oracles are in the full-suite report.
+
+ConfigCrts follow-up: Lowering no longer replaces already-defined SSA values
+with fresh segmented loads using undefined register carriers. Validation and
+strict unchanged-C execution now pass; 20 focused tests include seven oracle
+corruptions. The existing exact-temporary-name assertion was replaced by the
+executable contract. Scoped types pass; global quality remains red. See the
+full-suite report for root cause, acceptance scope and gate evidence.
+
+LIFE follow-up: retained compact string diagnostics but corrected clear_mat's
+test to reject partial whole-body replacement, and extended the timer fixture
+through its actual RET with CFG coverage assertions. The eight-test module
+passes, but timeout-accepting sidecar tests do not prove function recovery.
+A longer complete-range timer probe still reaches unresolved stack locals;
+timer/pause_screen and clear_mat's normal-path parameter validation remain
+open. See the full-suite report for the verified limits of these results.
+
+Current acceptance is red, but the REP infinite-loop kernel is repaired. Eight
+sidecar-free executable cases cover both repeat prefixes, zero/one/multiple
+iterations, both directions, offset wrapping and return overflow. Each passes
+validation, strict compilation and unchanged-C execution. The repair is in
+frontend loop shape, pre-SSA return binding and typed native constant lowering,
+not Rewrite. MONOPRIN argument recovery and BIOS strict-C remain open.
+
+Latest broad lanes: **3,734 passed / 1 failed** each (234.03s and 164.81s),
+verified after the bootstrap inventory and string admission repairs. The
+remaining failure is BIOS strict-C. All three MS C tiny round trips and executable
+quality guards pass. The pipeline aggregate's one failed lane is pytest, not
+an MS C example. Scoped Ruff/MyPy/Pyright pass; global lint remains red.
+See [current REP evidence](reference/p0-monoprin-repeat-state.md).
+
+Follow-up: string timeout recovery now shares the normal codegen override's
+typed whole-function admission guard. Four previously failing mixed-effect
+regressions now refuse replacement; 18 helper tests and three CLI timeout tests
+pass, with scoped Ruff/MyPy/Pyright clean. Full fallback soundness remains open:
+setup/live-out effect preservation and validation of the replacement itself
+still need proof. Broad post-change results are recorded above and in the report.
+
+BIOS acceptance is now executable, not just syntax-only: unchanged C must
+preserve ES and the exact two-byte BDA write without unrelated global-memory
+or segment changes. Eight positive/mutation oracle controls pass; the real
+function still fails strict compilation on its two protected locals. No
+production deletion or refreshed broad total is claimed for this test-only
+change. See [BIOS execution acceptance](reference/p0-frame-coordinate-coherence.md).
+
+The BIOS proof audit also corrected shared call-range preservation: an escaped
+byte now invalidates a containing preserved word even without a separate byte
+access in the caller. IR owns the fix; both memory SSA and stack-object widening
+consume it. 53 focused tests and scoped Ruff/MyPy/Pyright pass. Broad routine
+lanes each report 3,761 passed and one BIOS failure (204.98s / 173.40s); all
+three executable quality guards and MS C round trips pass. Global lint remains
+red. This is not private-store deletion permission or BIOS completion.
+
+The following entries are historical checkpoints, not current suite totals.
+DCE deliberately
+protects the exact stack-write facts; the next repair requires earlier
+Alias/IR ownership, lifetime and escape evidence, not a weaker DCE guard.
+That investigation exposed a preceding SSA register-identity defect, now
+fixed with focused regressions. The earlier stable-source full audit reported
+**11,478 passed, 23 failed, 170 skipped** (11,671 total) in **1,370.09s**.
+Thirteen prior failures pass; the only new failing node is the added BIOS
+strict-C test. Four changed architecture findings were subsequently repaired,
+with 402 focused tests passing; that is not a refreshed full-suite total.
+P0 and the accepted runtime target remain open. See
+[SSA register identity](reference/p0-ssa-register-identity.md).
+Post-audit routine reruns each report 3,610 passed and the one BIOS strict-C
+failure (196.44s/156.44s). All three executable quality guards and the default
+MS C round-trip lane pass. Scoped MyPy/Pyright pass; global Ruff remains red.
+
+Subsequently, two stale HeapSort output assertions were replaced with strict
+compiled behavior checks on unchanged generated C. The full HeapSort module,
+ten oracle mutations and wiring pass (128 tests, 44.90s); no semantic code or
+validation was weakened. The measured full-suite total is not recalculated
+from these focused repairs. See [HeapSort acceptance](reference/p0-heapsort-behavior-oracle.md).
+
+The BIOS follow-up also found a contradictory-BP storage merge in memory SSA.
+An IR-owned guard now refuses those coordinates coherently in memory SSA and
+logical Alias storage, without deleting instructions. Machine-byte failures
+reproduce before the fix; 143 focused tests pass afterward, including captured
+old BP values. BIOS lifetime proof remains open. See
+[coordinate conflict evidence](reference/p0-stack-coordinate-conflicts.md).
+Its routine gates each report 3,629 passed and the known BIOS strict-C failure
+(171.57s/142.80s). All executable quality guards and MS C round trips pass;
+global Ruff remains red. No new full-suite total is claimed.
+The subsequent ownership-validator cleanup removes its recurring complexity
+failure without weakening checks: 124 focused tests and scoped Ruff/MyPy/Pyright
+pass, as does the real manifest CLI. Global lint and semantic P0 remain open;
+details are in the coordinate report's ownership-gate follow-up.
+The BIOS investigation then exposed a live-out validation gap for stack
+addresses passed to callees. Direct address exposure now preserves zero and
+positive-offset writes, and a new observable retains their values. Deletion
+and value-corruption regressions pass with the full focused tail-validation
+module (287 tests). Routine gates each report 3,637 passed and the known BIOS
+strict-C failure (159.84s/141.34s); all quality executable guards and MS C
+round trips pass. Global lint remains red. This is validation
+hardening, not BIOS lifetime/DCE completion. See
+[address-exposed stack validation](reference/p0-address-exposed-stack-validation.md).
+
+The stale Sleep comparison-text assertion is now a strict compiled deadline
+oracle, preserving signed casts and all existing validation guards. Both real
+Sleep routes, seven corruption controls, positive stack-validation controls
+and wiring pass: 131 tests in 19.05s. No production semantics changed; the
+full-suite baseline and BIOS blocker remain open. See
+[Sleep acceptance evidence](reference/p0-sleep-behavior-oracle.md).
+
+The stack Alias builder now meets the shared complexity limit while retaining
+phi/refusal accounting (136 focused tests, 9.37s). Its quality-dev run reports
+3,649 passed and only the known BIOS strict-C failure in 163.25s; all three
+executable quality guards pass. A separate MyPy import-scope defect found by
+that gate is fixed in shared configuration: direct checking and `make mypy-dev`
+now pass, plus 25 scope/anchor tests. Global Ruff and BIOS remain open. See
+[stack Alias quality evidence](reference/p0-stack-alias-quality.md).
+
+Frame analysis now consumes the IR captured-BP contradiction census before
+publishing its entry-SP relation; previously later rebases left a stale PROVEN
+coordinate. Both machine-code failures reproduce before the fix. Afterward,
+157 focused tests pass; routine lanes each report 3,653 passed and the known
+BIOS strict-C failure (174.84s/143.49s). Executable quality and MS C round trips
+pass. No store deletion or lifetime proof is claimed. See
+[frame-coordinate coherence](reference/p0-frame-coordinate-coherence.md).
+
+MONOPRIN's unresolved string corpus failure is confirmed semantic, not merely
+an obsolete intrinsic spelling. Native SSA chooses pre-update CX/DI on a REP
+backedge, and liveness then discards updates. A diagnostic classifier change
+restores them but does not pass validation or fix pointer/loop-bound defects;
+it was not landed. The corpus test now uses private output instead of mutating
+shared `.dec` files. See [repeat-state investigation](reference/p0-monoprin-repeat-state.md)
+for exact ownership, rejected partial trials and next acceptance steps.
+
+The repeat-state follow-up now has a sidecar-free executable false-pass
+regression: `validation=passed` and strict compilation do not prevent its
+infinite loop. It is admitted to routine selection; five oracle corruptions
+are rejected. Focused result is 115 passed and this one failure (5.15s).
+Experimental native/frontend repairs remain unlanded because they expose
+additional index, direction and width defects. Closing this false-pass is the
+next semantic priority; see the repeat-state report's executable section.
+
+The REP trial's direction ellipsis was traced to CLI expression-display depth,
+not an unsupported instruction. Export now disables that display truncation;
+the uncached trial renders the full direction expression but still fails strict
+byte-store compilation. This is a rendering-only repair, not REP/P0 closure.
+See the repeat-state report's expression-display section for evidence.
+
+The next REP blocker is now localized before SSA: generic Clinic calling-
+convention recovery clears the guessed AX return prototype, cannot recover a
+convention, and skips ReturnMaker, leaving an empty return despite a live AX
+producer. Preserve the independently proven terminal effect without inventing
+an ABI. The byte-store narrowing conversion is present in native AIL but loses
+its explicit cast during native C simplification. See the repeat-state report's
+native width/return section; no partial REP fix has been accepted.
+
+Independent return-binding repair is implemented at native return construction:
+the existing typed AL/AH/AX storage proof supplies an AIL operand before SSA,
+without inventing a calling convention or changing the prototype. The REP
+trial preserved `return 0x1235`; byte narrowing and canonical-loop acceptance
+were still open at that checkpoint and are now covered by the executable cases
+above. Historical routine tests: 3,685 passed / 2 known failures after
+replacing a newly exposed `_dos_loadProgram` spelling assertion with compiled
+behavioral coverage. A DOS/KVM compiler crash failed one external case in the
+final aggregate; that case passed its isolated full round trip. See the report
+for exact counts, timing, refusals and the retained failed-run evidence.
 
 Current P0 follow-up: native SSA DCE was deleting caller-observed ES writes.
 The IR/native adapter now publishes segment return-boundary uses before DCE;
@@ -1395,21 +3160,29 @@ The fixed weights below define total progress. A task advances only when its
 DoD evidence passes; code volume, elapsed calendar time, and plausible-looking
 output do not advance the percentage.
 
+Current reporting correction (2026-09-11): the 75% weighted estimate and
+80-115h forecast below are historical, not revalidated current progress or an
+ETA. The last full audit has 21 failures and 170 skips, global Ruff is red,
+and LIFE remains unresolved. Recent evidence repairs do not close a weighted
+milestone. Re-audit each task's current DoD and remaining root-cause families
+before publishing a replacement percentage or finish date.
+
 | Task | Weight | Complete | Started | Finished | Focused spent | Remaining focused estimate | Evidence / next boundary |
 | --- | ---: | ---: | --- | --- | ---: | ---: | --- |
 | 1. Whole-binary export | 5% | 100% | pre-ledger | pre-ledger | unknown | 0h | Closed by canonical stdout and strict compilation evidence. |
 | 2. Behavior proof | 8% | 100% | pre-ledger | pre-ledger | unknown | 0h | Closed for all source-selftested non-library functions. |
 | 3. Interprocedural contracts | 20% | 95% | pre-ledger | - | unknown | 17-27h | Signed stack arguments, exact function-pointer values, indirect calls, typed pointer-memory byte values, atomic argument replay, and terminal local pointer-output carriers are closed; broader multi-output storage remains. |
 | 4. Semantic-loss ratchets | 7% | 100% | pre-ledger | pre-ledger | unknown | 0h | Closed by the strict 20/20 executable-only gate and permanent tests. |
-| 5. Proof-backed readability | 8% | 0% | not started | - | 0h | 8-12h | Starts only after the semantic and behavior gates remain closed. |
+| 5. Proof-backed readability | 8% | 0% | restored by user, 2026-09-11; not started | - | 0h | needs recalibration | Execution Step 11 follows Step 9 correctness closure and precedes Step 12. |
 | 6. Profiling and performance | 10% | 70% | pre-ledger | - | unknown | 8-12h | Measure aggregate PSS and profile the single-function serial tail. |
 | 7. Reko mechanisms | 8% | 0% | not started | - | 0h | 10-16h | Implement only mechanisms supported by owned typed evidence. |
 | 8. Ghidra mechanisms | 34% | 85% | pre-ledger | - | unknown | 45-65h | Curated acceptance is green, but the complete 10,091-test audit exposed remaining call/type/CFG and COD recovery families that must close before this task can claim completion. |
-| **Total** | **100%** | **75%** | - | - | **historical total unavailable** | **80-115h** | Weighted completion is 75% after correcting the earlier curated-only estimate. Quality and executable pipelines are green; the complete-suite baseline is 9,865 passed, 56 failed, and 170 skipped. The latest exact last-failed rerun is 26 failed and 25 passed in 224.10s after closing the stale indexed-inventory baseline. |
+| **Total** | **100%** | **75% historical; not revalidated** | - | - | **historical total unavailable** | **Needs re-estimation** | Historical forecast was 80-115h. Current full-audit evidence is 11,750 passed, 21 failed, 170 skipped; global Ruff is red. Focused repairs and curated passes do not establish current whole-plan completion. |
 
 Task-owner estimates above overlap where Tasks 3 and 8 share a mechanism. They
-are not summed. The non-overlapping forecast table below is the authoritative
-source for the total remaining estimate.
+are not summed. The non-overlapping forecast table below retains historical
+calibration data, not a current total remaining estimate. Its open rows require
+recalibration.
 
 ### Active Step Timing
 
@@ -2163,12 +3936,20 @@ The final cell in each row is that row's DoD. Missing any listed condition,
 weakening a gate, or moving semantics to a later layer is its definition of
 failure; the detailed reason and failure clauses remain authoritative in the
 numbered task section below.
-The rows are non-overlapping and currently sum to the same rounded 80-115h total
-as the weighted task ledger. Estimates for the remaining live families are deliberately
+The rows were designed as non-overlapping historical estimates totaling 80-115h.
+That forecast is withdrawn pending current acceptance and root-cause review.
+Estimates for the remaining live families are deliberately
 separate: a passing test count cannot hide an independent semantic owner or a
 validation blind spot.
 
 #### Remaining priority by impact
+
+User stop condition (2026-09-11): finish Step 9 completely, then stop work and
+report its acceptance evidence. Do not automatically start Steps 11 or 12.
+They remain pending in the full plan and require a new user instruction to
+resume. Step 10 work before this checkpoint is limited to measured bottlenecks
+needed for Step 9. A green curated lane alone does not trigger this stop:
+Step 9's full-suite and quality acceptance below must pass first.
 
 Priority is determined by semantic blast radius and dependency leverage, not
 by the easiest percentage gain:
@@ -2185,9 +3966,10 @@ by the easiest percentage gain:
    multi-output/indexed/indirect storage first, type and object identity second,
    CFG/condition recovery third, and isolated corpus regressions only after
    those shared mechanisms close.
-2. **P1 - Step 11, proof-backed readability.** Begin only after the semantic
-   suite is green, because readable output must consume stable typed evidence
-   rather than hide unresolved ownership defects.
+2. **P1 - Step 11, proof-backed readability.** Restored by user on 2026-09-11.
+   Begin after Step 9 correctness closure. Prioritize proven stack locals and
+   arguments, explicit conditions, and removal of redundant expressions using
+   existing evidence. Do not hide unresolved semantics with prettier output.
 3. **P2 - Step 12, evidence-supported Reko mechanisms.** Implement after
    the preceding non-performance work, and
    only where the existing IR/Alias/Types contracts can prove the mechanism;
@@ -2199,6 +3981,12 @@ by the easiest percentage gain:
    selecting an implementation, preserve accepted/rejected experiment records,
    and retain semantic acceptance and aggregate-worker memory limits. Use
    mypyc only for measured residual Python kernels, not speculative compilation.
+
+Correctness-required mechanisms from Steps 11 or 12 belong to Step 9's active
+dependency chain and must not wait for their optional quality phase. Test and
+linter closure remain P0, not a final cleanup phase. Performance work may
+interrupt this order only when measurements justify its development-time or
+execution benefit without weakening correctness gates.
 
 Reason: reduce time to functional and quality closure without optimizing code
 that correctness work will replace or repeating rejected experiments.
@@ -2261,8 +4049,8 @@ or output filtering.
 | 9p | Preserve wide far-pointer returns and materialize exact stack-offset constants | before `2026-09-07 00:30 +02:00`; exact first diagnostic not retained | `2026-09-07 01:05 +02:00` | exact subtotal unavailable across continuation; final implementation and verification about 25m; test waits separate | complete | Types/Lowering now recognizes only an exact byte-pair word-load shape, so materialization cannot consume its enclosing DX:AX return. Decoded same-block constant flow retains `36` only through exact register and BP-stack identities; overlapping or unresolved writes invalidate it. The focused OVERLAY body emits both words and `36 + (funcNumber << 1)`, passes clean whole-tail validation, avoids asm fallback, and recompiles as portable-flat C. Eight focused tests, the 190-test segmented-load surface, and the 52-test changed-file gate pass with Ruff `--fix`, MyPy, type/doc ratchet, startup architecture, context, and ownership checks green. |
 | 9q | Preserve caller-clean arguments and current typed stack-owner widths | before `2026-09-07 02:27 +02:00`; exact first diagnostic not retained | `2026-09-07 02:46 +02:00` | exact subtotal unavailable across continuation; final root fix and verification about 12m; executable waits separate | complete | Recovery Metadata no longer interprets a returning callee's zero terminal cleanup as zero arguments. ARGS retains its three physical CRT pushes, folds the stale `BP+5` byte view into the current word owner, materializes the `BP+6` pointer, passes strict recompilation and clean whole-tail validation, and is byte-deterministic across three generated-C checks. The 131-test argument surface, the 137-test callsite/fixture surface, focused Ruff/MyPy/type gates, and all four Ultra QuickC fixtures pass. The fixture AST parser is independent of host libc headers. |
 | 9 | Finish remaining general interprocedural contracts, full-suite failure families, and open Ghidra mechanisms | `2026-09-02 02:10 +02:00` | - | prior closures plus completed 9c/9d/9e slices; waits excluded where recorded | 55-76h pending exact recalibration | Tasks 3 and 8 meet their per-step DoD for general indexed, indirect, stack, multi-output, type, CFG, COD, and full-suite contracts; the exact complete collection reaches zero failures without hiding coverage. |
-| 10 | Profile and optimize the remaining serial decompiler tail | not started | - | 0h | 8-12h | Aggregate PSS stays within the 2 GiB budget and measured wall time improves without semantic or validation regression. |
-| 11 | Add proof-backed readability improvements | not started | - | 0h | 8-12h | Readability changes consume existing typed evidence and all semantic gates remain green. |
+| 10 | Profile and optimize the remaining serial decompiler tail | prior accepted work; see DECOMPILER_PERFORMANCE_PLAN.md | - | recorded per experiment; no reliable aggregate | needs current-HEAD profiling | Accepted optimizations already exist. Re-profile before extending or closing this step; retain aggregate-memory and semantic gates. Do not repeat rejected experiments. |
+| 11 | Add proof-backed readability improvements | restored by user, 2026-09-11; not started | - | 0h | needs recalibration | Follow Step 9, before Step 12; consume existing typed evidence and retain all semantic gates. |
 | 12 | Implement evidence-supported Reko mechanisms | not started | - | 0h | 9-15h | Task 7 per-step DoD passes; unsupported mechanisms remain explicit refusals. |
 
 #### Step 9c acceptance contract

@@ -23,6 +23,8 @@ from enum import Enum
 
 from angr.analyses.decompiler.structurer_nodes import SequenceNode
 
+from .switch_definition_coverage import missing_switch_definition_ids_8616
+
 __all__ = [
     "TypedSwitchSeqNodeRefusal8616",
     "TypedSwitchSeqNodeResult8616",
@@ -47,6 +49,7 @@ class TypedSwitchSeqNodeRefusal8616(Enum):
     MISSING_REPLACEMENT_PATH = "missing_replacement_path"
     SWITCH_CASE_NODE_UNAVAILABLE = "switch_case_node_unavailable"
     REPLACEMENT_PATH_UNAVAILABLE = "replacement_path_unavailable"
+    LIVE_DEFINITION_LOSS = "live_definition_loss"
 
 
 @dataclass(frozen=True, slots=True)
@@ -319,6 +322,15 @@ def materialize_typed_switch_seqnode_8616(
         return _refusal_8616(
             TypedSwitchSeqNodeRefusal8616.MISSING_AIL_SWITCH_EXPRESSION,
             attempted=True,
+        )
+    missing_definitions = missing_switch_definition_ids_8616(
+        sequence, _node_at_path_8616(loop_sequence, replace_path),
+        (*case_nodes.values(), default_node, switch_expr), children=_children_8616,
+    )
+    if missing_definitions:
+        return _refusal_8616(
+            TypedSwitchSeqNodeRefusal8616.LIVE_DEFINITION_LOSS,
+            attempted=True, detail=f"varids={missing_definitions}",
         )
     switch_node = SwitchCaseNode(
         switch_expr,

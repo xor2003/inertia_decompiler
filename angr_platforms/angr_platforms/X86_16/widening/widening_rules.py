@@ -20,6 +20,7 @@ from typing import Any, TypeGuard, cast
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 
 from ..alias.alias_model_impl import AliasStorageFacts
+from ..decoded_memory_width import decoded_memory_operand_width_8616
 from ..ir.core import MemSpace
 from ..lowering.runtime_segment_access import (
     build_runtime_segment_access_context_8616,
@@ -142,10 +143,11 @@ def collect_bp_stack_access_widths_from_instructions_8616(project: object, codeg
         for insn in tuple(_dynamic_attr_8616(_dynamic_attr_8616(block, "capstone", None), "insns", ()) or ()):
             if str(_dynamic_attr_8616(insn, "mnemonic", "")).lower() == "lea":
                 continue
-            for operand in tuple(_dynamic_attr_8616(insn, "operands", ()) or ()):
+            operands = cast(tuple[object, ...], tuple(_dynamic_attr_8616(insn, "operands", ()) or ()))
+            for operand_index, operand in enumerate(operands):
                 if int(_dynamic_attr_8616(operand, "type", -1)) != 3 or _dynamic_attr_8616(operand, "mem", None) is None:
                     continue
-                mem = operand.mem
+                mem = _dynamic_attr_8616(operand, "mem")
                 if not _dynamic_attr_8616(mem, "base", None):
                     continue
                 try:
@@ -154,7 +156,11 @@ def collect_bp_stack_access_widths_from_instructions_8616(project: object, codeg
                     continue
                 if base_name != "bp":
                     continue
-                size = int(_dynamic_attr_8616(operand, "size", 0) or 0)
+                size = decoded_memory_operand_width_8616(
+                    int(_dynamic_attr_8616(insn, "id", 0)), operand_index,
+                    int(_dynamic_attr_8616(operand, "size", 0) or 0),
+                    int(_dynamic_attr_8616(operands[0], "size", 0) or 0),
+                ) or 0
                 if size <= 0:
                     continue
                 disp = int(_dynamic_attr_8616(mem, "disp", 0) or 0)

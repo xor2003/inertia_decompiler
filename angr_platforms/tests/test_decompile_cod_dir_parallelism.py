@@ -5,6 +5,8 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from inertia_decompiler import tail_validation as _tail_validation
 from inertia_decompiler.work_items import WorkItemStatus
 
@@ -157,6 +159,36 @@ def test_run_work_item_preserves_timeout_without_scan_safe_fallback(monkeypatch,
     rendered = _script._render_result_block(result)
     assert "exit kind timeout" in rendered
     assert "Timed out while recovering" in rendered
+
+
+@pytest.mark.parametrize("fallback_kind", [None, "none", "string_intrinsic"])
+def test_diagnostic_scan_cannot_promote_failed_child(monkeypatch, tmp_path, fallback_kind):
+    """A successful diagnostic scan supplies no replacement C artifact."""
+    item = _script.CodWorkItem(tmp_path / "SAMPLE.COD", "sample", "NEAR", 1, 1, b"\xc3")
+    item.cod_path.write_text("sample", encoding="utf-8")
+    scan = _script.FunctionScanResult(
+        cod_file=str(item.cod_path), proc_name="sample", proc_kind="NEAR",
+        byte_len=1, has_near_call_reloc=False, has_far_call_reloc=False,
+        ok=True, fallback_kind=fallback_kind,
+    )
+
+    def fake_child(_command, *, stdout_path, **_kwargs):
+        stdout_path.write_text("/* partial validation failure */\nvoid sample(void) {}", encoding="utf-8")
+        return 4, "", False
+
+    monkeypatch.setattr(_script, "_SUCCESS_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(_script, "_cache_source_digest", lambda _paths: "test")
+    monkeypatch.setattr(_script, "_run_decompiler_child", fake_child)
+    monkeypatch.setattr(_script, "_run_scan_safe_fallback", lambda *_args: scan)
+    result = _script._run_work_item(item, timeout=20, max_memory_mb=1024)
+
+    assert result.exit_kind == result.child_exit_kind == "cli_exit"
+    assert result.scan_safe_result is scan
+    assert not result.from_cache
+    rendered = _script._render_result_block(result)
+    assert "exit kind cli_exit" in rendered
+    assert "partial validation failure" in rendered
+    assert "scan-safe ok: True" in rendered
 
 
 def test_run_work_item_normalizes_timeout_expired_bytes(monkeypatch, tmp_path):

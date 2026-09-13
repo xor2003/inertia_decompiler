@@ -31,6 +31,8 @@ from ..ir.core import (
     SegmentOrigin,
 )
 from ..lowering.condition_stack_operands import materialize_typed_condition_stack_operand_8616
+from ..lowering.condition_stack_value import condition_stack_operand_tags_8616
+from ..lowering.gp_register_state import runtime_gp_name_for_variable_8616
 from ..lowering.stack_variable_binding import StackVariableBinding, stable_stack_binding_tags_8616
 from ..widening.segmented_load_identity import segmented_load_identity_8616
 from .condition_binary_value import materialize_binary_ir_value_8616
@@ -125,6 +127,7 @@ class SameBlockRegisterAssignment8616:
     rhs: object
     register_offset: int
     register_size: int
+    use_stored_value: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,23 +196,32 @@ def build_same_block_register_assignment_index_8616(
             seen_nodes.add(id(node))
             if not isinstance(node, CAssignment):
                 continue
-            tags = node.tags if isinstance(node.tags, dict) else {}
+            tags = node.tags if node.tags is not None else {}
             instruction_addr = tags.get("ins_addr")
             block_addr = tags.get("vex_block_addr")
             if (
                 not isinstance(instruction_addr, int)
                 or not isinstance(block_addr, int)
                 or not isinstance(node.lhs, CVariable)
-                or not isinstance(node.lhs.variable, SimRegisterVariable)
             ):
+                continue
+            variable = node.lhs.variable
+            runtime_name = runtime_gp_name_for_variable_8616(variable)
+            if isinstance(variable, SimRegisterVariable):
+                register_offset, register_size = int(variable.reg), int(variable.size)
+            elif runtime_name is not None:
+                # This typed ABI destination is mutable storage, not an SSA RHS.
+                register_offset, register_size = cast(Any, codegen).project.arch.registers[runtime_name]
+            else:
                 continue
             indexed.setdefault(block_addr, []).append(
                 SameBlockRegisterAssignment8616(
                     instruction_addr=instruction_addr,
                     lhs=node.lhs,
                     rhs=node.rhs,
-                    register_offset=int(node.lhs.variable.reg),
-                    register_size=int(node.lhs.variable.size),
+                    register_offset=register_offset,
+                    register_size=register_size,
+                    use_stored_value=runtime_name is not None,
                 )
             )
     return SameBlockRegisterAssignmentIndex8616(
@@ -332,7 +344,7 @@ def materialize_same_block_register_projection_8616(
         )
     source = (
         lhs
-        if any(
+        if candidate.use_stored_value or any(
             isinstance(child, CFunctionCall)
             for child in _iter_c_nodes_deep_8616(rhs)
         )
@@ -540,7 +552,7 @@ def _ir_value_to_cvar_8616(
             condition_size = max(1, (condition_width_bits + 7) // 8)
             if size > condition_size:
                 size = condition_size
-        tags = stable_stack_condition_binding_tags_8616(int(value.offset), size)
+        tags = condition_stack_operand_tags_8616(value, size)
         lowered = materialize_typed_condition_stack_operand_8616(
             codegen,
             base="bp",

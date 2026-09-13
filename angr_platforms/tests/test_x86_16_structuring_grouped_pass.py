@@ -1,4 +1,5 @@
 import networkx as nx
+import pytest
 from angr_platforms.X86_16.ir.condition_ir import ConditionEdgeEvidence, ConditionIR
 from angr_platforms.X86_16.ir.core import IRBlock, IRCondition, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from angr_platforms.X86_16.ir.ssa_function import SSAFunctionArtifact
@@ -331,7 +332,9 @@ def test_decision_tree_prefers_normalized_edge_cmp_value_over_affine_delta():
     assert summary["normalization_status"] == "complete"
 
 
-def test_decision_tree_accumulates_unresolved_normalized_affine_producers():
+@pytest.mark.parametrize("zero_test", [False, True])
+def test_decision_tree_accumulates_unresolved_normalized_affine_producers(zero_test: bool) -> None:
+    """A DEC zero-test must remain a case in the normalized selector ladder."""
     graph = RegionGraph()
     regions = {
         name: Region(block_addr=addr)
@@ -368,17 +371,18 @@ def test_decision_tree_accumulates_unresolved_normalized_affine_producers():
     )
     for name, raw_value, producer_semantics in cases:
         region = regions[name]
+        unary_zero = zero_test and producer_semantics[0] == "dec_reg16"
         condition = ConditionIR(
-            op="eq",
+            op="zero" if unary_zero else "eq",
             lhs=lhs,
-            rhs=IRValue(MemSpace.CONST, const=raw_value, size=2),
+            rhs=None if unary_zero else IRValue(MemSpace.CONST, const=raw_value, size=2),
             src_insn=region.region_id,
             block_addr=region.region_id,
             producer_insn=(region.region_id or 0) - 1,
         )
         region.metadata["typed_condition_edge_guards"] = (condition,)
         region.metadata["typed_condition_edge_guard_count"] = 1
-        region.metadata["typed_condition_edge_guard_ops"] = ("eq",)
+        region.metadata["typed_condition_edge_guard_ops"] = (condition.op,)
         region.metadata["typed_condition_edge_producer_semantics"] = (producer_semantics,)
 
     summary = _collect_edge_guard_decision_tree_cases_8616(graph, regions["root"])

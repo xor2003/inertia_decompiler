@@ -269,6 +269,9 @@ def _collapse_pair_8616(
             lhs=replace(pair.low_left, size=4),
             rhs=replace(pair.low_right, size=4),
             width_bits=32,
+            # The derived operands no longer denote the source CMP registers.
+            producer_semantics=None,
+            register_bindings=(),
             taken_target=preferred_target,
             fallthrough_target=other_target,
             source=(*root.source, "wide-stack-predicate-graph"),

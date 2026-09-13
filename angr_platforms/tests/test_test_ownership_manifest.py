@@ -49,7 +49,11 @@ def test_selects_positive_bp_argument_plan_tests() -> None:
 
     assert selected == (
         "angr_platforms/tests/test_x86_16_positive_bp_argument_plan.py",
+        "angr_platforms/tests/test_x86_16_les_stack_argument_behavior.py",
+        "angr_platforms/tests/test_x86_16_string_corpus_anchors.py",
         "angr_platforms/tests/test_x86_16_stack_argument_identity.py",
+        "angr_platforms/tests/test_x86_16_projected_stack_argument_identity.py",
+        "angr_platforms/tests/test_x86_16_stack_declaration_identity.py",
     )
 
 
@@ -66,6 +70,7 @@ def test_selects_real_mode_linear_focused_tests_for_implementation_file():
 
     assert selected == (
         "angr_platforms/tests/test_x86_16_stack_reload_instruction_ownership.py",
+        "angr_platforms/tests/test_x86_16_ss_traversal_contract.py",
         "angr_platforms/tests/test_x86_16_machine_stack_names.py",
         "angr_platforms/tests/test_x86_16_direct_stack_replay.py",
         "angr_platforms/tests/test_x86_16_direct_stack_reload_idempotence.py",
@@ -183,10 +188,17 @@ def test_selects_indexed_address_owner_for_ir_core():
 
 def test_selects_semantics_layer_fallback_for_unowned_semantics_file():
     selected = test_ownership_manifest.select_tests_for_files(
-        ("angr_platforms/angr_platforms/X86_16/semantics/branch_target_return.py",)
+        ("angr_platforms/angr_platforms/X86_16/semantics/unowned_test_module.py",)
     )
 
     assert selected == ("angr_platforms/tests/test_x86_16_compare_semantics.py",)
+
+
+def test_selects_decoded_memory_width_regressions():
+    selected = test_ownership_manifest.select_tests_for_files(
+        ("angr_platforms/angr_platforms/X86_16/decoded_memory_width.py",)
+    )
+    assert selected == ("angr_platforms/tests/test_x86_16_far_load_access_width.py",)
 
 
 def test_selects_structuring_layer_fallback_for_unowned_structuring_file():
@@ -361,6 +373,7 @@ def test_selects_tail_validation_focused_tests_for_implementation_file():
     )
 
     assert selected == (
+        "angr_platforms/tests/test_x86_16_escaped_stack_validation.py",
         "angr_platforms/tests/test_x86_16_validation_dataflow.py::"
         "test_tail_validation_refuses_def_use_failure_even_when_baseline_already_lost_definition",
         "angr_platforms/tests/test_x86_16_validation_control_flow.py::"

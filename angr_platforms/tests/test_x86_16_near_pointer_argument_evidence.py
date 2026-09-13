@@ -33,6 +33,26 @@ def test_direct_argument_dereference_proves_near_pointer():
     assert facts[0].access_width_bytes == 1
 
 
+@pytest.mark.parametrize(("hex_bytes", "register", "exact"), [
+    ("8b7608 c600bb", "si", True),  # pointer SI, scalar BX index
+    ("8b5e08 c600bb", "bx", True),  # pointer BX, scalar SI index
+    ("8b7608 89f3 c607bb", "bx", True),  # copied pointer carrier
+    ("8b7608 01de c604bb", "si", False),  # ADD changes the address value
+    ("8b7608 01de 89f3 c607bb", "bx", False),  # copy must retain uncertainty
+])
+def test_pointer_fact_retains_exact_current_carrier(hex_bytes, register, exact):
+    """Pointer classification alone must not authorize replacing an adjusted base."""
+    facts = _facts(hex_bytes)
+    assert len(facts) == 1
+    assert facts[0].carrier_register_name == register
+    assert facts[0].carrier_value_is_exact is exact
+
+
+def test_two_pointer_carriers_do_not_choose_an_arbitrary_base():
+    """Two loaded pointers in one address have no unique argument base."""
+    assert _facts("8b7608 8b5e0a c600bb") == ()
+
+
 @pytest.mark.parametrize("hex_bytes", [
     "8b7608 c642afbb",  # mov si,[bp+8]; mov byte ptr [bp+si-81],0xbb
     "8b7608 8d4404",  # mov si,[bp+8]; lea ax,[si+4]

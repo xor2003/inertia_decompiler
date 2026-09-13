@@ -94,6 +94,7 @@ class TerminalCallReturnTypeEvidence8616:
     call_ins_addrs: tuple[int, ...] = ()
     target_addrs: tuple[int, ...] = ()
     sources: tuple[TerminalCallReturnTypeSource8616, ...] = ()
+    inspected_target_addrs: tuple[int, ...] = ()
 
     def with_materialized_count(self, count: int) -> TerminalCallReturnTypeEvidence8616:
         """Return this evidence with its consumed-fact count."""
@@ -236,6 +237,7 @@ def collect_terminal_call_return_type_evidence_8616(
     normalized_count = 0
     failure_count = 0
     classified: list[tuple[int, int, SimType, TerminalCallReturnTypeSource8616]] = []
+    inspected_targets: set[int] = set()
     for block_addr, block_size in callbacks.function_block_ranges():
         try:
             block = callbacks.load_block(int(block_addr), int(block_size))
@@ -258,6 +260,8 @@ def collect_terminal_call_return_type_evidence_8616(
                 continue
             normalized_count += 1
             target_addr = _direct_call_target_8616(insn)
+            if isinstance(target_addr, int):
+                inspected_targets.add(target_addr)
             return_type, source = (
                 _scalar_callee_return_type_8616(project, target_addr)
                 if isinstance(target_addr, int)
@@ -276,6 +280,7 @@ def collect_terminal_call_return_type_evidence_8616(
             raw_fact_count=raw_count,
             normalized_fact_count=normalized_count,
             failure_count=failure_count,
+            inspected_target_addrs=tuple(sorted(inspected_targets)),
         )
     return_keys = {_return_type_key_8616(return_type) for _, _, return_type, _ in classified}
     if len(return_keys) > 1:
@@ -283,6 +288,7 @@ def collect_terminal_call_return_type_evidence_8616(
             raw_fact_count=raw_count,
             normalized_fact_count=normalized_count,
             failure_count=failure_count + len(classified),
+            inspected_target_addrs=tuple(sorted(inspected_targets)),
         )
     return TerminalCallReturnTypeEvidence8616(
         raw_fact_count=raw_count,
@@ -293,6 +299,7 @@ def collect_terminal_call_return_type_evidence_8616(
         call_ins_addrs=tuple(call_addr for call_addr, _, _, _ in classified),
         target_addrs=tuple(target_addr for _, target_addr, _, _ in classified),
         sources=tuple(source for _, _, _, source in classified),
+        inspected_target_addrs=tuple(sorted(inspected_targets)),
     )
 
 

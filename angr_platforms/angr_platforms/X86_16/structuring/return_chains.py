@@ -67,6 +67,7 @@ from ..semantics.branch_target_return import (
 from ..semantics.branch_target_return import (
     terminal_ax_return_effect_8616 as terminal_ax_return_effect_8616,
 )
+from ..semantics.return_register_preservation import instruction_preserves_return_registers_8616
 from ..semantics.terminal_call_paths import (
     TerminalCallPathCallbacks8616,
     TerminalCallPathStatus8616,
@@ -75,9 +76,12 @@ from ..semantics.terminal_call_paths import (
 from .expression_substitution import unique_tagged_conditions_8616
 from .multi_arm_return_chains import multi_arm_wide_return_obligation_count_8616
 from .return_chain_condition_selection import select_cfg_return_condition_8616
+from .return_path_preservation import return_path_preserves_return_registers_8616
 from .selector_return_projection import (
     assess_selector_return_projection_8616,
+    mask_accumulator_has_unconsumed_effects_8616,
     require_selector_return_projection_8616,
+    selector_return_storage_write_obligations_8616,
 )
 from .surplus_guard_contracts import (
     SurplusGuardCleanupEvidence8616 as SurplusGuardCleanupEvidence8616,
@@ -96,6 +100,7 @@ from .terminal_register_values import (
 class _ReturnChainCFunction8616(Protocol):
     """Dynamic angr/codegen C function object carrying a mutable statement root."""
 
+    addr: int
     statements: object
 
 
@@ -802,7 +807,10 @@ class ReturnChainEmptyIfCallbacks8616:
 
 @dataclass(frozen=True, slots=True)
 class BranchTargetReturnBlockResult8616:
-    """Result from a compatibility block scan for branch-target return recovery."""
+    """Block value plus any jump tail still requiring preservation proof.
+
+    When ``next_target`` is present, ``expr`` is provisional, not a proven return.
+    """
 
     expr: object | None = None
     next_target: int | None = None
@@ -1339,7 +1347,7 @@ def scan_branch_target_return_block_8616(
     block: object,
     callbacks: BranchTargetReturnScanCallbacks8616,
 ) -> BranchTargetReturnBlockResult8616:
-    """Scan a CFG target block through a dynamic boundary: third-party Capstone instructions."""
+    """Consume every effect or prove return-register preservation before reuse."""
     ax_value: object | None = None
     dx_value: object | None = None
 
@@ -1378,15 +1386,20 @@ def scan_branch_target_return_block_8616(
                 ax_value = next_ax
                 continue
         if effect.kind is BranchTargetReturnEffectKind8616.JUMP:
-            combined = _combined_return_expr()
-            if combined is not None:
-                return BranchTargetReturnBlockResult8616(expr=combined)
-            return BranchTargetReturnBlockResult8616(next_target=effect.jump_target)
+            if effect.jump_target is None:
+                return BranchTargetReturnBlockResult8616()
+            return BranchTargetReturnBlockResult8616(
+                expr=_combined_return_expr(), next_target=effect.jump_target,
+            )
         if effect.kind is BranchTargetReturnEffectKind8616.RETURN:
             return BranchTargetReturnBlockResult8616(expr=_combined_return_expr())
         if effect.kind is BranchTargetReturnEffectKind8616.CONTROL_BOUNDARY:
             return BranchTargetReturnBlockResult8616()
-    return BranchTargetReturnBlockResult8616(expr=_combined_return_expr())
+        # Unmodeled arithmetic and failed materialization cannot preserve the
+        # previous AX/DX value merely because the scanner did not consume them.
+        if not instruction_preserves_return_registers_8616(insn):
+            return BranchTargetReturnBlockResult8616()
+    return BranchTargetReturnBlockResult8616()
 
 
 def _return_chain_reg_name_8616(insn: object, operand: object) -> str:
@@ -1980,6 +1993,10 @@ def branch_target_return_expr_8616(
         return None
     result = scan_block(block)
     if result.expr is not None:
+        if result.next_target is not None and not return_path_preserves_return_registers_8616(
+            result.next_target, load_block, max_depth=max_depth - _depth - 1,
+        ):
+            return None
         return result.expr
     if result.next_target is None:
         return None
@@ -2249,6 +2266,8 @@ def materialize_cfg_mask_accumulator_8616(
         return False
     mask_expr = callbacks.stack_slot_expr(codegen, int(slot_offset), 2)
     if mask_expr is None:
+        return False
+    if mask_accumulator_has_unconsumed_effects_8616(cfunc.statements, mask_expr):
         return False
     statements: list[CStatement] = [
         CAssignment(mask_expr, CConstant(0, SimTypeShort(False), codegen=codegen), codegen=codegen)
@@ -2563,6 +2582,13 @@ def selector_function_has_unsafe_effects_8616(
     allowed_call_addrs: frozenset[int] = frozenset(),
 ) -> bool:
     """Return side-effect risk from a dynamic boundary: third-party Capstone instructions."""
+    # Some instruction-only callers run before angr publishes a C function.
+    try:
+        root = codegen.cfunc.statements
+    except AttributeError:
+        root = None
+    if selector_return_storage_write_obligations_8616(root):
+        return True
     inventory = callbacks.function_inventory(project, codegen)
     if not inventory.complete:
         return True
@@ -2680,6 +2706,12 @@ def materialize_cfg_selector_return_branches_8616(
                 stats,
             )
         return _refuse("multi-arm-obligation")
+    write_obligations = selector_return_storage_write_obligations_8616(codegen.cfunc.statements)
+    if write_obligations:
+        stats["refused"] += len(write_obligations)
+        log.debug("[cfg-selector-return] function=%#x refused unconsumed storage writes=%d",
+                  codegen.cfunc.addr, len(write_obligations))
+        return _refuse("unconsumed-storage-writes")
     if callbacks.materialize_decrement_switch_return_chain(project, codegen):
         stats["materialized"] += 1
         require_selector_return_projection_8616(

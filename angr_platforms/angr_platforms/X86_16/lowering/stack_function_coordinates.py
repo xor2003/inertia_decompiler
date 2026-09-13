@@ -194,7 +194,15 @@ def projected_c_function_machine_bp_offset_8616(
     projection = c_function_stack_coordinate_projection_8616(cfunc)
     if projection is not None:
         return projection.machine_bp_offset(variable.offset)
+    return _registered_cvar_offset_8616(codegen, cfunc, variable)
 
+
+def _registered_cvar_offset_8616(
+    codegen: object,
+    cfunc: _CFunctionBoundary8616,
+    variable: SimStackVariable,
+) -> int | None:
+    """Distinguish rebound formal arguments from untouched entry-SP locals."""
     # Final argument lowering may replace the C argument with its machine-BP
     # view while untouched local clones retain entry-SP offsets. The owned
     # registry preserves both coordinates and the exact C argument binding.
@@ -228,6 +236,8 @@ def projected_c_function_machine_bp_offset_8616(
                 argument_variable.size,
             )
         if bound is not None:
+            if variable is argument_variable or variable is argument.unified_variable:
+                return bound.bp_offset
             bound_projections.append(bound)
     deltas = {
         item.bp_offset - item.entry_sp_offset for item in bound_projections
@@ -240,13 +250,32 @@ def final_c_function_machine_bp_offset_8616(
     variable: SimStackVariable,
 ) -> int | None:
     """Resolve a final C variable without publishing mutable C evidence as Alias truth."""
+    from .stack_variable_coordinates import (
+        machine_bp_offset_for_stack_variable_8616,
+        stack_variable_coordinate_registry_8616,
+    )
+
+    # A selected argument may already use machine-BP coordinates while its
+    # untouched siblings still use entry-SP. Exact ownership outranks a delta.
+    registry = stack_variable_coordinate_registry_8616(codegen)
+    owned = registry.for_variable(variable)
+    if owned is not None:
+        return owned.bp_offset
+    bound_views = {
+        item.bp_offset for item in registry.projections
+        if isinstance(item.cvar, CVariable)
+        and item.cvar.unified_variable is variable
+        and isinstance(item.cvar.variable, SimStackVariable)
+        and (variable.base, variable.offset, variable.size, variable.region)
+        == (item.cvar.variable.base, item.cvar.variable.offset, item.cvar.variable.size, item.cvar.variable.region)
+    }
+    if bound_views:
+        return next(iter(bound_views)) if len(bound_views) == 1 else None
     projected = projected_c_function_machine_bp_offset_8616(codegen, variable)
     if isinstance(projected, int):
         return projected
     # Imported here to keep the authoritative Alias/frame owner independent of
     # this late C-interface projection.
-    from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
-
     fallback = machine_bp_offset_for_stack_variable_8616(codegen, variable)
     return fallback if isinstance(fallback, int) else None
 

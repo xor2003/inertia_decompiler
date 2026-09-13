@@ -20,6 +20,7 @@ from ..ir.logical_memory_contracts import (
     IRLogicalMemoryArtifact8616,
     IRLogicalMemoryRefusal8616,
 )
+from ..ir.ssa_memory_ranges import StackCoordinateAgreement8616
 from .alias_model_impl import AliasStorageFacts, alias_facts_for_ir_address_8616
 from .stack_memory_ssa_contracts import StackMemoryAliasStats8616
 
@@ -34,6 +35,7 @@ class LogicalStackStorageIdentityFailure8616(StrEnum):
     NON_STACK_ADDRESS = "non_stack_address"
     UNSTABLE_BP_ADDRESS = "unstable_bp_address"
     ALIAS_FAILURE = "alias_failure"
+    COORDINATE_CONFLICT = "coordinate_conflict"
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +100,7 @@ class LogicalStackStorageIdentityProjection8616:
 def _project_access_8616(
     function_addr: int,
     source: IRLogicalMemoryAccess8616,
+    coordinate_agreement: StackCoordinateAgreement8616,
 ) -> LogicalStackStorageIdentity8616 | LogicalStackStorageIdentityRefusal8616:
     """Project one exact logical operand without claiming memory value state."""
     if source.key.function_addr != function_addr:
@@ -113,6 +116,12 @@ def _project_access_8616(
             source,
         )
     address = source.address
+    if address.space is MemSpace.SS and coordinate_agreement is StackCoordinateAgreement8616.CONFLICT:
+        return LogicalStackStorageIdentityRefusal8616(
+            LogicalStackStorageIdentityFailure8616.COORDINATE_CONFLICT,
+            "BP-relative storage has contradictory captured coordinates",
+            source,
+        )
     if address.space is not MemSpace.SS:
         return LogicalStackStorageIdentityRefusal8616(
             LogicalStackStorageIdentityFailure8616.NON_STACK_ADDRESS,
@@ -142,6 +151,8 @@ def _project_access_8616(
 def project_logical_stack_storage_identities_8616(
     function_addr: int,
     source: IRLogicalMemoryArtifact8616 | None,
+    *,
+    coordinate_agreement: StackCoordinateAgreement8616 = StackCoordinateAgreement8616.NO_CONFLICT_OBSERVED,
 ) -> LogicalStackStorageIdentityProjection8616:
     """Classify logical operands while keeping value-version refusal separate."""
     if source is None:
@@ -170,7 +181,7 @@ def project_logical_stack_storage_identities_8616(
                 failure_count=count,
             ),
         )
-    outcomes = tuple(_project_access_8616(function_addr, item) for item in source.accesses)
+    outcomes = tuple(_project_access_8616(function_addr, item, coordinate_agreement) for item in source.accesses)
     identities = tuple(
         item for item in outcomes if isinstance(item, LogicalStackStorageIdentity8616)
     )

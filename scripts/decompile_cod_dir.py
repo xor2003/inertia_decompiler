@@ -3,6 +3,7 @@
 
 Layer: Tooling/gates.
 Responsibility: run bounded COD-directory decompilation batches with validation reporting.
+Diagnostic corpus scans cannot replace generated C or override its validation verdict.
 """
 
 from __future__ import annotations
@@ -562,17 +563,6 @@ def _should_run_scan_safe_fallback(exit_kind: str, item: CodWorkItem) -> bool:
     return True
 
 
-def _describe_scan_safe_result(item: CodWorkItem, scan_result: FunctionScanResult) -> tuple[str, str]:
-    if scan_result.ok and scan_result.fallback_kind not in (None, "none"):
-        reason = scan_result.reason or scan_result.semantic_family_reason or "scan-safe fallback"
-        return "fallback", f"scan-safe {scan_result.fallback_kind} recovery: {reason}"
-    if scan_result.ok:
-        return "ok", "scan-safe recovery succeeded without fallback"
-    failure_class = scan_result.failure_class or "scan_safe_failure"
-    reason = scan_result.reason or "scan-safe recovery failed"
-    return failure_class, f"scan-safe {failure_class}: {reason}"
-
-
 def _render_scan_safe_block(result: CodWorkResult, scan_result: FunctionScanResult) -> str:
     def _impl() -> str:
         parts = [
@@ -881,6 +871,7 @@ def _run_decompiler_child(
 
 
 def _run_work_item(item: CodWorkItem, *, timeout: int, max_memory_mb: int) -> CodWorkResult:
+    """Capture the child artifact and verdict, retaining scans only as diagnostics."""
     def _impl() -> CodWorkResult:
         cached_result = _load_success_cache(item, timeout=timeout, max_memory_mb=max_memory_mb)
         if cached_result is not None:
@@ -932,9 +923,9 @@ def _run_work_item(item: CodWorkItem, *, timeout: int, max_memory_mb: int) -> Co
             stderr_text, tail_validation_payload = _strip_tail_validation_stderr(stderr_text)
             exit_kind, exit_detail = child_exit_kind, child_exit_detail
             if exit_kind != "ok" and _should_run_scan_safe_fallback(exit_kind, item):
+                # Scans provide diagnostics, not replacement C. The emitted
+                # child's status and tail-validation evidence remain authoritative.
                 scan_safe_result = _run_scan_safe_fallback(item, timeout)
-                if scan_safe_result is not None:
-                    exit_kind, exit_detail = _describe_scan_safe_result(item, scan_safe_result)
         except Exception as ex:  # pragma: no cover - defensive fallback
             returncode = 99
             stderr_text = f"{type(ex).__name__}: {ex}\n"
@@ -944,8 +935,6 @@ def _run_work_item(item: CodWorkItem, *, timeout: int, max_memory_mb: int) -> Co
             exit_detail = child_exit_detail
             tail_validation_payload = None
             scan_safe_result = _run_scan_safe_fallback(item, timeout)
-            if scan_safe_result is not None:
-                exit_kind, exit_detail = _describe_scan_safe_result(item, scan_safe_result)
 
         tail_validation_records: tuple[dict[str, object], ...] = ()
         tail_validation_scanned = 0
@@ -1014,16 +1003,17 @@ def _strip_nonsemantic_fallback_markers(body: str) -> str:
 
 
 def _render_result_block(result: CodWorkResult) -> str:
+    """Render the child artifact and keep secondary scans diagnostic-only."""
     def _impl() -> str:
         raw_output = result.stdout_path.read_text(encoding="utf-8", errors="replace")
         stderr_text = _coerce_output_text(result.stderr)
         if result.exit_kind == "ok":
             body = _extract_proc_body(raw_output)
             rendered = body or raw_output.strip()
-        elif result.scan_safe_result is not None:
-            rendered = _render_scan_safe_block(result, result.scan_safe_result)
         else:
             rendered = raw_output.strip()
+        if result.scan_safe_result is not None:
+            rendered += "\n" + _render_scan_safe_block(result, result.scan_safe_result)
 
         parts = [
             f"/* == {result.proc_index}/{result.proc_total} {result.cod_path.name}",

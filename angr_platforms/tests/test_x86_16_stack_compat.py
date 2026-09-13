@@ -83,15 +83,56 @@ def test_stack_propagator_filters_numeric_address_replacements(monkeypatch, kind
     receiver = SimpleNamespace(
         project=SimpleNamespace(arch=SimpleNamespace(name="86_16", sp_offset=16, bp_offset=20)),
         model=SimpleNamespace(), func_graph=[block] if graph_mode else None,
-        block=None if graph_mode else block, _ail_manager=Manager(),
+        block=None if graph_mode else block, _ail_manager=Manager(), _sp_tracker=None,
     )
     SPropagator._analyze(receiver)
 
-    accepted = kind == "address" and value_bits == 16
+    accepted = kind == "address" and value_bits == replacement.bits
     assert entries[location] == ({value: replacement} if accepted else {})
     stats = receiver.model._inertia_stack_pointer_propagation_stats_8616
     assert stats.raw_fact_count == 1
     assert stats.failure_count == (0 if accepted else 1)
+
+
+@pytest.mark.parametrize("mode", ["updated", "later_write", "unknown", "previous_instruction", "entry_phi"])
+def test_stack_propagation_respects_intra_instruction_updates(monkeypatch, mode):
+    value = VirtualVariable(1, 7, 16, VirtualVariableCategory.REGISTER, oident=16)
+    constant = ailment.Expr.Const(2, 0, 16)
+    instruction = 0x1005
+    source = constant
+    if mode == "entry_phi":
+        incoming = VirtualVariable(5, 6, 16, VirtualVariableCategory.REGISTER, oident=16)
+        source = ailment.Expr.Phi(6, 16, [((0x900, None), incoming)])
+    definition = ailment.Stmt.Assignment(
+        0, value, source, ins_addr=instruction - (mode == "previous_instruction"),
+    )
+    store = ailment.Stmt.Store(1, value, constant, 1, "Iend_LE", ins_addr=instruction)
+    statements = [definition, store]
+    if mode == "later_write":
+        later = VirtualVariable(3, 8, 16, VirtualVariableCategory.REGISTER, oident=16)
+        statements.append(ailment.Stmt.Assignment(2, later, constant, ins_addr=instruction))
+    block = ailment.Block(0x1000, 6, statements=statements)
+    location = AILCodeLocation(0x1000, None, 1, insn_addr=instruction)
+    before = -6
+    after = -8
+    entries = {location: {value: StackBaseOffset(4, 16, before)}}
+
+    def original(receiver):
+        receiver.model.replacements = entries
+
+    monkeypatch.setattr(SPropagator, "_analyze", original)
+    apply_x86_16_stack_compatibility()
+    receiver = SimpleNamespace(
+        project=SimpleNamespace(arch=SimpleNamespace(name="86_16", sp_offset=16, bp_offset=20)),
+        model=SimpleNamespace(), func_graph=[block], block=None, _ail_manager=Manager(),
+        _sp_tracker=SimpleNamespace(offset_after=lambda _addr, _reg: None if mode == "unknown" else after),
+    )
+    SPropagator._analyze(receiver)
+    if mode in {"later_write", "unknown"}:
+        assert entries[location] == {}
+    else:
+        expected = before if mode in {"previous_instruction", "entry_phi"} else after
+        assert entries[location][value].offset == expected
 
 
 class _StackOffsetToAddr(Protocol):
@@ -112,6 +153,7 @@ class _LiveDefinitionsStub:
 
 def test_x86_16_stack_compat_patches_16bit_stack_offsets() -> None:
     original = LiveDefinitions.stack_offset_to_stack_addr
+    positive_address, negative_address = 0x8000, 0x7FFC
     try:
         LiveDefinitions.stack_offset_to_stack_addr = original
 
@@ -119,14 +161,15 @@ def test_x86_16_stack_compat_patches_16bit_stack_offsets() -> None:
 
         patched = cast(_StackOffsetToAddr, LiveDefinitions.stack_offset_to_stack_addr)
         assert patched.__name__ == "_stack_offset_to_stack_addr_8616"
-        assert patched(_LiveDefinitionsStub(_ArchStub(bits=16)), 2) == 0x8000
-        assert patched(_LiveDefinitionsStub(_ArchStub(bits=16)), -2) == 0x7FFC
+        assert patched(_LiveDefinitionsStub(_ArchStub(bits=16)), 2) == positive_address
+        assert patched(_LiveDefinitionsStub(_ArchStub(bits=16)), -2) == negative_address
     finally:
         LiveDefinitions.stack_offset_to_stack_addr = original
 
 
 def test_x86_16_stack_compat_delegates_non_16bit_offsets() -> None:
     previous = LiveDefinitions.stack_offset_to_stack_addr
+    expected_address = 0xABC025
 
     def original(self_obj: _LiveDefinitionsStub, offset: int) -> int:
         return 0xABC000 + self_obj.arch.bits + offset
@@ -137,7 +180,7 @@ def test_x86_16_stack_compat_delegates_non_16bit_offsets() -> None:
         apply_x86_16_stack_compatibility()
 
         patched = cast(_StackOffsetToAddr, LiveDefinitions.stack_offset_to_stack_addr)
-        assert patched(_LiveDefinitionsStub(_ArchStub(bits=32)), 5) == 0xABC025
+        assert patched(_LiveDefinitionsStub(_ArchStub(bits=32)), 5) == expected_address
     finally:
         LiveDefinitions.stack_offset_to_stack_addr = previous
 
@@ -203,8 +246,8 @@ def test_x86_16_stack_pointer_replacement_narrows_loader_address_width() -> None
 
     assert result.verdict is StackPointerPropagationVerdict8616.MATERIALIZED_NARROWING
     assert isinstance(result.replacement, Convert)
-    assert result.replacement.from_bits == 32
-    assert result.replacement.to_bits == 16
+    assert result.replacement.from_bits == stack_address.bits
+    assert result.replacement.to_bits == stack_pointer.bits
     assert result.replacement.operand == stack_address
     assert result.stats.raw_fact_count == 1
     assert result.stats.normalized_fact_count == 1

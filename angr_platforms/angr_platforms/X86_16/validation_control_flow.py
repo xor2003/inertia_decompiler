@@ -342,6 +342,7 @@ def _semantic_loop_branch_guards_8616(
     condition_fingerprint: Callable[[object], str],
     condition_ir_fingerprint: Callable[[ConditionIR], str | None] | None,
     condition_fingerprint_normalizer: Callable[[str], str] | None,
+    condition_storage_matcher: Callable[[ConditionIR, object, bool], bool] | None = None,
 ) -> tuple[object, ...]:
     """Join an untagged folded guard by exact condition and CFG evidence."""
     decoded_fingerprint = fact.decoded_condition_fingerprint
@@ -357,15 +358,23 @@ def _semantic_loop_branch_guards_8616(
         guard_fingerprint = inverted
     guards: list[object] = []
     seen: set[int] = set()
+
+    def matches(candidate: object, expected: str, *, inverted: bool) -> bool:
+        """Use typed storage views only when ordinary identity is insufficient."""
+        if _condition_fingerprint_matches_8616(
+            candidate, expected, condition_fingerprint, condition_fingerprint_normalizer,
+        ):
+            return True
+        return bool(
+            fact.condition_ir is not None
+            and condition_storage_matcher is not None
+            and condition_storage_matcher(fact.condition_ir, candidate, inverted)
+        )
+
     for loop in ast_index.loops:
         if not _loop_matches_branch_region_8616(ast_index, loop, fact):
             continue
-        if _condition_fingerprint_matches_8616(
-            loop.condition,
-            decoded_fingerprint,
-            condition_fingerprint,
-            condition_fingerprint_normalizer,
-        ):
+        if matches(loop.condition, decoded_fingerprint, inverted=False):
             guards.append(loop)
             seen.add(id(loop))
         for node in ast_index.subtree_nodes(loop.body):
@@ -373,12 +382,7 @@ def _semantic_loop_branch_guards_8616(
             if (
                 guard_condition is None
                 or id(node) in seen
-                or not _condition_fingerprint_matches_8616(
-                    guard_condition,
-                    guard_fingerprint,
-                    condition_fingerprint,
-                    condition_fingerprint_normalizer,
-                )
+                or not matches(guard_condition, guard_fingerprint, inverted=True)
             ):
                 continue
             guards.append(node)
@@ -411,6 +415,7 @@ def validate_structured_control_flow_8616(
     condition_fingerprint: Callable[[object], str] | None = None,
     condition_ir_fingerprint: Callable[[ConditionIR], str | None] | None = None,
     condition_fingerprint_normalizer: Callable[[str], str] | None = None,
+    condition_storage_matcher: Callable[[ConditionIR, object, bool], bool] | None = None,
 ) -> ControlFlowValidationReport8616:
     """Validate final guarded reachability and proven loop-branch presence.
 
@@ -422,6 +427,8 @@ def validate_structured_control_flow_8616(
     loop-header condition or in-loop break guard. When angr folds away the JCC
     tag, an untagged guard is accepted only by a unique exact condition
     fingerprint plus taken/exit target membership. Validation does not repair it.
+    A storage matcher may additionally prove equivalent typed memory views;
+    it must retain access width, signedness and the requested branch polarity.
     """
     raw_fact_count = 0
     normalized_fact_count = 0
@@ -519,6 +526,7 @@ def validate_structured_control_flow_8616(
                     condition_fingerprint,
                     condition_ir_fingerprint,
                     condition_fingerprint_normalizer,
+                    condition_storage_matcher,
                 )
                 if condition_fingerprint is not None
                 else ()
@@ -606,6 +614,7 @@ def validate_structured_control_flow_8616(
                         condition_fingerprint,
                         condition_ir_fingerprint,
                         condition_fingerprint_normalizer,
+                        condition_storage_matcher,
                     )
                     if condition_fingerprint is not None
                     and _loop_branch_fact_is_valid_8616(fact)

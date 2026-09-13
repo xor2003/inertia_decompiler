@@ -389,8 +389,15 @@ def test_call_output_stack_fields_refuse_persisted_fact_without_exact_callsite()
     assert isinstance(refused.expression.rhs.lhs, CVariable)
 
 
-def _wide_condition_fixture(*, include_summary=True, ast_high_offset=-2):
+def _wide_condition_fixture(*, include_summary=True, ast_high_offset=-2, monkeypatch=None):
     codegen = _Codegen()
+    if monkeypatch is not None:
+        from x86_16_condition_definition_fixtures import install_condition_definition_block
+
+        install_condition_definition_block(
+            monkeypatch, codegen.project, address=0x1000,
+            data=b"\xe8\x00\x00\x90\x90\x3b\x56\xfe\x90\x90\x3b\x56\xfe\x90\x90\x3b\x46\xfc",
+        )
     low_variable = SimStackVariable(-4, 2, base="bp", name="goal_lo", region=0x1000)
     high_variable = SimStackVariable(ast_high_offset, 2, base="bp", name="goal_hi", region=0x1000)
     wide_variable = SimStackVariable(-4, 4, base="bp", name="goal", region=0x1000)
@@ -484,8 +491,8 @@ def _wide_condition_fixture(*, include_summary=True, ast_high_offset=-2):
 
 
 @pytest.mark.parametrize("cast_high_view", (False, True))
-def test_wide_call_return_condition_joins_typed_dx_ax_and_stack_pair(cast_high_view):
-    codegen, expression, conditions, call, wide = _wide_condition_fixture()
+def test_wide_call_return_condition_joins_typed_dx_ax_and_stack_pair(cast_high_view, monkeypatch):
+    codegen, expression, conditions, call, wide = _wide_condition_fixture(monkeypatch=monkeypatch)
     if cast_high_view:
         expression.lhs.rhs = CSemanticCast8616(
             SimTypeShort(False),
@@ -517,8 +524,8 @@ def test_wide_call_return_condition_joins_typed_dx_ax_and_stack_pair(cast_high_v
     assert codegen._inertia_wide_call_return_condition_stats_8616 is result.stats
 
 
-def test_wide_call_return_condition_refuses_without_typed_callsite():
-    codegen, expression, conditions, _call, _wide = _wide_condition_fixture(include_summary=False)
+def test_wide_call_return_condition_refuses_without_typed_callsite(monkeypatch):
+    codegen, expression, conditions, _call, _wide = _wide_condition_fixture(include_summary=False, monkeypatch=monkeypatch)
 
     result = lower_wide_call_return_condition_chain_8616(codegen, expression, conditions)
 
@@ -531,9 +538,9 @@ def test_wide_call_return_condition_refuses_without_typed_callsite():
     assert result.consumed_callsite is None
 
 
-def test_wide_call_return_condition_consumes_typed_low_word_projection():
+def test_wide_call_return_condition_consumes_typed_low_word_projection(monkeypatch):
     """Resolve a masked low-word view from its typed four-byte stack owner."""
-    codegen, expression, conditions, call, wide = _wide_condition_fixture()
+    codegen, expression, conditions, call, wide = _wide_condition_fixture(monkeypatch=monkeypatch)
     projected_low = materialize_typed_condition_stack_operand_8616(
         codegen,
         base="bp",
@@ -555,8 +562,8 @@ def test_wide_call_return_condition_consumes_typed_low_word_projection():
     assert result.consumed_call is call
 
 
-def test_wide_call_return_condition_uses_inventory_before_ast_summary_attachment():
-    codegen, expression, conditions, call, _wide = _wide_condition_fixture()
+def test_wide_call_return_condition_uses_inventory_before_ast_summary_attachment(monkeypatch):
+    codegen, expression, conditions, call, _wide = _wide_condition_fixture(monkeypatch=monkeypatch)
     del codegen._inertia_callsite_summaries
     call.tags = SimpleNamespace(get=lambda key: 0x1000 if key == "ins_addr" else None)
 
@@ -568,8 +575,8 @@ def test_wide_call_return_condition_uses_inventory_before_ast_summary_attachment
     assert codegen._inertia_callsite_summaries[id(call)].callsite_addr == 0x1000
 
 
-def test_wide_call_return_condition_binds_direct_callee_from_typed_summary():
-    codegen, expression, conditions, call, _wide = _wide_condition_fixture()
+def test_wide_call_return_condition_binds_direct_callee_from_typed_summary(monkeypatch):
+    codegen, expression, conditions, call, _wide = _wide_condition_fixture(monkeypatch=monkeypatch)
     call.callee_func = SimpleNamespace(addr=0x300)
     callee = SimpleNamespace(
         addr=0x3000,
@@ -593,8 +600,8 @@ def test_wide_call_return_condition_binds_direct_callee_from_typed_summary():
     assert call.callee_func is callee
 
 
-def test_wide_call_return_condition_joins_negated_non_break_form_with_wide_low_view():
-    codegen, expression, conditions, call, wide = _wide_condition_fixture()
+def test_wide_call_return_condition_joins_negated_non_break_form_with_wide_low_view(monkeypatch):
+    codegen, expression, conditions, call, wide = _wide_condition_fixture(monkeypatch=monkeypatch)
     dx = expression.lhs.lhs
     high = expression.lhs.rhs
     ax = expression.rhs.rhs.lhs
@@ -668,8 +675,8 @@ def test_prune_materialized_wide_condition_call_carrier_consumes_exact_ax_assign
     assert branch.condition_and_nodes[0][0] is call
 
 
-def test_wide_call_return_condition_refuses_unproven_stack_adjacency():
-    codegen, expression, conditions, _call, _wide = _wide_condition_fixture(ast_high_offset=-1)
+def test_wide_call_return_condition_refuses_unproven_stack_adjacency(monkeypatch):
+    codegen, expression, conditions, _call, _wide = _wide_condition_fixture(ast_high_offset=-1, monkeypatch=monkeypatch)
 
     result = lower_wide_call_return_condition_chain_8616(codegen, expression, conditions)
 

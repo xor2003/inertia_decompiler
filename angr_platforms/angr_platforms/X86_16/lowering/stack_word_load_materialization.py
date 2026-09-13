@@ -37,6 +37,7 @@ from .stack_word_load_candidate import (
     direct_machine_bp_word_owner_8616,
     stack_word_byte_pair_matches_machine_bp_view_8616,
     stack_word_load_expression_has_side_effect_8616,
+    stack_word_operand_is_captured_value_8616,
 )
 from .stack_word_load_projection import (
     resolve_logical_stack_word_owner_8616,
@@ -57,6 +58,7 @@ class StackWordLoadRefusalKind8616(StrEnum):
     ALIAS_LOAD_MISSING = "alias_load_missing"
     ALIAS_LOAD_AMBIGUOUS = "alias_load_ambiguous"
     STACK_PROJECTION_MISMATCH = "stack_projection_mismatch"
+    CAPTURED_VALUE = "captured_value"
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +187,12 @@ def materialize_stack_word_load_recompositions_8616(
             return node
         raw_fact_count += 1
         low, high = recomposition.low, recomposition.high
+        if any(stack_word_operand_is_captured_value_8616(operand) for operand in (low, high)):
+            _refuse(
+                StackWordLoadRefusalKind8616.CAPTURED_VALUE,
+                detail="saved scalar bytes have no current-memory value-lifetime proof",
+            )
+            return node
         if stack_word_load_expression_has_side_effect_8616(high):
             _refuse(StackWordLoadRefusalKind8616.SIDE_EFFECTFUL_HIGH)
             return node

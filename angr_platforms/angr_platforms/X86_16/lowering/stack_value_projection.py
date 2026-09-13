@@ -15,12 +15,13 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimType, SimTypeChar, SimTypeFunction, SimTypeInt, SimTypeLong, SimTypePointer, SimTypeShort
+from angr.sim_variable import SimStackVariable
 from archinfo import Arch
 
 from .semantic_cast import CSemanticCast8616
@@ -224,9 +225,12 @@ def project_stack_value_range_8616(
         except AttributeError:
             arguments = ()
         interface_owners = tuple(
-            owner
+            replace(owner, cvar=argument)
             for owner in owners
-            if any(owner.cvar is argument for argument in arguments)
+            for argument in arguments
+            if isinstance(argument, structured_c.CVariable)
+            and isinstance(argument.variable, SimStackVariable)
+            and registry.for_variable(argument.variable) is owner
         )
         if len(interface_owners) == 1:
             owners = interface_owners

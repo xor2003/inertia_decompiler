@@ -1,8 +1,8 @@
-"""Materialize exact word views of proven wide stack arguments.
+"""Materialize exact byte and word views of proven scalar stack arguments.
 
 Layer: Types/Lowering.
 Responsibility: replace narrow structured-C reads contained by one authoritative
-wide BP argument with projections of that argument. The owner and range come
+16/32-bit BP argument with projections of that argument. The owner and range come
 from the stack-prototype contract; rendered names and source text are not
 evidence. Writes and ambiguous ranges remain explicit refusals.
 Consumes alias, widening, and typed facts.
@@ -22,6 +22,9 @@ from ..c_ast_utils import _iter_c_nodes_deep_8616, _replace_c_children_8616
 from ..pipeline.errors import PipelineHardError
 from .condition_stack_operands import project_contained_stack_integer_view_8616
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+
+_WORD_BYTES = 2
+_WIDE_BYTES = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,13 +74,52 @@ def _signed_view_8616(cvar: structured_c.CVariable) -> bool:
     return False
 
 
+def _matching_view_8616(
+    codegen: object, active_owners: tuple[WideStackArgumentOwner8616, ...], node: object,
+) -> tuple[int, SimStackVariable, tuple[WideStackArgumentOwner8616, ...]] | None:
+    """Return exact owner candidates for one structured stack variable."""
+    if not isinstance(node, structured_c.CVariable):
+        return None
+    variable = node.variable
+    if not isinstance(variable, SimStackVariable) or not isinstance(variable.size, int):
+        return None
+    if any(variable is owner.cvar.variable for owner in active_owners):
+        return None
+    offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
+    if not isinstance(offset, int):
+        return None
+    candidates = tuple(
+        owner for owner in active_owners
+        if owner.bp_offset <= offset and offset + variable.size <= owner.bp_offset + owner.width
+    )
+    return (offset, variable, candidates) if candidates else None
+
+
+def _protected_view_nodes_8616(
+    codegen: object, owners: tuple[WideStackArgumentOwner8616, ...], root: object,
+) -> set[int]:
+    """Keep storage locations and escaped addresses outside value projection."""
+    protected_ids: set[int] = set()
+    for node in _iter_c_nodes_deep_8616(root):
+        if isinstance(node, structured_c.CAssignment):
+            protected = node.lhs
+        elif isinstance(node, structured_c.CUnaryOp) and node.op in {"Reference", "AddressOf"}:
+            protected = node.operand
+        else:
+            continue
+        for child in _iter_c_nodes_deep_8616(protected):
+            if _matching_view_8616(codegen, owners, child) is not None:
+                protected_ids.add(id(child))
+    return protected_ids
+
+
 def materialize_wide_stack_argument_subviews_8616(
     codegen: object,
     owners: tuple[WideStackArgumentOwner8616, ...],
 ) -> WideStackArgumentSubviewResult8616:
-    """Project exact contained word reads and retain every unproven variable."""
+    """Project exact contained scalar reads and retain every unproven variable."""
     typed_codegen = cast(_Codegen8616, codegen)
-    active_owners = tuple(owner for owner in owners if owner.width > 2)
+    active_owners = tuple(owner for owner in owners if owner.width >= _WORD_BYTES)
     if not active_owners:
         result = WideStackArgumentSubviewResult8616(0, 0, 0, 0, 0, ())
         typed_codegen._inertia_wide_stack_argument_subview_result_8616 = result
@@ -90,40 +132,13 @@ def materialize_wide_stack_argument_subviews_8616(
     materialized_count = 0
     failure_count = 0
 
-    def matches(node: object) -> tuple[int, SimStackVariable, tuple[WideStackArgumentOwner8616, ...]] | None:
-        """Return exact owner candidates for one structured stack variable."""
-        if not isinstance(node, structured_c.CVariable):
-            return None
-        variable = node.variable
-        if not isinstance(variable, SimStackVariable) or not isinstance(variable.size, int):
-            return None
-        if any(variable is owner.cvar.variable for owner in active_owners):
-            return None
-        offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
-        if not isinstance(offset, int):
-            return None
-        candidates = tuple(
-            owner
-            for owner in active_owners
-            if owner.bp_offset <= offset
-            and offset + variable.size <= owner.bp_offset + owner.width
-        )
-        return (offset, variable, candidates) if candidates else None
-
-    lvalue_ids: set[int] = set()
-    if root is not None:
-        for node in _iter_c_nodes_deep_8616(root):
-            if not isinstance(node, structured_c.CAssignment):
-                continue
-            for child in _iter_c_nodes_deep_8616(node.lhs):
-                if matches(child) is not None:
-                    lvalue_ids.add(id(child))
+    lvalue_ids = _protected_view_nodes_8616(codegen, active_owners, root) if root is not None else set()
 
     def transform(node: object) -> object:
         """Replace one exact read while preserving unproven C AST nodes."""
         nonlocal classified_count, failure_count, materialized_count
         nonlocal normalized_count, raw_count
-        match = matches(node)
+        match = _matching_view_8616(codegen, active_owners, node)
         if match is None:
             return node
         raw_count += 1
@@ -133,7 +148,13 @@ def materialize_wide_stack_argument_subviews_8616(
             return node
         normalized_count += 1
         owner = candidates[0]
-        if variable.size != 2 or owner.width != 4 or offset not in {owner.bp_offset, owner.bp_offset + 2}:
+        supported_size = variable.size in {1, _WORD_BYTES}
+        aligned_view = supported_size and (offset - owner.bp_offset) % variable.size == 0
+        supported_owner = owner.width == _WIDE_BYTES or (
+            owner.width == _WORD_BYTES
+            and isinstance(owner.cvar.variable_type, (SimTypeShort, SimTypeInt))
+        )
+        if not aligned_view or not supported_owner:
             failure_count += 1
             return node
         classified_count += 1
@@ -158,7 +179,7 @@ def materialize_wide_stack_argument_subviews_8616(
     retained = {
         match[1]
         for node in _iter_c_nodes_deep_8616(root)
-        if (match := matches(node)) is not None
+        if (match := _matching_view_8616(codegen, active_owners, node)) is not None
     } if root is not None else set()
     result = WideStackArgumentSubviewResult8616(
         raw_fact_count=raw_count,

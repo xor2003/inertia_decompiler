@@ -6706,8 +6706,6 @@ def test_postprocess_codegen_validates_small_function_typed_conditions(monkeypat
             (
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_materialize_global_byte_index_sum_loop_8616",
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
-                "_materialize_stack_arg_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
                 "_rewrite_decoded_jcc_conditions_8616",
             )
@@ -6762,8 +6760,6 @@ def test_postprocess_codegen_validates_small_function_global_byte_index_loop(mon
             (
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_apply_typed_conditions_to_codegen_8616",
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
-                "_materialize_stack_arg_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
                 "_rewrite_decoded_jcc_conditions_8616",
             )
@@ -6789,7 +6785,7 @@ def test_postprocess_codegen_validates_small_function_global_byte_index_loop(mon
     assert "_materialize_global_byte_index_sum_loop_8616" in codegen._inertia_postprocess_rejected_passes
 
 
-def test_postprocess_codegen_validates_small_function_nested_stack_counter(monkeypatch):
+def test_postprocess_codegen_validates_small_function_global_byte_loop(monkeypatch):
     project = SimpleNamespace(
         arch=SimpleNamespace(name="86_16"),
         _inertia_tail_validation_enabled=True,
@@ -6798,8 +6794,8 @@ def test_postprocess_codegen_validates_small_function_nested_stack_counter(monke
     codegen = SimpleNamespace(cfunc=_postprocess_cfunc(addr=0x1234, state="baseline"), project=project)
     calls: list[str] = []
 
-    def _nested_counter_pass(_project, codegen_arg):
-        calls.append("nested-counter")
+    def _global_byte_pass(_project, codegen_arg):
+        calls.append("global-byte")
         codegen_arg.cfunc.state = "bad"
         return True
 
@@ -6818,8 +6814,6 @@ def test_postprocess_codegen_validates_small_function_nested_stack_counter(monke
             (
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_apply_typed_conditions_to_codegen_8616",
-                "_materialize_global_byte_index_sum_loop_8616",
-                "_materialize_stack_arg_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
                 "_rewrite_decoded_jcc_conditions_8616",
             )
@@ -6828,8 +6822,8 @@ def test_postprocess_codegen_validates_small_function_nested_stack_counter(monke
     monkeypatch.setattr(postprocess_stage, "_decompiler_postprocess_passes_for_function", lambda _project, _codegen: ())
     monkeypatch.setattr(
         postprocess_stage,
-        "_materialize_nested_stack_counter_accumulator_loop_8616",
-        _nested_counter_pass,
+        "_materialize_global_byte_index_sum_loop_8616",
+        _global_byte_pass,
     )
     monkeypatch.setattr(
         postprocess_stage,
@@ -6843,13 +6837,13 @@ def test_postprocess_codegen_validates_small_function_nested_stack_counter(monke
     changed = postprocess_stage._postprocess_codegen_8616(project, codegen)
 
     assert changed is False
-    assert calls == ["nested-counter"]
+    assert calls == ["global-byte"]
     assert codegen.cfunc.state == "baseline"
     assert codegen._inertia_postprocess_validation_failed is False
-    assert "_materialize_nested_stack_counter_accumulator_loop_8616" in codegen._inertia_postprocess_rejected_passes
+    assert "_materialize_global_byte_index_sum_loop_8616" in codegen._inertia_postprocess_rejected_passes
 
 
-def test_postprocess_codegen_continues_after_stack_arg_accumulator_validation_delta(monkeypatch):
+def test_postprocess_codegen_continues_after_global_byte_accumulator_validation_delta(monkeypatch):
     project = SimpleNamespace(
         arch=SimpleNamespace(name="86_16"),
         _inertia_tail_validation_enabled=True,
@@ -6858,8 +6852,8 @@ def test_postprocess_codegen_continues_after_stack_arg_accumulator_validation_de
     codegen = SimpleNamespace(cfunc=_postprocess_cfunc(addr=0x1234, state="baseline"), project=project)
     calls: list[str] = []
 
-    def _stack_arg_pass(_project, codegen_arg):
-        calls.append("stack-arg")
+    def _global_pass(_project, codegen_arg):
+        calls.append("global-byte")
         codegen_arg.cfunc.state = "bad"
         return True
 
@@ -6874,7 +6868,7 @@ def test_postprocess_codegen_continues_after_stack_arg_accumulator_validation_de
     def _compare(_before, after):
         return {
             "changed": after.state == "bad",
-            "summary_text": "stack arg loop changed" if after.state == "bad" else "state stable",
+            "summary_text": "global byte loop changed" if after.state == "bad" else "state stable",
         }
 
     monkeypatch.setenv(
@@ -6883,8 +6877,6 @@ def test_postprocess_codegen_continues_after_stack_arg_accumulator_validation_de
             (
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_apply_typed_conditions_to_codegen_8616",
-                "_materialize_global_byte_index_sum_loop_8616",
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
                 "_rewrite_decoded_jcc_conditions_8616",
             )
@@ -6894,10 +6886,10 @@ def test_postprocess_codegen_continues_after_stack_arg_accumulator_validation_de
         postprocess_stage,
         "_decompiler_postprocess_passes_for_function",
         lambda _project, _codegen: (
-            postprocess_stage.DecompilerPostprocessPassSpec("_later_after_stack_arg_reject_8616", _later_pass, False),
+            postprocess_stage.DecompilerPostprocessPassSpec("_later_after_global_byte_reject_8616", _later_pass, False),
         ),
     )
-    monkeypatch.setattr(postprocess_stage, "_materialize_stack_arg_accumulator_loop_8616", _stack_arg_pass)
+    monkeypatch.setattr(postprocess_stage, "_materialize_global_byte_index_sum_loop_8616", _global_pass)
     monkeypatch.setattr(
         postprocess_stage,
         "_collect_tail_validation_summary_with_baseline_canonicalization_8616",
@@ -6910,10 +6902,10 @@ def test_postprocess_codegen_continues_after_stack_arg_accumulator_validation_de
     changed = postprocess_stage._postprocess_codegen_8616(project, codegen)
 
     assert changed is False
-    assert calls == ["stack-arg", "later"]
+    assert calls == ["global-byte", "later"]
     assert codegen.cfunc.state == "baseline"
     assert codegen._inertia_postprocess_validation_failed is False
-    assert "_materialize_stack_arg_accumulator_loop_8616" in codegen._inertia_postprocess_rejected_passes
+    assert "_materialize_global_byte_index_sum_loop_8616" in codegen._inertia_postprocess_rejected_passes
 
 
 def test_postprocess_mandatory_validation_covers_late_semantic_rewriters():
@@ -6994,8 +6986,6 @@ def test_postprocess_codegen_validates_small_function_after_ss_callsite_args(mon
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_apply_typed_conditions_to_codegen_8616",
                 "_materialize_global_byte_index_sum_loop_8616",
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
-                "_materialize_stack_arg_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
                 "_rewrite_decoded_jcc_conditions_8616",
             )
@@ -7101,8 +7091,6 @@ def test_postprocess_codegen_does_not_regenerate_when_no_pass_changed(monkeypatc
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_apply_typed_conditions_to_codegen_8616",
                 "_materialize_global_byte_index_sum_loop_8616",
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
-                "_materialize_stack_arg_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
                 "_rewrite_decoded_jcc_conditions_8616",
             )
@@ -7142,8 +7130,6 @@ def test_postprocess_codegen_refuses_large_function_semantic_pass_without_local_
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_apply_typed_conditions_to_codegen_8616",
                 "_materialize_global_byte_index_sum_loop_8616",
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
-                "_materialize_stack_arg_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
             )
         ),
@@ -7202,8 +7188,6 @@ def test_postprocess_codegen_refuses_large_function_final_simplifier_without_loc
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_apply_typed_conditions_to_codegen_8616",
                 "_materialize_global_byte_index_sum_loop_8616",
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
-                "_materialize_stack_arg_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
             )
         ),
@@ -7285,8 +7269,6 @@ def test_postprocess_codegen_refuses_large_function_annotations_without_local_va
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_apply_typed_conditions_to_codegen_8616",
                 "_materialize_global_byte_index_sum_loop_8616",
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
-                "_materialize_stack_arg_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
             )
         ),
@@ -7356,8 +7338,6 @@ def test_postprocess_force_validates_nonmandatory_large_function_pass(monkeypatc
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_apply_typed_conditions_to_codegen_8616",
                 "_materialize_global_byte_index_sum_loop_8616",
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
-                "_materialize_stack_arg_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
             )
         ),
@@ -7471,8 +7451,6 @@ def test_postprocess_optimization_reuses_witness_without_hiding_mutation(monkeyp
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_apply_typed_conditions_to_codegen_8616",
                 "_materialize_global_byte_index_sum_loop_8616",
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
-                "_materialize_stack_arg_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
                 "_rewrite_decoded_jcc_conditions_8616",
             )
@@ -7561,8 +7539,6 @@ def test_postprocess_codegen_validates_small_function_annotations(monkeypatch):
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_apply_typed_conditions_to_codegen_8616",
                 "_materialize_global_byte_index_sum_loop_8616",
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
-                "_materialize_stack_arg_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
             )
         ),
@@ -7685,8 +7661,6 @@ def test_postprocess_codegen_refuses_byte_heavy_function_semantic_pass_without_l
                 "_normalize_fact_backed_stack_accesses_8616",
                 "_apply_typed_conditions_to_codegen_8616",
                 "_materialize_global_byte_index_sum_loop_8616",
-                "_materialize_nested_stack_counter_accumulator_loop_8616",
-                "_materialize_stack_arg_accumulator_loop_8616",
                 "_materialize_cfg_selector_return_branches_early_8616",
             )
         ),
@@ -8896,6 +8870,7 @@ def test_tail_validation_normalizes_multi_branch_void_return_loop_exit_guard(mon
         after_codegen,
     )
     after.cfunc.arg_list = [first_exit_carrier, after_goal_hi]
+    after_goal_hi.variable_type = SimTypeShort(False).with_arch(project.arch)
 
     monkeypatch.setattr(
         tail_validation_module,

@@ -142,6 +142,7 @@ def test_reconcile_renames_provisional_local_positive_bp_argument() -> None:
         addr=0x1000,
         arg_list=[argument],
         functy=prototype,
+        statements=CStatements([], codegen=codegen),
         variables_in_use={argument.variable: argument},
         unified_local_vars={},
     )

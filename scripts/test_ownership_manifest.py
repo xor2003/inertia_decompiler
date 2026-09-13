@@ -87,7 +87,10 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="structured-simplifier-expression-identity",
         paths=("inertia_decompiler/cli_c_ast_rewrites.py",),
-        tests=("angr_platforms/tests/test_structured_simplifier_identity.py",),
+        tests=(
+            "angr_platforms/tests/test_structured_simplifier_identity.py",
+            "angr_platforms/tests/test_x86_16_cli_c_ast_rewrites.py",
+        ),
     ),
     TestOwnershipRule(
         owner="generic-annotation-contracts",
@@ -122,6 +125,8 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         paths=("scripts/check_sortd_sidecar_free.py", "scripts/test_pipeline.py"),
         tests=(
             "angr_platforms/tests/test_check_sortd_sidecar_free.py",
+            "angr_platforms/tests/test_sortd_drawtime_gate.py",
+            "angr_platforms/tests/test_runmenu_execution_evidence.py",
             "angr_platforms/tests/test_test_pipeline.py",
         ),
     ),
@@ -140,6 +145,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         tests=(
             "angr_platforms/tests/test_pytest_source_index.py",
             "angr_platforms/tests/test_test_ownership_manifest.py",
+            "angr_platforms/tests/test_test_ownership_validation.py",
         ),
     ),
     TestOwnershipRule(
@@ -322,6 +328,14 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
     ),
     TestOwnershipRule(
+        owner="cli-assignment-effect-preservation",
+        paths=("inertia_decompiler/cli_c_text_postprocess.py",),
+        tests=(
+            "angr_platforms/tests/test_cli_assignment_effect_preservation.py",
+            "angr_platforms/tests/test_cli_c_text_postprocess.py",
+        ),
+    ),
+    TestOwnershipRule(
         owner="cli-timeout-policy",
         paths=("inertia_decompiler/cli_timeout.py",),
         tests=(
@@ -383,12 +397,14 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
                "angr_platforms/angr_platforms/X86_16/call_frame_compat.py",
                "angr_platforms/angr_platforms/X86_16/call_cleanup_compat.py",
                "angr_platforms/angr_platforms/X86_16/ir/stack_pointer_provenance.py",
+               "angr_platforms/angr_platforms/X86_16/ir/stack_extent_evidence.py",
                "angr_platforms/angr_platforms/X86_16/ir/ail_register_displacement.py",
                "angr_platforms/angr_platforms/X86_16/ail_displacement_compat.py"),
         tests=(
             "angr_platforms/tests/test_x86_16_call_frame_compat.py",
             "angr_platforms/tests/test_x86_16_callee_cleanup_compat.py",
             "angr_platforms/tests/test_x86_16_stack_pointer_provenance.py",
+            "angr_platforms/tests/test_x86_16_stack_extent_evidence.py",
             "angr_platforms/tests/test_x86_16_ail_register_displacement.py",
             "angr_platforms/tests/test_x86_16_package_exports.py::test_x86_16_package_exports_source_backends",
             "angr_platforms/tests/test_x86_16_package_exports.py::test_x86_16_bootstrap_module_description",
@@ -462,10 +478,16 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         owner="x86-16-stack-compatibility",
         paths=(
             "angr_platforms/angr_platforms/X86_16/stack_compat.py",
+            "angr_platforms/angr_platforms/X86_16/load_propagation.py",
+            "angr_platforms/angr_platforms/X86_16/stack_tracker_allocation.py",
+            "angr_platforms/angr_platforms/X86_16/stack_tracker_return_segment.py",
             "angr_platforms/angr_platforms/X86_16/stack_value_use.py",
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_stack_compat.py",
+            "angr_platforms/tests/test_x86_16_load_propagation.py",
+            "angr_platforms/tests/test_x86_16_stack_tracker_allocation.py",
+            "angr_platforms/tests/test_x86_16_stack_tracker_return_segment.py",
             "angr_platforms/tests/test_x86_16_stack_address_operand_roles.py",
         ),
     ),
@@ -492,7 +514,10 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-calling-convention-compat",
         paths=("angr_platforms/angr_platforms/X86_16/calling_convention_compat.py",),
-        tests=("angr_platforms/tests/test_x86_16_calling_convention_compat.py",),
+        tests=(
+            "angr_platforms/tests/test_x86_16_calling_convention_compat.py",
+            "angr_platforms/tests/test_x86_16_far_load_access_width.py",
+        ),
     ),
     TestOwnershipRule(
         owner="x86-16-stack-parameter-width-lowering",
@@ -504,6 +529,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/tests/test_x86_16_calling_convention_compat.py",
             "angr_platforms/tests/test_x86_16_interprocedural_storage_consumers.py",
             "angr_platforms/tests/test_x86_16_stack_argument_widths.py",
+            "angr_platforms/tests/test_x86_16_stack_prototype_wrapped_locals.py",
             "angr_platforms/tests/test_x86_16_stack_prototype_promotion.py",
         ),
     ),
@@ -591,6 +617,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-wide-stack-condition-structuring",
         paths=(
+            "angr_platforms/angr_platforms/X86_16/structuring/bound_call_condition.py",
             "angr_platforms/angr_platforms/X86_16/lowering/condition_fact_arbitration.py",
             "angr_platforms/angr_platforms/X86_16/lowering/condition_argument_type_facts.py",
             "angr_platforms/angr_platforms/X86_16/lowering/condition_argument_types.py",
@@ -601,18 +628,25 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/structuring/branch_return_expressions.py",
             "angr_platforms/angr_platforms/X86_16/structuring/condition_binding.py",
             "angr_platforms/angr_platforms/X86_16/structuring/condition_ownership.py",
+            "angr_platforms/angr_platforms/X86_16/structuring/composite_pretest_conditions.py",
+            "angr_platforms/angr_platforms/X86_16/structuring/existing_loop_exit_conditions.py",
+            "angr_platforms/angr_platforms/X86_16/structuring/symbolic_condition_origin.py",
+            "angr_platforms/angr_platforms/X86_16/structuring/shared_loop_exit.py",
+            "angr_platforms/angr_platforms/X86_16/structuring/shared_loop_exit_publication.py",
             "angr_platforms/angr_platforms/X86_16/structuring/condition_replay.py",
             "angr_platforms/angr_platforms/X86_16/structuring/multi_arm_return_chains.py",
             "angr_platforms/angr_platforms/X86_16/structuring/stored_call_return_early_exit.py",
             "angr_platforms/angr_platforms/X86_16/structuring/total_return_suffixes.py",
             "angr_platforms/angr_platforms/X86_16/structuring/wide_call_return_guard_chains.py",
             "angr_platforms/angr_platforms/X86_16/structuring/wide_stack_condition_chains.py",
+            "angr_platforms/angr_platforms/X86_16/structuring/wide_stack_return_predicates.py",
             "angr_platforms/angr_platforms/X86_16/structuring/wide_stack_single_branches.py",
             "angr_platforms/angr_platforms/X86_16/validation_condition_precision.py",
             "angr_platforms/angr_platforms/X86_16/validation_call_return_storage.py",
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_branch_return_expressions.py",
+            "angr_platforms/tests/test_x86_16_bound_call_condition.py",
             "angr_platforms/tests/test_x86_16_condition_argument_types.py",
             "angr_platforms/tests/test_x86_16_condition_fact_arbitration.py",
             "angr_platforms/tests/test_x86_16_validation_condition_precision.py",
@@ -621,11 +655,18 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/tests/test_x86_16_scalar_return_types.py",
             "angr_platforms/tests/test_x86_16_structuring_condition_binding.py",
             "angr_platforms/tests/test_x86_16_structuring_condition_ownership.py",
+            "angr_platforms/tests/test_x86_16_composite_pretest_conditions.py",
+            "angr_platforms/tests/test_x86_16_existing_loop_exit_conditions.py",
+            "angr_platforms/tests/test_x86_16_structuring_condition_processor.py",
+            "angr_platforms/tests/test_x86_16_shared_loop_exit.py",
+            "angr_platforms/tests/test_x86_16_structured_tag_projection.py",
+            "angr_platforms/tests/test_x86_16_wide_return_condition_coverage.py",
             "angr_platforms/tests/test_x86_16_structuring_condition_replay.py",
             "angr_platforms/tests/test_x86_16_stored_call_return_early_exit.py",
             "angr_platforms/tests/test_x86_16_total_return_suffixes.py",
             "angr_platforms/tests/test_x86_16_wide_call_return_guard_chains.py",
             "angr_platforms/tests/test_x86_16_wide_stack_condition_chains.py",
+            "angr_platforms/tests/test_x86_16_wide_condition_provenance.py",
             "angr_platforms/tests/test_x86_16_validation_call_return_storage.py",
         ),
     ),
@@ -648,6 +689,8 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         owner="x86-16-analysis-helpers",
         paths=("angr_platforms/angr_platforms/X86_16/analysis_helpers.py",),
         tests=(
+            "angr_platforms/tests/test_x86_16_c_runtime_header.py",
+            "angr_platforms/tests/test_x86_16_mouse_position_behavior.py",
             "angr_platforms/tests/test_x86_16_tail_callsite_inventory.py",
             "angr_platforms/tests/test_x86_16_calling_convention_compat.py",
             "angr_platforms/tests/test_x86_16_patch_direct_calls.py",
@@ -717,9 +760,13 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_frontend_condition_evidence.py",
+            "angr_platforms/tests/test_x86_16_stack_condition_access_provenance.py",
             "angr_platforms/tests/test_x86_16_condition_ir.py",
+            "angr_platforms/tests/test_x86_16_condition_decrement_fingerprints.py",
+            "angr_platforms/tests/test_x86_16_storage_or_fingerprints.py",
             "angr_platforms/tests/test_x86_16_lifter_condition_cache.py",
             "angr_platforms/tests/test_x86_16_vex_memory_access_fidelity.py",
+            "angr_platforms/tests/test_x86_16_vex_logical_memory_accesses.py",
         ),
     ),
     TestOwnershipRule(owner="x86-16-semantics-stack-frame-recovery",
@@ -859,7 +906,8 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     ),
     TestOwnershipRule(
         owner="x86-16-condition-lowering",
-        paths=("angr_platforms/angr_platforms/X86_16/structuring/condition_lowering.py",),
+        paths=("angr_platforms/angr_platforms/X86_16/structuring/condition_lowering.py",
+               "angr_platforms/angr_platforms/X86_16/lowering/condition_stack_value.py"),
         tests=("angr_platforms/tests/test_x86_16_condition_lowering.py",),
     ),
     TestOwnershipRule(
@@ -881,6 +929,10 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-call-output-stack-objects",
         paths=(
+            "angr_platforms/angr_platforms/X86_16/lowering/stack_variable_coordinates.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/stack_frame_projection.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/stack_coordinate_rebinding.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/stack_variable_display_names.py",
             "angr_platforms/angr_platforms/X86_16/lowering/call_output_object_projection.py",
             "angr_platforms/angr_platforms/X86_16/lowering/call_execution_frame_carriers.py",
             "angr_platforms/angr_platforms/X86_16/lowering/call_execution_frame_runtime.py",
@@ -888,6 +940,9 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_call_output_object_projection.py",
+            "angr_platforms/tests/test_x86_16_stack_frame_projection.py",
+            "angr_platforms/tests/test_x86_16_stack_coordinate_rebinding.py",
+            "angr_platforms/tests/test_x86_16_stack_variable_identifier_coordinates.py",
             "angr_platforms/tests/test_x86_16_call_execution_frame_carriers.py",
             "angr_platforms/tests/test_x86_16_call_frame_base_effects.py",
             "angr_platforms/tests/test_x86_16_call_output_stack_objects.py",
@@ -908,12 +963,20 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-positive-bp-argument-plan",
         paths=(
+            "angr_platforms/angr_platforms/X86_16/lowering/stack_argument_identity.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/stack_declaration_identity.py",
             "angr_platforms/angr_platforms/X86_16/lowering/positive_bp_argument_plan.py",
             "angr_platforms/angr_platforms/X86_16/lowering/positive_bp_arguments.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/live_stack_word_inputs.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/wide_stack_argument_views.py",
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_positive_bp_argument_plan.py",
+            "angr_platforms/tests/test_x86_16_les_stack_argument_behavior.py",
+            "angr_platforms/tests/test_x86_16_string_corpus_anchors.py",
             "angr_platforms/tests/test_x86_16_stack_argument_identity.py",
+            "angr_platforms/tests/test_x86_16_projected_stack_argument_identity.py",
+            "angr_platforms/tests/test_x86_16_stack_declaration_identity.py",
         ),
     ),
     TestOwnershipRule(
@@ -1038,8 +1101,10 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         paths=(
             "angr_platforms/angr_platforms/X86_16/structuring/typed_switch_seqnode.py",
             "angr_platforms/angr_platforms/X86_16/structuring/switch_selector_binding.py",
+            "angr_platforms/angr_platforms/X86_16/structuring/switch_definition_coverage.py",
         ),
-        tests=("angr_platforms/tests/test_x86_16_typed_switch_seqnode.py",),
+        tests=("angr_platforms/tests/test_x86_16_typed_switch_seqnode.py",
+               "angr_platforms/tests/test_x86_16_switch_definition_coverage.py"),
     ),
     TestOwnershipRule(
         owner="x86-16-structuring-loop-break-jcc",
@@ -1083,13 +1148,28 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-segment-stack-restoration",
         paths=(
+            "angr_platforms/angr_platforms/X86_16/structuring/selector_return_projection.py",
+            "angr_platforms/angr_platforms/X86_16/structuring/return_chains.py",
+            "angr_platforms/angr_platforms/X86_16/semantics/register_definition_return.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/gp_stack_local_return.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/gp_stack_local_reload.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/gp_stack_restore.py",
             "angr_platforms/angr_platforms/X86_16/alias/segment_stack_fragments.py",
             "angr_platforms/angr_platforms/X86_16/alias/segment_stack_restore.py",
+            "angr_platforms/angr_platforms/X86_16/alias/stack_pointer_snapshots.py",
+            "angr_platforms/angr_platforms/X86_16/alias/stack_restore_state.py",
             "angr_platforms/angr_platforms/X86_16/ir/segment_state_solver.py",
             "angr_platforms/angr_platforms/X86_16/ir/segment_state_transfer.py",
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_segment_stack_restore.py",
+            "angr_platforms/tests/test_x86_16_stack_frame_register_alias.py",
+            "angr_platforms/tests/test_x86_16_mask_accumulator_effects.py",
+            "angr_platforms/tests/test_x86_16_global_sum_effects.py",
+            "angr_platforms/tests/test_x86_16_register_definition_return.py",
+            "angr_platforms/tests/test_x86_16_gp_stack_local_return.py",
+            "angr_platforms/tests/test_x86_16_gp_stack_local_reload.py",
+            "angr_platforms/tests/test_x86_16_gp_stack_restore.py",
             "angr_platforms/tests/test_segment_register_membership.py",
         ),
     ),
@@ -1098,6 +1178,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         paths=(
             "angr_platforms/angr_platforms/X86_16/memory.py",
             "angr_platforms/angr_platforms/X86_16/ir/block_ownership.py",
+            "angr_platforms/angr_platforms/X86_16/ir/block_successor_chain.py",
             "angr_platforms/angr_platforms/X86_16/ir/vex_condition_transport.py",
             "angr_platforms/angr_platforms/X86_16/ir/vex_import.py",
             "angr_platforms/angr_platforms/X86_16/ir/vex_integer_displacement.py",
@@ -1105,6 +1186,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_vex_import.py",
+            "angr_platforms/tests/test_x86_16_vex_direct_constants.py",
             "angr_platforms/tests/test_x86_16_vex_integer_displacement.py",
             "angr_platforms/tests/test_x86_16_vex_import_hot_path.py",
             "angr_platforms/tests/test_x86_16_vex_import_cfg_successors.py",
@@ -1193,6 +1275,11 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
     ),
     TestOwnershipRule(
+        owner="x86-16-frontend-jcc-result",
+        paths=("angr_platforms/angr_platforms/X86_16/jcc_result_condition.py",),
+        tests=("angr_platforms/tests/test_x86_16_jcc_result_condition.py",),
+    ),
+    TestOwnershipRule(
         owner="x86-16-lowering-call-return-selectors",
         paths=("angr_platforms/angr_platforms/X86_16/lowering/call_return_selectors.py",),
         tests=("angr_platforms/tests/test_x86_16_call_return_selectors.py",),
@@ -1249,6 +1336,116 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         tests=("angr_platforms/tests/test_x86_16_dosfunc_behavior.py",),
     ),
     TestOwnershipRule(
+        owner="heapsort-generated-c-oracle",
+        paths=("angr_platforms/tests/x86_16_heapsort_behavior.py",),
+        tests=("angr_platforms/tests/test_x86_16_heapsort_behavior.py",),
+    ),
+    TestOwnershipRule(
+        owner="quicksort-generated-c-oracle",
+        paths=("angr_platforms/tests/x86_16_quicksort_behavior.py",),
+        tests=("angr_platforms/tests/test_x86_16_quicksort_behavior.py",),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-runmenu-execution-oracle",
+        paths=("angr_platforms/tests/x86_16_runmenu_execution.py", "scripts/runmenu_behavior.py"),
+        tests=("angr_platforms/tests/test_x86_16_sortdemo_regressions.py",),
+    ),
+    TestOwnershipRule(
+        owner="rep-store-generated-c-oracle",
+        paths=("angr_platforms/angr_platforms/X86_16/string_helpers.py",),
+        tests=("angr_platforms/tests/test_x86_16_rep_store_codegen.py",),
+    ),
+    TestOwnershipRule(
+        owner="string-whole-function-admission",
+        paths=(
+            "inertia_decompiler/cli_string_timeout_fallback.py",
+            "angr_platforms/angr_platforms/X86_16/string_codegen_override.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_string_timeout_fallback.py",
+            "angr_platforms/tests/test_x86_16_string_codegen_override.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="native-terminal-register-binding",
+        paths=("angr_platforms/angr_platforms/X86_16/lowering/native_terminal_return_values.py",),
+        tests=("angr_platforms/tests/test_x86_16_native_terminal_return_values.py",),
+    ),
+    TestOwnershipRule(
+        owner="native-integer-constant-lowering",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/lowering/native_integer_constants.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/native_integer_operations.py",
+            "angr_platforms/angr_platforms/X86_16/ail_remainder_compat.py",
+            "angr_platforms/angr_platforms/X86_16/ir/ail_remainder.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_native_unsigned_constant_casts.py",
+            "angr_platforms/tests/test_x86_16_mset_pos_behavior.py",
+            "angr_platforms/tests/test_x86_16_native_integer_operations.py",
+            "angr_platforms/tests/test_x86_16_ail_remainder.py",
+            "angr_platforms/tests/test_x86_16_msetpos_behavior.py",
+            "angr_platforms/tests/test_x86_16_gp_livein_authority.py",
+            "angr_platforms/tests/test_x86_16_gp_register_state.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="stack-reference-subranges",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/alias/stack_reference_offsets.py",
+            "angr_platforms/angr_platforms/X86_16/variable_recovery_compat.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_stack_reference_offsets.py",
+            "angr_platforms/tests/test_x86_16_les_stack_argument_behavior.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="gp-livein-authority",
+        paths=("angr_platforms/angr_platforms/X86_16/lowering/gp_register_state.py",),
+        tests=(
+            "angr_platforms/tests/test_x86_16_gp_livein_authority.py",
+            "angr_platforms/tests/test_x86_16_gp_register_state.py",
+            "angr_platforms/tests/test_x86_16_msetpos_behavior.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="loadprogram-generated-c-oracle",
+        paths=("angr_platforms/tests/x86_16_loadprogram_behavior.py",),
+        tests=("angr_platforms/tests/test_x86_16_loadprogram_behavior.py",),
+    ),
+    TestOwnershipRule(
+        owner="complete-generated-expression-rendering",
+        paths=("inertia_decompiler/cli_decompilation.py",),
+        tests=("angr_platforms/tests/test_cli_codegen_policy.py",),
+    ),
+    TestOwnershipRule(
+        owner="sleep-generated-c-oracle",
+        paths=("angr_platforms/tests/x86_16_sleep_behavior.py",),
+        tests=("angr_platforms/tests/test_x86_16_sleep_behavior.py",),
+    ),
+    TestOwnershipRule(
+        owner="stack-coordinate-conflict-refusal",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/analysis/stack_frame_ir.py",
+            "angr_platforms/angr_platforms/X86_16/ir/frame_memory_accesses.py",
+            "angr_platforms/angr_platforms/X86_16/ir/ssa_memory_ranges.py",
+            "angr_platforms/angr_platforms/X86_16/ir/ssa_memory.py",
+            "angr_platforms/angr_platforms/X86_16/alias/stack_memory_ssa.py",
+            "angr_platforms/angr_platforms/X86_16/alias/logical_stack_storage_identity.py",
+        ),
+        tests=("angr_platforms/tests/test_x86_16_stack_coordinate_conflicts.py",
+               "angr_platforms/tests/test_x86_16_logical_frame_accesses.py"),
+    ),
+    TestOwnershipRule(
+        owner="address-exposed-stack-validation",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/tail_validation_stack_policy.py",
+            "angr_platforms/angr_platforms/X86_16/tail_validation.py",
+        ),
+        tests=("angr_platforms/tests/test_x86_16_escaped_stack_validation.py",),
+    ),
+    TestOwnershipRule(
         owner="symbolic-frontend-value-contract",
         paths=(
             "angr_platforms/angr_platforms/X86_16/vex_value_contract.py",
@@ -1287,10 +1484,13 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="msc6-runtime-gate",
         paths=(
+            "scripts/build_msc6_examples.py",
+            "examples/msc6_constructs/storage_classes.c",
             "scripts/msc6_runtime_gate_artifacts.py",
             "scripts/verify_msc_example_runtime_gate.py",
         ),
         tests=(
+            "angr_platforms/tests/test_msc_storage_carry_oracle.py",
             "angr_platforms/tests/test_msc6_runtime_gate_artifacts.py",
             "angr_platforms/tests/test_build_msc6_examples.py::test_runtime_gate_links_generic_runtime_support",
             "angr_platforms/tests/test_build_msc6_examples.py::"
@@ -1299,6 +1499,11 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/tests/test_build_msc6_examples.py::"
             "test_runtime_gate_worker_control_is_not_forwarded_to_decompiler",
         ),
+    ),
+    TestOwnershipRule(
+        owner="msc6-returned-call-contract",
+        paths=("scripts/generated_c_return_contract.py",),
+        tests=("angr_platforms/tests/test_build_msc6_examples.py",),
     ),
     TestOwnershipRule(
         owner="x86-16-cod-module-caller-evidence",
@@ -1421,6 +1626,30 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
     ),
     TestOwnershipRule(
+        owner="x86-16-stack-update-scope",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/lowering/stack_update_scope_guard.py",
+            "angr_platforms/angr_platforms/X86_16/structuring/instruction_fragment_placement.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_stack_update_scope_guard.py",
+            "angr_platforms/tests/test_x86_16_instruction_fragment_placement.py",
+            "angr_platforms/tests/test_x86_16_goto_accumulate_behavior.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-loop-condition-identity",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/structuring/loop_condition_identity.py",
+            "angr_platforms/angr_platforms/X86_16/structuring/loop_condition_materialization.py",
+        ),
+        tests=(
+            "angr_platforms/tests/test_x86_16_loop_condition_block_identity.py",
+            "angr_platforms/tests/test_x86_16_loop_condition_materialization.py",
+            "angr_platforms/tests/test_x86_16_nested_loop_behavior.py",
+        ),
+    ),
+    TestOwnershipRule(
         owner="x86-16-lowering-segmented-runtime",
         paths=(
             "angr_platforms/angr_platforms/X86_16/ir/register_live_in.py",
@@ -1428,6 +1657,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/lowering/gp_register_state.py",
             "angr_platforms/angr_platforms/X86_16/lowering/ir_segmented_load_carriers.py",
             "angr_platforms/angr_platforms/X86_16/lowering/near_pointer_argument.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/near_pointer_index_binding.py",
             "angr_platforms/angr_platforms/X86_16/lowering/register_indirect_call_targets.py",
             "angr_platforms/angr_platforms/X86_16/lowering/segmented_memory_lowering.py",
             "angr_platforms/angr_platforms/X86_16/lowering/pointer_store_consumption.py",
@@ -1436,10 +1666,16 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         tests=(
             "angr_platforms/tests/test_x86_16_pointer_store_fold_safety.py",
             "angr_platforms/tests/test_x86_16_near_pointer_argument_evidence.py",
+            "angr_platforms/tests/test_x86_16_near_pointer_index_binding.py",
+            "angr_platforms/tests/test_x86_16_gp_pointer_values.py",
+            "angr_platforms/tests/test_x86_16_pointer_fill_behavior.py",
+            "angr_platforms/tests/test_x86_16_pointer_sum_behavior.py",
             "angr_platforms/tests/test_x86_16_annotation_argument_identity.py",
             "angr_platforms/tests/test_x86_16_gp_register_state.py",
             "angr_platforms/tests/test_x86_16_gp_partial_live_in.py",
             "angr_platforms/tests/test_x86_16_ir_segmented_load_carriers.py",
+            "angr_platforms/tests/test_x86_16_configcrts_behavior.py",
+            "angr_platforms/tests/test_x86_16_mset_pos_behavior.py",
             "angr_platforms/tests/test_x86_16_reload_provenance_boundaries.py",
             "angr_platforms/tests/test_x86_16_register_indirect_call_targets.py",
             "angr_platforms/tests/test_x86_16_segmented_global_loads.py",
@@ -1449,7 +1685,10 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="c-runtime-header",
         paths=("angr_platforms/angr_platforms/X86_16/lowering/c_runtime_header.py",),
-        tests=("angr_platforms/tests/test_x86_16_c_runtime_header.py",),
+        tests=(
+            "angr_platforms/tests/test_x86_16_c_runtime_header.py",
+            "angr_platforms/tests/test_x86_16_mouse_position_behavior.py",
+        ),
     ),
     TestOwnershipRule(
         owner="x86-16-software-interrupt-pipeline",
@@ -1464,6 +1703,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_software_interrupt_pipeline.py",
+            "angr_platforms/tests/test_x86_16_ir_terminal_control_flow.py",
             "angr_platforms/tests/test_x86_16_software_interrupt_validation.py",
             "angr_platforms/tests/test_x86_16_cli.py::test_decompile_cli_recovers_small_cod_byte_condition_logic",
         ),
@@ -1492,6 +1732,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_stack_reload_instruction_ownership.py",
+            "angr_platforms/tests/test_x86_16_ss_traversal_contract.py",
             "angr_platforms/tests/test_x86_16_machine_stack_names.py",
             "angr_platforms/tests/test_x86_16_direct_stack_replay.py",
             "angr_platforms/tests/test_x86_16_direct_stack_reload_idempotence.py",
@@ -1632,12 +1873,14 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         owner="x86-16-validation-control-flow",
         paths=(
             "angr_platforms/angr_platforms/X86_16/validation_branch_conditions.py",
+            "angr_platforms/angr_platforms/X86_16/validation_condition_coverage.py",
             "angr_platforms/angr_platforms/X86_16/validation_condition_identity.py",
             "angr_platforms/angr_platforms/X86_16/validation_control_flow.py",
             "angr_platforms/angr_platforms/X86_16/validation_control_flow_obligations.py",
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_validation_branch_conditions.py",
+            "angr_platforms/tests/test_x86_16_validation_condition_coverage.py",
             "angr_platforms/tests/test_x86_16_validation_control_flow.py",
             "angr_platforms/tests/test_x86_16_validation_loop_condition_ir.py",
         ),
@@ -1748,8 +1991,11 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/alias/stack_memory_access_projection.py",
             "angr_platforms/angr_platforms/X86_16/alias/stack_memory_ssa.py",
             "angr_platforms/angr_platforms/X86_16/alias/stack_memory_ssa_contracts.py",
+            "angr_platforms/angr_platforms/X86_16/alias/stack_address_escape.py",
+            "angr_platforms/angr_platforms/X86_16/alias/private_stack_writes.py",
             "angr_platforms/angr_platforms/X86_16/ir/ssa_memory.py",
             "angr_platforms/angr_platforms/X86_16/ir/ssa_memory_call_liveness.py",
+            "angr_platforms/angr_platforms/X86_16/ir/stack_range_overlap.py",
             "angr_platforms/angr_platforms/X86_16/ir/ssa_memory_contracts.py",
             "angr_platforms/angr_platforms/X86_16/ir/ssa_memory_ranges.py",
             "angr_platforms/angr_platforms/X86_16/semantics/carry_borrow_links.py",
@@ -1768,6 +2014,8 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/tests/test_x86_16_function_condition_artifact.py",
             "angr_platforms/tests/test_x86_16_logical_memory_write_value.py",
             "angr_platforms/tests/test_x86_16_stack_memory_ssa_alias.py",
+            "angr_platforms/tests/test_x86_16_stack_address_escape.py",
+            "angr_platforms/tests/test_x86_16_private_stack_writes.py",
             "angr_platforms/tests/test_x86_16_carry_borrow_cfg.py",
             "angr_platforms/tests/test_x86_16_carry_borrow_sources.py",
             "angr_platforms/tests/test_x86_16_carry_borrow_stack_storage.py",
@@ -1822,7 +2070,10 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/semantics/terminal_pointer_output_contracts.py",
             "angr_platforms/angr_platforms/X86_16/semantics/terminal_pointer_outputs.py",
         ),
-        tests=("angr_platforms/tests/test_x86_16_terminal_pointer_outputs.py",),
+        tests=(
+            "angr_platforms/tests/test_x86_16_terminal_pointer_outputs.py",
+            "angr_platforms/tests/test_x86_16_conditional_pointer_output_native.py",
+        ),
     ),
     TestOwnershipRule(
         owner="x86-16-terminal-pointer-output-alias",
@@ -1837,6 +2088,8 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "test_unknown_or_non_parameter_source_refuses_atomically",
             "angr_platforms/tests/test_x86_16_terminal_pointer_output_aliases.py::"
             "test_competing_parameter_sources_refuse_without_partial_fact",
+            "angr_platforms/tests/test_x86_16_conditional_pointer_output_native.py::"
+            "test_native_conditional_output_preserves_logical_and_execution_width",
         ),
     ),
     TestOwnershipRule(
@@ -1845,7 +2098,11 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/widening/terminal_pointer_output_contracts.py",
             "angr_platforms/angr_platforms/X86_16/widening/terminal_pointer_output_views.py",
         ),
-        tests=("angr_platforms/tests/test_x86_16_terminal_pointer_output_views.py",),
+        tests=(
+            "angr_platforms/tests/test_x86_16_terminal_pointer_output_views.py",
+            "angr_platforms/tests/test_x86_16_conditional_pointer_output_native.py::"
+            "test_native_conditional_output_preserves_logical_and_execution_width",
+        ),
     ),
     TestOwnershipRule(
         owner="x86-16-pointer-parameter-output-lowering",
@@ -1895,6 +2152,9 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/semantics/call_stack_effect_contracts.py",
             "angr_platforms/angr_platforms/X86_16/semantics/call_stack_effect_pipeline.py",
             "angr_platforms/angr_platforms/X86_16/semantics/call_stack_effects.py",
+            "angr_platforms/angr_platforms/X86_16/semantics/call_stack_allocation.py",
+            "angr_platforms/angr_platforms/X86_16/semantics/call_stack_provenance.py",
+            "angr_platforms/angr_platforms/X86_16/ir/frame_memory_accesses.py",
             "angr_platforms/angr_platforms/X86_16/callsite_setup_evidence.py",
             "angr_platforms/angr_platforms/X86_16/lowering/consumed_stack_address_setup.py",
             "angr_platforms/angr_platforms/X86_16/semantics/register_entry_overwrite.py",
@@ -1908,6 +2168,10 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/tests/test_x86_16_call_return_segment.py",
             "angr_platforms/tests/test_x86_16_call_outputs.py",
             "angr_platforms/tests/test_x86_16_call_stack_effects.py",
+            "angr_platforms/tests/test_x86_16_call_stack_allocation_guard.py",
+            "angr_platforms/tests/test_x86_16_call_stack_allocation_proof.py",
+            "angr_platforms/tests/test_x86_16_call_stack_logical_width.py",
+            "angr_platforms/tests/test_x86_16_call_stack_provenance.py",
             "angr_platforms/tests/test_x86_16_partial_register_address_break.py",
             "angr_platforms/tests/test_x86_16_register_reaching_source.py",
             "angr_platforms/tests/test_x86_16_register_source_memory_dependencies.py",
@@ -2043,12 +2307,16 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-terminal-register-return-semantics",
         paths=(
+            "angr_platforms/angr_platforms/X86_16/semantics/branch_target_return.py",
+            "angr_platforms/angr_platforms/X86_16/semantics/return_effect_operands.py",
             "angr_platforms/angr_platforms/X86_16/semantics/terminal_call_paths.py",
             "angr_platforms/angr_platforms/X86_16/semantics/terminal_register_returns.py",
             "angr_platforms/angr_platforms/X86_16/semantics/terminal_return_passthrough.py",
             "angr_platforms/angr_platforms/X86_16/semantics/terminal_return_storage.py",
         ),
         tests=(
+            "angr_platforms/tests/test_x86_16_branch_target_return_semantics.py",
+            "angr_platforms/tests/test_x86_16_conditional_pointer_output_native.py",
             "angr_platforms/tests/test_x86_16_terminal_call_return_types.py",
             "angr_platforms/tests/test_x86_16_terminal_register_return_semantics.py",
             "angr_platforms/tests/test_x86_16_terminal_return_passthrough.py",
@@ -2082,7 +2350,10 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
         owner="x86-16-c-ast-utils",
         paths=("angr_platforms/angr_platforms/X86_16/c_ast_utils.py",),
-        tests=("angr_platforms/tests/test_x86_16_c_ast_utils.py",),
+        tests=(
+            "angr_platforms/tests/test_x86_16_c_ast_utils.py",
+            "angr_platforms/tests/test_x86_16_ast_traversal_coverage.py",
+        ),
     ),
     TestOwnershipRule(
         owner="x86-16-trivial-copy-optimization",
@@ -2121,7 +2392,15 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/widening/widening_rules.py",
             "angr_platforms/angr_platforms/X86_16/widening/word_projection_recomposition.py",
         ),
-        tests=("angr_platforms/tests/test_x86_16_widening_rules.py",),
+        tests=(
+            "angr_platforms/tests/test_x86_16_widening_rules.py",
+            "angr_platforms/tests/test_x86_16_far_load_access_width.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="x86-16-decoded-memory-width",
+        paths=("angr_platforms/angr_platforms/X86_16/decoded_memory_width.py",),
+        tests=("angr_platforms/tests/test_x86_16_far_load_access_width.py",),
     ),
     TestOwnershipRule(
         owner="x86-16-status-flag-liveness",
@@ -2365,10 +2644,12 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         paths=(
             "angr_platforms/angr_platforms/X86_16/postprocess/flags_cleanup.py",
             "angr_platforms/angr_platforms/X86_16/postprocess/flag_dead_definitions.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/packed_flags_liveness.py",
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_decompiler_postprocess_flags.py",
             "angr_platforms/tests/test_x86_16_flags_physical_register_contract.py",
+            "angr_platforms/tests/test_x86_16_packed_flags_cycles.py",
         ),
     ),
     TestOwnershipRule(
@@ -2376,6 +2657,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         paths=(
             "angr_platforms/angr_platforms/X86_16/decompiler_postprocess_calls.py",
             "angr_platforms/angr_platforms/X86_16/lowering/runtime_call_results.py",
+            "angr_platforms/angr_platforms/X86_16/lowering/call_argument_semantic_gap.py",
         ),
         tests=(
             "angr_platforms/tests/test_x86_16_runtime_call_results.py",
@@ -2404,6 +2686,7 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/lowering/segment_register_state.py",
         ),
         tests=(
+            "angr_platforms/tests/test_x86_16_switch_segment_diagnostics.py",
             "angr_platforms/tests/test_x86_16_segment_call_effects.py",
             "angr_platforms/tests/test_x86_16_native_segment_live_out.py",
         ),
@@ -2419,7 +2702,18 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
             "angr_platforms/angr_platforms/X86_16/lowering/store_projection_width.py",
             "angr_platforms/angr_platforms/X86_16/lowering/segmented_global_loads.py",
         ),
-        tests=("angr_platforms/tests/test_x86_16_anonymous_store_width.py",),
+        tests=(
+            "angr_platforms/tests/test_x86_16_anonymous_store_width.py",
+            "angr_platforms/tests/test_x86_16_bios_strict_compilation.py",
+        ),
+    ),
+    TestOwnershipRule(
+        owner="ssa-register-displacement-identity",
+        paths=(
+            "angr_platforms/angr_platforms/X86_16/ir/ssa.py",
+            "angr_platforms/angr_platforms/X86_16/ir/ssa_function.py",
+        ),
+        tests=("angr_platforms/tests/test_x86_16_ssa_register_displacements.py",),
     ),
     TestOwnershipRule(
         owner="x86-16-runtime-segment-access",
@@ -2506,8 +2800,88 @@ def _fallback_reason_quality_reason(reason: str) -> str | None:
     return None
 
 
+def _source_path_violations(rule: TestOwnershipRule) -> list[ManifestViolation]:
+    """Check source-path presence, duplicates and format in diagnostic order."""
+    violations: list[ManifestViolation] = []
+    if not rule.paths:
+        violations.append(ManifestViolation(rule.owner, "<paths>", "ownership rule must include at least one source path"))
+    violations.extend(
+        ManifestViolation(rule.owner, path, "ownership rule source paths must be unique within the rule")
+        for index, path in enumerate(rule.paths) if path in rule.paths[:index]
+    )
+    for path in rule.paths:
+        reason = _manifest_path_format_reason(path)
+        if reason is not None:
+            violations.append(ManifestViolation(rule.owner, path, reason))
+    return violations
+
+
+def _target_path_violations(rule: TestOwnershipRule) -> list[ManifestViolation]:
+    """Check target presence, duplicates and lane syntax without reading files."""
+    violations: list[ManifestViolation] = []
+    if not rule.tests:
+        violations.append(ManifestViolation(rule.owner, "<tests>", "ownership rule must include at least one pytest target"))
+    violations.extend(
+        ManifestViolation(rule.owner, target, "ownership rule pytest targets must be unique within the rule")
+        for index, target in enumerate(rule.tests) if target in rule.tests[:index]
+    )
+    for target in rule.tests:
+        test_path, _, _ = target.partition("::")
+        violations.extend(
+            ManifestViolation(rule.owner, target, reason)
+            for reason in (_manifest_path_format_reason(test_path), _pytest_target_path_reason(test_path))
+            if reason is not None
+        )
+    return violations
+
+
+def _rule_policy_violations(rule: TestOwnershipRule) -> list[ManifestViolation]:
+    """Check source existence and fast-tier/fallback obligations without short-circuiting."""
+    violations = [
+        ManifestViolation(rule.owner, path, f"source path does not exist: {path}")
+        for path in rule.paths if not (REPO_ROOT / path).exists()
+    ]
+    if rule.tier not in VALID_OWNERSHIP_TIERS:
+        violations.append(ManifestViolation(
+            rule.owner, rule.tier,
+            "focused ownership tests must stay in the fast tier; use test-pipeline tiers for slower coverage",
+        ))
+    if rule.fallback and not rule.reason.strip():
+        violations.append(ManifestViolation(
+            rule.owner, "<reason>", "fallback ownership rules must explain their fast architectural coverage",
+        ))
+    elif rule.fallback:
+        reason = _fallback_reason_quality_reason(rule.reason)
+        if reason is not None:
+            violations.append(ManifestViolation(rule.owner, "<reason>", reason))
+    return violations
+
+
+def _target_node_violations(
+    rule: TestOwnershipRule, target: str, source_indexes: dict[Path, PytestSourceIndex],
+) -> list[ManifestViolation]:
+    """Check one node and its skip policy using the validation-wide source cache."""
+    test_path, _, node_id = target.partition("::")
+    absolute_path = REPO_ROOT / test_path
+    if not absolute_path.is_file():
+        return [ManifestViolation(rule.owner, target, f"pytest file does not exist: {test_path}")]
+    source_index = source_indexes.get(absolute_path)
+    if source_index is None:
+        source_index = load_pytest_source_index(absolute_path, FAST_PYTEST_SKIP_CALLS)
+        source_indexes[absolute_path] = source_index
+    violations: list[ManifestViolation] = []
+    if node_id and not source_index.has_node(node_id):
+        violations.append(ManifestViolation(rule.owner, target, f"pytest node does not exist: {node_id}"))
+    if rule.tier == "fast":
+        violations.extend(
+            ManifestViolation(rule.owner, target, f"fast ownership pytest targets must not use skip/xfail at line {line_no}")
+            for line_no in source_index.skip_xfail_lines(node_id)
+        )
+    return violations
+
+
 def validate_manifest_targets(rules: tuple[TestOwnershipRule, ...] | None = None) -> tuple[ManifestViolation, ...]:
-    """Return invalid ownership rules or stale pytest targets."""
+    """Return every violation in stable rule/check order, sharing parsed sources."""
     rules = TEST_OWNERSHIP_RULES if rules is None else rules
     violations: list[ManifestViolation] = []
     seen_owners: set[str] = set()
@@ -2515,155 +2889,16 @@ def validate_manifest_targets(rules: tuple[TestOwnershipRule, ...] | None = None
     for rule in rules:
         owner = rule.owner.strip()
         if not owner:
-            violations.append(
-                ManifestViolation(
-                    owner=rule.owner,
-                    target="<owner>",
-                    reason="ownership rule must name a non-empty owner",
-                )
-            )
+            violations.append(ManifestViolation(rule.owner, "<owner>", "ownership rule must name a non-empty owner"))
         elif owner in seen_owners:
-            violations.append(
-                ManifestViolation(
-                    owner=rule.owner,
-                    target="<owner>",
-                    reason="ownership rule owner names must be unique",
-                )
-            )
+            violations.append(ManifestViolation(rule.owner, "<owner>", "ownership rule owner names must be unique"))
         else:
             seen_owners.add(owner)
-        if not rule.paths:
-            violations.append(
-                ManifestViolation(
-                    owner=rule.owner,
-                    target="<paths>",
-                    reason="ownership rule must include at least one source path",
-                )
-            )
-        duplicate_paths = tuple(path for index, path in enumerate(rule.paths) if path in rule.paths[:index])
-        for source_path in duplicate_paths:
-            violations.append(  # noqa: PERF401
-                ManifestViolation(
-                    owner=rule.owner,
-                    target=source_path,
-                    reason="ownership rule source paths must be unique within the rule",
-                )
-            )
-        for source_path in rule.paths:
-            format_reason = _manifest_path_format_reason(source_path)
-            if format_reason is not None:
-                violations.append(
-                    ManifestViolation(
-                        owner=rule.owner,
-                        target=source_path,
-                        reason=format_reason,
-                    )
-                )
-        if not rule.tests:
-            violations.append(
-                ManifestViolation(
-                    owner=rule.owner,
-                    target="<tests>",
-                    reason="ownership rule must include at least one pytest target",
-                )
-            )
-        duplicate_tests = tuple(target for index, target in enumerate(rule.tests) if target in rule.tests[:index])
-        for target in duplicate_tests:
-            violations.append(  # noqa: PERF401
-                ManifestViolation(
-                    owner=rule.owner,
-                    target=target,
-                    reason="ownership rule pytest targets must be unique within the rule",
-                )
-            )
+        violations.extend(_source_path_violations(rule))
+        violations.extend(_target_path_violations(rule))
+        violations.extend(_rule_policy_violations(rule))
         for target in rule.tests:
-            test_path, _separator, _node_id = target.partition("::")
-            format_reason = _manifest_path_format_reason(test_path)
-            if format_reason is not None:
-                violations.append(
-                    ManifestViolation(
-                        owner=rule.owner,
-                        target=target,
-                        reason=format_reason,
-                    )
-                )
-            target_path_reason = _pytest_target_path_reason(test_path)
-            if target_path_reason is not None:
-                violations.append(
-                    ManifestViolation(
-                        owner=rule.owner,
-                        target=target,
-                        reason=target_path_reason,
-                    )
-                )
-        for source_path in rule.paths:
-            if not (REPO_ROOT / source_path).exists():
-                violations.append(  # noqa: PERF401
-                    ManifestViolation(
-                        owner=rule.owner,
-                        target=source_path,
-                        reason=f"source path does not exist: {source_path}",
-                    )
-                )
-        if rule.tier not in VALID_OWNERSHIP_TIERS:
-            violations.append(
-                ManifestViolation(
-                    owner=rule.owner,
-                    target=rule.tier,
-                    reason="focused ownership tests must stay in the fast tier; use test-pipeline tiers for slower coverage",
-                )
-            )
-        if rule.fallback and not rule.reason.strip():
-            violations.append(
-                ManifestViolation(
-                    owner=rule.owner,
-                    target="<reason>",
-                    reason="fallback ownership rules must explain their fast architectural coverage",
-                )
-            )
-        elif rule.fallback:
-            reason_quality = _fallback_reason_quality_reason(rule.reason)
-            if reason_quality is not None:
-                violations.append(
-                    ManifestViolation(
-                        owner=rule.owner,
-                        target="<reason>",
-                        reason=reason_quality,
-                    )
-                )
-        for target in rule.tests:
-            test_path, _, node_id = target.partition("::")
-            absolute_test_path = REPO_ROOT / test_path
-            if not absolute_test_path.is_file():
-                violations.append(
-                    ManifestViolation(
-                        owner=rule.owner,
-                        target=target,
-                        reason=f"pytest file does not exist: {test_path}",
-                    )
-                )
-                continue
-            source_index = source_indexes.get(absolute_test_path)
-            if source_index is None:
-                source_index = load_pytest_source_index(absolute_test_path, FAST_PYTEST_SKIP_CALLS)
-                source_indexes[absolute_test_path] = source_index
-            if node_id and not source_index.has_node(node_id):
-                violations.append(
-                    ManifestViolation(
-                        owner=rule.owner,
-                        target=target,
-                        reason=f"pytest node does not exist: {node_id}",
-                    )
-                )
-            if rule.tier == "fast":
-                for line_no in source_index.skip_xfail_lines(node_id):
-                    violations.append(  # noqa: PERF401
-                        ManifestViolation(
-                            owner=rule.owner,
-                            target=target,
-                            reason=f"fast ownership pytest targets must not use skip/xfail at line {line_no}",
-                        )
-                    )
+            violations.extend(_target_node_violations(rule, target, source_indexes))
     return tuple(violations)
 
 

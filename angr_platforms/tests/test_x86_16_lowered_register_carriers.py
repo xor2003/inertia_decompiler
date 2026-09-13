@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
     CBinaryOp,
@@ -21,6 +22,7 @@ from angr_platforms.X86_16.lowering.real_mode_linear import (
     DirectStackMoveFact8616,
     DirectStackMoveSourceKind8616,
 )
+from angr_platforms.X86_16.lowering.semantic_cast import CSemanticCast8616
 
 
 class _DummyCodegen:
@@ -69,6 +71,28 @@ def _install_root(codegen: _DummyCodegen, statements: list[object]) -> CStatemen
     return root
 
 
+@pytest.mark.parametrize("register", ["si", "di", "bx"])
+def test_stack_restore_keeps_runtime_gp_output(register):
+    """A runtime-owned lane is observable even without a later C-AST read."""
+    codegen = _DummyCodegen()
+    offset, size = codegen.project.arch.registers[register]
+    saved = _stack_local(codegen)
+    incoming = CVariable(
+        SimRegisterVariable(offset, size, ident="entry", name=register, region=0x4010),
+        variable_type=SimTypeShort(False), codegen=codegen,
+    )
+    restored = CVariable(
+        SimRegisterVariable(offset, size, ident="restore", name=register, region=0x4010),
+        variable_type=SimTypeShort(False), codegen=codegen,
+    )
+    save = CAssignment(saved, incoming, codegen=codegen)
+    restore = CAssignment(restored, saved, codegen=codegen)
+    root = _install_root(codegen, [save, restore])
+    assert prune_unread_stack_lowered_register_carriers_8616(codegen) is False
+    assert root.statements == [save, restore]
+    assert codegen._inertia_lowered_register_carrier_prune_8616.live_use_refused_count == 1
+
+
 def test_stack_lowered_carrier_prunes_unread_pure_register_assignment() -> None:
     codegen = _DummyCodegen()
     assignment = CAssignment(
@@ -97,16 +121,39 @@ def test_stack_lowered_carrier_prunes_unread_pure_register_assignment() -> None:
     ) == (1, 1, 1, 1, 0)
 
 
-def test_stack_lowered_carrier_refuses_register_with_live_read() -> None:
+@pytest.mark.parametrize("name", ["cs", "ds", "es", "ss", "fs", "gs"])
+def test_stack_lowered_carrier_retains_caller_visible_segment_write(name: str) -> None:
+    codegen = _DummyCodegen()
+    offset, size = codegen.project.arch.registers[name]
+    destination = CVariable(
+        SimRegisterVariable(offset, size, ident="ir_restore", region=0x4010),
+        variable_type=SimTypeShort(False), vvar_id=23, codegen=codegen,
+    )
+    restore = CAssignment(destination, _stack_local(codegen), codegen=codegen)
+    root = _install_root(codegen, [restore])
+
+    assert not prune_unread_stack_lowered_register_carriers_8616(codegen)
+    assert root.statements == [restore]
+    stats = codegen._inertia_lowered_register_carrier_prune_8616
+    assert stats.live_use_refused_count == 1
+    assert stats.materialized_count == 0
+    assert stats.failure_count == 0
+
+
+@pytest.mark.parametrize("semantic_cast", [False, True])
+def test_stack_lowered_carrier_refuses_register_with_live_read(semantic_cast: bool) -> None:
     codegen = _DummyCodegen()
     definition = _register_carrier(codegen)
     read = _register_carrier(codegen)
+    value = CSemanticCast8616(
+        SimTypeShort(False), SimTypeShort(True), read, codegen=codegen,
+    ) if semantic_cast else read
     assignment = CAssignment(definition, _stack_local(codegen), codegen=codegen)
     use = CAssignment(
         _stack_local(codegen),
         CBinaryOp(
             "Add",
-            read,
+            value,
             CConstant(1, SimTypeShort(False), codegen=codegen),
             codegen=codegen,
         ),

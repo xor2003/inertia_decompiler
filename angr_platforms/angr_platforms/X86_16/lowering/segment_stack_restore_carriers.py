@@ -2,7 +2,9 @@
 
 Layer: Types/Lowering.
 Responsibility: remove structured stack bookkeeping only when Alias proves an
-exact segment-register save and restore pair.
+exact segment-register save and restore pair and both structured roles survive.
+Preflight precedes mutation; incomplete or overlapping refused pairs stay intact.
+Pair presence alone does not prove runtime register-state preservation.
 Consumes alias facts. Do not infer pairs from opcodes, assembly, or C text.
 
 Consumes alias, widening, and typed facts. Do not recover semantics from COD,
@@ -15,6 +17,7 @@ expose version-dependent tags and child containers.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -25,12 +28,23 @@ from ..alias.segment_stack_restore import (
     SegmentStackRestoreFact8616,
     SegmentStackRestoreVerdict8616,
 )
+from ..c_ast_utils import _iter_c_nodes_deep_8616
 from ..structured_tags import copy_structured_tags_8616
 
 __all__ = [
     "SegmentStackRestoreCarrierStats8616",
     "prune_proven_segment_stack_restore_carriers_8616",
 ]
+
+_PairKey8616 = tuple[int, int, str]
+
+
+class SegmentRestoreCarrierRefusal8616(StrEnum):
+    """Reason an optional pair optimization must leave the AST unchanged."""
+
+    INCOMPLETE_PAIR = "incomplete_pair"
+    SHARED_REFUSED_CARRIER = "shared_refused_carrier"
+    RUNTIME_STATE_RESTORE = "runtime_state_restore"
 
 
 class _SegmentStackRestoreCodegen8616(Protocol):
@@ -60,13 +74,19 @@ class SegmentStackRestoreCarrierStats8616:
     failure_count: int
     removed_assignment_count: int
     replaced_assignment_count: int = 0
+    refusals: tuple[tuple[_PairKey8616, SegmentRestoreCarrierRefusal8616], ...] = ()
+
+    @property
+    def refused_pair_count(self) -> int:
+        """Return pairs retained because their structured evidence is incomplete."""
+        return len(self.refusals)
 
     @property
     def closed(self) -> bool:
         """Return whether every proven pair reached one terminal lane."""
         return bool(
             self.raw_fact_count == self.normalized_fact_count + self.failure_count
-            and self.normalized_fact_count == self.classified_fact_count
+            and self.normalized_fact_count == self.classified_fact_count + self.refused_pair_count
             and self.classified_fact_count
             == self.materialized_count + self.already_materialized_count
         )
@@ -91,6 +111,52 @@ def _fact_key_8616(fact: SegmentStackRestoreFact8616) -> tuple[int, int, str] | 
     ):
         return None
     return fact.saved_instruction_addr, fact.restore_instruction_addr, fact.restore_register
+
+
+def _statement_lists_8616(root: object) -> tuple[list[object], ...]:
+    """Collect mutable statement lists using the shared child schema once."""
+    lists = [root] if isinstance(root, list) else []
+    roots = tuple(root) if isinstance(root, list) else (root,)
+    seen: set[int] = set()
+    for candidate in roots:
+        lists.extend(
+            node.statements
+            for node in _iter_c_nodes_deep_8616(candidate, seen)
+            if isinstance(node, structured_c.CStatements) and isinstance(node.statements, list)
+        )
+    return tuple(lists)
+
+
+def _pair_refusals_8616(
+    pending_pairs: dict[_PairKey8616, SegmentStackRestoreFact8616],
+    statement_lists: tuple[list[object], ...],
+) -> dict[_PairKey8616, SegmentRestoreCarrierRefusal8616]:
+    """Refuse absent roles and every pair sharing a refused instruction carrier."""
+    present = {
+        _statement_instruction_addr_8616(statement)
+        for statements in statement_lists
+        for statement in statements
+        if isinstance(statement, structured_c.CAssignment)
+    }
+    refused = {
+        key: (
+            SegmentRestoreCarrierRefusal8616.INCOMPLETE_PAIR
+            if key[0] not in present or key[1] not in present
+            else SegmentRestoreCarrierRefusal8616.RUNTIME_STATE_RESTORE
+        )
+        for key, fact in pending_pairs.items()
+        if key[0] not in present or key[1] not in present or fact.constant_value is None
+    }
+    while True:
+        protected_addresses = {address for key in refused for address in key[:2]}
+        overlapping = {
+            key: SegmentRestoreCarrierRefusal8616.SHARED_REFUSED_CARRIER
+            for key in pending_pairs
+            if key not in refused and protected_addresses.intersection(key[:2])
+        }
+        if not overlapping:
+            return refused
+        refused.update(overlapping)
 
 
 def prune_proven_segment_stack_restore_carriers_8616(project: object, codegen: object) -> bool:
@@ -118,6 +184,9 @@ def prune_proven_segment_stack_restore_carriers_8616(project: object, codegen: o
     )
     completed_pairs = set(typed_prior_pairs)
     pending_pairs = {key: fact for key, fact in facts_by_key.items() if key not in completed_pairs}
+    statement_lists = _statement_lists_8616(root)
+    refusals = _pair_refusals_8616(pending_pairs, statement_lists)
+    pending_pairs = {key: fact for key, fact in pending_pairs.items() if key not in refusals}
     address_roles: dict[int, set[tuple[tuple[int, int, str], str]]] = {}
     for key, fact in pending_pairs.items():
         assert fact.saved_instruction_addr is not None
@@ -129,7 +198,7 @@ def prune_proven_segment_stack_restore_carriers_8616(project: object, codegen: o
     replaced_assignment_count = 0
 
     def rewrite_statement_list(statements: list[object]) -> None:
-        """Remove matching assignments recursively while retaining all others."""
+        """Commit preflighted replacements while retaining every refused carrier."""
         nonlocal removed_assignment_count, replaced_assignment_count
         kept: list[object] = []
         for statement in statements:
@@ -163,20 +232,8 @@ def prune_proven_segment_stack_restore_carriers_8616(project: object, codegen: o
                 continue
             kept.append(statement)
         statements[:] = kept
-        for statement in tuple(kept):
-            for attribute in ("statements", "body", "else_node"):
-                child = getattr(statement, attribute, None)
-                child_statements = getattr(child, "statements", None)
-                if isinstance(child_statements, list):
-                    rewrite_statement_list(child_statements)
-                elif isinstance(child, list):
-                    rewrite_statement_list(child)
-
-    root_statements = getattr(root, "statements", None)
-    if isinstance(root_statements, list):
-        rewrite_statement_list(root_statements)
-    elif isinstance(root, list):
-        rewrite_statement_list(root)
+    for statements in statement_lists:
+        rewrite_statement_list(statements)
 
     materialized_pairs = {
         key for key, roles in observed_roles.items() if roles == {"save", "restore"}
@@ -186,12 +243,13 @@ def prune_proven_segment_stack_restore_carriers_8616(project: object, codegen: o
     stats = SegmentStackRestoreCarrierStats8616(
         raw_fact_count=len(facts_by_key),
         normalized_fact_count=len(facts_by_key),
-        classified_fact_count=len(facts_by_key),
+        classified_fact_count=len(facts_by_key) - len(refusals),
         materialized_count=len(materialized_pairs),
         already_materialized_count=len(set(facts_by_key) & set(typed_prior_pairs)),
         failure_count=0,
         removed_assignment_count=removed_assignment_count,
         replaced_assignment_count=replaced_assignment_count,
+        refusals=tuple(sorted(refusals.items())),
     )
     boundary._inertia_segment_stack_restore_carrier_stats_8616 = stats
     return removed_assignment_count > 0 or replaced_assignment_count > 0

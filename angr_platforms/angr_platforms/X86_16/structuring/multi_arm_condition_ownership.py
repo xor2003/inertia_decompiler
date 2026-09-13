@@ -14,10 +14,16 @@ import itertools
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
+from typing import Protocol, cast
 
-from angr.analyses.decompiler.structured_codegen.c import CExpression
+from angr.analyses.decompiler.structured_codegen.c import CBreak, CContinue, CExpression, CIfElse, CLabel, CStatements
 
 from ..ir.condition_ir import ConditionIR
+from ..ir.ssa_function import SSAFunctionArtifact
+from ..structured_tags import copy_structured_tags_8616
+from .condition_exit_normalization import exact_condition_exit_polarity_8616
+
+_BINARY_ARITY = 2
 
 
 class MultiArmConditionOwnershipStatus8616(Enum):
@@ -41,6 +47,7 @@ class MultiArmConditionOwnershipResult8616:
     status: MultiArmConditionOwnershipStatus8616
     facts: tuple[ConditionIR, ...] = ()
     detail: str | None = None
+    taken_polarities: tuple[bool, ...] = ()
 
     @property
     def selected(self) -> bool:
@@ -76,7 +83,7 @@ def select_multi_arm_condition_owners_8616(
     successors: Mapping[int, tuple[int, ...]],
 ) -> MultiArmConditionOwnershipResult8616:
     """Select one exact taken-edge condition for every structured arm."""
-    if len(arm_body_targets) < 2:
+    if len(arm_body_targets) < _BINARY_ARITY:
         return _refuse_8616(MultiArmConditionOwnershipStatus8616.TOO_FEW_ARMS)
     if any(target is None for target in arm_body_targets):
         return _refuse_8616(
@@ -145,10 +152,13 @@ def materialize_multi_arm_condition_owners_8616[BodyT](
     condition_and_nodes: tuple[tuple[CExpression, BodyT], ...],
     ownership: MultiArmConditionOwnershipResult8616,
     materialize: Callable[[ConditionIR], CExpression | None],
+    *,
+    invert: Callable[[CExpression], CExpression] | None = None,
 ) -> MultiArmConditionMaterializationResult8616[BodyT]:
     """Materialize selected facts while preserving third-party AST tags."""
     raw_count = len(condition_and_nodes)
-    if not ownership.selected or len(ownership.facts) != raw_count:
+    polarity_count_valid = not ownership.taken_polarities or len(ownership.taken_polarities) == raw_count
+    if not ownership.selected or len(ownership.facts) != raw_count or not polarity_count_valid:
         return MultiArmConditionMaterializationResult8616(
             condition_and_nodes=(),
             raw_fact_count=raw_count,
@@ -158,13 +168,10 @@ def materialize_multi_arm_condition_owners_8616[BodyT](
             failure_count=1,
         )
     replacements: list[tuple[CExpression, BodyT]] = []
-    for (condition, body), fact in zip(
-        condition_and_nodes,
-        ownership.facts,
-        strict=True,
-    ):
+    for index, ((condition, body), fact) in enumerate(zip(condition_and_nodes, ownership.facts, strict=True)):
+        taken = ownership.taken_polarities[index] if ownership.taken_polarities else True
         replacement = materialize(fact)
-        if replacement is None:
+        if replacement is None or (not taken and invert is None):
             return MultiArmConditionMaterializationResult8616(
                 condition_and_nodes=(),
                 raw_fact_count=raw_count,
@@ -173,7 +180,10 @@ def materialize_multi_arm_condition_owners_8616[BodyT](
                 materialized_count=0,
                 failure_count=1,
             )
-        tags = dict(condition.tags) if isinstance(condition.tags, dict) else {}
+        if not taken:
+            assert invert is not None
+            replacement = invert(replacement)
+        tags = copy_structured_tags_8616(condition.tags) or {}
         if isinstance(fact.src_insn, int):
             tags["ins_addr"] = fact.src_insn
         if isinstance(fact.block_addr, int):
@@ -192,3 +202,99 @@ def materialize_multi_arm_condition_owners_8616[BodyT](
         materialized_count=raw_count,
         failure_count=0,
     )
+
+
+def select_exact_multi_arm_condition_owners_8616(
+    arm_body_targets: tuple[int | None, ...],
+    facts: tuple[ConditionIR, ...],
+    *,
+    else_target: int | None,
+    successors: Mapping[int, tuple[int, ...]],
+    artifact: SSAFunctionArtifact | None = None,
+) -> MultiArmConditionOwnershipResult8616:
+    """Prove a decision ladder through exact edges or effect-free SSA connectors.
+
+    Physical ConditionIR edges remain authoritative and unchanged for replay.
+    Normalization stops at every body and condition owner, never bypassing them.
+    """
+    if len(facts) < _BINARY_ARITY or len(arm_body_targets) != len(facts):
+        return _refuse_8616(MultiArmConditionOwnershipStatus8616.TOO_FEW_ARMS)
+    if else_target is None or any(target is None for target in arm_body_targets):
+        return _refuse_8616(MultiArmConditionOwnershipStatus8616.MISSING_BODY_TARGET)
+    identities = {(fact.block_addr, fact.src_insn) for fact in facts}
+    if len(identities) != len(facts):
+        return _refuse_8616(MultiArmConditionOwnershipStatus8616.DUPLICATE_FACT)
+    polarities: list[bool] = []
+    retained_targets = frozenset(
+        target for target in (*arm_body_targets, else_target, *(fact.block_addr for fact in facts))
+        if target is not None
+    )
+    for index, (target, fact) in enumerate(zip(arm_body_targets, facts, strict=True)):
+        continuation = facts[index + 1].block_addr if index + 1 < len(facts) else else_target
+        if fact.block_addr is None or fact.src_insn is None or continuation is None:
+            return _refuse_8616(MultiArmConditionOwnershipStatus8616.MISSING_UNIQUE_FACT)
+        expected_edges = {fact.taken_target, fact.fallthrough_target}
+        if None in expected_edges or len(expected_edges) != _BINARY_ARITY or set(successors.get(fact.block_addr, ())) != expected_edges:
+            return _refuse_8616(MultiArmConditionOwnershipStatus8616.CFG_EDGE_MISMATCH)
+        polarity = exact_condition_exit_polarity_8616(
+            artifact, fact, target, continuation, successors, retained_targets=retained_targets,
+        )
+        if polarity is None:
+            return _refuse_8616(MultiArmConditionOwnershipStatus8616.DISCONNECTED_FALLTHROUGH)
+        polarities.append(polarity)
+    return MultiArmConditionOwnershipResult8616(
+        MultiArmConditionOwnershipStatus8616.SELECTED, facts,
+        taken_polarities=tuple(polarities),
+    )
+
+
+class _StatementTags8616(Protocol):
+    """Dynamic angr statement tag boundary, separate from operand provenance."""
+
+    tags: object
+
+
+class _LabelCodegen8616(Protocol):
+    """angr's authoritative label-address identity map."""
+
+    map_addr_to_label: Mapping[tuple[int, int | None], CLabel]
+
+
+def _label_entry_8616(label: CLabel) -> int | None:
+    """Resolve one registered label by object identity, never its printed name."""
+    try:
+        labels = cast(_LabelCodegen8616, label.codegen).map_addr_to_label
+    except AttributeError:
+        return None
+    addresses = [address for (address, _index), candidate in labels.items() if candidate is label]
+    if len(addresses) != 1 or label.tags.get("ins_addr") != addresses[0]:
+        return None
+    return addresses[0]
+
+
+def first_statement_block_8616(body: object) -> int | None:
+    """Read a statement entry, registered label or already-bound guard owner.
+
+    A nested condition supplies its root identity only after CFG ownership was
+    materialized. Never use a descendant operand or an unbound condition tag.
+    """
+    while isinstance(body, CStatements) and body.statements:
+        body = body.statements[0]
+    if isinstance(body, (CStatements, CBreak, CContinue)):
+        return None
+    if isinstance(body, CLabel):
+        return _label_entry_8616(body)
+    if isinstance(body, CIfElse) and body.condition_and_nodes:
+        condition, _arm = body.condition_and_nodes[0]
+        owned = condition.tags.get("inertia_structuring_condition_cfg_materialized_8616") is True
+        same_owner = condition.tags.get("ins_addr") == body.tags.get("ins_addr")
+        if owned and same_owner:
+            block = condition.tags.get("vex_block_addr")
+            if isinstance(block, int) and not isinstance(block, bool):
+                return block
+    try:
+        tags = copy_structured_tags_8616(cast(_StatementTags8616, body).tags) or {}
+    except AttributeError:
+        return None
+    block = tags.get("vex_block_addr")
+    return block if isinstance(block, int) and not isinstance(block, bool) else None

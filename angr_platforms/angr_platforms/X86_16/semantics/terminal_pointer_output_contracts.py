@@ -56,6 +56,19 @@ class TerminalPointerOutputFact8616:
     definitely_written_terminal_block_addrs: tuple[int, ...]
 
     @property
+    def conditional_store_blocks(self) -> tuple[int, ...]:
+        """Return conservative coexecution evidence, unnecessary for must-writes.
+
+        Equal terminal sets do not identify which incoming paths wrote memory.
+        Equal store-block sets do prove that the lanes execute together on
+        normally returning paths through these complete SSA basic blocks.
+        Distinct sets require further path evidence before combining outputs.
+        """
+        if self.disposition is TerminalPointerOutputDisposition8616.MUST_WRITE:
+            return ()
+        return tuple(sorted({site.block_addr for site in self.store_sites}))
+
+    @property
     def segment(self) -> MemSpace:
         """Return the exact segmented memory space of this output."""
         return self.address.space

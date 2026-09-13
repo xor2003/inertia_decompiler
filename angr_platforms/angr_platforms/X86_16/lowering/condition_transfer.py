@@ -316,8 +316,9 @@ def _expected_condition_op_for_owner_8616(
     expected = typing.cast(str | None, JCC_TO_COND_8616.get(owner.mnemonic))
     if expected is None:
         return None
-    source_kind = cond.source[0] if cond.source else None
-    if source_kind != "test":
+    # Alias may normalize a result test into an input comparison while keeping
+    # its original producer provenance. Check the current typed operator.
+    if not cond.is_zero_test:
         return expected
     if expected == "eq":
         return "zero"

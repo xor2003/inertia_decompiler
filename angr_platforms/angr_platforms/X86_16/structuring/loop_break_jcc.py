@@ -9,6 +9,9 @@ materializing missing ``if (...) break;`` guards, or by inverting an existing
 continuation guard when the decoded edge polarity proves it.  This module
 operates on C AST objects and typed callback contracts only; rendered C text and
 source declarations are not evidence.
+
+angr's Rust-backed Tags supports key lookup but is not a Python Mapping.
+Both supported tag representations must retain instruction membership evidence.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CUnaryOp,
     CWhileLoop,
 )
+from angr.rustylib.ailment import Tags
 
 from ..c_ast_utils import _iter_c_nodes_deep_8616
 from ..ir.condition_ir import (
@@ -44,6 +48,7 @@ from ..ir.condition_ir import (
 from ..pipeline.errors import PipelineHardError
 from .condition_materialization import materialize_condition_ir_expression_8616
 from .condition_storage_identity import same_condition_storage_identity_8616
+from .loop_break_topology import collect_loop_break_topology_8616
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -146,7 +151,7 @@ class _LoopBreakAstQuerySession8616:
             instruction_addresses=frozenset(
                 int(address)
                 for node in nodes
-                if isinstance((tags := _dynamic_attr_8616(node, "tags", None)), Mapping)
+                if isinstance((tags := _dynamic_attr_8616(node, "tags", None)), (Mapping, Tags))
                 and isinstance((address := tags.get("ins_addr")), int)
             ),
         )
@@ -265,7 +270,7 @@ def _root_contains_ins_addr_8616(
         return query_session.contains_instruction(root, target_addr)
     for node in _iter_c_nodes_deep_8616(root):
         tags = _dynamic_attr_8616(node, "tags", None)
-        if isinstance(tags, Mapping) and tags.get("ins_addr") == int(target_addr):
+        if isinstance(tags, (Mapping, Tags)) and tags.get("ins_addr") == int(target_addr):
             return True
     return False
 
@@ -273,7 +278,7 @@ def _root_contains_ins_addr_8616(
 def _condition_tags_8616(condition: object) -> tuple[int, int] | None:
     """Extract the JCC proof tag pair from a C AST condition."""
     tags = _dynamic_attr_8616(condition, "tags", None)
-    if not isinstance(tags, Mapping):
+    if not isinstance(tags, (Mapping, Tags)):
         return None
     ins_addr = tags.get("ins_addr")
     block_addr = tags.get("vex_block_addr")
@@ -459,7 +464,7 @@ def _collect_loop_break_initial_surface_8616(
             loop_header_jcc_addrs.add(condition_key[0])
             tags = _dynamic_attr_8616(condition, "tags", None)
             if (
-                isinstance(tags, Mapping)
+                isinstance(tags, (Mapping, Tags))
                 and tags.get("inertia_typed_loop_condition_bound_8616") is True
             ):
                 typed_loop_condition_jcc_addrs.add(condition_key[0])
@@ -1062,6 +1067,7 @@ def materialize_unconsumed_loop_break_jcc_8616(
     typed_conditions_by_key = _typed_conditions_by_key_8616(codegen)
     decoded_conditions_by_jcc: dict[int, CExpression] = {}
     query_session = _LoopBreakAstQuerySession8616()
+    topology = collect_loop_break_topology_8616(project, codegen)
     changed = False
     log = logging.getLogger(__name__)
     debug_jcc = bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE"))
@@ -1259,7 +1265,8 @@ def materialize_unconsumed_loop_break_jcc_8616(
         ):
             stats.refused_existing_condition += 1
             continue
-        stats.classified_fact_count += 1
+        if existing_break_nodes or has_existing_condition_without_break:
+            stats.classified_fact_count += 1
         branch_fact = LoopBranchGuardFact8616(
             jcc_addr=jcc_addr,
             block_addr=int(block_addr),
@@ -1412,6 +1419,10 @@ def materialize_unconsumed_loop_break_jcc_8616(
                     break
                 continue
 
+            if topology is None or not topology.proves_exit(
+                int(block_addr), int(body_target), int(fallthrough_target), int(false_target),
+            ):
+                continue
             body_statements = _dynamic_sequence_8616(_dynamic_attr_8616(loop_body, "statements", ()))
             insert_idx = _first_statement_index_containing_ins_addr_8616(
                 body_statements,
@@ -1420,6 +1431,8 @@ def materialize_unconsumed_loop_break_jcc_8616(
             )
             if insert_idx is None:
                 continue
+            # New guards are classified only after CFG exit and placement proof.
+            stats.classified_fact_count += 1
             guard = CIfBreak(callbacks.clone_c_value(guard_cond), codegen=codegen, cstyle_ifs=True)
             rebuilt = list(body_statements)
             rebuilt.insert(insert_idx, guard)

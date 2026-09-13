@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CStatements, CVariable
+from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CStatements, CTypeCast, CVariable
 from angr.sim_type import SimTypeShort
 from angr.sim_variable import SimRegisterVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
@@ -10,6 +10,7 @@ from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from inertia_decompiler.cli_c_ast_rewrites import (
     _get_or_seed_inertia_alias_state,
     _simplify_basic_algebraic_identities,
+    _simplify_structured_c_expressions,
 )
 
 
@@ -90,3 +91,29 @@ def test_get_or_seed_inertia_alias_state_tolerates_slotted_cfunc():
 
     assert alias_state is not None
     assert getattr(codegen, "_inertia_alias_state", None) is alias_state
+
+
+def test_expression_operand_cleanup_preserves_condition_ownership():
+    """Reconstructing a predicate must retain its Structuring provenance."""
+    codegen = _codegen([])
+    word = SimTypeShort(False).with_arch(codegen.project.arch)
+    ax = _reg("ax", codegen)
+    tags = {
+        "ins_addr": 0x4012,
+        "vex_block_addr": 0x4010,
+        "inertia_structuring_condition_cfg_materialized_8616": True,
+    }
+    predicate = CBinaryOp(
+        "CmpLT", CTypeCast(word, word, ax, codegen=codegen),
+        _const(7, codegen), tags=tags, codegen=codegen,
+    )
+    codegen.cfunc.statements.statements = [predicate]
+
+    assert _simplify_structured_c_expressions(codegen)
+
+    replacement = codegen.cfunc.statements.statements[0]
+    assert replacement is not predicate
+    assert replacement.op == predicate.op
+    assert replacement.lhs is ax
+    assert replacement.rhs is predicate.rhs
+    assert replacement.tags == tags

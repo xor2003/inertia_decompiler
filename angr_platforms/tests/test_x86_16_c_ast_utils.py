@@ -6,6 +6,7 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
     CBinaryOp,
     CConstant,
+    CDirtyExpression,
     CExpressionStatement,
     CIfElse,
     CMultiStatementExpression,
@@ -14,8 +15,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CVariable,
 )
 from angr.sim_type import SimTypeShort
-from angr.sim_variable import SimRegisterVariable
-from angr_platforms.X86_16 import c_ast_utils
+from angr.sim_variable import SimRegisterVariable, SimStackVariable
+from angr_platforms.X86_16 import c_ast_utils, decompiler_postprocess_utils
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.c_ast_utils import (
     _c_ast_cycle_path_8616,
@@ -23,6 +24,7 @@ from angr_platforms.X86_16.c_ast_utils import (
     _iter_c_nodes_deep_8616,
     _iter_c_statement_nodes_8616,
     _replace_c_children_8616,
+    _same_c_expression_8616,
 )
 
 
@@ -201,3 +203,42 @@ def test_replace_c_children_descends_into_multi_statement_expression() -> None:
 
     assert changed is True
     assert embedded.expr is replacement
+
+
+@pytest.mark.parametrize("compare", [_same_c_expression_8616, decompiler_postprocess_utils._same_c_expression_8616])
+@pytest.mark.parametrize("changed", [{}, {"offset": 3}, {"size": 1}, {"base": "sp"}, {"region": 0x2000}])
+def test_expression_comparison_preserves_stack_storage_coordinates(changed, compare):
+    codegen = _DummyCodegen()
+    coordinates = {"offset": 2, "size": 2, "base": "bp", "region": 0x1000}
+    lhs = CVariable(SimStackVariable(**coordinates), codegen=codegen)
+    rhs = CVariable(SimStackVariable(**(coordinates | changed)), codegen=codegen)
+    assert compare(lhs, rhs) is (not changed)
+
+
+@pytest.mark.parametrize("attribute", ["reg_offset", "reg", "variable_offset"])
+def test_dirty_expression_comparison_preserves_register_width_and_precedence(attribute):
+    codegen = _DummyCodegen()
+    original = {attribute: 4, "bits": 16, "size": 1, "varid": 9}
+    lhs = CDirtyExpression(SimpleNamespace(**original), codegen=codegen)
+    same = CDirtyExpression(SimpleNamespace(**(original | {"varid": 10})), codegen=codegen)
+    different = CDirtyExpression(SimpleNamespace(**(original | {"bits": 8})), codegen=codegen)
+    assert _same_c_expression_8616(lhs, same)
+    assert not _same_c_expression_8616(lhs, different)
+
+
+def test_unknown_dirty_expression_requires_payload_identity():
+    codegen = _DummyCodegen()
+    payload = object()
+    lhs = CDirtyExpression(payload, codegen=codegen)
+    same = CDirtyExpression(payload, codegen=codegen)
+    different = CDirtyExpression(object(), codegen=codegen)
+    assert _same_c_expression_8616(lhs, same)
+    assert not _same_c_expression_8616(lhs, different)
+
+
+def test_cycle_detection_does_not_confuse_shared_subtrees_with_cycles():
+    codegen = _DummyCodegen()
+    shared = CConstant(1, SimTypeShort(False), codegen=codegen)
+    root = CBinaryOp("Or", shared, shared, codegen=codegen)
+    assert not _c_ast_cycle_path_8616(root)
+    assert not _c_ast_cycle_path_8616(root, max_nodes=0)

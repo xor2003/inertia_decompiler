@@ -354,13 +354,15 @@ def _arg_cvar_at_stack_offset_8616(codegen: object, offset: int) -> object | Non
     arg_list = _dynamic_boundary_attr_8616(cfunc, "arg_list", ())
     if not isinstance(arg_list, Iterable):
         arg_list = ()
+    registry = stack_variable_coordinate_registry_8616(codegen)
     for arg in tuple(arg_list):
-        variable = _dynamic_boundary_attr_8616(arg, "variable")
-        if (
-            isinstance(arg, structured_c.CVariable)
-            and isinstance(variable, SimStackVariable)
-            and _canonical_stack_offset_8616(_dynamic_boundary_attr_8616(variable, "offset")) == offset
-        ):
+        if not isinstance(arg, structured_c.CVariable) or not isinstance(arg.variable, SimStackVariable):
+            continue
+        projection = registry.for_variable(arg.variable)
+        # Native argument objects can retain BP-relative offsets after their
+        # exact entry-SP projection is published. Never reinterpret that view.
+        entry_offset = projection.entry_sp_offset if projection is not None else arg.variable.offset
+        if _canonical_stack_offset_8616(entry_offset) == offset:
             return cast(object, arg)
     return None
 
@@ -386,12 +388,14 @@ def materialize_stack_cvar_at_offset_from_facts_8616(
     *,
     machine_bp_offset: int | None = None,
     preferred_name: str | None = None,
+    publish_machine_bp: bool = True,
 ) -> object | None:
     """Register a stack CVariable from an exact entry-SP projection.
 
     ``offset`` is angr's entry-SP coordinate. ``machine_bp_offset`` records the
     originating SS:BP displacement when Alias and frame evidence supplied one;
-    legacy callers default to an identity projection.
+    legacy callers default to an identity projection. A native entry-SP access
+    without BP-frame proof must disable publication of that machine relation.
     """
 
     def _impl() -> object | None:
@@ -421,7 +425,7 @@ def materialize_stack_cvar_at_offset_from_facts_8616(
                     name=binding_name,
                 )
             variable = _dynamic_boundary_attr_8616(cvar, "variable")
-            if isinstance(variable, SimStackVariable):
+            if isinstance(variable, SimStackVariable) and publish_machine_bp:
                 record_stack_variable_coordinate_projection_8616(
                     codegen,
                     variable=variable,
@@ -475,7 +479,7 @@ def materialize_stack_cvar_at_offset_from_facts_8616(
                 if isinstance(canonical_var, SimStackVariable):
                     recorded = _record(cast(object, canonical_cvar))
                     for variable, _candidate_cvar in matches:
-                        if variable is canonical_var:
+                        if variable is canonical_var or not publish_machine_bp:
                             continue
                         record_stack_variable_coordinate_alias_8616(
                             codegen,

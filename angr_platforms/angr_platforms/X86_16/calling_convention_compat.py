@@ -20,9 +20,11 @@ from angr.analyses.calling_convention import utils as _cc_utils
 from angr.errors import SimTranslationError
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimType, SimTypeBottom, SimTypeChar, SimTypeFunction, SimTypeLong, SimTypeShort
+from capstone.x86_const import X86_OP_MEM, X86_REG_INVALID, X86_REG_SS
 from pyvex.expr import Get
 from pyvex.stmt import Put
 
+from .capstone_memory_segment import effective_capstone_memory_segment_8616
 from .semantics.terminal_register_returns import collect_terminal_ax_return_evidence_8616
 from .semantics.terminal_return_storage import TerminalReturnStorage8616, terminal_return_storage_8616
 from .simos_86_16 import SimCC8616MSCsmall
@@ -46,6 +48,13 @@ __all__ = [
 class _WideReturnEvidence8616(Enum):
     NONE = "none"
     DX_AX_TERMINAL_ARITH = "dx_ax_terminal_arith"
+
+
+_ABI_WORD_BYTES_8616: int = 2
+_FIRST_STACK_ARGUMENT_8616: int = 4
+_OFFSET_SIGN_BIT_8616: int = 0x8000
+_OFFSET_MASK_8616: int = 0xFFFF
+_OFFSET_MODULUS_8616: int = 0x10000
 
 
 class _CapstoneMemory8616(Protocol):
@@ -139,15 +148,22 @@ def _typed_capstone_instruction_8616(insn: object) -> _CapstoneInstruction8616:
 
 
 def _bp_word_memory_offset_8616(insn: object, operand: _CapstoneOperand8616) -> int | None:
-    """Return a positive BP-relative word offset from one memory operand."""
-    if operand.type != 3 or operand.size != 2 or operand.mem.base == 0:
+    """Return an exact positive SS:BP word offset, refusing indexed addresses."""
+    if operand.type != X86_OP_MEM or operand.size != _ABI_WORD_BYTES_8616 or operand.mem.base == X86_REG_INVALID:
         return None
     if _capstone_reg_name_8616(insn, operand.mem.base) != "bp":
         return None
+    # Partial third-party adapters can omit optional addressing fields.
+    index = getattr(operand.mem, "index", X86_REG_INVALID)
+    segment = effective_capstone_memory_segment_8616(
+        getattr(operand.mem, "segment", X86_REG_INVALID), operand.mem.base,
+    )
+    if index != X86_REG_INVALID or segment != X86_REG_SS:
+        return None
     displacement = operand.mem.disp
-    if 0x8000 <= displacement <= 0xFFFF:
-        displacement -= 0x10000
-    return displacement if displacement >= 4 else None
+    if _OFFSET_SIGN_BIT_8616 <= displacement <= _OFFSET_MASK_8616:
+        displacement -= _OFFSET_MODULUS_8616
+    return displacement if displacement >= _FIRST_STACK_ARGUMENT_8616 else None
 
 
 def _binary_stack_operand_offset_8616(insn: object) -> int | None:
@@ -487,7 +503,7 @@ def _instruction_is_mov_sp_bp_8616(insn: object) -> bool:
 
 
 def _bp_word_load_offsets_from_insns_8616(instruction_groups: Iterator[tuple[object, ...]]) -> tuple[int, ...]:
-    """Return positive BP word offsets read by normalized instructions."""
+    """Return positive SS:BP word operand offsets for ABI evidence."""
     offsets: set[int] = set()
     for insns in instruction_groups:
         for insn in insns:
@@ -546,7 +562,8 @@ def _wide_stack_arithmetic_prototype_from_evidence_8616(
         physical_args = []
         return_type = SimTypeBottom(label="void").with_arch(project_dynamic.arch)
         variadic = False
-    if terminal_wide_return:
+    if terminal_wide_return and not isinstance(return_type, SimTypeLong):
+        # Width evidence cannot override an already established wide signedness.
         return_type = SimTypeLong(signed=signed).with_arch(project_dynamic.arch)
 
     required_word_count = 0

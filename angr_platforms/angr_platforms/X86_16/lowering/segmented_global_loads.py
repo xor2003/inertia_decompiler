@@ -146,7 +146,7 @@ from .indexed_global_evidence import (
     IndexedSegmentedGlobalEvidence8616,
     merge_global_object_source_evidence_8616,
 )
-from .indexed_load_subviews import project_indexed_load_subview_8616
+from .indexed_load_subviews import project_indexed_load_subview_8616, project_word_load_index_8616
 from .named_type_definitions import record_named_type_definitions_8616
 from .near_pointer_argument import (
     NearPointerArgumentFact8616,
@@ -7326,8 +7326,8 @@ def _runtime_indexed_global_load_site_8616(
     load_sites_by_ins_addr: dict[int, IndexedSegmentedGlobalLoadSiteEvidence8616],
     *,
     copies: dict[CopyKey8616, object] | None,
-) -> IndexedSegmentedGlobalLoadSiteEvidence8616 | None:
-    """Join a late runtime helper to an equivalent binary load-site class."""
+) -> tuple[IndexedSegmentedGlobalLoadSiteEvidence8616, object] | None:
+    """Join a runtime load site while retaining its exact index value view."""
 
     helper = _segment_load_helper_8616(node) if isinstance(node, CFunctionCall) else None
     if helper is None:
@@ -7372,7 +7372,7 @@ def _runtime_indexed_global_load_site_8616(
         width=helper.width, access_kind=SegmentAccessKind.READ,
     ):
         return None
-    return min(candidates, key=lambda site: site.ins_addr)
+    return min(candidates, key=lambda site: site.ins_addr), index_expr
 
 
 def _indexed_global_load_from_site_evidence_8616(
@@ -7389,14 +7389,14 @@ def _indexed_global_load_from_site_evidence_8616(
 
     if not load_sites_by_ins_addr:
         return None
-    site = _runtime_indexed_global_load_site_8616(
+    runtime_match = _runtime_indexed_global_load_site_8616(
         project,
         codegen,
         node,
         load_sites_by_ins_addr,
         copies=copies,
     )
-    if site is None:
+    if runtime_match is None:
         if not isinstance(node, CUnaryOp) or node.op != "Dereference":
             return None
         ins_addrs = {
@@ -7415,8 +7415,12 @@ def _indexed_global_load_from_site_evidence_8616(
         ):
             return None
         site = matching_sites[0]
+        index_expr = project_word_load_index_8616(
+            _stack_cvar_for_offset_8616(codegen, site.index_stack_offset), site.index_stack_width,
+        )
+    else:
+        site, index_expr = runtime_match
     item = evidence_by_base.get((site.base_offset & 0xFFFF, site.width))
-    index_expr = _stack_cvar_for_offset_8616(codegen, site.index_stack_offset)
     if item is None or index_expr is None or site.index_shift < 0 or site.index_shift > 4:
         return None
     materialized = _make_indexed_global_value_from_stride_evidence_8616(

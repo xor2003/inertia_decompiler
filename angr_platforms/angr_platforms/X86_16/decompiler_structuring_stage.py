@@ -1862,8 +1862,6 @@ def _materialize_structuring_loop_idioms_8616(project: AngrProjectSurface, codeg
 
     try:
         changed = bool(_postprocess_stage._materialize_global_byte_index_sum_loop_8616(project, codegen))
-        changed = bool(_postprocess_stage._materialize_nested_stack_counter_accumulator_loop_8616(project, codegen)) or changed
-        changed = bool(_postprocess_stage._materialize_stack_arg_accumulator_loop_8616(project, codegen)) or changed
         return changed
     finally:
         codegen._inertia_loop_idiom_structuring_pass_ran_8616 = True
@@ -1983,6 +1981,10 @@ def _guard_condition_processor_multibit_bool_predicates_8616(project: AngrProjec
     ) -> ClaripyConditionSurface:
         nonlocal normalized_count, refused_count
         result = orig(self, condition, nobool=nobool, must_bool=must_bool, ins_addr=ins_addr)
+        if must_bool and isinstance(result, claripy.ast.Bool):
+            from .structuring.symbolic_condition_origin import preserve_symbolic_condition_origin_8616
+
+            return preserve_symbolic_condition_origin_8616(self, condition, result)
         if not must_bool or isinstance(result, claripy.ast.Bool):
             return result
         if isinstance(result, claripy.ast.BV):
@@ -2243,6 +2245,8 @@ def _bind_direct_stack_move_branch_ownership_8616(
 
 def _apply_structuring_direct_stack_materialization_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
     """Prune frame scaffolding, then materialize direct effects before validation."""
+    from .structuring.instruction_fragment_placement import apply_instruction_fragment_placement_8616
+
     started = time.perf_counter()
     function = _current_structuring_function_8616(project, codegen)
     if not getattr(codegen, "_inertia_typed_conditions_transferred", False):
@@ -2251,6 +2255,7 @@ def _apply_structuring_direct_stack_materialization_8616(project: AngrProjectSur
             transfer_typed_conditions_to_codegen_8616(project, func_addr, codegen)
         codegen._inertia_typed_conditions_transferred = True
     _bind_direct_stack_move_branch_ownership_8616(project, codegen, function)
+    fragment_placement_changed = apply_instruction_fragment_placement_8616(project, codegen)
     component_started = time.perf_counter()
     control_stack_escape_changed = materialize_proven_control_stack_escape_8616(
         codegen,
@@ -2263,7 +2268,7 @@ def _apply_structuring_direct_stack_materialization_8616(project: AngrProjectSur
         function=function,
     )
     callee_saved_elapsed = time.perf_counter() - component_started
-    changed = control_stack_escape_changed or callee_saved_changed
+    changed = fragment_placement_changed or control_stack_escape_changed or callee_saved_changed
     component_started = time.perf_counter()
     mov_changed = materialize_direct_stack_mov_instructions_8616(
         codegen,
@@ -2480,8 +2485,6 @@ def _apply_structuring_pointer_memory_idioms_8616(project: AngrProjectSurface, c
 
     callbacks = PointerMemoryIdiomCallbacks8616(
         linear_function_insns=_postprocess_stage._linear_function_insns_for_codegen_8616,
-        byte_pointer_fill_loop=_postprocess_stage._materialize_byte_pointer_fill_loop_8616,
-        word_pointer_sum_loop=_postprocess_stage._materialize_word_pointer_sum_loop_8616,
         word_pair_pointer_accumulation_loop=_postprocess_stage._materialize_word_pair_pointer_accumulation_loop_8616,
         word_pointer_first_gt_loop=_postprocess_stage._materialize_word_pointer_first_gt_loop_8616,
         word_pointer_rotate3=_postprocess_stage._materialize_word_pointer_rotate3_8616,

@@ -20,6 +20,7 @@ import copy
 import typing
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import suppress
+from enum import StrEnum
 from functools import lru_cache
 from typing import Protocol, cast
 
@@ -126,25 +127,26 @@ def _structured_codegen_node_8616(value: object) -> bool:
     )
 
 
+def _labeled_c_children_8616(value: object, label: str) -> Iterator[tuple[str, object]]:
+    """Yield labeled structured nodes from one dynamic child container."""
+    if _structured_codegen_node_8616(value):
+        yield label, value
+        return
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield from _labeled_c_children_8616(child, f"{label}[{key!r}]")
+        return
+    if isinstance(value, (list, tuple)):
+        for index, child in enumerate(value):
+            yield from _labeled_c_children_8616(child, f"{label}[{index}]")
+
+
 def _c_ast_cycle_path_8616(node: object, *, max_nodes: int = 16_384) -> tuple[str, ...]:
     """Return one owned-child path that proves a structured C AST cycle."""
     active_indexes: dict[int, int] = {}
     completed: set[int] = set()
     path: list[str] = []
     visited = 0
-
-    def _structured_children(value: object, label: str) -> Iterator[tuple[str, object]]:
-        """Yield labeled structured nodes from one dynamic child container."""
-        if _structured_codegen_node_8616(value):
-            yield label, value
-            return
-        if isinstance(value, dict):
-            for key, child in value.items():
-                yield from _structured_children(child, f"{label}[{key!r}]")
-            return
-        if isinstance(value, (list, tuple)):
-            for index, child in enumerate(value):
-                yield from _structured_children(child, f"{label}[{index}]")
 
     def _walk(current: object, edge: str) -> tuple[str, ...]:
         """Depth-first search using active-path identity, not shared-node identity."""
@@ -165,7 +167,7 @@ def _c_ast_cycle_path_8616(node: object, *, max_nodes: int = 16_384) -> tuple[st
         for attr in _structured_slot_names_8616(current):
             with suppress(Exception):
                 value = getattr(current, attr)
-                for child_edge, child in _structured_children(value, attr):
+                for child_edge, child in _labeled_c_children_8616(value, attr):
                     cycle = _walk(child, child_edge)
                     if cycle:
                         return cycle
@@ -341,6 +343,61 @@ def _iter_c_statement_nodes_8616(root: object) -> Iterator[object]:
                     stack.append(value)
 
 
+class CTraversalFailure8616(StrEnum):
+    """Classify structural failures without parsing diagnostic text."""
+
+    CHILD_READ = "child_read"
+    CHILD_WRITE = "child_write"
+    CONTAINER_CYCLE = "container_cycle"
+
+
+class CTraversalContractError8616(RuntimeError):
+    """Report the exact AST field where structural traversal became unsafe."""
+
+    def __init__(self, node_type: str, child_path: str, reason: CTraversalFailure8616) -> None:
+        """Retain structured context and provide an actionable error message."""
+        self.node_type = node_type
+        self.child_path = child_path
+        self.reason = reason
+        super().__init__(f"C AST traversal failed at {node_type}.{child_path}: {reason.value}")
+
+
+def _replace_c_child_value_8616(
+    value: object, parent: object, path: str, active: frozenset[int],
+    pending: list[object], transform: Callable[[object], object],
+) -> tuple[object, bool]:
+    """Project one child edge without losing nested container structure."""
+    if _structured_codegen_node_8616(value):
+        replacement = transform(value)
+        pending.append(replacement)
+        return replacement, replacement is not value
+    if not isinstance(value, (list, tuple, dict)):
+        return value, False
+    identity = id(value)
+    if identity in active:
+        raise CTraversalContractError8616(
+            type(parent).__name__, path, CTraversalFailure8616.CONTAINER_CYCLE,
+        )
+    child_active = active | {identity}
+    items = value.items() if isinstance(value, dict) else enumerate(value)
+    replacements: list[tuple[object, object]] = []
+    container_changed = False
+    for index, (key, item) in enumerate(items):
+        replacement, item_changed = _replace_c_child_value_8616(
+            item, parent, f"{path}[{index}]", child_active, pending, transform,
+        )
+        replacements.append((key, replacement))
+        container_changed |= item_changed
+    if not container_changed:
+        return value, False
+    if isinstance(value, dict):
+        result = value.copy()
+        result.update(replacements)
+        return result, True
+    values = [replacement for _, replacement in replacements]
+    return (tuple(values) if isinstance(value, tuple) else values), True
+
+
 def _replace_c_children_8616(
     node: object,
     transform: Callable[[object], object],
@@ -348,168 +405,45 @@ def _replace_c_children_8616(
     *,
     should_process_child: Callable[[object, str], object] | None = None,
 ) -> bool:
-    """Replace child nodes across the dynamic third-party angr C AST boundary."""
-    scalar_attrs = (
-        "lhs",
-        "rhs",
-        "expr",
-        "operand",
-        "variable",
-        "index",
-        "condition",
-        "cond",
-        "initializer",
-        "iterator",
-        "body",
-        "iffalse",
-        "iftrue",
-        "switch",
-        "default",
-        "callee_target",
-        "else_node",
-        "retval",
-        "stmts",
-    )
-    list_attrs = ("args", "operands", "statements")
+    """Replace every declared child using the same schema as read traversal.
 
-    def _process_scalar_attr(current: object, attr: str, node_stack: list[object]) -> bool:
-        """Process one scalar child across the dynamic third-party angr boundary."""
-        if callable(should_process_child) and not bool(should_process_child(current, attr)):
-            return False
-        if not hasattr(current, attr):
-            return False
-        try:
-            value = getattr(current, attr)
-        except Exception:
-            return False
-        if not _structured_codegen_node_8616(value):
-            return False
-        new_value = transform(value)
-        changed_local = False
-        if new_value is not value:
-            setattr(current, attr, new_value)
-            changed_local = True
-            value = new_value
-        node_stack.append(value)
-        return changed_local
-
-    def _process_list_attr(current: object, attr: str, node_stack: list[object]) -> bool:
-        """Process one list child across the dynamic third-party angr boundary."""
-        if not hasattr(current, attr):
-            return False
-        try:
-            items = getattr(current, attr)
-        except Exception:
-            return False
-        if not items:
-            return False
-        changed_local = False
-        new_items = None
-        for idx, item in enumerate(items):
-            if not _structured_codegen_node_8616(item):
-                continue
-            transformed_item = transform(item)
-            if transformed_item is not item:
-                if new_items is None:
-                    new_items = list(items)
-                new_items[idx] = transformed_item
-                changed_local = True
-            else:
-                transformed_item = item
-            node_stack.append(transformed_item)
-        if new_items is None:
-            return changed_local
-        if attr == "statements" and isinstance(items, CStatements):
-            new_items = CStatements(statements=new_items, codegen=getattr(current, "codegen", None))
-        setattr(current, attr, new_items)
-        return changed_local
-
-    def _process_condition_pairs(current: object, node_stack: list[object]) -> bool:
-        """Process conditional pairs across the dynamic third-party angr boundary."""
-        if not hasattr(current, "condition_and_nodes"):
-            return False
-        try:
-            pairs = cast(_ConditionalPairs8616, current).condition_and_nodes
-        except Exception:
-            pairs = None
-        if not pairs:
-            return False
-        pair_changed = False
-        new_pairs = []
-        for cond, body in pairs:
-            new_cond = transform(cond) if _structured_codegen_node_8616(cond) else cond
-            new_body = transform(body) if _structured_codegen_node_8616(body) else body
-            if new_cond is not cond or new_body is not body:
-                pair_changed = True
-            if _structured_codegen_node_8616(new_cond):
-                node_stack.append(new_cond)
-            if _structured_codegen_node_8616(new_body):
-                node_stack.append(new_body)
-            new_pairs.append((new_cond, new_body))
-        if pair_changed:
-            cast(_ConditionalPairs8616, current).condition_and_nodes = new_pairs
-        return pair_changed
-
-    def _process_switch_cases(current: object, node_stack: list[object]) -> bool:
-        """Process switch cases across the dynamic third-party angr boundary."""
-        if not hasattr(current, "cases"):
-            return False
-        try:
-            cases = cast(_SwitchCases8616, current).cases
-        except Exception:
-            return False
-        if not cases:
-            return False
-        changed_local = False
-        new_cases = []
-        for item in cases:
-            if not isinstance(item, tuple) or len(item) != 2:
-                new_cases.append(item)
-                continue
-            case_value, case_body = item
-            new_value = transform(case_value) if _structured_codegen_node_8616(case_value) else case_value
-            new_body = transform(case_body) if _structured_codegen_node_8616(case_body) else case_body
-            if new_value is not case_value or new_body is not case_body:
-                changed_local = True
-            if _structured_codegen_node_8616(new_value):
-                node_stack.append(new_value)
-            if _structured_codegen_node_8616(new_body):
-                node_stack.append(new_body)
-            new_cases.append((new_value, new_body))
-        if changed_local:
-            cast(_SwitchCases8616, current).cases = new_cases
-        return changed_local
-
-    if seen is None:
-        seen = set()
+    Preserve container kinds and mapping keys. Report malformed child access
+    and cyclic containers at the responsible node/field, not as absent children.
+    """
+    visited = set() if seen is None else seen
+    pending = [node]
     changed = False
-    node_stack = [node]
 
-    while node_stack:
-        current = node_stack.pop()
-        if not _structured_codegen_node_8616(current):
+    def process_field(current: object, attr: str) -> bool:
+        """Apply the child policy and contextualize dynamic field-access errors."""
+        if should_process_child is not None and not should_process_child(current, attr):
+            return False
+        try:
+            value = getattr(current, attr, None)
+        except Exception as exc:
+            raise CTraversalContractError8616(
+                type(current).__name__, attr, CTraversalFailure8616.CHILD_READ,
+            ) from exc
+        replacement, field_changed = _replace_c_child_value_8616(
+            value, current, attr, frozenset(), pending, transform,
+        )
+        if field_changed:
+            try:
+                setattr(current, attr, replacement)
+            except Exception as exc:
+                raise CTraversalContractError8616(
+                    type(current).__name__, attr, CTraversalFailure8616.CHILD_WRITE,
+                ) from exc
+        return field_changed
+
+    while pending:
+        current = pending.pop()
+        if not _structured_codegen_node_8616(current) or id(current) in visited:
             continue
-        current_id = id(current)
-        if current_id in seen:
-            continue
-        seen.add(current_id)
-
-        child_attrs = frozenset(_structured_slot_names_8616(current))
-        for attr in scalar_attrs:
-            if attr not in child_attrs:
-                continue
-            if _process_scalar_attr(current, attr, node_stack):
+        visited.add(id(current))
+        for attr in _structured_slot_names_8616(current):
+            if process_field(current, attr):
                 changed = True
-        for attr in list_attrs:
-            if attr not in child_attrs:
-                continue
-            if _process_list_attr(current, attr, node_stack):
-                changed = True
-        if "condition_and_nodes" in child_attrs and _process_condition_pairs(current, node_stack):
-            changed = True
-        if "cases" in child_attrs and _process_switch_cases(current, node_stack):
-            changed = True
-
     return changed
 
 
@@ -570,30 +504,13 @@ def _iter_c_node_occurrences_8616(
             )
 
 
-def _same_c_expression_8616(lhs: object, rhs: object) -> bool:
-    """Compare C expressions across the dynamic third-party angr boundary."""
-
-    def _same_stack_variable_8616(lvar: SimStackVariable, rvar: SimStackVariable) -> bool:
-        """Compare stack variables across the dynamic third-party angr boundary."""
-        return bool(
-            lvar.offset == rvar.offset
-            and lvar.size == rvar.size
-            and lvar.base == rvar.base
-            and lvar.region == rvar.region
-        )
-
-    def _dirty_identity_8616(node: CDirtyExpression) -> tuple[str, object] | None:
-        """Build dirty-expression identity across the dynamic third-party angr boundary."""
-        dirty = node.dirty
-        reg_offset = None
-        for attr in ("reg_offset", "reg", "variable_offset"):
-            value = None
-            with suppress(AttributeError, TypeError, ValueError):
-                value = getattr(dirty, attr, None)
-            if isinstance(value, int):
-                reg_offset = value
-                break
-        if isinstance(reg_offset, int):
+def _dirty_register_identity_8616(dirty: object) -> tuple[str, object] | None:
+    """Read register identity from version-dependent third-party dirty nodes."""
+    for attr in ("reg_offset", "reg", "variable_offset"):
+        value = None
+        with suppress(AttributeError, TypeError, ValueError):
+            value = getattr(dirty, attr, None)
+        if isinstance(value, int):
             bits = None
             with suppress(AttributeError, TypeError, ValueError):
                 bits = getattr(dirty, "bits", None)
@@ -601,25 +518,71 @@ def _same_c_expression_8616(lhs: object, rhs: object) -> bool:
             with suppress(AttributeError, TypeError, ValueError):
                 size = getattr(dirty, "size", None)
             size_bits = bits if isinstance(bits, int) else size * 8 if isinstance(size, int) else None
-            return ("dirty-reg", (reg_offset, size_bits))
-        if isinstance(dirty, str) and dirty:
-            return ("dirty-name", dirty)
-        varid = getattr(dirty, "varid", None)
-        if isinstance(varid, int):
-            return ("dirty-varid", varid)
-        tmp_idx = getattr(dirty, "tmp_idx", None)
-        if isinstance(tmp_idx, int):
-            return ("dirty-tmp", tmp_idx)
-        name = getattr(dirty, "name", None)
-        if isinstance(name, str) and name:
-            return ("dirty-name", name)
-        return None
+            return ("dirty-reg", (value, size_bits))
+    return None
 
+
+def _dirty_identity_8616(node: CDirtyExpression) -> tuple[str, object] | None:
+    """Preserve native dirty identity precedence without guessing unknown nodes."""
+    dirty = node.dirty
+    register = _dirty_register_identity_8616(dirty)
+    if register is not None:
+        return register
+    if isinstance(dirty, str) and dirty:
+        return ("dirty-name", dirty)
+    varid = getattr(dirty, "varid", None)
+    if isinstance(varid, int):
+        return ("dirty-varid", varid)
+    tmp_idx = getattr(dirty, "tmp_idx", None)
+    if isinstance(tmp_idx, int):
+        return ("dirty-tmp", tmp_idx)
+    name = getattr(dirty, "name", None)
+    if isinstance(name, str) and name:
+        return ("dirty-name", name)
+    return None
+
+
+def _same_c_variable_8616(lhs: CVariable, rhs: CVariable) -> bool:
+    """Compare existing storage coordinates at the native C-variable boundary."""
+    lvar = lhs.variable
+    rvar = rhs.variable
+    if type(lvar) is not type(rvar):
+        return False
+    if isinstance(lvar, SimRegisterVariable):
+        return bool(lvar.reg == cast(SimRegisterVariable, rvar).reg)
+    # Stack variables subclass memory variables but also require frame identity.
+    if isinstance(lvar, SimStackVariable):
+        rhs_stack = cast(SimStackVariable, rvar)
+        return bool(
+            lvar.offset == rhs_stack.offset and lvar.size == rhs_stack.size
+            and lvar.base == rhs_stack.base and lvar.region == rhs_stack.region
+        )
+    if isinstance(lvar, SimMemoryVariable):
+        rhs_memory = cast(SimMemoryVariable, rvar)
+        return bool(lvar.addr == rhs_memory.addr and lvar.size == rhs_memory.size)
+    return lhs is rhs
+
+
+def _same_c_leaf_8616(lhs: object, rhs: object) -> bool:
+    """Compare same-class leaves, retaining identity fallback for unknown nodes."""
+    if isinstance(lhs, CConstant):
+        return bool(lhs.value == cast(CConstant, rhs).value)
+    if isinstance(lhs, CDirtyExpression):
+        rhs_dirty = cast(CDirtyExpression, rhs)
+        lhs_key = _dirty_identity_8616(lhs)
+        rhs_key = _dirty_identity_8616(rhs_dirty)
+        if lhs_key is not None or rhs_key is not None:
+            return lhs_key == rhs_key
+        return lhs.dirty is rhs_dirty.dirty
+    if isinstance(lhs, CVariable):
+        return _same_c_variable_8616(lhs, cast(CVariable, rhs))
+    return lhs is rhs
+
+
+def _same_c_expression_8616(lhs: object, rhs: object) -> bool:
+    """Compare C expressions across the dynamic third-party angr boundary."""
     if type(lhs) is not type(rhs):
         return False
-    if isinstance(lhs, CConstant):
-        rhs_constant = cast(CConstant, rhs)
-        return bool(lhs.value == rhs_constant.value)
     if isinstance(lhs, CTypeCast):
         rhs_cast = cast(CTypeCast, rhs)
         return _same_c_expression_8616(lhs.expr, rhs_cast.expr)
@@ -654,29 +617,7 @@ def _same_c_expression_8616(lhs: object, rhs: object) -> bool:
         return _same_c_expression_8616(lhs.variable, rhs_indexed.variable) and _same_c_expression_8616(
             lhs.index, rhs_indexed.index
         )
-    if isinstance(lhs, CDirtyExpression):
-        rhs_dirty = cast(CDirtyExpression, rhs)
-        lhs_key = _dirty_identity_8616(lhs)
-        rhs_key = _dirty_identity_8616(rhs_dirty)
-        if lhs_key is not None or rhs_key is not None:
-            return lhs_key == rhs_key
-        return lhs.dirty is rhs_dirty.dirty
-    if isinstance(lhs, CVariable):
-        rhs_variable = cast(CVariable, rhs)
-        lvar = lhs.variable
-        rvar = rhs_variable.variable
-        if type(lvar) is not type(rvar):
-            return False
-        if isinstance(lvar, SimRegisterVariable):
-            return bool(lvar.reg == cast(SimRegisterVariable, rvar).reg)
-        if isinstance(lvar, SimMemoryVariable):
-            rhs_memory = cast(SimMemoryVariable, rvar)
-            return bool(lvar.addr == rhs_memory.addr and lvar.size == rhs_memory.size)
-        if isinstance(lvar, SimStackVariable):
-            if not isinstance(rvar, SimStackVariable):
-                return False
-            return _same_stack_variable_8616(lvar, rvar)
-    return lhs is rhs
+    return _same_c_leaf_8616(lhs, rhs)
 
 
 def _same_call_target_8616(lhs: CFunctionCall, rhs: CFunctionCall) -> bool:

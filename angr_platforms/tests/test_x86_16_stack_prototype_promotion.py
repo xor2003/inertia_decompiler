@@ -913,7 +913,7 @@ def test_reconcile_exact_stack_argument_prototype_narrows_all_word_slots():
         arg_list=[which, value],
         functy=prototype,
         prototype=prototype,
-        unified_local_vars={},
+        unified_local_vars={}, statements=None,
     )
     codegen = SimpleNamespace(
         cfunc=cfunc,
@@ -966,7 +966,7 @@ def test_reconcile_aggregates_split_call_sources_covering_one_wide_stack_object(
         arg_list=[file_arg, cmdline_arg],
         functy=prototype,
         prototype=prototype,
-        unified_local_vars={},
+        unified_local_vars={}, statements=None,
     )
     codegen = SimpleNamespace(
         cfunc=cfunc,
@@ -1017,7 +1017,7 @@ def test_reconcile_uses_exact_near_pointer_parameter_slot_width() -> None:
         arg_list=[count, values],
         functy=prototype,
         prototype=prototype,
-        unified_local_vars={},
+        unified_local_vars={}, statements=None,
     )
     codegen = SimpleNamespace(
         cfunc=cfunc,
@@ -1060,7 +1060,7 @@ def test_reconcile_retains_exact_width_fact_when_prototype_is_already_correct() 
         addr=0x1000,
         arg_list=[value],
         functy=prototype,
-        unified_local_vars={},
+        unified_local_vars={}, statements=None,
     )
     codegen = SimpleNamespace(cfunc=cfunc, _inertia_callsite_summaries={})
 
@@ -1099,7 +1099,7 @@ def test_reconcile_replaces_stale_zero_arg_function_metadata_from_exact_stack_ar
         addr=0x1000,
         arg_list=[left, right],
         functy=codegen_prototype,
-        unified_local_vars={},
+        unified_local_vars={}, statements=None,
     )
     codegen = SimpleNamespace(cfunc=cfunc, _inertia_callsite_summaries={})
 
@@ -1159,7 +1159,7 @@ def test_materialize_uses_abi_word_for_vex_wide_simtype_int() -> None:
         arg_list=[value],
         functy=prototype,
         variables_in_use={stack_var: value},
-        unified_local_vars={},
+        unified_local_vars={}, statements=None,
     )
     codegen = SimpleNamespace(
         cfunc=cfunc,
@@ -1217,7 +1217,7 @@ def test_materialize_preserves_exact_near_pointer_stack_slot_width() -> None:
         arg_list=[values],
         functy=prototype,
         variables_in_use={stack_var: values},
-        unified_local_vars={},
+        unified_local_vars={}, statements=None,
     )
     codegen = SimpleNamespace(
         cfunc=cfunc,
@@ -2745,7 +2745,7 @@ def test_void_return_value_prune_preserves_call_side_effect_and_control_flow():
     assert codegen._inertia_codegen_decl_refresh_required_8616 is True
 
 
-def test_void_return_value_prune_drops_unused_call_result_carrier_declaration():
+def test_void_return_value_prune_keeps_call_result_without_owned_liveness_proof():
     arch = Arch86_16()
     c_codegen = SimpleNamespace(next_idx=lambda _name: 1, project=SimpleNamespace(arch=arch), next_ident = lambda name: f"{name}_0", next_node_idx = lambda : 1)
     carrier_var = SimStackVariable(-2, 2, base="bp", name="vvar_21", region=0x1000)
@@ -2774,14 +2774,12 @@ def test_void_return_value_prune_drops_unused_call_result_carrier_declaration():
 
     changed = postprocess._prune_void_function_return_values_8616(project, codegen)
 
-    assert changed is True
+    assert changed is False
     statements = codegen.cfunc.statements.statements
-    assert isinstance(statements[0], structured_c.CExpressionStatement)
-    assert statements[0].expr is call
-    assert isinstance(statements[1], structured_c.CReturn)
-    assert statements[1].retval is None
-    assert codegen.cfunc.variables_in_use == {}
-    assert codegen.cfunc.unified_local_vars == {}
+    assert statements == [assignment, ret]
+    assert assignment.rhs is call
+    assert codegen.cfunc.variables_in_use[carrier_var] is carrier
+    assert carrier_var in codegen.cfunc.unified_local_vars
 
 
 def test_classify_return_shape_promotes_far_pointer_returns_from_void_prototypes(monkeypatch):

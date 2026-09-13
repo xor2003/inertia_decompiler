@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from .core import IRFunctionArtifact, IRRefusal, IRValue, MemSpace
 from .function_condition_artifact import IRFunctionConditionArtifact8616
 from .logical_memory_contracts import IRLogicalMemoryArtifact8616
-from .ssa import SSABlock, build_x86_16_block_local_ssa
+from .ssa import SSABlock, _version_key, build_x86_16_block_local_ssa
 from .ssa_memory import build_x86_16_function_memory_ssa
 from .ssa_memory_contracts import (
     SSACallStackEffectSite8616,
@@ -24,6 +24,8 @@ from .ssa_memory_contracts import (
     SSAMemoryPhiNode8616,
     SSAMemoryStats8616,
 )
+
+_MIN_PHI_INPUTS_8616 = 2
 
 __all__ = [
     "SSACallStackEffectSite8616",
@@ -128,9 +130,10 @@ class SSAFunctionArtifact:
 
 
 def _value_key(value: IRValue) -> tuple[str, str | None, int] | None:
+    """Use the same storage identity for block definitions and function joins."""
     if value.space in {MemSpace.CONST, MemSpace.UNKNOWN}:
         return None
-    return (value.space.value, value.name, value.offset)
+    return _version_key(value)
 
 
 def _block_exit_versions(block: SSABlock) -> dict[tuple[str, str | None, int], IRValue]:
@@ -201,7 +204,7 @@ def build_x86_16_function_ssa(artifact: IRFunctionArtifact) -> SSAFunctionArtifa
         phi_nodes: list[SSAPhiNode] = []
 
         for block_addr, preds in pred_map.items():
-            if len(preds) < 2:
+            if len(preds) < _MIN_PHI_INPUTS_8616:
                 continue
             candidate_keys = sorted({key for pred in preds for key in exits_by_addr.get(pred, {})})
             for key in candidate_keys:
@@ -210,7 +213,7 @@ def build_x86_16_function_ssa(artifact: IRFunctionArtifact) -> SSAFunctionArtifa
                     for pred in preds
                     if key in exits_by_addr.get(pred, {})
                 )
-                if len(incoming) < 2 or not _distinct_incoming_values(incoming):
+                if len(incoming) < _MIN_PHI_INPUTS_8616 or not _distinct_incoming_values(incoming):
                     continue
                 phi_nodes.append(
                     SSAPhiNode(

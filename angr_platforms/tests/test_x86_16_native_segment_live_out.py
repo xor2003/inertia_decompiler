@@ -3,10 +3,15 @@
 import networkx as nx
 import pytest
 from angr.ailment import Block
-from angr.ailment.expression import Const, VirtualVariable, VirtualVariableCategory
-from angr.ailment.statement import Assignment, ConditionalJump, Return
+from angr.ailment.block_walker import AILBlockViewer
+from angr.ailment.expression import Const, Load, UnaryOp, VirtualVariable, VirtualVariableCategory
+from angr.ailment.statement import Assignment, ConditionalJump, Return, Store
 from angr.analyses.s_reaching_definitions.s_reaching_definitions import SReachingDefinitions
-from angr_platforms.X86_16.ir.native_segment_live_out import preserve_native_segment_live_outs_8616
+from angr_platforms.X86_16.ir.native_segment_live_out import (
+    _StackLoadAnchorViewer8616,
+    preserve_native_segment_live_outs_8616,
+)
+from angr_platforms.X86_16.ir.native_stack_anchor import NATIVE_ENTRY_SP_ANCHOR_TAG8616
 from test_x86_16_cod_samples import _project_from_bytes
 
 
@@ -40,6 +45,60 @@ def test_block_analysis_does_not_invent_function_boundary_uses() -> None:
     analysis = SReachingDefinitions(project, block)
     assert preserve_native_segment_live_outs_8616(analysis).materialized_count == 0
     assert not analysis.model.all_vvar_uses[0]
+
+
+def test_native_ssa_keeps_callee_saved_restores_after_stack_conversion() -> None:
+    """Native save-area cleanup must not erase still-present segmented restores."""
+    project = _project_from_bytes(bytes.fromhex(
+        "55 8b ec 57 56 06 8b 4e 08 8b 46 0a c4 7e 04 "
+        "f2 ab 07 2b c0 5e 5f 8b e5 5d c3"
+    ))
+    cfg = project.analyses.CFGFast(normalize=True)
+    decompiled = project.analyses.Decompiler(cfg.functions[0x1000], cfg=cfg)
+    writes = {
+        (statement.tags.get("ins_addr"), statement.dst.oident)
+        for block in decompiled.clinic.graph
+        for statement in block.statements
+        if isinstance(statement, Assignment)
+        and isinstance(statement.dst, VirtualVariable)
+        and statement.dst.category == VirtualVariableCategory.REGISTER
+    }
+    for instruction, register in ((0x1014, "si"), (0x1015, "di")):
+        assert (instruction, project.arch.registers[register][0]) in writes
+
+    class Anchors(AILBlockViewer):
+        def _handle_UnaryOp(self, expr_idx, expr, stmt_idx, stmt, block):
+            anchor = expr.tags.get(NATIVE_ENTRY_SP_ANCHOR_TAG8616)
+            if anchor is not None:
+                offsets.add(anchor)
+            return super()._handle_UnaryOp(expr_idx, expr, stmt_idx, stmt, block)
+
+    offsets = set()
+    push_es_addr = 0x1005
+    for block in decompiled.clinic.graph:
+        for statement in block.statements:
+            if isinstance(statement, Store) and statement.tags.get("ins_addr") == push_es_addr:
+                Anchors().walk_expression(statement.addr)
+    assert offsets == {-8, -7}, "PUSH ES must use updated SP, not the preceding SI slot"
+
+
+@pytest.mark.parametrize("anchor,loaded,expected", [
+    (-4, True, True),
+    (None, True, False),
+    (4, True, False),
+    (0, True, False),
+    (-4, False, False),
+])
+def test_native_stack_output_requires_proven_load_address(anchor, loaded, expected) -> None:
+    """A local-looking offset or an address value alone is not load evidence."""
+    value = VirtualVariable(0, 0, 16, VirtualVariableCategory.STACK, oident=-4)
+    reference = UnaryOp(1, "Reference", value, bits=16)
+    if anchor is not None:
+        reference.tags[NATIVE_ENTRY_SP_ANCHOR_TAG8616] = anchor
+    source = Load(2, reference, 2, "Iend_LE") if loaded else reference
+    viewer = _StackLoadAnchorViewer8616()
+    viewer.walk_expression(source)
+    assert viewer.has_stack_load is expected
 
 
 def test_each_branch_return_preserves_its_own_segment_definition() -> None:

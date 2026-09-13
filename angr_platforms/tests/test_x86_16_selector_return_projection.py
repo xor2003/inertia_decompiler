@@ -3,19 +3,37 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CIfElse, CReturn, CStatements
+from angr.analyses.decompiler.structured_codegen.c import (
+    CAssignment,
+    CBinaryOp,
+    CConstant,
+    CIfElse,
+    CReturn,
+    CStatements,
+    CUnaryOp,
+    CVariable,
+)
 from angr.sim_type import SimTypeShort
+from angr.sim_variable import SimMemoryVariable, SimStackVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.pipeline.errors import PipelineHardError
 from angr_platforms.X86_16.structuring.return_chains import (
     ReturnSelectorCallbacks8616,
+    SelectorUnsafeEffectsCallbacks8616,
     ensure_return_chain_codegen_state_8616,
     materialize_cfg_selector_return_branches_8616,
+    selector_function_has_unsafe_effects_8616,
 )
 from angr_platforms.X86_16.structuring.selector_return_projection import (
     SelectorReturnProjectionVerdict8616,
     assess_selector_return_projection_8616,
 )
+
+from scripts.test_pipeline import FOCUSED_PYTEST_TARGETS
+
+
+def test_selector_storage_write_guard_is_enrolled_in_routine_pipeline():
+    assert "angr_platforms/tests/test_x86_16_selector_return_projection.py" in FOCUSED_PYTEST_TARGETS
 
 
 class _Codegen:
@@ -119,3 +137,39 @@ def test_selector_return_stale_projection_hard_fails_when_evidence_cannot_replay
 
     with pytest.raises(PipelineHardError, match="lost CFG-proven selector-return projection"):
         materialize_cfg_selector_return_branches_8616(project, codegen, _callbacks([]))
+
+
+@pytest.mark.parametrize("storage", ["runtime-register", "stack", "indirect"])
+@pytest.mark.parametrize("entrypoint", ["materializer", "shared-proof"])
+def test_selector_return_retains_unconsumed_storage_writes(storage, entrypoint):
+    """CFG return proof alone does not authorize deleting storage effects."""
+    codegen = _Codegen()
+    if storage == "runtime-register":
+        variable = SimMemoryVariable(0x10010, 4, name="inertia_esi",
+                                     category="inertia_gp_register_state")
+        target = CVariable(variable, variable_type=SimTypeShort(False), codegen=codegen)
+    elif storage == "stack":
+        target = CVariable(SimStackVariable(-4, 2, base="bp"),
+                           variable_type=SimTypeShort(False), codegen=codegen)
+    else:
+        target = CUnaryOp("Dereference", _constant(0x1234, codegen), codegen=codegen)
+    write = CAssignment(target, _constant(7, codegen), codegen=codegen,
+                        tags={"ins_addr": codegen.cfunc.addr})
+    root = CStatements([CStatements([write], codegen=codegen),
+                        CReturn(_constant(5, codegen), codegen=codegen)], codegen=codegen)
+    codegen.cfunc.statements = root
+    callbacks = _callbacks([(_condition(codegen, 0), _constant(10, codegen), _constant(5, codegen))])
+
+    if entrypoint == "shared-proof":
+        effects = SelectorUnsafeEffectsCallbacks8616(
+            function_inventory=lambda _project, _codegen: pytest.fail("unconsumed C writes must refuse before instruction scanning"),
+            direct_call_target=lambda _insn: None,
+            callee_name_for_target=lambda _project, _target: (None, None),
+            target_is_stack_probe_helper=lambda _project, _target, _name: False,
+        )
+        assert selector_function_has_unsafe_effects_8616(codegen.project, codegen, effects)
+    else:
+        assert not materialize_cfg_selector_return_branches_8616(codegen.project, codegen, callbacks)
+        assert codegen._inertia_cfg_selector_return_stats_8616["refused"] > 0
+    assert codegen.cfunc.statements is root
+    assert root.statements[0].statements == [write]

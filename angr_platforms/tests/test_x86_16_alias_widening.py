@@ -97,7 +97,7 @@ def test_alias_widening_refuses_register_join_without_matching_alias_version():
     assert isinstance(codegen.cfunc.statements, CBinaryOp)
 
 
-def test_alias_widening_folds_adjacent_stack_bytes_only_when_alias_proof_exists():
+def test_rewrite_cannot_materialize_stack_object_from_byte_adjacency():
     codegen = _codegen(None)
     low = _stack(-4, codegen)
     high = _stack(-3, codegen)
@@ -107,12 +107,10 @@ def test_alias_widening_folds_adjacent_stack_bytes_only_when_alias_proof_exists(
 
     changed = _simplify_structured_expressions_8616(codegen)
 
-    assert changed is True
-    result = codegen.cfunc.statements
-    assert isinstance(result, CVariable)
-    assert isinstance(result.variable, SimStackVariable)
-    assert result.variable.offset == -4
-    assert result.variable.size == 2
+    assert changed is False
+    assert codegen.cfunc.statements is expr
+    assert expr.lhs is low
+    assert expr.rhs.lhs is high
 
 
 def test_alias_widening_refuses_mixed_domain_byte_pair():

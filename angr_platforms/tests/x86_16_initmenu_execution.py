@@ -18,6 +18,7 @@ def assert_initmenu_pause_guard_behavior(body: str, tmp_path: Path) -> None:
 unsigned short cszMenu = 0, fSound = 0;
 char *aszMenu[] = {"unused"};
 long clPause;
+uint32_t inertia_esi, inertia_edi;
 static int row, col, limit_outputs, zero_outputs;
 int settextcolor(int color) { return color; }
 int32_t setbkcolor(int32_t color) { return color; }
@@ -36,7 +37,9 @@ int main(void) {
     const long pauses[] = {0, 900, 0x10384};
     for (unsigned i = 0; i < sizeof(pauses) / sizeof(pauses[0]); ++i) {
         clPause = pauses[i]; limit_outputs = zero_outputs = 0;
+        inertia_esi = 0x1234a55a; inertia_edi = 0xabcd5aa5;
         InitMenu();
+        if (inertia_esi != 0x1234a55a || inertia_edi != 0xabcd5aa5) return 2;
         printf("%ld:%d:%d\\n", clPause, limit_outputs, zero_outputs);
     }
     return 0;

@@ -735,23 +735,13 @@ def test_structuring_loop_idiom_owner_records_pass(monkeypatch):
     monkeypatch.setattr(
         post_stage,
         "_materialize_global_byte_index_sum_loop_8616",
-        lambda *_args: calls.append("global") and False,
-    )
-    monkeypatch.setattr(
-        post_stage,
-        "_materialize_nested_stack_counter_accumulator_loop_8616",
-        lambda *_args: calls.append("nested") is None,
-    )
-    monkeypatch.setattr(
-        post_stage,
-        "_materialize_stack_arg_accumulator_loop_8616",
-        lambda *_args: calls.append("stack-arg") and False,
+        lambda *_args: calls.append("global") is None,
     )
 
     changed = stage._materialize_structuring_loop_idioms_8616(project, codegen)
 
     assert changed is True
-    assert calls == ["global", "nested", "stack-arg"]
+    assert calls == ["global"]
     assert codegen._inertia_loop_idiom_structuring_pass_ran_8616 is True
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeFunction, SimTypeShort
@@ -47,6 +48,46 @@ def _codegen_boundary(arch: Arch86_16) -> SimpleNamespace:
         next_ident=lambda name: name,
         next_node_idx=lambda: 1,
     )
+
+
+@pytest.mark.parametrize("ownership", ["argument", "live_key", "unified_key", "other_member", "mixed", "empty", "malformed"])
+def test_argument_member_retires_only_unowned_stale_declaration_key(ownership):
+    arch = Arch86_16()
+    codegen = _codegen_boundary(arch)
+    word = SimTypeShort(False).with_arch(arch)
+    argument = structured_c.CVariable(
+        SimStackVariable(6, 2, base="bp", name="arg_6", region=0x1000),
+        variable_type=word, codegen=codegen,
+    )
+    stale = SimStackVariable(6, 1, base="bp", name="arg_6", region=0x1000)
+    local = structured_c.CVariable(stale, variable_type=word, codegen=codegen)
+    if ownership == "unified_key":
+        local = structured_c.CVariable(
+            SimStackVariable(-8, 1, base="bp", name="local", region=0x1000),
+            unified_variable=stale, variable_type=word, codegen=codegen,
+        )
+    members = [(argument, word)]
+    if ownership == "other_member":
+        members = [(local, word)]
+    elif ownership == "mixed":
+        members.append((local, word))
+    elif ownership == "empty":
+        members = []
+    elif ownership == "malformed":
+        members = [(argument,)]
+    body = [argument, local] if ownership in {"live_key", "unified_key"} else [argument]
+    root = structured_c.CStatements(body, codegen=codegen)
+    codegen.cfunc = SimpleNamespace(
+        arg_list=[argument], statements=root,
+        variables_in_use={argument.variable: argument},
+        unified_local_vars={stale: members},
+    )
+
+    unify_positive_bp_argument_identity_8616(codegen)
+
+    assert (stale not in codegen.cfunc.unified_local_vars) == (ownership == "argument")
+    assert root.statements == body
+    assert codegen.cfunc.arg_list == [argument]
 
 
 def test_projected_entry_sp_argument_materializes_by_machine_bp_identity() -> None:

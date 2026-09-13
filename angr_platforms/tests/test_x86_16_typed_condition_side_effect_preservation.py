@@ -2,14 +2,21 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
+    CITE,
     CBinaryOp,
     CConstant,
     CFunctionCall,
     CIfElse,
+    CMultiStatementExpression,
     CStatements,
+    CTypeCast,
+    CUnaryOp,
+    CVariable,
 )
 from angr.sim_type import SimTypeFunction, SimTypeShort
+from angr.sim_variable import SimRegisterVariable
 from angr_platforms.X86_16 import decompiler_postprocess_jcc
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.condition_call_effects import (
@@ -61,6 +68,97 @@ def _semantic_call(codegen: object, *, callsite: int = 0x101D4) -> CFunctionCall
         codegen=codegen,
         tags={"ins_addr": callsite},
     )
+
+
+def test_inverted_typed_carrier_retains_condition_origin(monkeypatch):
+    """The negative wrapper must keep the typed owner's exact JCC coordinates."""
+    codegen = _codegen()
+    zero = CConstant(0, SimTypeShort(False), codegen=codegen)
+    one = CConstant(1, SimTypeShort(False), codegen=codegen)
+    tags = {"ins_addr": 0x101DA, "vex_block_addr": 0x101D7}
+    condition = CITE(one, zero, one, codegen=codegen, tags=tags)
+    branch = CIfElse([(condition, CStatements([], codegen=codegen))], codegen=codegen)
+    root = CStatements([branch], codegen=codegen)
+    codegen.cfunc = SimpleNamespace(addr=0x101A7, statements=root, body=root)
+    codegen._inertia_typed_conditions = (
+        ConditionIR("ne", IRValue(MemSpace.REG, name="ax", offset=8, size=2),
+                    IRValue(MemSpace.CONST, const=0, size=2), src_insn=0x101DA, block_addr=0x101D7),
+    )
+    predicate = CBinaryOp("CmpNE", one, zero, codegen=codegen, tags=tags)
+    monkeypatch.setattr(condition_materialization._legacy_typed_conditions,
+                        "_build_c_condition_expr", lambda *_args: predicate)
+    assert _apply_typed_conditions_to_codegen_8616(codegen.project, codegen)
+    replacement = branch.condition_and_nodes[0][0]
+    assert isinstance(replacement, CUnaryOp)
+    assert replacement.op == "Not"
+    assert replacement.operand is predicate
+    assert replacement.tags == tags
+
+
+@pytest.mark.parametrize("kind", ["LogicalAnd", "LogicalOr", "statements"])
+@pytest.mark.parametrize("wrapper", ["comparison", "not", "cast"])
+@pytest.mark.parametrize("consumer", ["typed", "jcc"])
+def test_single_typed_fact_cannot_replace_wrapped_condition_chain(kind, wrapper, consumer, monkeypatch) -> None:
+    """A tag on a wrapper does not prove ownership of all nested predicates."""
+    codegen = _codegen()
+    zero = CConstant(0, SimTypeShort(False), codegen=codegen)
+    one = CConstant(1, SimTypeShort(False), codegen=codegen)
+    flags_offset, flags_size = codegen.project.arch.registers["flags"]
+    flags = CVariable(SimRegisterVariable(flags_offset, flags_size, name="flags"),
+                      variable_type=SimTypeShort(False), codegen=codegen)
+    inner = (
+        CMultiStatementExpression(CStatements([], codegen=codegen), flags, codegen=codegen)
+        if kind == "statements" else CBinaryOp(kind, flags, zero, codegen=codegen)
+    )
+    if wrapper == "comparison":
+        condition = CBinaryOp("CmpEQ", inner, zero, codegen=codegen)
+    elif wrapper == "not":
+        condition = CUnaryOp("Not", CBinaryOp("CmpEQ", inner, zero, codegen=codegen), codegen=codegen)
+    else:
+        condition = CTypeCast(SimTypeShort(False), SimTypeShort(False),
+                              CBinaryOp("CmpEQ", inner, zero, codegen=codegen), codegen=codegen)
+    condition.tags = {"ins_addr": 0x101DA, "vex_block_addr": 0x101D7}
+    branch = CIfElse([(condition, CStatements([], codegen=codegen))], else_node=None,
+                     cstyle_ifs=True, codegen=codegen)
+    root = CStatements([branch], codegen=codegen)
+    codegen.cfunc = SimpleNamespace(addr=0x101A7, statements=root, body=root)
+    codegen._inertia_typed_conditions = (
+        ConditionIR("ne", IRValue(MemSpace.REG, name="ax", offset=8, size=2),
+                    IRValue(MemSpace.CONST, const=0, size=2), src_insn=0x101DA, block_addr=0x101D7),
+    )
+    monkeypatch.setattr(
+        condition_materialization._legacy_typed_conditions,
+        "_build_c_condition_expr",
+        lambda *_args: CBinaryOp("CmpNE", one, zero, codegen=codegen),
+    )
+    monkeypatch.setattr(
+        decompiler_postprocess_jcc, "_translate_cmp_jcc_guard_8616",
+        lambda *_args: decompiler_postprocess_jcc._DecodedCmpGuard8616(lhs=one, rhs=zero, op="CmpNE"),
+    )
+    apply = (_apply_typed_conditions_to_codegen_8616 if consumer == "typed" else
+             decompiler_postprocess_jcc._rewrite_decoded_jcc_conditions_8616)
+    assert apply(codegen.project, codegen) is False
+    assert branch.condition_and_nodes[0][0] is condition
+
+
+@pytest.mark.parametrize("operator,constant,refused", [
+    ("LogicalAnd", 1, False), ("LogicalOr", 0, False),
+    ("LogicalAnd", 0, True), ("LogicalOr", 1, True),
+])
+@pytest.mark.parametrize("constant_on_left", [False, True])
+def test_composite_ownership_distinguishes_neutral_root_from_wrapped_guard(
+    operator, constant, refused, constant_on_left,
+):
+    from angr_platforms.X86_16.structuring.condition_ownership import requires_composite_condition_ownership_8616
+
+    codegen = _codegen()
+    literal = CConstant(constant, SimTypeShort(False), codegen=codegen)
+    predicate = CBinaryOp("CmpEQ", literal, literal, codegen=codegen)
+    operands = (literal, predicate) if constant_on_left else (predicate, literal)
+    root = CBinaryOp(operator, *operands, codegen=codegen)
+    assert requires_composite_condition_ownership_8616(root) is refused
+    wrapped = CUnaryOp("Not", root, codegen=codegen)
+    assert requires_composite_condition_ownership_8616(wrapped)
 
 
 def test_typed_condition_cleanup_preserves_side_effecting_call_predicate() -> None:

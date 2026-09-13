@@ -278,6 +278,7 @@ def test_callee_prototype_consumes_same_accepted_stack_layout() -> None:
         arg_list=arguments,
         functy=prototype,
         prototype=prototype,
+        statements=None,
         unified_local_vars={},
     )
 

@@ -404,7 +404,7 @@ def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileChec
 
 
 def check_c_recompiles_8616(c_text: str, *, target: str = "portable-flat") -> RecompileCheckResult:
-    """Compile generated C with the requested target compiler profile."""
+    """Compile without linking; syntax-only GCC omits return-flow diagnostics."""
 
     def _impl() -> RecompileCheckResult:
         if target == "msc-dos":
@@ -420,7 +420,7 @@ def check_c_recompiles_8616(c_text: str, *, target: str = "portable-flat") -> Re
                 compiler=None,
                 stdout="",
                 stderr="gcc not found",
-                command=("gcc", "-std=c99", "-Wall", "-Werror", "-fsyntax-only"),
+                command=("gcc", "-std=c99", "-Wall", "-Werror", "-c", "-o", os.devnull),
                 checked_payload=checked_payload,
                 checked_payload_hash=checked_hash,
                 source_path=None,
@@ -440,7 +440,9 @@ def check_c_recompiles_8616(c_text: str, *, target: str = "portable-flat") -> Re
             "-Wno-error=nonnull",
             "-Wno-error=builtin-declaration-mismatch",
             "-fno-builtin",
-            "-fsyntax-only",
+            "-c",
+            "-o",
+            os.devnull,
             str(src_path),
         )
         try:

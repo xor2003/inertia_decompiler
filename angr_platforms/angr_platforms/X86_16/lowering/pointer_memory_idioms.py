@@ -5,6 +5,9 @@ Responsibility: own pointer-memory idiom dispatch from proven instruction,
 stack-slot, and typed pointer evidence.
 Consumes alias, widening, and typed facts; legacy callback providers
 may temporarily live in postprocess while their proof helpers are split.
+Byte-fill and word-sum body substitution are retired: generic indexed-access and GP storage
+lowering preserve the function's surrounding effects. Do not reintroduce a
+whole-function replacement to improve a loop's appearance.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
 
@@ -42,8 +45,6 @@ class PointerMemoryIdiomCallbacks8616:
     """Callbacks needed to consume legacy pointer-memory proof helpers."""
 
     linear_function_insns: Callable[[object, object], tuple[object, ...]]
-    byte_pointer_fill_loop: Callable[[object, object, tuple[object, ...], dict[int, int]], bool]
-    word_pointer_sum_loop: Callable[[object, object, tuple[object, ...], dict[int, int]], bool]
     word_pair_pointer_accumulation_loop: Callable[[object, object, tuple[object, ...], dict[int, int]], bool]
     word_pointer_first_gt_loop: Callable[[object, object, tuple[object, ...], dict[int, int]], bool]
     word_pointer_rotate3: Callable[[object, object, tuple[object, ...], dict[int, int]], bool]
@@ -604,8 +605,6 @@ def materialize_pointer_memory_idioms_from_evidence_8616(
         return False
     index_by_addr = {_instruction_address_8616(insn): idx for idx, insn in enumerate(insns)}
     attempts = (
-        (PointerMemoryIdiomKind8616.BYTE_FILL_LOOP, callbacks.byte_pointer_fill_loop),
-        (PointerMemoryIdiomKind8616.WORD_SUM_LOOP, callbacks.word_pointer_sum_loop),
         (
             PointerMemoryIdiomKind8616.WORD_PAIR_ACCUMULATION_LOOP,
             callbacks.word_pair_pointer_accumulation_loop,

@@ -142,6 +142,17 @@ def is_lowered_runtime_macro_8616(name: str) -> bool:
     return name in LOWERED_RUNTIME_MACROS_8616
 
 
+def render_pointer_storage_macros_8616(target: str) -> str:
+    """Render target pointer-to-storage casts for headers and rebuild harnesses."""
+    if target not in {"msc-dos", "portable-flat"}:
+        raise ValueError(f"Unsupported pointer-storage target: {target!r}")
+    intermediate_cast = "(uintptr_t)" if target == "portable-flat" else ""
+    return (
+        f"#define PTR_U16(ptr)       ((uint16_t){intermediate_cast}(ptr))\n"
+        f"#define PTR_U32(ptr)       ((uint32_t){intermediate_cast}(ptr))\n"
+    )
+
+
 def render_c_runtime_header_8616(target: str | None) -> str:
     """Return the C helper header for the requested generated-C target."""
     normalized = str(target or "").strip().lower()
@@ -176,8 +187,7 @@ def render_c_runtime_header_8616(target: str | None) -> str:
             "#define MEM_U8(ptr)        (*(uint8_t  *)(ptr))\n"
             "#define MEM_U16(ptr)       (*(uint16_t *)(ptr))\n"
             "#define MEM_U32(ptr)       (*(uint32_t *)(ptr))\n"
-            "#define PTR_U16(ptr)       ((uint16_t)(ptr))\n"
-            "#define PTR_U32(ptr)       ((uint32_t)(ptr))\n"
+            f"{render_pointer_storage_macros_8616(normalized)}"
         )
     if normalized == "portable-flat":
         compiler_helper_declarations = "\n".join(_PORTABLE_COMPILER_RUNTIME_HELPER_DECLARATIONS_8616)
@@ -208,8 +218,7 @@ def render_c_runtime_header_8616(target: str | None) -> str:
             "#define MEM_U8(ptr)          (*(uint8_t  *)(ptr))\n"
             "#define MEM_U16(ptr)         (*(uint16_t *)(ptr))\n"
             "#define MEM_U32(ptr)         (*(uint32_t *)(ptr))\n"
-            "#define PTR_U16(ptr)         ((uint16_t)(uintptr_t)(ptr))\n"
-            "#define PTR_U32(ptr)         ((uint32_t)(uintptr_t)(ptr))\n"
+            f"{render_pointer_storage_macros_8616(normalized)}"
         )
     return ""
 
@@ -223,5 +232,6 @@ __all__ = [
     "interrupt_helper_declarations_8616",
     "is_lowered_runtime_macro_8616",
     "render_c_runtime_header_8616",
+    "render_pointer_storage_macros_8616",
     "runtime_helper_declaration_8616",
 ]

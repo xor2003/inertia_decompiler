@@ -72,7 +72,7 @@ class _DeclarationTypeSurface8616(Protocol):
     unified_local_vars: dict[SimVariable, set[tuple[structured_c.CVariable, SimType]]]
 
 
-def _declared_variable_type_8616(expression: structured_c.CVariable) -> SimType | None:
+def declared_variable_type_8616(expression: structured_c.CVariable) -> SimType | None:
     """Use a unique emitted declaration type for the exact variable identity."""
     try:
         cfunc = cast(_DeclarationTypeSurface8616 | None, expression.codegen.cfunc)
@@ -109,7 +109,7 @@ def is_identity_semantic_variable_cast_8616(node: CSemanticCast8616) -> bool:
     integer_types = (SimTypeChar, SimTypeShort, SimTypeInt, SimTypeLong, SimTypeLongLong)
     source = node.src_type
     destination = node.dst_type
-    current = _declared_variable_type_8616(node.expr)
+    current = declared_variable_type_8616(node.expr)
     if (
         not isinstance(source, integer_types)
         or not isinstance(destination, integer_types)

@@ -26,6 +26,7 @@ from angr_platforms.X86_16.lowering.pointer_memory_idioms import (
     PointerMemoryIdiomKind8616,
     PointerMemoryIdiomMaterializationFact8616,
     PointerSwapSpliceStats8616,
+    _normalize_materialized_counted_loop_8616,
     materialize_pointer_memory_idioms_from_evidence_8616,
     pointer_memory_loop_validation_delta_is_precision_only_8616,
     pointer_swap_validation_delta_is_precision_only_8616,
@@ -72,8 +73,6 @@ def test_pointer_memory_idiom_dispatches_first_proven_materializer() -> None:
 
     callbacks = PointerMemoryIdiomCallbacks8616(
         linear_function_insns=linear,
-        byte_pointer_fill_loop=refuse("byte-fill"),
-        word_pointer_sum_loop=refuse("word-sum"),
         word_pair_pointer_accumulation_loop=refuse("pair-accum"),
         word_pointer_first_gt_loop=materialize,
         word_pointer_rotate3=refuse("rotate3"),
@@ -83,7 +82,7 @@ def test_pointer_memory_idiom_dispatches_first_proven_materializer() -> None:
     codegen = SimpleNamespace()
 
     assert materialize_pointer_memory_idioms_from_evidence_8616(object(), codegen, callbacks) is True
-    assert calls == ["linear", "byte-fill", "word-sum", "pair-accum", "word-first-gt"]
+    assert calls == ["linear", "pair-accum", "word-first-gt"]
     assert codegen._inertia_pointer_memory_idiom_facts_8616 == (
         PointerMemoryIdiomMaterializationFact8616(
             kind=PointerMemoryIdiomKind8616.WORD_FIRST_GREATER_LOOP,
@@ -103,8 +102,6 @@ def test_pointer_memory_idiom_dispatches_first_proven_materializer() -> None:
 def test_pointer_memory_idiom_dispatch_refuses_without_instruction_evidence() -> None:
     callbacks = PointerMemoryIdiomCallbacks8616(
         linear_function_insns=lambda _project, _codegen: (),
-        byte_pointer_fill_loop=lambda *_args: True,
-        word_pointer_sum_loop=lambda *_args: True,
         word_pair_pointer_accumulation_loop=lambda *_args: True,
         word_pointer_first_gt_loop=lambda *_args: True,
         word_pointer_rotate3=lambda *_args: True,
@@ -143,8 +140,6 @@ def test_pointer_memory_idiom_publishes_materialized_pointer_interface() -> None
 
     callbacks = PointerMemoryIdiomCallbacks8616(
         linear_function_insns=lambda _project, _codegen: insns,
-        byte_pointer_fill_loop=lambda *_args: False,
-        word_pointer_sum_loop=lambda *_args: False,
         word_pair_pointer_accumulation_loop=lambda *_args: False,
         word_pointer_first_gt_loop=materialize,
         word_pointer_rotate3=lambda *_args: False,
@@ -159,7 +154,8 @@ def test_pointer_memory_idiom_publishes_materialized_pointer_interface() -> None
     ) == recovered
 
 
-def test_pointer_memory_idiom_normalizes_byte_fill_as_for_loop_with_return() -> None:
+def test_legacy_byte_fill_projection_normalizes_as_for_loop_with_return() -> None:
+    """Retain old projection compatibility without invoking a body replacement."""
     codegen = SimpleNamespace(
         cstyle_null_cmp=False,
         next_idx=lambda _name: 0,
@@ -185,18 +181,7 @@ def test_pointer_memory_idiom_normalizes_byte_fill_as_for_loop_with_return() -> 
     codegen.cfunc = SimpleNamespace(
         statements=CStatements([initializer, loop], codegen=codegen),
     )
-    insns = (SimpleNamespace(address=0x1000),)
-    callbacks = PointerMemoryIdiomCallbacks8616(
-        linear_function_insns=lambda _project, _codegen: insns,
-        byte_pointer_fill_loop=lambda *_args: True,
-        word_pointer_sum_loop=lambda *_args: False,
-        word_pair_pointer_accumulation_loop=lambda *_args: False,
-        word_pointer_first_gt_loop=lambda *_args: False,
-        word_pointer_rotate3=lambda *_args: False,
-        pointer_swap=lambda *_args: False,
-    )
-
-    assert materialize_pointer_memory_idioms_from_evidence_8616(object(), codegen, callbacks) is True
+    assert _normalize_materialized_counted_loop_8616(codegen, PointerMemoryIdiomKind8616.BYTE_FILL_LOOP)
     normalized = codegen.cfunc.statements.statements
     assert len(normalized) == 2
     assert isinstance(normalized[0], CForLoop)
@@ -205,7 +190,6 @@ def test_pointer_memory_idiom_normalizes_byte_fill_as_for_loop_with_return() -> 
     assert normalized[0].body.statements == [body_statement]
     assert isinstance(normalized[1], CReturn)
     assert normalized[1].retval is None
-    assert codegen._inertia_pointer_memory_idiom_facts_8616[0].failure_count == 0
 
 
 def test_pointer_memory_byte_fill_accepts_only_exact_write_precision_delta() -> None:

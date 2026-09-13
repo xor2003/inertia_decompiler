@@ -13,7 +13,7 @@ of a near pointer. LEA computes an address and never proves a dereference.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol, cast
 
 from capstone import CS_AC_WRITE
@@ -89,6 +89,10 @@ class _InstructionBoundary8616(Protocol):
     id: int
     operands: Sequence[_OperandBoundary8616]
 
+    def reg_name(self, register: int) -> str | None:
+        """Return Capstone's architectural name for an explicit register ID."""
+        ...
+
 
 class _InstructionWrapperBoundary8616(Protocol):
     """Typed view of angr's Capstone instruction wrapper."""
@@ -117,7 +121,11 @@ class _FunctionBoundary8616(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class NearPointerArgumentFact8616:
-    """Binary proof that one BP argument feeds a register-indirect access."""
+    """Prove pointer use separately from the exact value in its current carrier.
+
+    Missing carrier metadata never authorizes substituting a register with the
+    argument. An adjusted carrier still proves pointer use, not value equality.
+    """
 
     stack_offset: int
     carrier_load_ins_addr: int
@@ -125,6 +133,8 @@ class NearPointerArgumentFact8616:
     access_width_bytes: int
     source_version_delta: int = 0
     source_update_ins_addrs: tuple[int, ...] = ()
+    carrier_register_name: str | None = None
+    carrier_value_is_exact: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +145,7 @@ class _NearPointerCarrier8616:
     carrier_load_ins_addr: int
     source_version_delta: int = 0
     source_update_ins_addrs: tuple[int, ...] = ()
+    value_is_exact: bool = True
 
 
 def _direct_bp_stack_operand_8616(operand: _OperandBoundary8616) -> tuple[int, int] | None:
@@ -185,7 +196,7 @@ def _direct_stack_write_delta_8616(
 def _unique_memory_carrier_8616(
     operand: _OperandBoundary8616,
     carriers: dict[int, _NearPointerCarrier8616],
-) -> _NearPointerCarrier8616 | None:
+) -> tuple[int, _NearPointerCarrier8616] | None:
     """Find a sole argument address carrier outside a BP-based stack object."""
     address_registers = (int(operand.mem.base), int(operand.mem.index))
     if X86_REG_BP in address_registers:
@@ -193,7 +204,8 @@ def _unique_memory_carrier_8616(
     carrier_registers = tuple(register for register in address_registers if register in carriers)
     if len(carrier_registers) != 1:
         return None
-    return carriers[carrier_registers[0]]
+    register = carrier_registers[0]
+    return register, carriers[register]
 
 
 def _collect_near_pointer_argument_facts_uncached_8616(
@@ -229,9 +241,14 @@ def _collect_near_pointer_argument_facts_uncached_8616(
             for operand in operands:
                 if operand.type != X86_OP_MEM or insn.id == X86_INS_LEA:
                     continue
-                carrier = _unique_memory_carrier_8616(operand, carriers)
-                if carrier is None or int(operand.size) <= 0:
+                carrier_match = _unique_memory_carrier_8616(operand, carriers)
+                if carrier_match is None or int(operand.size) <= 0:
                     continue
+                register, carrier = carrier_match
+                try:
+                    register_name = insn.reg_name(register)
+                except AttributeError:
+                    register_name = None
                 key = (carrier.stack_offset, insn_addr, int(operand.size))
                 if key in seen:
                     continue
@@ -244,6 +261,8 @@ def _collect_near_pointer_argument_facts_uncached_8616(
                         access_width_bytes=int(operand.size),
                         source_version_delta=carrier.source_version_delta,
                         source_update_ins_addrs=carrier.source_update_ins_addrs,
+                        carrier_register_name=register_name,
+                        carrier_value_is_exact=carrier.value_is_exact and register_name is not None,
                     )
                 )
             if insn.id in {X86_INS_CALL, X86_INS_LCALL}:
@@ -258,9 +277,8 @@ def _collect_near_pointer_argument_facts_uncached_8616(
                     if delta is None:
                         carriers.pop(register, None)
                         continue
-                    carriers[register] = _NearPointerCarrier8616(
-                        stack_offset=carrier.stack_offset,
-                        carrier_load_ins_addr=carrier.carrier_load_ins_addr,
+                    carriers[register] = replace(
+                        carrier,
                         source_version_delta=carrier.source_version_delta + delta,
                         source_update_ins_addrs=(*carrier.source_update_ins_addrs, insn_addr),
                     )
@@ -268,6 +286,7 @@ def _collect_near_pointer_argument_facts_uncached_8616(
                 continue
             destination_register = int(operands[0].reg)
             if insn.id == X86_INS_ADD and destination_register in carriers:
+                carriers[destination_register] = replace(carriers[destination_register], value_is_exact=False)
                 continue
             if insn.id != X86_INS_MOV or len(operands) != 2:
                 carriers.pop(destination_register, None)

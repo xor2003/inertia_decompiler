@@ -11,10 +11,12 @@ Forbidden: graph mutation, region collapse, semantic inference, or C mutation.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
+
+import networkx as nx
 
 from ..pipeline.errors import PipelineHardError
 
@@ -148,16 +150,45 @@ def _unknown_topology_8616(
     )
 
 
+def _header_dominated_nodes_8616(
+    entry: int, header: int, successors: Callable[[int], tuple[int, ...]],
+) -> frozenset[int]:
+    """Use entry-rooted dominance to exclude enclosing-loop re-entry paths."""
+    snapshot = nx.DiGraph()
+    pending = [entry]
+    seen: set[int] = set()
+    while pending:
+        source = pending.pop()
+        if source in seen:
+            continue
+        seen.add(source)
+        targets = successors(source)
+        snapshot.add_node(source)
+        snapshot.add_edges_from((source, target) for target in targets)
+        pending.extend(targets)
+    dominators = nx.immediate_dominators(snapshot, entry)
+    dominators[entry] = entry
+    if header not in dominators:
+        return frozenset()
+    tree = nx.DiGraph()
+    tree.add_nodes_from(dominators)
+    tree.add_edges_from((parent, node) for node, parent in dominators.items() if parent != node)
+    return frozenset({header} | nx.descendants(tree, header))
+
+
 def classify_natural_loop_topology_8616(
     graph: _NaturalLoopGraph8616,
     header: int,
     latch: int,
+    entry: int | None = None,
 ) -> NaturalLoopTopology8616:
     """Classify one exact single-latch, single-exit-target natural loop.
 
     The graph is observed through deterministic integer-node snapshots. Any
     missing edge, non-integer node, external non-header entry, extra latch, or
     non-unique exit target produces ``UNKNOWN_REFUSE``.
+    When the function entry is supplied, dominance distinguishes true latches
+    from enclosing-loop re-entry. Without it, retain conservative reachability.
     """
     successor_cache: dict[int, tuple[int, ...]] = {}
     predecessor_cache: dict[int, tuple[int, ...]] = {}
@@ -216,8 +247,14 @@ def classify_natural_loop_topology_8616(
         return _unknown_topology_8616(header, latch, "incomplete-loop-body", normalized=True)
 
     try:
+        latch_candidates = (
+            _header_dominated_nodes_8616(
+                entry, header, lambda node: _ordered_neighbors(node, predecessors=False),
+            )
+            if entry is not None else forward
+        )
         latches = tuple(
-            source for source in _ordered_neighbors(header, predecessors=True) if source in forward
+            source for source in _ordered_neighbors(header, predecessors=True) if source in latch_candidates
         )
         if latches != (latch,):
             return _unknown_topology_8616(header, latch, "non-unique-latch", normalized=True)

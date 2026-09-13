@@ -63,6 +63,14 @@ class ReturnSegmentFrame8616:
     effects: tuple[ReturnSegmentEffect8616, ...] = ()
     refusal: ReturnSegmentRefusal8616 | None = None
 
+    @property
+    def additional_return_bytes(self) -> int | None:
+        """Return the proven 16-bit CS slot consumed beyond the near CALL frame."""
+        if self.refusal is not None or not self.effects:
+            return None
+        # The producer refuses every non-16-bit or explicit-cleanup return.
+        return 16 // 8
+
 
 @dataclass(frozen=True, slots=True)
 class ReturnFrame8616:
@@ -186,13 +194,17 @@ def _push_effects_8616(
 
 def collect_return_segment_frames_8616(
     project: object, function: object, return_addrs: Mapping[int, int],
+    *, block_addr: int | None = None,
 ) -> tuple[ReturnSegmentFrame8616, ...]:
     """Return one explicit outcome per call using decoded prefix and exit proof."""
     if not isinstance(project, Project) or not isinstance(function, Function):
         return tuple(ReturnSegmentFrame8616(addr, refusal=ReturnSegmentRefusal8616.UNKNOWN_CALLEE)
                      for addr in sorted(return_addrs))
     candidates: dict[int, list[tuple[int, int, CsInsn, CsInsn]]] = {}
-    for block in function.blocks:
+    blocks = function.blocks if block_addr is None else (
+        (function.get_block(block_addr),) if block_addr in function.block_addrs_set else ()
+    )
+    for block in blocks:
         if not isinstance(block.size, int) or block.size <= 0:
             continue
         instructions = tuple(wrapper.insn for wrapper in block.capstone.insns)
