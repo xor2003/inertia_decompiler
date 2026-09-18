@@ -25,13 +25,16 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_variable import SimRegisterVariable
 
 from ..c_ast_utils import _iter_c_nodes_deep_8616
-from ..callsite_summary import CallsiteSummary8616
+from ..callsite_summary import CallsiteReturnShape8616, CallsiteSummary8616
 from ..pipeline.errors import PipelineHardError
 from .register_local_declarations import register_typed_register_local_8616
+
+_WORD_RETURN_BYTES: int = 2
 
 __all__ = [
     "CallReturnSelectorBindingResult8616",
     "bind_call_return_switch_selectors_8616",
+    "is_scalar_ax_call_return_8616",
     "replay_call_return_switch_selectors_8616",
 ]
 
@@ -60,6 +63,14 @@ class _RegisterView8616:
     expression: structured_c.CExpression
     offset: int
     size: int
+
+
+def is_scalar_ax_call_return_8616(summary: CallsiteSummary8616 | None) -> bool:
+    """Require a used, proven scalar AX result; never narrow DX:AX or unknown returns."""
+    return bool(
+        summary is not None and summary.return_register == "ax"
+        and summary.return_used is True and summary.return_shape == CallsiteReturnShape8616.AX.value
+    )
 
 
 def _register_cvar_8616(node: object) -> structured_c.CVariable | None:
@@ -173,10 +184,11 @@ def _structured_return_variable_8616(
         else None
     )
     for candidate in (variable, selector_variable):
+        if not isinstance(candidate, SimRegisterVariable):
+            continue
+        same_storage = candidate.reg == variable.reg and candidate.size == variable.size
         if (
-            isinstance(candidate, SimRegisterVariable)
-            and candidate.reg == variable.reg
-            and candidate.size == variable.size
+            same_storage
             and candidate.ident == f"call-return-{summary.callsite_addr:x}"
             and candidate.name == name
             and candidate.region == function_addr
@@ -277,16 +289,12 @@ def bind_call_return_switch_selectors_8616(
                 continue
             visited_calls.add(id(call))
             summary = summaries.get(id(call))
-            if (
-                summary is None
-                or summary.return_register != "ax"
-                or summary.return_used is not True
-                or summary.return_shape != "ax"
-            ):
+            if not is_scalar_ax_call_return_8616(summary):
                 continue
+            assert summary is not None
             raw_fact_count += 1
             register = _register_cvar_8616(statement.lhs)
-            if register is None or register.variable.size != 2:
+            if register is None or register.variable.size != _WORD_RETURN_BYTES:
                 failure_count += 1
                 continue
             normalized_fact_count += 1

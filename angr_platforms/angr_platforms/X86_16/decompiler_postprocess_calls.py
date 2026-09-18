@@ -165,6 +165,7 @@ from .lowering.call_argument_stack_sources import (
     materialize_call_argument_stack_cvariable_8616,
     outgoing_call_stack_carrier_offset_8616,
 )
+from .lowering.call_return_selectors import is_scalar_ax_call_return_8616
 from .lowering.callsite_inventory_presence import represented_callsite_addrs_8616
 from .lowering.function_pointer_parameters import materialize_function_pointer_parameters_8616
 from .lowering.real_mode_linear import (
@@ -6997,10 +6998,8 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
             return _debug_refuse("missing-call")
         if summary is None:
             return _debug_refuse("missing-summary")
-        if summary.return_register != "ax":
-            return _debug_refuse("return-register-not-ax")
-        if summary.return_used is not True:
-            return _debug_refuse("return-not-used")
+        if not is_scalar_ax_call_return_8616(summary):
+            return _debug_refuse("return-not-proven-scalar-ax")
         if not (is_standalone_call or is_assignment_call):
             return _debug_refuse("call-not-standalone-or-assignment")
         has_following_ax_read = any(

@@ -62,6 +62,9 @@ _POSTPROCESS_LEGACY_IMPORT_ALLOWLIST: dict[str, frozenset[str]] = {
             # Compatibility-only edge: Lowering proves whether an existing GP
             # call result can be read; the bridge must not clone a live call.
             ".lowering.runtime_call_results",
+            # Veto-only edge: consume Lowering's scalar-return eligibility;
+            # the bridge cannot narrow a proven DX:AX capture into AX.
+            ".lowering.call_return_selectors",
             # Lowering owns semantic-gap scheduling while the legacy call
             # materializer remains a bridge; this does not admit new recovery.
             ".lowering.call_argument_semantic_gap",
@@ -2051,6 +2054,7 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/structuring/condition_ownership.py",
     "angr_platforms/angr_platforms/X86_16/structuring/composite_pretest_conditions.py",
     "angr_platforms/angr_platforms/X86_16/structuring/existing_loop_exit_conditions.py",
+    "angr_platforms/angr_platforms/X86_16/structuring/terminal_loop_exit_conditions.py",
     "angr_platforms/angr_platforms/X86_16/structuring/symbolic_condition_origin.py",
     "angr_platforms/angr_platforms/X86_16/structuring/shared_loop_exit.py",
     "angr_platforms/angr_platforms/X86_16/structuring/shared_loop_exit_publication.py",

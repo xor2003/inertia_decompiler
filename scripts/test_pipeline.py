@@ -48,6 +48,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_x86_16_validation_condition_coverage.py",
     "angr_platforms/tests/test_x86_16_composite_pretest_conditions.py",
     "angr_platforms/tests/test_x86_16_existing_loop_exit_conditions.py",
+    "angr_platforms/tests/test_x86_16_terminal_loop_exit_conditions.py",
     "angr_platforms/tests/test_x86_16_structuring_condition_processor.py",
     "angr_platforms/tests/test_x86_16_bound_call_condition.py",
     "angr_platforms/tests/test_x86_16_structuring_condition_ownership.py",

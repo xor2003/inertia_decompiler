@@ -161,6 +161,7 @@ from .tagged_subtree_projection import (
     StructuredSubtreeEntryTagQueryStats8616,
     collect_structured_subtree_entry_tags_8616,
 )
+from .terminal_loop_exit_conditions import materialize_terminal_loop_exit_conditions_8616
 from .total_return_suffixes import (
     TotalReturnSuffixPruneStats8616,
     prune_unreachable_total_return_suffixes_8616,
@@ -263,6 +264,7 @@ class _ConditionMaterializationCodegen8616(Protocol):
     _inertia_typed_loop_condition_stats_8616: LoopConditionMaterializationStats8616
     _inertia_composite_pretest_condition_stats_8616: CompositePretestStats8616
     _inertia_existing_loop_exit_condition_stats_8616: ExistingLoopExitStats8616
+    _inertia_terminal_loop_exit_condition_stats_8616: ExistingLoopExitStats8616
     _inertia_structured_condition_provenance_stats_8616: StructuredConditionProvenanceStats8616
     _inertia_same_block_condition_register_projection_stats_8616: SameBlockConditionRegisterProjectionStats8616
     _inertia_multi_arm_return_chain_materialized_8616: bool
@@ -2790,6 +2792,18 @@ def materialize_structuring_conditions_8616(
         )
         typed_changed = bool(projection_stats.changed_count) or typed_changed
     stage_project._inertia_decompiler_stage = "structuring:condition_materialization:loops"
+    function_addr = cast(_ConditionMaterializationCFunction8616, metadata_codegen.cfunc).addr if root is not None else None
+    loop_topology = collect_loop_break_topology_8616(project, codegen)
+    terminal_stats = materialize_terminal_loop_exit_conditions_8616(
+        root, typed_conditions, loop_topology,
+        condition_chain_successors_8616(project, codegen),
+        registered_function_ssa_artifact_8616(project, function_addr).artifact if isinstance(function_addr, int) else None,
+        lambda plan: build_proven_wide_call_condition_8616(codegen, plan.conditions, plan.low_stack, plan.operator),
+        lambda before, after: record_condition_precision_evidence_8616(project, codegen, before, after),
+    )
+    metadata_codegen._inertia_terminal_loop_exit_condition_stats_8616 = terminal_stats
+    if terminal_stats.changed_count:
+        commit_wide_call_condition_captures_8616(codegen)
     loop_assignment_index = build_same_block_register_assignment_index_8616(codegen)
     loop_stats = materialize_typed_loop_continuation_conditions_8616(
         root,
@@ -2805,7 +2819,7 @@ def materialize_structuring_conditions_8616(
     )
     metadata_codegen._inertia_typed_loop_condition_stats_8616 = loop_stats
     exit_stats = materialize_existing_loop_exit_conditions_8616(
-        root, typed_conditions, collect_loop_break_topology_8616(project, codegen),
+        root, typed_conditions, loop_topology,
         condition_key=condition_key_from_tags_8616,
         lower=lambda condition: materialize_condition_ir_expression_8616(project, codegen, condition),
         invert=lambda condition: invert_structured_condition_8616(condition, codegen),
@@ -2813,7 +2827,6 @@ def materialize_structuring_conditions_8616(
     )
     metadata_codegen._inertia_existing_loop_exit_condition_stats_8616 = exit_stats
     _debug_condition_chain_8616("existing-loop-exits", stats=exit_stats)
-    function_addr = cast(_ConditionMaterializationCFunction8616, metadata_codegen.cfunc).addr if root is not None else None
     composite_stats = materialize_composite_pretest_conditions_8616(
         root, typed_conditions, condition_chain_successors_8616(project, codegen),
         registered_function_ssa_artifact_8616(project, function_addr).artifact if isinstance(function_addr, int) else None,
@@ -2852,7 +2865,10 @@ def materialize_structuring_conditions_8616(
         typed_conditions_changed=typed_changed,
         condition_chains_changed=chains_changed,
         decoded_jcc_changed=jcc_changed,
-        loop_conditions_changed=loop_stats.changed or composite_stats.changed or bool(exit_stats.changed_count),
+        loop_conditions_changed=(
+            loop_stats.changed or composite_stats.changed
+            or bool(exit_stats.changed_count) or bool(terminal_stats.changed_count)
+        ),
         segment_access_provenance_changed=provenance_stats.changed,
         condition_evidence_complete=(
             condition_closure.complete

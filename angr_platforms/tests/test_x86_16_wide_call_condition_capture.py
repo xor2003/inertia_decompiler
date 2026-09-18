@@ -29,6 +29,7 @@ def test_capture_is_once_in_place_and_reused_on_rematerialization(monkeypatch, r
     assert commit_wide_call_condition_captures_8616(codegen) == 1
     value = predicate.lhs.expr
     assert codegen.cfunc.variables_in_use[value.variable] is value
+    assert codegen.cfunc.variable_manager.variable_types[value.variable] == value.variable_type
     assert sum(node is call for node in _iter_c_node_occurrences_8616(root)) == 1
     if original is not None:
         assert original.rhs is value

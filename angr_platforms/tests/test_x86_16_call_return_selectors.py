@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 from angr.ailment import Expr
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.sim_type import SimTypeShort
@@ -9,9 +11,12 @@ from angr.sim_variable import SimRegisterVariable
 from angr_platforms.X86_16.callsite_summary import CallsiteSummary8616
 from angr_platforms.X86_16.lowering.call_return_selectors import (
     bind_call_return_switch_selectors_8616,
+    is_scalar_ax_call_return_8616,
     replay_call_return_switch_selectors_8616,
 )
 from angr_platforms.X86_16.validation_dataflow import validate_structured_def_use_8616
+
+FUNCTION_ADDR = 0x4010
 
 
 def _codegen() -> SimpleNamespace:
@@ -26,7 +31,7 @@ def _codegen() -> SimpleNamespace:
     return SimpleNamespace(
         project=project,
         cfunc=SimpleNamespace(
-            addr=0x4010,
+            addr=FUNCTION_ADDR,
             statements=None,
             variables_in_use={},
             unified_local_vars={},
@@ -65,6 +70,14 @@ def _summary() -> CallsiteSummary8616:
         return_used=True,
         return_shape="ax",
     )
+
+
+@pytest.mark.parametrize("shape", ["ax", "dx_ax", None])
+@pytest.mark.parametrize("used", [False, True])
+def test_scalar_selector_requires_exact_return_width(shape, used):
+    summary = replace(_summary(), return_shape=shape, return_used=used)
+    assert is_scalar_ax_call_return_8616(summary) is (shape == "ax" and used)
+    assert not is_scalar_ax_call_return_8616(None)
 
 
 def test_call_return_selector_binding_materializes_one_structured_identity() -> None:
@@ -106,7 +119,7 @@ def test_call_return_selector_binding_materializes_one_structured_identity() -> 
     assert assignment_variable is selector_variable
     assert assignment_variable.ident == "call-return-1048"
     assert assignment_variable.name == "ax"
-    assert assignment_variable.region == 0x4010
+    assert assignment_variable.region == FUNCTION_ADDR
     assert codegen.cfunc.variables_in_use[assignment_variable] is assignment.lhs
     assert codegen.cfunc.unified_local_vars[assignment_variable] == {
         (assignment.lhs, assignment.lhs.variable_type)

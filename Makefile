@@ -1142,6 +1142,7 @@ QA_TYPED_FILES := \
 	angr_platforms/angr_platforms/X86_16/structuring/condition_ownership.py \
 	angr_platforms/angr_platforms/X86_16/structuring/composite_pretest_conditions.py \
 	angr_platforms/angr_platforms/X86_16/structuring/existing_loop_exit_conditions.py \
+	angr_platforms/angr_platforms/X86_16/structuring/terminal_loop_exit_conditions.py \
 	angr_platforms/angr_platforms/X86_16/structuring/symbolic_condition_origin.py \
 	angr_platforms/angr_platforms/X86_16/structuring/shared_loop_exit.py \
 	angr_platforms/angr_platforms/X86_16/structuring/shared_loop_exit_publication.py \
@@ -2232,6 +2233,7 @@ QA_RUFF_TARGETS := \
 	angr_platforms/angr_platforms/X86_16/structuring/condition_ownership.py \
 	angr_platforms/angr_platforms/X86_16/structuring/composite_pretest_conditions.py \
 	angr_platforms/angr_platforms/X86_16/structuring/existing_loop_exit_conditions.py \
+	angr_platforms/angr_platforms/X86_16/structuring/terminal_loop_exit_conditions.py \
 	angr_platforms/angr_platforms/X86_16/structuring/symbolic_condition_origin.py \
 	angr_platforms/angr_platforms/X86_16/structuring/shared_loop_exit.py \
 	angr_platforms/angr_platforms/X86_16/structuring/shared_loop_exit_publication.py \
@@ -2725,6 +2727,7 @@ QA_RUFF_TARGETS := \
 		angr_platforms/tests/test_x86_16_validation_condition_coverage.py \
 		angr_platforms/tests/test_x86_16_composite_pretest_conditions.py \
 		angr_platforms/tests/test_x86_16_existing_loop_exit_conditions.py \
+		angr_platforms/tests/test_x86_16_terminal_loop_exit_conditions.py \
 		angr_platforms/tests/test_x86_16_structuring_condition_processor.py \
 		angr_platforms/tests/test_x86_16_structuring_condition_ownership.py \
 		angr_platforms/tests/test_x86_16_shared_loop_exit.py \
@@ -3392,6 +3395,7 @@ QA_PYTEST_TARGETS := \
 	angr_platforms/tests/test_x86_16_validation_condition_coverage.py \
 	angr_platforms/tests/test_x86_16_composite_pretest_conditions.py \
 	angr_platforms/tests/test_x86_16_existing_loop_exit_conditions.py \
+	angr_platforms/tests/test_x86_16_terminal_loop_exit_conditions.py \
 	angr_platforms/tests/test_x86_16_structuring_condition_processor.py \
 	angr_platforms/tests/test_x86_16_structuring_condition_ownership.py \
 	angr_platforms/tests/test_x86_16_shared_loop_exit.py \

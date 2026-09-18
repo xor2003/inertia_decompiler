@@ -156,6 +156,8 @@ def commit_wide_call_condition_captures_8616(codegen: object) -> int:
         node.lhs.expr = value
         del node.tags[_PENDING_CAPTURE]
         boundary.cfunc.variables_in_use[temporary] = value
+        # CFunction.refresh reads declaration types from the variable manager.
+        boundary.cfunc.variable_manager.set_variable_type(temporary, value_type)
         committed += 1
     if committed:
         boundary.cfunc.refresh()

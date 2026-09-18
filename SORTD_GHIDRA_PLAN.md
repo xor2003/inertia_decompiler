@@ -24,7 +24,47 @@ input path and conditional pointer-output/stack-initialization defects remain
 in scope. Preserve existing FPU behavior and tests; unsupported FPU handling
 must stay explicit rather than being counted as successful decompilation.
 
-## Current Checkpoint (2026-09-13)
+## Current Checkpoint (2026-09-18)
+
+**Implementation in progress:** terminal composite loop exits now consume the
+existing complete wide-decision proof without moving the clock call. Two
+Lowering defects exposed by the live integration are corrected: scalar AX
+selector replay cannot overwrite DX:AX captures, and captured temporaries keep
+their declared 32-bit type. Composite provenance also prevents scalar replay
+from replacing the compact predicate with only one comparison half.
+The 191-test focused surface passes. Sleep still fails one final branch
+fingerprint check, so it is not accepted and no additional SORTD function is
+counted complete. See the linked Sleep report for exact refusal controls,
+remaining validation-proof work, and gate results.
+
+Baseline revision: `cffd0bb43`; the worktree was clean on resumption.
+A fresh complete sidecar-free SORTD gate still accepts **15/20 functions**,
+with **five validation failures**, no timeouts, no empty results, and no
+tracebacks. Failing addresses: `0x10808`, `0x108d0`, `0x10a88`, `0x10c18`,
+`0x10f38`. The raw flag-state artifact check also fails. DrawTime's argument
+check and the RunMenu execution gate now pass. This supersedes the older
+12/20 checkpoint below; Step 9 is not complete.
+
+The existing Sleep regression fails independently: **1 failed, 17.26s**,
+including 14.18s in its executable call. Its wide comparison retains
+uninitialized AX/DX reads and three uncovered branch obligations. A fresh-cache
+worker-local probe proves the natural loop, its unique exit, and the complete
+signed `clock > deadline` comparison; existing Lowering can build the wide
+predicate. The missing integration is terminal composite break ownership, not
+wide-operator discovery. See
+[current Sleep evidence and next implementation boundary](reference/p0-sleep-terminal-composite-exit.md).
+
+Evidence: `/tmp/step9-sep18-whole.{txt,json,log}`,
+`/tmp/step9-sep18-sleep-test.log`, and `/tmp/step9-sep18-loop.log`.
+Initial investigation checkpoint: `2026-09-18 21:45 +02:00`; active time was not
+separately measured. That read-only investigation preceded the implementation
+checkpoint above.
+The final default test pipeline passes: 5,439 routine tests, QuickC, and MS C
+tiny round trips. Startup architecture and test ownership checks pass. Full
+pytest and expanded acceptance are not refreshed; quality-fast remains
+lint-blocked. This checkpoint does not close Step 9.
+
+## Historical Checkpoints (2026-09-13)
 
 **DrawTime blocker narrowed:** live Alias and C storage disagree by eight bytes
 for both SI/DI saved-register restores. The hard gate correctly refuses their

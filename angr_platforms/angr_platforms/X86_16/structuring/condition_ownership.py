@@ -24,6 +24,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 
 from ..c_ast_utils import _iter_c_nodes_deep_8616
 from ..ir.condition_ir import ConditionIR
+from .condition_chain_provenance import condition_chain_provenance_8616
 
 _MAX_PREHEADER_BLOCKS = 24
 
@@ -88,6 +89,9 @@ def requires_composite_condition_ownership_8616(expression: object) -> bool:
     predicate. Nested identities remain refused: their enclosing polarity
     wrapper needs its own ownership proof.
     """
+    provenance = condition_chain_provenance_8616(expression)
+    if provenance is not None and len(provenance.jcc_addrs) > 1:
+        return True
     neutral_root = expression if _is_neutral_logical_root_8616(expression) else None
     return any(
         isinstance(node, CMultiStatementExpression)
