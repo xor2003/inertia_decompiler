@@ -109,6 +109,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_import_ultra_quickc_fixtures.py",
     "angr_platforms/tests/test_generated_c_indexed_argument_contract.py",
     "angr_platforms/tests/test_omf_pat_lidata.py",
+    "angr_platforms/tests/test_omf_pat_fixup_encoding.py",
     "angr_platforms/tests/test_test_pipeline.py",
     "angr_platforms/tests/test_msc6_runtime_gate_artifacts.py",
     "angr_platforms/tests/test_x86_16_scalar_byte_behavior.py",

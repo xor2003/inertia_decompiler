@@ -13,7 +13,8 @@ compiler-coverage-csmith:
 	$(Q)PYTHON_JIT=1 PYTHONHASHSEED=0 $(PYTHON) -m scripts.compiler_coverage_csmith \
 		--csmith "$(CSMITH)" --seed "$(CSMITH_SEED)" --out-dir "$(COMPILER_COVERAGE_OUT)" \
 		--roundtrip --runtime-source "$(CSMITH_RUNTIME_SOURCE)" --runtime-build "$(CSMITH_RUNTIME_BUILD)" \
-		--memory-model "$(MODEL)" --case-timeout "$(COMPILER_COVERAGE_TIMEOUT)"
+		--memory-model "$(MODEL)" --case-timeout "$(COMPILER_COVERAGE_TIMEOUT)" \
+		$(if $(strip $(CSMITH_SIGNATURE_CATALOG)),--signature-catalog "$(CSMITH_SIGNATURE_CATALOG)",)
 
 compiler-coverage-generate:
 	$(Q)test -x "$(CSMITH)" || { printf 'Set CSMITH to the pinned MS-DOS generator executable\n' >&2; exit 2; }

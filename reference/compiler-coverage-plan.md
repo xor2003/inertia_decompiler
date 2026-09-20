@@ -377,6 +377,41 @@ unresolved issues and deferred parity remain visible, not silently declared done
 - Still required: close detached-descendant cancellation, verify one generated
   behavioral round trip, then bounded seed batches and retained/minimized
   failures. Step 5 is not complete.
+- Cancellation follow-up: the adapter now snapshots descendants with the existing
+  pytest process-tree helper before killing the root, and kills detached workers
+  as well as the original group. The real timeout test now includes `setsid()`;
+  that variant failed before the fix. Both variants pass; framework contracts:
+  105 passed in 11.85 seconds, scoped Ruff/MyPy passed. A deliberately short
+  30-second cancellation-only replay at
+  `.cache/compiler-coverage/csmith-cancellation-002/` timed out as expected and
+  left no matching workers. This does not grant behavioral coverage or change
+  acceptance deadlines. Snapshot cleanup covers visible descendants, not workers
+  already orphaned before the snapshot; stronger containment remains a limitation.
+- Seed-2 timeout investigation: the original linked EXE independently returns 0
+  with `checksum = 637A4628`. Its COD lists 69 functions: `func_1`, `main`, and
+  67 Csmith runtime helpers. `--max-funcs 1` bounds generated application code,
+  not emitted header runtime code. Do not increase deadlines or skip by name.
+  A runtime-only header translation unit compiled to an OMF object (linking
+  deliberately fails because it has no main). Existing signature catalog tooling
+  imported 134 entries; existing matching reported 54 unique matching specs in
+  the original EXE. These are spec counts, not proof that all 67 helpers match.
+  Probe evidence: `.cache/compiler-coverage/csmith-runtime-probe/`.
+- The shared adapter and Csmith CLI now accept an optional signature catalog and
+  record its hash. Make forwards `CSMITH_SIGNATURE_CATALOG`. No default runtime
+  exclusion or source-derived semantic recovery was added. Before using a runtime
+  catalog as acceptance evidence, verify matched address coverage, no application
+  exclusion, preserved library-call semantics and retention of the standard
+  compiler/runtime catalog. Generated behavioral acceptance is still open.
+  The five missing runtime bodies were traced to incorrect OMF LOCAT byte order
+  and now match after a parser-layer repair. See
+  [the bounded evidence and verification](omf-fixupp-locat.md).
+- Checkpoint: the combined-catalog seed-2 replay at
+  `.cache/compiler-coverage/csmith-roundtrip-catalog-003/` still timed out at
+  the 180-second case deadline. Generated behavioral acceptance remains open.
+  `scripts/msc6_original_evidence.py` is an initial evidence-checkpoint helper,
+  not yet integrated into the legacy runner or covered by dedicated tests.
+  Wiring and testing it remains pending; it does not currently preserve original
+  execution observations automatically when decompilation times out.
 
 References: [NIST covering arrays](https://math.nist.gov/coveringarrays/) and
 [Csmith research](https://users.cs.utah.edu/~regehr/papers/pldi11-preprint.pdf).

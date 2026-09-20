@@ -86,6 +86,7 @@ def main() -> int:
     parser.add_argument("--runtime-source", type=Path)
     parser.add_argument("--runtime-build", type=Path)
     parser.add_argument("--case-timeout", type=float, default=600)
+    parser.add_argument("--signature-catalog", type=Path)
     parser.add_argument("--memory-model", type=MSCMemoryModel, choices=list(MSCMemoryModel), default=MSCMemoryModel.SMALL)
     args = parser.parse_args()
     headers: dict[str, Path] = {}
@@ -102,6 +103,7 @@ def main() -> int:
             result = run_source_case(
                 args.out_dir / "csmith.c", args.out_dir / "roundtrip", timeout=args.case_timeout,
                 expected_exit_code=0, runtime_headers=headers, memory_model=args.memory_model,
+                signature_catalog=args.signature_catalog,
             )
             print(f"seed={args.seed}: {result.value}; artifacts={args.out_dir / 'roundtrip'}")
             return 0 if result is CoverageOutcome.PASSED else 1

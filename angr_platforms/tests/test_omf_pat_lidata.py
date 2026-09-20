@@ -42,11 +42,9 @@ def _build_synthetic_lidata_obj(
         _omf_record(record_type, lidata_payload),
     ]
     if fixup_offset is not None:
-        # Match the parser's existing FIXUPP fixture convention: first byte has
-        # bit 7 set, kind=1 (16-bit offset), target method=2 (EXTDEF), external
-        # index 1, and no displacement field.
-        locat = 0x400 | fixup_offset
-        records.append(_omf_record(0x9C, locat.to_bytes(2, "little") + b"\x46\x01"))
+        # LOCAT control bits precede the low offset byte; this is not a LE word.
+        locat = 0xC400 | fixup_offset
+        records.append(_omf_record(0x9C, locat.to_bytes(2, "big") + b"\x46\x01"))
     records.append(_omf_record(0x8A, b""))
     return b"".join(records)
 

@@ -32,13 +32,20 @@ from scripts.compiler_coverage_result import (  # noqa: E402
     roundtrip_diagnostics,
 )
 from scripts.msc6_memory_model import MSCMemoryModel  # noqa: E402
+from scripts.pytest_process_metrics import process_tree_pids  # noqa: E402
 
 COMPILER_ROOT = Path("/home/xor/inertia_player/dos_compilers/Microsoft C v6ax")
 KVIKDOS = Path("/home/xor/kvikdos/kvikdos")
 
 
 def _kill_and_reap(process: subprocess.Popen[bytes]) -> int:
-    """Terminate the isolated process group, tolerating concurrent child exit."""
+    """Stop visible descendants, including detached workers, before the root."""
+    # Snapshot before killing the root: afterward detached children are reparented.
+    descendants = process_tree_pids((process.pid,)) or (process.pid,)
+    for pid in reversed(descendants):
+        if pid != process.pid:
+            with suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
     # The group may exit between the deadline and signal delivery.
     with suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGKILL)
@@ -86,6 +93,7 @@ def run_source_case(
     memory_model: MSCMemoryModel = MSCMemoryModel.SMALL,
     expected_exit_code: int = 255,
     runtime_headers: Mapping[str, Path] | None = None,
+    signature_catalog: Path | None = None,
 ) -> CoverageOutcome:
     """Feed an external fixture through the same bounded legacy round-trip owner."""
     source = source.resolve(strict=True)
@@ -97,6 +105,9 @@ def run_source_case(
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("Case timeout must be positive and finite")
     headers = _validated_runtime_headers(runtime_headers)
+    catalog = signature_catalog.resolve(strict=True) if signature_catalog is not None else None
+    if catalog is not None and not catalog.is_file():
+        raise ValueError("Signature catalog must be a file")
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     for name, path in headers.items():
@@ -110,10 +121,12 @@ def run_source_case(
         "--msc6-root", str(COMPILER_ROOT), "--kvikdos", str(KVIKDOS),
         "--memory-model", memory_model.value,
     ]
+    command += ["--signature-catalog", str(catalog)] if catalog is not None else []
     provenance: dict[str, object] = {"source": input_fingerprint(source), "compiler": input_fingerprint(COMPILER_ROOT),
                   "emulator": input_fingerprint(KVIKDOS), "python": input_fingerprint(Path(sys.executable)),
                   "runner": input_fingerprint(ROOT / "scripts/build_msc6_examples.py")}
     provenance["runtime_headers"] = {name: input_fingerprint(path) for name, path in headers.items()}
+    provenance["signature_catalog"] = input_fingerprint(catalog) if catalog is not None else None
     start = time.monotonic()
     outcome = CoverageOutcome.HARNESS_FAILED
     returncode: int | None = None

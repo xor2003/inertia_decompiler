@@ -1611,6 +1611,7 @@ def _parse_fixupp_refs(
     target_threads: dict[int, tuple[int, int]],
     frame_threads: dict[int, tuple[int, int]],
 ) -> list[_OMFFixupRef]:
+    """Decode FIXUPP locations; LOCAT stores control bits before offset bits."""
     refs: list[_OMFFixupRef] = []
     offset = 0
     while offset < len(payload):
@@ -1620,7 +1621,7 @@ def _parse_fixupp_refs(
             continue
         if offset + 3 > len(payload):
             break
-        locat = int.from_bytes(payload[offset : offset + 2], "little")
+        locat = int.from_bytes(payload[offset : offset + 2], "big")
         offset += 2
         fixdat = payload[offset]
         offset += 1

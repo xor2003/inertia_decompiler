@@ -40,18 +40,25 @@ def test_external_fixture_uses_existing_owner_and_fingerprints_headers(tmp_path,
     source.write_text("int main(void) { return 0; }")
     header = tmp_path / "runtime.h"
     header.write_text("/* fixture runtime */")
+    catalog = tmp_path / "runtime.pat"
+    catalog.write_text("---\n")
     execute = Mock(return_value=(1, False))
     monkeypatch.setattr(runner, "_execute", execute)
     output = tmp_path / "case"
-    result = runner.run_source_case(source, output, expected_exit_code=0, runtime_headers={"RUNTIME.H": header})
+    result = runner.run_source_case(
+        source, output, expected_exit_code=0, runtime_headers={"RUNTIME.H": header},
+        signature_catalog=catalog,
+    )
     assert result is CoverageOutcome.HARNESS_FAILED  # No report, not a fabricated pass.
     command = execute.call_args.args[0]
     assert command[1].endswith("scripts/build_msc6_examples.py")
     assert command[command.index("--examples-dir") + 1] == str(tmp_path)
     assert command[command.index("--harvest-success-code") + 1] == "0"
+    assert command[command.index("--signature-catalog") + 1] == str(catalog)
     assert (output / "RUNTIME.H").read_bytes() == header.read_bytes()
     report = json.loads((output / "coverage-result.json").read_text())
     assert report["inputs"]["runtime_headers"]["RUNTIME.H"]["sha256"]
+    assert report["inputs"]["signature_catalog"]["sha256"]
 
 
 @pytest.mark.parametrize("names", [("../escape.h",), ("file.c",), ("R.H", "r.h")])
@@ -69,6 +76,7 @@ def test_invalid_runtime_header_destinations_fail_before_launch(tmp_path, monkey
 
 @pytest.mark.parametrize("disappeared", [False, True])
 def test_timeout_kills_group_and_reaps_child(tmp_path, monkeypatch, disappeared):
+    monkeypatch.setattr(runner, "process_tree_pids", lambda roots: roots)
     process = Mock(pid=123)
     process.wait.side_effect = [subprocess.TimeoutExpired("compiler", 1), -9]
     monkeypatch.setattr(runner.subprocess, "Popen", Mock(return_value=process))
@@ -103,12 +111,15 @@ def test_missing_report_is_not_success(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Checks Linux descendant process state")
-def test_real_timeout_stops_descendants_and_retains_both_output_streams(tmp_path):
+@pytest.mark.parametrize("detached", [False, True])
+def test_real_timeout_stops_descendants_and_retains_both_output_streams(tmp_path, detached):
     """A real forked child must stop, not merely the adapter's direct child."""
     inventory = tmp_path / "processes.json"
     script = """
 import json, os, sys, time
 child = os.fork()
+if not child and sys.argv[2] == "detach":
+    os.setsid()
 if child:
     with open(sys.argv[1], "w") as report:
         json.dump([os.getpid(), child], report)
@@ -120,7 +131,8 @@ time.sleep(60)
     try:
         with (tmp_path / "runner.log").open("w") as log:
             returncode, timed_out = runner._execute(
-                [sys.executable, "-c", script, str(inventory)], log, timeout=2,
+                [sys.executable, "-c", script, str(inventory), "detach" if detached else "group"],
+                log, timeout=2,
             )
         assert timed_out
         assert returncode == -signal.SIGKILL
@@ -129,7 +141,7 @@ time.sleep(60)
         while True:
             live = []
             for pid in pids:
-                with suppress(FileNotFoundError):
+                with suppress(FileNotFoundError, ProcessLookupError):
                     # An orphan may remain a zombie until the host init reaps it.
                     state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
                     if state not in {"Z", "X"}:
@@ -149,6 +161,7 @@ time.sleep(60)
 
 
 def test_interruption_kills_group_and_propagates(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "process_tree_pids", lambda roots: roots)
     process = Mock(pid=123)
     process.wait.side_effect = [KeyboardInterrupt, -signal.SIGKILL]
     monkeypatch.setattr(runner.subprocess, "Popen", Mock(return_value=process))
