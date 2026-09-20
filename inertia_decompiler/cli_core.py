@@ -138,6 +138,7 @@ from inertia_decompiler.library_function_classifier import (
     filter_code_labels_for_library_policy,
     is_library_like_function_name,
 )
+from inertia_decompiler.metadata_evidence import has_only_binary_signatures
 from inertia_decompiler.non_optimized_fallback import (
     allows_heavy_fallbacks_for_run,
     describe_non_optimized_unavailable,
@@ -4413,7 +4414,7 @@ def _prepare_main_project_8616(
                     cod_metadata=cod_metadata,
                     synthetic_globals=synthetic_globals,
                 )
-                if lst_metadata is None:
+                if lst_metadata is None or has_only_binary_signatures(lst_metadata):
                     print(
                         "/* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */"
                     )
@@ -4517,7 +4518,7 @@ def _prepare_main_project_8616(
             cod_metadata=cod_metadata,
             synthetic_globals=synthetic_globals,
         )
-        if lst_metadata is None:
+        if lst_metadata is None or has_only_binary_signatures(lst_metadata):
             print(
                 "/* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */"
             )
@@ -4580,7 +4581,7 @@ def _direct_request_cache_artifact_for_result_8616(
             "/* ignoring local sidecar metadata for function discovery and recovery due "
             "--ignore-local-sidecar-hints */"
         )
-    if context.lst_metadata is None:
+    if context.lst_metadata is None or has_only_binary_signatures(context.lst_metadata):
         startup_diagnostic_lines.append(
             "/* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis "
             "and quick function-entry scans. */"

@@ -15,14 +15,17 @@ from signature_catalog import build_signature_catalog, discover_signature_inputs
 
 
 def _catalog_manifest_path(output_path: Path) -> Path:
+    """Locate the input fingerprint manifest beside the generated catalog."""
     return output_path.parent / "repo_signature_catalog.sources.txt"
 
 
 def _catalog_tool_manifest_path(output_path: Path) -> Path:
+    """Locate the builder fingerprint manifest used for policy invalidation."""
     return output_path.parent / "repo_signature_catalog.tools.txt"
 
 
 def _catalog_source_lines(catalog_root: Path) -> tuple[str, ...]:
+    """Fingerprint source inputs, excluding generated catalog caches."""
     lines: list[str] = []
     for path in discover_signature_inputs((catalog_root,), recursive=True):
         if ".signature_catalog_cache" in path.parts:
@@ -36,6 +39,7 @@ def _catalog_source_lines(catalog_root: Path) -> tuple[str, ...]:
 
 
 def _catalog_tool_lines(root: Path) -> tuple[str, ...]:
+    """Fingerprint every implementation that controls the generated catalog."""
     tool_paths = (
         Path(__file__).resolve(),
         root / "signature_catalog.py",
@@ -53,6 +57,7 @@ def _catalog_tool_lines(root: Path) -> tuple[str, ...]:
 
 
 def _manifest_matches(manifest_path: Path, source_lines: tuple[str, ...]) -> bool:
+    """Check whether a stored fingerprint set matches the current inputs."""
     if not manifest_path.exists():
         return False
     try:
@@ -63,12 +68,17 @@ def _manifest_matches(manifest_path: Path, source_lines: tuple[str, ...]) -> boo
 
 
 def _write_manifest(manifest_path: Path, source_lines: tuple[str, ...]) -> None:
+    """Persist catalog fingerprints after successful generation."""
     manifest_path.write_text("".join(f"{line}\n" for line in source_lines))
 
 
 @lru_cache(maxsize=2)
 def default_signature_catalog_path(repo_root: Path | None = None) -> Path | None:
-    """Return a cached repo-local signature catalog built from bundled and user-added PAT inputs."""
+    """Return an automatic runtime catalog requiring library-archive provenance.
+
+    Sample OBJ and unknown PAT origins are not evidence for library exclusion.
+    Explicit caller-selected catalogs remain independent of this default policy.
+    """
 
     def _impl() -> Path | None:
         if signature_matching_disabled():
@@ -96,11 +106,11 @@ def default_signature_catalog_path(repo_root: Path | None = None) -> Path | None
         ):
             return output_path
         source_lines = _catalog_source_lines(catalog_root)
-        if output_path.exists() and _manifest_matches(manifest_path, source_lines):
-            _write_manifest(tool_manifest_path, tool_lines)
-            return output_path
         try:
-            build_signature_catalog((catalog_root,), output_path, recursive=True, cache_dir=cache_dir)
+            build_signature_catalog(
+                (catalog_root,), output_path, recursive=True, cache_dir=cache_dir,
+                library_only=True,
+            )
             _write_manifest(manifest_path, source_lines)
             _write_manifest(tool_manifest_path, tool_lines)
         except Exception:

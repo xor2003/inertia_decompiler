@@ -73,7 +73,7 @@ def discover_signature_inputs(
                     continue
                 if candidate.suffix.lower() not in suffixes:
                     continue
-                if any(part in {".inertia_pat_cache", "__pycache__"} for part in candidate.parts):
+                if any(part in {".inertia_pat_cache", ".signature_catalog_cache", "__pycache__"} for part in candidate.parts):
                     continue
                 resolved = candidate.resolve()
                 if resolved in seen:
@@ -92,8 +92,9 @@ def build_signature_catalog(
     recursive: bool = True,
     flair_root: Path | None = None,
     cache_dir: Path | None = None,
+    library_only: bool = False,
 ) -> SignatureCatalogBuildResult:
-    """Build a deterministic optional signature catalog from supported inputs."""
+    """Build a catalog, optionally requiring archive provenance for runtime use."""
 
     def _impl() -> SignatureCatalogBuildResult:
         discovered = discover_signature_inputs(roots, recursive=recursive)
@@ -110,6 +111,11 @@ def build_signature_catalog(
             if pat_path is None:
                 continue
             for module in parse_pat_file(pat_path):
+                if library_only and not any(
+                    Path(source.strip()).suffix.lower() == ".lib"
+                    for source in module.source_path.split(" || ")
+                ):
+                    continue
                 imported_module_count += 1
                 key = (
                     module.pattern_bytes,

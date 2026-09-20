@@ -583,5 +583,68 @@ unresolved issues and deferred parity remain visible, not silently declared done
   external stages are incomplete and no fresh tiny-MS-C round-trip pass is claimed.
   Full diagnostics: `.cache/compiler-coverage-complement-pipeline.log`.
 
+- Default-catalog provenance repair (2026-09-20, implementation/test work started
+  15:59 local): automatic catalog input contained compiler sample OBJ signatures,
+  including SORTDEMO application functions. Matching these as runtime signatures
+  could mislabel or exclude application code. Default catalog generation now
+  requires library-archive provenance; explicit catalogs retain their existing
+  behavior. Generated cache directories are not rediscovered as inputs, and a
+  changed builder policy forces regeneration even when input files are unchanged.
+  PAT metadata parsing also preserves merged `src=a || b` provenance instead of
+  discarding later sources. A typed reporting predicate separates signature-only
+  metadata from local source/debug evidence in live and cached CLI diagnostics.
+  Twenty focused tests and ten existing PAT/catalog regressions pass. Focused
+  five-module MyPy and new/helper Ruff checks pass; broader touched-owner checks
+  retain 22 legacy `omf_pat.py` typing errors and 52 Ruff findings. `quality-fast`
+  remains red on global lint; its 39-module mypyc import smoke passes.
+  Live SwapBars now passes the unchanged semantic/behavior regression. InitBars
+  no longer emits the spurious `$_init_max` call but still fails strict GCC:
+  `time(SEG_PTR(inertia_ds, 0))` supplies an incompatible pointer and does not
+  preserve a null pointer's meaning. Do not silence the diagnostic or count this
+  function fixed. The existing `_materialize_pointer_arg_8616` nested in
+  `decompiler_postprocess_calls.py` wraps scalar pointer arguments with DS;
+  repair through typed pointer/ABI lowering, not a rewrite-stage exception.
+  Logs: `.cache/signature-provenance-{focused,existing,live,quality-fast}.log`.
+  Standard pipeline pytest rerun: 6418 passed, 3 failed in 632.03 seconds
+  (previous checkpoint: 6397 passed, 8 failed in 797.92 seconds; not a controlled
+  performance comparison). Remaining failures are InitBars' pointer contract,
+  RunMenu's rejected branch predicates/uninitialized carrier, and SetGear's
+  30-second recovery deadline. QuickC: all four selected fixtures pass with
+  `validation=passed`; all eight tiny-MS-C fixtures compile, decompile, recompile
+  and pass their existing execution checks. Those legacy lanes remain distinct
+  from the plan's stronger source-free witness acceptance. The pipeline exits
+  nonzero because of its three pytest failures. Full diagnostics are in
+  `.cache/signature-provenance-pipeline.log`. Keep all three failures blocking;
+  do not remove signature matching or relax validation to recover a green count.
+  Checkpoint completed at 16:25 local: approximately 26 minutes since the first
+  new test, including broad gate execution and waiting, not 26 minutes of coding.
+
+- Near-null argument repair (2026-09-20, started 16:25 local): moved the legacy
+  near-pointer value constructor into `lowering/near_pointer_argument_values.py`.
+  Structuring binds its typed service; the compatibility shim cannot import the
+  implementation or proceed without the binding. The architecture import guard
+  remains unchanged. Proven integer zero in pointer context remains a C null
+  constant; nonzero offsets, memory reads, floating zero and object references at
+  offset zero retain their segmented meaning. Two null controls failed before
+  the repair; the five negative/nonzero controls passed. Current focused contract
+  suite: 83 passed. The broader call-materialization run has 191 passed and two
+  failures also reproduced with the committed pre-change implementation.
+  InitBars now emits `time(0)` instead of `time(SEG_PTR(inertia_ds, 0))`, the only
+  structured-C diff. This matches the original source's `time(NULL)` and preserves
+  all other calls/arguments. Live source-free validation and strict GCC pass;
+  the unchanged InitBars regression passes in 84.38 seconds. Promoted-scope `make mypy`
+  passes after enrolling the new owners in the shared Make coverage fragment.
+  New modules/tests pass Ruff; legacy touched-owner Ruff findings remain.
+  Logs: `.cache/near-pointer-null-{contracts,focused,live-regression,mypy-global}.log`
+  and `.cache/initbars-null-{before,after}.{c,err}`. Standard pipeline rerun:
+  6430 passed, 1 failed in 560.06 seconds. RunMenu's source-free escape-exit
+  regression remains blocking; InitBars and SetGear passed this run. QuickC
+  passed all four selected fixtures with validation passed (162.59 seconds);
+  all eight tiny-MS-C round trips passed (135.98 seconds). These are the existing
+  pipeline lanes, not a whole-repository test audit or stronger source-free
+  witness acceptance. Full log: `.cache/near-pointer-null-pipeline.log`.
+  Checkpoint ended at 16:59 local, approximately 34 minutes elapsed including
+  verification and waiting. Overall plan remains open; global lint debt remains.
+
 References: [NIST covering arrays](https://math.nist.gov/coveringarrays/) and
 [Csmith research](https://users.cs.utah.edu/~regehr/papers/pldi11-preprint.pdf).

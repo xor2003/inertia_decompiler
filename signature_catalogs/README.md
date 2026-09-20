@@ -1,7 +1,9 @@
 # Signature Catalogs
 
 Default behavior:
-- the decompiler builds a cached aggregate catalog from every `.pat`, `.obj`, and `.lib` under `signature_catalogs/`
+- the decompiler builds a cached runtime catalog from source inputs under `signature_catalogs/`, excluding generated cache directories
+- only patterns with `.lib` archive provenance enter the automatic catalog; sample `.obj` and unknown origins cannot justify hiding application functions
+- explicit `--signature-catalog` inputs remain available for deliberate custom catalogs
 - users can keep multiple source `.pat` files here
 
 Repo source packs:

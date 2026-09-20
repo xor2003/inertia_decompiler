@@ -91,6 +91,7 @@ from .callee_name_normalization import normalize_callee_name_8616
 from .callsite_argument_value_sources import (
     call_argument_stack_value_source_8616,
 )
+from .callsite_pointer_values import consume_near_pointer_argument_value_8616
 from .callsite_stack_metadata import (
     _generic_stack_carrier_keys_8616,
     _stack_carrier_key_8616,
@@ -8131,15 +8132,8 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
         target = str(
             getattr(getattr(codegen, "project", None), "_inertia_c_target", "portable-flat") or "portable-flat"
         )
-        helper = "SEG_PTR" if target == "portable-flat" else "MK_FP"
-        return (
-            structured_c.CFunctionCall(
-                helper,
-                None,
-                [ds_expr, _clone_c_ast_tree(expr)],
-                codegen=codegen,
-            ),
-            True,
+        return consume_near_pointer_argument_value_8616(
+            expr, ds_expr, codegen=codegen, c_target=target,
         )
 
     def _direct_expr_from_push_source_8616(

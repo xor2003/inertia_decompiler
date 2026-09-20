@@ -22,6 +22,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeFunction, SimTypeLong, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
+from angr_platforms.X86_16.callsite_pointer_values import bind_near_pointer_argument_value_lowerer_8616
 from angr_platforms.X86_16.callsite_stack_metadata import _prune_dead_stack_carrier_assignments_8616
 from angr_platforms.X86_16.callsite_summary import (
     CallerReturnUseEvidence8616,
@@ -68,6 +69,7 @@ from angr_platforms.X86_16.lowering.call_argument_carrier_liveness import (
     call_argument_setup_is_proven_dead_8616,
 )
 from angr_platforms.X86_16.lowering.call_argument_state import ProtectedCallArgumentStore8616
+from angr_platforms.X86_16.lowering.near_pointer_argument_values import materialize_near_pointer_argument_value_8616
 from angr_platforms.X86_16.lowering.return_type_evidence import proven_function_result_observation_8616
 from angr_platforms.X86_16.lowering.segmented_global_loads import DirectGlobalSymbolRef8616
 from angr_platforms.X86_16.lowering.segmented_memory_lowering import (
@@ -96,6 +98,7 @@ def _args_match(args: list, expected: list) -> bool:
 
 class _DummyCodegen:
     def __init__(self, project):
+        bind_near_pointer_argument_value_lowerer_8616(self, materialize_near_pointer_argument_value_8616)
         self._idx = 0
         self.project = project
         self.cstyle_null_cmp = False

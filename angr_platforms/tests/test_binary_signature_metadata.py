@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import angr
 import pytest
+from angr_platforms.X86_16.lst_extract import LSTMetadata
 
 from inertia_decompiler import binary_signature_metadata as signatures
 from inertia_decompiler import cli_core
@@ -42,7 +43,7 @@ def test_signature_loader_keeps_debug_fields_empty(tmp_path, monkeypatch, matche
     assert _visible_code_labels(metadata) == {}
 
 
-def test_cli_source_free_setup_loads_signatures_not_sidecars(tmp_path, monkeypatch):
+def test_cli_source_free_setup_loads_signatures_not_sidecars(tmp_path, monkeypatch, capsys):
     project = SimpleNamespace()
     args = SimpleNamespace(
         binary=tmp_path / "APP.EXE", proc=None, blob=False, base_addr=0x1000,
@@ -50,7 +51,10 @@ def test_cli_source_free_setup_loads_signatures_not_sidecars(tmp_path, monkeypat
         dump_layers=False, dump_layer_dir=None, dump_layer_filter=None,
         ignore_local_sidecar_hints=True, pat_backend="python_regex",
     )
-    sentinel = object()
+    sentinel = LSTMetadata(
+        data_labels={}, code_labels={0x100: "runtime"},
+        signature_code_addrs=frozenset({0x100}), source_format="signature_catalog",
+    )
     load_signatures = Mock(return_value=sentinel)
     sidecars = Mock(side_effect=AssertionError("source-free setup read sidecars"))
     monkeypatch.setattr(cli_core, "_build_project", lambda *args, **kwargs: project)
@@ -65,3 +69,4 @@ def test_cli_source_free_setup_loads_signatures_not_sidecars(tmp_path, monkeypat
     assert setup.lst_metadata is sentinel
     load_signatures.assert_called_once_with(args.binary, project, pat_backend="python_regex", signature_catalog=catalog)
     sidecars.assert_not_called()
+    assert "no helper metadata (.lst/.map/.cod/debug info) found" in capsys.readouterr().out

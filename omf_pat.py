@@ -275,12 +275,13 @@ def _format_pat_comment(module: PatModule) -> str:
 
 
 def _parse_pat_comment_metadata(comment_text: str) -> tuple[str, str, str]:
+    """Read PAT metadata fields without splitting merged provenance values."""
     if not comment_text:
         return "", "", ""
     source_path = ""
     compiler_name = ""
     module_name = ""
-    for part in (piece.strip() for piece in comment_text.split("|")):
+    for part in (piece.strip() for piece in re.split(r"(?<!\|)\|(?!\|)", comment_text)):
         if "=" not in part:
             continue
         key, value = part.split("=", 1)

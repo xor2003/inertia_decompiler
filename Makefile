@@ -3943,6 +3943,8 @@ QA_TYPED_FILES += inertia_decompiler/external_unpacker_cache.py
 QA_RUFF_TARGETS += inertia_decompiler/external_unpacker_cache.py
 QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_pklite.py angr_platforms/tests/test_cli_catalog_budget.py angr_platforms/tests/test_missing_dos_toolchain.py
 
+include scripts/compiler_coverage.mk
+
 PYRIGHT_SELECTED_FILES := $(filter $(QA_TYPED_FILES),$(PY_FILES))
 PYRIGHT_SKIPPED_FILES := $(filter-out $(QA_TYPED_FILES),$(PY_FILES))
 MYPY_SELECTED_FILES := $(filter $(QA_TYPED_FILES),$(PY_FILES))
@@ -4110,7 +4112,6 @@ decompiler-contracts:
 		angr_platforms/tests/test_x86_16_validation_entry_stack_ranges.py \
 		angr_platforms/tests/test_x86_16_stack_reference_offsets.py
 
-include scripts/compiler_coverage.mk
 
 test-pipeline: decompiler-contracts
 	flock "/tmp/vextest-test-pipeline.lock" $(PYTHON) scripts/test_pipeline.py --require-external --msc6-workers $(PIPELINE_WORKERS)

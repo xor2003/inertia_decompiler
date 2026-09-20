@@ -1,5 +1,5 @@
-[16:40:09] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 typedef long clock_t;
@@ -9,6 +9,11 @@ clock_t clock(void);
 int rand(void);
 void srand(unsigned int seed);
 time_t time(time_t *out);
+char *strcpy(char *dst, const char *src);
+unsigned short dos_int21_flags(void);
+void inertia_io_out8(uint16_t port, uint8_t value);
+void inertia_io_out16(uint16_t port, uint16_t value);
+void inertia_io_out32(uint16_t port, uint32_t value);
 int32_t aNldiv(int32_t dividend, int32_t divisor);
 
 extern uint8_t inertia_memory[];
@@ -23,1559 +28,890 @@ extern uint16_t inertia_ss;
 
 #define SEG_LINEAR(seg, off) ((((uint32_t)(uintptr_t)(seg)) << 4) + ((uint16_t)(uintptr_t)(off)))
 #define MK_FP(seg, off)      (&inertia_memory[SEG_LINEAR((seg), (off))])
-#define SEG_PTR(seg, off)    (&inertia_memory[SEG_LINEAR((seg), (off))])
+#define SEG_PTR(seg, off)    ((char *)&inertia_memory[SEG_LINEAR((seg), (off))])
 #define SEG_U8(seg, off)     (*(uint8_t  *)&inertia_memory[SEG_LINEAR((seg), (off))])
 #define SEG_U16(seg, off)    (*(uint16_t *)&inertia_memory[SEG_LINEAR((seg), (off))])
 #define SEG_U32(seg, off)    (*(uint32_t *)&inertia_memory[SEG_LINEAR((seg), (off))])
 #define MEM_U8(ptr)          (*(uint8_t  *)(ptr))
 #define MEM_U16(ptr)         (*(uint16_t *)(ptr))
 #define MEM_U32(ptr)         (*(uint32_t *)(ptr))
-[16:40:09] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:40:09] [dbg] dos_mz load base=0x10000
-[16:40:09] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:40:09] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:40:09] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:40:09] /* discovering likely functions... */
-[16:40:10] /* rizin discovery: status=ok entries=1 elapsed=138.0ms backend=auto */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=1 elapsed_ms=34
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=112
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=229
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=177
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=875
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=391
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=870
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=574
-[metric] seed_calling_conventions cfg_functions=13 candidates=15 initialized=15 errors=0 stack_probes=0 stack_byte=0 wide_stack=1 elapsed_ms=5405
-[metric] seed_calling_conventions cfg_functions=1 candidates=3 initialized=3 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=142
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=202
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=26
-[metric] seed_calling_conventions cfg_functions=3 candidates=6 initialized=6 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=477
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=31
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=135
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=75
-[metric] seed_calling_conventions cfg_functions=5 candidates=9 initialized=9 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=349
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=119
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=100
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=99
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=48
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=47
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=119
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=114
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=168
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=184
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=41
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=40
-[16:40:35] /* source-region discovery evidence: raw_fact_count=20 normalized_fact_count=20 classified_fact_count=20 materialized_count=20 failure_count=0 failed_addrs=none */
-[16:40:35] [dbg] quick EXE function-list pass: candidate-function recovery 23.80s (seed limit 20)
-[16:40:35] /* quick EXE function discovery found entry/body functions without needing whole-program control-flow recovery. */
-[16:40:35] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:40:35] /* arch: 86_16 */
-[16:40:35] /* entry: 0x10f9a */
-[16:40:35] /* functions queued for decompilation: 20 */
-[16:40:35] /* info: selected 20 function(s) for decompilation */
-[16:40:35] /* parallel function decompilation: disabled; using one clean serial process at a time */
-[16:40:35] /* parallel x86-16 decompilation: using one fresh analysis project per shown function for stability. */
-[16:40:35] /* sweep budget: disabled via INERTIA_SWEEP_BUDGET_SEC */
-[16:40:35] [dbg] clean serial function worker: start 0x102e0 sub_102e0 requested_timeout=120s hard_timeout=165s
-ERROR    | 2026-07-30 16:40:40,718 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:40:42] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:40:42] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:40:42] [dbg] dos_mz load base=0x10000
-[16:40:42] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:40:43] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:40:43] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:40:43] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=138
-[16:40:43] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:40:43] /* arch: 86_16 */
-[16:40:43] /* entry: 0x10f9a */
-[16:40:43] /* function: 0x102e0 sub_102e0 */
-[16:40:43] /* decompiling... */
-[dbg] function complexity for 0x102e0 sub_102e0: blocks=76, bytes=459
-[dbg] decompile_function: addr=0x102e0 name=sub_102e0
-[dbg] function 0x102e0 not normalized, normalizing...
-[dbg] registered 28 direct callee stub(s) for 0x102e0
-[metric] seed_calling_conventions cfg_functions=29 candidates=29 initialized=29 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=21
-[dbg] _decompile_8616 ENTER validation path: addr=66272 id=127380471851264
-[dbg] _decompile_8616 DONE: addr=66272 codegen_id=127380471851264 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x102e0
-WARNING  | 2026-07-30 16:41:22,241 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x102e0 blocks=76 text_bytes=0
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
+#define PTR_U16(ptr)       ((uint16_t)(uintptr_t)(ptr))
+#define PTR_U32(ptr)       ((uint32_t)(uintptr_t)(ptr))
 
-[16:41:36] /* == function 0x102e0 sub_102e0 == */
-[16:41:36] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:41:36] /* info: function 0x102e0 sub_102e0 attempt=decompiled validation=passed */
-[16:41:36] /* -- c -- */
-void sub_1005d(void);
-void sub_10060(void);
-void sub_10491(unsigned short a0);
-void sub_10498(unsigned short a0);
-void sub_10672(void);
-void sub_10678(void);
-int sub_107e7(void);
-void sub_108c0(void);
-void sub_108d0(void);
-void sub_1095b(void);
-void sub_10970(void);
-int sub_10b2c(void);
-int sub_10bf4(void);
-int sub_10cd4(unsigned short a0, unsigned short a1);
-int sub_10ce0(unsigned short a0, unsigned short a1);
-unsigned short sub_11278(unsigned short a0);
-unsigned short sub_11292(void);
-int sub_128e4(unsigned short a0, unsigned short a1);
-int sub_12bc0(unsigned short a0);
-
-
-    extern unsigned short inertia_ds;
-
-extern unsigned long g_0132;
+typedef struct inertia_stack_object_22_14w2_18w2
+{
+  char padding_0[14];
+  unsigned short field_14;
+  char padding_16[2];
+  unsigned short field_18;
+  char padding_20[2];
+} inertia_stack_object_22_14w2_18w2;
+typedef struct g_08F0_entry
+{
+  char field_0;
+  char field_1;
+} g_08F0_entry;
+extern unsigned long inertia_esi;
+extern unsigned long inertia_edi;
+extern unsigned short inertia_ds;
 extern unsigned short g_0B46;
-
-void sub_102e0(void)
-{
-
-    unsigned short ax;  // ax
-    unsigned short local_2;  // [bp+0x2]
-    while (1)
-    {
-        SEG_U16(inertia_ds, 2986) = 0;
-        SEG_U16(inertia_ds, 2980) = 0;
-        sub_128e4(SEG_U16(inertia_ds, 352) + 1, 75);
-        sub_12bc0(1);
-        local_2 = sub_11292();
-        sub_12bc0(0);
-        ax = sub_11278(local_2);
-        switch (ax)
-        {
-        case 69:
-            SEG_U16(inertia_ds, 2988) = 3;
-            sub_10678();
-            sub_10b2c();
-            sub_10498(0);
-            goto LABEL_10488;
-        case 60:
-            if (g_0132 >> 16 <= 0)
-            {
-                if (g_0132 >> 16 >= 0)
-                {
-                    if ((g_0132 & 65535) <= 900)
-                        goto LABEL_10408;
-                }
-                else
-                {
-LABEL_10408:
-                    g_0132 += 30;
-                }
-            }
-            sub_10060();
-            goto LABEL_10488;
-        case 62:
-            if (g_0132)
-                g_0132 -= 30;
-            sub_10060();
-            goto LABEL_10488;
-        case 66:
-            SEG_U16(inertia_ds, 2988) = 1;
-            sub_10678();
-            sub_108d0();
-            sub_10498(0);
-            goto LABEL_10488;
-        case 72:
-            SEG_U16(inertia_ds, 2988) = 2;
-            sub_10678();
-            sub_10970();
-            sub_10498(0);
-            goto LABEL_10488;
-        case 73:
-            SEG_U16(inertia_ds, 2988) = 0;
-            sub_10678();
-            sub_107e7();
-            sub_10498(0);
-            goto LABEL_10488;
-        case 81:
-            SEG_U16(inertia_ds, 2988) = 5;
-            sub_10678();
-            sub_10ce0(0, SEG_U16(inertia_ds, 2978));
-            sub_10498(0);
-            goto LABEL_10488;
-        case 83:
-            SEG_U16(inertia_ds, 2988) = 4;
-            sub_10678();
-            sub_10bf4();
-            sub_10498(0);
-            goto LABEL_10488;
-        case 84:
-            g_0B46 = g_0B46 < 1;
-            sub_10060();
-            goto LABEL_10488;
-        default:
-            break;
-        }
-LABEL_10488:;
-    }
-    return;
-}
-[16:41:36] [dbg] clean serial function worker: start 0x107b8 sub_107b8 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:41:42,068 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:41:44] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:41:44] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:41:44] [dbg] dos_mz load base=0x10000
-[16:41:44] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:41:44] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:41:44] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:41:44] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=12
-[16:41:44] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:41:44] /* arch: 86_16 */
-[16:41:44] /* entry: 0x10f9a */
-[16:41:44] /* function: 0x107b8 sub_107b8 */
-[16:41:44] /* decompiling... */
-[dbg] function complexity for 0x107b8 sub_107b8: blocks=2, bytes=47
-[dbg] decompile_function: addr=0x107b8 name=sub_107b8
-[dbg] function 0x107b8 not normalized, normalizing...
-[dbg] registered 2 direct callee stub(s) for 0x107b8
-[metric] seed_calling_conventions cfg_functions=3 candidates=3 initialized=3 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=1
-ERROR    | 2026-07-30 16:41:44,815 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=67512 id=124430979680304
-[dbg] _decompile_8616 DONE: addr=67512 codegen_id=124430979680304 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x107b8
-WARNING  | 2026-07-30 16:41:46,088 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x107b8 blocks=2 text_bytes=463
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:41:48] /* == function 0x107b8 sub_107b8 == */
-[16:41:48] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:41:48] /* info: function 0x107b8 sub_107b8 attempt=decompiled validation=passed */
-[16:41:48] /* -- c -- */
-
-
-extern unsigned short g_0BA4;
-
-void sub_107b8(unsigned short *left, unsigned short *right)
-{
-
-    unsigned short local_2;  // [bp-0x2]
-    g_0BA4 += 1;
-    local_2 = left[0];
-    left[0] = right[0];
-    right[0] = local_2;
-    return;
-}
-[16:41:48] [dbg] clean serial function worker: start 0x10768 sub_10768 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:41:54,091 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:41:56] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:41:56] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:41:56] [dbg] dos_mz load base=0x10000
-[16:41:56] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:41:56] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:41:56] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:41:56] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=15
-[16:41:56] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:41:56] /* arch: 86_16 */
-[16:41:56] /* entry: 0x10f9a */
-[16:41:56] /* function: 0x10768 sub_10768 */
-[16:41:56] /* decompiling... */
-[dbg] function complexity for 0x10768 sub_10768: blocks=5, bytes=44
-[dbg] decompile_function: addr=0x10768 name=sub_10768
-[dbg] function 0x10768 not normalized, normalizing...
-[dbg] registered 6 direct callee stub(s) for 0x10768
-[metric] seed_calling_conventions cfg_functions=7 candidates=7 initialized=7 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=2
-ERROR    | 2026-07-30 16:41:57,060 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=67432 id=134693213689840
-[dbg] _decompile_8616 DONE: addr=67432 codegen_id=134693213689840 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10768
-WARNING  | 2026-07-30 16:41:59,342 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10768 blocks=5 text_bytes=371
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:42:02] /* == function 0x10768 sub_10768 == */
-[16:42:02] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:42:02] /* info: function 0x10768 sub_10768 attempt=decompiled validation=passed */
-[16:42:02] /* -- c -- */
-void sub_10491(unsigned short a0);
-void sub_10498(unsigned short a0);
-void sub_106c8(unsigned short a0);
-
-void sub_10768(unsigned short arg, unsigned short arg_6)
-{
-
-    unsigned short local_a;  // [bp-0xa]
-    sub_106c8(arg);
-    sub_106c8(arg_6);
-    sub_10498(arg);
-    return;
-}
-[16:42:02] [dbg] clean serial function worker: start 0x106c8 sub_106c8 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:42:07,735 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:42:09] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:42:09] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:42:09] [dbg] dos_mz load base=0x10000
-[16:42:09] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:42:10] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:42:10] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:42:10] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=54
-[16:42:10] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:42:10] /* arch: 86_16 */
-[16:42:10] /* entry: 0x10f9a */
-[16:42:10] /* function: 0x106c8 sub_106c8 */
-[16:42:10] /* decompiling... */
-[dbg] function complexity for 0x106c8 sub_106c8: blocks=7, bytes=147
-[dbg] decompile_function: addr=0x106c8 name=sub_106c8
-[dbg] function 0x106c8 not normalized, normalizing...
-[dbg] registered 10 direct callee stub(s) for 0x106c8
-[metric] seed_calling_conventions cfg_functions=11 candidates=11 initialized=11 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=6
-ERROR    | 2026-07-30 16:42:11,531 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:42:11,532 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:42:11,536 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:42:11,542 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=67272 id=136327924026736
-[dbg] _decompile_8616 DONE: addr=67272 codegen_id=136327924026736 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x106c8
-WARNING  | 2026-07-30 16:42:17,700 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x106c8 blocks=7 text_bytes=0
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:42:21] /* == function 0x106c8 sub_106c8 == */
-[16:42:21] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:42:21] /* info: function 0x106c8 sub_106c8 attempt=decompiled validation=passed */
-[16:42:21] /* -- c -- */
-int sub_113d4(char a0[44], unsigned short a1, unsigned short a2);
-int sub_12756(char a0[44], unsigned short a1);
-int sub_128e4(unsigned short a0, unsigned short a1);
-int sub_12b24(unsigned short a0);
-
-typedef struct g_0B4D_entry {
-    char field_0;
-    char field_1;
-} g_0B4D_entry;
-
-typedef struct g_0B4C_entry {
-    char field_0;
-    char field_1;
-} g_0B4C_entry;
-
-
-    extern unsigned short inertia_ds;
-    extern unsigned short inertia_ss;
-
-extern g_0B4D_entry g_0B4D[1];
-extern g_0B4C_entry g_0B4C[1];
+extern unsigned short g_0160;
+extern long g_0132;
+extern char *g_0136[];
+extern unsigned short xffff;
+extern unsigned short inertia_ss;
 extern unsigned short g_0BA2;
-
-void sub_106c8(unsigned short arg)
-{
-
-    unsigned short local_2e;  // [bp-0x2e]
-    char local_2c[44];  // [bp-0x2c]
-    sub_113d4(local_2c, 223, g_0B4C[arg].field_0);
-    local_2e = SEG_U16(inertia_ds, 2978) - g_0B4C[arg].field_0;
-    sub_113d4(local_2c + g_0B4C[arg].field_0, 32, local_2e);
-    local_2c[g_0BA2] = 0;
-    sub_12b24(g_0B4D[arg].field_0);
-    sub_128e4(arg + 1, 0);
-    sub_12756(local_2c, inertia_ss);
-    return;
-}
-[16:42:21] [dbg] clean serial function worker: start 0x10010 sub_10010 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:42:27,123 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:42:29] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:42:29] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:42:29] [dbg] dos_mz load base=0x10000
-[16:42:29] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:42:29] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:42:29] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:42:29] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=25
-[16:42:29] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:42:29] /* arch: 86_16 */
-[16:42:29] /* entry: 0x10f9a */
-[16:42:29] /* function: 0x10010 sub_10010 */
-[16:42:29] /* decompiling... */
-[dbg] function complexity for 0x10010 sub_10010: blocks=9, bytes=77
-[dbg] decompile_function: addr=0x10010 name=sub_10010
-[dbg] function 0x10010 not normalized, normalizing...
-[dbg] registered 16 direct callee stub(s) for 0x10010
-[metric] seed_calling_conventions cfg_functions=17 candidates=17 initialized=17 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=4
-ERROR    | 2026-07-30 16:42:30,401 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=65552 id=128269224219312
-[dbg] _decompile_8616 DONE: addr=65552 codegen_id=128269224219312 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10010
-WARNING  | 2026-07-30 16:42:35,046 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10010 blocks=9 text_bytes=969
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:42:38] /* == function 0x10010 sub_10010 == */
-[16:42:38] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:42:38] /* info: function 0x10010 sub_10010 attempt=decompiled validation=passed */
-[16:42:38] /* -- c -- */
-void sub_1005d(void);
-void sub_10060(void);
-void sub_102cc(void);
-void sub_102e0(void);
-void sub_10554(void);
-void sub_10560(void);
+extern unsigned long g_0B48;
+extern unsigned short g_0BAC;
+extern unsigned short g_0BA4;
+extern unsigned short g_0BAA;
+extern g_08F0_entry g_08F0[];
+extern unsigned long g_0BA6;
+extern g_08F0_entry g_0B4C[];
+extern unsigned short xff;
 unsigned short sub_1294f(unsigned short a0);
 unsigned short sub_12a29(unsigned short a0);
-int sub_12b5e(unsigned short a0);
-int sub_12bc0(unsigned short a0);
-
-
-    extern unsigned short inertia_ds;
+void sub_12b5e(unsigned short a0);
+void sub_12bc0(unsigned short a0);
+int32_t aNldiv(int32_t dividend, int32_t divisor);
+void sub_1123a(char *a0, void *a1);
+void sub_112ba();
+int sub_12756(char *a0, unsigned short a1);
+void sub_128e4(unsigned short a0, unsigned short a1);
+void sub_12b24(unsigned short a0);
+void sub_12b3e(unsigned short a0, unsigned short a1);
+void sub_113d4(char *a0, unsigned short a1, unsigned short a2);
+unsigned short sub_11278(unsigned short a0);
+unsigned short sub_11292(void);
+unsigned long sub_1137e(void);
+unsigned long sub_137e(void);
+unsigned short sub_1132c(void *a0);
+void sub_11402(unsigned short a0);
+unsigned short sub_11414(void);
+void sub_12ac8(struct inertia_stack_object_22_14w2_18w2 *a0, unsigned short a1);
+unsigned short sub_11310(unsigned short a0);
+void sub_1131e(unsigned short a0, unsigned short a1);
+unsigned short sub_10010(void);
+void sub_10060(void);
+void sub_101f0(unsigned short arg_4, unsigned short arg_6, unsigned short arg_8, short arg_a);
+void sub_102e0(void);
+void sub_10498(unsigned short arg_4);
+void sub_10560(void);
+void sub_10678(void);
+void sub_106c8(unsigned short arg_4);
+void sub_10768(unsigned short arg_4, unsigned short arg_6);
+void sub_107b8(g_08F0_entry *arg_4, g_08F0_entry *arg_6);
+void sub_10808(void);
+void sub_108d0(void);
+void sub_10970(void);
+void sub_109e8(unsigned short arg_4);
+void sub_10a88(short arg_4);
+void sub_10b50(void);
+void sub_10c18(void);
+void sub_10ce0(short arg_4, short arg_6);
+void sub_10e70(unsigned short arg_4, short arg_6);
+void sub_10f38(long arg_4);
 unsigned short sub_10010(void)
 {
-
-    unsigned short v5;  // ax
-    unsigned short local_1c;  // [bp-0x1c]
-    char local_1a;  // [bp-0x1a]
-    char local_f;  // [bp-0xf]
-    unsigned short local_e;  // [bp-0xe]
-    char local_c;  // [bp-0xc]
-    char local_b;  // [bp-0xb]
-    unsigned short local_a;  // [bp-0xa]
-    v5 = sub_12a29(43);
-    SEG_U16(inertia_ds, 2978) = v5;
-    sub_12b5e(0);
-    sub_12bc0(0);
-    sub_10560();
-    sub_10060();
-    sub_102e0();
-    return sub_1294f(65535);
-
-    return v5;
+  unsigned short v8;
+  unsigned char local_6;
+  unsigned char local_5;
+  unsigned char local_4;
+  unsigned char local_3;
+  local_4 = inertia_edi & 0xffff;
+  local_3 = (inertia_edi & 0xffff) >> 8;
+  local_6 = inertia_esi & 0xffff;
+  local_5 = (inertia_esi & 0xffff) >> 8;
+  v8 = sub_12a29(43);
+  SEG_U16(inertia_ds, 2978) = v8;
+  sub_12b5e(0);
+  sub_12bc0(0);
+  sub_10560();
+  sub_10060();
+  sub_102e0();
+  inertia_esi = (inertia_esi & 0xffff0000) | ((local_6 | (local_5 << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((local_4 | (local_3 << 8)) & 0xffff);
+  return sub_1294f(0xffff);
 }
-[16:42:38] [dbg] clean serial function worker: start 0x10678 sub_10678 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:42:44,110 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:42:46] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:42:46] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:42:46] [dbg] dos_mz load base=0x10000
-[16:42:46] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:42:46] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:42:46] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:42:46] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=21
-[16:42:46] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:42:46] /* arch: 86_16 */
-[16:42:46] /* entry: 0x10f9a */
-[16:42:46] /* function: 0x10678 sub_10678 */
-[16:42:46] /* decompiling... */
-[dbg] function complexity for 0x10678 sub_10678: blocks=9, bytes=89
-[dbg] decompile_function: addr=0x10678 name=sub_10678
-[dbg] function 0x10678 not normalized, normalizing...
-[dbg] registered 6 direct callee stub(s) for 0x10678
-[metric] seed_calling_conventions cfg_functions=7 candidates=7 initialized=7 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=3
-ERROR    | 2026-07-30 16:42:47,182 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=67192 id=123774768358336
-[dbg] _decompile_8616 DONE: addr=67192 codegen_id=123774768358336 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10678
-WARNING  | 2026-07-30 16:42:50,339 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10678 blocks=9 text_bytes=689
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:42:53] /* == function 0x10678 sub_10678 == */
-[16:42:53] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:42:53] /* info: function 0x10678 sub_10678 attempt=decompiled validation=passed */
-[16:42:53] /* -- c -- */
-void sub_106c8(unsigned short a0);
-unsigned long sub_1137e(void);
-
-
-
-    extern unsigned short inertia_ds;
-
-extern unsigned short g_08F0[1];
-extern unsigned short g_0B4C[1];
-extern unsigned long g_0BA6;
-
-void sub_10678(void)
-{
-
-    unsigned short local_2;  // [bp-0x2]
-    g_0BA6 = sub_1137e();
-    local_2 = 0;
-    while (1)
-    {
-        if (SEG_U16(inertia_ds, 2978) <= local_2)
-            break;
-        g_0B4C[local_2] = g_08F0[local_2];
-        sub_106c8(local_2);
-        local_2 += 1;
-    }
-    return;
-}
-[16:42:53] [dbg] clean serial function worker: start 0x10f38 sub_10f38 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:42:58,987 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:43:01] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:43:01] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:43:01] [dbg] dos_mz load base=0x10000
-[16:43:01] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:43:01] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:43:01] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:43:01] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=1 elapsed_ms=18
-[16:43:01] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:43:01] /* arch: 86_16 */
-[16:43:01] /* entry: 0x10f9a */
-[16:43:01] /* function: 0x10f38 sub_10f38 */
-[16:43:01] /* decompiling... */
-[dbg] function complexity for 0x10f38 sub_10f38: blocks=12, bytes=62
-[dbg] decompile_function: addr=0x10f38 name=sub_10f38
-[dbg] function 0x10f38 not normalized, normalizing...
-[dbg] registered 4 direct callee stub(s) for 0x10f38
-[metric] seed_calling_conventions cfg_functions=5 candidates=5 initialized=5 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=0
-ERROR    | 2026-07-30 16:43:02,217 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=69432 id=133171216140000
-[dbg] _decompile_8616 DONE: addr=69432 codegen_id=133171216140000 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10f38
-WARNING  | 2026-07-30 16:43:05,613 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10f38 blocks=12 text_bytes=731
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:43:08] /* == function 0x10f38 sub_10f38 == */
-[16:43:08] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:43:08] /* info: function 0x10f38 sub_10f38 attempt=decompiled validation=passed */
-[16:43:08] /* -- c -- */
-unsigned long sub_1137e(void);
-
-void sub_10f38(long arg)
-{
-
-    unsigned short local_a;  // [bp-0xa]
-    unsigned long local_4;  // [bp-0x4]
-    local_4 = sub_1137e() + arg;
-    while (1)
-    {
-        if (sub_1137e() > local_4)
-            break;
-    }
-}
-[16:43:08] [dbg] clean serial function worker: start 0x109e8 sub_109e8 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:43:13,938 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:43:16] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:43:16] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:43:16] [dbg] dos_mz load base=0x10000
-[16:43:16] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:43:16] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:43:16] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:43:16] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=37
-[16:43:16] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:43:16] /* arch: 86_16 */
-[16:43:16] /* entry: 0x10f9a */
-[16:43:16] /* function: 0x109e8 sub_109e8 */
-[16:43:16] /* decompiling... */
-[dbg] function complexity for 0x109e8 sub_109e8: blocks=12, bytes=127
-[dbg] decompile_function: addr=0x109e8 name=sub_109e8
-[dbg] function 0x109e8 not normalized, normalizing...
-[dbg] registered 6 direct callee stub(s) for 0x109e8
-[metric] seed_calling_conventions cfg_functions=7 candidates=7 initialized=7 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=6
-ERROR    | 2026-07-30 16:43:17,824 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:43:17,828 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=68072 id=137275041744944
-[dbg] _decompile_8616 DONE: addr=68072 codegen_id=137275041744944 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x109e8
-WARNING  | 2026-07-30 16:43:22,480 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x109e8 blocks=12 text_bytes=0
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:43:26] /* == function 0x109e8 sub_109e8 == */
-[16:43:26] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:43:26] /* info: function 0x109e8 sub_109e8 attempt=decompiled validation=passed */
-[16:43:26] /* -- c -- */
-void sub_1075b(unsigned short a0, unsigned short a1);
-void sub_10768(unsigned short a0, unsigned short a1);
-int sub_10794(unsigned short a0, unsigned short a1);
-
-typedef struct g_0B4C_entry {
-    char field_0;
-    char field_1;
-} g_0B4C_entry;
-
-
-
-extern unsigned short g_0BAA;
-extern g_0B4C_entry g_0B4C[1];
-
-void sub_109e8(unsigned short arg)
-{
-
-    unsigned short local_4;  // [bp-0x4]
-    unsigned short local_2;  // [bp-0x2]
-    for (local_4 = arg; local_4; local_4 = local_2)
-    {
-        local_2 = local_4 / 2;
-        g_0BAA += 1;
-        if (g_0B4C[local_4].field_0 <= g_0B4C[local_2].field_0)
-            return;
-        sub_10794((local_2 << 1) + 2892, (local_4 << 1) + 2892);
-        sub_10768(local_2, local_4);
-    }
-    return;
-}
-[16:43:26] [dbg] clean serial function worker: start 0x108d0 sub_108d0 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:43:31,613 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:43:33] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:43:33] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:43:33] [dbg] dos_mz load base=0x10000
-[16:43:33] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:43:33] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:43:33] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:43:33] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=40
-[16:43:34] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:43:34] /* arch: 86_16 */
-[16:43:34] /* entry: 0x10f9a */
-[16:43:34] /* function: 0x108d0 sub_108d0 */
-[16:43:34] /* decompiling... */
-[dbg] function complexity for 0x108d0 sub_108d0: blocks=15, bytes=163
-[dbg] decompile_function: addr=0x108d0 name=sub_108d0
-[dbg] function 0x108d0 not normalized, normalizing...
-[dbg] registered 6 direct callee stub(s) for 0x108d0
-[metric] seed_calling_conventions cfg_functions=7 candidates=7 initialized=7 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=6
-ERROR    | 2026-07-30 16:43:35,359 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=67792 id=138884877404544
-[dbg] _decompile_8616 DONE: addr=67792 codegen_id=138884877404544 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x108d0
-WARNING  | 2026-07-30 16:43:40,530 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x108d0 blocks=15 text_bytes=1087
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:43:44] /* == function 0x108d0 sub_108d0 == */
-[16:43:44] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:43:44] /* info: function 0x108d0 sub_108d0 attempt=decompiled validation=passed */
-[16:43:44] /* -- c -- */
-void sub_1075b(unsigned short a0, unsigned short a1);
-void sub_10768(unsigned short a0, unsigned short a1);
-int sub_10794(unsigned short a0, unsigned short a1);
-
-typedef struct g_0B4C_entry {
-    char field_0;
-    char field_1;
-} g_0B4C_entry;
-
-typedef struct g_0B4E_entry {
-    char field_0;
-    char field_1;
-} g_0B4E_entry;
-
-
-
-    extern unsigned short inertia_ds;
-
-extern unsigned short g_0BAA;
-extern g_0B4C_entry g_0B4C[1];
-extern g_0B4E_entry g_0B4E[1];
-
-void sub_108d0(void)
-{
-
-    unsigned short local_a;  // [bp-0xa]
-    unsigned short local_6;  // [bp-0x6]
-    unsigned short local_4;  // [bp-0x4]
-    unsigned short local_2;  // [bp-0x2]
-    local_4 = SEG_U16(inertia_ds, 2978);
-    do
-    {
-        local_6 = 0;
-        for (local_2 = 0; local_4 > local_2; local_2 = local_2 + 1)
-        {
-            g_0BAA += 1;
-            if (g_0B4E[local_2].field_0 < g_0B4C[local_2].field_0)
-            {
-                sub_10794((local_2 << 1) + 2892, (local_2 << 1) + 2894);
-                sub_10768(local_2, local_2 + 1);
-                local_6 = local_2;
-            }
-        }
-        local_4 = local_6;
-    } while ((!local_6 ? 0 : 1));
-    return;
-}
-[16:43:44] [dbg] clean serial function worker: start 0x10498 sub_10498 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:43:49,850 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:43:52] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:43:52] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:43:52] [dbg] dos_mz load base=0x10000
-[16:43:52] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:43:52] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:43:52] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:43:52] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=71
-[16:43:52] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:43:52] /* arch: 86_16 */
-[16:43:52] /* entry: 0x10f9a */
-[16:43:52] /* function: 0x10498 sub_10498 */
-[16:43:52] /* decompiling... */
-[dbg] function complexity for 0x10498 sub_10498: blocks=15, bytes=194
-[dbg] decompile_function: addr=0x10498 name=sub_10498
-[dbg] function 0x10498 not normalized, normalizing...
-[dbg] registered 18 direct callee stub(s) for 0x10498
-[metric] seed_calling_conventions cfg_functions=19 candidates=19 initialized=19 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=8
-ERROR    | 2026-07-30 16:43:55,202 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:43:55,225 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:43:55,230 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=66712 id=129469736900256
-[dbg] _decompile_8616 DONE: addr=66712 codegen_id=129469736900256 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10498
-WARNING  | 2026-07-30 16:44:08,334 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10498 blocks=15 text_bytes=1846
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:44:14] /* == function 0x10498 sub_10498 == */
-[16:44:14] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:44:14] /* info: function 0x10498 sub_10498 attempt=decompiled validation=passed */
-[16:44:14] /* -- c -- */
-void sub_10e5d(unsigned short a0, unsigned short a1);
-void sub_10e70(unsigned short a0, unsigned short a1);
-void sub_10f18(unsigned long a0);
-void sub_10f38(unsigned long a0);
-int sub_112ba();
-unsigned long sub_1137e(void);
-int sub_1143a(unsigned short a0, unsigned short a1, unsigned short a2, unsigned short a3);
-int sub_12756(char a0[80], unsigned short a1);
-int sub_128e4(unsigned short a0, unsigned short a1);
-int sub_12b24(unsigned short a0);
-
-
-
-    extern unsigned short inertia_ds;
-    extern unsigned short inertia_ss;
-
-extern unsigned long g_0B48;
-
-void sub_10498(void)
-{
-
-    char local_50[80];  // [bp-0x50]
-    unsigned short local_4;  // [bp+0x4]
-    sub_12b24(15);
-    g_0B48 = sub_1137e();
-    sub_112ba(local_50, 381, sub_1143a(SEG_U16(inertia_ds, 2888) - SEG_U16(inertia_ds, 2982), SEG_U16(inertia_ds, 2890) - SEG_U16(inertia_ds, 2984), 1000, 0), SEG_U16(inertia_ds, 2980), SEG_U16(inertia_ds, 2986));
-    sub_128e4(SEG_U16(inertia_ds, 2988) + 7, 59);
-    sub_12756(local_50, inertia_ss);
-    if (!SEG_U16(inertia_ds, 2886))
-    {
-        sub_10f38(SEG_U32(inertia_ds, 306));
-        return;
-    }
-    sub_10e70(local_4 * 60, 75);
-    sub_10f38(SEG_U32(inertia_ds, 306) - 75);
-    return;
-}
-[16:44:14] [dbg] clean serial function worker: start 0x10970 sub_10970 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:44:19,656 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:44:21] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:44:21] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:44:21] [dbg] dos_mz load base=0x10000
-[16:44:21] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:44:21] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:44:21] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:44:21] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=42
-[16:44:22] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:44:22] /* arch: 86_16 */
-[16:44:22] /* entry: 0x10f9a */
-[16:44:22] /* function: 0x10970 sub_10970 */
-[16:44:22] /* decompiling... */
-[dbg] function complexity for 0x10970 sub_10970: blocks=16, bytes=135
-[dbg] decompile_function: addr=0x10970 name=sub_10970
-[dbg] function 0x10970 not normalized, normalizing...
-[dbg] registered 10 direct callee stub(s) for 0x10970
-[metric] seed_calling_conventions cfg_functions=11 candidates=11 initialized=11 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=5
-ERROR    | 2026-07-30 16:44:23,398 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=67952 id=127283323508048
-[dbg] _decompile_8616 DONE: addr=67952 codegen_id=127283323508048 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10970
-WARNING  | 2026-07-30 16:44:28,162 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10970 blocks=16 text_bytes=0
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:44:31] /* == function 0x10970 sub_10970 == */
-[16:44:31] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:44:31] /* info: function 0x10970 sub_10970 attempt=decompiled validation=passed */
-[16:44:31] /* -- c -- */
-void sub_1075b(unsigned short a0, unsigned short a1);
-void sub_10768(unsigned short a0, unsigned short a1);
-int sub_10794(unsigned short a0, unsigned short a1);
-void sub_109e8(unsigned short a0);
-int sub_10a61(unsigned short a0);
-
-    extern unsigned short inertia_ds;
-void sub_10970(void)
-{
-
-    unsigned short local_2;  // [bp-0x2]
-    local_2 = 1;
-    while (1)
-    {
-        if (SEG_U16(inertia_ds, 2978) <= local_2)
-            break;
-        sub_109e8(local_2);
-        local_2 += 1;
-    }
-    for (local_2 = SEG_U16(inertia_ds, 2978) - 1; local_2 > 0; local_2 = local_2 - 1)
-    {
-        sub_10794(2892, (local_2 << 1) + 2892);
-        sub_10768(0, local_2);
-        sub_10a61(local_2 - 1);
-    }
-    return;
-}
-[16:44:31] [dbg] clean serial function worker: start 0x101f0 sub_101f0 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:44:36,183 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:44:38] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:44:38] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:44:38] [dbg] dos_mz load base=0x10000
-[16:44:38] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:44:38] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:44:38] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:44:38] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=62
-[16:44:38] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:44:38] /* arch: 86_16 */
-[16:44:38] /* entry: 0x10f9a */
-[16:44:38] /* function: 0x101f0 sub_101f0 */
-[16:44:38] /* decompiling... */
-[dbg] function complexity for 0x101f0 sub_101f0: blocks=16, bytes=228
-[dbg] decompile_function: addr=0x101f0 name=sub_101f0
-[dbg] function 0x101f0 not normalized, normalizing...
-[dbg] registered 8 direct callee stub(s) for 0x101f0
-[metric] seed_calling_conventions cfg_functions=9 candidates=9 initialized=9 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=7
-ERROR    | 2026-07-30 16:44:39,536 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:44:39,538 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:44:39,542 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:44:39,545 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:44:39,555 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:44:39,561 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:44:39,573 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=66032 id=136559035503616
-[dbg] _decompile_8616 DONE: addr=66032 codegen_id=136559035503616 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x101f0
-WARNING  | 2026-07-30 16:44:48,619 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x101f0 blocks=16 text_bytes=923
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:44:53] /* == function 0x101f0 sub_101f0 == */
-[16:44:53] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:44:53] /* info: function 0x101f0 sub_101f0 attempt=decompiled validation=passed */
-[16:44:53] /* -- c -- */
-int sub_113d4(char a0[80], unsigned short a1, unsigned short a2);
-int sub_12756(char a0[80], unsigned short a1);
-int sub_128e4(unsigned short a0, unsigned short a1);
-
-    extern unsigned short inertia_ss;
-void sub_101f0(unsigned short arg, unsigned short arg_6, unsigned short arg_8, short arg_a)
-{
-
-    char local_52[80];  // [bp-0x52]
-    unsigned short local_2;  // [bp-0x2]
-    sub_113d4(local_52, 205, arg_8);
-    local_52[0] = 201;
-    local_52[arg_8 - 1] = 187;
-    local_52[arg_8] = 0;
-    sub_128e4(arg, arg_6);
-    sub_12756(local_52, inertia_ss);
-    sub_113d4(local_52, 32, arg_8);
-    local_52[0] = 186;
-    local_52[arg_8 - 1] = 186;
-    local_2 = arg + 1;
-    for (; local_2 <= arg_a; local_2 = local_2 + 1)
-    {
-        sub_128e4(local_2, arg_6);
-        sub_12756(local_52, inertia_ss);
-    }
-    sub_113d4(local_52, 205, arg_8);
-    local_52[0] = 200;
-    local_52[arg_8 - 1] = 188;
-    sub_128e4(arg_a + arg, arg_6);
-    sub_12756(local_52, inertia_ss);
-    return;
-}
-[16:44:53] [dbg] clean serial function worker: start 0x10a88 sub_10a88 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:44:58,025 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:44:59] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:44:59] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:44:59] [dbg] dos_mz load base=0x10000
-[16:44:59] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:45:00] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:45:00] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:45:00] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=43
-[16:45:00] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:45:00] /* arch: 86_16 */
-[16:45:00] /* entry: 0x10f9a */
-[16:45:00] /* function: 0x10a88 sub_10a88 */
-[16:45:00] /* decompiling... */
-[dbg] function complexity for 0x10a88 sub_10a88: blocks=18, bytes=204
-[dbg] decompile_function: addr=0x10a88 name=sub_10a88
-[dbg] function 0x10a88 not normalized, normalizing...
-[dbg] registered 6 direct callee stub(s) for 0x10a88
-[metric] seed_calling_conventions cfg_functions=7 candidates=7 initialized=7 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=12
-ERROR    | 2026-07-30 16:45:01,505 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:45:01,508 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:45:01,511 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=68232 id=136143784519600
-[dbg] _decompile_8616 DONE: addr=68232 codegen_id=136143784519600 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10a88
-WARNING  | 2026-07-30 16:45:06,635 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10a88 blocks=18 text_bytes=0
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:45:10] /* == function 0x10a88 sub_10a88 == */
-[16:45:10] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:45:10] /* info: function 0x10a88 sub_10a88 attempt=decompiled validation=passed */
-[16:45:10] /* -- c -- */
-void sub_1075b(unsigned short a0, unsigned short a1);
-void sub_10768(unsigned short a0, unsigned short a1);
-int sub_10794(unsigned short a0, unsigned short a1);
-
-typedef struct g_0B4C_entry {
-    char field_0;
-    char field_1;
-} g_0B4C_entry;
-
-typedef struct g_0B4E_entry {
-    char field_0;
-    char field_1;
-} g_0B4E_entry;
-
-
-
-extern unsigned short g_0BAA;
-extern g_0B4C_entry g_0B4C[1];
-extern g_0B4E_entry g_0B4E[1];
-
-void sub_10a88(short arg)
-{
-
-    unsigned short local_4;  // [bp-0x4]
-    unsigned short local_2;  // [bp-0x2]
-    local_2 = 0;
-    while (1)
-    {
-        local_4 = local_2 << 1;
-        if (local_4 <= arg)
-        {
-            if (local_4 + 1 <= arg)
-            {
-                g_0BAA += 1;
-                if (g_0B4E[local_4].field_0 > g_0B4C[local_4].field_0)
-                    local_4 += 1;
-            }
-            g_0BAA += 1;
-            if (g_0B4C[local_2].field_0 >= g_0B4C[local_4].field_0)
-                return;
-            sub_10794((local_2 << 1) + 2892, (local_4 << 1) + 2892);
-            sub_10768(local_2, local_4);
-            local_2 = local_4;
-        }
-        else
-        {
-            return;
-        }
-    }
-}
-[16:45:10] [dbg] clean serial function worker: start 0x10e70 sub_10e70 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:45:14,807 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:45:16] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:45:16] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:45:16] [dbg] dos_mz load base=0x10000
-[16:45:16] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:45:16] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:45:16] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:45:16] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=43
-[16:45:16] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:45:16] /* arch: 86_16 */
-[16:45:16] /* entry: 0x10f9a */
-[16:45:16] /* function: 0x10e70 sub_10e70 */
-[16:45:16] /* decompiling... */
-[dbg] function complexity for 0x10e70 sub_10e70: blocks=19, bytes=194
-[dbg] decompile_function: addr=0x10e70 name=sub_10e70
-[dbg] function 0x10e70 not normalized, normalizing...
-[dbg] registered 10 direct callee stub(s) for 0x10e70
-[metric] seed_calling_conventions cfg_functions=11 candidates=11 initialized=11 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=6
-ERROR    | 2026-07-30 16:45:17,699 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-WARNING  | 2026-07-30 16:45:19,996 | angr_platforms.X86_16.decompiler_structuring_stage | structuring pass validation changed function=0x10e70 pass=_structuring_codegen_8616 verdict=structuring:_structuring_codegen_8616 whole-tail validation [live_out] failed: observable whole-tail delta present
-WARNING  | 2026-07-30 16:45:20,437 | angr_platforms.X86_16.decompiler_structuring_stage | structuring pass validation changed function=0x10e70 pass=_widening_copy_propagation_8616 verdict=structuring:_widening_copy_propagation_8616 whole-tail validation [live_out] failed: observable whole-tail delta present
-[dbg] _decompile_8616 ENTER validation path: addr=69232 id=127360116076096
-[dbg] _decompile_8616 DONE: addr=69232 codegen_id=127360116076096 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10e70
-WARNING  | 2026-07-30 16:45:25,363 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10e70 blocks=19 text_bytes=0
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:45:29] /* == function 0x10e70 sub_10e70 == */
-[16:45:29] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:45:29] /* info: function 0x10e70 sub_10e70 attempt=decompiled validation=passed */
-[16:45:29] /* -- c -- */
-void sub_10f18(unsigned long a0);
-void sub_10f38(unsigned long a0);
-unsigned short sub_11310(unsigned short a0);
-int sub_1131e(unsigned short a0, unsigned short a1);
-unsigned short sub_1143a(unsigned short a0, unsigned short a1, unsigned short a2, unsigned short a3);
-
-void sub_10e70(char local, unsigned short local_6)
-{
-
-    unsigned short local_2;  // [bp-0x2]
-    unsigned short local_5;  // [bp+0x4]
-    if (local_5)
-    {
-        if (local_6 < 75)
-            local_6 = 75;
-        sub_1131e(67, 182);
-        local_5 = sub_1143a(13532, 18, local_5, 0 - (local_5 >> 15 & 1));
-        sub_1131e(66, local_5);
-        sub_1131e(66, local_5 >> 8);
-        local_2 = sub_11310(97);
-        sub_1131e(97, local_2 | 3);
-    }
-    sub_10f38(local_6);
-    if (local_5)
-    {
-        sub_1131e(97, local_2);
-        return;
-    }}
-[16:45:29] [dbg] clean serial function worker: start 0x10c18 sub_10c18 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:45:34,059 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:45:35] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:45:35] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:45:35] [dbg] dos_mz load base=0x10000
-[16:45:35] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:45:36] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:45:36] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:45:36] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=57
-[16:45:36] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:45:36] /* arch: 86_16 */
-[16:45:36] /* entry: 0x10f9a */
-[16:45:36] /* function: 0x10c18 sub_10c18 */
-[16:45:36] /* decompiling... */
-[dbg] function complexity for 0x10c18 sub_10c18: blocks=19, bytes=218
-[dbg] decompile_function: addr=0x10c18 name=sub_10c18
-[dbg] function 0x10c18 not normalized, normalizing...
-[dbg] registered 6 direct callee stub(s) for 0x10c18
-[metric] seed_calling_conventions cfg_functions=7 candidates=7 initialized=7 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=6
-ERROR    | 2026-07-30 16:45:38,394 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:45:38,400 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=68632 id=137092871237520
-[dbg] _decompile_8616 DONE: addr=68632 codegen_id=137092871237520 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10c18
-WARNING  | 2026-07-30 16:45:44,491 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10c18 blocks=19 text_bytes=0
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:45:48] /* == function 0x10c18 sub_10c18 == */
-[16:45:48] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:45:48] /* info: function 0x10c18 sub_10c18 attempt=decompiled validation=passed */
-[16:45:48] /* -- c -- */
-void sub_1075b(unsigned short a0, unsigned short a1);
-void sub_10768(unsigned short a0, unsigned short a1);
-int sub_10794(unsigned short a0, unsigned short a1);
-
-typedef struct g_0B4C_entry {
-    char field_0;
-    char field_1;
-} g_0B4C_entry;
-
-
-
-    extern unsigned short inertia_ds;
-
-extern unsigned short g_0BAA;
-extern g_0B4C_entry g_0B4C[1];
-
-void sub_10c18(void)
-{
-
-    char v8;  // 4111
-    unsigned short local_8;  // [bp-0x8]
-    unsigned short local_6;  // [bp-0x6]
-    unsigned short local_4;  // [bp-0x4]
-    unsigned short local_2;  // [bp+0x2]
-    for (local_2 = SEG_U16(inertia_ds, 2978) / 2; local_2; )
-    {
-        local_6 = SEG_U16(inertia_ds, 2978) - local_2;
-        do
-        {
-            local_8 = 0;
-            for (local_4 = 0; local_4 <= local_6; local_4 = local_4 + 1)
-            {
-                g_0BAA += 1;
-                local_2 = local_2 / 2;
-                if ((g_0B4C[local_2 + local_4].field_0 < g_0B4C[local_4].field_0 ? 0 : 1) == 0)
-                {
-                    sub_10794((local_4 << 1) + 2892, (local_4 + local_2 << 1) + 2892);
-                    sub_10768(local_4, local_4 + local_2);
-                    local_8 = local_4;
-                }
-                v8 = local_6;
-                local_6 = v8 + 1;
-            }
-        } while (local_8);
-    }
-    return;
-}
-[16:45:48] [dbg] clean serial function worker: start 0x10808 sub_10808 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:45:53,536 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:45:55] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:45:55] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:45:55] [dbg] dos_mz load base=0x10000
-[16:45:55] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:45:55] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:45:55] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:45:55] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=45
-[16:45:55] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:45:55] /* arch: 86_16 */
-[16:45:55] /* entry: 0x10f9a */
-[16:45:55] /* function: 0x10808 sub_10808 */
-[16:45:55] /* decompiling... */
-[dbg] function complexity for 0x10808 sub_10808: blocks=20, bytes=199
-[dbg] decompile_function: addr=0x10808 name=sub_10808
-[dbg] function 0x10808 not normalized, normalizing...
-[dbg] registered 6 direct callee stub(s) for 0x10808
-[metric] seed_calling_conventions cfg_functions=7 candidates=7 initialized=7 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=6
-ERROR    | 2026-07-30 16:45:57,301 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-ERROR    | 2026-07-30 16:45:57,305 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=67592 id=138874012849152
-[dbg] _decompile_8616 DONE: addr=67592 codegen_id=138874012849152 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10808
-WARNING  | 2026-07-30 16:46:03,817 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10808 blocks=20 text_bytes=0
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:46:07] /* == function 0x10808 sub_10808 == */
-[16:46:07] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:46:07] /* info: function 0x10808 sub_10808 attempt=decompiled validation=passed */
-[16:46:07] /* -- c -- */
-void sub_10491(unsigned short a0);
-void sub_10498(unsigned short a0);
-void sub_106c8(unsigned short a0);
-
-typedef struct g_0B4A_entry {
-    char field_0;
-    char field_1;
-} g_0B4A_entry;
-
-
-
-    extern unsigned short inertia_ds;
-
-extern unsigned short g_0BAA;
-extern unsigned short g_0BA4;
-extern g_0B4A_entry g_0B4A[1];
-extern unsigned short g_0B4C[1];
-
-void sub_10808(void)
-{
-
-    unsigned short local_8;  // [bp-0x8]
-    unsigned short local_6;  // [bp-0x6]
-    unsigned short local_4;  // [bp-0x4]
-    unsigned short local_2;  // [bp-0x2]
-    for (local_2 = 0; SEG_U16(inertia_ds, 2978) > local_2; local_2 = local_2 + 1)
-    {
-        local_8 = g_0B4C[local_2];
-        local_6 = local_8;
-        for (local_4 = local_2; local_4; local_4 = local_4 - 1)
-        {
-            g_0BAA += 1;
-            if (g_0B4A[local_4].field_0 <= local_6)
-                break;
-            g_0BA4 += 1;
-            g_0B4C[local_4] = g_0B4C[local_4 - 1];
-            sub_106c8(local_4);
-            sub_10498(local_4);
-        }
-        g_0B4C[local_4] = local_8;
-        sub_106c8(local_4);
-        sub_10498(local_4);
-    }
-    return;
-}
-[16:46:07] [dbg] clean serial function worker: start 0x10b50 sub_10b50 requested_timeout=60s hard_timeout=105s
-ERROR    | 2026-07-30 16:46:12,367 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:46:14] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:46:14] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:46:14] [dbg] dos_mz load base=0x10000
-[16:46:14] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:46:14] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:46:14] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:46:14] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=41
-[16:46:14] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:46:14] /* arch: 86_16 */
-[16:46:14] /* entry: 0x10f9a */
-[16:46:14] /* function: 0x10b50 sub_10b50 */
-[16:46:14] /* decompiling... */
-[dbg] function complexity for 0x10b50 sub_10b50: blocks=21, bytes=187
-[dbg] decompile_function: addr=0x10b50 name=sub_10b50
-[dbg] function 0x10b50 not normalized, normalizing...
-[dbg] registered 8 direct callee stub(s) for 0x10b50
-[metric] seed_calling_conventions cfg_functions=9 candidates=9 initialized=9 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=6
-ERROR    | 2026-07-30 16:46:15,712 | angr.analyses.decompiler.structured_codegen.c | Store data lifted to a C type with a different size. Decompilation output will be wrong.
-[dbg] _decompile_8616 ENTER validation path: addr=68432 id=139690767796944
-[dbg] _decompile_8616 DONE: addr=68432 codegen_id=139690767796944 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10b50
-WARNING  | 2026-07-30 16:46:21,887 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10b50 blocks=21 text_bytes=0
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:46:25] /* == function 0x10b50 sub_10b50 == */
-[16:46:25] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:46:25] /* info: function 0x10b50 sub_10b50 attempt=decompiled validation=passed */
-[16:46:25] /* -- c -- */
-void sub_10491(unsigned short a0);
-void sub_10498(unsigned short a0);
-void sub_1075b(unsigned short a0, unsigned short a1);
-void sub_10768(unsigned short a0, unsigned short a1);
-int sub_10794(unsigned short a0, unsigned short a1);
-
-typedef struct g_0B4C_entry {
-    char field_0;
-    char field_1;
-} g_0B4C_entry;
-
-
-
-    extern unsigned short inertia_ds;
-
-extern unsigned short g_0BAA;
-extern g_0B4C_entry g_0B4C[1];
-
-void sub_10b50(void)
-{
-
-    unsigned short local_a;  // [bp-0xa]
-    unsigned short local_6;  // [bp-0x6]
-    unsigned short local_4;  // [bp-0x4]
-    unsigned short local_2;  // [bp+0x2]
-    for (local_6 = 0; SEG_U16(inertia_ds, 2978) > local_6; local_6 = local_6 + 1)
-    {
-        local_4 = local_6;
-        for (local_2 = local_6; local_2 < SEG_U16(inertia_ds, 2978); local_2 = local_2 + 1)
-        {
-            local_4 = local_2;
-            if (local_2 >= SEG_U16(inertia_ds, 2978))
-                break;
-            g_0BAA += 1;
-            if (g_0B4C[local_2].field_0 < g_0B4C[local_4].field_0)
-            {
-                sub_10498(local_2);
-            }
-            local_4 += 1;
-        }
-        if (local_4 > local_6)
-        {
-            sub_10794((local_6 << 1) + 2892, (local_4 << 1) + 2892);
-            sub_10768(local_6, local_4);
-        }
-    }
-    return;
-}
-[16:46:25] [dbg] clean serial function worker: start 0x10560 sub_10560 requested_timeout=120s hard_timeout=165s
-ERROR    | 2026-07-30 16:46:30,431 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:46:32] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:46:32] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:46:32] [dbg] dos_mz load base=0x10000
-[16:46:32] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:46:32] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:46:32] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:46:32] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=65
-[16:46:32] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:46:32] /* arch: 86_16 */
-[16:46:32] /* entry: 0x10f9a */
-[16:46:32] /* function: 0x10560 sub_10560 */
-[16:46:32] /* decompiling... */
-[dbg] function complexity for 0x10560 sub_10560: blocks=29, bytes=303
-[dbg] decompile_function: addr=0x10560 name=sub_10560
-[dbg] function 0x10560 not normalized, normalizing...
-[dbg] registered 12 direct callee stub(s) for 0x10560
-[metric] seed_calling_conventions cfg_functions=13 candidates=13 initialized=13 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=9
-[dbg] _decompile_8616 ENTER validation path: addr=66912 id=132735585909600
-[dbg] _decompile_8616 DONE: addr=66912 codegen_id=132735585909600 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10560
-WARNING  | 2026-07-30 16:47:12,639 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10560 blocks=29 text_bytes=0
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:47:17] /* == function 0x10560 sub_10560 == */
-[16:47:17] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:47:17] /* info: function 0x10560 sub_10560 attempt=decompiled validation=passed */
-[16:47:17] /* -- c -- */
-struct inertia_stack_object_22_14w2_18w2;
-void sub_10672(void);
-void sub_10678(void);
-unsigned short sub_1132c(unsigned short a0);
-int sub_11402(unsigned short a0);
-unsigned short sub_11414(void);
-int sub_12ac8(struct inertia_stack_object_22_14w2_18w2 *a0, unsigned short a1);
-
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
-} g_08F0_entry;
-
-typedef struct g_08F1_entry {
-    char field_0;
-    char field_1;
-} g_08F1_entry;
-
-typedef struct inertia_stack_object_22_14w2_18w2 {
-    char padding_0[14];
-    unsigned short field_14;
-    char padding_16[2];
-    unsigned short field_18;
-    char padding_20[2];
-} inertia_stack_object_22_14w2_18w2;
-
-
-    extern unsigned short inertia_ds;
-    extern unsigned short inertia_ss;
-
-extern g_08F0_entry g_08F0[1];
-extern g_08F1_entry g_08F1[1];
-
-void sub_10560(void)
-{
-    unsigned short local_76;  // [bp-0x76]
-    unsigned short local_74;  // [bp-0x74]
-    unsigned short local_72;  // [bp-0x72]
-    unsigned short local_5a[43];  // [bp-0x5a]
-    unsigned short local_4;  // [bp-0x4]
-    unsigned short local_2;  // [bp-0x2]
-    inertia_stack_object_22_14w2_18w2 stack_object_70;  // [bp-0x70]
-
-    sub_11402(sub_1132c(0));
-    SEG_U16(inertia_ds, 2886) = 1;
-    SEG_U16(inertia_ds, 306) = 30;
-    SEG_U16(inertia_ds, 308) = 0;
-    sub_12ac8(&stack_object_70, inertia_ss);
-    if (stack_object_70.field_18 == 1 || stack_object_70.field_14 == 2 || !stack_object_70.field_14)
-        local_74 = 1;
-    else
-        local_74 = 15;
-    local_2 = 0;
-    while (1)
-    {
-        if (SEG_U16(inertia_ds, 2978) <= local_2)
-            break;
-        local_5a[local_2] = local_2 + 1;
-        local_2 += 1;
-    }
-    local_4 = SEG_U16(inertia_ds, 2978) - 1;
-    local_2 = 0;
-    while (1)
-    {
-        if (SEG_U16(inertia_ds, 2978) <= local_2)
-            break;
-        local_76 = sub_11414() % (local_4 + 1);
-        local_72 = local_5a[local_76];
-        local_5a[local_76] = local_5a[local_4];
-        local_4 -= 1;
-        g_08F0[local_2].field_0 = local_72;
-        if (local_74 == 1)
-            g_08F1[local_2].field_0 = 7;
-        else
-            g_08F1[local_2].field_0 = (short)local_72 % (short)local_74 + 1;
-        local_2 += 1;
-    }
-    sub_10678();
-    return;
-}
-[16:47:17] [dbg] clean serial function worker: start 0x10060 sub_10060 requested_timeout=120s hard_timeout=165s
-ERROR    | 2026-07-30 16:47:22,123 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:47:23] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:47:23] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:47:23] [dbg] dos_mz load base=0x10000
-[16:47:23] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:47:24] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:47:24] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:47:24] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=119
-[16:47:24] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:47:24] /* arch: 86_16 */
-[16:47:24] /* entry: 0x10f9a */
-[16:47:24] /* function: 0x10060 sub_10060 */
-[16:47:24] /* decompiling... */
-[dbg] function complexity for 0x10060 sub_10060: blocks=37, bytes=418
-[dbg] decompile_function: addr=0x10060 name=sub_10060
-[dbg] function 0x10060 not normalized, normalizing...
-[dbg] registered 18 direct callee stub(s) for 0x10060
-[metric] seed_calling_conventions cfg_functions=19 candidates=19 initialized=19 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=14
-[dbg] _decompile_8616 ENTER validation path: addr=65632 id=132336527990400
-[dbg] _decompile_8616 DONE: addr=65632 codegen_id=132336527990400 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10060
-WARNING  | 2026-07-30 16:47:59,313 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10060 blocks=37 text_bytes=0
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:48:07] /* == function 0x10060 sub_10060 == */
-[16:48:07] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:48:07] /* info: function 0x10060 sub_10060 attempt=decompiled validation=passed */
-[16:48:07] /* -- c -- */
-void sub_101db(unsigned short a0, unsigned short a1, unsigned short a2, unsigned short a3);
-void sub_101f0(unsigned short a0, unsigned short a1, unsigned short a2, unsigned short a3);
-int sub_1123a(char a0[16], unsigned short a1);
-int sub_112ba();
-int sub_1143a(unsigned short a0, unsigned short a1, unsigned short a2, unsigned short a3);
-int sub_12756();
-int sub_128e4(unsigned short a0, unsigned short a1);
-int sub_12b24(unsigned short a0);
-int sub_12b3e(unsigned short a0, unsigned short a1);
-
-
-    extern unsigned short inertia_ds;
-    extern unsigned short inertia_ss;
-
-extern unsigned short g_0136[1];
 
 void sub_10060(void)
 {
+  char local_12[16];
+  unsigned short local_2;
+  unsigned char local_15;
+  unsigned char local_16;
+  unsigned char local_13;
+  unsigned char local_14;
+  local_14 = inertia_edi & 0xffff;
+  local_13 = (inertia_edi & 0xffff) >> 8;
+  local_16 = inertia_esi & 0xffff;
+  local_15 = (inertia_esi & 0xffff) >> 8;
+  sub_12b24(15);
+  sub_12b3e(0, 0);
+  sub_101f0(1, 45, 35, SEG_U16(inertia_ds, 352) + 2);
+  for (local_2 = 0; ((short) local_2) < ((short) g_0160); local_2 += 1)
+  {
+    sub_128e4(((unsigned short) local_2) + 2, 48);
+    sub_12756(g_0136[(unsigned short) local_2], inertia_ds);
+  }
 
-    char local_12[16];  // [bp-0x12]
-    unsigned short local_2;  // [bp+0x2]
-    sub_12b24(15);
-    sub_12b3e(0, 0);
-    sub_101f0(1, 45, 35, SEG_U16(inertia_ds, 352) + 2);
-    local_2 = 0;
-    while (1)
+  if (g_0B46)
+    sub_1123a(local_12, SEG_PTR(inertia_ds, 354));
+  else
+    sub_1123a(local_12, SEG_PTR(inertia_ds, 358));
+  sub_128e4(SEG_U16(inertia_ds, 352) - 7, 62);
+  sub_12756(local_12, inertia_ss);
+  sub_112ba(local_12, 362, aNldiv(SEG_U32(inertia_ds, 306), 30));
+  sub_128e4(SEG_U16(inertia_ds, 352) - 5, 62);
+  sub_12756(local_12, inertia_ss);
+  sub_1123a(local_12, SEG_PTR(inertia_ds, 368));
+  if (((g_0132 & 0xffff) == 900) && (!(g_0132 >> 16)))
+  {
+    sub_128e4(SEG_U16(inertia_ds, 352) - 4, 48);
+    sub_12756(local_12, inertia_ss);
+  }
+  if (!g_0132)
+  {
+    sub_128e4(SEG_U16(inertia_ds, 352) - 3, 48);
+    sub_12756(local_12, inertia_ss);
+  }
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_16) | (((unsigned char) local_15) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_14) | (((unsigned char) local_13) << 8)) & 0xffff);
+  return;
+}
+
+void sub_101f0(unsigned short arg_4, unsigned short arg_6, unsigned short arg_8, short arg_a)
+{
+  char local_52[80];
+  unsigned short local_2;
+  unsigned char local_56;
+  unsigned char local_55;
+  unsigned char local_54;
+  unsigned char local_53;
+  local_54 = inertia_edi & 0xffff;
+  local_53 = (inertia_edi & 0xffff) >> 8;
+  local_56 = inertia_esi & 0xffff;
+  local_55 = (inertia_esi & 0xffff) >> 8;
+  sub_113d4(local_52, 205, (unsigned short) arg_8);
+  local_52[0] = 201;
+  inertia_esi = (inertia_esi & 0xffff0000) | (arg_8 & 0xffff);
+  local_52[arg_8 - 1] = 0xbb;
+  inertia_esi = (inertia_esi & 0xffff0000) | (arg_8 & 0xffff);
+  local_52[arg_8] = 0;
+  sub_128e4((unsigned short) arg_4, (unsigned short) arg_6);
+  sub_12756(local_52, inertia_ss);
+  sub_113d4(local_52, 32, (unsigned short) arg_8);
+  local_52[0] = 186;
+  inertia_esi = (inertia_esi & 0xffff0000) | (arg_8 & 0xffff);
+  local_52[arg_8 - 1] = 186;
+  for (local_2 = arg_4 + 1; ((short) local_2) <= arg_a; local_2 += 1)
+  {
+    sub_128e4(local_2, (unsigned short) arg_6);
+    sub_12756(local_52, inertia_ss);
+  }
+
+  sub_113d4(local_52, 205, (unsigned short) arg_8);
+  local_52[0] = 200;
+  inertia_esi = (inertia_esi & 0xffff0000) | (arg_8 & 0xffff);
+  local_52[arg_8 - 1] = 188;
+  sub_128e4(((unsigned short) arg_a) + ((unsigned short) arg_4), (unsigned short) arg_6);
+  sub_12756(local_52, inertia_ss);
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_56) | (((unsigned char) local_55) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_54) | (((unsigned char) local_53) << 8)) & 0xffff);
+  return;
+}
+
+void sub_102e0(void)
+{
+  unsigned short v20;
+  unsigned short v21;
+  unsigned short v26;
+  unsigned short v36;
+  unsigned short v37;
+  unsigned short v38;
+  unsigned short v41;
+  unsigned short v42;
+  unsigned short v14;
+  unsigned char local_6;
+  unsigned char local_5;
+  unsigned char local_4;
+  unsigned char local_3;
+  unsigned char local_2;
+  local_4 = inertia_edi & 0xffff;
+  local_3 = (inertia_edi & 0xffff) >> 8;
+  local_6 = inertia_esi & 0xffff;
+  local_5 = (inertia_esi & 0xffff) >> 8;
+  while (1)
+  {
+    SEG_U16(inertia_ds, 2986) = 0;
+    SEG_U16(inertia_ds, 2980) = 0;
+    sub_128e4(g_0160 + 1, 75);
+    sub_12bc0(1);
+    local_2 = sub_11292();
+    sub_12bc0(0);
+    v14 = sub_11278((unsigned char) local_2);
+    if (v14 == 69)
     {
-        if (local_2 >= SEG_U16(inertia_ds, 352))
-            break;
-        sub_128e4(local_2 + 2, 48);
-        sub_12756(g_0136[local_2], inertia_ds);
-        local_2 += 1;
-    }
-    if (SEG_U16(inertia_ds, 2886))
-    {
-        sub_1123a(local_12, 354);
+      SEG_U16(inertia_ds, 2988) = 3;
+      sub_10678();
+      sub_10b50();
+      sub_10498(0);
     }
     else
+      if (((short) v14) <= 69)
     {
-        sub_1123a(local_12, 358);
-    }
-    sub_128e4(SEG_U16(inertia_ds, 352) - 7, 62);
-    sub_12756(local_12, inertia_ss);
-    sub_112ba(local_12, 362, sub_1143a(SEG_U16(inertia_ds, 306), SEG_U16(inertia_ds, 308), 30, 0));
-    sub_128e4(SEG_U16(inertia_ds, 352) - 5, 62);
-    sub_12756(local_12, inertia_ss);
-    sub_1123a(local_12, 368);
-    if (SEG_U16(inertia_ds, 306) == 900)
-    {
-        if (!SEG_U16(inertia_ds, 308))
+      v20 = v14 - 27;
+      if (v14 == 27)
+        break;
+      v21 = v20 - 33;
+      if ((v14 - 27) == 33)
+      {
+        if ((((short) (g_0132 >> 16)) <= 0) && ((((short) (g_0132 >> 16)) < 0) || (((unsigned short) (g_0132 & 0xffff)) <= 900)))
+          g_0132 += 30;
+        sub_10060();
+      }
+      else
+      {
+        v26 = v21 - 1;
+        if (v26 == 1)
         {
-            sub_128e4(SEG_U16(inertia_ds, 352) - 4, 48);
-            sub_12756(local_12, inertia_ss);
-        }
-    }
-    if (!(SEG_U16(inertia_ds, 308) | SEG_U16(inertia_ds, 306)))
-    {
-        sub_128e4(SEG_U16(inertia_ds, 352) - 3, 48);
-        sub_12756(local_12, inertia_ss);
-    }
-    return;
-}
-[16:48:07] [dbg] clean serial function worker: start 0x10ce0 sub_10ce0 requested_timeout=120s hard_timeout=165s
-ERROR    | 2026-07-30 16:48:12,485 | angr.state_plugins.unicorn_engine | failed loading "unicornlib.so", unicorn support disabled ('NoneType' object has no attribute 'unicorn_py3')
-[16:48:14] /* loading: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:48:14] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:48:14] [dbg] dos_mz load base=0x10000
-[16:48:14] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:48:14] /* no helper metadata (.lst/.map/.cod/debug info) found; using raw binary analysis and quick function-entry scans. */
-[16:48:14] /* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */
-[16:48:14] /* recovering function... */
-[metric] seed_calling_conventions cfg_functions=1 candidates=1 initialized=1 errors=0 stack_probes=0 stack_byte=0 wide_stack=0 elapsed_ms=110
-[16:48:14] [dbg] build_project: path=/tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE suffix=.exe force_blob=False
-[16:48:14] [dbg] dos_mz load base=0x10000
-[16:48:14] [dbg] project built: arch=86_16 entry=0x10f9a
-[16:48:14] /* binary: /tmp/inertia-sortd-sidecar-free-9bqwcxl_/SORTD.EXE */
-[16:48:14] /* arch: 86_16 */
-[16:48:14] /* entry: 0x10f9a */
-[16:48:14] /* function: 0x10ce0 sub_10ce0 */
-[16:48:14] /* decompiling... */
-[dbg] function complexity for 0x10ce0 sub_10ce0: blocks=42, bytes=438
-[dbg] decompile_function: addr=0x10ce0 name=sub_10ce0
-[dbg] function 0x10ce0 not normalized, normalizing...
-[dbg] registered 8 direct callee stub(s) for 0x10ce0
-[metric] seed_calling_conventions cfg_functions=9 candidates=9 initialized=9 errors=0 stack_probes=2 stack_byte=0 wide_stack=0 elapsed_ms=14
-[dbg] _decompile_8616 ENTER validation path: addr=68832 id=127373614484512
-[dbg] _decompile_8616 DONE: addr=68832 codegen_id=127373614484512 snapshot_stages=['structuring', 'postprocess'] proj_fb_stages=['structuring', 'postprocess']
-[dbg] Decompiler returned for 0x10ce0
-WARNING  | 2026-07-30 16:48:53,084 | inertia_decompiler.cli_decompilation | Skipping legacy CLI rewrite loop after core validation for nontrivial x86-16 AST at function=0x10ce0 blocks=42 text_bytes=0
-[dbg] direct_decompile_job snapshot: project_fb_stages=['structuring', 'postprocess'] func_info_tv_stages=None merged_stages=['structuring', 'postprocess'] merged_statuses={'structuring': 'stable', 'postprocess': 'stable'}
-
-[16:49:00] /* == function 0x10ce0 sub_10ce0 == */
-[16:49:00] /* failure family: status=ok stage=not_set sidecar=not_attempted nonopt=not_attempted fallback=file_sweep validation=passed */
-[16:49:00] /* info: function 0x10ce0 sub_10ce0 attempt=decompiled validation=passed */
-[16:49:00] /* -- c -- */
-void sub_1075b(unsigned short a0, unsigned short a1);
-void sub_10768(unsigned short a0, unsigned short a1);
-int sub_10794(unsigned short a0, unsigned short a1);
-
-typedef struct g_0B4C_entry {
-    char field_0;
-    char field_1;
-} g_0B4C_entry;
-
-
-extern unsigned short g_0BAA;
-extern g_0B4C_entry g_0B4C[1];
-
-void sub_10ce0(short arg, short arg_6)
-{
-
-    unsigned short local_6;  // [bp-0x6]
-    unsigned short local_4;  // [bp-0x4]
-    unsigned short local_2;  // [bp-0x2]
-    if (arg < arg_6)
-    {
-        local_4 = g_0B4C[arg_6].field_0;
-        if (arg_6 - arg == 1)
-        {
-            g_0BAA += 1;
-            if (g_0B4C[arg].field_0 > g_0B4C[arg_6].field_0)
-            {
-                sub_10794((arg << 1) + 2892, (arg_6 << 1) + 2892);
-                sub_10768(arg, arg_6);
-            }
+          if (g_0132)
+            g_0132 -= 30;
+          sub_10060();
         }
         else
         {
-            do
+          if ((v26 - 1) != 4)
+            goto LABEL_1042d;
+          SEG_U16(inertia_ds, 2988) = 1;
+          sub_10678();
+          sub_108d0();
+          sub_10498(0);
+        }
+      }
+    }
+    else
+    {
+      v36 = v14 - 72;
+      if (v14 == 72)
+      {
+        SEG_U16(inertia_ds, 2988) = 2;
+        sub_10678();
+        sub_10970();
+        sub_10498(0);
+      }
+      else
+      {
+        v37 = v36 - 1;
+        if (v36 == 1)
+        {
+          SEG_U16(inertia_ds, 2988) = 0;
+          sub_10678();
+          sub_10808();
+          sub_10498(0);
+        }
+        else
+        {
+          v38 = v37 - 8;
+          if ((v36 - 1) == 8)
+          {
+            SEG_U16(inertia_ds, 2988) = 5;
+            sub_10678();
+            sub_10ce0(0, g_0BA2);
+            sub_10498(0);
+          }
+          else
+          {
+            v41 = v38 - 1;
+            v42 = v41 - 1;
+            if (v41 == 1)
             {
-                local_6 = arg;
-                local_2 = arg_6;
-                g_0BAA += 1;
-                while (1)
-                {
-                    if (local_2 <= local_6)
-                        break;
-                    if (g_0B4C[local_6].field_0 > local_4)
-                        break;
-                    local_6 += 1;
-                }
-                g_0BAA += 1;
-                while (1)
-                {
-                    if (local_2 <= local_6)
-                        break;
-                    if (g_0B4C[local_2].field_0 < local_4)
-                        break;
-                    local_2 -= 1;
-                }
-                if (local_2 > local_6)
-                {
-                    sub_10794((local_6 << 1) + 2892, (local_2 << 1) + 2892);
-                    sub_10768(local_6, local_2);
-                }
-            } while (local_2 > local_6);
-            sub_10794((local_6 << 1) + 2892, (arg_6 << 1) + 2892);
-            sub_10768(local_6, arg_6);
-            if (local_6 - arg < arg_6 - local_6)
-            {
-                sub_10ce0(arg, local_6 - 1);
-                sub_10ce0(local_6 + 1, arg_6);
+              SEG_U16(inertia_ds, 2988) = 4;
+              sub_10678();
+              sub_10c18();
+              sub_10498(0);
             }
             else
             {
-                sub_10ce0(local_6 + 1, arg_6);
-                sub_10ce0(arg, local_6 - 1);
-            }
-        }
-    }
-    return;
-}
-[16:49:00] /* info: decompilation attempted for 20/20 selected function(s) */
-[tail-validation] whole-tail validation clean across 20 functions
+              if (v42 == 1)
+              {
+                g_0B46 = g_0B46 < 1;
+                sub_10060();
+              }
+              else
+              {
+                LABEL_1042d:
+                ;
 
-[16:49:00] /* summary: decompiled 20/20 selected functions */
-/* summary: same_family_retry_stops=0 fallback_family_labels=none */
-/* summary: shown=20 decompiled=20 asm_or_detail_fallback=0 */
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_4) | (((unsigned char) local_3) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10498(unsigned short arg_4)
+{
+  char local_50[80];
+  unsigned char local_54;
+  unsigned char local_53;
+  unsigned char local_52;
+  unsigned char local_51;
+  local_52 = inertia_edi & 0xffff;
+  local_51 = (inertia_edi & 0xffff) >> 8;
+  local_54 = inertia_esi & 0xffff;
+  local_53 = (inertia_esi & 0xffff) >> 8;
+  sub_12b24(15);
+  g_0B48 = sub_1137e();
+  sub_112ba(local_50, 381, aNldiv(SEG_U32(inertia_ds, 2888) - SEG_U32(inertia_ds, 2982), 1000), g_0BA4, g_0BAA);
+  sub_128e4(g_0BAC + 7, 59);
+  sub_12756(local_50, inertia_ss);
+  if (g_0B46)
+  {
+    sub_10e70(((unsigned short) arg_4) * 60, 75);
+    sub_10f38(SEG_U32(inertia_ds, 306) - 75);
+  }
+  else
+  {
+    sub_10f38(SEG_U32(inertia_ds, 306));
+  }
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_54) | (((unsigned char) local_53) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_52) | (((unsigned char) local_51) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10560(void)
+{
+  unsigned short local_79;
+  unsigned short local_77;
+  unsigned short local_76;
+  unsigned short local_74;
+  unsigned short local_72;
+  unsigned short local_5a[43];
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned short tmp_0;
+  unsigned char local_7a;
+  unsigned char local_78;
+  inertia_stack_object_22_14w2_18w2 local_56;
+  local_78 = inertia_edi & 0xffff;
+  local_77 = (inertia_edi & 0xffff) >> 8;
+  local_7a = inertia_esi & 0xffff;
+  local_79 = (inertia_esi & 0xffff) >> 8;
+  sub_11402(sub_1132c(SEG_PTR(inertia_ds, 0)));
+  SEG_U16(inertia_ds, 2886) = 1;
+  g_0132 = 30;
+  sub_12ac8(&local_56, inertia_ss);
+  if (((local_56.field_18 == 1) || (local_56.field_14 == 2)) || (!local_56.field_14))
+    local_74 = 1;
+  else
+    local_74 = 15;
+  for (local_2 = 0; ((short) g_0BA2) > ((short) local_2); local_2 += 1)
+  {
+    tmp_0 = local_2 << 1;
+    inertia_esi = (inertia_esi & 0xffff0000) | (tmp_0 & 0xffff);
+    local_5a[local_2] = local_2 + 1;
+  }
+
+  local_4 = g_0BA2 - 1;
+  for (local_2 = 0; ((short) g_0BA2) > ((short) local_2); local_2 += 1)
+  {
+    local_76 = ((short) sub_11414()) % ((short) (local_4 + 1));
+    inertia_esi = (inertia_esi & 0xffff0000) | (local_76 & 0xffff);
+    local_72 = local_5a[local_76];
+    inertia_esi = (inertia_esi & 0xffff0000) | (local_4 & 0xffff);
+    inertia_esi = (inertia_esi & 0xffff0000) | ((local_76 << 1) & 0xffff);
+    local_5a[local_76] = local_5a[local_4];
+    local_4 -= 1;
+    g_08F0[local_2].field_0 = local_72;
+    if (local_74 == 1)
+      g_08F0[local_2].field_1 = 7;
+    else
+      g_08F0[local_2].field_1 = (((short) local_72) % ((short) local_74)) + 1;
+  }
+
+  sub_10678();
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_7a) | (((unsigned char) local_79) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_78) | (((unsigned char) local_77) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10678(void)
+{
+  unsigned short local_2;
+  unsigned char local_6;
+  unsigned char local_5;
+  unsigned char local_4;
+  unsigned char local_3;
+  local_4 = inertia_edi & 0xffff;
+  local_3 = (inertia_edi & 0xffff) >> 8;
+  local_6 = inertia_esi & 0xffff;
+  local_5 = (inertia_esi & 0xffff) >> 8;
+  g_0BA6 = sub_1137e();
+  for (local_2 = 0; ((short) g_0BA2) > ((short) local_2); local_2 += 1)
+  {
+    g_0B4C[local_2] = g_08F0[local_2];
+    sub_106c8((unsigned short) local_2);
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_4) | (((unsigned char) local_3) << 8)) & 0xffff);
+  return;
+}
+
+void sub_106c8(unsigned short arg_4)
+{
+  unsigned short local_2e;
+  char local_2c[44];
+  unsigned char local_32;
+  unsigned char local_31;
+  unsigned char local_30;
+  unsigned char local_2f;
+  local_30 = inertia_edi & 0xffff;
+  local_2f = (inertia_edi & 0xffff) >> 8;
+  local_32 = inertia_esi & 0xffff;
+  local_31 = (inertia_esi & 0xffff) >> 8;
+  sub_113d4(local_2c, 223, g_0B4C[(unsigned short) arg_4].field_0);
+  local_2e = g_0BA2 - g_0B4C[arg_4].field_0;
+  sub_113d4(local_2c + g_0B4C[(unsigned short) arg_4].field_0, 32, local_2e);
+  local_2c[g_0BA2] = 0;
+  sub_12b24(g_0B4C[(unsigned short) arg_4].field_1);
+  sub_128e4(((unsigned short) arg_4) + 1, 0);
+  sub_12756(local_2c, inertia_ss);
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_32) | (((unsigned char) local_31) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_30) | (((unsigned char) local_2f) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10768(unsigned short arg_4, unsigned short arg_6)
+{
+  unsigned char local_4;
+  unsigned char local_3;
+  unsigned char local_2;
+  unsigned char local_1;
+  local_2 = inertia_edi & 0xffff;
+  local_1 = (inertia_edi & 0xffff) >> 8;
+  local_4 = inertia_esi & 0xffff;
+  local_3 = (inertia_esi & 0xffff) >> 8;
+  sub_106c8((unsigned short) arg_4);
+  sub_106c8((unsigned short) arg_6);
+  sub_10498((unsigned short) arg_4);
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_4) | (((unsigned char) local_3) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_2) | (((unsigned char) local_1) << 8)) & 0xffff);
+  return;
+}
+
+void sub_107b8(g_08F0_entry *arg_4, g_08F0_entry *arg_6)
+{
+  unsigned short gp_saved_si_107c2;
+  unsigned short gp_saved_di_107c1;
+  g_08F0_entry local_2;
+  gp_saved_di_107c1 = inertia_edi & 0xffff;
+  gp_saved_si_107c2 = inertia_esi & 0xffff;
+  g_0BA4 += 1;
+  local_2 = arg_4[0];
+  arg_4[0] = arg_6[0];
+  arg_6[0] = local_2;
+  inertia_esi = (inertia_esi & 0xffff0000) | (gp_saved_si_107c2 & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | (gp_saved_di_107c1 & 0xffff);
+  return;
+}
+
+void sub_10808(void)
+{
+  unsigned short v14;
+  unsigned short local_6;
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned char local_c;
+  unsigned char local_b;
+  unsigned char local_a;
+  unsigned char local_9;
+  g_08F0_entry local_8;
+  local_a = inertia_edi & 0xffff;
+  local_9 = (inertia_edi & 0xffff) >> 8;
+  local_c = inertia_esi & 0xffff;
+  local_b = (inertia_esi & 0xffff) >> 8;
+  for (local_2 = 0; ((short) g_0BA2) > ((short) local_2); local_2 += 1)
+  {
+    local_8 = g_0B4C[local_2];
+    v14 = (g_0B4C[local_2].field_0 & 0xff) | ((g_0B4C[local_2].field_1 & 0xff) << 8);
+    ((unsigned char *) (&local_8))[0] = v14;
+    ((unsigned char *) (&local_8))[1] = v14 >> 8;
+    local_6 = (signed char) local_8.field_0;
+    for (local_4 = local_2; local_4; local_4 -= 1)
+    {
+      g_0BAA += 1;
+      if (((short) ((((g_0B4C[local_4 - 1].field_0 & 0xff) & 0xff) ^ 128) - 128)) <= ((short) local_6))
+        break;
+      g_0BA4 += 1;
+      g_0B4C[local_4] = g_0B4C[local_4 - 1];
+      sub_106c8((unsigned short) local_4);
+      sub_10498((unsigned short) local_4);
+    }
+
+    g_0B4C[local_4] = local_8;
+    sub_106c8((unsigned short) local_4);
+    sub_10498((unsigned short) local_4);
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_c) | (((unsigned char) local_b) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_a) | (((unsigned char) local_9) << 8)) & 0xffff);
+  return;
+}
+
+void sub_108d0(void)
+{
+  unsigned short local_6;
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned char local_a;
+  unsigned char local_9;
+  unsigned char local_8;
+  unsigned char local_7;
+  local_8 = inertia_edi & 0xffff;
+  local_7 = (inertia_edi & 0xffff) >> 8;
+  local_a = inertia_esi & 0xffff;
+  local_9 = (inertia_esi & 0xffff) >> 8;
+  local_4 = g_0BA2;
+  do
+  {
+    local_6 = 0;
+    for (local_2 = 0; ((short) local_4) > ((short) local_2); local_2 += 1)
+    {
+      g_0BAA += 1;
+      inertia_esi = (inertia_esi & 0xffff0000) | ((local_2 << 1) & 0xffff);
+      if (((signed char) g_0B4C[local_2 + 1].field_0) < ((signed char) g_0B4C[local_2].field_0))
+      {
+        sub_107b8(&g_0B4C[(unsigned short) local_2], &g_0B4C[((unsigned short) local_2) + 1]);
+        sub_10768(local_2, ((unsigned short) local_2) + 1);
+        local_6 = local_2;
+      }
+    }
+
+    local_4 = local_6;
+  }
+  while (local_6);
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_a) | (((unsigned char) local_9) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_8) | (((unsigned char) local_7) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10970(void)
+{
+  unsigned short local_2;
+  unsigned char local_6;
+  unsigned char local_5;
+  unsigned char local_4;
+  unsigned char local_3;
+  local_4 = inertia_edi & 0xffff;
+  local_3 = (inertia_edi & 0xffff) >> 8;
+  local_6 = inertia_esi & 0xffff;
+  local_5 = (inertia_esi & 0xffff) >> 8;
+  for (local_2 = 1; ((short) g_0BA2) > ((short) local_2); local_2 += 1)
+  {
+    sub_109e8((unsigned short) local_2);
+  }
+
+  for (local_2 = g_0BA2 - 1; ((short) local_2) > 0; local_2 -= 1)
+  {
+    sub_107b8(&g_0B4C[0], &g_0B4C[(unsigned short) local_2]);
+    sub_10768(0, local_2);
+    sub_10a88(((unsigned short) local_2) - 1);
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_4) | (((unsigned char) local_3) << 8)) & 0xffff);
+  return;
+}
+
+void sub_109e8(unsigned short arg_4)
+{
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned char local_8;
+  unsigned char local_7;
+  unsigned char local_6;
+  unsigned char local_5;
+  local_6 = inertia_edi & 0xffff;
+  local_5 = (inertia_edi & 0xffff) >> 8;
+  local_8 = inertia_esi & 0xffff;
+  local_7 = (inertia_esi & 0xffff) >> 8;
+  local_4 = arg_4;
+  for (; local_4;)
+  {
+    local_2 = ((short) local_4) / 2;
+    g_0BAA += 1;
+    inertia_esi = (inertia_esi & 0xffff0000) | ((local_2 << 1) & 0xffff);
+    if (((signed char) g_0B4C[local_4].field_0) <= ((signed char) g_0B4C[local_2].field_0))
+      break;
+    sub_107b8(&g_0B4C[(unsigned short) local_2], &g_0B4C[(unsigned short) local_4]);
+    sub_10768(local_2, local_4);
+    local_4 = local_2;
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_8) | (((unsigned char) local_7) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10a88(short arg_4)
+{
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned char local_8;
+  unsigned char local_7;
+  unsigned char local_6;
+  unsigned char local_5;
+  local_6 = inertia_edi & 0xffff;
+  local_5 = (inertia_edi & 0xffff) >> 8;
+  local_8 = inertia_esi & 0xffff;
+  local_7 = (inertia_esi & 0xffff) >> 8;
+  local_2 = 0;
+  while (1)
+  {
+    local_4 = local_2 << 1;
+    if (((short) local_4) > arg_4)
+      break;
+    if (((short) (((short) local_4) + 1)) <= arg_4)
+    {
+      g_0BAA += 1;
+      inertia_esi = (inertia_esi & 0xffff0000) | ((local_4 << 1) & 0xffff);
+      if (((signed char) g_0B4C[local_4 + 1].field_0) > ((signed char) g_0B4C[local_4].field_0))
+        local_4 += 1;
+    }
+    g_0BAA += 1;
+    inertia_esi = (inertia_esi & 0xffff0000) | ((local_4 << 1) & 0xffff);
+    if (((signed char) g_0B4C[local_2].field_0) >= ((signed char) g_0B4C[local_4].field_0))
+      break;
+    sub_107b8(&g_0B4C[(unsigned short) local_2], &g_0B4C[(unsigned short) local_4]);
+    sub_10768(local_2, local_4);
+    local_2 = local_4;
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_8) | (((unsigned char) local_7) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10b50(void)
+{
+  unsigned short local_6;
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned char local_a;
+  unsigned char local_9;
+  unsigned char local_8;
+  unsigned char local_7;
+  local_8 = inertia_edi & 0xffff;
+  local_7 = (inertia_edi & 0xffff) >> 8;
+  local_a = inertia_esi & 0xffff;
+  local_9 = (inertia_esi & 0xffff) >> 8;
+  for (local_6 = 0; ((short) g_0BA2) > ((short) local_6); local_6 += 1)
+  {
+    local_4 = local_6;
+    for (local_2 = local_6; ((short) local_2) < ((short) g_0BA2); local_2 += 1)
+    {
+      g_0BAA += 1;
+      inertia_esi = (inertia_esi & 0xffff0000) | ((local_4 << 1) & 0xffff);
+      if (((signed char) g_0B4C[local_2].field_0) < ((signed char) g_0B4C[local_4].field_0))
+      {
+        local_4 = local_2;
+        sub_10498((unsigned short) local_2);
+      }
+    }
+
+    if (((short) local_4) > ((short) local_6))
+    {
+      sub_107b8(&g_0B4C[(unsigned short) local_6], &g_0B4C[(unsigned short) local_4]);
+      sub_10768(local_6, local_4);
+    }
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_a) | (((unsigned char) local_9) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_8) | (((unsigned char) local_7) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10c18(void)
+{
+  unsigned short local_8;
+  short local_6;
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned char local_c;
+  unsigned char local_b;
+  unsigned char local_a;
+  unsigned char local_9;
+  local_a = inertia_edi & 0xffff;
+  local_9 = (inertia_edi & 0xffff) >> 8;
+  local_c = inertia_esi & 0xffff;
+  local_b = (inertia_esi & 0xffff) >> 8;
+  local_2 = ((short) g_0BA2) / 2;
+  for (; local_2;)
+  {
+    local_6 = g_0BA2 - local_2;
+    do
+    {
+      local_8 = 0;
+      for (local_4 = 0; ((short) local_4) <= local_6; local_4 += 1)
+      {
+        g_0BAA += 1;
+        inertia_esi = (inertia_esi & 0xffff0000) | ((local_4 << 1) & 0xffff);
+        if (((signed char) g_0B4C[local_4 + local_2].field_0) < ((signed char) g_0B4C[local_4].field_0))
+        {
+          sub_107b8(&g_0B4C[(unsigned short) local_4], &g_0B4C[((unsigned short) local_4) + ((unsigned short) local_2)]);
+          sub_10768(local_4, ((unsigned short) local_4) + ((unsigned short) local_2));
+          local_8 = local_4;
+        }
+      }
+
+      local_6 = ((short) local_8) - ((short) local_2);
+    }
+    while (local_8);
+    local_2 = ((short) local_2) / 2;
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_c) | (((unsigned char) local_b) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_a) | (((unsigned char) local_9) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10ce0(short arg_4, short arg_6)
+{
+  unsigned short v26;
+  short local_6;
+  unsigned short local_4;
+  short local_2;
+  unsigned char local_a;
+  unsigned char local_9;
+  unsigned char local_8;
+  unsigned char local_7;
+  local_8 = inertia_edi & 0xffff;
+  local_7 = (inertia_edi & 0xffff) >> 8;
+  local_a = inertia_esi & 0xffff;
+  local_9 = (inertia_esi & 0xffff) >> 8;
+  if (arg_4 < arg_6)
+  {
+    if ((((unsigned short) arg_6) - ((unsigned short) arg_4)) == 1)
+    {
+      g_0BAA += 1;
+      inertia_esi = (inertia_esi & 0xffff0000) | ((arg_6 << 1) & 0xffff);
+      if (((signed char) g_0B4C[(unsigned short) arg_4].field_0) > ((signed char) g_0B4C[(unsigned short) arg_6].field_0))
+      {
+        sub_107b8(&g_0B4C[(unsigned short) arg_4], &g_0B4C[(unsigned short) arg_6]);
+        sub_10768((unsigned short) arg_4, (unsigned short) arg_6);
+      }
+    }
+    else
+    {
+      v26 = g_0B4C[(unsigned short) arg_6].field_0;
+      ((unsigned char *) (&local_4))[0] = v26;
+      ((unsigned char *) (&local_4))[1] = v26 >> 8;
+      local_4 = g_0B4C[(unsigned short) arg_6].field_0;
+      do
+      {
+        local_6 = arg_4;
+        local_2 = arg_6;
+        g_0BAA += 1;
+        while (1)
+        {
+          if ((((short) local_2) <= ((short) local_6)) || (((short) (((g_0B4C[local_6].field_0 & 0xff) ^ 128) - 128)) > ((short) local_4)))
+            break;
+          local_6 += 1;
+        }
+
+        g_0BAA += 1;
+        while (1)
+        {
+          if ((((short) local_2) <= ((short) local_6)) || (((short) (((g_0B4C[local_2].field_0 & 0xff) ^ 128) - 128)) < ((short) local_4)))
+            break;
+          local_2 -= 1;
+        }
+
+        if (((short) local_2) > ((short) local_6))
+        {
+          sub_107b8(&g_0B4C[(unsigned short) local_6], &g_0B4C[(unsigned short) local_2]);
+          sub_10768(local_6, local_2);
+        }
+      }
+      while (((short) local_2) > ((short) local_6));
+      sub_107b8(&g_0B4C[(unsigned short) local_6], &g_0B4C[(unsigned short) arg_6]);
+      sub_10768(local_6, (unsigned short) arg_6);
+      if (((short) (((short) local_6) - arg_4)) < ((short) (arg_6 - ((short) local_6))))
+      {
+        sub_10ce0((unsigned short) arg_4, ((unsigned short) local_6) - 1);
+        sub_10ce0(((unsigned short) local_6) + 1, (unsigned short) arg_6);
+      }
+      else
+      {
+        sub_10ce0(((unsigned short) local_6) + 1, (unsigned short) arg_6);
+        sub_10ce0((unsigned short) arg_4, ((unsigned short) local_6) - 1);
+      }
+    }
+  }
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_a) | (((unsigned char) local_9) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_8) | (((unsigned char) local_7) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10e70(unsigned short arg_4, short arg_6)
+{
+  unsigned short local_2;
+  unsigned char local_6;
+  unsigned char local_5;
+  unsigned char local_4;
+  unsigned char local_3;
+  local_4 = inertia_edi & 0xffff;
+  local_3 = (inertia_edi & 0xffff) >> 8;
+  local_6 = inertia_esi & 0xffff;
+  local_5 = (inertia_esi & 0xffff) >> 8;
+  if (arg_4)
+  {
+    if (arg_6 < 75)
+      arg_6 = 75;
+    sub_1131e(67, 182);
+    arg_4 = aNldiv(1193180, arg_4);
+    sub_1131e(66, (unsigned char) arg_4);
+    sub_1131e(66, arg_4 >> 8);
+    local_2 = sub_11310(97);
+    sub_1131e(97, ((unsigned short) local_2) | 3);
+  }
+  sub_10f38(arg_6);
+  if (arg_4)
+    sub_1131e(97, local_2);
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_4) | (((unsigned char) local_3) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10f38(long arg_4)
+{
+  unsigned short local_7;
+  unsigned short local_5;
+  unsigned long local_4;
+  long tmp_0;
+  unsigned char local_8;
+  unsigned char local_6;
+  local_6 = inertia_edi & 0xffff;
+  local_5 = (inertia_edi & 0xffff) >> 8;
+  local_8 = inertia_esi & 0xffff;
+  local_7 = (inertia_esi & 0xffff) >> 8;
+  local_4 = sub_1137e() + arg_4;
+  while (1)
+  {
+    tmp_0 = sub_1137e();
+    if (((long) tmp_0) > ((long) local_4))
+      break;
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_8) | (((unsigned char) local_7) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  return;
+}

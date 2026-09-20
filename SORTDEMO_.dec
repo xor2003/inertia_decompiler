@@ -37,1184 +37,882 @@ extern uint16_t inertia_ss;
 #define MEM_U32(ptr)         (*(uint32_t *)(ptr))
 #define PTR_U16(ptr)       ((uint16_t)(uintptr_t)(ptr))
 #define PTR_U32(ptr)       ((uint32_t)(uintptr_t)(ptr))
-unsigned long sub_1137e(void);
-
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-
-    extern unsigned short x100;
-void sub_10f38(long arg_4)
+typedef struct g_08F0_entry
 {
-    unsigned short ax;  // ax
-    unsigned short dx;  // dx
-    unsigned short v17;  // dx
-    unsigned short v18;  // ax
-    unsigned long local_4;  // [bp-0x6]
-    unsigned short local_2;  // [bp-0x2]
-    unsigned char local_8;  // [bp-0xa]
-    unsigned char local_7;  // [bp-0x9]
-    unsigned char local_6;  // [bp-0x8]
-    unsigned char local_5;  // [bp-0x7]
-
-    local_6 = inertia_edi & 0xffff;
-    local_5 = (inertia_edi & 0xffff) >> 8;
-    local_8 = inertia_esi & 0xffff;
-    local_7 = (inertia_esi & 0xffff) >> 8;
-    local_4 = sub_1137e() + arg_4;
-    while (1)
-    {
-        v18 = sub_1137e();
-        if (!((dx < (unsigned short)(local_4 >> 16) || (dx == (unsigned short)(local_4 >> 16) && ax <= (unsigned short)local_4)) && !(!(v17 >= local_2 ? 0 : 1) && (v18 <= ((unsigned char)local_4 | ((unsigned char)(local_4 >> 8) * 0x100)) ? 0 : 1))))
-            break;
-    }
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_8 | ((unsigned char)local_7 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_6 | ((unsigned char)local_5 << 8)) & 0xffff);
-    return;
-}
-struct g_08F0_entry;
-
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
+  char field_0;
+  char field_1;
 } g_08F0_entry;
-extern unsigned short g_0BAA;
+typedef struct inertia_stack_object_22_14w2_18w2
+{
+  char padding_0[14];
+  unsigned short field_14;
+  char padding_16[2];
+  unsigned short field_18;
+  char padding_20[2];
+} inertia_stack_object_22_14w2_18w2;
 extern unsigned long inertia_esi;
 extern unsigned long inertia_edi;
+extern unsigned short inertia_ds;
+extern unsigned short g_0BAA;
 extern g_08F0_entry g_0B4C[];
-
-void sub_10768(unsigned short a0, unsigned short a1);
-void sub_107b8(struct g_08F0_entry *a0, struct g_08F0_entry *a1);
-
-void sub_109e8(unsigned short arg_4)
-{
-    unsigned short local_4;  // [bp-0x6]
-    unsigned short local_2;  // [bp-0x4]
-    unsigned char local_8;  // [bp-0xa]
-    unsigned char local_7;  // [bp-0x9]
-    unsigned char local_6;  // [bp-0x8]
-    unsigned char local_5;  // [bp-0x7]
-
-    local_6 = inertia_edi & 0xffff;
-    local_5 = (inertia_edi & 0xffff) >> 8;
-    local_8 = inertia_esi & 0xffff;
-    local_7 = (inertia_esi & 0xffff) >> 8;
-    local_4 = arg_4;
-    for (; local_4; )
-    {
-        local_2 = (short)local_4 / 2;
-        g_0BAA += 1;
-        inertia_esi = (inertia_esi & 0xffff0000) | ((local_2 << 1) & 0xffff);
-        if (g_0B4C[local_4].field_0 <= g_0B4C[local_2].field_0)
-            break;
-        sub_107b8(&g_0B4C[(unsigned short)local_2], &g_0B4C[(unsigned short)local_4]);
-        sub_10768(local_2, local_4);
-        local_4 = local_2;
-    }
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_8 | ((unsigned char)local_7 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_6 | ((unsigned char)local_5 << 8)) & 0xffff);
-    return;
-}
-int32_t aNldiv(int32_t dividend, int32_t divisor);
-void sub_10f38(unsigned long a0);
-unsigned short sub_11310(unsigned short a0);
-void sub_1131e(unsigned short a0, unsigned short a1);
-
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-
-void sub_10e70(unsigned short arg_4, short arg_6)
-{
-    unsigned short local_2;  // [bp-0x4]
-    unsigned char local_e;  // [bp-0x10]
-    unsigned char local_d;  // [bp-0xf]
-    unsigned char local_c;  // [bp-0xe]
-    unsigned char local_b;  // [bp-0xd]
-
-    if (arg_4)
-    {
-        if (arg_6 < 75)
-            arg_6 = 75;
-        sub_1131e(67, 182);
-        arg_4 = aNldiv(1193180, arg_4);
-        sub_1131e(66, (unsigned char)arg_4);
-        sub_1131e(66, arg_4 >> 8);
-        local_2 = sub_11310(97);
-        sub_1131e(97, (unsigned short)local_2 | 3);
-    }
-    sub_10f38(arg_6);
-    if (arg_4)
-        sub_1131e(97, local_2);
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_e | ((unsigned char)local_d << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_c | ((unsigned char)local_b << 8)) & 0xffff);
-    return;
-}
-struct g_08F0_entry;
-
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
-} g_08F0_entry;
-extern unsigned short g_0BAA;
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-extern g_08F0_entry g_0B4C[];
-
-void sub_10768(unsigned short a0, unsigned short a1);
-void sub_107b8(struct g_08F0_entry *a0, struct g_08F0_entry *a1);
-
-void sub_10a88(short arg_4)
-{
-    unsigned short local_4;  // [bp-0x6]
-    unsigned short local_2;  // [bp-0x4]
-    unsigned char local_8;  // [bp-0xa]
-    unsigned char local_7;  // [bp-0x9]
-    unsigned char local_6;  // [bp-0x8]
-    unsigned char local_5;  // [bp-0x7]
-
-    local_6 = inertia_edi & 0xffff;
-    local_5 = (inertia_edi & 0xffff) >> 8;
-    local_8 = inertia_esi & 0xffff;
-    local_7 = (inertia_esi & 0xffff) >> 8;
-    local_2 = 0;
-    while (1)
-    {
-        local_4 = local_2 << 1;
-        if (local_4 <= arg_4)
-            break;
-        if ((short)((short)local_4 + 1) <= arg_4)
-        {
-            g_0BAA += 1;
-            inertia_esi = (inertia_esi & 0xffff0000) | ((local_4 << 1) & 0xffff);
-            if ((signed char)g_0B4C[local_4 + 1].field_0 > (signed char)g_0B4C[local_4].field_0)
-                local_4 += 1;
-        }
-        g_0BAA += 1;
-        inertia_esi = (inertia_esi & 0xffff0000) | ((local_4 << 1) & 0xffff);
-        if (g_0B4C[local_2].field_0 >= g_0B4C[local_4].field_0)
-            break;
-        sub_107b8(&g_0B4C[(unsigned short)local_2], &g_0B4C[(unsigned short)local_4]);
-        sub_10768(local_2, local_4);
-        local_2 = local_4;
-    }
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_8 | ((unsigned char)local_7 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_6 | ((unsigned char)local_5 << 8)) & 0xffff);
-    return;
-}
-void sub_10498(unsigned short a0);
-void sub_106c8(unsigned short a0);
-
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
-} g_08F0_entry;
-
-extern unsigned short g_0BAA;
 extern unsigned short g_0BA4;
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
+extern unsigned long g_0BA6;
 extern unsigned short g_0BA2;
-extern g_08F0_entry g_0B4C[];
-
-    extern unsigned short xff;
-void sub_10808(void)
-{
-    unsigned short local_6;  // [bp-0x8]
-    unsigned short local_4;  // [bp-0x6]
-    unsigned short local_2;  // [bp-0x4]
-    unsigned char local_c;  // [bp-0xe]
-    unsigned char local_b;  // [bp-0xd]
-    unsigned char local_a;  // [bp-0xc]
-    unsigned char local_9;  // [bp-0xb]
-    g_08F0_entry local_8;  // [bp-0xa]
-
-    local_a = inertia_edi & 0xffff;
-    local_9 = (inertia_edi & 0xffff) >> 8;
-    local_c = inertia_esi & 0xffff;
-    local_b = (inertia_esi & 0xffff) >> 8;
-    for (local_2 = 0; (short)g_0BA2 > (short)local_2; local_2 += 1)
-    {
-        local_8 = g_0B4C[local_2];
-        local_6 = (signed char)local_8.field_0;
-        for (local_4 = local_2; local_4; local_4 -= 1)
-        {
-            g_0BAA += 1;
-            if ((g_0B4C[local_4 - 1].field_0 & 0xff) <= (short)local_6)
-                break;
-            g_0BA4 += 1;
-            g_0B4C[local_4] = g_0B4C[local_4 - 1];
-            sub_106c8((unsigned short)local_4);
-            sub_10498((unsigned short)local_4);
-        }
-        g_0B4C[local_4] = local_8;
-        sub_106c8((unsigned short)local_4);
-        sub_10498((unsigned short)local_4);
-    }
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_c | ((unsigned char)local_b << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_a | ((unsigned char)local_9 << 8)) & 0xffff);
-    return;
-}
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
-} g_08F0_entry;
-extern unsigned short g_0BA2;
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-extern long g_0132;
 extern g_08F0_entry g_08F0[];
-
-int sub_10678(void);
-unsigned short sub_1132c(void *a0);
-void sub_11402(unsigned short a0);
-unsigned short sub_11414(void);
-void sub_12ac8(char *a0, unsigned short a1);
-
-    extern unsigned short inertia_ds;
-    extern unsigned short inertia_ss;
-    extern unsigned short x100;
-void sub_10560(void)
-{
-    unsigned short v28;  // ax
-    unsigned short local_76;  // [bp-0x78]
-    unsigned short local_74;  // [bp-0x76]
-    unsigned short local_72;  // [bp-0x74]
-    unsigned short local_70;  // [bp-0x72]
-    unsigned short local_62;  // [bp-0x64]
-    unsigned short local_5e;  // [bp-0x60]
-    unsigned short local_5a[43];  // [bp-0x5c]
-    unsigned short local_4;  // [bp-0x6]
-    unsigned short local_2;  // [bp-0x4]
-    unsigned char local_7a;  // [bp-0x7c]
-    unsigned char local_79;  // [bp-0x7b]
-    unsigned char local_78;  // [bp-0x7a]
-    unsigned char local_77;  // [bp-0x79]
-
-    local_78 = inertia_edi & 0xffff;
-    local_77 = (inertia_edi & 0xffff) >> 8;
-    local_7a = inertia_esi & 0xffff;
-    local_79 = (inertia_esi & 0xffff) >> 8;
-    sub_11402(sub_1132c(SEG_PTR(inertia_ds, 0)));
-    SEG_U16(inertia_ds, 2886) = 1;
-    g_0132 = 30;
-    sub_12ac8(&local_70, inertia_ss);
-    if ((((unsigned char)local_5e | ((unsigned char)(local_5e >> 8) * 0x100)) != 1 ? 0 : 1) || (((unsigned char)local_62 | ((unsigned char)(local_62 >> 8) * 0x100)) != 2 ? 0 : 1) || !(!(unsigned char)local_62 && !((unsigned char)(local_62 >> 8) * 0x100) ? 0 : 1))
-        local_74 = 1;
-    else
-        local_74 = 15;
-    for (local_2 = 0; (short)g_0BA2 > (short)local_2; local_2 += 1)
-    {
-        inertia_esi = (inertia_esi & 0xffff0000) | ((local_2 << 1) & 0xffff);
-        local_5a[local_2] = local_2 + 1;
-    }
-    local_4 = g_0BA2 - 1;
-    for (local_2 = 0; (short)g_0BA2 > (short)local_2; local_2 += 1)
-    {
-        local_76 = (short)sub_11414() % (short)(local_4 + 1);
-        inertia_esi = (inertia_esi & 0xffff0000) | (local_76 & 0xffff);
-        local_72 = local_5a[local_76];
-        inertia_esi = (inertia_esi & 0xffff0000) | (local_4 & 0xffff);
-        v28 = *((unsigned char *)((unsigned char *)local_5a + ((inertia_esi & 0xffff) << 1))) | (*((unsigned char *)((unsigned char *)local_5a + ((inertia_esi & 0xffff) << 1) + 1)) << 8);
-        inertia_esi = (inertia_esi & 0xffff0000) | ((local_76 << 1) & 0xffff);
-        local_5a[local_76] = local_5a[local_4];
-        local_4 -= 1;
-        g_08F0[local_2].field_0 = local_72;
-        if (local_74 == 1)
-            g_08F0[local_2].field_1 = 7;
-        else
-            g_08F0[local_2].field_1 = (short)local_72 % (short)local_74 + 1;
-    }
-    sub_10678();
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_7a | ((unsigned char)local_79 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_78 | ((unsigned char)local_77 << 8)) & 0xffff);
-    return;
-}
-extern char g_b48[4];
-extern char g_b49[4];
-
-void sub_10498(unsigned short arg_4)
-{
-    unsigned short v15;  // ss
-    unsigned short v16;  // bp
-    char v25;  // 4196
-    unsigned short v26;  // ax
-    char v27;  // 4314
-    char v28;  // 4316
-    unsigned short v29;  // flags
-    unsigned short v30;  // flags
-    unsigned short v31;  // ax
-    unsigned short v32;  // dx
-    unsigned short v33;  // ax
-    unsigned short v34;  // ax
-    unsigned short v17;  // di
-    unsigned short v35;  // ax
-    unsigned short v36;  // ax
-    char v37;  // 4136
-    char v38;  // 4138
-    unsigned short v39;  // ax
-    char v40;  // 4119
-    char v41;  // 4121
-    unsigned short v42;  // ax
-    int v43;  // 4142
-    int v44;  // 4144
-    unsigned short v18;  // si
-    unsigned short v45;  // flags
-    char v46;  // 4119
-    char v47;  // 4121
-    int v48;  // 4142
-    int v49;  // 4144
-    unsigned short v50;  // ax
-    unsigned short v51;  // ax
-    unsigned short v52;  // dx
-    char v53;  // 4113
-    char v54;  // 4115
-    unsigned short v19;  // ax
-    char v55;  // 4157
-    char v56;  // 4159
-    unsigned short v57;  // si
-    unsigned short v58;  // di
-    unsigned short v20;  // ds
-    unsigned short v21;  // dx
-    char v22;  // 4150
-    char v23;  // 4152
-    char v24;  // 4194
-    int local_68;  // [bp-0x6a]
-    int local_67;  // [bp-0x69]
-    char local_66;  // [bp-0x68]
-    int local_65;  // [bp-0x67]
-    char local_64;  // [bp-0x66]
-    int local_63;  // [bp-0x65]
-    char local_62;  // [bp-0x64]
-    int local_61;  // [bp-0x63]
-    char local_60;  // [bp-0x62]
-    int local_5f;  // [bp-0x61]
-    char local_5e;  // [bp-0x60]
-    int local_5d;  // [bp-0x5f]
-    char local_5c;  // [bp-0x5e]
-    int local_5b;  // [bp-0x5d]
-    char local_5a;  // [bp-0x5c]
-    int local_59;  // [bp-0x5b]
-    char local_58;  // [bp-0x5a]
-    int local_57;  // [bp-0x59]
-    char local_56;  // [bp-0x58]
-    int local_55;  // [bp-0x57]
-    int gp_saved_si_104a2;  // [bp-0x56]
-    char local_54;  // [bp-0x56]
-    int local_53;  // [bp-0x55]
-    int gp_saved_di_104a1;  // [bp-0x54]
-    char local_52;  // [bp-0x54]
-    int local_51;  // [bp-0x53]
-    char v11[80];  // [bp-0x52]
-    char v12;  // [bp-0x2]
-    int local_1;  // [bp-0x1]
-    char local_0;  // [bp+0x0]
-
-    v29 = inertia_flags;
-    v45 = inertia_flags;
-    local_0 = inertia_ebp & 0xffff;
-    local_1 = (inertia_ebp & 0xffff) >> 8;
-    inertia_ebp = (inertia_ebp & 0xffff0000) | (((inertia_esp & 0xffff) - 2) & 0xffff);
-    local_52 = inertia_edi & 0xffff;
-    local_51 = (inertia_edi & 0xffff) >> 8;
-    local_54 = inertia_esi & 0xffff;
-    local_53 = (inertia_esi & 0xffff) >> 8;
-    local_56 = 15;
-    local_55 = 15 >> 8;
-    sub_2b24();
-    v19 = sub_137e();
-    g_0B48 = sub_1137e();
-    v22 = SEG_U8((uint32_t)inertia_ds, 2986);
-    v23 = SEG_U8((uint32_t)inertia_ds, 2987);
-    local_56 = SEG_U8((uint32_t)inertia_ds, 2986) | (SEG_U8((uint32_t)inertia_ds, 2987) << 8);
-    local_55 = (v22 | (v23 << 8)) >> 8;
-    v24 = SEG_U8((uint32_t)inertia_ds, 2980);
-    v25 = SEG_U8((uint32_t)inertia_ds, 2981);
-    local_58 = SEG_U8((uint32_t)inertia_ds, 2980) | (SEG_U8((uint32_t)inertia_ds, 2981) << 8);
-    local_57 = (v24 | (v25 << 8)) >> 8;
-    local_5a = 0;
-    local_59 = 0 >> 8;
-    local_5c = 232;
-    local_5b = 1000 >> 8;
-    v26 = SEG_U8((uint32_t)inertia_ds, 2888) | (SEG_U8((uint32_t)inertia_ds, 2889) << 8);
-    v27 = SEG_U8((uint32_t)inertia_ds, 2982);
-    v28 = SEG_U8((uint32_t)inertia_ds, 2983);
-    v30 = (v29 & 63274) | ((0 | (((v26 < (v27 | (v28 << 8))) & 1) << 0)) & 1);
-    v31 = v26 - (SEG_U8((uint32_t)inertia_ds, 2982) | (SEG_U8((uint32_t)inertia_ds, 2983) << 8));
-    v32 = (SEG_U8((uint32_t)inertia_ds, 2890) | (SEG_U8((uint32_t)inertia_ds, 2891) << 8)) - (SEG_U8((uint32_t)inertia_ds, 2984) | (SEG_U8((uint32_t)inertia_ds, 2985) << 8)) - ((unsigned short)v26 < (unsigned short)(SEG_U8((uint32_t)inertia_ds, 2982) | (SEG_U8((uint32_t)inertia_ds, 2983) << 8)));
-    local_5e = v32;
-    local_5d = v32 >> 8;
-    local_60 = v31;
-    local_5f = v31 >> 8;
-    v33 = ::0x143a::aNldiv();
-    local_62 = v32;
-    local_61 = v32 >> 8;
-    local_64 = v33;
-    local_63 = v33 >> 8;
-    local_66 = 125;
-    local_65 = 381 >> 8;
-    v34 = 0xffb0 + (inertia_ebp & 0xffff);
-    local_68 = v34;
-    local_67 = v34 >> 8;
-    sub_12ba();
-    local_5e = 59;
-    local_5d = 59 >> 8;
-    v35 = (SEG_U8((uint32_t)inertia_ds, 2988) | (SEG_U8((uint32_t)inertia_ds, 2989) << 8)) + 7;
-    local_60 = v35;
-    local_5f = v35 >> 8;
-    sub_28e4();
-    v36 = 0xffb0 + (inertia_ebp & 0xffff);
-    local_5e = inertia_ss;
-    local_5d = inertia_ss >> 8;
-    local_60 = v36;
-    local_5f = v36 >> 8;
-    sub_2756();
-    if (!(SEG_U8(inertia_ds, 2886) || SEG_U8(inertia_ds, 2887) * 0x100 ? 0 : 1))
-    {
-        local_5e = 75;
-        local_5d = 75 >> 8;
-        v37 = (unsigned char)arg_4;
-        v38 = (unsigned char)(arg_4 >> 8);
-        v39 = 60 * arg_4;
-        if (1 & (60 * (v37 | (v38 * 0x100)) >> 15) & 1)
-        {
-            v40 = (unsigned char)arg_4;
-            v41 = (unsigned char)(arg_4 >> 8);
-            v42 = v39 * (v40 | (v41 << 8));
-            v43 = v39 * (v40 | (v41 << 8)) >> 16 == 0xffff;
-            v44 = (v39 * (v40 | (v41 << 8)) >> 16 == 0xffff) & 1;
-            v45 = (((v30 & 0xfffe) | (((!v44) << 0) & 1)) & 0xf7ff) | (((!(v43 & 1)) << 11) & 0x800);
-        }
-        else
-        {
-            v46 = (unsigned char)arg_4;
-            v47 = (unsigned char)(arg_4 >> 8);
-            v42 = v39 * (v46 | (v47 << 8));
-            v48 = !(v39 * (v46 | (v47 << 8)) >> 16);
-            v49 = (!(v39 * (v46 | (v47 << 8)) >> 16)) & 1;
-            v45 = (((v30 & 0xfffe) | (((!v49) << 0) & 1)) & 0xf7ff) | (((!(v48 & 1)) << 11) & 0x800);
-        }
-        local_60 = v42;
-        local_5f = v42 >> 8;
-        local_62 = 37;
-        local_61 = 1317 >> 8;
-        sub_e5d();
-        v50 = SEG_U8((uint32_t)inertia_ds, 306) | (SEG_U8((uint32_t)inertia_ds, 307) << 8);
-        v51 = v50 - 75;
-        v52 = (SEG_U8((uint32_t)inertia_ds, 308) | (SEG_U8((uint32_t)inertia_ds, 309) << 8)) - 0 - (1 & (((v45 & 63274) | ((0 | (((v50 < 75) & 1) << 0)) & 1)) >> 0) & 1);
-        local_5e = v52;
-        local_5d = v52 >> 8;
-        local_60 = v51;
-        local_5f = v51 >> 8;
-        sub_f18();
-    }
-    else
-    {
-        v53 = SEG_U8((uint32_t)inertia_ds, 308);
-        v54 = SEG_U8((uint32_t)inertia_ds, 309);
-        local_5e = SEG_U8((uint32_t)inertia_ds, 308) | (SEG_U8((uint32_t)inertia_ds, 309) << 8);
-        local_5d = (v53 | (v54 << 8)) >> 8;
-        v55 = SEG_U8((uint32_t)inertia_ds, 306);
-        v56 = SEG_U8((uint32_t)inertia_ds, 307);
-        local_60 = SEG_U8((uint32_t)inertia_ds, 306) | (SEG_U8((uint32_t)inertia_ds, 307) << 8);
-        local_5f = (v55 | (v56 << 8)) >> 8;
-        sub_f18();
-    }
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_5c | ((unsigned char)local_5b << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_5a | ((unsigned char)local_59 << 8)) & 0xffff);
-    return;
-}
-void sub_10060(void);
-void sub_10498(unsigned short a0);
-void sub_10678(void);
-void sub_10808(void);
-void sub_108d0(void);
-void sub_10970(void);
-void sub_10b50(void);
-void sub_10c18(void);
-void sub_10ce0(unsigned short a0, unsigned short a1);
-unsigned short sub_11278(unsigned short a0);
-unsigned short sub_11292(void);
-void sub_128e4(unsigned short a0, unsigned short a1);
-void sub_12bc0(unsigned short a0);
-
-
-extern unsigned short g_0B46;
-extern unsigned short inertia_flags;
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-extern unsigned short g_0BA2;
-extern unsigned short g_0160;
+extern unsigned short xff;
+extern unsigned short inertia_ss;
 extern long g_0132;
-
-    extern unsigned short xffff;
-    extern unsigned short inertia_ds;
-void sub_102e0(void)
-{
-    unsigned short v26;  // flags
-    unsigned short v27;  // ax
-    unsigned short v42;  // flags
-    unsigned int v43;  // ax
-    unsigned short v45;  // 4169
-    unsigned short v10;  // flags
-    unsigned short v46;  // 4172
-    unsigned char v28;  // 4132
-    unsigned char v29;  // 4134
-    unsigned char v40;  // 4107
-    unsigned char v41;  // 4109
-    unsigned char v44;  // 4155
-    unsigned char local_6;  // [bp-0x8]
-    unsigned char local_5;  // [bp-0x7]
-    unsigned char local_4;  // [bp-0x6]
-    unsigned char local_3;  // [bp-0x5]
-    unsigned char local_2;  // [bp-0x4]
-
-    v26 = inertia_flags;
-    v42 = inertia_flags;
-    v10 = inertia_flags;
-    local_4 = inertia_edi & 0xffff;
-    local_3 = (inertia_edi & 0xffff) >> 8;
-    local_6 = inertia_esi & 0xffff;
-    local_5 = (inertia_esi & 0xffff) >> 8;
-    while (1)
-    {
-        SEG_U16(inertia_ds, 2986) = 0;
-        SEG_U16(inertia_ds, 2980) = 0;
-        sub_128e4(g_0160 + 1, 75);
-        sub_12bc0(1);
-        local_2 = sub_11292();
-        sub_12bc0(0);
-        switch (sub_11278(local_2))
-        {
-        case 69:
-            SEG_U16(inertia_ds, 2988) = 3;
-            sub_10678();
-            sub_10b50();
-            sub_10498(0);
-            break;
-        case 60:
-            if ((short)(g_0132 >> 16) <= 0 && ((short)(g_0132 >> 16) < 0 || (unsigned short)(g_0132 & 0xffff) <= 900))
-                g_0132 += 30;
-            sub_10060();
-            break;
-        case 62:
-            v27 = g_0132 >> 16;
-            v28 = SEG_U8((uint32_t)inertia_ds, 306);
-            v29 = SEG_U8((uint32_t)inertia_ds, 307);
-            v10 = (v26 & 63274) | ((((!(v27 | v28 | (v29 << 8))) & 1) << 6) & 64);
-            if (g_0132)
-                g_0132 -= 30;
-            sub_10060();
-            break;
-        case 66:
-            SEG_U16(inertia_ds, 2988) = 1;
-            sub_10678();
-            sub_108d0();
-            sub_10498(0);
-            break;
-        case 72:
-            SEG_U16(inertia_ds, 2988) = 2;
-            sub_10678();
-            sub_10970();
-            sub_10498(0);
-            break;
-        case 73:
-            SEG_U16(inertia_ds, 2988) = 0;
-            sub_10678();
-            sub_10808();
-            sub_10498(0);
-            break;
-        case 81:
-            SEG_U16(inertia_ds, 2988) = 5;
-            sub_10678();
-            sub_10ce0(0, g_0BA2);
-            sub_10498(0);
-            break;
-        case 83:
-            SEG_U16(inertia_ds, 2988) = 4;
-            sub_10678();
-            sub_10c18();
-            sub_10498(0);
-            break;
-        case 84:
-            v40 = SEG_U8((uint32_t)inertia_ds, 2886);
-            v41 = SEG_U8((uint32_t)inertia_ds, 2887);
-            v42 = (v10 & 63274) | (((v40 | (v41 << 8)) < 1) & 1 & 1);
-            v43 = 0 - (1 & v42 & 1);
-            v44 = (0 - v43) ^ ((0 - v43) >> 4) ^ (((0 - v43) ^ ((0 - v43) >> 4)) >> 2) ^ (((0 - v43) ^ ((0 - v43) >> 4) ^ (((0 - v43) ^ ((0 - v43) >> 4)) >> 2)) >> 1);
-            v45 = ((((v42 & 0xfffe) | ((v43) & 1 & 1)) & 0xfffb) | (((~(v44) & 1 & 1) << 2) & 4)) & 0xffef;
-            v46 = ((((0 ^ v43 ^ (0 - v43)) >> 4) & 1 & 1) << 4) & 16;
-            v10 = ((((((v45 | v46) & 0xffbf) | ((((!(0 - v43)) & 1) << 6) & 64)) & 0xff7f) | (((1 & ((0 - v43) >> 15) & 1) << 7) & 128)) & 0xf7ff) | ((((v43 == 0x8000) & 1) << 11) & 0x800);
-            g_0B46 = g_0B46 < 1;
-            sub_10060();
-            break;
-        case 27:
-            return;
-        default:
-            break;
-        }
-    }
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_6 | ((unsigned char)local_5 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_4 | ((unsigned char)local_3 << 8)) & 0xffff);
-    return;
-}
-int32_t aNldiv(int32_t dividend, int32_t divisor);
-void sub_101f0(unsigned short a0, unsigned short a1, unsigned short a2, unsigned short a3);
-void sub_1123a(char *a0, void *a1);
-void sub_112ba();
-void sub_12756(char *a0, unsigned short a1);
-void sub_128e4(unsigned short a0, unsigned short a1);
-void sub_12b24(unsigned short a0);
-void sub_12b3e(unsigned short a0, unsigned short a1);
-
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
+extern unsigned long g_0B48;
 extern unsigned short g_0B46;
+extern unsigned short g_0BAC;
 extern unsigned short g_0160;
-extern long g_0132;
-extern char * g_0136[];
-
-    extern unsigned short inertia_ds;
-    extern unsigned short inertia_ss;
-    extern unsigned short xffff;
-void sub_10060(void)
-{
-    char local_12[16];  // [bp-0x14]
-    unsigned short local_2;  // [bp-0x4]
-    unsigned char local_1d;  // [bp-0x1f]
-    unsigned char local_1e;  // [bp-0x1e]
-    unsigned char local_1b;  // [bp-0x1d]
-    unsigned char local_1c;  // [bp-0x1c]
-
-    sub_12b24(15);
-    sub_12b3e(0, 0);
-    sub_101f0(1, 45, 35, SEG_U16(inertia_ds, 352) + 2);
-    for (local_2 = 0; (short)local_2 < (short)g_0160; local_2 += 1)
-    {
-        sub_128e4((unsigned short)local_2 + 2, 48);
-        sub_12756(g_0136[(unsigned short)local_2], inertia_ds);
-    }
-    if (g_0B46)
-        sub_1123a(local_12, SEG_PTR(inertia_ds, 354));
-    else
-        sub_1123a(local_12, SEG_PTR(inertia_ds, 358));
-    sub_128e4(SEG_U16(inertia_ds, 352) - 7, 62);
-    sub_12756(local_12, inertia_ss);
-    sub_112ba(local_12, 362, aNldiv(SEG_U32(inertia_ds, 306), 30));
-    sub_128e4(SEG_U16(inertia_ds, 352) - 5, 62);
-    sub_12756(local_12, inertia_ss);
-    sub_1123a(local_12, SEG_PTR(inertia_ds, 368));
-    if ((g_0132 & 0xffff) == 900 && !(g_0132 >> 16))
-    {
-        sub_128e4(SEG_U16(inertia_ds, 352) - 4, 48);
-        sub_12756(local_12, inertia_ss);
-    }
-    if (!g_0132)
-    {
-        sub_128e4(SEG_U16(inertia_ds, 352) - 3, 48);
-        sub_12756(local_12, inertia_ss);
-    }
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_1e | ((unsigned char)local_1d << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_1c | ((unsigned char)local_1b << 8)) & 0xffff);
-    return;
-}
-void sub_10060(void);
-void sub_102e0(void);
-void sub_10560(void);
+extern unsigned short xffff;
+extern char *g_0136[];
 unsigned short sub_1294f(unsigned short a0);
 unsigned short sub_12a29(unsigned short a0);
 void sub_12b5e(unsigned short a0);
 void sub_12bc0(unsigned short a0);
-
-
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-
-    extern unsigned short inertia_ds;
-unsigned short sub_10010(void)
-{
-    unsigned short v8;  // ax
-    unsigned char local_6;  // [bp-0x6]
-    unsigned char local_5;  // [bp-0x5]
-    unsigned char local_4;  // [bp-0x4]
-    unsigned char local_3;  // [bp-0x3]
-
-    local_4 = inertia_edi & 0xffff;
-    local_3 = (inertia_edi & 0xffff) >> 8;
-    local_6 = inertia_esi & 0xffff;
-    local_5 = (inertia_esi & 0xffff) >> 8;
-    v8 = sub_12a29(43);
-    SEG_U16(inertia_ds, 2978) = v8;
-    sub_12b5e(0);
-    sub_12bc0(0);
-    sub_10560();
-    sub_10060();
-    sub_102e0();
-    inertia_esi = (inertia_esi & 0xffff0000) | ((local_6 | (local_5 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | ((local_4 | (local_3 << 8)) & 0xffff);
-    return sub_1294f(0xffff);
-}
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
-} g_08F0_entry;
-
-extern unsigned short g_0BA4;
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-
-void sub_107b8(g_08F0_entry *arg_4, g_08F0_entry *arg_6)
-{
-    unsigned short gp_saved_si_107c2;  // [bp-0x8]
-    unsigned short gp_saved_di_107c1;  // [bp-0x6]
-    g_08F0_entry local_2;  // [bp-0x4]
-
-    gp_saved_di_107c1 = inertia_edi & 0xffff;
-    gp_saved_si_107c2 = inertia_esi & 0xffff;
-    g_0BA4 += 1;
-    local_2 = arg_4[0];
-    arg_4[0] = arg_6[0];
-    arg_6[0] = local_2;
-    inertia_esi = (inertia_esi & 0xffff0000) | (gp_saved_si_107c2 & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (gp_saved_di_107c1 & 0xffff);
-    return;
-}
-void sub_10498(unsigned short a0);
-void sub_106c8(unsigned short a0);
-
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-
-void sub_10768(unsigned short arg_4, unsigned short arg_6)
-{
-    unsigned char local_4;  // [bp-0x6]
-    unsigned char local_3;  // [bp-0x5]
-    unsigned char local_2;  // [bp-0x4]
-    unsigned char local_1;  // [bp-0x3]
-
-    local_2 = inertia_edi & 0xffff;
-    local_1 = (inertia_edi & 0xffff) >> 8;
-    local_4 = inertia_esi & 0xffff;
-    local_3 = (inertia_esi & 0xffff) >> 8;
-    sub_106c8((unsigned short)arg_4);
-    sub_106c8((unsigned short)arg_6);
-    sub_10498((unsigned short)arg_4);
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_4 | ((unsigned char)local_3 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_2 | ((unsigned char)local_1 << 8)) & 0xffff);
-    return;
-}
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
-} g_08F0_entry;
-extern unsigned long g_0BA6;
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-extern unsigned short g_0BA2;
-extern g_08F0_entry g_08F0[];
-extern g_08F0_entry g_0B4C[];
-
-void sub_106c8(unsigned short a0);
 unsigned long sub_1137e(void);
 unsigned long sub_137e(void);
-
-
-void sub_10678(void)
-{
-    unsigned short local_2;  // [bp-0x4]
-    unsigned char local_6;  // [bp-0x8]
-    unsigned char local_5;  // [bp-0x7]
-    unsigned char local_4;  // [bp-0x6]
-    unsigned char local_3;  // [bp-0x5]
-
-    local_4 = inertia_edi & 0xffff;
-    local_3 = (inertia_edi & 0xffff) >> 8;
-    local_6 = inertia_esi & 0xffff;
-    local_5 = (inertia_esi & 0xffff) >> 8;
-    g_0BA6 = sub_1137e();
-    for (local_2 = 0; (short)g_0BA2 > (short)local_2; local_2 += 1)
-    {
-        g_0B4C[local_2] = g_08F0[local_2];
-        sub_106c8((unsigned short)local_2);
-    }
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_6 | ((unsigned char)local_5 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_4 | ((unsigned char)local_3 << 8)) & 0xffff);
-    return;
-}
-struct g_08F0_entry;
-
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
-} g_08F0_entry;
-extern unsigned short g_0BAA;
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-extern g_08F0_entry g_0B4C[];
-
-void sub_10768(unsigned short a0, unsigned short a1);
-void sub_107b8(struct g_08F0_entry *a0, struct g_08F0_entry *a1);
-
-void sub_10ce0(short arg_4, short arg_6)
-{
-    unsigned short v28;  // ax
-    short local_6;  // [bp-0x8]
-    unsigned short local_4;  // [bp-0x6]
-    short local_2;  // [bp-0x4]
-    unsigned char local_a;  // [bp-0xc]
-    unsigned char local_9;  // [bp-0xb]
-    unsigned char local_8;  // [bp-0xa]
-    unsigned char local_7;  // [bp-0x9]
-
-    local_8 = inertia_edi & 0xffff;
-    local_7 = (inertia_edi & 0xffff) >> 8;
-    local_a = inertia_esi & 0xffff;
-    local_9 = (inertia_esi & 0xffff) >> 8;
-    if (arg_4 < arg_6)
-    {
-        if ((unsigned short)arg_6 - (unsigned short)arg_4 == 1)
-        {
-            g_0BAA += 1;
-            inertia_esi = (inertia_esi & 0xffff0000) | ((arg_6 << 1) & 0xffff);
-            if ((signed char)g_0B4C[(unsigned short)arg_4].field_0 > (signed char)g_0B4C[(unsigned short)arg_6].field_0)
-            {
-                sub_107b8(&g_0B4C[(unsigned short)arg_4], &g_0B4C[(unsigned short)arg_6]);
-                sub_10768((unsigned short)arg_4, (unsigned short)arg_6);
-            }
-        }
-        else
-        {
-            v28 = g_0B4C[(unsigned short)arg_6].field_0;
-            ((unsigned char *)&local_4)[0] = v28;
-            ((unsigned char *)&local_4)[1] = v28 >> 8;
-            local_4 = g_0B4C[(unsigned short)arg_6].field_0;
-            do
-            {
-                local_6 = arg_4;
-                local_2 = arg_6;
-                g_0BAA += 1;
-                while (1)
-                {
-                    if ((short)local_2 <= (short)local_6 || (short)g_0B4C[local_6].field_0 > (short)local_4)
-                        break;
-                    local_6 += 1;
-                }
-                g_0BAA += 1;
-                while (1)
-                {
-                    if ((short)local_2 <= (short)local_6 || (short)g_0B4C[local_2].field_0 < (short)local_4)
-                        break;
-                    local_2 -= 1;
-                }
-                if ((short)local_2 > (short)local_6)
-                {
-                    sub_107b8(&g_0B4C[(unsigned short)local_6], &g_0B4C[(unsigned short)local_2]);
-                    sub_10768(local_6, local_2);
-                }
-            } while ((short)local_2 > (short)local_6);
-            sub_107b8(&g_0B4C[(unsigned short)local_6], &g_0B4C[(unsigned short)arg_6]);
-            sub_10768(local_6, (unsigned short)arg_6);
-            if ((short)((short)local_6 - arg_4) < (short)(arg_6 - (short)local_6))
-            {
-                sub_10ce0((unsigned short)arg_4, (unsigned short)local_6 - 1);
-                sub_10ce0((unsigned short)local_6 + 1, (unsigned short)arg_6);
-            }
-            else
-            {
-                sub_10ce0((unsigned short)local_6 + 1, (unsigned short)arg_6);
-                sub_10ce0((unsigned short)arg_4, (unsigned short)local_6 - 1);
-            }
-        }
-    }
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_a | ((unsigned char)local_9 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_8 | ((unsigned char)local_7 << 8)) & 0xffff);
-    return;
-}
-struct g_08F0_entry;
-
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
-} g_08F0_entry;
-extern unsigned short g_0BA2;
-extern unsigned short g_0BAA;
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-extern g_08F0_entry g_0B4C[];
-
-void sub_10768(unsigned short a0, unsigned short a1);
-void sub_107b8(struct g_08F0_entry *a0, struct g_08F0_entry *a1);
-
-void sub_10c18(void)
-{
-    unsigned short local_8;  // [bp-0xa]
-    short local_6;  // [bp-0x8]
-    unsigned short local_4;  // [bp-0x6]
-    unsigned short local_2;  // [bp-0x4]
-    unsigned char local_c;  // [bp-0xe]
-    unsigned char local_b;  // [bp-0xd]
-    unsigned char local_a;  // [bp-0xc]
-    unsigned char local_9;  // [bp-0xb]
-
-    local_a = inertia_edi & 0xffff;
-    local_9 = (inertia_edi & 0xffff) >> 8;
-    local_c = inertia_esi & 0xffff;
-    local_b = (inertia_esi & 0xffff) >> 8;
-    local_2 = (short)g_0BA2 / 2;
-    for (; local_2; )
-    {
-        local_6 = g_0BA2 - local_2;
-        do
-        {
-            local_8 = 0;
-            for (local_4 = 0; (short)local_4 <= local_6; local_4 += 1)
-            {
-                g_0BAA += 1;
-                inertia_esi = (inertia_esi & 0xffff0000) | ((local_4 << 1) & 0xffff);
-                if ((signed char)g_0B4C[local_4 + local_2].field_0 < (signed char)g_0B4C[local_4].field_0)
-                {
-                    sub_107b8(&g_0B4C[(unsigned short)local_4], &g_0B4C[(unsigned short)local_4 + (unsigned short)local_2]);
-                    sub_10768(local_4, (unsigned short)local_4 + (unsigned short)local_2);
-                    local_8 = local_4;
-                }
-            }
-            local_6 = (short)local_8 - (short)local_2;
-        } while (local_8);
-        local_2 = (short)local_2 / 2;
-    }
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_c | ((unsigned char)local_b << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_a | ((unsigned char)local_9 << 8)) & 0xffff);
-    return;
-}
-struct g_08F0_entry;
-
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
-} g_08F0_entry;
-extern unsigned short g_0BAA;
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-extern unsigned short g_0BA2;
-extern g_08F0_entry g_0B4C[];
-
-void sub_10498(unsigned short a0);
-void sub_10768(unsigned short a0, unsigned short a1);
-void sub_107b8(struct g_08F0_entry *a0, struct g_08F0_entry *a1);
-
-void sub_10b50(void)
-{
-    unsigned short local_6;  // [bp-0x8]
-    unsigned short local_4;  // [bp-0x6]
-    unsigned short local_2;  // [bp-0x4]
-    unsigned char local_a;  // [bp-0xc]
-    unsigned char local_9;  // [bp-0xb]
-    unsigned char local_8;  // [bp-0xa]
-    unsigned char local_7;  // [bp-0x9]
-
-    local_8 = inertia_edi & 0xffff;
-    local_7 = (inertia_edi & 0xffff) >> 8;
-    local_a = inertia_esi & 0xffff;
-    local_9 = (inertia_esi & 0xffff) >> 8;
-    for (local_6 = 0; (short)g_0BA2 > (short)local_6; local_6 += 1)
-    {
-        local_4 = local_6;
-        for (local_2 = local_6; (short)local_2 < (short)g_0BA2; local_2 += 1)
-        {
-            g_0BAA += 1;
-            inertia_esi = (inertia_esi & 0xffff0000) | ((local_4 << 1) & 0xffff);
-            if ((signed char)g_0B4C[local_2].field_0 < (signed char)g_0B4C[local_4].field_0)
-            {
-                local_4 = local_2;
-                sub_10498((unsigned short)local_2);
-            }
-        }
-        if ((short)local_4 > (short)local_6)
-        {
-            sub_107b8(&g_0B4C[(unsigned short)local_6], &g_0B4C[(unsigned short)local_4]);
-            sub_10768(local_6, local_4);
-        }
-    }
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_a | ((unsigned char)local_9 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_8 | ((unsigned char)local_7 << 8)) & 0xffff);
-    return;
-}
-struct g_08F0_entry;
-
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
-} g_08F0_entry;
-extern unsigned short g_0BA2;
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-extern g_08F0_entry g_0B4C[];
-
-void sub_10768(unsigned short a0, unsigned short a1);
-void sub_107b8(struct g_08F0_entry *a0, struct g_08F0_entry *a1);
-void sub_109e8(unsigned short a0);
-void sub_10a88(unsigned short a0);
-
-void sub_10970(void)
-{
-    unsigned short local_2;  // [bp-0x4]
-    unsigned char local_6;  // [bp-0x8]
-    unsigned char local_5;  // [bp-0x7]
-    unsigned char local_4;  // [bp-0x6]
-    unsigned char local_3;  // [bp-0x5]
-
-    local_4 = inertia_edi & 0xffff;
-    local_3 = (inertia_edi & 0xffff) >> 8;
-    local_6 = inertia_esi & 0xffff;
-    local_5 = (inertia_esi & 0xffff) >> 8;
-    for (local_2 = 1; (short)g_0BA2 > (short)local_2; local_2 += 1)
-    {
-        sub_109e8((unsigned short)local_2);
-    }
-    for (local_2 = g_0BA2 - 1; (short)local_2 > 0; local_2 -= 1)
-    {
-        sub_107b8(&g_0B4C[0], &g_0B4C[(unsigned short)local_2]);
-        sub_10768(0, local_2);
-        sub_10a88((unsigned short)local_2 - 1);
-    }
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_6 | ((unsigned char)local_5 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_4 | ((unsigned char)local_3 << 8)) & 0xffff);
-    return;
-}
-struct g_08F0_entry;
-
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
-} g_08F0_entry;
-extern unsigned short g_0BA2;
-extern unsigned short g_0BAA;
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-extern g_08F0_entry g_0B4C[];
-
-void sub_10768(unsigned short a0, unsigned short a1);
-void sub_107b8(struct g_08F0_entry *a0, struct g_08F0_entry *a1);
-
-void sub_108d0(void)
-{
-    unsigned short local_6;  // [bp-0x8]
-    unsigned short local_4;  // [bp-0x6]
-    unsigned short local_2;  // [bp-0x4]
-    unsigned char local_a;  // [bp-0xc]
-    unsigned char local_9;  // [bp-0xb]
-    unsigned char local_8;  // [bp-0xa]
-    unsigned char local_7;  // [bp-0x9]
-
-    local_8 = inertia_edi & 0xffff;
-    local_7 = (inertia_edi & 0xffff) >> 8;
-    local_a = inertia_esi & 0xffff;
-    local_9 = (inertia_esi & 0xffff) >> 8;
-    local_4 = g_0BA2;
-    do
-    {
-        local_6 = 0;
-        for (local_2 = 0; (short)local_4 > (short)local_2; local_2 += 1)
-        {
-            g_0BAA += 1;
-            inertia_esi = (inertia_esi & 0xffff0000) | ((local_2 << 1) & 0xffff);
-            if ((signed char)g_0B4C[local_2 + 1].field_0 < (signed char)g_0B4C[local_2].field_0)
-            {
-                sub_107b8(&g_0B4C[(unsigned short)local_2], &g_0B4C[(unsigned short)local_2 + 1]);
-                sub_10768(local_2, (unsigned short)local_2 + 1);
-                local_6 = local_2;
-            }
-        }
-        local_4 = local_6;
-    } while (local_6);
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_a | ((unsigned char)local_9 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_8 | ((unsigned char)local_7 << 8)) & 0xffff);
-    return;
-}
-typedef struct g_08F0_entry {
-    char field_0;
-    char field_1;
-} g_08F0_entry;
-extern unsigned short g_0BA2;
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
-extern g_08F0_entry g_0B4C[];
-
-void sub_113d4();
+int32_t aNldiv(int32_t dividend, int32_t divisor);
+unsigned short sub_11310(unsigned short a0);
+void sub_1131e(unsigned short a0, unsigned short a1);
+void sub_113d4(char *a0, unsigned short a1, unsigned short a2);
 int sub_12756(char *a0, unsigned short a1);
 void sub_128e4(unsigned short a0, unsigned short a1);
 void sub_12b24(unsigned short a0);
+unsigned short sub_1132c(void *a0);
+void sub_11402(unsigned short a0);
+unsigned short sub_11414(void);
+void sub_12ac8(struct inertia_stack_object_22_14w2_18w2 *a0, unsigned short a1);
+void sub_112ba();
+unsigned short sub_11278(unsigned short a0);
+unsigned short sub_11292(void);
+void sub_1123a(char *a0, void *a1);
+void sub_12b3e(unsigned short a0, unsigned short a1);
+unsigned short sub_10010(void);
+void sub_10f38(long arg_4);
+void sub_109e8(unsigned short arg_4);
+void sub_107b8(g_08F0_entry *arg_4, g_08F0_entry *arg_6);
+void sub_10768(unsigned short arg_4, unsigned short arg_6);
+void sub_10678(void);
+void sub_10e70(unsigned short arg_4, short arg_6);
+void sub_10ce0(short arg_4, short arg_6);
+void sub_10c18(void);
+void sub_10b50(void);
+void sub_10a88(short arg_4);
+void sub_10970(void);
+void sub_108d0(void);
+void sub_10808(void);
+void sub_106c8(unsigned short arg_4);
+void sub_10560(void);
+void sub_10498(unsigned short arg_4);
+void sub_102e0(void);
+void sub_101f0(unsigned short arg_4, unsigned short arg_6, unsigned short arg_8, short arg_a);
+void sub_10060(void);
+unsigned short sub_10010(void)
+{
+  unsigned short v8;
+  unsigned char local_6;
+  unsigned char local_5;
+  unsigned char local_4;
+  unsigned char local_3;
+  local_4 = inertia_edi & 0xffff;
+  local_3 = (inertia_edi & 0xffff) >> 8;
+  local_6 = inertia_esi & 0xffff;
+  local_5 = (inertia_esi & 0xffff) >> 8;
+  v8 = sub_12a29(43);
+  SEG_U16(inertia_ds, 2978) = v8;
+  sub_12b5e(0);
+  sub_12bc0(0);
+  sub_10560();
+  sub_10060();
+  sub_102e0();
+  inertia_esi = (inertia_esi & 0xffff0000) | ((local_6 | (local_5 << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((local_4 | (local_3 << 8)) & 0xffff);
+  return sub_1294f(0xffff);
+}
 
-    extern unsigned short inertia_ss;
+void sub_10f38(long arg_4)
+{
+  unsigned short local_7;
+  unsigned short local_5;
+  unsigned long local_4;
+  long tmp_0;
+  unsigned char local_8;
+  unsigned char local_6;
+  local_6 = inertia_edi & 0xffff;
+  local_5 = (inertia_edi & 0xffff) >> 8;
+  local_8 = inertia_esi & 0xffff;
+  local_7 = (inertia_esi & 0xffff) >> 8;
+  local_4 = sub_1137e() + arg_4;
+  while (1)
+  {
+    tmp_0 = sub_1137e();
+    if (((long) tmp_0) > ((long) local_4))
+      break;
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_8) | (((unsigned char) local_7) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  return;
+}
+
+void sub_109e8(unsigned short arg_4)
+{
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned char local_8;
+  unsigned char local_7;
+  unsigned char local_6;
+  unsigned char local_5;
+  local_6 = inertia_edi & 0xffff;
+  local_5 = (inertia_edi & 0xffff) >> 8;
+  local_8 = inertia_esi & 0xffff;
+  local_7 = (inertia_esi & 0xffff) >> 8;
+  local_4 = arg_4;
+  for (; local_4;)
+  {
+    local_2 = ((short) local_4) / 2;
+    g_0BAA += 1;
+    inertia_esi = (inertia_esi & 0xffff0000) | ((local_2 << 1) & 0xffff);
+    if (((signed char) g_0B4C[local_4].field_0) <= ((signed char) g_0B4C[local_2].field_0))
+      break;
+    sub_107b8(&g_0B4C[(unsigned short) local_2], &g_0B4C[(unsigned short) local_4]);
+    sub_10768(local_2, local_4);
+    local_4 = local_2;
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_8) | (((unsigned char) local_7) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  return;
+}
+
+void sub_107b8(g_08F0_entry *arg_4, g_08F0_entry *arg_6)
+{
+  unsigned short gp_saved_si_107c2;
+  unsigned short gp_saved_di_107c1;
+  g_08F0_entry local_2;
+  gp_saved_di_107c1 = inertia_edi & 0xffff;
+  gp_saved_si_107c2 = inertia_esi & 0xffff;
+  g_0BA4 += 1;
+  local_2 = arg_4[0];
+  arg_4[0] = arg_6[0];
+  arg_6[0] = local_2;
+  inertia_esi = (inertia_esi & 0xffff0000) | (gp_saved_si_107c2 & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | (gp_saved_di_107c1 & 0xffff);
+  return;
+}
+
+void sub_10768(unsigned short arg_4, unsigned short arg_6)
+{
+  unsigned char local_4;
+  unsigned char local_3;
+  unsigned char local_2;
+  unsigned char local_1;
+  local_2 = inertia_edi & 0xffff;
+  local_1 = (inertia_edi & 0xffff) >> 8;
+  local_4 = inertia_esi & 0xffff;
+  local_3 = (inertia_esi & 0xffff) >> 8;
+  sub_106c8((unsigned short) arg_4);
+  sub_106c8((unsigned short) arg_6);
+  sub_10498((unsigned short) arg_4);
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_4) | (((unsigned char) local_3) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_2) | (((unsigned char) local_1) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10678(void)
+{
+  unsigned short local_2;
+  unsigned char local_6;
+  unsigned char local_5;
+  unsigned char local_4;
+  unsigned char local_3;
+  local_4 = inertia_edi & 0xffff;
+  local_3 = (inertia_edi & 0xffff) >> 8;
+  local_6 = inertia_esi & 0xffff;
+  local_5 = (inertia_esi & 0xffff) >> 8;
+  g_0BA6 = sub_1137e();
+  for (local_2 = 0; ((short) g_0BA2) > ((short) local_2); local_2 += 1)
+  {
+    g_0B4C[local_2] = g_08F0[local_2];
+    sub_106c8((unsigned short) local_2);
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_4) | (((unsigned char) local_3) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10e70(unsigned short arg_4, short arg_6)
+{
+  unsigned short local_2;
+  unsigned char local_6;
+  unsigned char local_5;
+  unsigned char local_4;
+  unsigned char local_3;
+  local_4 = inertia_edi & 0xffff;
+  local_3 = (inertia_edi & 0xffff) >> 8;
+  local_6 = inertia_esi & 0xffff;
+  local_5 = (inertia_esi & 0xffff) >> 8;
+  if (arg_4)
+  {
+    if (arg_6 < 75)
+      arg_6 = 75;
+    sub_1131e(67, 182);
+    arg_4 = aNldiv(1193180, arg_4);
+    sub_1131e(66, (unsigned char) arg_4);
+    sub_1131e(66, arg_4 >> 8);
+    local_2 = sub_11310(97);
+    sub_1131e(97, ((unsigned short) local_2) | 3);
+  }
+  sub_10f38(arg_6);
+  if (arg_4)
+    sub_1131e(97, local_2);
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_4) | (((unsigned char) local_3) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10ce0(short arg_4, short arg_6)
+{
+  unsigned short v26;
+  short local_6;
+  unsigned short local_4;
+  short local_2;
+  unsigned char local_a;
+  unsigned char local_9;
+  unsigned char local_8;
+  unsigned char local_7;
+  local_8 = inertia_edi & 0xffff;
+  local_7 = (inertia_edi & 0xffff) >> 8;
+  local_a = inertia_esi & 0xffff;
+  local_9 = (inertia_esi & 0xffff) >> 8;
+  if (arg_4 < arg_6)
+  {
+    if ((((unsigned short) arg_6) - ((unsigned short) arg_4)) == 1)
+    {
+      g_0BAA += 1;
+      inertia_esi = (inertia_esi & 0xffff0000) | ((arg_6 << 1) & 0xffff);
+      if (((signed char) g_0B4C[(unsigned short) arg_4].field_0) > ((signed char) g_0B4C[(unsigned short) arg_6].field_0))
+      {
+        sub_107b8(&g_0B4C[(unsigned short) arg_4], &g_0B4C[(unsigned short) arg_6]);
+        sub_10768((unsigned short) arg_4, (unsigned short) arg_6);
+      }
+    }
+    else
+    {
+      v26 = g_0B4C[(unsigned short) arg_6].field_0;
+      ((unsigned char *) (&local_4))[0] = v26;
+      ((unsigned char *) (&local_4))[1] = v26 >> 8;
+      local_4 = g_0B4C[(unsigned short) arg_6].field_0;
+      do
+      {
+        local_6 = arg_4;
+        local_2 = arg_6;
+        g_0BAA += 1;
+        while (1)
+        {
+          if ((((short) local_2) <= ((short) local_6)) || (((short) (((g_0B4C[local_6].field_0 & 0xff) ^ 128) - 128)) > ((short) local_4)))
+            break;
+          local_6 += 1;
+        }
+
+        g_0BAA += 1;
+        while (1)
+        {
+          if ((((short) local_2) <= ((short) local_6)) || (((short) (((g_0B4C[local_2].field_0 & 0xff) ^ 128) - 128)) < ((short) local_4)))
+            break;
+          local_2 -= 1;
+        }
+
+        if (((short) local_2) > ((short) local_6))
+        {
+          sub_107b8(&g_0B4C[(unsigned short) local_6], &g_0B4C[(unsigned short) local_2]);
+          sub_10768(local_6, local_2);
+        }
+      }
+      while (((short) local_2) > ((short) local_6));
+      sub_107b8(&g_0B4C[(unsigned short) local_6], &g_0B4C[(unsigned short) arg_6]);
+      sub_10768(local_6, (unsigned short) arg_6);
+      if (((short) (((short) local_6) - arg_4)) < ((short) (arg_6 - ((short) local_6))))
+      {
+        sub_10ce0((unsigned short) arg_4, ((unsigned short) local_6) - 1);
+        sub_10ce0(((unsigned short) local_6) + 1, (unsigned short) arg_6);
+      }
+      else
+      {
+        sub_10ce0(((unsigned short) local_6) + 1, (unsigned short) arg_6);
+        sub_10ce0((unsigned short) arg_4, ((unsigned short) local_6) - 1);
+      }
+    }
+  }
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_a) | (((unsigned char) local_9) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_8) | (((unsigned char) local_7) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10c18(void)
+{
+  unsigned short local_8;
+  short local_6;
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned char local_c;
+  unsigned char local_b;
+  unsigned char local_a;
+  unsigned char local_9;
+  local_a = inertia_edi & 0xffff;
+  local_9 = (inertia_edi & 0xffff) >> 8;
+  local_c = inertia_esi & 0xffff;
+  local_b = (inertia_esi & 0xffff) >> 8;
+  local_2 = ((short) g_0BA2) / 2;
+  for (; local_2;)
+  {
+    local_6 = g_0BA2 - local_2;
+    do
+    {
+      local_8 = 0;
+      for (local_4 = 0; ((short) local_4) <= local_6; local_4 += 1)
+      {
+        g_0BAA += 1;
+        inertia_esi = (inertia_esi & 0xffff0000) | ((local_4 << 1) & 0xffff);
+        if (((signed char) g_0B4C[local_4 + local_2].field_0) < ((signed char) g_0B4C[local_4].field_0))
+        {
+          sub_107b8(&g_0B4C[(unsigned short) local_4], &g_0B4C[((unsigned short) local_4) + ((unsigned short) local_2)]);
+          sub_10768(local_4, ((unsigned short) local_4) + ((unsigned short) local_2));
+          local_8 = local_4;
+        }
+      }
+
+      local_6 = ((short) local_8) - ((short) local_2);
+    }
+    while (local_8);
+    local_2 = ((short) local_2) / 2;
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_c) | (((unsigned char) local_b) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_a) | (((unsigned char) local_9) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10b50(void)
+{
+  unsigned short local_6;
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned char local_a;
+  unsigned char local_9;
+  unsigned char local_8;
+  unsigned char local_7;
+  local_8 = inertia_edi & 0xffff;
+  local_7 = (inertia_edi & 0xffff) >> 8;
+  local_a = inertia_esi & 0xffff;
+  local_9 = (inertia_esi & 0xffff) >> 8;
+  for (local_6 = 0; ((short) g_0BA2) > ((short) local_6); local_6 += 1)
+  {
+    local_4 = local_6;
+    for (local_2 = local_6; ((short) local_2) < ((short) g_0BA2); local_2 += 1)
+    {
+      g_0BAA += 1;
+      inertia_esi = (inertia_esi & 0xffff0000) | ((local_4 << 1) & 0xffff);
+      if (((signed char) g_0B4C[local_2].field_0) < ((signed char) g_0B4C[local_4].field_0))
+      {
+        local_4 = local_2;
+        sub_10498((unsigned short) local_2);
+      }
+    }
+
+    if (((short) local_4) > ((short) local_6))
+    {
+      sub_107b8(&g_0B4C[(unsigned short) local_6], &g_0B4C[(unsigned short) local_4]);
+      sub_10768(local_6, local_4);
+    }
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_a) | (((unsigned char) local_9) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_8) | (((unsigned char) local_7) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10a88(short arg_4)
+{
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned char local_8;
+  unsigned char local_7;
+  unsigned char local_6;
+  unsigned char local_5;
+  local_6 = inertia_edi & 0xffff;
+  local_5 = (inertia_edi & 0xffff) >> 8;
+  local_8 = inertia_esi & 0xffff;
+  local_7 = (inertia_esi & 0xffff) >> 8;
+  local_2 = 0;
+  while (1)
+  {
+    local_4 = local_2 << 1;
+    if (((short) local_4) > arg_4)
+      break;
+    if (((short) (((short) local_4) + 1)) <= arg_4)
+    {
+      g_0BAA += 1;
+      inertia_esi = (inertia_esi & 0xffff0000) | ((local_4 << 1) & 0xffff);
+      if (((signed char) g_0B4C[local_4 + 1].field_0) > ((signed char) g_0B4C[local_4].field_0))
+        local_4 += 1;
+    }
+    g_0BAA += 1;
+    inertia_esi = (inertia_esi & 0xffff0000) | ((local_4 << 1) & 0xffff);
+    if (((signed char) g_0B4C[local_2].field_0) >= ((signed char) g_0B4C[local_4].field_0))
+      break;
+    sub_107b8(&g_0B4C[(unsigned short) local_2], &g_0B4C[(unsigned short) local_4]);
+    sub_10768(local_2, local_4);
+    local_2 = local_4;
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_8) | (((unsigned char) local_7) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10970(void)
+{
+  unsigned short local_2;
+  unsigned char local_6;
+  unsigned char local_5;
+  unsigned char local_4;
+  unsigned char local_3;
+  local_4 = inertia_edi & 0xffff;
+  local_3 = (inertia_edi & 0xffff) >> 8;
+  local_6 = inertia_esi & 0xffff;
+  local_5 = (inertia_esi & 0xffff) >> 8;
+  for (local_2 = 1; ((short) g_0BA2) > ((short) local_2); local_2 += 1)
+  {
+    sub_109e8((unsigned short) local_2);
+  }
+
+  for (local_2 = g_0BA2 - 1; ((short) local_2) > 0; local_2 -= 1)
+  {
+    sub_107b8(&g_0B4C[0], &g_0B4C[(unsigned short) local_2]);
+    sub_10768(0, local_2);
+    sub_10a88(((unsigned short) local_2) - 1);
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_4) | (((unsigned char) local_3) << 8)) & 0xffff);
+  return;
+}
+
+void sub_108d0(void)
+{
+  unsigned short local_6;
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned char local_a;
+  unsigned char local_9;
+  unsigned char local_8;
+  unsigned char local_7;
+  local_8 = inertia_edi & 0xffff;
+  local_7 = (inertia_edi & 0xffff) >> 8;
+  local_a = inertia_esi & 0xffff;
+  local_9 = (inertia_esi & 0xffff) >> 8;
+  local_4 = g_0BA2;
+  do
+  {
+    local_6 = 0;
+    for (local_2 = 0; ((short) local_4) > ((short) local_2); local_2 += 1)
+    {
+      g_0BAA += 1;
+      inertia_esi = (inertia_esi & 0xffff0000) | ((local_2 << 1) & 0xffff);
+      if (((signed char) g_0B4C[local_2 + 1].field_0) < ((signed char) g_0B4C[local_2].field_0))
+      {
+        sub_107b8(&g_0B4C[(unsigned short) local_2], &g_0B4C[((unsigned short) local_2) + 1]);
+        sub_10768(local_2, ((unsigned short) local_2) + 1);
+        local_6 = local_2;
+      }
+    }
+
+    local_4 = local_6;
+  }
+  while (local_6);
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_a) | (((unsigned char) local_9) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_8) | (((unsigned char) local_7) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10808(void)
+{
+  unsigned short v14;
+  unsigned short local_6;
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned char local_c;
+  unsigned char local_b;
+  unsigned char local_a;
+  unsigned char local_9;
+  g_08F0_entry local_8;
+  local_a = inertia_edi & 0xffff;
+  local_9 = (inertia_edi & 0xffff) >> 8;
+  local_c = inertia_esi & 0xffff;
+  local_b = (inertia_esi & 0xffff) >> 8;
+  for (local_2 = 0; ((short) g_0BA2) > ((short) local_2); local_2 += 1)
+  {
+    local_8 = g_0B4C[local_2];
+    v14 = (g_0B4C[local_2].field_0 & 0xff) | ((g_0B4C[local_2].field_1 & 0xff) << 8);
+    ((unsigned char *) (&local_8))[0] = v14;
+    ((unsigned char *) (&local_8))[1] = v14 >> 8;
+    local_6 = (signed char) local_8.field_0;
+    for (local_4 = local_2; local_4; local_4 -= 1)
+    {
+      g_0BAA += 1;
+      if (((short) ((((g_0B4C[local_4 - 1].field_0 & 0xff) & 0xff) ^ 128) - 128)) <= ((short) local_6))
+        break;
+      g_0BA4 += 1;
+      g_0B4C[local_4] = g_0B4C[local_4 - 1];
+      sub_106c8((unsigned short) local_4);
+      sub_10498((unsigned short) local_4);
+    }
+
+    g_0B4C[local_4] = local_8;
+    sub_106c8((unsigned short) local_4);
+    sub_10498((unsigned short) local_4);
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_c) | (((unsigned char) local_b) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_a) | (((unsigned char) local_9) << 8)) & 0xffff);
+  return;
+}
+
 void sub_106c8(unsigned short arg_4)
 {
-    unsigned short local_2e;  // [bp-0x30]
-    char local_2c[44];  // [bp-0x2e]
-    unsigned char local_32;  // [bp-0x34]
-    unsigned char local_31;  // [bp-0x33]
-    unsigned char local_30;  // [bp-0x32]
-    unsigned char local_2f;  // [bp-0x31]
-
-    local_30 = inertia_edi & 0xffff;
-    local_2f = (inertia_edi & 0xffff) >> 8;
-    local_32 = inertia_esi & 0xffff;
-    local_31 = (inertia_esi & 0xffff) >> 8;
-    sub_113d4(local_2c, 223, g_0B4C[(unsigned short)arg_4].field_0);
-    local_2e = g_0BA2 - g_0B4C[arg_4].field_0;
-    sub_113d4(local_2c + g_0B4C[(unsigned short)arg_4].field_0, 32, local_2e);
-    local_2c[g_0BA2] = 0;
-    sub_12b24(g_0B4C[(unsigned short)arg_4].field_1);
-    sub_128e4((unsigned short)arg_4 + 1, 0);
-    sub_12756(local_2c, inertia_ss);
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_32 | ((unsigned char)local_31 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_30 | ((unsigned char)local_2f << 8)) & 0xffff);
-    return;
+  unsigned short local_2e;
+  char local_2c[44];
+  unsigned char local_32;
+  unsigned char local_31;
+  unsigned char local_30;
+  unsigned char local_2f;
+  local_30 = inertia_edi & 0xffff;
+  local_2f = (inertia_edi & 0xffff) >> 8;
+  local_32 = inertia_esi & 0xffff;
+  local_31 = (inertia_esi & 0xffff) >> 8;
+  sub_113d4(local_2c, 223, g_0B4C[(unsigned short) arg_4].field_0);
+  local_2e = g_0BA2 - g_0B4C[arg_4].field_0;
+  sub_113d4(local_2c + g_0B4C[(unsigned short) arg_4].field_0, 32, local_2e);
+  local_2c[g_0BA2] = 0;
+  sub_12b24(g_0B4C[(unsigned short) arg_4].field_1);
+  sub_128e4(((unsigned short) arg_4) + 1, 0);
+  sub_12756(local_2c, inertia_ss);
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_32) | (((unsigned char) local_31) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_30) | (((unsigned char) local_2f) << 8)) & 0xffff);
+  return;
 }
-void sub_113d4(char *a0, unsigned short a1, unsigned short a2);
-void sub_12756(char *a0, unsigned short a1);
-void sub_128e4(unsigned short a0, unsigned short a1);
 
-extern unsigned long inertia_esi;
-extern unsigned long inertia_edi;
+void sub_10560(void)
+{
+  unsigned short local_79;
+  unsigned short local_77;
+  unsigned short local_76;
+  unsigned short local_74;
+  unsigned short local_72;
+  unsigned short local_5a[43];
+  unsigned short local_4;
+  unsigned short local_2;
+  unsigned short tmp_0;
+  unsigned char local_7a;
+  unsigned char local_78;
+  inertia_stack_object_22_14w2_18w2 local_56;
+  local_78 = inertia_edi & 0xffff;
+  local_77 = (inertia_edi & 0xffff) >> 8;
+  local_7a = inertia_esi & 0xffff;
+  local_79 = (inertia_esi & 0xffff) >> 8;
+  sub_11402(sub_1132c(SEG_PTR(inertia_ds, 0)));
+  SEG_U16(inertia_ds, 2886) = 1;
+  g_0132 = 30;
+  sub_12ac8(&local_56, inertia_ss);
+  if (((local_56.field_18 == 1) || (local_56.field_14 == 2)) || (!local_56.field_14))
+    local_74 = 1;
+  else
+    local_74 = 15;
+  for (local_2 = 0; ((short) g_0BA2) > ((short) local_2); local_2 += 1)
+  {
+    tmp_0 = local_2 << 1;
+    inertia_esi = (inertia_esi & 0xffff0000) | (tmp_0 & 0xffff);
+    local_5a[local_2] = local_2 + 1;
+  }
 
-    extern unsigned short inertia_ss;
+  local_4 = g_0BA2 - 1;
+  for (local_2 = 0; ((short) g_0BA2) > ((short) local_2); local_2 += 1)
+  {
+    local_76 = ((short) sub_11414()) % ((short) (local_4 + 1));
+    inertia_esi = (inertia_esi & 0xffff0000) | (local_76 & 0xffff);
+    local_72 = local_5a[local_76];
+    inertia_esi = (inertia_esi & 0xffff0000) | (local_4 & 0xffff);
+    inertia_esi = (inertia_esi & 0xffff0000) | ((local_76 << 1) & 0xffff);
+    local_5a[local_76] = local_5a[local_4];
+    local_4 -= 1;
+    g_08F0[local_2].field_0 = local_72;
+    if (local_74 == 1)
+      g_08F0[local_2].field_1 = 7;
+    else
+      g_08F0[local_2].field_1 = (((short) local_72) % ((short) local_74)) + 1;
+  }
+
+  sub_10678();
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_7a) | (((unsigned char) local_79) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_78) | (((unsigned char) local_77) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10498(unsigned short arg_4)
+{
+  char local_50[80];
+  unsigned char local_54;
+  unsigned char local_53;
+  unsigned char local_52;
+  unsigned char local_51;
+  local_52 = inertia_edi & 0xffff;
+  local_51 = (inertia_edi & 0xffff) >> 8;
+  local_54 = inertia_esi & 0xffff;
+  local_53 = (inertia_esi & 0xffff) >> 8;
+  sub_12b24(15);
+  g_0B48 = sub_1137e();
+  sub_112ba(local_50, 381, aNldiv(SEG_U32(inertia_ds, 2888) - SEG_U32(inertia_ds, 2982), 1000), g_0BA4, g_0BAA);
+  sub_128e4(g_0BAC + 7, 59);
+  sub_12756(local_50, inertia_ss);
+  if (g_0B46)
+  {
+    sub_10e70(((unsigned short) arg_4) * 60, 75);
+    sub_10f38(SEG_U32(inertia_ds, 306) - 75);
+  }
+  else
+  {
+    sub_10f38(SEG_U32(inertia_ds, 306));
+  }
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_54) | (((unsigned char) local_53) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_52) | (((unsigned char) local_51) << 8)) & 0xffff);
+  return;
+}
+
+void sub_102e0(void)
+{
+  unsigned short v20;
+  unsigned short v21;
+  unsigned short v26;
+  unsigned short v36;
+  unsigned short v37;
+  unsigned short v38;
+  unsigned short v41;
+  unsigned short v42;
+  unsigned short v14;
+  unsigned char local_6;
+  unsigned char local_5;
+  unsigned char local_4;
+  unsigned char local_3;
+  unsigned char local_2;
+  local_4 = inertia_edi & 0xffff;
+  local_3 = (inertia_edi & 0xffff) >> 8;
+  local_6 = inertia_esi & 0xffff;
+  local_5 = (inertia_esi & 0xffff) >> 8;
+  while (1)
+  {
+    SEG_U16(inertia_ds, 2986) = 0;
+    SEG_U16(inertia_ds, 2980) = 0;
+    sub_128e4(g_0160 + 1, 75);
+    sub_12bc0(1);
+    local_2 = sub_11292();
+    sub_12bc0(0);
+    v14 = sub_11278((unsigned char) local_2);
+    if (v14 == 69)
+    {
+      SEG_U16(inertia_ds, 2988) = 3;
+      sub_10678();
+      sub_10b50();
+      sub_10498(0);
+    }
+    else
+      if (((short) v14) <= 69)
+    {
+      v20 = v14 - 27;
+      if (v14 == 27)
+        break;
+      v21 = v20 - 33;
+      if ((v14 - 27) == 33)
+      {
+        if ((((short) (g_0132 >> 16)) <= 0) && ((((short) (g_0132 >> 16)) < 0) || (((unsigned short) (g_0132 & 0xffff)) <= 900)))
+          g_0132 += 30;
+        sub_10060();
+      }
+      else
+      {
+        v26 = v21 - 1;
+        if (v26 == 1)
+        {
+          if (g_0132)
+            g_0132 -= 30;
+          sub_10060();
+        }
+        else
+        {
+          if ((v26 - 1) != 4)
+            goto LABEL_1042d;
+          SEG_U16(inertia_ds, 2988) = 1;
+          sub_10678();
+          sub_108d0();
+          sub_10498(0);
+        }
+      }
+    }
+    else
+    {
+      v36 = v14 - 72;
+      if (v14 == 72)
+      {
+        SEG_U16(inertia_ds, 2988) = 2;
+        sub_10678();
+        sub_10970();
+        sub_10498(0);
+      }
+      else
+      {
+        v37 = v36 - 1;
+        if (v36 == 1)
+        {
+          SEG_U16(inertia_ds, 2988) = 0;
+          sub_10678();
+          sub_10808();
+          sub_10498(0);
+        }
+        else
+        {
+          v38 = v37 - 8;
+          if ((v36 - 1) == 8)
+          {
+            SEG_U16(inertia_ds, 2988) = 5;
+            sub_10678();
+            sub_10ce0(0, g_0BA2);
+            sub_10498(0);
+          }
+          else
+          {
+            v41 = v38 - 1;
+            v42 = v41 - 1;
+            if (v41 == 1)
+            {
+              SEG_U16(inertia_ds, 2988) = 4;
+              sub_10678();
+              sub_10c18();
+              sub_10498(0);
+            }
+            else
+            {
+              if (v42 == 1)
+              {
+                g_0B46 = g_0B46 < 1;
+                sub_10060();
+              }
+              else
+              {
+                LABEL_1042d:
+                ;
+
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_6) | (((unsigned char) local_5) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_4) | (((unsigned char) local_3) << 8)) & 0xffff);
+  return;
+}
+
 void sub_101f0(unsigned short arg_4, unsigned short arg_6, unsigned short arg_8, short arg_a)
 {
-    char local_52[80];  // [bp-0x54]
-    unsigned short local_2;  // [bp-0x4]
-    unsigned char local_56;  // [bp-0x58]
-    unsigned char local_55;  // [bp-0x57]
-    unsigned char local_54;  // [bp-0x56]
-    unsigned char local_53;  // [bp-0x55]
+  char local_52[80];
+  unsigned short local_2;
+  unsigned char local_56;
+  unsigned char local_55;
+  unsigned char local_54;
+  unsigned char local_53;
+  local_54 = inertia_edi & 0xffff;
+  local_53 = (inertia_edi & 0xffff) >> 8;
+  local_56 = inertia_esi & 0xffff;
+  local_55 = (inertia_esi & 0xffff) >> 8;
+  sub_113d4(local_52, 205, (unsigned short) arg_8);
+  local_52[0] = 201;
+  inertia_esi = (inertia_esi & 0xffff0000) | (arg_8 & 0xffff);
+  local_52[arg_8 - 1] = 0xbb;
+  inertia_esi = (inertia_esi & 0xffff0000) | (arg_8 & 0xffff);
+  local_52[arg_8] = 0;
+  sub_128e4((unsigned short) arg_4, (unsigned short) arg_6);
+  sub_12756(local_52, inertia_ss);
+  sub_113d4(local_52, 32, (unsigned short) arg_8);
+  local_52[0] = 186;
+  inertia_esi = (inertia_esi & 0xffff0000) | (arg_8 & 0xffff);
+  local_52[arg_8 - 1] = 186;
+  for (local_2 = arg_4 + 1; ((short) local_2) <= arg_a; local_2 += 1)
+  {
+    sub_128e4(local_2, (unsigned short) arg_6);
+    sub_12756(local_52, inertia_ss);
+  }
 
-    local_54 = inertia_edi & 0xffff;
-    local_53 = (inertia_edi & 0xffff) >> 8;
-    local_56 = inertia_esi & 0xffff;
-    local_55 = (inertia_esi & 0xffff) >> 8;
-    sub_113d4(local_52, 205, (unsigned short)arg_8);
-    local_52[0] = 201;
-    inertia_esi = (inertia_esi & 0xffff0000) | (arg_8 & 0xffff);
-    local_52[arg_8 - 1] = 0xbb;
-    inertia_esi = (inertia_esi & 0xffff0000) | (arg_8 & 0xffff);
-    local_52[arg_8] = 0;
-    sub_128e4((unsigned short)arg_4, (unsigned short)arg_6);
-    sub_12756(local_52, inertia_ss);
-    sub_113d4(local_52, 32, (unsigned short)arg_8);
-    local_52[0] = 186;
-    inertia_esi = (inertia_esi & 0xffff0000) | (arg_8 & 0xffff);
-    local_52[arg_8 - 1] = 186;
-    for (local_2 = arg_4 + 1; (short)local_2 <= arg_a; local_2 += 1)
-    {
-        sub_128e4(local_2, (unsigned short)arg_6);
-        sub_12756(local_52, inertia_ss);
-    }
-    sub_113d4(local_52, 205, (unsigned short)arg_8);
-    local_52[0] = 200;
-    inertia_esi = (inertia_esi & 0xffff0000) | (arg_8 & 0xffff);
-    local_52[arg_8 - 1] = 188;
-    sub_128e4((unsigned short)arg_a + (unsigned short)arg_4, (unsigned short)arg_6);
-    sub_12756(local_52, inertia_ss);
-    inertia_esi = (inertia_esi & 0xffff0000) | (((unsigned char)local_56 | ((unsigned char)local_55 << 8)) & 0xffff);
-    inertia_edi = (inertia_edi & 0xffff0000) | (((unsigned char)local_54 | ((unsigned char)local_53 << 8)) & 0xffff);
-    return;
+  sub_113d4(local_52, 205, (unsigned short) arg_8);
+  local_52[0] = 200;
+  inertia_esi = (inertia_esi & 0xffff0000) | (arg_8 & 0xffff);
+  local_52[arg_8 - 1] = 188;
+  sub_128e4(((unsigned short) arg_a) + ((unsigned short) arg_4), (unsigned short) arg_6);
+  sub_12756(local_52, inertia_ss);
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_56) | (((unsigned char) local_55) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_54) | (((unsigned char) local_53) << 8)) & 0xffff);
+  return;
+}
+
+void sub_10060(void)
+{
+  char local_12[16];
+  unsigned short local_2;
+  unsigned char local_15;
+  unsigned char local_16;
+  unsigned char local_13;
+  unsigned char local_14;
+  local_14 = inertia_edi & 0xffff;
+  local_13 = (inertia_edi & 0xffff) >> 8;
+  local_16 = inertia_esi & 0xffff;
+  local_15 = (inertia_esi & 0xffff) >> 8;
+  sub_12b24(15);
+  sub_12b3e(0, 0);
+  sub_101f0(1, 45, 35, SEG_U16(inertia_ds, 352) + 2);
+  for (local_2 = 0; ((short) local_2) < ((short) g_0160); local_2 += 1)
+  {
+    sub_128e4(((unsigned short) local_2) + 2, 48);
+    sub_12756(g_0136[(unsigned short) local_2], inertia_ds);
+  }
+
+  if (g_0B46)
+    sub_1123a(local_12, SEG_PTR(inertia_ds, 354));
+  else
+    sub_1123a(local_12, SEG_PTR(inertia_ds, 358));
+  sub_128e4(SEG_U16(inertia_ds, 352) - 7, 62);
+  sub_12756(local_12, inertia_ss);
+  sub_112ba(local_12, 362, aNldiv(SEG_U32(inertia_ds, 306), 30));
+  sub_128e4(SEG_U16(inertia_ds, 352) - 5, 62);
+  sub_12756(local_12, inertia_ss);
+  sub_1123a(local_12, SEG_PTR(inertia_ds, 368));
+  if (((g_0132 & 0xffff) == 900) && (!(g_0132 >> 16)))
+  {
+    sub_128e4(SEG_U16(inertia_ds, 352) - 4, 48);
+    sub_12756(local_12, inertia_ss);
+  }
+  if (!g_0132)
+  {
+    sub_128e4(SEG_U16(inertia_ds, 352) - 3, 48);
+    sub_12756(local_12, inertia_ss);
+  }
+  inertia_esi = (inertia_esi & 0xffff0000) | ((((unsigned char) local_16) | (((unsigned char) local_15) << 8)) & 0xffff);
+  inertia_edi = (inertia_edi & 0xffff0000) | ((((unsigned char) local_14) | (((unsigned char) local_13) << 8)) & 0xffff);
+  return;
 }
 /* summary: same_family_retry_stops=0 fallback_family_labels=none */
-/* summary: shown=20 decompiled=11 asm_or_detail_fallback=9 */
+/* summary: shown=20 decompiled=20 asm_or_detail_fallback=0 */

@@ -1733,7 +1733,10 @@ def _close_final_structuring_callsites_8616(
 def _bind_structuring_callsite_consumers_8616(codegen: AngrCodegenSurface) -> None:
     """Bind Types/Lowering replay services before any Structuring mode diverges."""
     from . import decompiler_postprocess_calls as _calls
+    from .callsite_pointer_values import bind_near_pointer_argument_value_lowerer_8616
+    from .lowering.near_pointer_argument_values import materialize_near_pointer_argument_value_8616
 
+    bind_near_pointer_argument_value_lowerer_8616(codegen, materialize_near_pointer_argument_value_8616)
     _calls._bind_call_target_identity_consumer_8616(codegen, canonicalize_callsite_target_identities_8616)
     _calls._bind_call_argument_rematerialization_classifier_8616(
         codegen,

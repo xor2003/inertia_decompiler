@@ -14,7 +14,8 @@ def test_default_signature_catalog_reuses_existing_catalog_without_rescan(monkey
 
     build_calls: list[tuple[Path, ...]] = []
 
-    def _fake_build_signature_catalog(roots, output_path, *, recursive, cache_dir):
+    def _fake_build_signature_catalog(roots, output_path, *, recursive, cache_dir, library_only):
+        assert library_only
         build_calls.append(tuple(Path(root) for root in roots))
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text("---\n")

@@ -1,4 +1,20 @@
 # Candidate round trips; semantic feature witnesses are reported separately.
+COMPILER_COVERAGE_TYPED_OWNERS := \
+	angr_platforms/angr_platforms/X86_16/callsite_pointer_values.py \
+	angr_platforms/angr_platforms/X86_16/lowering/near_pointer_argument_values.py \
+	inertia_decompiler/binary_signature_metadata.py \
+	inertia_decompiler/discovery_candidate_ranges.py \
+	inertia_decompiler/metadata_evidence.py
+COMPILER_COVERAGE_REGRESSION_FILES := \
+	angr_platforms/tests/test_near_pointer_argument_values.py \
+	angr_platforms/tests/test_default_signature_provenance.py \
+	angr_platforms/tests/test_metadata_evidence.py \
+	angr_platforms/tests/test_binary_signature_metadata.py
+QA_TYPED_FILES += $(COMPILER_COVERAGE_TYPED_OWNERS)
+LINTERS_DEV_MYPY_FILES += $(COMPILER_COVERAGE_TYPED_OWNERS)
+QA_RUFF_TARGETS += $(COMPILER_COVERAGE_TYPED_OWNERS) $(COMPILER_COVERAGE_REGRESSION_FILES)
+QA_PYTEST_TARGETS += $(COMPILER_COVERAGE_REGRESSION_FILES)
+
 MODEL ?= small
 COMPILER_COVERAGE_MANIFEST ?= examples/compiler_coverage/$(if $(filter large,$(MODEL)),large,pilot).json
 COMPILER_COVERAGE_OUT ?= .cache/compiler-coverage/run-$(shell date +%Y%m%d-%H%M%S)

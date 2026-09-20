@@ -42,6 +42,7 @@ _DISCOVERY_INERTIA_NAMES_8616 = frozenset(
         "sidecar_cache.py",
         "sidecar_metadata.py",
         "binary_signature_metadata.py",
+        "metadata_evidence.py",
         "sidecar_parsers.py",
         "sidecar_policy.py",
         "slice_recovery.py",

@@ -64,6 +64,7 @@ BASE_RECOVERY_CACHE_SOURCE_FILES: tuple[Path, ...] = (
     _ROOT / "inertia_decompiler" / "project_loading.py",
     _ROOT / "inertia_decompiler" / "source_sidecar.py",
     _ROOT / "inertia_decompiler" / "binary_signature_metadata.py",
+    _ROOT / "inertia_decompiler" / "metadata_evidence.py",
     _ROOT / "inertia_decompiler" / "sidecar_policy.py",
     _ROOT / "inertia_decompiler" / "sidecar_parsers.py",
     _ROOT / "inertia_decompiler" / "sidecar_metadata.py",

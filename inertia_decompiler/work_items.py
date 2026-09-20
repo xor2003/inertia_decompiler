@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
     from inertia_decompiler.direct_addr_failure_family import FailureFamilySnapshot
 
+from inertia_decompiler.metadata_evidence import has_only_binary_signatures
 from inertia_decompiler.sidecar_cache import lst_metadata_content_digest_8616
 from inertia_decompiler.tail_validation import (
     emit_tail_validation_console_summary,
@@ -336,6 +337,8 @@ def recovery_evidence_line(binary_path: Path, metadata: object) -> str:
     """Return the CLI evidence banner for sidecar/debug metadata availability."""
     if metadata is None:
         return "/* info: recovery evidence: pure binary recovery mode (no helper metadata/debug info found) */"
+    if has_only_binary_signatures(metadata):
+        return "/* info: recovery evidence: pure binary recovery mode (binary signatures only; no local source/debug evidence) */"
     # Dynamic sidecar compatibility boundary: callers may pass legacy metadata carriers.
     source_format = _visible_source_format(getattr(metadata, "source_format", None))
     source_parts = tuple(part for part in source_format.split("+") if part)
