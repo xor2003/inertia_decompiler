@@ -485,10 +485,10 @@ def _detect_flair_metadata(
     pat_backend: str | None = None,
     signature_catalog: Path | None = None,
 ) -> tuple[dict[int, str], dict[int, tuple[int, int]], tuple[str, ...]]:
+    """Merge independent optional startup patterns and binary catalog matches."""
     def _impl() -> tuple[dict[int, str], dict[int, tuple[int, int]], tuple[str, ...]]:
         flair_root = flair_signature_root()
-        if not flair_root.exists():
-            return {}, {}, ()
+        # Startup matchers tolerate missing assets; an explicit catalog is independent.
         # Dynamic angr boundary: loader objects expose backend-specific main object metadata.
         main_object = getattr(project.loader, "main_object", None)
         if main_object is None:

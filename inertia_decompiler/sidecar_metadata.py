@@ -1061,6 +1061,7 @@ def _lst_code_label(metadata: LSTMetadata | None, addr: int | None, code_base: i
 
 
 def _lst_code_region(metadata: LSTMetadata | None, addr: int | None) -> tuple[int, int] | None:
+    """Find recorded ranges without extending signature evidence into gaps."""
     def _impl() -> tuple[int, int] | None:
         if metadata is None or addr is None:
             return None
@@ -1086,6 +1087,9 @@ def _lst_code_region(metadata: LSTMetadata | None, addr: int | None) -> tuple[in
         for i, label_addr in enumerate(ordered):
             next_addr = ordered[i + 1] if i + 1 < len(ordered) else None
             if label_addr <= addr and (next_addr is None or addr < next_addr):
+                # A matched label proves no ownership beyond its recorded range.
+                if label_addr in metadata.signature_code_addrs:
+                    return None
                 start = label_addr
                 end = next_addr
                 break

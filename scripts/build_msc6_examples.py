@@ -44,6 +44,7 @@ from inertia_decompiler.project_loading import _build_project  # noqa: E402
 from inertia_decompiler.sidecar_metadata import _load_lst_metadata  # noqa: E402
 from scripts.generated_c_return_contract import has_returned_call_8616  # noqa: E402
 from scripts.msc6_memory_model import MSCMemoryModel  # noqa: E402
+from scripts.msc6_original_evidence import record_original_execution  # noqa: E402
 from scripts.msc6_pointer_memory_harness import POINTER_MEMORY_HARNESS_MAIN  # noqa: E402
 from scripts.msc6_runtime_support import (  # noqa: E402
     msc6_runtime_state_declarations,
@@ -3330,6 +3331,12 @@ def main() -> int:
             )
             run_ok = run_exit_code == args.harvest_success_code
 
+        record_original_execution(
+            local_source, memory_model=args.memory_model, build_ok=build_ok,
+            expected_exit_code=args.harvest_success_code, returncode=run_exit_code,
+            stdout=run_stdout, stderr=run_stderr,
+            compile_output=(c_out, c_err), link_output=(l_out, l_err),
+        )
         decompile_skipped = source_path.stem in decompile_skip
         decompile_ok = False
         decompile_recompiled_ok = False

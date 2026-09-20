@@ -38,6 +38,7 @@ compiler-coverage:
 
 compiler-coverage-contracts:
 	$(Q)PYTHON_JIT=1 PYTHONHASHSEED=0 $(PYTHON) -m pytest -n 7 -q --tb=short --no-header --durations=10 \
+		angr_platforms/tests/test_msc6_original_evidence.py \
 		angr_platforms/tests/test_compiler_coverage_csmith.py \
 		angr_platforms/tests/test_compiler_coverage_manifest.py \
 		angr_platforms/tests/test_compiler_coverage_pointer_oracle.py \

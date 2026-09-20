@@ -69,6 +69,7 @@ from inertia_decompiler.architecture_runtime_guard import (
     DecompilerArchitectureGuardError,
     assert_decompiler_architecture_clean,
 )
+from inertia_decompiler.binary_signature_metadata import load_binary_signature_metadata
 from inertia_decompiler.c_text_cleanup import normalize_unresolved_c_text
 from inertia_decompiler.cache import (
     _cache_key_lock,
@@ -4384,7 +4385,10 @@ def _prepare_main_project_8616(
             typing.cast(typing.Any, project)._inertia_dump_layer_filter = args.dump_layer_filter
             _set_tail_validation_runtime_enabled(project, _tail_validation_enabled_for_run(args.binary, proc=args.proc))
             if bool(args.ignore_local_sidecar_hints):
-                lst_metadata = None
+                lst_metadata = load_binary_signature_metadata(
+                    args.binary, project, pat_backend=args.pat_backend,
+                    signature_catalog=effective_signature_catalog,
+                )
                 print(
                     "/* ignoring local sidecar metadata for function discovery and recovery due --ignore-local-sidecar-hints */"
                 )
@@ -4492,7 +4496,10 @@ def _prepare_main_project_8616(
         typing.cast(typing.Any, project)._inertia_dump_layer_filter = args.dump_layer_filter
         _set_tail_validation_runtime_enabled(project, _tail_validation_enabled_for_run(args.binary, proc=args.proc))
         if bool(args.ignore_local_sidecar_hints):
-            lst_metadata = None
+            lst_metadata = load_binary_signature_metadata(
+                args.binary, project, pat_backend=args.pat_backend,
+                signature_catalog=effective_signature_catalog,
+            )
             print(
                 "/* ignoring local sidecar metadata for function discovery and recovery due --ignore-local-sidecar-hints */"
             )

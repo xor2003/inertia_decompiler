@@ -408,10 +408,180 @@ unresolved issues and deferred parity remain visible, not silently declared done
 - Checkpoint: the combined-catalog seed-2 replay at
   `.cache/compiler-coverage/csmith-roundtrip-catalog-003/` still timed out at
   the 180-second case deadline. Generated behavioral acceptance remains open.
-  `scripts/msc6_original_evidence.py` is an initial evidence-checkpoint helper,
-  not yet integrated into the legacy runner or covered by dedicated tests.
-  Wiring and testing it remains pending; it does not currently preserve original
-  execution observations automatically when decompilation times out.
+  Original observations now persist through `scripts/msc6_original_evidence.py`
+  before the legacy runner enters decompilation. Each `<DOS stem>.original.json`
+  retains the source hash, model, compiler/linker diagnostics, original exit code
+  and output. It explicitly records decompilation evidence as not collected and
+  cannot replace the final round-trip report or make a timeout pass.
+  Small/large integration regressions failed before wiring and pass afterward;
+  four negative original-result controls also pass. Both the framework contracts
+  target and routine pipeline enroll them. Framework contracts: 111 passed,
+  seven third-party deprecation warnings, 24.73 seconds. Scoped helper Ruff/MyPy
+  pass; legacy-owner Ruff remains red with 12 findings. Logs:
+  `.cache/original-evidence-{before,after}.log` and
+  `.cache/original-evidence-owner-ruff.log`. This is infrastructure acceptance,
+  not a new generated-program behavioral pass.
+- Seed-2 diagnostic follow-up (2026-09-20, 15:00-15:02 local): direct CLI
+  execution with the combined catalog and `--no-alternate-source-c` still queued
+  all 69 COD-labelled functions; the 100-second diagnostic cap expired. Thus raw
+  signature matches do not establish that this selection path excludes their
+  bodies. No name-based exclusion was added.
+  With `--ignore-local-sidecar-hints`, discovery reported 129 candidates but
+  queued only `main` (`0x1158b`), not the known application body at `0x111f5`.
+  It exited 2 after about 41 seconds, reporting 0/1 selected functions decompiled.
+  Whole-tail validation rejected the call at `0x11639` to `0x10021`: expected two
+  16-bit arguments, recovered zero. This is a genuine blocking validation report,
+  not evidence that source-free selection or behavioral equivalence passes.
+  Retained logs: `.cache/csmith-diagnostic.{c,err}` and
+  `.cache/csmith-sourcefree-diagnostic.{c,err}`. These were bounded diagnostic
+  runs, not timing benchmarks or round-trip acceptance runs.
+  Next repair order: verify complete application selection and signature-backed
+  runtime-body filtering, fix the missing call arguments at their semantic owner,
+  then replay the same seed through the shared round-trip adapter. Do not admit
+  a faster but incomplete function inventory, weaken validation, or substitute a
+  vacuous seed. The legacy adapter still requests alternate-source C; removing
+  that dependency with explicit source-free acceptance remains required.
+- Pre-entry selection repair (2026-09-20, 15:03-15:06 local): the selector used
+  the startup call target as a hard lower address bound. Helpers linked before
+  `main` were discarded despite being ranked candidates. It now retains ranked,
+  framed entries across the loaded pre-startup image, keeping upstream signature
+  filtering and the startup upper bound. No names or source bodies guide it.
+  The earlier-helper regression failed before the change; all 29 focused
+  discovery/cache tests pass afterward. The new tests are enrolled in the routine
+  pipeline. MyPy passes for the owner; whole-file Ruff still has 53 legacy findings.
+  A binary-only candidate probe now retains both `0x111f5` and `0x1158b`, among
+  69 framed candidates. That probe did not attach a signature catalog and is not
+  proof of runtime exclusion, complete function recovery, validation or improved
+  performance. Combined-catalog end-to-end selection and the call-argument failure
+  remain open. Logs: `.cache/pre-entry-order-{before,after,csmith,ruff,mypy}.log`.
+- Catalog integration repair (2026-09-20, 15:07-15:10 local):
+  `_detect_flair_metadata` returned early when optional `flair_startup/` was
+  absent, silently ignoring the independent explicit signature catalog. The
+  directory is absent in this checkout. Removed that dependency; existing startup
+  matchers already tolerate missing assets. The new regression failed before the
+  repair and passes afterward; six focused catalog/merge tests pass, and owner
+  MyPy passes. Whole-file Ruff still reports six complexity findings. The new
+  regression is enrolled in the routine pipeline. A real runtime-only-catalog
+  probe now returns 57 labels/ranges and `signature_catalog` evidence, with no
+  hits at either application entry. This production result is not the earlier
+  raw-match range count of 67; complete runtime exclusion remains unproven.
+  Source-free CLI setup separately skips all metadata loading, including explicit
+  catalogs, under `--ignore-local-sidecar-hints`. That policy coupling must be
+  separated without admitting debug/source evidence before claiming source-free
+  catalog acceptance. Logs: `.cache/catalog-without-flair-{before,after,csmith,ruff,mypy}.log`.
+- Binary-signature policy separation (2026-09-20, 15:10-15:14 local): source-free
+  CLI setup now uses `binary_signature_metadata.py` instead of discarding catalog
+  evidence along with sidecars. The focused owner only invokes binary/startup
+  signature matching; COD/debug/type/data fields remain empty. Existing typed
+  signature addresses drive filtering, not library names. Recovery cache source
+  manifests include the new owner. Tests cover no matches, real angr label storage,
+  empty source/debug fields and CLI setup refusing the sidecar loader; all seven
+  focused signature/discovery regressions pass. New owner Ruff/MyPy and touched
+  CLI/cache MyPy pass; owner-wide Ruff retains 37 findings outside this addition.
+  The real binary probe now keeps both application entries among 12 candidates,
+  down from 69 without catalog evidence. Ten runtime candidates still remain,
+  so neither complete exclusion nor behavioral round-trip acceptance is claimed.
+  Logs: `.cache/binary-signatures-{tests,csmith,owner-ruff,owner-mypy}.log`.
+- Runtime ambiguity audit (2026-09-20, 15:14-15:16 local): all ten remaining
+  runtime candidates have PATs matching two locations. Production matching
+  requires exactly one hit, unlike the earlier raw-hit audit. Retain that refusal;
+  do not skip ambiguous functions by name. Added the unique/repeated-body control
+  to the routine pipeline: two tests pass and scoped Ruff passes. Audit:
+  `.cache/csmith-unmatched-runtime-audit.json`.
+  A focused combined-catalog CLI run requested `--addr 0x1158b` but recovered
+  `0x113bf` (`fcn_0d133`) instead, then exited 4 on uninitialized stack reads,
+  missing call arguments and branch-surface validation. It is not a comparable
+  `main` regression. Catalog setup took approximately 53 seconds before recovery;
+  `.cache/csmith-main-signatures.{c,err}` retains the run. A subsequent metadata
+  probe found 126 labels, no labels at either application entry and no catalog
+  range containing `0x1158b`, so a catalog-range overlap is not established.
+  Direct-function selection must be investigated before interpreting this as a
+  call-argument regression. Probe: `.cache/csmith-catalog-overlap.json.log`.
+- Signature-gap ownership repair (2026-09-20, 15:17-15:20 local):
+  `_lst_code_region` guessed a containing interval between neighboring labels
+  after explicit-range lookup failed. That let a signature label claim unmatched
+  application bytes beyond its actual match. Signature-only labels now supply
+  only recorded ranges; listing-label fallback remains unchanged. Two negative
+  gap cases failed before the fix; 25 focused metadata/discovery tests pass after
+  it, and owner MyPy passes. Routine pipeline enrolls the new cases. Whole-file
+  Ruff remains red with seven findings, including existing selector complexity.
+  The identical combined-catalog CLI replay now selects the requested `0x1158b`,
+  not `0x113bf`. It still exits 3: caller-census setup consumes the recovery
+  budget, indexed-Alias refuses an incomplete census, and validation is
+  uncollected. Do not call the function fixed or the timeout a pass. Logs:
+  `.cache/signature-region-{before,after,ruff,mypy}.log` and
+  `.cache/csmith-main-signatures-bounded.{c,err}`.
+  `quality-fast` was rerun and remains blocked by global lint findings;
+  `.cache/compiler-coverage-signature-quality-fast.log` retains the full result.
+- Isolated-evidence policy repair (2026-09-20, 15:21-15:24 local): fresh caller
+  discovery projects dropped already-established signature matches. They now
+  receive a detached signature-only subset and the include-library policy; local
+  source/debug fields are not copied, and reuse clears stale metadata. The new
+  isolation regression failed before the repair; 27 focused tests pass afterward,
+  with scoped Ruff/MyPy clean. Same-argument `main` replay still exits 3 with
+  validation uncollected after approximately 71 seconds; no speedup is claimed.
+  Logs: `.cache/discovery-signature-isolation-{before,after}.log` and
+  `.cache/csmith-main-isolated-signatures.{c,err}`.
+  Next bounded cause: `_recover_pre_entry_source_catalog_8616` and
+  `_pre_entry_source_function_ranges_8616` derive ends from selected entries only.
+  Signature-excluded entries therefore cease to bound neighboring recovery
+  ranges. Preserve matched entry boundaries independently of body-selection
+  policy before further replay; do not widen timeouts or weaken census refusal.
+- Library-boundary repair (2026-09-20, 15:25-15:28 local): recovery and caller
+  ranges now share `discovery_candidate_ranges.py`. Signature entries remain
+  boundaries even when their bodies are excluded. The integration test failed
+  before the change; 32 focused tests now pass, including duplicate/out-of-image
+  boundaries and invalid selected-entry refusal. New helper Ruff and touched
+  discovery MyPy pass; owner-wide Ruff retains 53 findings. Same-argument `main`
+  replay still exits 3 with uncollected validation; no performance improvement
+  is claimed. Logs: `.cache/library-boundaries-{before,after,ruff}.log` and
+  `.cache/csmith-main-library-boundaries.{c,err}`.
+  Further inspection found a separate expansion path in
+  `_recover_candidate_function_pair`: recovered bodies of at most 0x20 bytes
+  trigger richer recovery even with an explicit bound. This path uses
+  `_richest_bounded_recovery_region` rather than the supplied exact region;
+  richer `_pick_function` calls also omit the disabled calling-convention-seeding
+  policy used for census scans. Cover and repair those paths before another
+  expensive replay. Exact bounds and disabled expensive analysis must survive
+  fallback; do not treat small functions alone as proof of truncation.
+- Richer-recovery policy repair (2026-09-20, 15:29-15:32 local): exact bounded
+  short functions no longer trigger size-only region expansion. Richer CFG
+  recovery now forwards and obeys the calling-convention-seeding policy; its
+  default remains enabled. Four controls failed before the change. Afterward,
+  35 focused discovery tests and 33 selected CLI regressions pass; owner MyPy
+  passes, while whole-file Ruff retains 53 findings. New tests are in the routine
+  pipeline. Logs: `.cache/recovery-policy-{before,after,cli-tests,ruff,mypy}.log`.
+  Identical `main` replay now closes candidate census accounting: raw=12,
+  normalized=12, classified=12, materialized=12, failures=0; logged candidate
+  recovery took 2.74 seconds. It reaches the correct function's decompilation and
+  still fails validation at call `0x11639` to `0x10021` (two expected arguments,
+  zero recovered). This removes the census-timeout blocker, not the semantic
+  failure. No repeatable end-to-end speedup or behavioral pass is claimed from
+  this single diagnostic replay, which overlapped focused pytest work.
+  Output: `.cache/csmith-main-recovery-policy.{c,err}`. Next: repair argument
+  recovery using binary stack/value evidence; leave validation blocking.
+
+- Complemented call-argument repair (2026-09-20, 15:33-15:38 local): decoded
+  register NOT now preserves width-aware value provenance as XOR with the
+  operand-width mask. Register-only NOT no longer hides earlier argument pushes;
+  frame-register and memory writes remain barriers. Three controls failed before
+  the change; 98 focused tests pass afterward, and owner MyPy passes. Owner Ruff
+  retains 22 findings. The 60-second, source-free `main` replay now emits C with
+  `validation=passed` and clean whole-tail validation. Its final call preserves
+  both complemented CRC words and the flag argument. This is not a complete
+  Csmith round-trip pass: wide argument grouping, pointer argument classes,
+  strict recompilation and execution remain acceptance obligations. Logs:
+  `.cache/callsite-complement-{before,after,ruff,mypy}.log` and
+  `.cache/csmith-main-complement.{c,err}`. Existing global lint debt remains
+  blocking for a green quality gate.
+- Commit checkpoint validation (2026-09-20): contract lane 268 passed; standard
+  pipeline pytest lane 6397 passed, 8 failed in 797.92 seconds. Failures cover
+  SORTD drawtime/swapbars/insertionsort sidecar-message assertions, percolateup
+  timeout, runmenu/initbars output, setgear guard logic and COD loadprog output.
+  These are unresolved failures, not established pre-existing debt. The subsequent
+  QuickC stage was interrupted to fulfill the commit/push checkpoint request;
+  external stages are incomplete and no fresh tiny-MS-C round-trip pass is claimed.
+  Full diagnostics: `.cache/compiler-coverage-complement-pipeline.log`.
 
 References: [NIST covering arrays](https://math.nist.gov/coveringarrays/) and
 [Csmith research](https://users.cs.utah.edu/~regehr/papers/pldi11-preprint.pdf).

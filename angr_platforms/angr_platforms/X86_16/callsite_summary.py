@@ -1234,6 +1234,7 @@ def _is_segment_register_push_8616(insn: object) -> bool:
 
 
 def _transparent_between_push_args_8616(insn: object) -> bool:
+    """Allow register calculations between pushes without crossing frame writes."""
     mnemonic = _mnemonic(insn)
     if mnemonic in {"cbw", "cwd", "cwde", "cdq", "nop"}:
         return True
@@ -1251,10 +1252,10 @@ def _transparent_between_push_args_8616(insn: object) -> bool:
             return False
         return _operand_reg_name(insn, operands[0]) not in {"sp", "bp", "ss", "ds", "es", "cs"}
 
-    if mnemonic not in {"adc", "add", "sbb", "sub", "sar", "shl", "shr", "and", "or", "xor", "inc", "dec", "neg"}:
+    if mnemonic not in {"adc", "add", "sbb", "sub", "sar", "shl", "shr", "and", "or", "xor", "inc", "dec", "neg", "not"}:
         return False
     operands = _instruction_operands(insn)
-    if mnemonic in {"inc", "dec", "neg"}:
+    if mnemonic in {"inc", "dec", "neg", "not"}:
         if len(operands) != 1:
             return False
         dest_name = _operand_reg_name(insn, operands[0])
@@ -1900,6 +1901,7 @@ def _segmented_indirect_source_from_operand_8616(
 
 
 def _register_source_from_context_8616(insns: tuple[object, ...], idx: int, reg_name: str, *, depth: int = 0) -> _CallsiteTuple8616 | None:
+    """Trace a decoded register value through supported width-aware operations."""
     if depth > 4 or reg_name in {"sp", "bp", "ss", "ds", "es", "cs"}:
         return None
     scan = idx - 1
@@ -2010,8 +2012,14 @@ def _register_source_from_context_8616(insns: tuple[object, ...], idx: int, reg_
                 scan -= 1
                 skipped += 1
                 continue
-        if mnemonic == "neg" and len(operands) == 1 and _operand_reg_name(insn, operands[0]) == reg_name:
-            ops.append((CallsitePushExprOp8616.NEG.value, 0))
+        if mnemonic in {"neg", "not"} and len(operands) == 1 and _operand_reg_name(insn, operands[0]) == reg_name:
+            width = cast(_CapstoneOperandSurface8616, operands[0]).size
+            if mnemonic == "not" and width not in (1, 2, 4):
+                return None
+            operation = (CallsitePushExprOp8616.NEG.value, 0) if mnemonic == "neg" else (
+                CallsitePushExprOp8616.XOR.value, (1 << (width * 8)) - 1,
+            )
+            ops.append(operation)
             scan -= 1
             skipped += 1
             continue
@@ -2319,6 +2327,7 @@ def _zero_extended_byte_push_source_8616(
 def _push_arg_source_from_context(
     function: object, insns: tuple[object, ...], idx: int
 ) -> _CallsiteTuple8616 | None:
+    """Recover a PUSH value from decoded local and cross-block provenance."""
     def _impl() -> _CallsiteTuple8616 | None:
         source = _push_arg_source(insns[idx])
         if source is not None:
@@ -2465,8 +2474,14 @@ def _push_arg_source_from_context(
                     skipped += 1
                     continue
                 return None
-            if mnemonic == "neg" and len(operands) == 1 and _operand_reg_name(insn, operands[0]) == pushed_reg:
-                ops.append((CallsitePushExprOp8616.NEG.value, 0))
+            if mnemonic in {"neg", "not"} and len(operands) == 1 and _operand_reg_name(insn, operands[0]) == pushed_reg:
+                width = cast(_CapstoneOperandSurface8616, operands[0]).size
+                if mnemonic == "not" and width not in (1, 2, 4):
+                    return None
+                operation = (CallsitePushExprOp8616.NEG.value, 0) if mnemonic == "neg" else (
+                    CallsitePushExprOp8616.XOR.value, (1 << (width * 8)) - 1,
+                )
+                ops.append(operation)
                 scan -= 1
                 skipped += 1
                 continue

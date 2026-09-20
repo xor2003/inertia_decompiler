@@ -77,6 +77,7 @@ from inertia_decompiler.discovery_cache_contract import (
     display_catalog_cache_record_8616,
     source_region_catalog_evidence_comment_8616,
 )
+from inertia_decompiler.discovery_candidate_ranges import pre_entry_candidate_ranges
 from inertia_decompiler.discovery_evidence_project import isolated_discovery_evidence_project_8616
 from inertia_decompiler.function_graph_extent_repair import enforce_covered_transition_sources_8616
 from inertia_decompiler.project_loading import (
@@ -780,7 +781,9 @@ def _pick_function(
     regions: Sequence[tuple[int, int]] | None = None,
     data_references: bool | None = None,
     force_smart_scan: bool | None = None,
+    seed_calling_conventions_enabled: bool = True,
 ) -> _FunctionCfgPair:
+    """Recover a CFG while preserving the caller's convention-analysis policy."""
     def _impl() -> _FunctionCfgPair:
         target_addr = project.entry if addr is None else addr
         data_refs = True if data_references is None else data_references
@@ -843,7 +846,8 @@ def _pick_function(
                 cfg = extended_cfg
                 function = cfg.functions[target_addr]
             patch_interrupt_service_call_sites(function, _dynamic_attr(project.loader.main_object, "binary", None))
-        seed_calling_conventions(cfg)
+        if seed_calling_conventions_enabled:
+            seed_calling_conventions(cfg)
 
         return cfg, function
 
@@ -2035,6 +2039,7 @@ def _recover_candidate_function_pair(
     exact_region: tuple[int, int] | None = None,
     seed_calling_conventions_enabled: bool = True,
 ) -> _FunctionCfgPair:
+    """Recover one candidate without widening explicit function boundaries."""
     def _impl() -> _FunctionCfgPair:
         block = candidate_project.factory.block(candidate_addr, size=8, opt_level=0)
         insns = block.capstone.insns
@@ -2136,6 +2141,7 @@ def _recover_candidate_function_pair(
                         regions=[bounded_region],
                         data_references=data_references,
                         force_smart_scan=False,
+                        seed_calling_conventions_enabled=seed_calling_conventions_enabled,
                     )
                 except Exception as exc:
                     last_error = exc
@@ -2148,7 +2154,8 @@ def _recover_candidate_function_pair(
                 best_pair = richer_best_pair
                 best_score = richer_best_score
                 truncated = False
-        if best_pair is not None and candidate_addr < project_entry and best_score[1] <= 0x20 and candidate_regions:
+        small_unbounded_candidate = bounded_exact_region is None and best_score[1] <= 0x20
+        if best_pair is not None and candidate_addr < project_entry and small_unbounded_candidate and candidate_regions:
             truncated = True
             try:
                 richer_pair = _pick_function(
@@ -2159,6 +2166,7 @@ def _recover_candidate_function_pair(
                     ],
                     data_references=True,
                     force_smart_scan=False,
+                    seed_calling_conventions_enabled=seed_calling_conventions_enabled,
                 )
                 richer_score = _function_recovery_score(richer_pair[1])
                 if richer_score > best_score:
@@ -3269,7 +3277,7 @@ def _rank_exe_function_seeds(
 
 
 def _rank_pre_entry_source_function_seeds_8616(project: angr.Project) -> list[int]:
-    """Return framed application entries bounded by a startup call to lower code."""
+    """Rank framed pre-startup candidates without assuming main is linked first."""
     if project.arch.name != "86_16":
         return []
     main_object = _dynamic_attr(project.loader, "main_object", None)
@@ -3298,7 +3306,8 @@ def _rank_pre_entry_source_function_seeds_8616(project: angr.Project) -> list[in
     source_seeds = [
         addr
         for addr in ranked_seeds
-        if source_region_start <= addr < project.entry
+        # A startup call locates a root, not the first function in its object.
+        if linked_base <= addr < project.entry
         and _looks_like_x86_16_function_prologue(code, addr - linked_base)
     ]
     if source_region_start not in source_seeds:
@@ -3323,12 +3332,16 @@ def _pre_entry_source_function_ranges_8616(
     final_end = min(project.entry, image_end)
     if ordered_seeds[-1] >= final_end:
         return ()
+    metadata = cast(LSTMetadata | None, _dynamic_attr(project, "_inertia_lst_metadata", None))
+    candidate_ranges = pre_entry_candidate_ranges(
+        ordered_seeds, _signature_matched_code_addrs(metadata), end=final_end,
+    )
     function_ranges = tuple(
         (
             _binary_padding_entry_aliases_8616(project, start)[0],
-            ordered_seeds[index + 1] if index + 1 < len(ordered_seeds) else final_end,
+            candidate_ranges[start][1],
         )
-        for index, start in enumerate(ordered_seeds)
+        for start in ordered_seeds
     )
     entry_caller_range = _entry_linear_caller_range_8616(
         project,
@@ -3476,11 +3489,10 @@ def _recover_pre_entry_source_catalog_8616(
     deadline = time.monotonic() + max(1, timeout)
     image_end = linked_base + max_addr + 1
     ordered_seeds = tuple(sorted(normalized_seeds))
-    exact_region_by_addr = {
-        addr: (addr, ordered_seeds[index + 1] if index + 1 < len(ordered_seeds) else min(project.entry, image_end))
-        for index, addr in enumerate(ordered_seeds)
-    }
     metadata = cast(LSTMetadata | None, _dynamic_attr(project, "_inertia_lst_metadata", None))
+    exact_region_by_addr = pre_entry_candidate_ranges(
+        ordered_seeds, _signature_matched_code_addrs(metadata), end=min(project.entry, image_end),
+    )
     recovered: list[_FunctionCfgPair] = []
     recovered_addrs: set[int] = set()
     failed_addrs: list[int] = []
