@@ -132,3 +132,46 @@ For the changed surface, run `make quality-dev PYTHON=./.venv/bin/python`.
 For global typing debt accounting, run `make linters PYTHON=./.venv/bin/python`.
 Read `reference/project-map.md`, `reference/decompiler-map.md`, `reference/agent-rules.md`, `reference/real-mode-edge-policy.md`, and `reference/frontend-backend-migration-policy.md`.
 This includes the Supplemental glossary and long-running-agent guidance.
+
+## Context / compaction
+
+Context / compaction
+
+Before compaction, create a minimal handoff for the next agent.
+
+Keep only:
+
+current objective
+non-obvious settled decisions/invariants
+current state
+next 3–6 actions
+active blockers/risks
+files needed for those actions
+
+Do not retain information that can be cheaply rediscovered from the repo.
+
+Delete:
+
+investigation/history/rejected approaches
+completed commands, logs, tool output
+line numbers and Makefile locations
+constructor/signature details unless currently blocking
+completed test-case inventories
+unrelated/future defects
+duplicated information already in PLAN/PROGRESS
+long path repetitions
+
+Use path aliases when useful.
+
+Completed work: one line per logical milestone.
+
+Relevant files: maximum 8 entries.
+
+Hard limit: 500 words. If the draft exceeds 500 words, rewrite it before compaction.
+
+For every retained fact ask:
+"Would the next agent likely make a wrong implementation decision without this?"
+If not, omit it.
+
+Do not preserve commands or exact locations solely to save the next agent a grep/search.
+

@@ -774,5 +774,50 @@ References: [NIST covering arrays](https://math.nist.gov/coveringarrays/) and
 - Replay artifacts: `.cache/large-bump-after-farfix.{c,err}`,
   `.cache/large-bump-after-probefix.{c,err}`,
   `.cache/large-bump-after-farret.{c,err}`. Batch after these fixes:
-  `.cache/compiler-coverage/large-farfix-001/` (running at ledger time;
-  result to be recorded by the next checkpoint).
+  `.cache/compiler-coverage/large-farfix-001/` (recorded below).
+
+### RETF Boundary Carrier Consumption
+
+- Delivered the planned next slice: model the far return as a 4-byte return
+  boundary at its semantic owner. New owner
+  `X86_16/lowering/far_return_boundary_carriers.py`
+  (`consume_terminal_far_return_boundary_carriers_8616`): a structured RETF
+  CS-restore carrier CAssignment is removed when alias
+  `SegmentStackRestoreFact8616` (`restore_register == "cs"`,
+  `saved_instruction_addr is None`, verdict `UNKNOWN_REFUSE`) has its
+  `restore_instruction_addr` proven at a block-terminal RET with complete
+  `terminal_stack_cleanup_at_address_8616` evidence (FAR frame,
+  `operand_bits == 16`, cleanup 0), and the assignment's LHS is a pure CS
+  carrier (`inertia_cs` runtime variable or physical cs
+  SimRegisterVariable). Mixed non-CS carriers refuse and keep code; typed
+  enums only; closed stats accounting (raw == normalized + failure;
+  normalized == classified + refused; classified == materialized + already).
+  The consumed-set tolerates the structuring pass table's single sweep
+  (re-removal of rebuilt carriers is allowed; consumed facts feed
+  `already_materialized` only when the carrier is absent). `ir/vex_control_flow.py`
+  gains `terminal_ret_instruction_addrs_8616`; both are wired in
+  `decompiler_structuring_stage.py` after `_segment_stack_restore_carriers_8616`
+  (pass table + priming-end). No IR lift change: tests still assert the CS
+  restore in IR. 19 tests in `test_x86_16_far_return_boundary_carriers.py`,
+  enrolled in QA_TYPED/QA_RUFF/QA_PYTEST/decompiler-contracts lanes and the
+  `scripts/test_pipeline.py` routine lane. Ruff/MyPy clean on touched owners.
+- The gcc `-Werror=uninitialized` blocker is resolved: the RETF CS pop is
+  consumed instead of materializing caller-frame machinery as program reads,
+  so far functions end with a plain `return ...`.
+- Recorded results. Baseline batch `.cache/compiler-coverage/large-farfix-001/`:
+  case `large_global_calls` = `validation_failed` (forbidden `ss << 4` token
+  in `_sum_globals`). After the slice, focused replays on the 001 `STORE.EXE`:
+  `_sum_globals` and `bump_static` both `validation=passed` with no `ss << 4`
+  in the generated C. Full rerun
+  `scripts/compiler_coverage_suite.py --manifest examples/compiler_coverage/large.json
+  --out-dir .cache/compiler-coverage/large-farfix-002`: case
+  `large_global_calls` **passed** (`roundtrips_passed=true`,
+  `source_contracts_passed=true`; `bump_static` materializes the required
+  global write and keeps the returned call; the rebuilt `DSTOR01.C` body has
+  the static bump and `return seen`, i.e. full 30-byte-function semantics, not
+  the truncated fallback). No `ss << 4` in any 002 `.dec` artifact.
+- Open defect unchanged: the shared-project slice lane still lacks a
+  function-inventory completeness check (the earlier truncated 24/30-byte
+  `bump_static` fallback). The 002 fallback-rebuild lane produced full-body
+  output this time, but the check itself remains to be implemented before
+  slice-lane acceptance is trusted by construction.
