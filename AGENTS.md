@@ -118,6 +118,9 @@ Read and follow [reference/agent-execution.md](reference/agent-execution.md)
 at startup and after compaction. It owns the detailed regression-test,
 performance, selective-delegation, token-efficient-output, and progress-reporting
 rules. This file remains the canonical architecture and acceptance contract.
+`CLAUDE.md` is the agent entry file: its context-efficiency rules supplement
+this contract, and on any conflict this contract and
+[reference/agent-execution.md](reference/agent-execution.md) win.
 
 Regular local gate: `make quality-fast PYTHON=./.venv/bin/python`.
 `make test-pipeline PYTHON=./.venv/bin/python` before claiming semantic decompiler improvements.

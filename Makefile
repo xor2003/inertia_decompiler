@@ -1484,13 +1484,16 @@ QA_TYPED_FILES := \
 	angr_platforms/angr_platforms/X86_16/lowering/interprocedural_storage_return_type_collection_contracts.py \
 	angr_platforms/angr_platforms/X86_16/lowering/packed_flags_state.py \
 	angr_platforms/angr_platforms/X86_16/lowering/packed_flags_liveness.py \
-	angr_platforms/angr_platforms/X86_16/lowering/packed_flags_calls.py \
+angr_platforms/angr_platforms/X86_16/lowering/packed_flags_calls.py \
+	angr_platforms/angr_platforms/X86_16/lowering/far_return_boundary_carriers.py \
 	angr_platforms/angr_platforms/X86_16/lowering/segment_stack_restore_carriers.py \
 	angr_platforms/angr_platforms/X86_16/structuring/condition_chain_provenance.py \
 	angr_platforms/angr_platforms/X86_16/structuring/condition_evidence_closure.py \
 	angr_platforms/angr_platforms/X86_16/structuring/pretest_condition_surface.py \
-	angr_platforms/angr_platforms/X86_16/structuring/string_io_loop_carriers.py \
-	angr_platforms/angr_platforms/X86_16/validation_condition_chains.py \
+	angr_platforms/angr_platforms/X86_16/structuring/pointer_array_sum_projection.py \
+	angr_platforms/angr_platforms/X86_16/structuring/typed_stack_effect_transfer.py \
+	angr_platforms/angr_platforms/X86_16/structuring/typed_widening.py \
+	angr_platforms/angr_platforms/X86_16/validation_cog/typed_instructions_cog.py \
 	angr_platforms/angr_platforms/X86_16/validation_condition_closure_delta.py \
 	angr_platforms/angr_platforms/X86_16/validation_observable_compaction.py \
 	angr_platforms/angr_platforms/X86_16/validation_pointer_parameter_output_contracts.py \
@@ -2964,6 +2967,7 @@ QA_RUFF_TARGETS := \
 	angr_platforms/tests/test_x86_16_stack_reference_offsets.py \
 	angr_platforms/tests/test_x86_16_les_stack_argument_behavior.py \
 	angr_platforms/tests/test_x86_16_segment_stack_restore_carriers.py \
+	angr_platforms/tests/test_x86_16_far_return_boundary_carriers.py \
 	angr_platforms/tests/test_x86_16_string_corpus_anchors.py \
 	angr_platforms/tests/test_x86_16_ss_traversal_contract.py \
 	angr_platforms/tests/test_x86_16_stack_prototype_wrapped_locals.py \
@@ -3127,13 +3131,16 @@ QA_RUFF_TARGETS := \
 	angr_platforms/angr_platforms/X86_16/lowering/interprocedural_storage_return_type_collection_contracts.py \
 	angr_platforms/angr_platforms/X86_16/lowering/packed_flags_state.py \
 	angr_platforms/angr_platforms/X86_16/lowering/packed_flags_liveness.py \
-	angr_platforms/angr_platforms/X86_16/lowering/packed_flags_calls.py \
+angr_platforms/angr_platforms/X86_16/lowering/packed_flags_calls.py \
+	angr_platforms/angr_platforms/X86_16/lowering/far_return_boundary_carriers.py \
 	angr_platforms/angr_platforms/X86_16/lowering/segment_stack_restore_carriers.py \
 	angr_platforms/angr_platforms/X86_16/structuring/condition_chain_provenance.py \
 	angr_platforms/angr_platforms/X86_16/structuring/condition_evidence_closure.py \
 	angr_platforms/angr_platforms/X86_16/structuring/pretest_condition_surface.py \
-	angr_platforms/angr_platforms/X86_16/structuring/string_io_loop_carriers.py \
-	angr_platforms/angr_platforms/X86_16/validation_condition_chains.py \
+	angr_platforms/angr_platforms/X86_16/structuring/pointer_array_sum_projection.py \
+	angr_platforms/angr_platforms/X86_16/structuring/typed_stack_effect_transfer.py \
+	angr_platforms/angr_platforms/X86_16/structuring/typed_widening.py \
+	angr_platforms/angr_platforms/X86_16/validation_cog/typed_instructions_cog.py \
 	angr_platforms/angr_platforms/X86_16/validation_condition_closure_delta.py \
 	angr_platforms/angr_platforms/X86_16/validation_observable_compaction.py \
 	angr_platforms/angr_platforms/X86_16/validation_pointer_parameter_output_contracts.py \
@@ -3602,6 +3609,7 @@ QA_PYTEST_TARGETS := \
 	angr_platforms/tests/test_x86_16_les_stack_argument_behavior.py \
 	angr_platforms/tests/test_x86_16_string_corpus_anchors.py \
 	angr_platforms/tests/test_x86_16_segment_stack_restore_carriers.py \
+	angr_platforms/tests/test_x86_16_far_return_boundary_carriers.py \
 	angr_platforms/tests/test_x86_16_ss_traversal_contract.py \
 	angr_platforms/tests/test_x86_16_stack_prototype_wrapped_locals.py \
 	angr_platforms/tests/test_x86_16_ast_traversal_coverage.py \
@@ -4110,6 +4118,7 @@ decompiler-contracts:
 		angr_platforms/tests/test_x86_16_ss_traversal_contract.py \
 		angr_platforms/tests/test_x86_16_stack_prototype_wrapped_locals.py \
 		angr_platforms/tests/test_x86_16_validation_entry_stack_ranges.py \
+		angr_platforms/tests/test_x86_16_far_return_boundary_carriers.py \
 		angr_platforms/tests/test_x86_16_stack_reference_offsets.py
 
 

@@ -21,8 +21,8 @@ from ..callsite_summary import (
     callsite_machine_frame_kind_8616,
 )
 from ..compiler_helpers import (
-    CompilerHelperEvidenceKind8616,
     identify_x86_16_compiler_helper_at_8616,
+    is_x86_16_stack_probe_evidence_kind_8616,
 )
 from ..ir import IRAddress, IRCallStackEffect8616, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from .call_stack_effect_contracts import CallStackEffectFailure8616
@@ -103,7 +103,7 @@ def binary_stack_allocation_target_8616(
     if not same_target:
         return None
     evidence = identify_x86_16_compiler_helper_at_8616(project, target_addr)
-    if evidence is None or evidence.kind is not CompilerHelperEvidenceKind8616.STACK_PROBE:
+    if evidence is None or not is_x86_16_stack_probe_evidence_kind_8616(evidence.kind):
         return None
     return target_addr
 

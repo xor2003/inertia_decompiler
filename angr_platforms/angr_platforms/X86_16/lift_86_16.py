@@ -66,6 +66,7 @@ from .semantics.status_flag_liveness import (
     decoded_status_flag_instruction_8616,
     status_flags_dead_before_use_8616,
 )
+from .stack_helpers import far_linear_target_8616
 from .vex_value_contract import require_vex_value_8616
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -402,6 +403,18 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
                 mem = self._bp_mem(ops[0])
                 if mem:
                     return ("call_mem16", mem)
+            if self.cs.mnemonic == "lcall" and len(ops) == 2 and all(op.type == 2 for op in ops):
+                # Far calls reach the emulator path unless the linear target is a
+                # binary-proven far stack probe, which is inlined with local effects.
+                segment = ops[0].imm & 0xFFFF
+                offset = ops[1].imm & 0xFFFF
+                linear_target = far_linear_target_8616(segment, offset)
+                if linear_target is not None and is_x86_16_registered_stack_probe_target_8616(
+                    self.arch,
+                    linear_target,
+                ):
+                    return ("far_probe_call", segment, offset)
+                return None
             if self.cs.mnemonic == "inc" and len(ops) == 1 and (
                 _affine_switch_conditions_enabled_8616() or self._next_instruction_is_simple_jcc_from_bytes_8616()
             ):
@@ -2982,6 +2995,21 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
                 self.put(sp, "sp")
                 self._stack_store16(sp, ret_addr, offset=-2)
                 self.jump(None, target, JumpKind.Call)
+                return
+            if kind == "far_probe_call":
+                # Binary-proven far stack probe inlined with local effects: the
+                # helper pops the far return pair, subtracts AX from SP, pushes
+                # the pair back, and RETFs, so the net effect is the register
+                # scratch updates plus the SP allocation without any call edge.
+                proven_ax = self._condition_proven_reg_value_8616("ax", width_bits=16)
+                allocation = proven_ax.const if isinstance(proven_ax, IRValue) else None
+                ax_value = self._const16(allocation) if allocation is not None else self._get_reg16("ax")
+                next_sp = self._get_reg16("sp") - ax_value
+                self.put(self._const16(self.addr + self.cs.size), "cx")
+                self.put(self._get_reg16("cs"), "dx")
+                self.put(next_sp, "bx")
+                if allocation != 0:
+                    self.put(next_sp, "sp")
                 return
             if kind == "enter":
                 _, frame_size, nesting = semantics

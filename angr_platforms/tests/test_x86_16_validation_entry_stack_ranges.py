@@ -6,6 +6,11 @@ import pytest
 from angr.analyses.decompiler.structured_codegen.c import CStatements, CVariable
 from angr.sim_type import SimTypeBottom, SimTypeChar, SimTypeFunction, SimTypeShort
 from angr.sim_variable import SimStackVariable
+from angr_platforms.X86_16.alias.segment_stack_restore import (
+    SegmentStackRestoreArtifact8616,
+    SegmentStackRestoreFact8616,
+    SegmentStackRestoreVerdict8616,
+)
 from angr_platforms.X86_16.lowering.stack_variable_coordinates import (
     record_stack_variable_coordinate_projection_8616,
 )
@@ -226,3 +231,121 @@ def test_missing_parameter_declaration_cannot_initialize_a_variable():
     collection = entry_stack_ranges_from_codegen_8616(codegen)
     assert not collection.ranges
     assert collection.stats.failure_count == 1
+
+
+def _far_return_fact(
+    restore_addr: int,
+    *,
+    verdict: SegmentStackRestoreVerdict8616 = SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE,
+    saved_instruction_addr: int | None = None,
+    restore_register: str = "cs",
+) -> SegmentStackRestoreFact8616:
+    """Build one terminal segment-restore fact for far-return evidence."""
+    return SegmentStackRestoreFact8616(
+        block_addr=0x1000,
+        restore_instruction_addr=restore_addr,
+        restore_register=restore_register,
+        saved_instruction_addr=saved_instruction_addr,
+        saved_register=None,
+        stack_offsets=(),
+        verdict=verdict,
+    )
+
+
+def _ir_artifact_with_terminal_ret(ret_addr: int) -> SimpleNamespace:
+    """Build the codegen IR surface with one block ending in a RET terminal."""
+    terminal = SimpleNamespace(op="RET", addr=ret_addr)
+    block = SimpleNamespace(instrs=[SimpleNamespace(op="MOV", addr=0x1000), terminal])
+    return SimpleNamespace(blocks=[block])
+
+
+def _attach_far_return_evidence(
+    codegen: SimpleNamespace,
+    fact: SegmentStackRestoreFact8616,
+    ret_addr: int = 0x100B,
+) -> None:
+    """Attach the segment-restore artifact and IR surface to a fake codegen."""
+    codegen._inertia_segment_stack_restore_artifact = SegmentStackRestoreArtifact8616(
+        facts=(fact,)
+    )
+    codegen._inertia_vex_ir_artifact = _ir_artifact_with_terminal_ret(ret_addr)
+
+
+def test_far_return_cs_restore_adds_caller_defined_entry_range():
+    codegen = _codegen()
+    _attach_far_return_evidence(codegen, _far_return_fact(0x100B))
+    codegen.cfunc = SimpleNamespace(arg_list=[])
+
+    collection = entry_stack_ranges_from_codegen_8616(codegen)
+
+    assert collection.ranges == (
+        DefUseEntryStackRange8616(base_offset=4, width=2),
+    )
+    assert collection.stats.raw_fact_count == 1
+    assert collection.stats.normalized_fact_count == 1
+    assert collection.stats.classified_fact_count == 1
+    assert collection.stats.materialized_count == 1
+    assert collection.stats.failure_count == 0
+    assert collection.stats.complete is True
+
+
+def test_mid_function_cs_restore_does_not_define_entry_range():
+    codegen = _codegen()
+    _attach_far_return_evidence(codegen, _far_return_fact(0x1006))
+    codegen.cfunc = SimpleNamespace(arg_list=[])
+
+    collection = entry_stack_ranges_from_codegen_8616(codegen)
+
+    assert not collection.ranges
+    assert collection.stats.complete is True
+
+
+def test_proven_constant_cs_restore_does_not_define_entry_range():
+    codegen = _codegen()
+    _attach_far_return_evidence(
+        codegen,
+        _far_return_fact(0x100B, verdict=SegmentStackRestoreVerdict8616.PROVEN),
+    )
+    codegen.cfunc = SimpleNamespace(arg_list=[])
+
+    collection = entry_stack_ranges_from_codegen_8616(codegen)
+
+    assert not collection.ranges
+
+
+def test_in_function_cs_save_does_not_define_entry_range():
+    codegen = _codegen()
+    _attach_far_return_evidence(
+        codegen,
+        _far_return_fact(0x100B, saved_instruction_addr=0x1002),
+    )
+    codegen.cfunc = SimpleNamespace(arg_list=[])
+
+    collection = entry_stack_ranges_from_codegen_8616(codegen)
+
+    assert not collection.ranges
+
+
+def test_far_return_entry_range_accepts_retf_cs_read_in_final_validation():
+    codegen = _codegen()
+    _attach_far_return_evidence(codegen, _far_return_fact(0x100B))
+    cs_low = _cvar(codegen, 4, 1, "local_4")
+    cs_low.variable_type = SimTypeChar().with_arch(codegen.project.arch)
+    cs_high = _cvar(codegen, 5, 1, "local_5")
+    cs_high.variable_type = SimTypeChar().with_arch(codegen.project.arch)
+    codegen.cfunc = SimpleNamespace(
+        arg_list=[],
+        statements=CStatements([cs_low, cs_high], codegen=codegen),
+    )
+    codegen._inertia_tail_validation_snapshot = {
+        "structuring": {"status": "stable", "changed": False},
+        "postprocess": {"status": "stable", "changed": False},
+    }
+
+    report = refresh_x86_16_final_semantic_validation_8616(
+        codegen.project,
+        codegen,
+        persist_failures=False,
+    )
+
+    assert report.def_use.passed, report.def_use.issue_tokens()

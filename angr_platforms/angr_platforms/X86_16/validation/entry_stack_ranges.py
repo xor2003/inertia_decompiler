@@ -19,6 +19,11 @@ from angr.analyses.decompiler.structured_codegen.c import CVariable
 from angr.sim_type import SimType, SimTypeFunction
 from angr.sim_variable import SimStackVariable
 
+from ..alias.segment_stack_restore import (
+    SegmentStackRestoreArtifact8616,
+    SegmentStackRestoreVerdict8616,
+)
+from ..ir.vex_control_flow import terminal_ret_instruction_addrs_8616
 from ..lowering.stack_function_coordinates import (
     c_function_stack_coordinate_projection_8616,
 )
@@ -29,6 +34,12 @@ from ..validation_dataflow import DefUseEntryStackRange8616
 
 _BITS_PER_BYTE_8616 = 8
 _FIRST_ARGUMENT_BP_OFFSET_8616 = 4
+# A far function's caller pushes the four-byte far return frame before entry:
+# machine BP+2 holds the return IP and BP+4 the return CS. The CS slot is
+# caller-defined, so the retf's materialized CS read must not be reported as
+# an uninitialized stack-local read.
+_FAR_RETURN_CS_BP_OFFSET_8616 = 4
+_FAR_RETURN_CS_WIDTH_8616 = 2
 
 __all__ = [
     "EntryStackRangeCollection8616",
@@ -79,6 +90,8 @@ class _CodegenBoundary8616(Protocol):
     """Third-party codegen field exposing the structured function contract."""
 
     cfunc: _CFunctionBoundary8616
+    _inertia_segment_stack_restore_artifact: object
+    _inertia_vex_ir_artifact: object
 
 
 def _stack_argument_variable_8616(argument: object) -> SimStackVariable | None:
@@ -114,6 +127,41 @@ def _argument_value_width_8616(argument_type: SimType | None, slot_width: object
     return min(slot_width, bits // _BITS_PER_BYTE_8616)
 
 
+def _far_return_cs_entry_ranges_8616(
+    boundary: _CodegenBoundary8616,
+) -> tuple[DefUseEntryStackRange8616, ...]:
+    """Derive the caller-pushed far return CS slot from terminal CS-restore facts.
+
+    A far function's retf restores CS from a slot no in-function instruction
+    saved: the alias layer records that restore as UNKNOWN_REFUSE because the
+    save belongs to the caller's far call. Such a fact at a block-terminal
+    RET proves the far return frame, whose CS word at machine BP+4..+5 was
+    defined by the caller before entry.
+    """
+    artifact = getattr(boundary, "_inertia_segment_stack_restore_artifact", None)
+    ir_artifact = getattr(boundary, "_inertia_vex_ir_artifact", None)
+    if not isinstance(artifact, SegmentStackRestoreArtifact8616):
+        return ()
+    terminal_ret_addrs = terminal_ret_instruction_addrs_8616(ir_artifact)
+    if not terminal_ret_addrs:
+        return ()
+    ranges: list[DefUseEntryStackRange8616] = []
+    for fact in artifact.facts:
+        if (
+            fact.restore_register == "cs"
+            and fact.saved_instruction_addr is None
+            and fact.verdict is SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE
+            and fact.restore_instruction_addr in terminal_ret_addrs
+        ):
+            ranges.append(
+                DefUseEntryStackRange8616(
+                    base_offset=_FAR_RETURN_CS_BP_OFFSET_8616,
+                    width=_FAR_RETURN_CS_WIDTH_8616,
+                )
+            )
+    return tuple(sorted(set(ranges)))
+
+
 def entry_stack_ranges_from_codegen_8616(
     codegen: object,
 ) -> EntryStackRangeCollection8616:
@@ -122,18 +170,37 @@ def entry_stack_ranges_from_codegen_8616(
     Register arguments are outside this collector. A stack argument whose
     coordinate or width cannot be proven is counted as a failure and omitted,
     so downstream def-use validation refuses any read from that range.
+    Far return CS slots proven by a terminal retf restore are also
+    entry-defined: the caller's far call pushed them before entry.
     """
     boundary = cast(_CodegenBoundary8616, codegen)
+    far_return_ranges = _far_return_cs_entry_ranges_8616(boundary)
     try:
         arguments = boundary.cfunc.arg_list
     except AttributeError:
         arguments = None
     if arguments is None:
-        return EntryStackRangeCollection8616()
+        return EntryStackRangeCollection8616(
+            ranges=far_return_ranges,
+            stats=EntryStackRangeCollectionStats8616(
+                raw_fact_count=len(far_return_ranges),
+                normalized_fact_count=len(far_return_ranges),
+                classified_fact_count=len(far_return_ranges),
+                materialized_count=len(far_return_ranges),
+            ),
+        )
     try:
         argument_nodes = tuple(arguments)
     except TypeError:
-        return EntryStackRangeCollection8616()
+        return EntryStackRangeCollection8616(
+            ranges=far_return_ranges,
+            stats=EntryStackRangeCollectionStats8616(
+                raw_fact_count=len(far_return_ranges),
+                normalized_fact_count=len(far_return_ranges),
+                classified_fact_count=len(far_return_ranges),
+                materialized_count=len(far_return_ranges),
+            ),
+        )
     function_projection = c_function_stack_coordinate_projection_8616(
         boundary.cfunc
     )
@@ -181,8 +248,10 @@ def entry_stack_ranges_from_codegen_8616(
         )
         materialized_count += 1
 
+    materialized_count += len(far_return_ranges)
+    raw_fact_count += len(far_return_ranges)
     return EntryStackRangeCollection8616(
-        ranges=tuple(sorted(set(ranges))),
+        ranges=tuple(sorted(set(ranges + list(far_return_ranges)))),
         stats=EntryStackRangeCollectionStats8616(
             raw_fact_count=raw_fact_count,
             normalized_fact_count=materialized_count,

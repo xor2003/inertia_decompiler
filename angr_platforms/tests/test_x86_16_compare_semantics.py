@@ -1254,26 +1254,39 @@ def test_call_rm16_pushes_return_and_jumps():
     assert state.solver.eval(state.memory.load(0x2FE, 2, endness=state.arch.memory_endness)) == 0x102
 
 
-def test_jmpf_ptr16_16_preserves_segment_and_executes_target_offset():
-    state = _run_control_flow_instruction(b"\xea\x08\x01\x34\x12\x90\x90\x90\xb8\xcd\xab")
+def test_jmpf_ptr16_16_preserves_segment_and_executes_linear_target():
+    # Real-mode PC is 16-bit: the concrete successor only follows a flat
+    # target below 64K, so the probe segment is 0x0100 and the linear target
+    # 0x1108 differs from the bare architectural offset 0x0108, proving the
+    # immediate far pair is linearized for control flow while CS keeps the
+    # selector and execution continues at the mapped linear code.
+    target_linear = (0x0100 << 4) + 0x0108
+    state = _run_control_flow_instruction(
+        b"\xea\x08\x01\x00\x01",
+        setup=lambda s: s.memory.store(target_linear, b"\xb8\xcd\xab"),
+    )
 
-    assert state.addr == 0x108
-    assert state.solver.eval(state.regs.cs) == 0x1234
+    assert state.addr == target_linear
+    assert state.solver.eval(state.regs.cs) == 0x0100
     assert state.solver.eval(state.regs.sp) == 0x300
     simgr = state.project.factory.simgr(state)
     simgr.step(num_inst=1)
     assert len(simgr.active) == 1
     target_state = simgr.active[0]
-    assert target_state.addr == 0x10B
+    assert target_state.addr == target_linear + 3
     assert target_state.solver.eval(target_state.regs.ax) == 0xABCD
-    assert target_state.solver.eval(target_state.regs.cs) == 0x1234
+    assert target_state.solver.eval(target_state.regs.cs) == 0x0100
 
 
 def test_callf_ptr16_16_pushes_return_frame_and_jumps():
-    state = _run_control_flow_instruction(b"\x9a\x78\x56\x34\x12")
+    # Immediate far calls resolve the concrete seg:off pair to its flat
+    # real-mode address; the 16-bit concrete successor stays below 64K with
+    # segment 0x0100, and the CS register plus the pushed far frame keep their
+    # architectural values.
+    state = _run_control_flow_instruction(b"\x9a\x78\x05\x00\x01")
 
-    assert state.addr == 0x5678
-    assert state.solver.eval(state.regs.cs) == 0x1234
+    assert state.addr == ((0x0100 << 4) + 0x0578)
+    assert state.solver.eval(state.regs.cs) == 0x0100
     assert state.solver.eval(state.regs.sp) == 0x2FC
     assert state.solver.eval(state.memory.load(0x2FC, 2, endness=state.arch.memory_endness)) == 0x105
     assert state.solver.eval(state.memory.load(0x2FE, 2, endness=state.arch.memory_endness)) == 0x0000

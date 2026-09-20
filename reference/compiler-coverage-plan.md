@@ -706,3 +706,73 @@ References: [NIST covering arrays](https://math.nist.gov/coveringarrays/) and
   No semantic owner was edited during this diagnostic. Investigate this earlier
   source-free failure first on resume; keep both previously recorded large-model
   failures blocking. Work paused at the user's request after the commit/push.
+
+### Far Control-Flow And Stack-Probe Repairs
+
+- Resumed 2026-09-20 18:40 local from the pause checkpoint. The `KeyError: 712`
+  root cause is proven from the captured traceback (requires
+  `INERTIA_DEBUG_DECOMPILER_ERRORS_TRACEBACK=1`): the immediate far call
+  `lcall 0x100e:0x2c8` in `bump_static` lifted its control-flow target as the
+  bare offset `0x2c8` (712), so Clinic's `_recover_calling_conventions` looked
+  up `kb.functions.get_by_addr(0x2c8)` and raised. Full traceback retained in
+  `.cache/large-bump-traceback2.c`. Fix at the lifting layer:
+  `stack_helpers.far_linear_target_8616` resolves concrete seg:off pairs to
+  their flat 20-bit real-mode address (wrapped at 1MB), and
+  `emit_far_call16`/`emit_far_jump16` now jump there; symbolic pairs keep the
+  bare-offset target. The CFG then reaches the real helper at `0x103a8`.
+- Binary-backed far stack probe (`__aFchkstk`, bytes
+  `59 5a 8b dc 2b d8 72 ?? 3b 1e ?? ?? 72 ?? 8b e3 52 51 cb` from
+  `STORE.EXE:0x103a8`): new `_MSC_AFCHKSTK_PATTERN_8616`,
+  `CompilerHelperEvidenceKind8616.STACK_PROBE_FAR`, far SimProcedure (pop far
+  return, SP -= AX, far-return to the linear pair), scan and registration, and
+  the `afchkstk` name spelling. A shared typed predicate
+  `is_x86_16_stack_probe_evidence_kind_8616` now gates every former
+  `STACK_PROBE`-only consumer (`semantics/call_stack_allocation.py`,
+  `lowering/stack_aggregate_objects.py`, both `cli_decompilation.py` gates).
+  The lifter inlines registered far probes exactly like near probes
+  (`far_probe_call` simple semantics in `lift_86_16.py`: CX = return IP,
+  DX = return CS, BX/SP = SP-AX, allocation-0 keeps SP, no call edge).
+  This is binary evidence plus coherent stack/call effects, not a
+  far-name patch on the near model.
+- Far functions' RETF restores CS from the caller-pushed frame at
+  machine BP+4..+5; `validation/entry_stack_ranges.py` now derives that slot as
+  a caller-defined entry range from terminal `UNKNOWN_REFUSE` CS-restore facts
+  (alias-proved, no in-function save), so def-use validation no longer reports
+  `uninitialized-read:stack-local:SS:BP+0x4/+0x5` for the materialized
+  `inertia_cs` restore.
+- Tests: 5 new far-target helper tests, 6 far compiler-helper tests, 5 new
+  IR-level far-probe lifting tests (`test_x86_16_far_probe_lifting.py`,
+  enrolled in the routine pipeline lane), 6 far-return entry-range tests.
+  Focused neighborhood: 361 passed; validation neighborhood: 79 passed.
+  Two `compare_semantics` tests updated to the linear-successor contract with
+  sub-64K far targets (real-mode PC is 16-bit; concrete successors cannot
+  follow >64K flats). Scoped Ruff/MyPy pass on changed owners; legacy
+  complexity findings in `lift_86_16.py`/`stack_aggregate_objects.py` remain.
+- Source-free replay progression for `bump_static` at `0x10000`:
+  `KeyError: 712` -> gone (far-target fix); `GP stack-restore facts classified
+  but none materialized` -> gone (far-probe inline); def-use uninitialized
+  BP+4/+0x5 -> gone (entry range). The direct lane now reaches whole-tail
+  validation with coverage=2 and its Inertia validation is clean; the direct
+  generated C keeps proper SI/DI save/restore and the static-bump return.
+  Remaining direct-lane blocker: the rebuild's `gcc -Werror=uninitialized`
+  rejects the same materialized RETF CS read (`local_4`/`local_5`), because
+  GCC cannot see the caller-defined slot. Next slice: model the far return as
+  a 4-byte return boundary (consume the RETF CS pop like the near RET's IP
+  pop) at its semantic owner instead of materializing frame machinery as
+  program reads.
+- Discovered open framework defect (record, do not silently accept): after the
+  far-probe inline, the non-optimized shared-project slice lane decompiled a
+  TRUNCATED 24-byte slice of the 30-byte function (ending at the `jmp` at
+  `0x10015`) and its validation passed, so the CLI exited 0 via a fallback
+  whose body lacks the pops, return, and AX result. Do not count this as a
+  `bump_static` pass; the slice lane needs a function-inventory completeness
+  check before its output can be accepted.
+- The blob backend maps one 64K window, so synthetic fixtures must stay below
+  64K; real MZ inputs use the `dos_mz` backend. Verified a synthetic 300KB MZ
+  EXE loads and lifts through `dos_mz` in 0.22s, so large real binaries remain
+  in scope. Logs: `.cache/blob-size-log.log`, `.cache/mz-300k-5.log`.
+- Replay artifacts: `.cache/large-bump-after-farfix.{c,err}`,
+  `.cache/large-bump-after-probefix.{c,err}`,
+  `.cache/large-bump-after-farret.{c,err}`. Batch after these fixes:
+  `.cache/compiler-coverage/large-farfix-001/` (running at ledger time;
+  result to be recorded by the next checkpoint).

@@ -6,6 +6,7 @@ Forbidden: helper signature synthesis from COD/source names or rendered C.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol, cast
@@ -18,11 +19,13 @@ from .callee_name_normalization import normalize_callee_name_8616
 __all__ = [
     "CompilerHelperEvidence8616",
     "CompilerHelperEvidenceKind8616",
+    "X86_16MscStackProbeFarSimProcedure8616",
     "X86_16MscStackProbeSimProcedure8616",
     "hook_x86_16_compiler_helper_at_8616",
     "hook_x86_16_known_compiler_helpers_8616",
     "identify_x86_16_compiler_helper_at_8616",
     "is_x86_16_registered_stack_probe_target_8616",
+    "is_x86_16_stack_probe_evidence_kind_8616",
     "is_x86_16_stack_probe_helper_at_8616",
     "is_x86_16_stack_probe_name_8616",
     "transfer_x86_16_compiler_helper_evidence_8616",
@@ -34,6 +37,7 @@ class CompilerHelperEvidenceKind8616(Enum):
     """Binary evidence category for a recognized compiler helper."""
 
     STACK_PROBE = "stack_probe"
+    STACK_PROBE_FAR = "stack_probe_far"
     SIGNED_LONG_DIVIDE = "signed_long_divide"
 
 
@@ -69,9 +73,39 @@ class X86_16MscStackProbeSimProcedure8616(SimProcedure):  # type: ignore[misc, u
         self.jump(ret_addr, jumpkind="Ijk_Ret")
 
 
+class X86_16MscStackProbeFarSimProcedure8616(SimProcedure):  # type: ignore[misc, unused-ignore] # dynamic angr SimProcedure base
+    """Microsoft C 16-bit far stack probe: pop far return, allocate AX bytes, far-return.
+
+    The binary helper pops the far return CS:IP pair, subtracts AX from SP,
+    pushes the pair back, and executes RETF, so the net stack effect is the
+    four-byte far return frame plus the AX-byte allocation.
+    """
+
+    NO_RET = False
+
+    def run(self) -> None:  # pylint:disable=arguments-differ
+        """Model the far stack probe effect without inventing call signatures."""
+        sp = cast(claripy.ast.BV, self.state.regs.sp)
+        ax = cast(claripy.ast.BV, self.state.regs.ax)
+        ss = cast(claripy.ast.BV, self.state.regs.ss)
+        sp32 = claripy.ZeroExt(16, sp)
+        ss32 = claripy.ZeroExt(16, ss)
+        stack_addr = (ss32 << claripy.BVV(4, 32)) + sp32
+        ret_ip = self.state.memory.load(stack_addr, 2, endness=self.state.arch.memory_endness)
+        ret_cs = self.state.memory.load(stack_addr + claripy.BVV(2, 32), 2, endness=self.state.arch.memory_endness)
+        next_sp = sp + claripy.BVV(4, 16) - ax
+        self.state.regs.cx = ret_ip
+        self.state.regs.dx = ret_cs
+        self.state.regs.bx = next_sp
+        self.state.regs.sp = next_sp
+        ret_linear = (claripy.ZeroExt(16, ret_cs) << claripy.BVV(4, 32)) + claripy.ZeroExt(16, ret_ip)
+        self.jump(ret_linear, jumpkind="Ijk_Ret")
+
+
 _STACK_PROBE_NORMALIZED_NAMES_8616 = frozenset(
     {
         "anchkstk",
+        "afchkstk",
         "chkstk",
         "analloca_probe",
     }
@@ -96,6 +130,28 @@ _MSC_ANCHKSTK_PATTERN_8616: tuple[int | None, ...] = (
     0xE3,  # mov sp, bx
     0xFF,
     0xE1,  # jmp cx
+)
+
+_MSC_AFCHKSTK_PATTERN_8616: tuple[int | None, ...] = (
+    0x59,  # pop cx
+    0x5A,  # pop dx
+    0x8B,
+    0xDC,  # mov bx, sp
+    0x2B,
+    0xD8,  # sub bx, ax
+    0x72,
+    None,  # jb stack_overflow
+    0x3B,
+    0x1E,
+    None,
+    None,  # cmp bx, word ptr [limit]
+    0x72,
+    None,  # jb stack_overflow
+    0x8B,
+    0xE3,  # mov sp, bx
+    0x52,  # push dx
+    0x51,  # push cx
+    0xCB,  # retf
 )
 
 _MSC_ANLDIV_PATTERN_8616: tuple[int | None, ...] = tuple(
@@ -164,6 +220,41 @@ def _matches_masked_prefix_8616(data: bytes, pattern: tuple[int | None, ...]) ->
     return all(not (expected is not None and data[index] != expected) for index, expected in enumerate(pattern))
 
 
+_STACK_PROBE_PATTERNS_8616: tuple[
+    tuple[tuple[int | None, ...], CompilerHelperEvidence8616, CompilerHelperEvidenceKind8616], ...
+] = (
+    (
+        _MSC_ANCHKSTK_PATTERN_8616,
+        CompilerHelperEvidence8616(
+            addr=0,
+            name="aNchkstk",
+            kind=CompilerHelperEvidenceKind8616.STACK_PROBE,
+            pattern_name="msc_aNchkstk_popcx_sp_ax",
+            matched_bytes=len(_MSC_ANCHKSTK_PATTERN_8616),
+        ),
+        CompilerHelperEvidenceKind8616.STACK_PROBE,
+    ),
+    (
+        _MSC_AFCHKSTK_PATTERN_8616,
+        CompilerHelperEvidence8616(
+            addr=0,
+            name="aFchkstk",
+            kind=CompilerHelperEvidenceKind8616.STACK_PROBE_FAR,
+            pattern_name="msc_aFchkstk_popcx_popdx_sp_ax_retf",
+            matched_bytes=len(_MSC_AFCHKSTK_PATTERN_8616),
+        ),
+        CompilerHelperEvidenceKind8616.STACK_PROBE_FAR,
+    ),
+)
+
+_STACK_PROBE_EVIDENCE_KINDS_8616: frozenset[CompilerHelperEvidenceKind8616] = frozenset(
+    {
+        CompilerHelperEvidenceKind8616.STACK_PROBE,
+        CompilerHelperEvidenceKind8616.STACK_PROBE_FAR,
+    }
+)
+
+
 def identify_x86_16_compiler_helper_at_8616(
     project: object, addr: int | None
 ) -> CompilerHelperEvidence8616 | None:
@@ -186,22 +277,14 @@ def identify_x86_16_compiler_helper_at_8616(
         if key in seen:
             continue
         seen.add(key)
-        stack_probe_code = _load_project_bytes_8616(
-            candidate_project,
-            candidate_addr,
-            len(_MSC_ANCHKSTK_PATTERN_8616),
-        )
-        if stack_probe_code is not None and _matches_masked_prefix_8616(
-            stack_probe_code,
-            _MSC_ANCHKSTK_PATTERN_8616,
-        ):
-            return CompilerHelperEvidence8616(
-                addr=addr,
-                name="aNchkstk",
-                kind=CompilerHelperEvidenceKind8616.STACK_PROBE,
-                pattern_name="msc_aNchkstk_popcx_sp_ax",
-                matched_bytes=len(_MSC_ANCHKSTK_PATTERN_8616),
+        for pattern, template, _kind in _STACK_PROBE_PATTERNS_8616:
+            stack_probe_code = _load_project_bytes_8616(
+                candidate_project,
+                candidate_addr,
+                len(pattern),
             )
+            if stack_probe_code is not None and _matches_masked_prefix_8616(stack_probe_code, pattern):
+                return dataclasses.replace(template, addr=addr)
         signed_divide_code = _load_project_bytes_8616(
             candidate_project,
             candidate_addr,
@@ -221,10 +304,15 @@ def identify_x86_16_compiler_helper_at_8616(
     return None
 
 
+def is_x86_16_stack_probe_evidence_kind_8616(kind: CompilerHelperEvidenceKind8616) -> bool:
+    """Return whether an evidence kind is any binary-proven stack-probe helper."""
+    return kind in _STACK_PROBE_EVIDENCE_KINDS_8616
+
+
 def is_x86_16_stack_probe_helper_at_8616(project: object, addr: int | None) -> bool:
     """Return whether binary evidence identifies exactly a stack-probe helper."""
     evidence = identify_x86_16_compiler_helper_at_8616(project, addr)
-    return evidence is not None and evidence.kind is CompilerHelperEvidenceKind8616.STACK_PROBE
+    return evidence is not None and is_x86_16_stack_probe_evidence_kind_8616(evidence.kind)
 
 
 def hook_x86_16_compiler_helper_at_8616(project: object, addr: int | None) -> CompilerHelperEvidence8616 | None:
@@ -232,13 +320,18 @@ def hook_x86_16_compiler_helper_at_8616(project: object, addr: int | None) -> Co
     evidence = identify_x86_16_compiler_helper_at_8616(project, addr)
     if evidence is None:
         return None
-    if evidence.kind is CompilerHelperEvidenceKind8616.STACK_PROBE:
+    if is_x86_16_stack_probe_evidence_kind_8616(evidence.kind):
+        procedure_class = (
+            X86_16MscStackProbeFarSimProcedure8616
+            if evidence.kind is CompilerHelperEvidenceKind8616.STACK_PROBE_FAR
+            else X86_16MscStackProbeSimProcedure8616
+        )
         # Dynamic boundary: project is an angr.Project-like object supplied by callers.
         is_hooked = getattr(project, "is_hooked", None)
         # Dynamic boundary: hook installation is provided by the same angr.Project-like object.
         hook = getattr(project, "hook", None)
         if callable(is_hooked) and callable(hook) and not is_hooked(evidence.addr):
-            hook(evidence.addr, X86_16MscStackProbeSimProcedure8616(display_name=evidence.name))
+            hook(evidence.addr, procedure_class(display_name=evidence.name))
     return evidence
 
 
@@ -258,13 +351,14 @@ def hook_x86_16_known_compiler_helpers_8616(
         return ()
 
     found: list[CompilerHelperEvidence8616] = []
-    pattern_len = len(_MSC_ANCHKSTK_PATTERN_8616)
-    for offset in range(max(0, len(data) - pattern_len + 1)):
-        if not _matches_masked_prefix_8616(data[offset : offset + pattern_len], _MSC_ANCHKSTK_PATTERN_8616):
-            continue
-        evidence = hook_x86_16_compiler_helper_at_8616(project, start + offset)
-        if evidence is not None:
-            found.append(evidence)
+    for pattern, _template, _kind in _STACK_PROBE_PATTERNS_8616:
+        pattern_len = len(pattern)
+        for offset in range(max(0, len(data) - pattern_len + 1)):
+            if not _matches_masked_prefix_8616(data[offset : offset + pattern_len], pattern):
+                continue
+            evidence = hook_x86_16_compiler_helper_at_8616(project, start + offset)
+            if evidence is not None:
+                found.append(evidence)
     if found:
         _register_compiler_helper_targets_on_arch_8616(project, tuple(found))
     return tuple(found)
@@ -281,7 +375,7 @@ def _register_compiler_helper_targets_on_arch_8616(
         return
     targets: set[int] = set()
     for item in evidence:
-        if item.kind is CompilerHelperEvidenceKind8616.STACK_PROBE:
+        if is_x86_16_stack_probe_evidence_kind_8616(item.kind):
             targets.add(item.addr)
             targets.add(item.addr & 0xFFFF)
     if targets:

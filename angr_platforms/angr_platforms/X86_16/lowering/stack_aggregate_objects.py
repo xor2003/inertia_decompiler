@@ -51,9 +51,9 @@ from capstone.x86_const import (
 
 from ..c_ast_utils import _iter_c_nodes_deep_8616, _replace_c_children_8616
 from ..compiler_helpers import (
-    CompilerHelperEvidenceKind8616,
     identify_x86_16_compiler_helper_at_8616,
     is_x86_16_registered_stack_probe_target_8616,
+    is_x86_16_stack_probe_evidence_kind_8616,
 )
 from .call_output_stack_object_replay import (
     reapply_call_output_stack_object_types_8616,
@@ -890,7 +890,7 @@ def collect_stack_aggregate_object_facts_8616(
         if not isinstance(target, int):
             continue
         evidence = identify_x86_16_compiler_helper_at_8616(project, target)
-        if (evidence is not None and evidence.kind is CompilerHelperEvidenceKind8616.STACK_PROBE) or is_x86_16_registered_stack_probe_target_8616(getattr(project, "arch", None), target):
+        if (evidence is not None and is_x86_16_stack_probe_evidence_kind_8616(evidence.kind)) or is_x86_16_registered_stack_probe_target_8616(getattr(project, "arch", None), target):
             targets.add(target)
     return recover_stack_aggregate_object_facts_from_instructions_8616(
         decoded,

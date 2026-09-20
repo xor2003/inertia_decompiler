@@ -53,9 +53,9 @@ from angr_platforms.X86_16.codegen_metadata import (
     snapshot_stack_local_candidates_8616,
 )
 from angr_platforms.X86_16.compiler_helpers import (
-    CompilerHelperEvidenceKind8616,
     hook_x86_16_compiler_helper_at_8616,
     identify_x86_16_compiler_helper_at_8616,
+    is_x86_16_stack_probe_evidence_kind_8616,
     is_x86_16_stack_probe_name_8616,
 )
 from angr_platforms.X86_16.decompiler_postprocess_calls import (
@@ -4497,7 +4497,7 @@ def _decompile_function(
                     if candidate_project is None or not isinstance(candidate_addr, int):
                         continue
                     evidence = identify_x86_16_compiler_helper_at_8616(candidate_project, candidate_addr)
-                    if evidence is not None and evidence.kind is CompilerHelperEvidenceKind8616.STACK_PROBE:
+                    if evidence is not None and is_x86_16_stack_probe_evidence_kind_8616(evidence.kind):
                         return True
             return False
 
@@ -7144,7 +7144,7 @@ def _is_compiler_stack_probe_call_target_8616(project: angr.Project, target: int
             if candidate_project is None:
                 continue
             evidence = identify_x86_16_compiler_helper_at_8616(candidate_project, candidate)
-            if evidence is not None and evidence.kind is CompilerHelperEvidenceKind8616.STACK_PROBE:
+            if evidence is not None and is_x86_16_stack_probe_evidence_kind_8616(evidence.kind):
                 cache[target] = True
                 return True
     cache[target] = False

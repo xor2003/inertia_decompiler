@@ -11,12 +11,12 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any, Protocol, cast
 
 from .core import IRInstr, IRValue, MemSpace
 
-__all__ = ["terminal_control_flow_instr_8616"]
+__all__ = ["terminal_control_flow_instr_8616", "terminal_ret_instruction_addrs_8616"]
 
 
 class _VexConstant8616(Protocol):
@@ -32,10 +32,29 @@ class _VexConstantExpression8616(Protocol):
 
 
 class _VexBlock8616(Protocol):
-    """Minimal third-party VEX terminal control-flow contract."""
+    """Minimal third-party VEX block terminal control-flow contract."""
 
     jumpkind: object
     next: object
+
+
+class _IRArtifactBlocks8616(Protocol):
+    """Third-party typed IR artifact surface holding ordered blocks."""
+
+    blocks: Iterable[_IRArtifactBlock8616]
+
+
+class _IRArtifactBlock8616(Protocol):
+    """Third-party typed IR block surface holding ordered instructions."""
+
+    instrs: Iterable[_IRArtifactInstruction8616]
+
+
+class _IRArtifactInstruction8616(Protocol):
+    """Typed IR instruction fields read for terminal return classification."""
+
+    op: str
+    addr: int | None
 
 
 def _constant_target_8616(expr: object) -> int | None:
@@ -82,3 +101,31 @@ def terminal_control_flow_instr_8616(
         args=(target_value,),
         addr=instruction_addr,
     )
+
+
+def terminal_ret_instruction_addrs_8616(artifact: object) -> frozenset[int]:
+    """Return addresses of block-terminal RET instructions in one IR artifact.
+
+    A block-terminal RET instruction is the control-flow owner of that block's
+    return-frame pops. Artifacts without typed blocks, without instructions, or
+    without integer instruction addresses contribute no addresses; callers must
+    treat that absence as absence of proof, never as an empty machine return.
+    """
+    try:
+        blocks = tuple(cast(_IRArtifactBlocks8616, artifact).blocks)
+    except AttributeError:
+        return frozenset()
+    addresses: set[int] = set()
+    for block in blocks:
+        try:
+            instructions = tuple(block.instrs)
+        except AttributeError:
+            continue
+        if not instructions:
+            continue
+        terminal = instructions[-1]
+        if terminal.op != "RET":
+            continue
+        if isinstance(terminal.addr, int):
+            addresses.add(terminal.addr)
+    return frozenset(addresses)

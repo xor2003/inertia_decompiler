@@ -499,12 +499,35 @@ def far_return_ip32(emu: StackEmulator, instruction_size: int) -> StackExpr:
     return near_return_eip32(emu, instruction_size)
 
 
+def far_linear_target_8616(segment: object, offset: object) -> int | None:
+    """Resolve a concrete far seg:offset pair to its flat 20-bit real-mode code address.
+
+    Returns None for symbolic segment or offset values, where the segmented
+    control-flow target cannot be linearized without evaluating the pair.
+    """
+    if not isinstance(segment, int) or not isinstance(offset, int):
+        return None
+    return (((segment & 0xFFFF) << 4) + (offset & 0xFFFF)) & 0xFFFFF
+
+
+def _far_control_flow_target_8616(emu: StackEmulator, segment: object, offset: object) -> object:
+    """Return the flat control-flow target for a 16-bit far call or far jump.
+
+    Concrete seg:offset pairs resolve to their linear real-mode address so the
+    CFG reaches the callee; symbolic pairs retain the bare offset target.
+    """
+    linear_target = far_linear_target_8616(segment, offset)
+    if linear_target is None:
+        return offset
+    return emu.constant(linear_target, Type.int_32)
+
+
 def emit_far_call16(emu: StackEmulator, segment: object, offset: object, return_ip: object) -> object:
     """Emit a 16-bit far call through the emulator boundary."""
     push_far_return_frame16(emu, return_ip)
     emu.set_segment(sgreg_t.CS, segment)
     emu.set_eip(offset)
-    emu.lifter_instruction.jump(None, offset, JumpKind.Call)
+    emu.lifter_instruction.jump(None, _far_control_flow_target_8616(emu, segment, offset), JumpKind.Call)
     return return_ip
 
 
@@ -512,7 +535,7 @@ def emit_far_jump16(emu: StackEmulator, segment: object, offset: object) -> obje
     """Emit a 16-bit far jump through the emulator boundary."""
     emu.set_segment(sgreg_t.CS, segment)
     emu.set_eip(offset)
-    emu.lifter_instruction.jump(None, offset, JumpKind.Boring)
+    emu.lifter_instruction.jump(None, _far_control_flow_target_8616(emu, segment, offset), JumpKind.Boring)
     return offset
 
 

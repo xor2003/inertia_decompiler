@@ -3,12 +3,15 @@ from angr_platforms.X86_16.stack_helpers import (
     branch_rel8,
     branch_rel16,
     branch_rel32,
+    emit_far_call16,
+    emit_far_jump16,
     emit_near_call16,
     emit_near_call32,
     emit_near_jump16,
     emit_near_jump32,
     enter16,
     enter32,
+    far_linear_target_8616,
     leave16,
     near_relative_target16,
     near_relative_target32,
@@ -553,3 +556,51 @@ def test_stack_helpers_return_near32_sets_eip_and_ret_jumpkind():
     assert emu.get_gpreg(reg32_t.ESP) == 0x2000
     assert emu.irsb.next == 0x12345678
     assert emu.irsb.jumpkind == "Ijk_Ret"
+
+
+def test_stack_helpers_far_call_emits_flat_linear_target():
+    emu = _StackEmu()
+
+    returned = emit_far_call16(emu, 0x100E, 0x02C8, 0x0105)
+
+    assert returned == 0x0105
+    assert emu.irsb.next == ((0x100E << 4) + 0x02C8)
+    assert emu.irsb.jumpkind == "Ijk_Call"
+    assert emu.get_sgreg(sgreg_t.CS) == 0x100E
+    assert emu.get_eip() == 0x02C8
+
+
+def test_stack_helpers_far_call_wraps_linear_target_at_one_megabyte():
+    emu = _StackEmu()
+
+    emit_far_call16(emu, 0xFFFF, 0xFFFF, 0x0105)
+
+    assert emu.irsb.next == 0x0FFEF
+
+
+def test_stack_helpers_far_call_symbolic_segment_keeps_offset_target():
+    emu = _StackEmu()
+    symbolic_segment = object()
+
+    emit_far_call16(emu, symbolic_segment, 0x02C8, 0x0105)
+
+    assert emu.irsb.next == 0x02C8
+    assert emu.irsb.jumpkind == "Ijk_Call"
+
+
+def test_stack_helpers_far_jump_emits_flat_linear_target():
+    emu = _StackEmu()
+
+    returned = emit_far_jump16(emu, 0x100E, 0x02C8)
+
+    assert returned == 0x02C8
+    assert emu.irsb.next == ((0x100E << 4) + 0x02C8)
+    assert emu.irsb.jumpkind == "Ijk_Boring"
+    assert emu.get_sgreg(sgreg_t.CS) == 0x100E
+
+
+def test_stack_helpers_far_linear_target_resolution_contract():
+    assert far_linear_target_8616(0x100E, 0x02C8) == ((0x100E << 4) + 0x02C8)
+    assert far_linear_target_8616(0, 0) == 0
+    assert far_linear_target_8616(object(), 0x02C8) is None
+    assert far_linear_target_8616(0x100E, object()) is None

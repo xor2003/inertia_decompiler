@@ -136,6 +136,9 @@ from .lowering.segment_global_materialization import (
     cod_metadata_for_codegen_8616,
     run_segment_global_materialization_8616,
 )
+from .lowering.far_return_boundary_carriers import (
+    consume_terminal_far_return_boundary_carriers_8616,
+)
 from .lowering.segment_stack_restore_carriers import prune_proven_segment_stack_restore_carriers_8616
 from .lowering.segmented_global_loads import (
     DwordGlobalZeroTestMaterializationRecord8616,
@@ -601,6 +604,11 @@ def _build_decompiler_structuring_passes() -> tuple[DecompilerStructuringPassSpe
         DecompilerStructuringPassSpec(
             "_segment_stack_restore_carriers_8616",
             prune_proven_segment_stack_restore_carriers_8616,
+            True,
+        ),
+        DecompilerStructuringPassSpec(
+            "_far_return_boundary_carriers_8616",
+            consume_terminal_far_return_boundary_carriers_8616,
             True,
         ),
         DecompilerStructuringPassSpec(
@@ -2674,6 +2682,13 @@ def _prime_structuring_validation_semantics_8616(project: AngrProjectSurface, co
         # high-byte register views inside packed-FLAGS expressions. Reconsume
         # those typed GP projections before the validation baseline is frozen.
         changed = _replay_structuring_gp_state_after_late_cleanup_8616(codegen) or changed
+        # The terminal far-return frame pop is machine return semantics; its
+        # structured CS carrier must leave the AST before the validation
+        # baseline is frozen. Subtree rebuilds are re-pruned by the pass-table
+        # copy of the same evidence-owned consumer.
+        changed = (
+            bool(consume_terminal_far_return_boundary_carriers_8616(project, codegen)) or changed
+        )
         # Publish the callsite materialization contract before any per-pass
         # validation baseline is captured. Rebased direct slices can otherwise
         # expose complete generated calls while leaving validation with only
