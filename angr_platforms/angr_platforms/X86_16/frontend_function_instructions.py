@@ -78,6 +78,7 @@ class BoundedLinearInstructionStatus8616(Enum):
 
     TERMINAL_REACHED = "terminal_reached"
     WINDOW_EXHAUSTED = "window_exhausted"
+    EXACT_END_REACHED = "exact_end_reached"
     DECODE_REFUSED = "decode_refused"
     INVALID_WIDTH = "invalid_width"
     MISSING_ENTRY = "missing_entry"
@@ -89,6 +90,7 @@ class BoundedLinearInstructionInventory8616:
 
     function_entry: int | None
     max_bytes: int
+    exact_end: int | None
     base_surface: tuple[tuple[int, int, str], ...]
     instructions: tuple[object, ...]
     sequential_instructions: tuple[object, ...]
@@ -157,6 +159,34 @@ def _refused_inventory_8616(
     )
 
 
+def _decode_function_block_instructions_8616(
+    project: object,
+    block_addrs: tuple[int, ...],
+) -> tuple[dict[int, object], int, int]:
+    """Decode CFG-owned blocks while retaining one closed failure count."""
+    by_addr: dict[int, object] = {}
+    materialized_count = 0
+    failure_count = 0
+    for block_addr in block_addrs:
+        try:
+            decoded = decoded_block_instructions_8616(
+                project,
+                block_addr,
+                opt_level=0,
+            )
+        except Exception:
+            decoded = ()
+        if not decoded or int(cast(_InstructionBoundary8616, decoded[0]).address) != block_addr:
+            failure_count += 1
+            continue
+        materialized_count += 1
+        for instruction in decoded:
+            address = int(cast(_InstructionBoundary8616, instruction).address)
+            if address >= 0:
+                by_addr.setdefault(address, instruction)
+    return by_addr, materialized_count, failure_count
+
+
 def collect_function_instruction_inventory_8616(
     project: object,
     *,
@@ -193,26 +223,10 @@ def collect_function_instruction_inventory_8616(
             FunctionInstructionInventoryStatus8616.MISSING_BLOCKS,
         )
 
-    by_addr: dict[int, object] = {}
-    materialized_count = 0
-    failure_count = 0
-    for block_addr in block_addrs:
-        try:
-            decoded = decoded_block_instructions_8616(
-                project,
-                block_addr,
-                opt_level=0,
-            )
-        except Exception:
-            decoded = ()
-        if not decoded or int(cast(_InstructionBoundary8616, decoded[0]).address) != block_addr:
-            failure_count += 1
-            continue
-        materialized_count += 1
-        for instruction in decoded:
-            address = int(cast(_InstructionBoundary8616, instruction).address)
-            if address >= 0:
-                by_addr.setdefault(address, instruction)
+    by_addr, materialized_count, failure_count = _decode_function_block_instructions_8616(
+        project,
+        block_addrs,
+    )
 
     status = (
         FunctionInstructionInventoryStatus8616.COMPLETE
@@ -254,6 +268,7 @@ def collect_bounded_linear_instruction_inventory_8616(
     base_instructions: tuple[object, ...],
     previous: BoundedLinearInstructionInventory8616 | None = None,
     max_bytes: int = 0x800,
+    exact_end: int | None = None,
 ) -> BoundedLinearInstructionInventory8616:
     """Decode one bounded sequential stream and merge exact base evidence.
 
@@ -261,11 +276,24 @@ def collect_bounded_linear_instruction_inventory_8616(
     classify control flow, conditions, storage, types, or C-AST semantics.
     """
     bounded_bytes = max(1, int(max_bytes))
+    bounded_exact_end = (
+        int(exact_end)
+        if isinstance(exact_end, int)
+        else (
+            int(function_entry) + bounded_bytes
+            if isinstance(function_entry, int)
+            else None
+        )
+    )
+    if isinstance(exact_end, int) and isinstance(function_entry, int):
+        bounded_exact_end = min(exact_end, int(function_entry) + bounded_bytes)
+        bounded_bytes = max(1, bounded_exact_end - int(function_entry))
     base_surface = _instruction_surface_8616(base_instructions)
     if (
         previous is not None
         and previous.function_entry == function_entry
         and previous.max_bytes == bounded_bytes
+        and previous.exact_end == bounded_exact_end
         and previous.base_surface == base_surface
     ):
         return previous
@@ -273,6 +301,7 @@ def collect_bounded_linear_instruction_inventory_8616(
         return BoundedLinearInstructionInventory8616(
             function_entry=None,
             max_bytes=bounded_bytes,
+            exact_end=None,
             base_surface=base_surface,
             instructions=base_instructions,
             sequential_instructions=(),
@@ -286,8 +315,16 @@ def collect_bounded_linear_instruction_inventory_8616(
 
     sequential: list[object] = []
     address = int(function_entry)
-    end_address = address + bounded_bytes
-    status = BoundedLinearInstructionStatus8616.WINDOW_EXHAUSTED
+    end_address = (
+        int(bounded_exact_end)
+        if isinstance(bounded_exact_end, int)
+        else address + bounded_bytes
+    )
+    status = (
+        BoundedLinearInstructionStatus8616.EXACT_END_REACHED
+        if exact_end is not None
+        else BoundedLinearInstructionStatus8616.WINDOW_EXHAUSTED
+    )
     while address < end_address:
         try:
             decoded = decoded_block_instructions_8616(
@@ -307,7 +344,7 @@ def collect_bounded_linear_instruction_inventory_8616(
         boundary = cast(_InstructionBoundary8616, instruction)
         width = int(boundary.size)
         mnemonic = str(boundary.mnemonic).lower()
-        if mnemonic in {"ret", "retf", "iret"}:
+        if exact_end is None and mnemonic in {"ret", "retf", "iret"}:
             status = BoundedLinearInstructionStatus8616.TERMINAL_REACHED
             break
         if width <= 0:
@@ -333,6 +370,7 @@ def collect_bounded_linear_instruction_inventory_8616(
     return BoundedLinearInstructionInventory8616(
         function_entry=int(function_entry),
         max_bytes=bounded_bytes,
+        exact_end=end_address,
         base_surface=base_surface,
         instructions=instructions,
         sequential_instructions=tuple(sequential),

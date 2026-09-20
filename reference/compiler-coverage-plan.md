@@ -821,3 +821,26 @@ References: [NIST covering arrays](https://math.nist.gov/coveringarrays/) and
   `bump_static` fallback). The 002 fallback-rebuild lane produced full-body
   output this time, but the check itself remains to be implemented before
   slice-lane acceptance is trusted by construction.
+
+### Shared-Project Slice Inventory Completeness
+
+- Delivered the remaining slice-lane acceptance guard. The Frontend bounded
+  instruction inventory now accepts an exact `end` bound: `EXACT_END_REACHED`
+  continues through every byte in the metadata-bounded sidecar region instead
+  of stopping at the first machine return. The sidecar fallback owner builds a
+  closed instruction census from that exact bound and compares it with the
+  recovered function's CFG-owned Capstone instructions. Any omitted exact
+  instruction turns the otherwise decompiled attempt into an error, preserves
+  the diagnostic address list, and allows the bounded recovery retry policy to
+  try the next recovery mode instead of accepting a truncated 24/30-byte body.
+- Added focused regressions for exact-end decoding and truncated CFG refusal
+  (`test_bounded_inventory_decodes_to_exact_region_end`,
+  `test_sidecar_slice_refuses_truncated_cfg_ownership`), and enrolled both in
+  the `scripts/test_pipeline.py` routine lane. Focused neighborhood: 12 passed
+  (sidecar entry, bounded instruction inventory, and slice recovery verdicts).
+  MyPy passed on the changed implementation owners. Ruff on the changed files
+  reports the pre-existing `cli_fallback_decompilation.py` complexity debt
+  (baseline 12 findings); the touched frontend owner is clean after a focused
+  extraction. The broad fast lane also has unrelated pre-existing failures
+  (cache-key surface, SORTD sidecar-free regressions, COD `loadprog`, and
+  inbox long arithmetic), so this checkpoint does not claim broad-lane health.

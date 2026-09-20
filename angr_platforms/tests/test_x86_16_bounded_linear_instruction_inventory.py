@@ -107,6 +107,48 @@ def test_bounded_inventory_invalidates_changed_consumed_surface(monkeypatch) -> 
     assert calls == [0x1000, 0x2000, 0x2000, 0x2000]
 
 
+def test_bounded_inventory_decodes_to_exact_region_end(monkeypatch) -> None:
+    """An exact sidecar end is decoded even when no terminal opcode is present."""
+    instructions = (
+        _instruction(0x1000, "nop"),
+        _instruction(0x1001, "nop"),
+        _instruction(0x1002, "ret"),
+    )
+
+    def decode(
+        _project: object,
+        address: int,
+        *,
+        num_inst: int | None = None,
+        opt_level: int = 0,
+    ) -> tuple[object, ...]:
+        assert num_inst == 1
+        assert opt_level == 0
+        return (instructions[address - 0x1000],)
+
+    monkeypatch.setattr(
+        frontend_function_instructions,
+        "decoded_block_instructions_8616",
+        decode,
+    )
+
+    inventory = collect_bounded_linear_instruction_inventory_8616(
+        object(),
+        function_entry=0x1000,
+        base_instructions=(),
+        exact_end=0x1002,
+    )
+
+    assert inventory.status is BoundedLinearInstructionStatus8616.EXACT_END_REACHED
+    assert inventory.exact_end == 0x1002
+    assert inventory.max_bytes == 2
+    assert [instruction.address for instruction in inventory.sequential_instructions] == [
+        0x1000,
+        0x1001,
+    ]
+    assert inventory.closed is True
+
+
 def test_stage_reuses_inventory_without_reloading_instruction_bytes(monkeypatch) -> None:
     """The Rewrite compatibility wrapper must not repeat Frontend byte reads."""
     terminal = _instruction(0x1000)

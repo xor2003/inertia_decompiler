@@ -38,6 +38,10 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_x86_16_wide_return_type_preservation.py",
     "angr_platforms/tests/test_x86_16_cod_regressions.py::test_cod_runner_hotspots_fall_back_through_scan_safe_classifier",
     "angr_platforms/tests/test_x86_16_cli.py::test_decompile_function_disables_structuring_for_tiny_single_call_helpers",
+    "angr_platforms/tests/test_cli_fallback_slice_entry.py::"
+    "test_sidecar_slice_refuses_truncated_cfg_ownership",
+    "angr_platforms/tests/test_x86_16_bounded_linear_instruction_inventory.py::"
+    "test_bounded_inventory_decodes_to_exact_region_end",
     "angr_platforms/tests/test_x86_16_wide_condition_ordering.py",
     "angr_platforms/tests/test_x86_16_wide_call_condition_source.py",
     "angr_platforms/tests/test_x86_16_wide_call_condition_capture.py",

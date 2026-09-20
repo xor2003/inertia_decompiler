@@ -17,9 +17,13 @@ import typing
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 import angr
 from angr_platforms.X86_16.cod_extract import CODProcMetadata
+from angr_platforms.X86_16.frontend_function_instructions import (
+    collect_bounded_linear_instruction_inventory_8616,
+)
 from angr_platforms.X86_16.lst_extract import LSTMetadata
 
 from inertia_decompiler import cli_string_timeout_fallback as _cli_string_timeout_fallback
@@ -84,12 +88,40 @@ print: Callable[..., None] = _timestamped_print
 
 _SIDECAR_SLICE_DECOMPILE_TIMEOUT_CAP_8616 = 24
 _SIDECAR_SLICE_RUNNER_TIMEOUT_CAP_8616 = 30
+_SIDECAR_SLICE_MAX_INSTRUCTION_BYTES_8616 = 0x800
 
 # Imported decompilation entry point: keep its public result contract explicit
 # when global mypy checks this CLI module without following every import. The
 # forwarding function intentionally resolves the module global on each call so
 # tests and integrations can replace the decompilation boundary.
 _DecompileFunctionWithStats = Callable[..., tuple[str, str, str | None, int, int, float]]
+
+
+@runtime_checkable
+class _SidecarCfgInstructionBoundary8616(Protocol):
+    """Dynamic angr instruction fields consumed by the completeness census."""
+
+    address: object
+
+
+@runtime_checkable
+class _SidecarCfgCapstoneBoundary8616(Protocol):
+    """Dynamic angr Capstone collection exposed by one recovered CFG block."""
+
+    insns: object
+
+
+@runtime_checkable
+class _SidecarCfgBlockBoundary8616(Protocol):
+    """Dynamic angr block fields consumed by the completeness census."""
+
+    capstone: _SidecarCfgCapstoneBoundary8616
+
+
+class _SidecarFunctionBoundary8616(Protocol):
+    """Dynamic angr recovered-function fields consumed by the census."""
+
+    blocks: object
 
 
 def _call_decompile_function_with_stats(
@@ -218,6 +250,52 @@ def _try_decompile_sidecar_slice(
                 if status == "ok" and assess_decompiled_c_text(payload).reject_as_decompiled:
                     status = "empty"
                     payload = "Sidecar slice decompilation remained unresolved after bounded recovery."
+                if status == "ok" and slice_plan is not None:
+                    function_boundary = typing.cast(_SidecarFunctionBoundary8616, func)
+                    cfg_blocks = tuple(
+                        block
+                        for block in typing.cast(typing.Any, function_boundary.blocks)
+                        if isinstance(block, _SidecarCfgBlockBoundary8616)
+                    )
+                    inventory_base_instructions: tuple[object, ...] = ()
+                    cfg_instruction_addrs: set[int] = set()
+                    for block in cfg_blocks:
+                        for instruction in typing.cast(
+                            typing.Any, block.capstone.insns
+                        ):
+                            instruction_boundary = typing.cast(
+                                _SidecarCfgInstructionBoundary8616,
+                                instruction,
+                            )
+                            inventory_base_instructions += (instruction,)
+                            instruction_address = instruction_boundary.address
+                            if isinstance(instruction_address, int):
+                                cfg_instruction_addrs.add(instruction_address)
+                    inventory = collect_bounded_linear_instruction_inventory_8616(
+                        slice_project,
+                        function_entry=slice_entry,
+                        base_instructions=inventory_base_instructions,
+                        max_bytes=_SIDECAR_SLICE_MAX_INSTRUCTION_BYTES_8616,
+                        exact_end=slice_end,
+                    )
+                    missing_instruction_addrs: list[int] = []
+                    for instruction in inventory.sequential_instructions:
+                        instruction_boundary = typing.cast(
+                            _SidecarCfgInstructionBoundary8616,
+                            instruction,
+                        )
+                        instruction_address = instruction_boundary.address
+                        if (
+                            isinstance(instruction_address, int)
+                            and instruction_address not in cfg_instruction_addrs
+                        ):
+                            missing_instruction_addrs.append(instruction_address)
+                    if missing_instruction_addrs:
+                        status = "error"
+                        payload = (
+                            f"{attempt_name} sidecar slice omitted exact instructions: "
+                            + ", ".join(f"{address:#x}" for address in missing_instruction_addrs)
+                        )
                 snapshot = _tail_validation_snapshot_for_function_run(slice_project, func)
                 return SliceRecoveryAttemptOutcome(
                     attempt_name=attempt_name,
@@ -314,11 +392,12 @@ def _try_decompile_sidecar_slice(
                 status="timeout",
                 payload=f"sidecar slice timed out after {runner_timeout}s ({ex})",
             )
-        except Exception:
+        except Exception as ex:
             return SliceRecoveryAttemptOutcome(
                 attempt_name="sidecar-slice",
                 status="error",
-                payload="sidecar slice timed wrapper failed" + (f": {fork_error}" if fork_error is not None else ""),
+                payload="sidecar slice timed wrapper failed: "
+                + (str(fork_error) if fork_error is not None else _describe_exception(ex)),
             )
 
     return _impl()
