@@ -14,6 +14,9 @@ runtime, so access to those objects remains guarded. `CallsiteSummary8616`,
 typed evidence records, enums, and materialization state are owned contracts;
 they must use direct attributes so contract drift fails clearly.
 Accepted logical-shape publication is owned by Lowering, not this bridge.
+Whole-function return-carrier use checks are also Lowering-owned: this bridge
+only consumes their veto before its legacy destination fold. Move that fold
+out of this module during migration; do not add liveness recovery here.
 
 Ownership rule:
 - This file is a compatibility migration shim.
@@ -166,6 +169,7 @@ from .lowering.call_argument_stack_sources import (
     outgoing_call_stack_carrier_offset_8616,
 )
 from .lowering.call_return_selectors import is_scalar_ax_call_return_8616
+from .lowering.call_return_stack_bindings import call_result_escapes_group_8616
 from .lowering.callsite_inventory_presence import represented_callsite_addrs_8616
 from .lowering.function_pointer_parameters import materialize_function_pointer_parameters_8616
 from .lowering.real_mode_linear import (
@@ -6879,6 +6883,8 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
             old_lhs, _old_rhs = _assignment_lhs_rhs(assignment)
             selected_destination = dest_cvar
             if old_lhs is not None:
+                if call_result_escapes_group_8616(codegen.cfunc.statements, assignment, following_stmts):
+                    return False
                 if _same_c_expression_8616(old_lhs, dest_cvar):
                     return False
                 stale_destination = _consume_exact_stale_return_alias_8616(

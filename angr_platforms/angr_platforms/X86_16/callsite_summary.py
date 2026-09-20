@@ -1268,9 +1268,23 @@ def _transparent_between_push_args_8616(insn: object) -> bool:
     return dest_name is not None
 
 
-def _rewind_nested_call_args_8616(function: object, insns: tuple[object, ...], call_idx: int) -> int | None:
-    """Rewind over nested arguments with exact callee-clean or helper ABI evidence."""
-    argument_bytes = _callee_stack_cleanup_bytes_8616(function, insns[call_idx])
+def _nested_call_argument_window_8616(
+    function: object, insns: tuple[object, ...], call_idx: int,
+) -> tuple[int, int] | None:
+    """Prove which call and byte count an argument-scan barrier consumes."""
+    caller_cleanup: int | None = None
+    if _mnemonic(insns[call_idx]) == "add":
+        if call_idx == 0 or not is_x86_16_call_mnemonic_8616(_mnemonic(insns[call_idx - 1])):
+            return None
+        call_idx -= 1
+        call_addr = _instruction_address_8616(insns[call_idx])
+        if call_addr is None or _callee_stack_cleanup_bytes_8616(function, insns[call_idx]) != 0:
+            return None
+        cleanup = _stack_cleanup_after_call(function, insns, call_idx, call_addr)
+        if cleanup is None:
+            return None
+        caller_cleanup = cleanup.amount
+    argument_bytes = caller_cleanup if caller_cleanup is not None else _callee_stack_cleanup_bytes_8616(function, insns[call_idx])
     if not isinstance(argument_bytes, int) or argument_bytes <= 0:
         target_addr = _direct_call_target_for_insn_8616(function, insns[call_idx])
         helper_widths = known_helper_abi_widths_8616(_lookup_target_name_8616(function, target_addr))
@@ -1283,6 +1297,15 @@ def _rewind_nested_call_args_8616(function: object, insns: tuple[object, ...], c
                 argument_bytes,
             )
         return None
+    return call_idx, argument_bytes
+
+
+def _rewind_nested_call_args_8616(function: object, insns: tuple[object, ...], call_idx: int) -> int | None:
+    """Rewind nested arguments using exact caller/callee cleanup or helper ABI."""
+    window = _nested_call_argument_window_8616(function, insns, call_idx)
+    if window is None:
+        return None
+    call_idx, argument_bytes = window
     scan = call_idx - 1
     skipped_transparents = 0
     total = 0
@@ -1623,7 +1646,7 @@ def _collect_push_args_before_call(
                 widths
                 and target_total is not None
                 and sum(widths) < target_total
-                and is_x86_16_call_mnemonic_8616(_mnemonic(insn))
+                and (is_x86_16_call_mnemonic_8616(_mnemonic(insn)) or _mnemonic(insn) == "add")
             ):
                 rewound = _rewind_nested_call_args_8616(function, insns, scan)
                 if rewound is not None and rewound < scan:
@@ -2555,7 +2578,7 @@ def _collect_push_arg_sources_before_call(
                 sources
                 and target_total is not None
                 and total < target_total
-                and is_x86_16_call_mnemonic_8616(_mnemonic(insn))
+                and (is_x86_16_call_mnemonic_8616(_mnemonic(insn)) or _mnemonic(insn) == "add")
             ):
                 rewound = _rewind_nested_call_args_8616(function, insns, scan)
                 if rewound is not None and rewound < scan:
@@ -2609,7 +2632,7 @@ def _collect_push_arg_instruction_addrs_before_call(
             addresses
             and target_total is not None
             and total < target_total
-            and is_x86_16_call_mnemonic_8616(_mnemonic(insn))
+            and (is_x86_16_call_mnemonic_8616(_mnemonic(insn)) or _mnemonic(insn) == "add")
         ):
             rewound = _rewind_nested_call_args_8616(function, insns, scan)
             if rewound is not None and rewound < scan:

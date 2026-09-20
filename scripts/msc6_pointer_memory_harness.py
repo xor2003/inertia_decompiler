@@ -1,42 +1,11 @@
-void fill_bytes(unsigned char *dst, unsigned char value, int count)
-{
-    int i;
+"""Behavioral observations for rebuilt tiny MS C pointer functions.
 
-    for (i = 0; i < count; ++i) {
-        dst[i] = value;
-    }
-}
+Layer: Test infrastructure.
+Responsibility: retain the original pointer fixture's checks without importing
+compiler/decompiler machinery into lightweight oracle regression tests.
+"""
 
-int sum_words(const unsigned short *src, int count)
-{
-    int i;
-    int total;
-
-    total = 0;
-    for (i = 0; i < count; ++i) {
-        total += src[i];
-    }
-    return total;
-}
-
-void swap_ptrs(int *left, int *right)
-{
-    int tmp;
-
-    tmp = *left;
-    *left = *right;
-    *right = tmp;
-}
-
-void offset_copy(unsigned short *dst, const unsigned short *src, int count)
-{
-    int i;
-
-    for (i = 0; i < count; ++i) {
-        dst[i] = src[i] + 1U;
-    }
-}
-
+POINTER_MEMORY_HARNESS_MAIN: str = """
 int main(void)
 {
     unsigned char bytes[8];
@@ -86,3 +55,4 @@ int main(void)
     }
     return 255;
 }
+"""

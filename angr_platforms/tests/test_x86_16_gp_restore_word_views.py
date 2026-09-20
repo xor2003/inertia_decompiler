@@ -5,13 +5,30 @@ from types import SimpleNamespace
 
 import pytest
 from angr.analyses.decompiler.structured_codegen import c
-from angr.sim_type import SimTypeChar, SimTypeShort
+from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
+from angr_platforms.X86_16.lowering.gp_stack_local_reload import has_materialized_gp_local_reload_8616
 from angr_platforms.X86_16.lowering.gp_stack_restore import materialize_gp_stack_restores_8616
 from angr_platforms.X86_16.pipeline.errors import PipelineHardError
 from angr_platforms.X86_16.postprocess.optimization.dce import _dead_code_elimination_8616
+from test_x86_16_gp_stack_local_reload import _fixture as reload_fixture
 from test_x86_16_gp_stack_restore import _artifact, _Codegen
+
+
+@pytest.mark.parametrize("offset", [-4, -2, -1, 0])
+def test_intervening_byte_store_requires_disjoint_stack_coordinates(offset):
+    """Distinct variable objects at overlapping coordinates must still refuse."""
+    codegen, container, local, fact = reload_fixture()
+    other = c.CVariable(SimStackVariable(offset, 2, base="bp"), variable_type=local.variable_type, codegen=codegen)
+    reference = c.CUnaryOp("Reference", other, codegen=codegen)
+    pointer = c.CTypeCast(None, SimTypePointer(SimTypeChar(False)).with_arch(codegen.project.arch),
+                         reference, codegen=codegen)
+    zero = c.CConstant(0, local.variable_type, codegen=codegen)
+    target = c.CIndexedVariable(pointer, zero, codegen=codegen)
+    container.statements.insert(2, c.CAssignment(target, zero, codegen=codegen))
+
+    assert has_materialized_gp_local_reload_8616(codegen, (container,), fact) is (offset not in {-2, -1})
 
 
 def _fixture(value=0, shift=8, offset=-2):

@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "profile": {
+    "id": "msc6-large",
+    "compiler": "Microsoft C v6ax",
+    "flags": ["/Od", "/AL"],
+    "memory_model": "large"
+  },
+  "scope": {
+    "admitted": ["model.large", "storage.global", "storage.static_local", "calls.far"],
+    "later": ["pointer.far_data", "pointer.far_function", "calls.pointer_return"],
+    "excluded": [],
+    "undecided": []
+  },
+  "cases": [
+    {"id": "large_global_calls", "construct": "storage_classes", "obligations": ["model.large", "storage.global", "storage.static_local", "calls.far"]}
+  ]
+}

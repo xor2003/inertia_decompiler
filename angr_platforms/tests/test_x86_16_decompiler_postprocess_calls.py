@@ -9024,7 +9024,8 @@ def test_materialize_callsite_return_destination_refuses_to_cross_competing_retu
     assert not hasattr(codegen, "_inertia_call_return_destination_stale_alias_pruned_8616")
 
 
-def test_materialize_callsite_return_destination_keeps_carrier_read_after_stale_alias():
+@pytest.mark.parametrize("nested", [False, True])
+def test_materialize_callsite_return_destination_keeps_carrier_read_after_stale_alias(nested):
     project = _project()
     codegen = _empty_codegen(project)
     structured_c = _scg.c
@@ -9050,7 +9051,9 @@ def test_materialize_callsite_return_destination_keeps_carrier_read_after_stale_
     call_assignment = CAssignment(carrier, call, codegen=codegen)
     stale_alias = CAssignment(ch, carrier, codegen=codegen)
     competing_use = CAssignment(competing_lhs, carrier, codegen=codegen)
-    root = CStatements([call_assignment, stale_alias, competing_use], addr=0x4010, codegen=codegen)
+    bridge = CStatements([call_assignment, stale_alias], codegen=codegen)
+    expected = [bridge, competing_use] if nested else [call_assignment, stale_alias, competing_use]
+    root = CStatements(expected.copy(), addr=0x4010, codegen=codegen)
     codegen.cfunc = SimpleNamespace(
         addr=0x4010,
         statements=root,
@@ -9076,7 +9079,8 @@ def test_materialize_callsite_return_destination_keeps_carrier_read_after_stale_
 
     assert _materialize_callsite_stack_arguments_8616(project, codegen) is False
 
-    assert root.statements == [call_assignment, stale_alias, competing_use]
+    assert root.statements == expected
+    assert not nested or bridge.statements == [call_assignment, stale_alias]
     assert _same_c_expression_8616(call_assignment.lhs, carrier)
     assert not hasattr(codegen, "_inertia_call_return_destination_stale_alias_pruned_8616")
 

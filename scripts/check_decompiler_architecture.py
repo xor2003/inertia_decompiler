@@ -65,6 +65,9 @@ _POSTPROCESS_LEGACY_IMPORT_ALLOWLIST: dict[str, frozenset[str]] = {
             # Veto-only edge: consume Lowering's scalar-return eligibility;
             # the bridge cannot narrow a proven DX:AX capture into AX.
             ".lowering.call_return_selectors",
+            # Veto-only migration edge: Lowering owns whole-function carrier
+            # occurrence checks; the legacy destination fold may only refuse.
+            ".lowering.call_return_stack_bindings",
             # Lowering owns semantic-gap scheduling while the legacy call
             # materializer remains a bridge; this does not admit new recovery.
             ".lowering.call_argument_semantic_gap",

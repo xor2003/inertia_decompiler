@@ -32,8 +32,10 @@ def msc6_runtime_state_declarations(
 
 def msc6_runtime_support_source(
     gp_runtime_abi: GPRegisterRuntimeABI8616 = DEFAULT_GP_RUNTIME_ABI_8616,
+    *,
+    dos_segment_state: bool = False,
 ) -> str:
-    """Return C89 runtime support, with MS C's 32-bit unsigned-long GP lanes."""
+    """Emit GP support, optionally binding DOS segments to live CPU state."""
     from angr_platforms.X86_16.lowering.gp_register_state import runtime_gp_state_symbols_8616
 
     definitions: str
@@ -43,8 +45,19 @@ def msc6_runtime_support_source(
         definitions = "\n".join(
             f"unsigned long {symbol} = 0UL;" for symbol in runtime_gp_state_symbols_8616()
         )
+    segment_support = (
+        "#include <dos.h>\n"
+        "unsigned short inertia_cs, inertia_ds, inertia_es, inertia_ss;\n"
+        "void inertia_init_segments(void)\n"
+        "{\n"
+        "    struct SREGS state;\n"
+        "    segread(&state);\n"
+        "    inertia_cs = state.cs; inertia_ds = state.ds;\n"
+        "    inertia_es = state.es; inertia_ss = state.ss;\n"
+        "}\n"
+    ) if dos_segment_state else ""
     return (
         "/* Generic runtime state for rebuilt decompiler output. */\n"
-        + definitions
+        + definitions + "\n" + segment_support
         + "\nvoid aNchkstk(void) {}\nvoid __aNchkstk(void) {}\n"
     )

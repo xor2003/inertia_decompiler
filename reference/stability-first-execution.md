@@ -3,10 +3,73 @@
 User priority, September 20: decompilation stability, then correctness, then
 the remaining agreed plan. This changes execution order, not the promised
 Ghidra/Reko features or the full Steps 10-12 completion requirements.
+Current milestone scope is defined in the [compiler coverage plan](compiler-coverage-plan.md#objective-and-limits):
+unpacked 16-bit real-mode C application functions; unpacking and recognized
+library bodies are excluded, while library-call semantics remain required.
 
 Latest explicit direction: defer new Ghidra/Reko parity features until stability
 work is accepted. Preserve those tasks as deferred, not completed or cancelled.
+Finishing the previous Ghidra/Reko parity plan remains a low-priority task after
+the current stability/correctness milestone, not a prerequisite for it.
 Known incorrect output remains blocking even when decompilation does not crash.
+User reaffirmed this order: stability first, correctness next, remaining planned
+features last. Keep the existing repair cohort and work one slice at a time.
+The revised compiler-coverage plan permits a reusable test-runner slice after
+the current small repair checkpoint, without waiting for every corpus failure.
+
+Current carrier-repair routine pytest lane: 6,231 passed, eight failed in
+834.96 seconds (`.cache/mcb-carrier-test-pipeline.log`). Seven failures report
+timeouts; their causes are not yet established. The eighth is `_dos_envSize`
+GP stack-restore materialization, within the active repair cohort. These are
+routine-selection results, not a full approximately 11,000-test audit. The
+completed pipeline failed overall: two external compiler lanes passed and the
+routine pytest lane failed. The preceding 268 contract tests passed. Preserve
+these failures; do not label the full suite green or raise timeouts without
+diagnosing their causes.
+
+The isolated `_dos_envSize` regression was reproduced before the fix. Alias
+proves BX=0 restored by LES at 0x1023 from entry-SP bytes -6/-5; its memory use
+was folded, leaving only the ES publication at that instruction. Lowering now
+publishes the proven constant GP effect beside one unambiguous pure segment
+anchor, preserving the upper register half. Replay recognizes the equivalent
+`EBX & 0xffff0000` zero-word write after simplification. Unknown constants,
+conflicting effects, wrong registers/masks and ambiguous placement refuse.
+Expanded focused result: 124 passed in 43.90 seconds; the live function passes
+validation, generated-C compilation and behavior (16.31-second test call).
+New-helper Ruff and MyPy pass; tests are enrolled in Make and the routine lane.
+Evidence: `.cache/constant-restore-expanded-tests.log`. Broad acceptance remains
+open; this does not close the other DOSFUNC failures or the full-suite audit.
+`quality-fast` finished with exit 2 on global Ruff debt; its compiled-import
+smoke passed 39 modules (`.cache/constant-restore-quality-fast.log`).
+
+The call-carrier replay regression failed before the focused Lowering change
+and passed after it (14 tests); it now recognizes the existing unsigned-word
+call/copy pair by storage identity and exact callsite instead of rebuilding it.
+New-helper Ruff/MyPy pass; legacy `real_mode_linear.py` retains lint debt.
+`_dos_mcbInfo` still times out at the unchanged 30-second limit. A diagnostic
+90-second run ended with exit 4, not success: final GP restore refusal, an ESI
+validation delta and two underspecified `sprintf` calls remain. At those calls,
+COD assembly preserves two outer arguments across `strlen` and its two-byte
+cleanup before pushing the final argument; recovery reports one argument.
+Investigate generic pending-argument preservation across nested calls, not
+library-name-specific argument reconstruction. Artifacts:
+`.cache/call-bridge-replay-before.log`, `.cache/call-bridge-replay-after.log`,
+`.cache/mcbinfo-replay-diagnostic.log`. No function or cohort closure is claimed.
+
+Bounded follow-up: [DOS compiler coverage plan](compiler-coverage-plan.md)
+defines the ordered manifest, behavioral oracle, interaction coverage,
+budgeted generation/reduction and routine gate, with per-step DoD and failure
+criteria. Its revised order delivers a reused four-case runner first, after
+the current small repair checkpoint, without opening a parallel workstream.
+
+Future bounded correctness input: the user confirms their
+[Csmith fork](https://github.com/xor2003/csmith) supports MS C's 16-bit integer
+model. Reuse it after the current repair is accepted, without making generator
+integration another prerequisite. Compare compiled original and recompiled
+decompiler output under kvikdos; preserve seeds and minimize failures into
+deterministic regressions. Random exploration belongs in an optional bounded
+lane, not an unbounded default gate.
+
 New bounded diagnostic: [linked selector/offset read](segcopy-stability-probe.md).
 Original MS C 6/kvikdos execution passes; decompilation loses a load and is
 correctly rejected. Track this after the active stack-restore repair, without

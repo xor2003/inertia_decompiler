@@ -14,11 +14,15 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CVariable,
 )
 from angr.sim_type import SimTypeShort
-from angr.sim_variable import SimStackVariable
+from angr.sim_variable import SimStackVariable, SimTemporaryVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.ir import IRCallOutputProvenance8616, IRCallOutputShape8616
+from angr_platforms.X86_16.lowering.call_return_stack_bindings import call_result_escapes_group_8616
 from angr_platforms.X86_16.lowering.real_mode_linear import (
+    DirectStackMoveFact8616,
+    DirectStackMoveSourceKind8616,
     _replace_tagged_call_statement_with_stack_assignment_8616,
+    _tree_has_zero_arg_call_return_assignment_8616,
 )
 from angr_platforms.X86_16.lowering.wide_call_output_assignment_contracts import (
     WideCallOutputAssignmentArtifact8616,
@@ -99,6 +103,52 @@ def test_same_target_fallback_preserves_distinct_later_callsite() -> None:
     assert result is None
     assert root.statements == [existing, later_statement]
     assert later_call.tags["ins_addr"] == _LATER_CALLSITE
+
+
+def test_direct_stack_call_replacement_preserves_live_temporary() -> None:
+    """Retain the original call result when later statements still consume it."""
+    project, codegen, destination = _fixture()
+    temporary = CVariable(SimTemporaryVariable(0, 2), variable_type=SimTypeShort(False), codegen=codegen)
+    call = CFunctionCall("callee", None, [], codegen=codegen, tags={"ins_addr": _INITIAL_CALLSITE})
+    producer = CAssignment(temporary, call, codegen=codegen)
+    use = CAssignment(destination, temporary, codegen=codegen)
+    root = CStatements([producer, use], codegen=codegen)
+    rebuilt_call = CFunctionCall("callee", None, [], codegen=codegen, tags=call.tags)
+
+    result = _replace_tagged_call_statement_with_stack_assignment_8616(
+        root, project, _INITIAL_CALLSITE, "callee",
+        lambda tags: CAssignment(destination, rebuilt_call, codegen=codegen, tags=tags),
+    )
+
+    assert isinstance(root.statements[0], CStatements)
+    assert root.statements[0].statements == [producer, result]
+    assert producer.rhs is call
+    assert result.rhs is temporary
+    assert root.statements[1] is use
+    fact = DirectStackMoveFact8616(
+        dst_offset=-4, width=2, source_kind=DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN,
+        ins_addr=_INITIAL_CALLSITE + 3, source_call_ins_addr=_INITIAL_CALLSITE, source_call_name="callee",
+    )
+    assert _tree_has_zero_arg_call_return_assignment_8616(root, project, fact, destination)
+    assert not _tree_has_zero_arg_call_return_assignment_8616(
+        root, project, replace(fact, source_call_ins_addr=_LATER_CALLSITE), destination,
+    )
+    result.rhs = CVariable(SimTemporaryVariable(1, 2), variable_type=SimTypeShort(False), codegen=codegen)
+    assert not _tree_has_zero_arg_call_return_assignment_8616(root, project, fact, destination)
+
+
+@pytest.mark.parametrize("external", [False, True])
+def test_call_carrier_group_proof_counts_shared_outer_uses(external):
+    """An outer read of the same AST object remains a distinct occurrence."""
+    _project, codegen, destination = _fixture()
+    temporary = CVariable(SimTemporaryVariable(0, 2), variable_type=SimTypeShort(False), codegen=codegen)
+    call = CFunctionCall("callee", None, [], codegen=codegen)
+    producer = CAssignment(temporary, call, codegen=codegen)
+    copy = CAssignment(destination, temporary, codegen=codegen)
+    bridge = CStatements([producer, copy], codegen=codegen)
+    root = CStatements([bridge, copy] if external else [bridge], codegen=codegen)
+
+    assert call_result_escapes_group_8616(root, producer, (copy,)) is external
 
 
 def test_unique_same_target_fallback_remains_available_without_exact_callsite() -> None:

@@ -13,7 +13,7 @@ GP_REGISTERS = ("eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp")
 
 @pytest.mark.parametrize("abi", list(GPRegisterRuntimeABI8616))
 def test_msc6_runtime_defines_shared_gp_state(monkeypatch, tmp_path, abi):
-    """Use the real runtime writer, then link a separate C state consumer."""
+    """Link the real runtime and preserve distinct segment and GP state."""
     monkeypatch.setattr(
         build, "_run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "", ""),
     )
@@ -24,17 +24,36 @@ def test_msc6_runtime_defines_shared_gp_state(monkeypatch, tmp_path, abi):
     )
     consumer = tmp_path / "consumer.c"
     declarations = msc6_runtime_state_declarations(abi)
+    (tmp_path / "dos.h").write_text(
+        "struct SREGS { unsigned short es, cs, ss, ds; };\n"
+        "void segread(struct SREGS *state);\n"
+    )
+    segment_probe = """
+#include <dos.h>
+extern unsigned short inertia_cs, inertia_ds, inertia_es, inertia_ss;
+void inertia_init_segments(void);
+void segread(struct SREGS *state) {
+    state->cs = 0x1234; state->ds = 0x2345;
+    state->es = 0x3456; state->ss = 0x4567;
+}
+"""
     checks = "\n".join(
         f"inertia_{name} = 0xabcd1234UL;\n"
         f"inertia_{name} = (inertia_{name} & 0xffff0000UL) | 0x8173UL;\n"
         f"if (inertia_{name} != 0xabcd8173UL) return 1;"
         for name in GP_REGISTERS
     )
-    consumer.write_text(declarations + "\nint main(void) {\n" + checks + "\nreturn 0; }\n")
+    consumer.write_text(
+        declarations + segment_probe + "\nint main(void) {\n" + checks
+        + "\ninertia_init_segments();\n"
+        "return inertia_cs != 0x1234 || inertia_ds != 0x2345 ||\n"
+        "       inertia_es != 0x3456 || inertia_ss != 0x4567;\n}\n"
+    )
     executable = tmp_path / "runtime_state"
     compiled = subprocess.run(
         ["gcc", "-std=c89", "-pedantic-errors", "-Wall", "-Wextra", "-Werror",
-         "-x", "c", str(tmp_path / "INERTIA.C"), str(consumer), "-o", str(executable)],
+         "-I", str(tmp_path), "-x", "c", str(tmp_path / "INERTIA.C"),
+         str(consumer), "-o", str(executable)],
         capture_output=True, text=True, check=False,
     )
     assert compiled.returncode == 0, compiled.stderr

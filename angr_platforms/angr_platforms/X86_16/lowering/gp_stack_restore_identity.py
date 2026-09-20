@@ -12,15 +12,18 @@ from __future__ import annotations
 from typing import cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
-from angr.sim_type import SimTypeChar, SimTypePointer
-from angr.sim_variable import SimStackVariable
+from angr.sim_type import SimTypeChar, SimTypePointer, SimTypeShort
+from angr.sim_variable import SimRegisterVariable, SimStackVariable
 
 from ..alias.segment_stack_restore import SegmentStackRestoreFact8616
 from ..c_ast_utils import _iter_c_nodes_deep_8616
 from .gp_register_state import runtime_gp_expression_view_8616, runtime_gp_live_in_name_8616
+from .physical_registers import physical_register_name_8616
 from .segment_access_policy import instruction_addrs_from_node_8616
+from .segment_register_state import runtime_segment_name_for_variable_8616
 from .stack_variable_coordinates import stack_variable_coordinate_registry_8616
 from .stack_word_recomposition import recognize_stack_word_recomposition_8616
+from .terminal_return_expressions import _safe_scalar_expression_8616
 
 
 def _entry_sp_byte_offset_8616(codegen: object, node: object) -> int | None:
@@ -52,7 +55,7 @@ def matches_gp_restore_stack_bytes_8616(
     """Require both byte operands to match the Alias-proven restore range."""
     recomposition = recognize_stack_word_recomposition_8616(node)
     if recomposition is None:
-        return fact.constant_value is not None and _constant_word_views_8616(codegen, node, fact)
+        return fact.constant_value is not None and _word_local_from_byte_views_8616(codegen, node, fact) is not None
     low = _entry_sp_byte_offset_8616(codegen, recomposition.low)
     high = _entry_sp_byte_offset_8616(codegen, recomposition.high)
     return low is not None and high is not None and (low, high) == fact.stack_offsets
@@ -73,10 +76,12 @@ def _shifted_view_8616(node: object, operation: str) -> object | None:
     return None
 
 
-def _constant_word_views_8616(codegen: object, node: object, fact: SegmentStackRestoreFact8616) -> bool:
-    """Join two byte views of one local to Alias's exact proven word range."""
+def _word_local_from_byte_views_8616(
+    codegen: object, node: object, fact: SegmentStackRestoreFact8616,
+) -> structured_c.CVariable | None:
+    """Find the local behind exact byte views; this alone does not prove its value."""
     if not isinstance(node, structured_c.CBinaryOp) or node.op != "Or":
-        return False
+        return None
     for low, high in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
         local = _unsigned_byte_view_8616(low)
         upper = _shifted_view_8616(_unsigned_byte_view_8616(_shifted_view_8616(high, "Shl")), "Shr")
@@ -86,8 +91,8 @@ def _constant_word_views_8616(codegen: object, node: object, fact: SegmentStackR
             continue
         offset = _entry_sp_byte_offset_8616(codegen, local)
         if offset is not None and fact.stack_offsets == (offset, offset + 1):
-            return True
-    return False
+            return local
+    return None
 
 
 _BYTE_BITS_8616 = 8
@@ -109,7 +114,13 @@ def _runtime_restore_word_8616(
     statement: structured_c.CAssignment,
     register: str,
 ) -> object | None:
-    """Require a low-word write that preserves the destination's upper word."""
+    """Read an exact native word write or a preserving runtime-parent write."""
+    destination = statement.lhs
+    if isinstance(destination, structured_c.CVariable) and isinstance(destination.variable, SimRegisterVariable):
+        native_word = destination.variable.size == _WORD_BYTES_8616 and isinstance(destination.variable_type, SimTypeShort)
+        if native_word and physical_register_name_8616(destination) == register:
+            return cast(object, statement.rhs)
+        return None
     target = runtime_gp_expression_view_8616(statement.lhs)
     expected = runtime_gp_live_in_name_8616(register)
     if target is None or target.register_name != expected:
@@ -195,6 +206,67 @@ def _unconditional_sequence_8616(container: structured_c.CStatements) -> list[ob
         else:
             result.append(statement)
     return result
+
+
+def _assignment_prefix_before_origin_8616(statements: list[object], instruction: int | None) -> set[int]:
+    """Identify direct preceding assignments, never crossing control-flow boundaries.
+
+    Consumers must independently prove complete replacement stores and dominance.
+    This only establishes order; it neither deletes nor classifies earlier effects.
+    """
+    prefix: set[int] = set()
+    for statement in statements:
+        if not isinstance(statement, structured_c.CAssignment) or id(statement) in prefix:
+            return set()
+        if instruction in instruction_addrs_from_node_8616(statement):
+            return prefix
+        prefix.add(id(statement))
+    return set()
+
+
+def _independent_segment_assignment_8616(statement: structured_c.CAssignment) -> bool:
+    """Separate a pure owned segment publication from a GP destination census.
+
+    The segment value remains subject to segment and whole-tail validation.
+    Calls and nested effects may alter GP state and cannot be excluded here.
+    """
+    target = statement.lhs
+    if not isinstance(target, structured_c.CVariable) or runtime_segment_name_for_variable_8616(target.variable) is None:
+        return False
+    return bool(_safe_scalar_expression_8616(statement.rhs))
+
+
+def _stack_write_offsets_8616(codegen: object, target: object) -> tuple[int, ...] | None:
+    """Resolve only exact word locals and unsigned indexed bytes of those locals."""
+    if isinstance(target, structured_c.CVariable):
+        offset = _entry_sp_byte_offset_8616(codegen, target)
+        if offset is not None and target.variable.size == 2 and isinstance(target.variable_type, SimTypeShort):
+            return (offset, offset + 1)
+        return None
+    if not isinstance(target, structured_c.CIndexedVariable):
+        return None
+    index, pointer = target.index, target.variable
+    if not isinstance(index, structured_c.CConstant) or index.value not in {0, 1}:
+        return None
+    if not isinstance(pointer, structured_c.CTypeCast) or not isinstance(pointer.dst_type, SimTypePointer):
+        return None
+    byte_type, reference = pointer.dst_type.pts_to, pointer.expr
+    unsigned_byte = isinstance(byte_type, SimTypeChar) and byte_type.signed is False
+    if not unsigned_byte or not isinstance(reference, structured_c.CUnaryOp) or reference.op != "Reference":
+        return None
+    offsets = _stack_write_offsets_8616(codegen, reference.operand)
+    return (offsets[int(index.value)],) if offsets is not None and len(offsets) == 2 else None
+
+
+def _disjoint_stack_write_8616(
+    statement: structured_c.CAssignment, stores: tuple[structured_c.CAssignment, ...],
+) -> bool:
+    """Require every written stack byte to avoid every protected saved byte."""
+    target = _stack_write_offsets_8616(statement.codegen, statement.lhs)
+    if target is None or not stores:
+        return False
+    saved_ranges = tuple(_stack_write_offsets_8616(store.codegen, store.lhs) for store in stores)
+    return all(saved is not None and set(target).isdisjoint(saved) for saved in saved_ranges)
 
 
 def has_materialized_gp_stack_bytes_8616(

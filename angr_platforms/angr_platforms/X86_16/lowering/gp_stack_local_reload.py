@@ -22,11 +22,15 @@ from .call_return_stack_stores import classify_call_return_stack_store_8616
 from .callsite_inventory import ensure_callsite_summary_inventory_8616
 from .gp_register_state import runtime_gp_expression_view_8616, runtime_gp_live_in_name_8616
 from .gp_stack_restore_identity import (
+    _assignment_prefix_before_origin_8616,
+    _disjoint_stack_write_8616,
     _entry_sp_byte_offset_8616,
+    _independent_segment_assignment_8616,
     _is_saved_register_byte_8616,
     _masked_value_8616,
     _runtime_restore_word_8616,
     _unconditional_sequence_8616,
+    _word_local_from_byte_views_8616,
 )
 from .segment_access_policy import instruction_addrs_from_node_8616
 
@@ -245,22 +249,30 @@ def _complete_byte_stores(
     return ()
 
 
+def _local_writers(nodes: dict[int, object], local: structured_c.CVariable) -> tuple[structured_c.CAssignment, ...]:
+    """Collect all assignments whose destination contains the exact local storage."""
+    return tuple(node for node in nodes.values() if isinstance(node, structured_c.CAssignment)
+                 and any(_same_local(child, local) for child in (node.lhs, *_iter_c_nodes_deep_8616(node.lhs))))
+
+
 def _stores_for_local(
     codegen: object,
     containers: tuple[structured_c.CStatements, ...],
     local: structured_c.CVariable,
     fact: SegmentStackRestoreFact8616,
+    prior_writes: set[int] | frozenset[int] = frozenset(),
 ) -> tuple[structured_c.CAssignment, ...]:
-    """Require exactly one source-register store per byte and no other writers."""
+    """Require complete reaching stores, refusing other writers and all escapes."""
     stores: dict[int, structured_c.CAssignment] = {}
     word_stores: list[structured_c.CAssignment] = []
     allowed_references: set[int] = set()
     nodes = {id(node): node for container in containers for node in _iter_c_nodes_deep_8616(container)}
-    for node in nodes.values():
-        if not isinstance(node, structured_c.CAssignment):
-            continue
-        owns_lvalue = any(_same_local(child, local) for child in (node.lhs, *_iter_c_nodes_deep_8616(node.lhs)))
-        if not owns_lvalue:
+    for node in _local_writers(nodes, local):
+        if id(node) in prior_writes:
+            if _stored_byte(node.lhs, local) is None and not _same_local(node.lhs, local):
+                return ()
+            allowed_references.update(id(child) for child in _iter_c_nodes_deep_8616(node.lhs)
+                                      if isinstance(child, structured_c.CUnaryOp) and child.op == "Reference")
             continue
         if _same_local(node.lhs, local):
             if not _proven_call_store(codegen, node, fact):
@@ -295,7 +307,7 @@ def _dominates_reload(
     for statement in statements[indices[-1] + 1:restore_index]:
         if not isinstance(statement, structured_c.CAssignment):
             return False
-        if not any(statement is store for store in stores) and not isinstance(statement.lhs, structured_c.CVariable):
+        if not isinstance(statement.lhs, structured_c.CVariable) and not _disjoint_stack_write_8616(statement, stores):
             return False
         if any(isinstance(node, structured_c.CFunctionCall) for node in _iter_c_nodes_deep_8616(statement)):
             return False
@@ -308,6 +320,8 @@ def has_materialized_gp_local_reload_8616(
     """Accept every exact runtime reload only when its local stores dominate it."""
     if fact.verdict is not SegmentStackRestoreVerdict8616.PROVEN:
         return False
+    if any(isinstance(node, structured_c.CGoto) for container in containers for node in _iter_c_nodes_deep_8616(container)):
+        return False
     candidates: set[int] = set()
     verified: set[int] = set()
     for container in containers:
@@ -315,14 +329,19 @@ def has_materialized_gp_local_reload_8616(
         for index, statement in enumerate(statements):
             if not isinstance(statement, structured_c.CAssignment):
                 continue
-            if fact.restore_instruction_addr not in instruction_addrs_from_node_8616(statement):
+            unrelated_effect = (fact.restore_instruction_addr not in instruction_addrs_from_node_8616(statement)
+                                or _independent_segment_assignment_8616(statement))
+            if unrelated_effect:
                 continue
             candidates.add(id(statement))
             local = _runtime_restore_word_8616(statement, fact.restore_register)
             if not _exact_local(codegen, local, fact):
+                local = _word_local_from_byte_views_8616(codegen, local, fact)
+            if not _exact_local(codegen, local, fact):
                 continue
             assert isinstance(local, structured_c.CVariable)
-            stores = _stores_for_local(codegen, containers, local, fact)
+            prior = _assignment_prefix_before_origin_8616(statements, fact.saved_instruction_addr)
+            stores = _stores_for_local(codegen, containers, local, fact, prior)
             if _dominates_reload(statements, index, stores):
                 verified.add(id(statement))
     # Transparent nested containers can revisit a statement without its

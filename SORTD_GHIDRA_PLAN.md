@@ -79,6 +79,11 @@ nine/five input callsites and 27/five return-memory facts, respectively, without
 weakening either solver. Fresh exports validate 20/20, compile without warnings,
 and pass all 19 behavior cases; all default pipeline lanes pass.
 Current priority: [stability first, correctness next, remaining features last](reference/stability-first-execution.md).
+The [bounded compiler-coverage follow-up](reference/compiler-coverage-plan.md)
+adds directed interaction coverage and Csmith differential testing after the
+active stability repairs, with explicit per-step DoD and failure criteria.
+Remaining Ghidra/Reko parity work is explicitly low priority after this
+stability/correctness milestone; its previous obligations are retained.
 New Ghidra/Reko parity features are explicitly deferred by the user until
 stability work is accepted; they are not completed or cancelled. Small source
 fixtures from `/home/xor/nndecomp` are preferred over new feature work.

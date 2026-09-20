@@ -43,6 +43,8 @@ from inertia_decompiler.flair_paths import default_flair_startup_root  # noqa: E
 from inertia_decompiler.project_loading import _build_project  # noqa: E402
 from inertia_decompiler.sidecar_metadata import _load_lst_metadata  # noqa: E402
 from scripts.generated_c_return_contract import has_returned_call_8616  # noqa: E402
+from scripts.msc6_memory_model import MSCMemoryModel  # noqa: E402
+from scripts.msc6_pointer_memory_harness import POINTER_MEMORY_HARNESS_MAIN  # noqa: E402
 from scripts.msc6_runtime_support import (  # noqa: E402
     msc6_runtime_state_declarations,
     msc6_runtime_support_source,
@@ -261,6 +263,16 @@ int main(void)
     if (in_window_i16(9, 1, 7) != 0) {
         return 13;
     }
+    if (rel_i16(-32767 - 1, 32767) != 35 || rel_i16(32767, -32767 - 1) != 44) {
+        return 14;
+    }
+    if (rel_u16(65535U, 0U) != 44 || rel_u16(32768U, 32767U) != 44) {
+        return 15;
+    }
+    if (add_wrap_u16(65535U, 1U) != 0U || add_wrap_u16(32767U, 1U) != 32768U ||
+        add_wrap_u16(32768U, 32768U) != 0U) {
+        return 16;
+    }
     return 255;
 }
 """
@@ -340,6 +352,10 @@ int main(void)
     if (select_and_apply(0, 8) != 6) {
         return 4;
     }
+    if (nested_arguments(2) != 50 || nested_arguments(-3) != -5 ||
+        nested_arguments(0) != 28) {
+        return 5;
+    }
     return 255;
 }
 """
@@ -381,35 +397,6 @@ int main(void)
     }
     if (goto_accumulate(4) != 14) {
         return 2;
-    }
-    return 255;
-}
-"""
-
-POINTER_MEMORY_HARNESS_MAIN = """
-int main(void)
-{
-    unsigned char bytes[8];
-    unsigned short words[4];
-    int a;
-    int b;
-
-    fill_bytes(bytes, 3, 8);
-    words[0] = 10;
-    words[1] = 20;
-    words[2] = 30;
-    words[3] = 40;
-    a = 5;
-    b = 9;
-    swap_ptrs(&a, &b);
-    if (bytes[2] != 3) {
-        return 1;
-    }
-    if (sum_words(words, 4) != 100) {
-        return 2;
-    }
-    if (a != 9 || b != 5) {
-        return 3;
     }
     return 255;
 }
@@ -657,7 +644,7 @@ FALLBACK_EXAMPLE_REBUILD: dict[str, dict[str, object]] = {
         "harness": SIMPLE_CONTROL_HARNESS_MAIN,
     },
     "compare16": {
-        "functions": ("cmp_i16", "rel_i16", "rel_u16", "clamp_u16", "in_window_i16"),
+        "functions": ("cmp_i16", "rel_i16", "rel_u16", "clamp_u16", "in_window_i16", "add_wrap_u16"),
         "harness": COMPARE16_HARNESS_MAIN,
     },
     "compare32": {
@@ -672,7 +659,7 @@ FALLBACK_EXAMPLE_REBUILD: dict[str, dict[str, object]] = {
         "harness": COMPARE32_HARNESS_MAIN,
     },
     "function_pointers": {
-        "functions": ("inc_one", "dec_one", "apply_twice", "select_and_apply"),
+        "functions": ("inc_one", "dec_one", "apply_twice", "select_and_apply", "combine_args", "nested_arguments"),
         "harness": FNPTR_HARNESS_MAIN,
         "source_contracts": (
             GeneratedFunctionSourceContract(
@@ -687,7 +674,7 @@ FALLBACK_EXAMPLE_REBUILD: dict[str, dict[str, object]] = {
         "harness": LOOPS_JUMPS_HARNESS_MAIN,
     },
     "pointer_memory": {
-        "functions": ("fill_bytes", "sum_words", "swap_ptrs"),
+        "functions": ("fill_bytes", "sum_words", "swap_ptrs", "offset_copy"),
         "harness": POINTER_MEMORY_HARNESS_MAIN,
         "source_contracts": (
             GeneratedFunctionSourceContract(
@@ -1042,24 +1029,23 @@ def _declares_c89_local_identifier(function_body: str, identifier: str) -> bool:
 
 def _build_fallback_source(function_bodies: list[str], harness_main: str, *, prefix: str = "") -> str:
     """Combine extracted bodies with their target runtime ABI and behavior harness."""
-    from angr_platforms.X86_16.lowering.c_runtime_header import render_pointer_storage_macros_8616
+    from angr_platforms.X86_16.lowering.c_runtime_header import render_c_runtime_header_8616
 
     prefix_text = textwrap.dedent(prefix).strip()
     prefix_lines = [prefix_text, ""] if prefix_text else []
     return "\n".join(
         [
             "#include <stdbool.h>",
-            "#include <stdint.h>",
-            "#include <dos.h>",
-            "#ifndef MK_FP",
-            "#define MK_FP(seg, off) ((void far *)((((unsigned long)(seg)) << 16) | (unsigned short)(off)))",
-            "#endif",
-            render_pointer_storage_macros_8616("msc-dos"),
+            render_c_runtime_header_8616("msc-dos"),
+            "void inertia_init_segments(void);",
             "",
             *prefix_lines,
             *function_bodies,
             "",
+            "#define main inertia_case_main",
             textwrap.dedent(harness_main).strip(),
+            "#undef main",
+            "int main(void) { inertia_init_segments(); return inertia_case_main(); }",
             "",
         ]
     )
@@ -1443,6 +1429,7 @@ def _compile_and_link_unlocked(
     map_name: str,
     cod_name: str | None = None,
     runtime_support: bool = False,
+    memory_model: MSCMemoryModel = MSCMemoryModel.SMALL,
     gp_runtime_abi: GPRegisterRuntimeABI8616 = DEFAULT_GP_RUNTIME_ABI_8616,
 ) -> tuple[bool, str, str, str, str]:
     """Compile and link while the caller owns the shared toolchain lock."""
@@ -1467,6 +1454,7 @@ def _compile_and_link_unlocked(
         "/Ic:\\",
         "/nologo",
         "/Od",
+        memory_model.compiler_flag,
         "/c",
         f"/Foc:\\{obj_name}",
     ]
@@ -1483,7 +1471,7 @@ def _compile_and_link_unlocked(
     if runtime_support:
         runtime_src = out_dir / "INERTIA.C"
         runtime_src.write_text(
-            msc6_runtime_support_source(gp_runtime_abi),
+            msc6_runtime_support_source(gp_runtime_abi, dos_segment_state=True),
             encoding="utf-8",
         )
         runtime_compile_cmd = [
@@ -1500,6 +1488,7 @@ def _compile_and_link_unlocked(
             "/Ic:\\",
             "/nologo",
             "/Od",
+            memory_model.compiler_flag,
             "/c",
             f"/Foc:\\{runtime_obj_name}",
             "c:\\INERTIA.C",
@@ -1519,7 +1508,7 @@ def _compile_and_link_unlocked(
         "--env=LIB=E:\\LIB",
         "--prog=e:\\BIN\\LINK.EXE",
         "e:\\BIN\\LINK.EXE",
-        f"c:\\{obj_name}{runtime_link_obj},c:\\{exe_name},c:\\{map_name},E:\\LIB\\SLIBCE.LIB;",
+        f"c:\\{obj_name}{runtime_link_obj},c:\\{exe_name},c:\\{map_name},E:\\LIB\\{memory_model.runtime_library};",
     ]
     link_proc = _run(link_cmd, timeout=120)
 
@@ -1553,6 +1542,7 @@ def _compile_and_link(
     map_name: str,
     cod_name: str | None = None,
     runtime_support: bool = False,
+    memory_model: MSCMemoryModel = MSCMemoryModel.SMALL,
     gp_runtime_abi: GPRegisterRuntimeABI8616 = DEFAULT_GP_RUNTIME_ABI_8616,
 ) -> tuple[bool, str, str, str, str]:
     """Run one complete compiler/linker transaction without cross-worker overlap."""
@@ -1567,6 +1557,7 @@ def _compile_and_link(
             map_name=map_name,
             cod_name=cod_name,
             runtime_support=runtime_support,
+            memory_model=memory_model,
             gp_runtime_abi=gp_runtime_abi,
         )
 
@@ -2147,8 +2138,10 @@ def _build_from_function_decompiles(
     kvikdos: Path,
     msc6_root: Path,
     source_contracts: tuple[GeneratedFunctionSourceContract, ...] = (),
+    memory_model: MSCMemoryModel = MSCMemoryModel.SMALL,
     fallback_debug: dict[str, object] | None = None,
 ) -> tuple[bool, bool, int | None, str, str, str, str, str, str]:
+    """Rebuild selected decompiled functions with the original compiler model."""
     function_bodies: list[str] = []
     function_debug: list[tuple[str, str, str, dict[str, object]]] = []
 
@@ -2454,6 +2447,7 @@ def _build_from_function_decompiles(
         map_name=decompile_map_name,
         cod_name=Path(decompile_c_name).with_suffix(".COD").name,
         runtime_support=True,
+        memory_model=memory_model,
     )
     run_exit: int | None = None
     decompile_run_stdout = ""
@@ -2836,7 +2830,9 @@ def _decompile_and_validate(
     decompile_pat_backend: str | None = None,
     decompile_signature_catalog: Path | None = None,
     decompile_fallback_rebuild: dict[str, object] | None = None,
+    memory_model: MSCMemoryModel = MSCMemoryModel.SMALL,
 ) -> tuple[bool, Path, Path, bool, bool, int | None, str, str, str, str, str, str, float, int, str]:
+    """Validate generated C under the same toolchain model as the original."""
     def _rebuild_names() -> tuple[str, str, str, str]:
         if decompile_safe_names is None:
             stem = exe_path.stem.upper()
@@ -2891,6 +2887,7 @@ def _decompile_and_validate(
             msc6_root=msc6_root,
             source_contracts=source_contracts,
             fallback_debug=fallback_debug,
+            memory_model=memory_model,
         )
         profile["fallback_rebuild"] = {
             "attempted": True,
@@ -3077,6 +3074,7 @@ def _decompile_and_validate(
         map_name=map_name,
         cod_name=Path(decomp_name).with_suffix(".COD").name,
         runtime_support=True,
+        memory_model=memory_model,
     )
     decompile_run_exit: int | None = None
     decompile_run_stdout = ""
@@ -3145,6 +3143,7 @@ def main() -> int:
     ap.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     ap.add_argument("--kvikdos", type=Path, default=DEFAULT_KVIKDOS)
     ap.add_argument("--msc6-root", type=Path, default=DEFAULT_MSC6_ROOT)
+    ap.add_argument("--memory-model", type=MSCMemoryModel, choices=list(MSCMemoryModel), default=MSCMemoryModel.SMALL)
     ap.add_argument("--decompile-py", type=Path, default=DEFAULT_DECOMPILE)
     ap.add_argument(
         "--skip-constructs",
@@ -3312,6 +3311,7 @@ def main() -> int:
             exe_name=f"{local_source.stem.upper()}.EXE",
             map_name=f"{local_source.stem.upper()}.MAP",
             cod_name=f"{local_source.stem.upper()}.COD",
+            memory_model=args.memory_model,
         )
         exe_path = args.out_dir / f"{local_source.stem.upper()}.EXE"
         obj_path = args.out_dir / f"{local_source.stem.upper()}.OBJ"
@@ -3376,6 +3376,7 @@ def main() -> int:
                 args.out_dir,
                 kvikdos=args.kvikdos,
                 msc6_root=args.msc6_root,
+                memory_model=args.memory_model,
                 decompile_py=args.decompile_py,
                 decompile_timeout=args.decompile_timeout,
                 decompile_run_timeout=args.decompile_run_timeout,

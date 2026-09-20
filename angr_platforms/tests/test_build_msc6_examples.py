@@ -37,6 +37,16 @@ from scripts.build_msc6_examples import (
 )
 
 
+def test_fallback_keeps_target_memory_access_runtime_and_initializes_segments():
+    from angr_platforms.X86_16.lowering.c_runtime_header import render_c_runtime_header_8616
+
+    body = "void put(unsigned short off) { SEG_U16(inertia_ds, off) = 7; }"
+    source = _build_fallback_source([body], "int main(void) { return 255; }")
+    assert render_c_runtime_header_8616("msc-dos") in source
+    assert body in source
+    assert "inertia_init_segments();" in source
+
+
 def test_extract_decompiled_function_definition_handles_multiline_header():
     text = """
 #include <stdint.h>
@@ -60,7 +70,7 @@ int cmp_i16(int a, int b)
 def test_build_fallback_source_includes_dos_header_for_mk_fp():
     source = _build_fallback_source(["void f(void) { MK_FP(0, 0); }\n"], "int main(void) { return 255; }")
 
-    assert "#include <dos.h>" in source
+    assert "#include <dos.h>" in source.lower()
     assert "#define MK_FP(seg, off)" in source
     assert "void f(void)" in source
     prepared = _prepare_decompiled_source_for_c89(source)
@@ -483,7 +493,7 @@ def test_scalar_types_fallback_tracks_active_non_fpu_functions():
 def test_pointer_memory_fallback_tracks_all_runtime_checked_functions():
     config = FALLBACK_EXAMPLE_REBUILD["pointer_memory"]
 
-    assert config["functions"] == ("fill_bytes", "sum_words", "swap_ptrs")
+    assert config["functions"] == ("fill_bytes", "sum_words", "swap_ptrs", "offset_copy")
     harness = config["harness"]
     assert "fill_bytes(bytes, 3, 8);" in harness
     assert "sum_words(words, 4) != 100" in harness

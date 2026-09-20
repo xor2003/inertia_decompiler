@@ -126,10 +126,12 @@ from .call_argument_carrier_liveness import (
 from .call_execution_frame_replay import (
     prune_materialized_call_execution_frames_8616,
 )
+from .call_return_bridge_projection import word_call_bridge_projection_8616
 from .call_return_frame import (
     CallReturnFrameCarrierPrune8616,
     prune_exact_call_return_frame_projections_8616,
 )
+from .call_return_stack_bindings import preserve_word_call_carrier_8616
 from .call_return_stack_stores import recover_zero_arg_call_return_stack_store_8616
 from .callee_saved_frame import (
     CalleeSavedFrameCarrierKind8616,
@@ -9161,6 +9163,7 @@ def _replace_tagged_call_statement_with_stack_assignment_8616(
     *,
     call_target: int | None = None,
 ) -> structured_c.CAssignment | None:
+    """Project an owned call result to stack storage while retaining word carriers."""
     if not isinstance(call_ins_addr, int):
         return None
     accepted_call_names: set[str] = set()
@@ -9213,8 +9216,8 @@ def _replace_tagged_call_statement_with_stack_assignment_8616(
         ):
             # A stack-local low-half assignment is a carrier, not the
             # full-width destination. Materialize the wide assignment first,
-            # then consume the exact carrier below. SSA/register carriers are
-            # temporary identities and remain valid in-place replacements.
+            # then consume the exact carrier below. Word SSA/register carriers
+            # retain their definitions through the call-result bridge below.
             return False
         observed_name, target_matches, tagged, has_direct_call = (
             call_statement_identity_8616(stmt)
@@ -9268,7 +9271,7 @@ def _replace_tagged_call_statement_with_stack_assignment_8616(
                     replacement = replacement_factory({"ins_addr": call_ins_addr})
                     if not isinstance(replacement, structured_c.CAssignment):
                         continue
-                    statements[index] = replacement
+                    statements[index] = preserve_word_call_carrier_8616(stmt, replacement)
                     materialized_assignment = replacement
                     visit(replacement)
                     continue
@@ -10564,17 +10567,19 @@ def _zero_arg_call_return_assignment_matches_fact_8616(
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue,
 ) -> bool:
-    """Match an exact zero-argument call assignment after AST identity rewrites."""
+    """Match a direct assignment or its preserved call-carrier bridge."""
+    bridge = word_call_bridge_projection_8616(node)
+    carrier, node = bridge if bridge is not None else (node, node)
     if not isinstance(node, structured_c.CAssignment) or not _same_stack_cvar_8616(
         node.lhs,
         dst_cvar,
     ):
         return False
-    call = _wide_call_return_direct_call_8616(node)
+    call = _wide_call_return_direct_call_8616(carrier)
     return (
         isinstance(call, structured_c.CFunctionCall)
         and not call.args
-        and _call_return_call_matches_fact_8616(node, project, fact)
+        and _call_return_call_matches_fact_8616(carrier, project, fact)
     )
 
 

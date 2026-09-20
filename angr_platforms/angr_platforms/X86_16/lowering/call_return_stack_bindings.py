@@ -19,9 +19,12 @@ from enum import Enum
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
-from angr.sim_variable import SimRegisterVariable, SimStackVariable
+from angr.sim_type import SimTypeShort
+from angr.sim_variable import SimRegisterVariable, SimStackVariable, SimTemporaryVariable
 
+from ..c_ast_utils import _iter_c_node_occurrences_8616
 from ..callsite_summary import callsite_summary_inventory_8616
+from ..semantics.expression_analysis import describe_virtual_value_identity_8616
 from .call_return_stack_stores import (
     CallReturnStackStoreEvidence8616,
     classify_call_return_stack_store_8616,
@@ -287,10 +290,60 @@ def bind_call_return_stack_assignment_8616(
     )
 
 
+def preserve_word_call_carrier_8616(
+    original: object, replacement: structured_c.CAssignment,
+) -> structured_c.CAssignment | structured_c.CStatements:
+    """Keep an exact word call definition when projecting its result to a local.
+
+    The caller already owns the machine store proof. Equal exact callsites and
+    unsigned word storage allow a copy, not another evaluation of the call.
+    Retaining the carrier unconditionally preserves all later consumers without
+    guessing their liveness. Wider/composite results retain their existing path.
+    """
+    if not isinstance(original, structured_c.CAssignment):
+        return replacement
+    if not isinstance(original.rhs, structured_c.CFunctionCall) or not isinstance(replacement.rhs, structured_c.CFunctionCall):
+        return replacement
+    source, destination = original.lhs, replacement.lhs
+    if not isinstance(source, structured_c.CVariable) or not isinstance(destination, structured_c.CVariable):
+        return replacement
+    if not isinstance(source.variable, (SimTemporaryVariable, SimRegisterVariable)) or not isinstance(destination.variable, SimStackVariable):
+        return replacement
+    exact_words = all(variable.variable.size == 2 and isinstance(variable.variable_type, SimTypeShort)
+                      and variable.variable_type.signed is False for variable in (source, destination))
+    callsite = original.rhs.tags.get("ins_addr")
+    same_callsite = isinstance(callsite, int) and original.rhs.tags.get("ins_addr") == replacement.rhs.tags.get("ins_addr")
+    if not exact_words or not same_callsite:
+        return replacement
+    replacement.rhs = source
+    return structured_c.CStatements([original, replacement], codegen=replacement.codegen)
+
+
+def call_result_escapes_group_8616(root: object, assignment: object, following: tuple[object, ...]) -> bool:
+    """Refuse destination folding when its local census misses any carrier use."""
+    if not isinstance(assignment, structured_c.CAssignment):
+        return True
+    source = (assignment.lhs.variable if isinstance(assignment.lhs, structured_c.CVariable)
+              else describe_virtual_value_identity_8616(assignment.lhs))
+    if source is None:
+        return True
+
+    def occurrences(node: object) -> int:
+        """Count shared references by occurrence, not by visited node identity."""
+        return sum((child.variable if isinstance(child, structured_c.CVariable)
+                    else describe_virtual_value_identity_8616(child)) == source
+                   for child in _iter_c_node_occurrences_8616(node))
+
+    inspected = occurrences(assignment) + sum(occurrences(node) for node in following)
+    return occurrences(root) != inspected
+
+
 __all__ = [
     "CallReturnStackBindingResult8616",
     "CallReturnStackBindingStatus8616",
     "bind_call_return_stack_assignment_8616",
+    "call_result_escapes_group_8616",
     "call_return_stack_destination_matches_8616",
     "materialize_call_return_stack_destination_8616",
+    "preserve_word_call_carrier_8616",
 ]

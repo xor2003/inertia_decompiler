@@ -324,3 +324,153 @@ smoke passed. Focused changed-module Ruff and mypy and `git diff --check` pass.
 This is an explicitly partial checkpoint, not completed cohort acceptance or
 a green whole-project test claim. No deadlines, semantic checks or test
 expectations were relaxed.
+
+### Committed-Checkpoint Reload Diagnosis
+
+September 20, 11:24:45-11:25:05 +02:00: checkpoint `8a82fa712`
+reproduces `_dos_mcbInfo` exit 4 with the read-only worker probe.
+Artifacts: `.cache/mcbinfo-checkpoint.{c,log}`. This is diagnostic execution,
+not a controlled performance measurement or successful semantic acceptance.
+
+The blocking Alias fact saves AX at 0x102e and reloads BX at 0x1036 from
+entry-SP bytes -144/-143. The registered local agrees: entry-SP -144,
+machine BP -142, size two. Earlier zero initialization and the later two
+`tmp_0` byte stores target the same local. The reload reconstructs its word
+from byte views; LES also publishes ES from the adjacent local.
+
+Source inspection rules out coherent-word rendering as the cause:
+`CGPWordAssignment8616` retains the canonical full-lane AST. Do not add a
+second semantic interpretation based on its printed word lvalue. The existing
+local-reload verifier instead requires a runtime-register destination, a whole
+local RHS, and globally unique writers. These restrictions do not cover this
+native BX reload with an earlier initialization. Its candidate census also
+includes the separate ES assignment at the same instruction.
+
+Next repair must prove reaching stores and native register destination identity
+from typed contracts, preserving the separate segment effect. Earlier writers
+may be disregarded only when complete later stores provably dominate the load;
+intervening writes, partial stores, escape and ambiguous control flow must refuse.
+Do not simply remove the constant guard in the snapshot matcher: the current AX
+value is not necessarily the saved value. Acceptance still requires the real
+function's validation, compilation and source-backed call/behavior checks.
+
+Current focused word-assignment, local-reload and constant-word-view tests:
+78 passed in 20.04 seconds, pytest -n 7 with PYTHON_JIT=1 and PYTHONHASHSEED=0.
+The graph service currently lists no indexed projects, so this bounded diagnosis
+uses exact source and observed worker state, not graph-completeness claims.
+
+The previously outstanding isolated timeout recheck log was also inspected:
+loadprog and SetGear both passed (97.76 seconds total; calls 74.05 and 36.20
+seconds). `.cache/segmented-origin-timeouts-isolated.log` does not replace the
+failed broad run or prove its timeout cause. Full pipeline acceptance stays open.
+
+### Native Word-Destination Proof Slice
+
+The Lowering restore recognizer now accepts an exact native two-byte
+SimRegisterVariable destination with a word C type and the matching physical
+register name. It consumes the existing physical-register owner, not rendered
+names. Byte and full-parent destinations and a different register refuse.
+The existing preserving runtime-parent assignment path is unchanged.
+
+The new regression failed before the change (one failed, three refused controls
+passed). Afterward, the affected reload/return/restore/word-view selection passed
+117 tests in 12.61 seconds with pytest -n 7. Changed-file Ruff check --fix and
+scoped mypy passed. This is proof-consumer coverage, not recovered-function
+acceptance. The regression is in the existing enrolled local-reload test module.
+
+At 11:27:56 +02:00, the production `_dos_mcbInfo` recheck still exited 4 on the
+classified-but-not-materialized contract. Artifacts:
+`.cache/mcbinfo-native-word.{c,log}`. Byte-view reconstruction, reaching stores,
+and the separate LES segment assignment remain unresolved. No full pipeline
+or quality-fast acceptance is claimed for this partial slice.
+
+### Existing Byte-View Reload Proof
+
+Lowering now shares the existing exact byte-view recognizer with the local
+reload verifier. The recognizer returns the underlying local, not a value proof;
+the verifier still requires the exact word object, saved-value proof, unique
+writers, no escape, and dominance. The constant-only snapshot replacement guard
+is retained. No AST expression is rewritten by this extension.
+
+A positive byte-view regression failed before the change; four wrong-sign,
+wrong-shift, different-local and wrong-slot controls refused. The affected test
+selection now passes 122 tests in 13.92 seconds. Changed-file Ruff check --fix
+and scoped mypy for both production modules pass. The regular quality-fast
+gate exits 2 on global Ruff debt; its 39-module compiled import smoke passes.
+Full diagnostics: `.cache/gp-byte-view-quality-fast.log`.
+
+At 11:32:52 +02:00 the real function still exits 4 at the same restore contract:
+`.cache/mcbinfo-byte-view.{c,log}`. Reaching-store proof and the LES candidate
+census remain open. This is not function-fix acceptance or a green full suite;
+test-pipeline remains required after completing the semantic repair.
+
+### Reaching Stores And Later Proof Invalidation
+
+The verifier now admits complete later saves after a direct assignment-only
+prefix, rejects escapes and intervening/partial writes, and separates pure
+owned segment publications from the GP destination census. Intervening indexed
+stack-byte writes require exact disjoint entry-SP coordinates, not different
+variable names or object identities. No stores are removed. The shared return
+verifier retains its default no-predecessor-exclusions contract.
+
+Positive regressions failed before each change; corruption controls cover
+conditional initialization, missing bytes, escaped storage, intervening writes,
+effectful segment assignments, and distinct variables with overlapping offsets.
+The affected selection passes 133 tests in 15.22 seconds. Scoped Ruff and mypy
+pass. No full-pipeline acceptance is claimed for this still-incomplete repair.
+
+The real `_dos_mcbInfo` still exits 4. The worker probe now demonstrates that
+its reload proof passes in the first three observed invocations, then fails
+after the call result appears as `local_8e = dos_sysvars()` while subsequent
+byte stores still read `tmp_0`. The temporary's saved-value proof no longer
+holds. This is a later definition/use-coherence investigation, not justification
+to waive the verifier. Trace: `.cache/mcbinfo-candidate-probe.log`;
+stage trace: `.cache/mcbinfo-stage-probe.log`. The first failing invocation is
+inside Structuring validation priming through segment/global materialization.
+The responsible assignment rewrite has not yet been identified. The inspected
+`bind_call_return_stack_assignment_8616` preserves a bridge and must not be
+blamed solely because its name matches the symptom.
+
+The assignment-creation trace subsequently identified
+`real_mode_linear._replace_tagged_call_statement_with_stack_assignment_8616`
+as the first owner replacing the temporary's call definition. Its direct word
+case now preserves the original call assignment and copies the exact result
+to the proven local. The helper is in `call_return_stack_bindings.py`; the large
+compatibility owner delegates rather than gaining another recovery mechanism.
+Callsite identity and unsigned two-byte carrier/destination types bound the
+bridge. Original call arguments and the single evaluation are retained.
+
+A focused production-helper regression failed before and passes after this
+change. The expanded selection passes 157 tests in 10.22 seconds; scoped mypy
+passes. Ruff reports the binding module's pre-existing complexity finding and
+the large compatibility owner's existing debt. This is not a clean global gate.
+
+The live function still fails: the probe now observes one additional successful
+reload verification after direct-stack materialization, then a later failure
+inside `_replay_structuring_lowering_before_validation_8616`. A subsequent
+transformation again leaves a stack call assignment and dangling temporary
+reads. Its exact mutation is being traced; the bridge alone is not a completed
+function fix. Evidence: `.cache/mcbinfo-bridge-probe.log` and
+`.cache/mcbinfo-preserved-carrier.log` (exit 4).
+
+The later mutation is now identified: legacy callsite destination folding
+examines only the nested bridge's following statements, missing consumers in
+the enclosing block. `call_result_escapes_group_8616` in Lowering now compares
+whole-function and inspected-group occurrences, including shared AST objects
+and typed dirty SSA identities. The compatibility fold consumes this veto;
+it does not gain a local liveness solver. The startup import guard caught the
+new edge, which is explicitly documented as a veto-only migration exception.
+
+The expanded focused selection passes 159 tests in 8.21 seconds. Existing
+destination-fold tests plus a new nested-bridge variant pass all six cases in
+7.42 seconds. Scoped binding-module mypy passes. Quality-fast still exits 2
+on global lint debt and passes the 39-module compiled-import smoke.
+Logs: `.cache/mcb-carrier-quality-fast.log` and
+`.cache/mcb-call-carrier-ruff.log`. A fresh test-pipeline run is recorded in
+`.cache/mcb-carrier-test-pipeline.log`; do not infer success before it completes.
+
+The latest live function still exits 4. Its diagnostics now also expose an ESI
+register-write delta during Structuring and two known-prototype argument
+mismatches during postprocess. These are not waived, and the final GP restore
+failure still requires tracing through the later passes. Artifact:
+`.cache/mcbinfo-global-use.log`. No function-fix or cohort completion is claimed.

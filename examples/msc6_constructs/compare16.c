@@ -83,6 +83,11 @@ int in_window_i16(int value, int low, int high)
     return 1;
 }
 
+unsigned int add_wrap_u16(unsigned int left, unsigned int right)
+{
+    return left + right;
+}
+
 int main(void)
 {
     if (cmp_i16(-2, 5) != -1) {
@@ -123,6 +128,16 @@ int main(void)
     }
     if (in_window_i16(9, 1, 7) != 0) {
         return 13;
+    }
+    if (rel_i16(-32767 - 1, 32767) != 35 || rel_i16(32767, -32767 - 1) != 44) {
+        return 14;
+    }
+    if (rel_u16(65535U, 0U) != 44 || rel_u16(32768U, 32767U) != 44) {
+        return 15;
+    }
+    if (add_wrap_u16(65535U, 1U) != 0U || add_wrap_u16(32767U, 1U) != 32768U ||
+        add_wrap_u16(32768U, 32768U) != 0U) {
+        return 16;
     }
     return 255;
 }

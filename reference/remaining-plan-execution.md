@@ -21,6 +21,11 @@ of complete live caller coverage or completion of the seven-function audit.
 
 ## Order
 
+Current priority override: follow [stability-first execution](stability-first-execution.md).
+After the active repair cohort, the [bounded compiler-coverage pilot](compiler-coverage-plan.md)
+strengthens correctness evidence. The original feature sequence below remains
+deferred, not cancelled; the pilot has its own finite acceptance boundary.
+
 1. Step 11: proof-backed readability (Task 5), starting with exact signed-value
    conversions already present in IR. Then inspect remaining proven stack,
    aggregate and expression projections; do not rename from source guesses.

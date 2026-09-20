@@ -30,6 +30,7 @@ from ..alias.segment_stack_restore import (
 )
 from ..c_ast_utils import _iter_c_nodes_deep_8616, _replace_c_children_8616
 from ..pipeline.errors import PipelineHardError
+from .gp_constant_restore import ConstantRestorePublication8616, publish_constant_gp_restore_8616
 from .gp_register_state import runtime_gp_state_expr_8616
 from .gp_stack_local_reload import has_materialized_gp_local_reload_8616
 from .gp_stack_local_return import has_materialized_gp_local_return_8616
@@ -436,6 +437,11 @@ def materialize_gp_stack_restores_8616(codegen: object) -> bool:
             fact.restore_register,
         )
         if key in completed_pairs:
+            continue
+        constant_publication = publish_constant_gp_restore_8616(codegen, containers, fact, cfunc.addr)
+        if constant_publication is not ConstantRestorePublication8616.REFUSED:
+            completed_pairs.add(key)
+            newly_materialized += constant_publication is ConstantRestorePublication8616.INSERTED
             continue
         if (has_materialized_gp_stack_bytes_8616(codegen, containers, fact)
                 or has_materialized_gp_local_reload_8616(codegen, containers, fact)

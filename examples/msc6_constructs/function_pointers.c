@@ -27,6 +27,16 @@ int select_and_apply(int which, int value)
     return apply_twice(fn, value);
 }
 
+int combine_args(int first, int second, int third)
+{
+    return first + second * 3 + third * 7;
+}
+
+int nested_arguments(int value)
+{
+    return combine_args(inc_one(value), value + 2, value + 3);
+}
+
 int main(void)
 {
     if (apply_twice(inc_one, 5) != 7) {
@@ -40,6 +50,10 @@ int main(void)
     }
     if (select_and_apply(0, 8) != 6) {
         return 4;
+    }
+    if (nested_arguments(2) != 50 || nested_arguments(-3) != -5 ||
+        nested_arguments(0) != 28) {
+        return 5;
     }
     return 255;
 }

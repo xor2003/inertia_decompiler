@@ -2646,6 +2646,7 @@ QA_RUFF_TARGETS := \
 	angr_platforms/tests/test_segment_program_layout_reporting.py \
 	angr_platforms/tests/test_x86_16_stack_restore_constants.py \
 	angr_platforms/tests/test_x86_16_gp_restore_word_views.py \
+	angr_platforms/tests/test_x86_16_gp_constant_restore.py \
 	angr_platforms/tests/test_x86_16_segment_stack_restore.py \
 	angr_platforms/tests/test_x86_16_stack_restore_loops.py \
 	angr_platforms/tests/test_x86_16_gp_restore_binding.py \
@@ -3154,6 +3155,7 @@ QA_RUFF_TARGETS += \
 	angr_platforms/tests/test_x86_16_clinic_semantic_stages.py
 
 QA_PYTEST_TARGETS := \
+	angr_platforms/tests/test_x86_16_gp_constant_restore.py \
 	angr_platforms/tests/test_x86_16_segmented_load_origins.py \
 	angr_platforms/tests/test_x86_16_envsize_behavior.py \
 	angr_platforms/tests/test_x86_16_ir_instruction_origin.py \
@@ -4107,6 +4109,8 @@ decompiler-contracts:
 		angr_platforms/tests/test_x86_16_stack_prototype_wrapped_locals.py \
 		angr_platforms/tests/test_x86_16_validation_entry_stack_ranges.py \
 		angr_platforms/tests/test_x86_16_stack_reference_offsets.py
+
+include scripts/compiler_coverage.mk
 
 test-pipeline: decompiler-contracts
 	flock "/tmp/vextest-test-pipeline.lock" $(PYTHON) scripts/test_pipeline.py --require-external --msc6-workers $(PIPELINE_WORKERS)

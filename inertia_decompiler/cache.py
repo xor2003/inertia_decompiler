@@ -22,7 +22,6 @@ from inertia_decompiler.cache_file_digest import (
 from inertia_decompiler.cache_io import load_cache_json_path, store_cache_json_path
 from inertia_decompiler.cache_lock import cache_path_lock
 from inertia_decompiler.cache_runtime_contract import cache_runtime_contract_8616
-from inertia_decompiler.external_unpacker_cache import deark_cache_identity
 from inertia_decompiler.cache_source_manifest import (
     DIRECT_GLOBAL_OBJECT_CACHE_SOURCE_FILES,
     FUNCTION_DISCOVERY_CACHE_SOURCE_FILES,
@@ -31,6 +30,7 @@ from inertia_decompiler.cache_source_manifest import (
     PROGRAM_CALLSITE_CACHE_SOURCE_FILES,
     RecoveryCacheSourceScope8616,
 )
+from inertia_decompiler.external_unpacker_cache import deark_cache_identity
 
 _ROOT = Path(__file__).resolve().parents[1]
 

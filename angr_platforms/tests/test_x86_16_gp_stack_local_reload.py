@@ -13,6 +13,7 @@ from angr_platforms.X86_16.caller_return_use_contracts import CallsiteReturnUseK
 from angr_platforms.X86_16.lowering.gp_register_state import runtime_gp_state_expr_8616
 from angr_platforms.X86_16.lowering.gp_stack_local_reload import has_materialized_gp_local_reload_8616
 from angr_platforms.X86_16.lowering.gp_stack_restore import materialize_gp_stack_restores_8616
+from angr_platforms.X86_16.lowering.segment_register_state import runtime_segment_state_cvar_8616
 from test_x86_16_call_stack_effects import _summary
 from test_x86_16_gp_stack_restore import _artifact, _Codegen
 
@@ -92,6 +93,39 @@ def test_transparent_child_sequence_retains_parent_dominance():
     assert has_materialized_gp_local_reload_8616(codegen, (container, child), fact)
 
 
+@pytest.mark.parametrize("register,width", [("ax", 2), ("bx", 2), ("ax", 1), ("ax", 4)])
+def test_native_register_reload_requires_exact_word_destination(register, width):
+    """Native SSA register storage must agree with the Alias destination range."""
+    codegen, container, local, fact = _fixture()
+    offset = codegen.project.arch.registers[register][0]
+    destination = c.CVariable(SimRegisterVariable(offset, width),
+                              variable_type=local.variable_type, codegen=codegen)
+    container.statements[-1] = c.CAssignment(destination, local, codegen=codegen,
+                                             tags={"ins_addr": fact.restore_instruction_addr})
+
+    assert has_materialized_gp_local_reload_8616(codegen, (container,), fact) is (register == "ax" and width == 2)
+
+
+@pytest.mark.parametrize("corruption", [None, "signed", "shift", "other-local", "wrong-slot"])
+def test_reload_byte_views_require_one_exact_word(corruption):
+    """Two truncations are a word reload only with the same exact storage."""
+    codegen, container, local, fact = _fixture()
+    word = local.variable_type
+    byte = SimTypeChar(corruption == "signed").with_arch(codegen.project.arch)
+    upper_local = local
+    if corruption == "other-local":
+        upper_local = c.CVariable(SimStackVariable(-4, 2, base="bp"), variable_type=word, codegen=codegen)
+    shift = c.CConstant(7 if corruption == "shift" else 8, word, codegen=codegen)
+    upper = c.CTypeCast(word, byte, c.CBinaryOp("Shr", upper_local, shift, codegen=codegen), codegen=codegen)
+    low = c.CTypeCast(word, byte, local, codegen=codegen)
+    value = c.CBinaryOp("Or", low, c.CBinaryOp("Shl", upper, shift, codegen=codegen), codegen=codegen)
+    container.statements[-1].rhs.rhs.lhs = value
+    if corruption == "wrong-slot":
+        fact = replace(fact, stack_offsets=(-4, -3))
+
+    assert has_materialized_gp_local_reload_8616(codegen, (container,), fact) is (corruption is None)
+
+
 def test_valid_reload_does_not_hide_a_corrupted_copy():
     codegen, container, local, fact = _fixture()
     original = container.statements[-1]
@@ -100,6 +134,40 @@ def test_valid_reload_does_not_hide_a_corrupted_copy():
     other = c.CStatements([corrupted], codegen=codegen)
 
     assert not has_materialized_gp_local_reload_8616(codegen, (container, other), fact)
+
+
+@pytest.mark.parametrize("effectful", [False, True])
+def test_separate_segment_write_is_not_a_gp_restore(effectful):
+    """A pure segment publication does not count as another GP destination."""
+    codegen, container, local, fact = _fixture()
+    segment = runtime_segment_state_cvar_8616("es", codegen=codegen,
+                                              variable_type=local.variable_type, function_addr=0x1000)
+    value = c.CFunctionCall("callee", None, [], codegen=codegen) if effectful else local
+    container.statements.append(c.CAssignment(segment, value, codegen=codegen,
+                                              tags={"ins_addr": fact.restore_instruction_addr}))
+
+    assert has_materialized_gp_local_reload_8616(codegen, (container,), fact) is (not effectful)
+
+
+@pytest.mark.parametrize("corruption", [None, "intervening", "missing-byte", "escape", "conditional"])
+def test_complete_later_save_supersedes_initialization(corruption):
+    """Earlier writes do not reach the reload when a complete save dominates it."""
+    codegen, container, local, fact = _fixture()
+    low, high, restore = container.statements
+    initial = c.CAssignment(low.lhs, c.CConstant(0, local.variable_type, codegen=codegen),
+                            codegen=codegen, tags={"ins_addr": 0xff0})
+    container.statements.insert(0, initial)
+    if corruption == "intervening":
+        container.statements = [low, high, initial, restore]
+    elif corruption == "missing-byte":
+        container.statements.remove(high)
+    elif corruption == "escape":
+        container.statements.insert(0, c.CReturn(c.CUnaryOp("Reference", local, codegen=codegen), codegen=codegen))
+    elif corruption == "conditional":
+        container.statements[0] = c.CIfElse(c.CConstant(1, local.variable_type, codegen=codegen),
+                                           c.CStatements([initial], codegen=codegen), codegen=codegen)
+
+    assert has_materialized_gp_local_reload_8616(codegen, (container,), fact) is (corruption is None)
 
 
 def test_intervening_call_refuses_dominance():
