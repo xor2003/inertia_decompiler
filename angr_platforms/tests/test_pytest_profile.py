@@ -5,6 +5,9 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from inertia_decompiler.cache_io import load_cache_json_path, store_cache_json_path
 from scripts.pytest_cache_events import begin_cache_event_capture, finish_cache_event_capture
@@ -12,8 +15,11 @@ from scripts.pytest_inventory_review import RETIRED_TEST_CONTRACTS, REVIEWED_TES
 from scripts.pytest_process_metrics import ChildUsageSnapshot
 from scripts.pytest_profile_rankings import profile_cost_rankings
 from scripts.pytest_source_index import load_pytest_source_index
+from scripts.pytest_test_inventory import record_for_item
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+EXPECTED_PROFILE_SCHEMA_VERSION = 11
+PROFILED_TEST_COUNT = 2
 
 
 def test_child_usage_delta_is_non_negative():
@@ -87,6 +93,30 @@ def test_reviewed_inventory_module_paths_exist():
     assert all((REPO_ROOT / path).is_file() for path in REVIEWED_TEST_MODULE_LAYERS)
 
 
+@pytest.mark.parametrize(("module", "test_name", "layer", "status"), [
+    ("inbox_long_live", "test_inbox_long_passes_validation_and_compiled_behavior",
+     "inertia_decompiler/cli", "reviewed-module"),
+    ("reinitbars_execution", "test_reinitbars_oracle_accepts_preserved_register_state",
+     "tooling/gates", "reviewed-module"),
+    ("setgear_behavior", "test_setgear_oracle_accepts_reference_decisions", "tooling/gates", "reviewed-module"),
+    ("tidshowrange_behavior", "test_tidshowrange_oracle_accepts_source_behavior", "tooling/gates", "reviewed-module"),
+    ("insertionsort_behavior", "test_insertion_oracle_accepts_complete_behavior", "tooling/gates", "reviewed-manifest"),
+])
+def test_indirect_behavior_tests_have_reviewed_inventory(module, test_name, layer, status):
+    path = f"angr_platforms/tests/test_x86_16_{module}.py"
+    assert load_pytest_source_index(REPO_ROOT / path, frozenset()).has_node(test_name)
+    item = SimpleNamespace(
+        location=(path, 0, test_name), nodeid=f"{path}::{test_name}",
+        iter_markers=lambda: (), keywords={},
+    )
+    record = record_for_item(item)
+    assert record.owner_layers == [layer]
+    assert record.inventory_status == status
+    if status == "reviewed-manifest":
+        assert record.owner_contracts
+    assert record.required_pipeline_evidence
+
+
 def test_retired_inert_tests_have_existing_replacements():
     assert RETIRED_TEST_CONTRACTS
     for retired_nodeid, contract in RETIRED_TEST_CONTRACTS.items():
@@ -127,9 +157,9 @@ def test_xdist_profile_merges_executed_records_and_removes_fragments(tmp_path):
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(profile_path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 11
-    assert payload["collected_count"] == 2
-    assert len(payload["records"]) == 2
+    assert payload["schema_version"] == EXPECTED_PROFILE_SCHEMA_VERSION
+    assert payload["collected_count"] == PROFILED_TEST_COUNT
+    assert len(payload["records"]) == PROFILED_TEST_COUNT
     assert {record["outcome"] for record in payload["records"]} == {"passed"}
     assert all(record["assertion_count"] > 0 for record in payload["records"])
     assert all(record["effective_assertion_count"] >= record["assertion_count"] for record in payload["records"])
@@ -159,5 +189,5 @@ def test_xdist_profile_merges_executed_records_and_removes_fragments(tmp_path):
     assert payload["source_state"]["stable"] is True
     assert payload["source_state"]["start"] == payload["source_state"]["finish"]
     assert set(payload["rankings"]) == {"wall_seconds", "child_cpu_seconds"}
-    assert all(len(ranking) == 2 for ranking in payload["rankings"].values())
+    assert all(len(ranking) == PROFILED_TEST_COUNT for ranking in payload["rankings"].values())
     assert list(tmp_path.glob(".profile.json.*.json")) == []

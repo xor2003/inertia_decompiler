@@ -124,7 +124,7 @@ def build_cfg_snapshot(codegen: object) -> CFGSnapshot | None:
                 reachable_from_entry.add(region.region_id)
             for succ in graph.successors(region):
                 if succ not in seen:
-                    worklist.append(succ)  # noqa: PERF401
+                    worklist.append(succ)
 
     snapshot_nodes: list[CFGSnapshotNode] = []
     edge_count = 0

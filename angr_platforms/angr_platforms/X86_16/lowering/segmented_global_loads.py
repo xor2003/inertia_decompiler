@@ -106,6 +106,7 @@ from ..widening.segmented_load_identity import (
     SegmentedLoadIdentity8616,
     segmented_load_tags_8616,
 )
+from .aggregate_byte_projection import project_proven_aggregate_byte_8616
 from .annotated_global_refs import collect_annotated_direct_global_refs_8616
 from .bounded_global_array_declarations import (
     materialize_project_bounded_global_arrays_8616,
@@ -193,6 +194,8 @@ from .storage_identity_facts import (
     global_storage_identity_facts_8616,
 )
 from .store_projection_width import has_exact_store_projection_width_8616
+from .straight_line_placement import adjacent_straight_line_statements_8616
+from .wide_call_output_assignment_ast import _call_target_matches_8616
 from .wide_call_return_recombine import (
     DIRECT_CALL_RETURN_STORE_EVIDENCE_TAG_8616,
     fold_tagged_wide_call_return_stores_8616,
@@ -2566,8 +2569,14 @@ def _call_matches_direct_global_return_evidence_8616(
     """Match one call target without consulting symbols beyond typed evidence."""
 
     raw_target = call.callee_target
-    if isinstance(raw_target, int):
-        return evidence.source_call_target is not None and raw_target == evidence.source_call_target
+    has_binary_identity = (
+        isinstance(raw_target, (int, CConstant)) or call.callee_func is not None
+        or call.tags.get("inertia_target_addr_8616") is not None
+    )
+    if has_binary_identity:
+        return evidence.source_call_target is not None and _call_target_matches_8616(
+            call, evidence.source_call_target, _codegen_project_optional_8616(call.codegen),
+        )
     call_name = _cfunction_call_name_8616(call)
     evidence_name = evidence.source_call_name.strip().lstrip("_")
     return call_name == evidence_name
@@ -2844,7 +2853,9 @@ def _materialize_nested_direct_global_call_return_store_8616(
             continue
         call_group, call_index, call_statement, call = call_matches[0]
         store_group, store_start, store_end = store_matches[0]
-        if call_group is store_group:
+        if call_group is store_group or not adjacent_straight_line_statements_8616(
+            root, call_statement, store_group.statements[store_start],
+        ):
             continue
         lhs = _make_direct_global_symbol_expr_8616(codegen, dword_ref, evidence.width)
         if lhs is None:
@@ -4412,19 +4423,14 @@ def _match_direct_global_dword_store_pair_8616(
     if rhs is not None:
         consume_previous = True
     else:
-        rhs = _make_direct_global_call_return_store_rhs_8616(
+        rhs = _reuse_direct_global_call_return_store_rhs_8616(
             codegen,
+            previous_stmt,
             call_return_evidence,
             low_assignment.rhs,
             high_assignment.rhs,
         )
-        previous_call = _direct_global_call_return_standalone_call_8616(
-            previous_stmt,
-            call_return_evidence,
-        )
-        if rhs is not None and previous_call is not None:
-            rhs = previous_call
-            consume_previous = True
+        consume_previous = rhs is not None
     if rhs is not None and call_return_evidence is not None:
         stats.direct_symbol_call_return_materialized_count += 1
     if rhs is None:
@@ -4790,25 +4796,26 @@ def _copy_key_used_outside_ids_in_statement_list_8616(
     return False
 
 
-def _make_direct_global_call_return_store_rhs_8616(
+def _reuse_direct_global_call_return_store_rhs_8616(
     codegen: CodegenBoundary8616,
+    previous_stmt: object,
     evidence: DirectGlobalCallReturnStoreEvidence8616 | None,
     low_rhs: object,
     high_rhs: object,
-) -> CExpression | None:
+) -> CFunctionCall | None:
+    """Reuse an exact adjacent call; carrier reads cannot introduce a call.
+
+    Instruction-store candidates do not prove that a call executes on every
+    path. Keep the original call node, arguments and evaluation count, or
+    retain the register-valued store when its placement is unavailable.
+    """
     if evidence is None:
         return None
     if _register_name_for_dword_low_half_8616(codegen, low_rhs) not in {"ax", "eax"}:
         return None
     if _register_name_for_dword_high_half_8616(codegen, high_rhs) not in {"dx", "edx"}:
         return None
-    return CFunctionCall(
-        evidence.source_call_name,
-        None,
-        [],
-        codegen=codegen,
-        tags=_direct_call_return_store_tags_8616(evidence),
-    )
+    return _direct_global_call_return_standalone_call_8616(previous_stmt, evidence)
 
 
 def _register_name_for_dword_low_half_8616(codegen: CodegenBoundary8616, expr: object) -> str | None:
@@ -10207,12 +10214,13 @@ def _record_stack_aggregate_field_projection_fact_8616(
 
 
 def _project_two_byte_aggregate_char_casts_8616(codegen: CodegenBoundary8616, root: object) -> int:
-    """Project low-byte scalar uses after evidence promotes their source to an aggregate.
+    """Project exact scalar byte uses after their source becomes an aggregate.
 
     A pre-promotion ``(char)word`` expression denotes the low byte.  Once the
     same two-byte storage is proven to be an aggregate, casting the aggregate
     itself is invalid C; its equivalent typed expression is a cast of field 0.
     A binary-proven ``word & 0xff`` zero-extension similarly applies to field 0.
+    An exact eight-bit shift selects field 1 from the original object instead.
     """
 
     projected = 0
@@ -10223,40 +10231,31 @@ def _project_two_byte_aggregate_char_casts_8616(codegen: CodegenBoundary8616, ro
         cast_expr = assignment.rhs
         if not isinstance(cast_expr, CTypeCast) or not isinstance(cast_expr.dst_type, SimTypeChar):
             continue
-        aggregate_expr = cast_expr.expr
-        if not isinstance(aggregate_expr, CVariable) or not isinstance(assignment.lhs, CVariable):
+        projection = project_proven_aggregate_byte_8616(
+            cast_expr.expr, codegen, _resolve_two_byte_global_struct_type_8616,
+        )
+        if projection is None or not isinstance(assignment.lhs, CVariable):
             continue
-        aggregate_type = _resolve_two_byte_global_struct_type_8616(aggregate_expr.type)
-        if aggregate_type is None:
+        if not isinstance(projection.variable, CVariable):
             continue
         _record_stack_aggregate_field_projection_fact_8616(
             codegen,
             assignment.lhs,
-            aggregate_expr,
-            aggregate_type,
-            0,
+            projection.variable,
+            projection.field.struct_type,
+            projection.field.offset,
             cast_expr.src_type,
             cast_expr.dst_type,
         )
     for node in nodes:
         if not isinstance(node, CTypeCast) or not isinstance(node.dst_type, SimTypeChar):
             continue
-        aggregate_expr = node.expr
-        if not isinstance(aggregate_expr, CExpression):
-            continue
-        aggregate_type = _resolve_two_byte_global_struct_type_8616(aggregate_expr.type)
-        if aggregate_type is None:
-            continue
-        node.expr = CVariableField(
-            aggregate_expr,
-            CStructField(
-                aggregate_type,
-                0,
-                _two_byte_global_struct_field_name_8616(0),
-                codegen=codegen,
-            ),
-            codegen=codegen,
+        projection = project_proven_aggregate_byte_8616(
+            node.expr, codegen, _resolve_two_byte_global_struct_type_8616,
         )
+        if projection is None:
+            continue
+        node.expr = projection
         projected += 1
     for node in nodes:
         if not isinstance(node, CBinaryOp) or node.op != "And":
@@ -10268,19 +10267,11 @@ def _project_two_byte_aggregate_char_casts_8616(codegen: CodegenBoundary8616, ro
             masked_aggregate_expr = node.rhs
         if masked_aggregate_expr is None:
             continue
-        aggregate_type = _resolve_two_byte_global_struct_type_8616(masked_aggregate_expr.type)
-        if aggregate_type is None:
-            continue
-        field_expr = CVariableField(
-            masked_aggregate_expr,
-            CStructField(
-                aggregate_type,
-                0,
-                _two_byte_global_struct_field_name_8616(0),
-                codegen=codegen,
-            ),
-            codegen=codegen,
+        field_expr = project_proven_aggregate_byte_8616(
+            masked_aggregate_expr, codegen, _resolve_two_byte_global_struct_type_8616,
         )
+        if field_expr is None:
+            continue
         if masked_aggregate_expr is node.lhs:
             node.lhs = field_expr
         else:
@@ -11420,7 +11411,7 @@ def _collect_global_address_symbol_refs_8616(
             continue
         for ref in symbol_refs:
             for width in _offset_symbol_candidate_widths_8616(immediate_size):
-                refs.append(  # noqa: PERF401
+                refs.append(
                     DirectGlobalSymbolRef8616(
                         offset=immediate & 0xFFFF,
                         name=ref.name,
@@ -11443,6 +11434,7 @@ def _collect_global_address_literal_evidence_8616(
     cod_metadata: CodMetadataBoundary8616,
     summaries: list[InsnSummary8616],
 ) -> tuple[GlobalAddressLiteralEvidence8616, ...]:
+    """Associate optional literals only with their exact rebased instruction."""
     cod_refs = tuple(ref for ref in _cod_offset_global_ref_records_8616(cod_metadata) if ref.literal is not None)
     if not cod_refs:
         return ()
@@ -11455,7 +11447,8 @@ def _collect_global_address_literal_evidence_8616(
     for insn in summaries:
         if not isinstance(insn.address, int):
             continue
-        literal_refs = _lookup_cod_address_refs_8616(by_addr, insn, slop=8)
+        # Nearby instructions may load unrelated pointers, even with the same opcode.
+        literal_refs = _lookup_cod_address_refs_8616(by_addr, insn, slop=0)
         if not literal_refs:
             continue
         immediate: int | None = None
@@ -11467,7 +11460,7 @@ def _collect_global_address_literal_evidence_8616(
             continue
         for ref in literal_refs:
             if ref.literal is not None:
-                evidence.append(GlobalAddressLiteralEvidence8616(immediate & 0xFFFF, ref.literal))  # noqa: PERF401
+                evidence.append(GlobalAddressLiteralEvidence8616(immediate & 0xFFFF, ref.literal))
     return tuple(dict.fromkeys(evidence))
 
 
@@ -11572,7 +11565,7 @@ def _cod_instruction_offsets_8616(cod_metadata: CodMetadataBoundary8616) -> tupl
     offsets: list[int] = []
     for offset in tuple(getattr(cod_metadata, "instruction_offsets", ()) or ()):
         if isinstance(offset, int):
-            offsets.append(offset)  # noqa: PERF401
+            offsets.append(offset)
     return tuple(offsets)
 
 
@@ -12364,7 +12357,7 @@ def _augment_indexed_evidence_with_project_layouts_8616(
         augmented.append(item)
     for canonical_base, (canonical, layout) in matched_layouts.items():
         for field_offset in layout.field_offsets:
-            augmented.append(  # noqa: PERF401
+            augmented.append(
                 IndexedSegmentedGlobalEvidence8616(
                     base_offset=(canonical_base + field_offset) & 0xFFFF,
                     name=canonical.name,

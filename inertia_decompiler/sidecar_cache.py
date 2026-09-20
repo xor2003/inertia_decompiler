@@ -388,7 +388,7 @@ def _payload_pairs(payload: dict[str, object], key: str) -> PayloadPairs:
     pairs: list[tuple[object, object]] = []
     for item in _payload_sequence(payload, key):
         if isinstance(item, (list, tuple)) and len(item) == 2:
-            pairs.append((item[0], item[1]))  # noqa: PERF401
+            pairs.append((item[0], item[1]))
     return tuple(pairs)
 
 
@@ -396,7 +396,7 @@ def _payload_triples(payload: dict[str, object], key: str) -> PayloadTriples:
     triples: list[tuple[object, object, object]] = []
     for item in _payload_sequence(payload, key):
         if isinstance(item, (list, tuple)) and len(item) == 3:
-            triples.append((item[0], item[1], item[2]))  # noqa: PERF401
+            triples.append((item[0], item[1], item[2]))
     return tuple(triples)
 
 

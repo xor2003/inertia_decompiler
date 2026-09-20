@@ -64,6 +64,7 @@ from inertia_decompiler.cache import (
     _store_cache_json,
 )
 from inertia_decompiler.cache_source_manifest import RecoveryCacheSourceScope8616
+from inertia_decompiler.catalog_policy import DEFAULT_CATALOG_TIMEOUT
 from inertia_decompiler.cli_output import (
     _timestamped_print,
 )
@@ -138,7 +139,7 @@ def _function_cfg_pair_object(value: object) -> _FunctionCfgPair:
     if isinstance(value, tuple) and len(value) == 2:
         return value[0], value[1]
     raise TypeError("function recovery did not return a CFG/function pair")
-_DISPLAY_CATALOG_CACHE_POLICY_SCHEMA_8616 = 2
+_DISPLAY_CATALOG_CACHE_POLICY_SCHEMA_8616 = 3
 _BINARY_EXACT_REGION_INFO_KEY_8616 = "x86_16_binary_exact_region"
 
 
@@ -164,6 +165,7 @@ class DisplayCatalogCachePolicy8616:
     signature_catalog_path: str | None
     signature_catalog_size: int | None
     signature_catalog_mtime_ns: int | None
+    catalog_timeout: int = DEFAULT_CATALOG_TIMEOUT
 
     @classmethod
     def from_runtime(
@@ -180,6 +182,7 @@ class DisplayCatalogCachePolicy8616:
         low_memory: bool,
         auto_rizin_policy: str,
         signature_catalog: Path | None,
+        catalog_timeout: int = DEFAULT_CATALOG_TIMEOUT,
     ) -> Self:
         """Build a stable cache policy from the effective CLI discovery inputs."""
         catalog_path: str | None = None
@@ -209,6 +212,7 @@ class DisplayCatalogCachePolicy8616:
             signature_catalog_path=catalog_path,
             signature_catalog_size=catalog_size,
             signature_catalog_mtime_ns=catalog_mtime_ns,
+            catalog_timeout=catalog_timeout,
         )
 
     def cache_fields(self) -> dict[str, object]:
@@ -228,6 +232,7 @@ class DisplayCatalogCachePolicy8616:
             "signature_catalog_path": self.signature_catalog_path,
             "signature_catalog_size": self.signature_catalog_size,
             "signature_catalog_mtime_ns": self.signature_catalog_mtime_ns,
+            "catalog_timeout": self.catalog_timeout,
         }
 
 
@@ -1495,6 +1500,7 @@ def _should_replace_function_with_stitched_graph_8616(
 
 
 def _reset_function_graph_state_8616(function: _AngrFunction) -> None:
+    """Clear recovered nodes and invalidate angr's derived local CFG together."""
     try:
         function._addr_to_block_node.clear()
         function._block_sizes.clear()
@@ -1508,6 +1514,7 @@ def _reset_function_graph_state_8616(function: _AngrFunction) -> None:
         function._endpoints.clear()
         if hasattr(function, "transition_graph"):
             function.transition_graph.clear()
+            function._local_transition_graph = None
         if hasattr(function, "startpoint"):
             function.startpoint = None
     except Exception:
@@ -1537,7 +1544,7 @@ def _rebuild_function_transition_graph_8616(
         insns = _dynamic_attr(source_capstone, "insns", ())
         ins_addr = int(_dynamic_attr(insns[-1], "address", source_addr)) if insns else source_addr
         try:
-            function.transition_graph.add_edge(source_node, target_node, type="transition", ins_addr=ins_addr)
+            function._transit_to(source_node, target_node, ins_addr=ins_addr)
         except Exception:
             continue
 
@@ -1865,7 +1872,7 @@ def _repair_x86_16_function_graph_8616(
         except Exception:
             ins_addr = source_addr
         try:
-            function.transition_graph.add_edge(source_node, target_node, type="transition", ins_addr=ins_addr)
+            function._transit_to(source_node, target_node, ins_addr=ins_addr)
         except Exception:
             continue
 
@@ -3591,7 +3598,9 @@ def _recover_fast_exe_catalog(
     low_memory: bool,
     limit: int | None,
     seed_calling_conventions_enabled: bool = True,
+    catalog_timeout: int = DEFAULT_CATALOG_TIMEOUT,
 ) -> list[_FunctionCfgPair]:
+    """Recover catalog candidates with an independent bounded recovery budget."""
     recovered: list[_FunctionCfgPair] = []
     seen_addrs: set[int] = set()
     source_seeds = _rank_pre_entry_source_function_seeds_8616(project)
@@ -3624,7 +3633,7 @@ def _recover_fast_exe_catalog(
 
     seed_start = time.perf_counter()
     if selected_source_seeds:
-        source_budget = min(max(1, timeout), max(8, min(45, len(selected_source_seeds) * 2 + 5)))
+        source_budget = catalog_timeout
         seeded, source_evidence = _recover_pre_entry_source_catalog_8616(
             project,
             source_seeds=selected_source_seeds,
@@ -3639,7 +3648,7 @@ def _recover_fast_exe_catalog(
         seed_limit = None if limit is None else max(limit * 2, limit + 4)
         seeded = _recover_fast_seed_functions(
             project,
-            timeout=max(1, min(timeout, 8)),
+            timeout=catalog_timeout,
             limit=seed_limit,
         )
     print(
@@ -5521,7 +5530,7 @@ def _recover_direct_addr_function(
             )
             if recovered is not None:
                 return recovered
-        if function_label is not None and addr == project.entry and project.arch.name == "86_16":
+        if exact_region is None and function_label is not None and addr == project.entry and project.arch.name == "86_16":
             return _fallback_entry_function(
                 project,
                 timeout=timeout,
@@ -5529,7 +5538,7 @@ def _recover_direct_addr_function(
                 low_memory=low_memory_path,
                 prefer_fast_recovery=bool(function_label is not None and prefer_fast_recovery),
             )
-        if function_label is not None and addr == project.entry:
+        if exact_region is None and function_label is not None and addr == project.entry:
             return _recover_blob_entry_function(project, addr, timeout=timeout)
 
         candidate_addr = addr
@@ -5553,7 +5562,7 @@ def _recover_direct_addr_function(
                         region_span=max(window, 0x180),
                         exact_region=exact_region,
                     ))
-                regions = [_infer_x86_16_linear_region(project, addr, window=window)]
+                regions = [exact_region or _infer_x86_16_linear_region(project, addr, window=window)]
             else:
                 regions = [(addr, addr + window)]
             recovered = _pick_function(project, addr, regions=regions)

@@ -79,7 +79,7 @@ def _assignment_nodes_8616(stmt: object) -> tuple[object, ...]:
         candidates.append(stmt)
     for node in _iter_c_nodes_deep_8616(stmt):
         if _is_assignment_node_8616(node):
-            candidates.append(node)  # noqa: PERF401
+            candidates.append(node)
     return tuple(candidates)
 
 

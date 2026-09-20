@@ -51,6 +51,7 @@ from angr_platforms.X86_16.lowering.c_runtime_header import (
 from angr_platforms.X86_16.lowering.segmented_lowering import _SegmentedAccess
 from angr_platforms.X86_16.lowering.semantic_cast import CSemanticCast8616, is_identity_semantic_variable_cast_8616
 from angr_platforms.X86_16.lst_extract import LSTMetadata
+from angr_platforms.X86_16.postprocess.bitwise_terms import flatten_bitwise_terms_8616
 from angr_platforms.X86_16.semantics.alias_query import (
     _storage_domain_for_expr,
     describe_alias_storage,
@@ -589,7 +590,7 @@ def _structured_slot_names_8616(value: StructuredAstValue) -> tuple[str, ...]:
                 slots = (slots,)
             for slot in slots:
                 if isinstance(slot, str) and not slot.startswith("_") and slot != "codegen":
-                    attrs.append(slot)  # noqa: PERF401
+                    attrs.append(slot)
 
         if hasattr(value, "__dict__"):
             attrs.extend(
@@ -1135,7 +1136,7 @@ def _iter_c_nodes_deep(node: StructuredAstValue, seen: set[int] | None = None) -
                 continue
             for item in _iter_c_node_children_8616(value, set()):
                 if _structured_codegen_node(item):
-                    node_stack.append(item)  # noqa: PERF401
+                    node_stack.append(item)
 
 
 def _same_c_expression(
@@ -2571,12 +2572,6 @@ def _simplify_structured_c_expressions(codegen: StructuredCodegenValue) -> bool:
                 return False
             return _is_linear_register_temp_var(lhs)
 
-        def _flatten_bitwise_terms(expr: StructuredAstValue, op: StructuredAstValue) -> StructuredAstValue:
-            expr = _unwrap_c_casts(expr)
-            if isinstance(expr, structured_c.CBinaryOp) and expr.op == op:
-                return _flatten_bitwise_terms(expr.lhs, op) + _flatten_bitwise_terms(expr.rhs, op)
-            return [expr]
-
         def _rewrite_and_over_or(node: StructuredAstValue) -> StructuredAstValue:
             if not isinstance(node, structured_c.CBinaryOp) or node.op != "And":
                 return None
@@ -2707,7 +2702,7 @@ def _simplify_structured_c_expressions(codegen: StructuredCodegenValue) -> bool:
                 if rewritten_and is not None:
                     return rewritten_and
                 if node.op in {"And", "Or"}:
-                    terms = _flatten_bitwise_terms(node, node.op)
+                    terms = flatten_bitwise_terms_8616(node, node.op, _unwrap_c_casts)
                     const_value = None
                     const_type = None
                     non_constants = []

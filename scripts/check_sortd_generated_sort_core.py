@@ -24,6 +24,11 @@ from inertia_decompiler.generated_c_function_extraction import (  # noqa: E402
     generated_function_definition_span,
     load_generated_function_artifacts,
 )
+from scripts.sortd_gp_runtime import (  # noqa: E402
+    DEFAULT_GP_RUNTIME_ABI_8616,
+    GPRegisterRuntimeABI8616,
+    prepare_sortd_gp_runtime,
+)
 
 DEFAULT_TRANSCRIPT: Path = REPO_ROOT / "angr_platforms/.cache/test_pipeline/sortd_sidecar_free.txt"
 DEFAULT_BUILD_DIR: Path = REPO_ROOT / "angr_platforms/.cache/test_pipeline/sortd_generated_sort_core"
@@ -241,6 +246,7 @@ def build_and_run(
     compiler: str,
     harness_path: Path,
     function_c_dir: Path | None = None,
+    gp_runtime_abi: GPRegisterRuntimeABI8616 = DEFAULT_GP_RUNTIME_ABI_8616,
 ) -> subprocess.CompletedProcess[str]:
     """Build generated sort functions and execute the source-derived harness."""
     if function_c_dir is None:
@@ -273,7 +279,10 @@ def build_and_run(
     harness = build_dir / "harness.c"
     shutil.copyfile(harness_path, harness)
     sources.append(harness)
-    sources.append(harness_path.with_name("sortd_generated_behavior_runtime.c"))
+    runtime, runtime_flags = prepare_sortd_gp_runtime(
+        build_dir, harness_path.with_name("sortd_generated_behavior_runtime.c"), gp_runtime_abi,
+    )
+    sources.append(runtime)
 
     executable = build_dir / "sortd_generated_sort_core"
     compile_process = subprocess.run(
@@ -286,6 +295,7 @@ def build_and_run(
             "-Werror=implicit-function-declaration",
             "-fsanitize=address,undefined",
             "-fno-sanitize-recover=all",
+            *runtime_flags,
             *(str(path) for path in sources),
             "-o",
             str(executable),
@@ -315,6 +325,8 @@ def main() -> int:
     parser.add_argument("--harness", type=Path, default=DEFAULT_HARNESS)
     parser.add_argument("--function-c-dir", type=Path)
     parser.add_argument("--compiler", default="gcc")
+    parser.add_argument("--gp-runtime-abi", type=GPRegisterRuntimeABI8616,
+                        choices=list(GPRegisterRuntimeABI8616), default=DEFAULT_GP_RUNTIME_ABI_8616)
     args = parser.parse_args()
 
     try:
@@ -324,6 +336,7 @@ def main() -> int:
             compiler=args.compiler,
             harness_path=args.harness,
             function_c_dir=args.function_c_dir,
+            gp_runtime_abi=args.gp_runtime_abi,
         )
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"[sortd-generated-sort-core] failed error={error}")

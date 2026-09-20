@@ -25,11 +25,12 @@ def test_assembly_preserves_function_payloads_without_diagnostics(tmp_path: Path
     _write_artifact(function_dir, 0x1000, first)
     _write_artifact(function_dir, 0x2000, second)
     output = tmp_path / "generated.c"
+    expected_addresses = (0x1000, 0x2000)
 
-    count = assemble_translation_unit(function_dir, output, expected_addresses=(0x1000, 0x2000))
+    count = assemble_translation_unit(function_dir, output, expected_addresses=expected_addresses)
 
     assembled = output.read_text(encoding="utf-8")
-    assert count == 2
+    assert count == len(expected_addresses)
     assert "void sub_1000(void);" in assembled
     assert "int sub_2000(void);" in assembled
     assert "return 2;" in assembled
@@ -43,8 +44,9 @@ def test_assembly_refuses_missing_function_artifact(tmp_path: Path) -> None:
         assemble_translation_unit(tmp_path, tmp_path / "generated.c", expected_addresses=(0x1000, 0x2000))
 
 
-def test_compiler_gate_classifies_conflicting_function_contract(tmp_path: Path) -> None:
-    source = tmp_path / "conflict.c"
+@pytest.mark.parametrize("suffix", [".c", ".dec", ""])
+def test_compiler_gate_classifies_conflicting_function_contract(tmp_path: Path, suffix: str) -> None:
+    source = tmp_path / f"conflict{suffix}"
     source.write_text("int f(void);\nvoid f(void) {}\n", encoding="utf-8")
 
     report = compile_translation_unit(

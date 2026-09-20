@@ -30,6 +30,9 @@ from .global_declarations import (
     GlobalDeclarationCType8616,
     record_global_declaration_spec_8616,
 )
+from .gp_register_versions import capture_gp_register_versions_8616
+from .gp_word_assignment import project_gp_word_assignment_8616
+from .gp_word_runtime import initialize_gp_runtime_abi_8616
 from .stack_value_projection import project_pointer_storage_value_8616
 
 __all__ = [
@@ -554,12 +557,12 @@ def _runtime_gp_subview_write_8616(
             structured_c.CConstant(bit_shift, lane_type, codegen=codegen),
             codegen=codegen,
         )
-    return structured_c.CAssignment(
+    return project_gp_word_assignment_8616(structured_c.CAssignment(
         parent_lhs,
         structured_c.CBinaryOp("Or", preserved, inserted, codegen=codegen),
         codegen=codegen,
         tags=tags,
-    )
+    ))
 
 
 def _addressed_gp_high_byte_view_8616(
@@ -662,6 +665,7 @@ def runtime_gp_state_names_8616(codegen: object) -> frozenset[str]:
 
 def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
     """Materialize SSA-proven GP live-ins as explicit runtime globals."""
+    initialize_gp_runtime_abi_8616(codegen)
     boundary = cast(_CodegenGPRegisters8616, codegen)
     cfunc = boundary.cfunc
     project = boundary.project
@@ -669,6 +673,9 @@ def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
         boundary._inertia_gp_register_state_lowering_stats_8616 = GPRegisterStateLoweringStats8616(0, 0, 0, 0, 0)
         return False
     state_owned_names = runtime_gp_state_names_8616(codegen)
+    captured = capture_gp_register_versions_8616(
+        codegen, state_owned_names, lambda node: _c_register_identity_8616(node, project),
+    )
     raw_ids: set[int] = set()
     materialized_ids: set[int] = set()
 
@@ -777,7 +784,7 @@ def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
 
     root = cfunc.statements
     new_root = transform(root)
-    changed = new_root is not root
+    changed = new_root is not root or captured
     if changed:
         cfunc.statements = new_root
     if _replace_c_children_8616(cfunc.statements, transform):

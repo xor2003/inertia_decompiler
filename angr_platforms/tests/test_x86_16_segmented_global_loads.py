@@ -2305,19 +2305,22 @@ def test_structured_address_literal_materializes_segment_pointer_to_string_const
     assert stats.indexed_materialized_count == 1
 
 
-def test_collect_global_address_literal_evidence_matches_summary_immediate():
+@pytest.mark.parametrize("address", [0x1049F, 0x104A1])
+def test_collect_global_address_literal_evidence_matches_summary_immediate(address):
     metadata = SimpleNamespace(
         instruction_offsets=(0x4C8, 0x4CF),
         global_address_refs=(CODGlobalAddressRef(0x4CF, "SG604", 0, 2, b"\xb8\x3b\x01", "%7.i  %4.i  %4.i"),),
     )
     summaries = [
         InsnSummary8616("push", "reg", "bp", address=0x10498),
-        InsnSummary8616("mov", "reg", "ax", "imm", 0x17D, 2, 2, address=0x104A1),
+        InsnSummary8616("mov", "reg", "ax", "imm", 0x17D, 2, 2, address=address),
+        InsnSummary8616("mov", "reg", "ax", "imm", 0x701A, 2, 2, address=0x104A7),
     ]
 
     evidence = _collect_global_address_literal_evidence_8616(metadata, summaries)
 
-    assert evidence == (GlobalAddressLiteralEvidence8616(0x17D, "%7.i  %4.i  %4.i"),)
+    expected = (GlobalAddressLiteralEvidence8616(0x17D, "%7.i  %4.i  %4.i"),) if address == 0x1049F else ()
+    assert evidence == expected
 
 
 def test_indexed_segmented_global_store_evidence_recovers_shifted_stack_index():
@@ -5548,7 +5551,7 @@ def test_scalar_call_return_global_store_consumes_only_exact_ax_carrier():
     assert stats.direct_symbol_call_return_materialized_count == 1
 
 
-def test_direct_global_symbol_store_pairs_fold_call_return_evidence_scalar_store():
+def test_direct_global_symbol_store_pairs_preserve_registers_without_original_call():
     project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
     codegen = _DummyCodegen()
     low_word = _reg(project, codegen, "ax")
@@ -5599,15 +5602,15 @@ def test_direct_global_symbol_store_pairs_fold_call_return_evidence_scalar_store
     assert isinstance(assignment.lhs, CVariable)
     assert assignment.lhs.variable.name == "clFinish"
     assert assignment.lhs.variable.size == 4
-    assert isinstance(assignment.rhs, CFunctionCall)
-    assert assignment.rhs.callee_target == "clock"
-    assert assignment.rhs.args == []
+    assert isinstance(assignment.rhs, CBinaryOp)
+    assert assignment.rhs.lhs is low_word
+    assert assignment.rhs.rhs.lhs is high_word
     assert stats.direct_symbol_store_materialized_count == 1
-    assert stats.direct_symbol_call_return_materialized_count == 1
+    assert stats.direct_symbol_call_return_materialized_count == 0
     assert codegen._inertia_global_declaration_specs_8616 == (("unsigned long", "clFinish", None),)
 
 
-def test_direct_global_call_return_store_prunes_stale_dx_ax_recombine():
+def test_direct_global_call_return_store_keeps_recombine_without_original_call():
     project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
     codegen = _DummyCodegen()
     codegen.project = project
@@ -5668,12 +5671,10 @@ def test_direct_global_call_return_store_prunes_stale_dx_ax_recombine():
     )
 
     assert changed is True
-    assert len(root.statements) == 1
-    assignment = root.statements[0]
-    assert isinstance(assignment, CAssignment)
-    assert assignment.lhs.variable.name == "clFinish"
-    assert isinstance(assignment.rhs, CFunctionCall)
-    assert assignment.rhs.callee_target == "clock"
+    assert len(root.statements) == 2
+    assert root.statements[1] is stale_recombine
+    assert isinstance(root.statements[0].rhs, CBinaryOp)
+    assert stats.direct_symbol_call_return_materialized_count == 0
 
 
 def test_direct_global_call_return_store_folds_evidenced_nested_carrier_group():
@@ -5974,7 +5975,7 @@ def test_sidecar_free_dword_update_refs_refuse_nonmatching_high_word(
     assert _sidecar_free_dword_update_refs_8616(summaries) == ()
 
 
-def test_direct_global_symbol_store_pairs_fold_call_return_evidence_from_byte_stores():
+def test_direct_global_symbol_store_pairs_keep_byte_carriers_without_original_call():
     project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
     codegen = _DummyCodegen()
     ax_offset, ax_size = project.arch.registers["ax"]
@@ -6047,13 +6048,13 @@ def test_direct_global_symbol_store_pairs_fold_call_return_evidence_from_byte_st
     assert isinstance(assignment.lhs, CVariable)
     assert assignment.lhs.variable.name == "clFinish"
     assert assignment.lhs.variable.size == 4
-    assert isinstance(assignment.rhs, CFunctionCall)
-    assert assignment.rhs.callee_target == "clock"
-    assert assignment.rhs.args == []
-    assert stats.direct_symbol_call_return_materialized_count == 1
+    assert isinstance(assignment.rhs, CBinaryOp)
+    assert assignment.rhs.lhs is low_word
+    assert assignment.rhs.rhs.lhs is high_word
+    assert stats.direct_symbol_call_return_materialized_count == 0
 
 
-def test_direct_global_symbol_store_pairs_consume_evidenced_call_carrier_from_byte_stores():
+def test_direct_global_symbol_store_pairs_keep_nonadjacent_call_carrier_from_byte_stores():
     project = SimpleNamespace(arch=Arch86_16(), kb=SimpleNamespace(labels={}))
     codegen = _DummyCodegen()
     ax_offset, ax_size = project.arch.registers["ax"]
@@ -6141,15 +6142,17 @@ def test_direct_global_symbol_store_pairs_consume_evidenced_call_carrier_from_by
     )
 
     assert changed is True
-    assert len(root.statements) == 2
-    assert root.statements[0] is unrelated_copy
-    assignment = root.statements[1]
+    assert len(root.statements) == 3
+    assert root.statements[0] is call_copy
+    assert root.statements[1] is unrelated_copy
+    assignment = root.statements[2]
     assert isinstance(assignment, CAssignment)
     assert isinstance(assignment.lhs, CVariable)
     assert assignment.lhs.variable.name == "clFinish"
-    assert isinstance(assignment.rhs, CFunctionCall)
-    assert assignment.rhs.callee_target == "clock"
-    assert stats.direct_symbol_call_return_materialized_count == 1
+    assert isinstance(assignment.rhs, CBinaryOp)
+    assert assignment.rhs.lhs is low_word
+    assert assignment.rhs.rhs.lhs is high_word
+    assert stats.direct_symbol_call_return_materialized_count == 0
 
 
 def test_direct_global_symbol_store_pairs_fold_copied_constant_word_store():
@@ -6669,7 +6672,7 @@ def test_direct_global_dword_update_folds_long_msc_flag_suffix_after_scalar_stor
     upper = CAssignment(cl_pause, upper_rhs, codegen=codegen)
     suffix = [CAssignment(tmp(5001), tmp(5000), codegen=codegen)]
     for index in range(5002, 5088):
-        suffix.append(CAssignment(tmp(index), tmp(index - 1), codegen=codegen))  # noqa: PERF401
+        suffix.append(CAssignment(tmp(index), tmp(index - 1), codegen=codegen))
     root = CStatements([low, carry, upper, *suffix], codegen=codegen)
     codegen.cfunc = SimpleNamespace(addr=0x4010, statements=root, body=root)
     stats = SegmentedGlobalLoadStats8616()

@@ -1231,7 +1231,7 @@ def _recover_missing_direct_calls_from_evidence_8616(project: StructuredAstValue
                 cfunc_root_now = _structured_root_8616(cfunc)
                 for node in _iter_c_nodes_deep_8616(cfunc_root_now):
                     if isinstance(node, CFunctionCall):
-                        cfunc_calls.append(_call_node_name_8616(node))  # noqa: PERF401
+                        cfunc_calls.append(_call_node_name_8616(node))
                 log.warning(
                     "[call-recover] context=%s function=%#x codegen_id=%#x recovered=%r root=%s root_id=%#x cfunc_root=%s cfunc_root_id=%#x calls=%r",
                     context_tag,
@@ -2353,7 +2353,7 @@ def _reg_expr_setup_matches_push_source_8616(
             elif op_name == CallsitePushExprOp8616.NEG.value:
                 for raw in variants:
                     if op_value == 0:
-                        next_variants.append(bytearray(raw + bytearray((0xF7, 0xD8 | reg))))  # noqa: PERF401
+                        next_variants.append(bytearray(raw + bytearray((0xF7, 0xD8 | reg))))
             elif op_name == CallsitePushExprOp8616.ADD.value:
                 for raw in variants:
                     if reg == 0:
@@ -11714,15 +11714,15 @@ def _materialize_callsite_stack_arguments_8616(project: StructuredAstValue, code
         if first_info is None:
             return None
         first_callsite, first_reg = first_info
+        result_read = materialize_runtime_call_result_read_8616(
+            _structured_root_8616(codegen.cfunc), statements, first_callsite, first_reg,
+            codegen=codegen, function_addr=codegen.cfunc.addr,
+        )
+        codegen._inertia_runtime_call_result_read_8616 = result_read
+        if result_read.verdict is RuntimeCallResultVerdict8616.PROVEN:
+            return result_read.expression, 1, None
         nearest = _nearest_standalone_return_call_8616(statements, first_callsite)
         if nearest is None:
-            result_read = materialize_runtime_call_result_read_8616(
-                _structured_root_8616(codegen.cfunc), statements, first_callsite, first_reg,
-                codegen=codegen, function_addr=codegen.cfunc.addr,
-            )
-            codegen._inertia_runtime_call_result_read_8616 = result_read
-            if result_read.verdict is RuntimeCallResultVerdict8616.PROVEN:
-                return result_read.expression, 1, None
             if result_read.verdict is RuntimeCallResultVerdict8616.UNKNOWN_REFUSE:
                 return None
             stored_return_call = _stored_return_call_expr_for_callsite_8616(first_callsite)

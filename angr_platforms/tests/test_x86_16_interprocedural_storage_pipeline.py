@@ -37,6 +37,7 @@ from angr_platforms.X86_16.lowering.interprocedural_storage_transaction import (
     function_storage_resolution_8616,
     program_storage_resolution_8616,
 )
+from angr_platforms.X86_16.pipeline.errors import PipelineHardError
 
 
 def _trials(
@@ -233,6 +234,57 @@ def test_incomplete_collection_does_not_replace_atomic_program_payload(monkeypat
     assert refused.verdict is FunctionStoragePublicationVerdict8616.INPUT_REFUSED
     assert refused.published is False
     assert program_storage_resolution_8616(project) is before
+@pytest.mark.parametrize("failure", ("input", "return_evidence", "return_collection"))
+@pytest.mark.parametrize("through_consumers", (False, True))
+def test_refused_refresh_cannot_reuse_previously_accepted_contract(
+    monkeypatch, failure, through_consumers,
+) -> None:
+    """An older complete census must not override the current refusal."""
+    project = _project(0x2000)
+    codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=0x2000))
+    collections = {0x2000: _input_collection(0x2000)}
+    _install_collectors(monkeypatch, collections)
+    accepted = collect_and_publish_function_storage_contract_8616(project, codegen)
+    assert accepted.verdict is FunctionStoragePublicationVerdict8616.PUBLISHED_ACCEPTED
+    before = program_storage_resolution_8616(project)
+    if failure == "input":
+        collections[0x2000] = _input_collection(0x2000, complete=False)
+    elif failure == "return_evidence":
+        project._inertia_caller_return_use_evidence_by_addr_8616.clear()
+    else:
+        monkeypatch.setattr(
+            storage_pipeline,
+            "collect_function_return_storage_trials_8616",
+            lambda *args, **kwargs: FunctionReturnStorageTrialCollection8616(
+                verdict=StorageTrialCollectionVerdict8616.UNKNOWN_REFUSE,
+                trials=collections[0x2000].trials,
+                failures=(),
+                stats=StorageTrialStats8616(failure_count=1),
+            ),
+        )
+
+    monkeypatch.setattr(
+        prototype_application,
+        "apply_accepted_function_storage_prototype_8616",
+        lambda *args: pytest.fail("stale contract reached a prototype consumer"),
+    )
+    refresh = (
+        publish_and_reconcile_callsite_interfaces_8616
+        if through_consumers
+        else collect_and_publish_function_storage_contract_8616
+    )
+    with pytest.raises(PipelineHardError, match="previously accepted storage contract") as error:
+        refresh(project, codegen)
+    assert error.value.function_addr == 0x2000
+    assert error.value.layer == "types/lowering"
+    assert error.value.details.verdict is {
+        "input": FunctionStoragePublicationVerdict8616.INPUT_REFUSED,
+        "return_evidence": FunctionStoragePublicationVerdict8616.RETURN_EVIDENCE_UNAVAILABLE,
+        "return_collection": FunctionStoragePublicationVerdict8616.RETURN_REFUSED,
+    }[failure]
+    assert program_storage_resolution_8616(project) is before
+
+
 def test_complete_conflicting_trials_publish_typed_refusal(monkeypatch) -> None:
     project = _project(0x2000)
     collections = {

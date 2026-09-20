@@ -9,6 +9,9 @@ import angr
 import pytest
 from angr.codenode import BlockNode
 from angr.knowledge_plugins.functions.function import Function
+from angr_platforms.X86_16.arch_86_16 import Arch86_16
+from angr_platforms.X86_16.ir.ssa_function import build_x86_16_function_ssa
+from angr_platforms.X86_16.ir.vex_import import build_x86_16_ir_function_artifact
 
 import inertia_decompiler.function_graph_extent_repair as extent_repair
 from inertia_decompiler import cli_function_discovery as discovery
@@ -247,7 +250,9 @@ def test_fallback_entry_forwards_recovery_region_to_graph_repair(monkeypatch: py
     assert captured == [(0x1000, 0x1200)]
 
 
-def test_direct_addr_forwards_inferred_region_to_graph_repair(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("label", [None, "entry"])
+@pytest.mark.parametrize("exact_region", [None, (0x1000, 0x1100)])
+def test_direct_addr_forwards_inferred_region_to_graph_repair(monkeypatch, label, exact_region) -> None:
     project = SimpleNamespace(
         entry=0x1000,
         arch=SimpleNamespace(name="86_16"),
@@ -268,13 +273,14 @@ def test_direct_addr_forwards_inferred_region_to_graph_repair(monkeypatch: pytes
         0x1000,
         timeout=10,
         window=0x200,
-        function_label=None,
+        function_label=label,
         lst_metadata=None,
         low_memory_path=False,
         prefer_fast_recovery=False,
+        exact_region=exact_region,
     )
 
-    assert captured == [(0x1000, 0x1200)]
+    assert captured == [exact_region or (0x1000, 0x1200)]
 
 
 def test_refuses_extension_outside_exact_region() -> None:
@@ -288,3 +294,37 @@ def test_refuses_extension_outside_exact_region() -> None:
         )
 
     assert function.get_node(0x1000).size == 2
+
+
+@pytest.mark.parametrize("rebuild", [False, True])
+@pytest.mark.parametrize("warm_graph", [False, True])
+def test_recovered_transitions_reach_cached_graph_and_ssa(rebuild: bool, warm_graph: bool) -> None:
+    """Graph repair must retain a jump-only connector in every CFG projection."""
+    project = angr.load_shellcode(bytes.fromhex("eb029090b80100c3"), arch=Arch86_16(), load_address=0x1000)
+    function = project.kb.functions.function(addr=0x1000, create=True)
+    function._register_node(True, BlockNode(0x1000, 2, bytestr=bytes.fromhex("eb02")))
+    if warm_graph:
+        assert not tuple(function.graph.edges)
+    if rebuild:
+        blocks = {addr: project.factory.block(addr, opt_level=0) for addr in (0x1000, 0x1004)}
+        discovery._rebuild_function_transition_graph_8616(function, blocks, {(0x1000, 0x1004)})
+    else:
+        discovery._repair_x86_16_function_graph_8616(project, function, exact_region=(0x1000, 0x1008))
+
+    expected = {(0x1000, 0x1004)}
+    assert {(a.addr, b.addr) for a, b in function.transition_graph.edges} == expected
+    assert {(a.addr, b.addr) for a, b in function.graph.edges} == expected
+    artifact = build_x86_16_ir_function_artifact(project, function)
+    assert artifact.blocks[0].successor_addrs == (0x1004,)
+    assert build_x86_16_function_ssa(artifact).predecessor_map[0x1004] == (0x1000,)
+
+
+def test_reset_function_graph_clears_cached_edges_and_nodes() -> None:
+    """Resetting a graph must not leave the old cached local projection readable."""
+    function = _function_with_transition()
+    assert tuple(function.graph.edges)
+
+    discovery._reset_function_graph_state_8616(function)
+
+    assert not tuple(function.transition_graph.nodes)
+    assert not tuple(function.graph.nodes)

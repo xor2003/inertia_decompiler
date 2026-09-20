@@ -283,14 +283,7 @@ def materialize_call_stack_effects_8616(
                 )
             )
             rewritten.append(
-                IRInstr(
-                    instruction.op,
-                    instruction.dst,
-                    instruction.args,
-                    instruction.size,
-                    instruction.addr,
-                    effect,
-                )
+                replace(instruction, call_stack_effect=effect)
             )
         rewritten_blocks.append(
             IRBlock(block.addr, tuple(rewritten), block.refusals, block.successor_addrs)

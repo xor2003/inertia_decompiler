@@ -60,7 +60,7 @@ def physical_register_view_8616(value: object) -> PhysicalRegisterView8616 | Non
         return PhysicalRegisterView8616(reg_offset, width) if isinstance(width, int) and width > 0 else None
 
     dirty = value.dirty if isinstance(value, CDirtyExpression) else value
-    if isinstance(dirty, VirtualVariable):  # noqa: SIM108
+    if isinstance(dirty, VirtualVariable):
         bits = dirty.bits
     else:
         # Dynamic boundary: legacy angr dirty payloads expose width by shape.

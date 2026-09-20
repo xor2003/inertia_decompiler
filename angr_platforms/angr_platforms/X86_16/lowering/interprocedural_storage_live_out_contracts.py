@@ -66,6 +66,7 @@ class MemoryLiveOutFailureKind8616(StrEnum):
     ALIAS_EVIDENCE_REFUSED = "alias_evidence_refused"
     WIDENING_EVIDENCE_REFUSED = "widening_evidence_refused"
     CALLER_SSA_UNAVAILABLE = "caller_ssa_unavailable"
+    CALLER_CONTEXT_CONFLICT = "caller_context_conflict"
     CALL_OUTPUT_DEFINITION_REFUSED = "call_output_definition_refused"
     CALL_OUTPUT_DEFINITION_CONFLICT = "call_output_definition_conflict"
     CFG_INCOMPLETE = "cfg_incomplete"
@@ -205,6 +206,36 @@ class FunctionMemoryLiveOutCollection8616:
         )
 
 
+def refused_memory_live_out_collection_8616(
+    failure: MemoryLiveOutFailure8616,
+    raw: int,
+    normalized: int,
+) -> FunctionMemoryLiveOutCollection8616:
+    """Build one atomic typed refusal without publishing partial live-out trials."""
+    conflict = failure.kind in {
+        MemoryLiveOutFailureKind8616.CALLER_CONTEXT_CONFLICT,
+        MemoryLiveOutFailureKind8616.CALL_OUTPUT_DEFINITION_CONFLICT,
+        MemoryLiveOutFailureKind8616.CONDITION_CONFLICT,
+        MemoryLiveOutFailureKind8616.SIGNEDNESS_CONFLICT,
+        MemoryLiveOutFailureKind8616.POINTER_TARGET_CONFLICT,
+    }
+    verdict = (
+        MemoryLiveOutCollectionVerdict8616.CONFLICT
+        if conflict
+        else MemoryLiveOutCollectionVerdict8616.UNKNOWN_REFUSE
+    )
+    return FunctionMemoryLiveOutCollection8616(
+        verdict,
+        (),
+        (failure,),
+        StorageTrialStats8616(
+            raw_fact_count=raw,
+            normalized_fact_count=normalized,
+            failure_count=max(1, raw - normalized),
+        ),
+    )
+
+
 __all__ = [
     "CallsiteMemoryLiveOutEvidence8616",
     "FunctionMemoryLiveOutCollection8616",
@@ -214,4 +245,5 @@ __all__ = [
     "MemoryLiveOutFailureKind8616",
     "MemoryLiveOutUseDisposition8616",
     "MemoryLiveOutUseFact8616",
+    "refused_memory_live_out_collection_8616",
 ]

@@ -24,6 +24,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
 from ..c_ast_utils import _iter_c_nodes_deep_8616
 from .wide_call_output_assignment_contracts import WideCallOutputAssignmentFact8616
 
+_NEAR_OFFSET_MAX: int = 0xFFFF
+
 
 class _TaggedNodeBoundary8616(Protocol):
     """Dynamic tag field exposed by angr C-AST nodes."""
@@ -124,12 +126,8 @@ def _standalone_call_8616(statement: object) -> CFunctionCall | None:
     return None
 
 
-def _call_target_matches_8616(
-    call: CFunctionCall,
-    target_addr: int,
-    project: object,
-) -> bool:
-    """Match exact original or slice-relative binary target identity."""
+def _call_target_variants_8616(target_addr: int, project: object) -> set[int]:
+    """Project the proven target into existing original, slice and near coordinates."""
     target_variants = {target_addr}
     try:
         delta = cast(_ProjectAddressBoundary8616, project)._inertia_original_linear_delta
@@ -143,10 +141,29 @@ def _call_target_matches_8616(
         image_base = None
     if isinstance(image_base, int):
         near_offset = target_addr - image_base
-        if 0 <= near_offset <= 0xFFFF:
+        if 0 <= near_offset <= _NEAR_OFFSET_MAX:
             target_variants.add(near_offset)
-        if 0 <= target_addr <= 0xFFFF:
+        if 0 <= target_addr <= _NEAR_OFFSET_MAX:
             target_variants.add(image_base + target_addr)
+    return target_variants
+
+
+def _call_target_matches_8616(
+    call: CFunctionCall,
+    target_addr: int,
+    project: object,
+) -> bool:
+    """Match binary identity before and after symbol projection.
+
+    Naming may detach the angr function but retains its exact target tag.
+    A label alone proves nothing; conflicting numeric evidence refuses a match.
+    """
+    target_variants = _call_target_variants_8616(target_addr, project)
+    attached_target = call.tags.get("inertia_target_addr_8616")
+    if attached_target is not None and (
+        type(attached_target) is not int or attached_target not in target_variants
+    ):
+        return False
     if isinstance(call.callee_target, int):
         return call.callee_target in target_variants
     if isinstance(call.callee_target, CConstant):
@@ -154,7 +171,7 @@ def _call_target_matches_8616(
         if isinstance(constant_target, int):
             return constant_target in target_variants
     if call.callee_func is None:
-        return False
+        return isinstance(call.callee_target, str) and attached_target in target_variants
     try:
         return cast(_FunctionBoundary8616, call.callee_func).addr in target_variants
     except AttributeError:

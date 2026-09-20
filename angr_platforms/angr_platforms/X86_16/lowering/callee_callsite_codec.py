@@ -17,6 +17,10 @@ from ..callsite_summary_codec import (
     callsite_summary_from_record_8616,
     callsite_summary_record_8616,
 )
+from ..frontend_boundary_transport import (
+    function_boundary_from_record_8616,
+    function_boundary_record_8616,
+)
 from .callee_callsite_contracts import (
     CalleeCallsiteCensus8616,
     CalleeCallsiteFact8616,
@@ -96,6 +100,10 @@ def _fact_record_8616(
         "owner": _owner_kind_8616(project, fact.evidence_project),
         "evidence_target_addr": fact.evidence_target_addr,
         "caller_addr": fact.caller_addr,
+        "caller_boundary": function_boundary_record_8616(
+            fact.evidence_project, fact.caller_function,
+            required_entry=fact.caller_addr, required_instruction=fact.callsite_addr,
+        ),
         "callsite_addr": fact.callsite_addr,
         "summary": (
             None
@@ -115,6 +123,7 @@ def _fact_from_record_8616(
         "owner",
         "evidence_target_addr",
         "caller_addr",
+        "caller_boundary",
         "callsite_addr",
         "summary",
     }:
@@ -128,17 +137,25 @@ def _fact_from_record_8616(
     callsite_addr = _int_8616(record["callsite_addr"], "callee callsite address")
     if summary is not None and summary.callsite_addr != callsite_addr:
         raise ValueError("callee callsite summary address disagrees with its fact")
+    owner = _owner_from_kind_8616(project, record["owner"])
+    caller_addr = _optional_int_8616(record["caller_addr"], "callee callsite caller address")
+    boundary = function_boundary_from_record_8616(owner, record["caller_boundary"])
+    boundary_disagrees = boundary is not None and (
+        boundary.addr != caller_addr or callsite_addr not in boundary.reachable_instruction_addrs
+    )
+    if boundary_disagrees:
+        raise ValueError(
+            f"callee callsite {callsite_addr:#x}, caller {caller_addr!r}: "
+            "identity disagrees with its caller boundary"
+        )
     return CalleeCallsiteFact8616(
-        evidence_project=_owner_from_kind_8616(project, record["owner"]),
-        caller_function=None,
+        evidence_project=owner,
+        caller_function=boundary,
         evidence_target_addr=_int_8616(
             record["evidence_target_addr"],
             "callee callsite evidence target",
         ),
-        caller_addr=_optional_int_8616(
-            record["caller_addr"],
-            "callee callsite caller address",
-        ),
+        caller_addr=caller_addr,
         callsite_addr=callsite_addr,
         summary=summary,
     )

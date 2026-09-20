@@ -10,6 +10,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .core import IRAddress, IRAtom, IRCallStackEffect8616, IRCondition, IRInstr, IRRefusal
 from .logical_memory_contracts import IRLogicalMemoryArtifact8616
 from .ssa import SSABlock
@@ -285,14 +287,7 @@ def build_x86_16_function_memory_ssa(
                         for item in slices
                     )
             rewritten_instrs.append(
-                IRInstr(
-                    instruction.op,
-                    instruction.dst,
-                    args,
-                    instruction.size,
-                    instruction.addr,
-                    instruction.call_stack_effect,
-                )
+                replace(instruction, args=args)
             )
         rewritten_blocks.append(
             SSABlock(

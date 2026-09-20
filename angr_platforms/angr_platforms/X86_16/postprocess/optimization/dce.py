@@ -32,6 +32,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CVariable,
     CVariableField,
 )
+from angr.sim_type import SimStruct
 from angr.sim_variable import (
     SimMemoryVariable,
     SimRegisterVariable,
@@ -42,11 +43,13 @@ from angr.sim_variable import (
 
 from ...decompiler_postprocess_utils import _iter_c_nodes_deep_8616, _same_c_expression_8616
 from ...lowering.stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+from .dce_local_array_reads import is_pure_local_array_read_8616
 from .dce_noop_conditionals import (
     DceNoopConditionalPruneStats8616,
     prune_explicit_empty_if_else_after_dce_8616,
 )
 from .dce_purity import PURE_LOCAL_BINARY_OPS_8616, PURE_LOCAL_UNARY_OPS_8616
+from .dce_value_identity import assignment_reads_destination_8616, same_local_value_expression_8616
 from .dce_walk import (
     DceValuePurity8616,
     _DceWalkContext8616,
@@ -585,6 +588,13 @@ def _dead_code_elimination_8616(codegen: object) -> bool:
                     _dynamic_dce_getattr_8616(expr, "variable", None),
                     active,
                 )
+                # Reading an already-typed aggregate value is not pointer dereferencing.
+                local_value_projection = (
+                    base_purity is DceValuePurity8616.LOCAL_VALUE
+                    and not expr.var_is_ptr and isinstance(expr.variable.type, SimStruct)
+                )
+                if local_value_projection:
+                    return DceValuePurity8616.LOCAL_VALUE
                 return (
                     DceValuePurity8616.GLOBAL_MEMORY_READ
                     if base_purity is DceValuePurity8616.GLOBAL_MEMORY_READ
@@ -600,6 +610,8 @@ def _dead_code_elimination_8616(codegen: object) -> bool:
                 op = _dynamic_dce_getattr_8616(expr, "op", None)
                 operand = _dynamic_dce_getattr_8616(expr, "operand", None)
                 if op == "Dereference":
+                    if is_pure_local_array_read_8616(expr):
+                        return DceValuePurity8616.LOCAL_VALUE
                     return (
                         DceValuePurity8616.GLOBAL_MEMORY_READ
                         if _address_expr_is_pure_global_read_address_8616(operand)
@@ -736,13 +748,17 @@ def _dead_code_elimination_8616(codegen: object) -> bool:
     ) -> bool:
         if not isinstance(first_assignment, CAssignment) or not isinstance(second_assignment, CAssignment):
             return False
-        if not _same_c_expression_8616(_dynamic_dce_getattr_8616(first_assignment, "lhs", None), _dynamic_dce_getattr_8616(second_assignment, "lhs", None)):
+        if not same_local_value_expression_8616(first_assignment.lhs, second_assignment.lhs):
             return False
-        if not _same_c_expression_8616(_dynamic_dce_getattr_8616(first_assignment, "rhs", None), _dynamic_dce_getattr_8616(second_assignment, "rhs", None)):
+        if not same_local_value_expression_8616(first_assignment.rhs, second_assignment.rhs):
             return False
         lhs = _dynamic_dce_getattr_8616(second_assignment, "lhs", None)
         rhs = _dynamic_dce_getattr_8616(second_assignment, "rhs", None)
-        return _is_plain_local_lvalue_8616(lhs) and _expr_is_pure_local_value_8616(rhs)
+        return (
+            _is_plain_local_lvalue_8616(lhs)
+            and _expr_is_pure_local_value_8616(rhs)
+            and not assignment_reads_destination_8616(lhs, rhs)
+        )
 
     def _adjacent_duplicate_assignment_is_definitely_dead_8616(first: object, second: object) -> bool:
         first_assignment = _transparent_last_assignment_8616(first)
@@ -1010,7 +1026,7 @@ def _dead_code_elimination_8616(codegen: object) -> bool:
         if condition_and_nodes:
             for pair in condition_and_nodes:
                 if len(pair) >= 1:
-                    condition_roots.append(pair[0])  # noqa: PERF401
+                    condition_roots.append(pair[0])
         if condition_roots:
             for child in condition_roots:
                 _collect_expr(child)
@@ -1054,7 +1070,7 @@ def _dead_code_elimination_8616(codegen: object) -> bool:
                 work.append(child)
         for pair in _dynamic_dce_getattr_8616(stmt, "condition_and_nodes", ()) or ():
             if len(pair) >= 2:
-                work.append(pair[1])  # noqa: PERF401
+                work.append(pair[1])
         cases = _dynamic_dce_getattr_8616(stmt, "cases", None)
         work.extend(_iter_switch_case_bodies_8616(cases))
 
@@ -1363,7 +1379,13 @@ def _dead_code_elimination_8616(codegen: object) -> bool:
         return _rhs_is_unproven_dirty_register_carrier_8616(rhs, defined_keys)
 
     def _protected_var_keys() -> set[tuple[str, int | str]]:
+        """Keep Lowering's live save definitions even after AST rebinding."""
         protected: set[tuple[str, int | str]] = set()
+        # Earlier passes can clone/rebind locals independently of side metadata.
+        for node in _iter_c_nodes_deep_8616(root):
+            if (isinstance(node, CAssignment) and isinstance(node.lhs, CVariable)
+                    and isinstance(node.tags, dict) and "inertia_x86_16_gp_stack_save" in node.tags):
+                protected.add(_var_key(node.lhs))
         attrs = (
             "_inertia_callsite_arg_sources",
             "_inertia_stack_variable_bindings",

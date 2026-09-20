@@ -8,11 +8,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from x86_16_sleep_behavior import SLEEP_REGISTER_STATE_PRELUDE, assert_sleep_behavior
+
 from scripts.check_sortd_sidecar_free import mz_executable_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLI_PATH = REPO_ROOT / "decompile.py"
 SORTDEMO_EXE = REPO_ROOT / "SORTDEMO.EXE"
+EXPECTED_CLOCK_SITES = 2
 
 
 def test_sortd_sleep_preserves_both_wide_clock_calls_sidecar_free(
@@ -62,11 +65,15 @@ def test_sortd_sleep_preserves_both_wide_clock_calls_sidecar_free(
     function_start = result.stdout.rfind(signature.group(0))
     assert function_start >= 0
     body = result.stdout[function_start:]
-    assert body.count("sub_1137e()") == 2
+    assert body.count("sub_1137e()") == EXPECTED_CLOCK_SITES
     assert "local_4 = sub_1137e() +" in body
-    assert re.search(r"if \((?:\(long\))?sub_1137e\(\) > \(long\)local_4\)", body)
+    assert_sleep_behavior(result.stdout, tmp_path, harness_prelude=(
+        "#define Sleep sub_10f38\n#define clock sub_1137e\n#define clock_t unsigned long\n"
+        + SLEEP_REGISTER_STATE_PRELUDE
+    ))
     assert "sub_137e" not in combined
-    assert "local_6" not in body
+    # Saved SI/DI bytes are legitimate locals; test their ABI effect above
+    # instead of banning a name that previously denoted a stale clock word.
     assert "vvar_" not in body
     assert "stack_base" not in body
     assert "flags" not in body

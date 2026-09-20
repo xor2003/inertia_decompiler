@@ -229,3 +229,32 @@ def test_classified_restore_without_push_carriers_hard_fails() -> None:
         materialize_gp_stack_restores_8616(codegen)
     assert failure.value.function_addr == codegen.cfunc.addr
     assert failure.value.details["restore_obligations"] == ((0x1008, "ax", (-2, -1)),)
+
+
+def test_unmatched_restore_does_not_publish_snapshot_declarations() -> None:
+    """A valid insertion point alone must not publish an unused stack snapshot."""
+    codegen = _Codegen(project=SimpleNamespace(arch=Arch86_16()))
+    local = structured_c.CVariable(
+        SimStackVariable(-2, 2, base="bp", name="local_2"),
+        variable_type=SimTypeShort(False),
+        codegen=codegen,
+    )
+    restore = _assignment(codegen, local, 0x1008)
+    declarations = {local.variable: {(local, local.type)}}
+    uses = {local.variable: local}
+    codegen.cfunc = SimpleNamespace(
+        addr=0x1000,
+        statements=structured_c.CStatements([restore], codegen=codegen),
+        unified_local_vars=dict(declarations),
+        variables_in_use=dict(uses),
+    )
+    codegen._inertia_stack_register_restore_artifact_8616 = _artifact()
+
+    with pytest.raises(PipelineHardError, match="classified but none materialized"):
+        materialize_gp_stack_restores_8616(codegen)
+
+    assert codegen.cfunc.unified_local_vars == declarations
+    assert codegen.cfunc.variables_in_use == uses
+    assert codegen.cfunc.statements.statements == [restore]
+    assert restore.lhs is local
+    assert restore.rhs.value == 0

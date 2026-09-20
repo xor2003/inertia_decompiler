@@ -52,3 +52,11 @@ SORTD.failed-*.dec
 # Generated large catalog artifacts
 signature_catalogs/all_compilers.pat
 signature_catalogs/catalog_specs.pickle
+
+# Local comparison exports and agent harness (not repository inputs)
+/SORTD_decomp/
+/VIKINGS_decomp/
+/VIKINGS_decomp_first5/
+/VIKINGS_decomp_first5_after_flags/
+/comparisons/reko/
+/meta_harness/

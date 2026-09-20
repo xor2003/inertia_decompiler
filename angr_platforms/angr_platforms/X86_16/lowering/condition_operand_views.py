@@ -13,11 +13,13 @@ from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimType, SimTypeChar, SimTypeInt, SimTypeLong, SimTypeLongLong, SimTypeNum, SimTypeShort
 
 from ..ir.condition_ir import ConditionIR
-from .semantic_cast import CSemanticCast8616, is_identity_semantic_variable_cast_8616
+from .semantic_cast import CSemanticCast8616
 
-_INTEGER_TYPES = (SimTypeChar, SimTypeShort, SimTypeInt, SimTypeLong, SimTypeLongLong, SimTypeNum)
-_WIDTH_TYPES = {8: SimTypeChar, 16: SimTypeShort, 32: SimTypeLong}
-_DWORD_BITS = 32
+_INTEGER_TYPES: tuple[type[SimType], ...] = (SimTypeChar, SimTypeShort, SimTypeInt, SimTypeLong, SimTypeLongLong, SimTypeNum)
+_WIDTH_TYPES: dict[int, type[SimTypeChar] | type[SimTypeShort] | type[SimTypeLong]] = {
+    8: SimTypeChar, 16: SimTypeShort, 32: SimTypeLong,
+}
+_DWORD_BITS: int = 32
 
 
 def _unsigned_mask_fits(expression: c.CExpression, width: int) -> bool:
@@ -46,10 +48,9 @@ def _operand_view(expression: c.CExpression, target: SimType, width: int, signed
         return c.CConstant(value, target, codegen=expression.codegen, tags=expression.tags)
     if isinstance(expression, CSemanticCast8616) and expression.dst_type == target:
         return expression
-    conversion = CSemanticCast8616(source, target, expression, codegen=expression.codegen)
-    if is_identity_semantic_variable_cast_8616(conversion):
-        return expression
-    return conversion
+    # The declaration can still be refined by another signed/unsigned use.
+    # Retain this use's proof even when its current storage type happens to match.
+    return CSemanticCast8616(source, target, expression, codegen=expression.codegen)
 
 
 def materialize_condition_operand_views_8616(

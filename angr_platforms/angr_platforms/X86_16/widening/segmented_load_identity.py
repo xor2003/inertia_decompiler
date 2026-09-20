@@ -71,18 +71,17 @@ def segmented_load_identity_8616(
     """Return an exact tagged identity without parsing the helper expression."""
     if not isinstance(node, CFunctionCall) or not isinstance(node.tags, dict):
         return None
+    address = node.tags.get(SEGMENTED_LOAD_ADDRESS_TAG_8616)
+    if isinstance(address, IRAddress) and (address.base or address.base_values):
+        return None
     identity = node.tags.get(_SEGMENTED_LOAD_IDENTITY_TAG_8616)
     if isinstance(identity, SegmentedLoadIdentity8616):
         return identity
-    address = node.tags.get(SEGMENTED_LOAD_ADDRESS_TAG_8616)
-    if (
-        isinstance(address, IRAddress)
-        and address.status is AddressStatus.STABLE
-        and address.segment_origin is SegmentOrigin.PROVEN
-        and address.space in {MemSpace.DS, MemSpace.ES, MemSpace.SS}
-        and 0 <= address.offset <= 0xFFFF
-        and address.size > 0
-    ):
+    if not isinstance(address, IRAddress):
+        return None
+    proven_address = address.status is AddressStatus.STABLE and address.segment_origin is SegmentOrigin.PROVEN
+    supported_scalar = address.space in {MemSpace.DS, MemSpace.ES, MemSpace.SS} and 0 <= address.offset <= 0xFFFF and address.size > 0
+    if proven_address and supported_scalar:
         return SegmentedLoadIdentity8616(
             space=address.space,
             offset=address.offset,

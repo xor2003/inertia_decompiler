@@ -16,6 +16,7 @@ from enum import Enum
 from typing import Protocol, cast
 
 from .branch_target_return import TerminalAxReturnEffectKind8616, terminal_ax_return_effect_8616
+from .terminal_boundary_paths import boundary_terminal_callbacks_8616
 
 __all__ = (
     "TerminalCallPathCallbacks8616",
@@ -194,12 +195,13 @@ def angr_terminal_call_path_callbacks_8616(
         immediate = _dynamic_attr_8616(operands[0], "imm", None)
         return immediate if isinstance(immediate, int) else None
 
-    return TerminalCallPathCallbacks8616(
+    callbacks = TerminalCallPathCallbacks8616(
         function_block_ranges=lambda: tuple(block_ranges),
         load_block=_load_block,
         successor_addrs=_successor_addrs,
         branch_target_imm=_branch_target_imm,
     )
+    return boundary_terminal_callbacks_8616(function, callbacks)
 
 
 def prove_terminal_call_path_8616(

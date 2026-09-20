@@ -21,9 +21,11 @@ from angr.analyses.decompiler.structured_codegen.c import CExpression
 
 from .ir.condition_ir import (
     canonicalize_condition_storage_fingerprint_8616,
+    normalize_condition_fingerprint_algebraic_8616,
     normalize_condition_fingerprint_string_8616,
 )
 from .tail_validation_fingerprint import _expr_fingerprint
+from .validation_control_condition_delta import control_condition_delta_matches_8616
 from .validation_observable_compaction import (
     compact_normalized_validation_observable_8616,
 )
@@ -35,6 +37,7 @@ __all__ = [
     "condition_precision_evidence_8616",
     "condition_precision_token_8616",
     "condition_precision_validation_delta_8616",
+    "matches_recorded_condition_precision_8616",
     "record_condition_precision_evidence_8616",
 ]
 
@@ -126,6 +129,22 @@ def condition_precision_evidence_8616(
     )
 
 
+def matches_recorded_condition_precision_8616(
+    codegen: object, jcc_addr: int, fingerprint: str,
+) -> bool:
+    """Require the current predicate to match one unambiguous proven branch view.
+
+    This is the same exact after-token check used by final branch validation.
+    It must not substitute a historical predicate for changed current code.
+    """
+    candidates = {
+        evidence.after
+        for evidence in condition_precision_evidence_8616(codegen)
+        if evidence.jcc_addr == jcc_addr
+    }
+    return candidates == {condition_precision_token_8616(fingerprint)}
+
+
 def _delta_tokens_8616(field: object) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
     """Read one validation field as immutable added and removed token tuples."""
     if not isinstance(field, dict):
@@ -151,25 +170,19 @@ def condition_precision_token_8616(token: str) -> str:
             canonicalize_condition_storage_fingerprint_8616(token)
         )
     )
+    normalized = str(normalize_condition_fingerprint_algebraic_8616(normalized))
     return compact_normalized_validation_observable_8616(
         "conditions",
         normalized,
     )
 
 
-def _control_condition_token_8616(token: str) -> str | None:
-    """Extract a condition from one supported control-flow fingerprint."""
-    normalized = condition_precision_token_8616(token)
-    for prefix in ("if:", "ifbreak:", "while:", "dowhile:", "for:"):
-        if normalized.startswith(prefix):
-            return normalized[len(prefix) :]
-    return None
-
-
 def _evidence_covers_delta_8616(
     evidence: tuple[ConditionPrecisionEvidence8616, ...],
     removed: tuple[str, ...],
     added: tuple[str, ...],
+    control_removed: tuple[str, ...],
+    control_added: tuple[str, ...],
 ) -> bool:
     """Return whether evidence provides a complete one-to-one delta matching."""
     if not removed or len(removed) != len(added):
@@ -179,9 +192,13 @@ def _evidence_covers_delta_8616(
         for item in evidence
     )
 
+    chosen_pairs: list[tuple[str, str]] = []
+
     def _match(index: int, remaining_added: Counter[str]) -> bool:
         if index == len(removed):
-            return not remaining_added
+            return not remaining_added and control_condition_delta_matches_8616(
+                control_removed, control_added, tuple(chosen_pairs),
+            )
         before = removed[index]
         for after in tuple(remaining_added):
             pair = (before, after)
@@ -191,8 +208,10 @@ def _evidence_covers_delta_8616(
             remaining_added[after] -= 1
             if remaining_added[after] == 0:
                 del remaining_added[after]
+            chosen_pairs.append(pair)
             if _match(index + 1, remaining_added):
                 return True
+            chosen_pairs.pop()
             remaining_added[after] += 1
             pair_counts[pair] += 1
         return False
@@ -245,17 +264,11 @@ def condition_precision_validation_delta_8616(
         raise AssertionError("validated condition fields must be present")
     condition_added = tuple(condition_precision_token_8616(item) for item in condition_tokens[0])
     condition_removed = tuple(condition_precision_token_8616(item) for item in condition_tokens[1])
-    control_added = tuple(_control_condition_token_8616(item) for item in control_tokens[0])
-    control_removed = tuple(_control_condition_token_8616(item) for item in control_tokens[1])
+    control_added = control_tokens[0]
+    control_removed = control_tokens[1]
     normalized_count = len(condition_added) + len(condition_removed)
-    normalized = None not in (*control_added, *control_removed)
-    control_added_exact = tuple(item for item in control_added if item is not None)
-    control_removed_exact = tuple(item for item in control_removed if item is not None)
-    covered = (
-        normalized
-        and Counter(condition_added) == Counter(control_added_exact)
-        and Counter(condition_removed) == Counter(control_removed_exact)
-        and _evidence_covers_delta_8616(evidence, condition_removed, condition_added)
+    covered = _evidence_covers_delta_8616(
+        evidence, condition_removed, condition_added, control_removed, control_added,
     )
     if os.environ.get("INERTIA_DEBUG_CONDITION_PRECISION") == "1":
         logging.getLogger(__name__).warning(

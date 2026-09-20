@@ -47,6 +47,9 @@ class PackedMZErrorKind(StrEnum):
     UNSUPPORTED_PACKER = "unsupported_packer"
     MALFORMED_LZEXE = "malformed_lzexe"
     MALFORMED_EXEPACK = "malformed_exepack"
+    MALFORMED_PKLITE = "malformed_pklite"
+    UNPACKER_UNAVAILABLE = "unpacker_unavailable"
+    UNPACKER_TIMEOUT = "unpacker_timeout"
 
 
 class PackedMZError(ValueError):

@@ -10,6 +10,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import replace
 from functools import partial
 from typing import Any, Protocol, cast
 
@@ -39,6 +40,7 @@ from .function_ir_registry import (
     publish_function_ir_artifact_8616,
     registered_function_ir_artifact_8616,
 )
+from .instruction_origin import vex_instruction_origin_8616
 from .logical_memory_capture import (
     collect_accesses_for_block,
     collect_accesses_for_function,
@@ -785,7 +787,7 @@ def _block_to_ir(
         )
         type_environment = _vex_type_environment(vex)
         instruction_addr: int | None = None
-        for stmt in statements:
+        for statement_index, stmt in enumerate(statements):
             tag = _stmt_tag(stmt)
             if tag == "Ist_IMark":
                 instruction_addr = _stmt_instruction_addr(stmt)
@@ -804,6 +806,9 @@ def _block_to_ir(
                 if tag:
                     refusals.append(IRRefusal("unsupported_stmt", f"unsupported VEX statement {tag}", addr))
                 continue
+            instr = replace(instr, origin=vex_instruction_origin_8616(
+                stmt, block_addr=addr, statement_index=statement_index,
+            ))
             if instr.op == "LOAD" and tag == "Ist_WrTmp":
                 tmp_id = _stmt_tmp(stmt)
                 loaded_value = tmps.get(tmp_id)

@@ -38,6 +38,29 @@ def test_missing_export_is_an_explicit_execution_failure(tmp_path):
     assert not result.accepts("")
 
 
+def test_runtime_flag_storage_is_rejected_by_whole_file_gate():
+    result = evaluate_sortd_transcript(
+        _passing_transcript() + "\nunsigned short inertia_flags;\n",
+        decompiler_returncode=0, minimum_decompiled=20,
+        maximum_empty=0, maximum_timeouts=0, maximum_tracebacks=0,
+    )
+    assert "generated output retains raw flag-state artifacts" in result.violations
+
+
+def test_execution_evidence_uses_final_emitted_definition(tmp_path, monkeypatch):
+    from scripts import runmenu_behavior
+
+    exported = "void sub_102e0(void) { return; }"
+    emitted = "void sub_102e0(void) { while (1) { if (ax == 27) break; } }"
+    (tmp_path / "000102e0-sub_102e0.c").write_text(exported)
+    executed = []
+    monkeypatch.setattr(runmenu_behavior, "assert_runmenu_behavior", lambda source, _: executed.append(source))
+    result = collect_runmenu_execution_evidence(tmp_path, tmp_path, definition=emitted)
+    assert executed[0].endswith(emitted)
+    assert result.accepts(emitted)
+    assert not result.accepts(exported)
+
+
 @pytest.mark.parametrize("runtime_failure", [False, True])
 def test_export_gets_runtime_header_without_changing_its_definition(tmp_path, monkeypatch, runtime_failure):
     from scripts import runmenu_behavior

@@ -1211,8 +1211,8 @@ def test_dosfunc_cod_sample_deduplicates_stack_local_names(tmp_path):
 @pytest.mark.parametrize(
     ("proc_name", "header_anchor"),
     (
-        ("_dos_getProcessId", "unsigned short _dos_getProcessId(void)"),
-        ("_dos_setProcessId", "int _dos_setProcessId(const unsigned short pid)"),
+        ("_dos_getProcessId", "void _dos_getProcessId(void)"),
+        ("_dos_setProcessId", "void _dos_setProcessId(unsigned short pid)"),
     ),
 )
 def test_dosfunc_cod_sample_process_helpers_stay_empty(proc_name: str, header_anchor: str):
@@ -1231,21 +1231,14 @@ def test_dosfunc_cod_sample_process_helpers_stay_empty(proc_name: str, header_an
         text=True,
         check=False,
     )
-    if result.returncode == 4:
-        assert (
-            "direct validation=failed" in result.stdout
-            or "== asm fallback ==" in result.stdout
-            or "whole-tail validation failed" in result.stderr
-        )
-        return
-    assert result.returncode == 0
+    assert result.returncode == 0, result.stderr
     text = result.stdout
 
     assert header_anchor in text
-    assert "return;" not in text
+    assert "return;" in text
     if proc_name == "_dos_setProcessId":
         assert "[bp+0x4]" not in text
-        assert f"{header_anchor}\n{{\n}}" in text
+        assert f"{header_anchor}\n{{\n    return;\n}}" in text
 
 
 def test_bios_cod_sample_decompilation():

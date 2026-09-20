@@ -108,8 +108,14 @@ def condition_ir_semantic_fingerprint_8616(
     codegen: object,
     condition: ConditionIR,
 ) -> str | None:
-    """Fingerprint proven ConditionIR in the final lowered storage domain."""
+    """Fingerprint proven ConditionIR using a detached current-type view.
+
+    Redundant casts may compare equal here without removing their proof from
+    the live AST, whose declarations can still be refined before emission.
+    """
     expression = materialize_condition_ir_expression_8616(project, codegen, condition)
+    signedness = condition.is_signed if condition.is_signed or condition.is_unsigned else None
+    expression = project_identity_semantic_casts_8616(expression, required_signedness=signedness)
     if not isinstance(expression, CBinaryOp):
         return None
     lhs = _typed_operand_fingerprint_8616(condition.lhs, expression.lhs, project)

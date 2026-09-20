@@ -430,7 +430,8 @@ def test_decode_or_same_register_jcc_as_zero_test():
         project,
     )
 
-    decoded = _decode_test_jcc_guard_8616(project, codegen, insn, "jne", {}, None)
+    evidence = {(insn.address, insn.reg_name(ax_offset), 2): _reg(project, "ax", codegen)}
+    decoded = _decode_test_jcc_guard_8616(project, codegen, insn, "jne", evidence, None)
 
     assert decoded is not None
     assert decoded.op == "CmpNE"
@@ -452,7 +453,11 @@ def test_decode_or_distinct_registers_jcc_as_bitwise_or_zero_test():
         project,
     )
 
-    decoded = _decode_test_jcc_guard_8616(project, codegen, insn, "je", {}, None)
+    evidence = {
+        (insn.address, insn.reg_name(project.arch.registers[name][0]), 2): _reg(project, name, codegen)
+        for name in ("ax", "dx")
+    }
+    decoded = _decode_test_jcc_guard_8616(project, codegen, insn, "je", evidence, None)
 
     assert decoded is not None
     assert decoded.op == "CmpEQ"
@@ -478,7 +483,8 @@ def test_decode_or_register_direct_memory_jcc_as_bitwise_or_zero_test():
         address=0x1149,
     )
 
-    decoded = _decode_test_jcc_guard_8616(project, codegen, insn, "je", {}, _reg(project, "ds", codegen))
+    evidence = {(insn.address, insn.reg_name(ax_offset), 2): _reg(project, "ax", codegen)}
+    decoded = _decode_test_jcc_guard_8616(project, codegen, insn, "je", evidence, _reg(project, "ds", codegen))
 
     assert decoded is not None
     assert decoded.op == "CmpEQ"
@@ -504,7 +510,11 @@ def test_decode_and_distinct_registers_jcc_as_bitwise_and_zero_test():
         project,
     )
 
-    decoded = _decode_test_jcc_guard_8616(project, codegen, insn, "jne", {}, None)
+    evidence = {
+        (insn.address, insn.reg_name(project.arch.registers[name][0]), 2): _reg(project, name, codegen)
+        for name in ("ax", "dx")
+    }
+    decoded = _decode_test_jcc_guard_8616(project, codegen, insn, "jne", evidence, None)
 
     assert decoded is not None
     assert decoded.op == "CmpNE"
@@ -2158,7 +2168,8 @@ def test_rewrite_decoded_jcc_conditions_inverts_return_only_condition_pair(monke
     assert getattr(codegen, "_inertia_jcc_rewrite_refused_unknown_polarity_8616", 0) == 0
 
 
-def test_rewrite_decoded_jcc_preserves_nested_condition_provenance(monkeypatch):
+@pytest.mark.parametrize("expression_tags", [None, {}, {"ins_addr": 0x401D}])
+def test_rewrite_decoded_jcc_preserves_nested_condition_provenance(monkeypatch, expression_tags):
     project = _project()
     codegen = _codegen([])
     flags = _reg(project, "flags", codegen, var_name="flags_tmp")
@@ -2188,6 +2199,8 @@ def test_rewrite_decoded_jcc_preserves_nested_condition_provenance(monkeypatch):
             lhs=_reg(project, "ax", codegen),
             rhs=_reg(project, "bx", codegen),
             op="CmpGT",
+            expr=(CBinaryOp("CmpGT", _reg(project, "ax", codegen), _reg(project, "bx", codegen),
+                            codegen=codegen, tags=expression_tags) if expression_tags is not None else None),
         ),
     )
 
@@ -3301,6 +3314,9 @@ def test_compare_jcc_mapping_stays_in_sync_with_condition_ir_aliases():
 def test_translate_cmp_jcc_guard_decodes_32bit_le_chain():
     project = _project()
     codegen = _codegen([])
+    codegen._inertia_jcc_register_exprs_by_ins_addr_8616 = {
+        (addr, name, 2): _reg(project, name, codegen) for addr, name in ((0x5000, "dx"), (0x5020, "ax"))
+    }
     hi = _stack(-2, codegen, "goal_hi")
     lo = _stack(-4, codegen, "goal_lo")
     codegen.cfunc.arg_list = ()
@@ -3365,6 +3381,9 @@ def test_translate_cmp_jcc_guard_decodes_32bit_le_chain():
 def test_translate_cmp_jcc_guard_decodes_32bit_call_return_stack_pair():
     project = _project()
     codegen = _codegen([])
+    codegen._inertia_jcc_register_exprs_by_ins_addr_8616 = {
+        (addr, name, 2): _reg(project, name, codegen) for addr, name in ((0x5000, "dx"), (0x5020, "ax"))
+    }
     hi = _stack(-2, codegen, "goal_hi")
     lo = _stack(-4, codegen, "goal_lo")
     codegen.cfunc.arg_list = ()
@@ -3449,6 +3468,9 @@ def test_translate_cmp_jcc_guard_decodes_32bit_call_return_stack_pair():
 def test_translate_cmp_jcc_guard_decodes_call_return_from_previous_linear_block():
     project = _project()
     codegen = _codegen([])
+    codegen._inertia_jcc_register_exprs_by_ins_addr_8616 = {
+        (addr, name, 2): _reg(project, name, codegen) for addr, name in ((0x5000, "dx"), (0x5020, "ax"))
+    }
     codegen.cfunc.addr = 0x4FFA
     hi = _stack(-2, codegen, "goal_hi")
     lo = _stack(-4, codegen, "goal_lo")

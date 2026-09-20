@@ -17,6 +17,7 @@ from .ail_displacement_compat import apply_register_displacement_compatibility_8
 from .call_frame_compat import apply_call_frame_compatibility_8616
 from .codegen_parentheses import apply_codegen_parentheses_8616
 from .ir.native_segment_live_out import apply_native_segment_live_out_compatibility_8616
+from .lowering.codegen_return_origin import apply_codegen_return_origin_8616
 from .patch_dirty import apply_patch as _apply_dirty_patch
 from .stack_anchor_compat import apply_native_stack_anchor_compatibility_8616
 from .stack_compat import apply_x86_16_stack_compatibility as _apply_stack_compatibility
@@ -212,6 +213,7 @@ def apply_x86_16_compatibility() -> None:
     apply_call_frame_compatibility_8616()
     apply_register_displacement_compatibility_8616()
     apply_codegen_parentheses_8616()
+    apply_codegen_return_origin_8616()
     _apply_stack_compatibility()
     apply_native_stack_anchor_compatibility_8616()
     _apply_typehoon_compatibility()

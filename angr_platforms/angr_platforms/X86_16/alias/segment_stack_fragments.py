@@ -53,7 +53,7 @@ def _expr_narrows_to_byte(value: IRValue) -> bool:
 def segment_value_fragments_8616(
     value: IRAtom | None,
     instruction_addr: int,
-    values: dict[str, SegmentStackFragments8616],
+    values: dict[str | int, SegmentStackFragments8616],
 ) -> SegmentStackFragments8616:
     """Read symbolic segment-byte provenance for one typed value."""
     return register_value_fragments_8616(
@@ -67,9 +67,10 @@ def segment_value_fragments_8616(
 def register_value_fragments_8616(
     value: IRAtom | None,
     instruction_addr: int,
-    values: dict[str, SegmentStackFragments8616],
+    values: dict[str | int, SegmentStackFragments8616],
     *,
     tracked_registers: frozenset[str],
+    constant_value: int | None = None,
 ) -> SegmentStackFragments8616:
     """Read exact byte provenance for one tracked 16-bit register value."""
     if not isinstance(value, IRValue):
@@ -90,12 +91,20 @@ def register_value_fragments_8616(
             SegmentStackByteOrigin8616(value.name, instruction_addr, byte, byte)
             for byte in range(2)
         )
+    elif value.space is MemSpace.TMP and value.source_tmp is not None:
+        # Expression labels are shared by distinct VEX definitions (for
+        # example the two Or16 words of LES). Exact provenance takes priority;
+        # a missing definition must not borrow another expression's proof.
+        fragments = values.get(value.source_tmp, frozenset())
     elif value.name is not None:
         fragments = values.get(value.name, frozenset())
     else:
         fragments = frozenset()
     if _expr_narrows_to_byte(value):
-        return frozenset(fragment for fragment in fragments if fragment.value_byte == 0)
+        fragments = frozenset(fragment for fragment in fragments if fragment.value_byte == 0)
+    if constant_value is not None:
+        fragments = frozenset(replace(fragment, constant_byte=(constant_value >> (8 * fragment.value_byte)) & 0xFF)
+                              for fragment in fragments)
     return fragments
 
 
@@ -144,12 +153,12 @@ def _stack_offset(address: IRAddress, sp_delta: int | StackFrameBase8616 | None)
     if isinstance(sp_delta, StackFrameBase8616):
         if address.base != (sp_delta.register,):
             return None
-        return sp_delta.entry_sp_offset + int(address.offset)
+        return int(sp_delta.entry_sp_offset) + int(address.offset)
     if address.base != ("sp",):
         return None
     # The caller supplies the exact current or captured base. A displacement's
     # sign says nothing about which SP definition owns it.
-    return sp_delta + int(address.offset)
+    return int(sp_delta) + int(address.offset)
 
 
 def stack_load_fragments_8616(
@@ -203,7 +212,7 @@ def _constant_arg(instruction: IRInstr, index: int) -> int | None:
 
 def computed_segment_fragments_8616(
     instruction: IRInstr,
-    values: dict[str, SegmentStackFragments8616],
+    values: dict[str | int, SegmentStackFragments8616],
 ) -> SegmentStackFragments8616:
     """Transfer byte provenance through lossless MOV, shift, and OR operations."""
     return computed_stack_register_fragments_8616(
@@ -215,7 +224,7 @@ def computed_segment_fragments_8616(
 
 def computed_stack_register_fragments_8616(
     instruction: IRInstr,
-    values: dict[str, SegmentStackFragments8616],
+    values: dict[str | int, SegmentStackFragments8616],
     *,
     tracked_registers: frozenset[str],
 ) -> SegmentStackFragments8616:
@@ -300,11 +309,13 @@ def complete_stack_constant_8616(
     if (
         len(save_sites) != 1
         or value_bytes != {0, 1}
-        or any(fragment.saved_register is not None for fragment in fragments)
         or any(fragment.constant_byte is None for fragment in fragments)
         or len(stack_offsets) != 2
         or stack_offsets[1] - stack_offsets[0] != 1
     ):
+        return None
+    # Native word materialization requires low-address/low-byte agreement.
+    if any(fragment.stack_offset != stack_offsets[fragment.value_byte] for fragment in fragments):
         return None
     bytes_by_position = {
         fragment.value_byte: fragment.constant_byte

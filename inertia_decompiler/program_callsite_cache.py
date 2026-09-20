@@ -40,7 +40,7 @@ from .cache_source_manifest import RecoveryCacheSourceScope8616
 from .cli_function_discovery import _display_catalog_cache_policy_8616
 
 PROGRAM_CALLSITE_CACHE_NAMESPACE_8616: str = "program_callsite_evidence"
-_PROGRAM_CALLSITE_CACHE_SCHEMA_8616: int = 2
+_PROGRAM_CALLSITE_CACHE_SCHEMA_8616: int = 3
 
 log: logging.Logger = logging.getLogger(__name__)
 

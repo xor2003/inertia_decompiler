@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import subprocess
+
+from angr_platforms.X86_16.lowering.gp_word_runtime import (
+    coherent_gp_runtime_definitions_8616,
+    coherent_gp_runtime_header_8616,
+)
+
 from inertia_decompiler.cli_batch_c_output import (
     BatchCOutputStatus8616,
     build_batch_c_output_8616,
@@ -8,6 +15,42 @@ from scripts.generated_translation_unit_assembly import (
     DeclarationContractKind,
     assemble_generated_translation_unit,
 )
+
+
+def test_assembler_preserves_portable_runtime_header_without_frozen_typedefs(tmp_path) -> None:
+    header = coherent_gp_runtime_header_8616()
+    result = assemble_generated_translation_unit((
+        header + "void first(void) { inertia_si = 5; }\n",
+        header + "unsigned long second(void) { return inertia_esi; }\n",
+    ))
+    assert result.conflicts == ()
+    assert header in result.source
+    assert result.source.count("typedef union inertia_gp_lane") == 1
+    assert result.function_count == 2
+    # A consumer may include the ABI header independently, as the MS C builder does.
+    executable = tmp_path / "runtime_export"
+    source = header + result.source + coherent_gp_runtime_definitions_8616() + """
+int main(void) {
+    inertia_esi = 0xabcd1234UL;
+    first();
+    return second() == 0xabcd0005UL ? 0 : 1;
+}
+"""
+    compiled = subprocess.run(
+        ["gcc", "-std=c89", "-pedantic-errors", "-Werror", "-x", "c", "-", "-o", str(executable)],
+        input=source, text=True, capture_output=True, check=False,
+    )
+    assert compiled.returncode == 0, compiled.stderr
+    assert subprocess.run([str(executable)], check=False).returncode == 0
+
+
+def test_assembler_retains_runtime_declaration_conflicts() -> None:
+    header = coherent_gp_runtime_header_8616()
+    result = assemble_generated_translation_unit((
+        header + "void first(void) {}\n",
+        "typedef unsigned short inertia_gp_dword;\nvoid second(void) {}\n",
+    ))
+    assert any(item.name == "inertia_gp_dword" for item in result.conflicts)
 
 
 def test_assembler_deduplicates_types_and_uses_internal_definition_contract() -> None:

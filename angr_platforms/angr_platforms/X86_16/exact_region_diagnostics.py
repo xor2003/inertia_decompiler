@@ -110,7 +110,7 @@ def build_exact_region_diagnostics_8616(
         entries: list[int] = []
         for addr in sorted(cfg_functions.keys()):
             if isinstance(addr, int) and requested_start <= addr < requested_end:
-                entries.append(addr)  # noqa: PERF401
+                entries.append(addr)
         actual_entries = tuple(entries)
         cfg_function_count = max(len(actual_entries), 1)
     else:

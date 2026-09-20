@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from inertia_decompiler.acceptance_scorecard import build_acceptance_scorecard
+
+_DECLARATION_AND_USE = 2
 
 
 def test_acceptance_scorecard_defaults_validation_to_uncollected_without_evidence() -> None:
@@ -25,7 +29,7 @@ void main(void)
     assert scorecard.raw_flags_count >= 1
     assert scorecard.raw_ss_linear_count == 1
     assert scorecard.raw_ds_linear_count == 1
-    assert scorecard.vvar_count == 2
+    assert scorecard.vvar_count == _DECLARATION_AND_USE
     assert scorecard.anonymous_sub_count == 1
     assert scorecard.recovery_mode == "decompiled"
     assert scorecard.validation_verdict == "uncollected"
@@ -69,3 +73,32 @@ def test_acceptance_scorecard_detects_changed_tail_validation_console_summary() 
     scorecard = build_acceptance_scorecard("main", output)
 
     assert scorecard.validation_verdict == "failed"
+
+
+@pytest.mark.parametrize("prior, final, expected", [
+    ("failed", "clean", "stable"),
+    ("passed", "failed", "failed"),
+    ("passed", "changed", "failed"),
+    ("failed", "unknown", "unknown"),
+    ("passed", "uncollected", "uncollected"),
+])
+def test_final_whole_tail_report_owns_verdict(prior: str, final: str, expected: str) -> None:
+    output = (
+        f"[dbg] rejected attempt validation={prior}\n"
+        "[tail-validation] whole-tail validation clean across 1 functions\n"
+        f"[tail-validation] whole-tail validation {final} across 1 functions\n"
+        "/* == c == */\n"
+    )
+    assert build_acceptance_scorecard("main", output).validation_verdict == expected
+
+
+@pytest.mark.parametrize("payload, expected", [
+    ('{"surface": {"severity": "changed"}}', "failed"),
+    ('{"surface": []}', "stable"),
+    ('{"surface": {"severity": null}}', "stable"),
+    ('{invalid}', "stable"),
+])
+def test_structured_report_precedence_and_malformed_evidence(payload: str, expected: str) -> None:
+    output = (f"@@INERTIA_TAIL_VALIDATION@@ {payload}\n"
+              "[tail-validation] whole-tail validation clean across 1 functions\n")
+    assert build_acceptance_scorecard("main", output).validation_verdict == expected

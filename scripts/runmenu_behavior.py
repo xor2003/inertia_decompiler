@@ -3,10 +3,19 @@
 Responsibility: execute unchanged sidecar-free RunMenu C against source dispatch.
 """
 
+from __future__ import annotations
+
 import subprocess
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+
+from angr_platforms.X86_16.lowering.gp_word_runtime import (
+    DEFAULT_GP_RUNTIME_ABI_8616,
+    GPRegisterRuntimeABI8616,
+    coherent_gp_runtime_definitions_8616,
+    coherent_gp_runtime_header_8616,
+)
 
 from inertia_decompiler.generated_c_function_extraction import (
     generated_function_definition_span,
@@ -26,15 +35,23 @@ class RunMenuExecutionEvidence:
         return self.failure is None and self.definition_digest == sha256(definition.encode()).hexdigest()
 
 
-def collect_runmenu_execution_evidence(directory: Path, workdir: Path) -> RunMenuExecutionEvidence:
-    """Compile and execute the exported function; retain clear failure evidence."""
+def collect_runmenu_execution_evidence(
+    directory: Path, workdir: Path, *, definition: str | None = None,
+) -> RunMenuExecutionEvidence:
+    """Execute the final emitted body with supporting export declarations."""
     from angr_platforms.X86_16.lowering.c_runtime_header import render_c_runtime_header_8616
 
     digest = ""
     try:
         source = load_generated_function_artifacts(directory, (0x102E0,))[0x102E0]
         start, end = generated_function_definition_span(source, "sub_102e0")
-        digest = sha256(source[start:end].encode()).hexdigest()
+        if definition is None:
+            definition = source[start:end]
+        if generated_function_definition_span(definition, "sub_102e0") != (0, len(definition)):
+            raise ValueError("expected exactly one emitted RunMenu definition")
+        # Test final rendering itself; digest matching must remain exact.
+        source = source[:start] + definition + source[end:]
+        digest = sha256(definition.encode()).hexdigest()
         assert_runmenu_behavior(render_c_runtime_header_8616("portable-flat") + source, workdir)
     except (AssertionError, OSError, ValueError, subprocess.TimeoutExpired) as error:
         return RunMenuExecutionEvidence(digest, f"{type(error).__name__}: {error}")
@@ -47,7 +64,6 @@ _HARNESS = r"""
 uint8_t inertia_memory[0x20000];
 uint16_t inertia_cs, inertia_ds, inertia_es, inertia_ss;
 unsigned short g_0B46, inertia_flags, g_0BA2 = 17, g_0160 = 2, xffff;
-unsigned long inertia_esi, inertia_edi;
 long g_0132;
 static unsigned key, reads, upper_calls, event_count, events[8], cursor_calls;
 static void require(int ok) { if (!ok) exit(20); }
@@ -124,11 +140,20 @@ int main(void) {
 """
 
 
-def assert_runmenu_behavior(generated_c: str, tmp_path: Path) -> None:
+def assert_runmenu_behavior(
+    generated_c: str, tmp_path: Path,
+    *, gp_runtime_abi: GPRegisterRuntimeABI8616 = DEFAULT_GP_RUNTIME_ABI_8616,
+) -> None:
     """Check key dispatch, call arguments, ESC, globals and preserved registers."""
     source = tmp_path / "runmenu.c"
     executable = tmp_path / "runmenu"
-    source.write_text(generated_c + _HARNESS, encoding="utf-8")
+    if not isinstance(gp_runtime_abi, GPRegisterRuntimeABI8616):
+        raise ValueError(f"expected GPRegisterRuntimeABI8616, got {gp_runtime_abi!r}")
+    header, definitions = "", "unsigned long inertia_esi, inertia_edi;\n"
+    if gp_runtime_abi is GPRegisterRuntimeABI8616.COHERENT_WORD_VIEWS:
+        header = coherent_gp_runtime_header_8616()
+        definitions = coherent_gp_runtime_definitions_8616()
+    source.write_text(header + generated_c + definitions + _HARNESS, encoding="utf-8")
     built = subprocess.run(
         ["gcc", "-std=c99", "-Werror=implicit-function-declaration", str(source), "-o", str(executable)],
         capture_output=True, text=True, timeout=30, check=False,

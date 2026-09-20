@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
+    CAssignment,
     CConstant,
     CExpressionStatement,
     CFunctionCall,
@@ -11,8 +12,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CStatements,
     CVariable,
 )
-from angr.sim_type import SimTypeFunction, SimTypeShort
-from angr.sim_variable import SimStackVariable
+from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeShort
+from angr.sim_variable import SimStackVariable, SimTemporaryVariable
 from angr_platforms.X86_16.c_ast_utils import _iter_c_nodes_deep_8616
 from angr_platforms.X86_16.callsite_summary import CallsiteSummary8616
 from angr_platforms.X86_16.decompiler_postprocess_calls import (
@@ -52,15 +53,17 @@ def _runtime_producer():
     return project, codegen, producer, assignment
 
 
-def test_call_argument_reuses_masked_runtime_result_without_duplicate_execution():
+@pytest.mark.parametrize("captured", [False, True])
+def test_call_argument_reuses_masked_runtime_result_without_duplicate_execution(captured):
     project, codegen, producer, assignment = _runtime_producer()
+    prefix = list(_captured_publication(codegen, producer)) if captured else [assignment]
     consumer = CFunctionCall(
         "sub_3000",
         SimpleNamespace(addr=0x3000, name="sub_3000", block_addrs_set={0x3000}),
         [], codegen=codegen, tags={"ins_addr": 0x1008},
     )
     codegen.cfunc.statements = CStatements(
-        [assignment, CExpressionStatement(consumer, codegen=codegen)],
+        [*prefix, CExpressionStatement(consumer, codegen=codegen)],
         addr=0x4010, codegen=codegen,
     )
     codegen.cfunc.body = codegen.cfunc.statements
@@ -87,7 +90,7 @@ def test_call_argument_reuses_masked_runtime_result_without_duplicate_execution(
     assert len(consumer.args) == 1
     assert not any(isinstance(node, CFunctionCall)
                    for node in _iter_c_nodes_deep_8616(consumer.args[0]))
-    assert codegen.cfunc.statements.statements[0] is assignment
+    assert codegen.cfunc.statements.statements[:len(prefix)] == prefix
     assert runtime_gp_expression_view_8616(consumer.args[0]) == RuntimeGPExpressionView8616("ax", "eax", 0, 2)
 
 
@@ -161,10 +164,50 @@ def test_literal_source_classifier_refuses_other_or_malformed_sources(source):
     assert not has_literal_push_stack_carrier_8616(producer, ())
 
 
+def _captured_publication(codegen, producer):
+    temporary = CVariable(
+        SimTemporaryVariable(7, 2), variable_type=producer.type, codegen=codegen,
+    )
+    capture = CAssignment(temporary, producer, codegen=codegen)
+    publication = runtime_gp_state_assignment_8616(
+        "ax", temporary, codegen=codegen, function_addr=0x4010,
+    )
+    assert publication is not None
+    return capture, publication
+
+
+@pytest.mark.parametrize("barrier", ["none", "ax", "call", "branch", "stale"])
+def test_runtime_result_read_across_transparent_sibling_sequences(barrier):
+    _project_obj, codegen, producer, _assignment = _runtime_producer()
+    capture, publication = _captured_publication(codegen, producer)
+    store = CAssignment(CVariable(SimStackVariable(-2, 2, base="bp"),
+                                 variable_type=producer.type, codegen=codegen),
+                        CConstant(3, producer.type, codegen=codegen), codegen=codegen)
+    prefix = [store]
+    middle = []
+    if barrier == "ax":
+        middle = [runtime_gp_state_assignment_8616("ax", store.rhs, codegen=codegen, function_addr=0x4010)]
+    elif barrier == "call":
+        middle = [CExpressionStatement(CFunctionCall("other", None, [], codegen=codegen), codegen=codegen)]
+    elif barrier == "branch":
+        middle = [CIfElse([(store.rhs, CStatements([], codegen=codegen))], codegen=codegen)]
+    root = CStatements([CStatements([capture, publication], codegen=codegen), *middle,
+                        CStatements(prefix, codegen=codegen)], codegen=codegen)
+    if barrier == "stale":
+        prefix = [CAssignment(store.lhs, store.rhs, codegen=codegen)]
+    result = materialize_runtime_call_result_read_8616(
+        root, prefix, 0x1001, "ax", codegen=codegen, function_addr=0x4010,
+    )
+    expected = RuntimeCallResultVerdict8616.PROVEN if barrier == "none" else RuntimeCallResultVerdict8616.UNKNOWN_REFUSE
+    assert result.verdict is expected
+    assert capture.rhs is producer
+
+
+@pytest.mark.parametrize("captured", [False, True])
 @pytest.mark.parametrize("barrier", ["ax", "al", "call", "branch", "none", "bx"])
-def test_runtime_result_read_requires_uninterrupted_producer(barrier):
+def test_runtime_result_read_requires_uninterrupted_producer(barrier, captured):
     _project_obj, codegen, producer, assignment = _runtime_producer()
-    prefix = [assignment]
+    prefix = list(_captured_publication(codegen, producer)) if captured else [assignment]
     if barrier in {"ax", "al", "bx"}:
         prefix.append(runtime_gp_state_assignment_8616(
             barrier, CConstant(3, SimTypeShort(False), codegen=codegen),
@@ -189,7 +232,68 @@ def test_runtime_result_read_requires_uninterrupted_producer(barrier):
                               else RuntimeCallResultVerdict8616.UNKNOWN_REFUSE)
     assert (result.classified_fact_count, result.materialized_count) == ((1, 1) if proven else (0, 0))
     assert result.failure_count == (0 if proven else 1)
+    assert (result.refusal_reason is None) is proven
     assert sum(node is producer for node in _iter_c_nodes_deep_8616(root)) == 1
+
+
+@pytest.mark.parametrize("transparent", [False, True])
+def test_runtime_result_read_accepts_adjacent_temporary_publication(transparent):
+    _project_obj, codegen, producer, _assignment = _runtime_producer()
+    capture, publication = _captured_publication(codegen, producer)
+    prefix = [capture, publication]
+    if transparent:
+        prefix = [CStatements(prefix, codegen=codegen)]
+    root = CStatements(prefix, codegen=codegen)
+
+    result = materialize_runtime_call_result_read_8616(
+        root, prefix, 0x1001, "ax", codegen=codegen, function_addr=0x4010,
+    )
+
+    assert result.verdict is RuntimeCallResultVerdict8616.PROVEN
+    assert runtime_gp_expression_view_8616(result.expression) == RuntimeGPExpressionView8616("ax", "eax", 0, 2)
+    assert capture.rhs is producer
+    assert publication.rhs.rhs.lhs is capture.lhs
+    assert sum(node is producer for node in _iter_c_nodes_deep_8616(root)) == 1
+
+
+@pytest.mark.parametrize("corruption", ["missing", "other-value", "clobber", "wrong-register", "bad-mask", "narrow", "narrow-type", "stack"])
+def test_runtime_result_read_refuses_unproven_temporary_publication(corruption):
+    _project_obj, codegen, producer, _assignment = _runtime_producer()
+    capture, publication = _captured_publication(codegen, producer)
+    prefix = [capture, publication]
+    register = "ax"
+    if corruption == "missing":
+        prefix.pop()
+    elif corruption == "other-value":
+        publication.rhs.rhs.lhs = CConstant(7, producer.type, codegen=codegen)
+    elif corruption == "clobber":
+        prefix.insert(1, CAssignment(capture.lhs, CConstant(0, producer.type, codegen=codegen), codegen=codegen))
+    elif corruption == "wrong-register":
+        register = "dx"
+    elif corruption == "bad-mask":
+        publication.rhs.rhs.rhs.value = 0xff
+    elif corruption == "narrow":
+        capture.lhs.variable = SimTemporaryVariable(7, 1)
+    elif corruption == "narrow-type":
+        capture.lhs.variable_type = SimTypeChar().with_arch(_project_obj.arch)
+    else:
+        capture.lhs.variable = SimStackVariable(-2, 2, base="bp")
+    root = CStatements(prefix, codegen=codegen)
+
+    result = materialize_runtime_call_result_read_8616(
+        root, prefix, 0x1001, register, codegen=codegen, function_addr=0x4010,
+    )
+
+    assert result.verdict is RuntimeCallResultVerdict8616.UNKNOWN_REFUSE
+    expected_reason = {
+        "missing": "missing_publication", "other-value": "publication_mismatch",
+        "clobber": "publication_mismatch", "wrong-register": "publication_mismatch",
+        "bad-mask": "publication_mismatch", "narrow": "capture_width",
+        "narrow-type": "capture_type", "stack": "capture_storage",
+    }[corruption]
+    assert result.refusal_reason.value == expected_reason
+    assert result.materialized_count == 0
+    assert result.failure_count == 1
 
 
 @pytest.mark.parametrize("scope", ["absent", "outside-prefix", "new-prefix", "duplicate", "wrong-register", "bad-mask"])
@@ -221,3 +325,26 @@ def test_runtime_result_read_refuses_ambiguous_or_unsupported_ownership(scope):
                 RuntimeCallResultVerdict8616.PROVEN if scope == "new-prefix" else
                 RuntimeCallResultVerdict8616.UNKNOWN_REFUSE)
     assert result.verdict is expected
+
+
+@pytest.mark.parametrize("debug", [False, True])
+def test_runtime_result_refusal_diagnostic_is_opt_in(debug, monkeypatch, caplog):
+    _project_obj, codegen, _producer, assignment = _runtime_producer()
+    if debug:
+        monkeypatch.setenv("INERTIA_DEBUG_CALL_MATERIALIZATION", "1")
+    else:
+        monkeypatch.delenv("INERTIA_DEBUG_CALL_MATERIALIZATION", raising=False)
+    root = CStatements([assignment], codegen=codegen)
+
+    result = materialize_runtime_call_result_read_8616(
+        root, [], 0x1001, "ax", codegen=codegen, function_addr=0x4010,
+    )
+
+    assert result.refusal_reason.value == "ownership"
+    records = [record for record in caplog.records if record.name.endswith(".runtime_call_results")]
+    assert len(records) == int(debug)
+    if debug:
+        message = records[0].getMessage()
+        for evidence in ("function=0x4010", "callsite=0x1001", "register=ax", "reason=ownership",
+                         "root_calls=1", "prefix_matches=0", "prefix_length=0"):
+            assert evidence in message

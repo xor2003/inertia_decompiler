@@ -110,7 +110,7 @@ def disasm_x86(data: bytes, addr: int, count: int = 20, arch: str = "x86") -> li
     md.detail = False
     lines: list[tuple[int, str, str]] = []
     for insn in md.disasm(data, addr, count):
-        lines.append((insn.address, insn.mnemonic, insn.op_str))  # noqa: PERF401
+        lines.append((insn.address, insn.mnemonic, insn.op_str))
     return lines
 
 

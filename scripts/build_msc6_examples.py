@@ -29,6 +29,11 @@ REPO_ROOT: Path = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from angr_platforms.X86_16.lowering.gp_word_runtime import (  # noqa: E402
+    DEFAULT_GP_RUNTIME_ABI_8616,
+    GPRegisterRuntimeABI8616,
+)
+
 from inertia_decompiler.acceptance_scorecard import measure_x86_16_codegen_quality_8616  # noqa: E402
 from inertia_decompiler.cli_c_text_postprocess import (  # noqa: E402
     _materialize_missing_synthetic_global_declarations_text,
@@ -1213,11 +1218,9 @@ def _dos_safe_names(stem: str, counter: int | None = None) -> tuple[str, str, st
 
 def _ensure_msvc6_compat_headers(out_dir: Path) -> None:
     """Emit minimal stdbool/stdint shims when the MS C test root misses them."""
-    stdbool = """#ifndef _STDBOOL_H\n#define _STDBOOL_H\n\n#define bool unsigned char\n#define true 1\n#define false 0\n\n#endif\n"""
-    stdint = """#ifndef _STDINT_H\n#define _STDINT_H\n\ntypedef unsigned char uint8_t;\ntypedef signed char int8_t;\ntypedef unsigned short uint16_t;\ntypedef signed short int16_t;\ntypedef unsigned long uint32_t;\ntypedef signed long int32_t;\ntypedef unsigned int uintptr_t;\n\ntypedef unsigned long size_t;\n\ntypedef uint8_t u8;\ntypedef uint16_t u16;\ntypedef uint32_t u32;\n\ntypedef int32_t ptrdiff_t;\n\ntypedef int16_t int_fast16_t;\ntypedef uint16_t uint_fast16_t;\n\ntypedef int32_t int_least32_t;\ntypedef uint32_t uint_least32_t;\n\ntypedef int16_t int_least16_t;\ntypedef uint16_t uint_least16_t;\n\n#endif\n"""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "STDBOOL.H").write_text(stdbool, encoding="utf-8")
-    (out_dir / "STDINT.H").write_text(stdint, encoding="utf-8")
+    from scripts.msc6_compat_headers import write_msc6_compat_headers
+
+    write_msc6_compat_headers(out_dir)
 
 
 def _sanitize_decompiled_source(raw_c_text: str) -> str:
@@ -1409,6 +1412,7 @@ def _inject_ms_c89_forward_decls(raw_c_text: str) -> str:
 
 
 def _lookup_sidecar_code_labels(binary_path: Path) -> dict[str, int]:
+    """Read labels belonging to the fixture's linked binary and build sidecars."""
     project = _build_project(
         binary_path,
         force_blob=False,
@@ -1419,7 +1423,7 @@ def _lookup_sidecar_code_labels(binary_path: Path) -> dict[str, int]:
     labels: dict[str, int] = {}
     if metadata is None:
         return labels
-    for addr, name in getattr(metadata, "code_labels", {}).items():
+    for addr, name in metadata.code_labels.items():
         if not isinstance(name, str):
             continue
         normalized = name.lower()
@@ -1439,6 +1443,7 @@ def _compile_and_link_unlocked(
     map_name: str,
     cod_name: str | None = None,
     runtime_support: bool = False,
+    gp_runtime_abi: GPRegisterRuntimeABI8616 = DEFAULT_GP_RUNTIME_ABI_8616,
 ) -> tuple[bool, str, str, str, str]:
     """Compile and link while the caller owns the shared toolchain lock."""
     _ensure_msvc6_compat_headers(out_dir)
@@ -1478,7 +1483,7 @@ def _compile_and_link_unlocked(
     if runtime_support:
         runtime_src = out_dir / "INERTIA.C"
         runtime_src.write_text(
-            msc6_runtime_support_source(),
+            msc6_runtime_support_source(gp_runtime_abi),
             encoding="utf-8",
         )
         runtime_compile_cmd = [
@@ -1548,6 +1553,7 @@ def _compile_and_link(
     map_name: str,
     cod_name: str | None = None,
     runtime_support: bool = False,
+    gp_runtime_abi: GPRegisterRuntimeABI8616 = DEFAULT_GP_RUNTIME_ABI_8616,
 ) -> tuple[bool, str, str, str, str]:
     """Run one complete compiler/linker transaction without cross-worker overlap."""
     with msc6_toolchain_lock(msc6_root):
@@ -1561,6 +1567,7 @@ def _compile_and_link(
             map_name=map_name,
             cod_name=cod_name,
             runtime_support=runtime_support,
+            gp_runtime_abi=gp_runtime_abi,
         )
 
 
@@ -3050,6 +3057,15 @@ def _decompile_and_validate(
     decomp_src = out_dir / decomp_name
     reexe = out_dir / exe_name
     shutil.copy2(dec_out, decomp_src)
+
+    from scripts.msc6_entrypoint import bind_msc6_fixture_entrypoint
+
+    entry = bind_msc6_fixture_entrypoint(
+        decomp_src.read_text(encoding="utf-8"),
+        main_address=_lookup_sidecar_code_labels(exe_path).get("main"),
+    )
+    decompile_profile["entrypoint_binding"] = {"status": entry.status.value, "symbol": entry.symbol, "detail": entry.detail}
+    decomp_src.write_text(entry.source, encoding="utf-8")
 
     recompiled_ok, rec_out, rec_err, rel_out, rel_err = _compile_and_link(
         decomp_src,

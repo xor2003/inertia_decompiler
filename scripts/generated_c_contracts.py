@@ -25,7 +25,8 @@ else:
         missing_indexed_argument_uses,
     )
 
-_PARSE_PREFIX = (
+_PARSE_PREFIX: str = (
+    "#include <limits.h>\n"
     "typedef _Bool bool;\n"
     "typedef signed char int8_t;\n"
     "typedef unsigned char uint8_t;\n"

@@ -41,8 +41,8 @@ def test_compact_predicate_retains_its_composite_ownership(fact_count):
     assert requires_composite_condition_ownership_8616(expression) is (fact_count > 1)
 
 
-def _fixture():
-    codegen, expression, conditions, call, _ = _wide_condition_fixture()
+def _fixture(monkeypatch=None):
+    codegen, expression, conditions, call, _ = _wide_condition_fixture(monkeypatch=monkeypatch)
     high, equal, low = conditions
     header, latch, exit_address = 0x1000, 0x1020, 0x1030
     facts = (

@@ -17,10 +17,10 @@ from typing import Any
 
 import angr
 from angr.sim_type import SimTypeChar, SimTypeShort
-from angr.utils.library import convert_cproto_to_py
 from angr_platforms.X86_16.analysis_helpers import preferred_known_helper_signature_decl
 from angr_platforms.X86_16.cod_extract import CODProcMetadata
 from angr_platforms.X86_16.cod_known_objects import known_cod_object_spec
+from angr_platforms.X86_16.lowering.gp_word_runtime import runtime_gp_word_symbols_8616
 
 from inertia_decompiler.cli_output import (
     _timestamped_print,
@@ -1674,8 +1674,9 @@ def _parameter_names_from_args_text_8616(args_text: str) -> set[str]:
 
 
 def _extract_function_header_args_8616(line: str) -> str | None:
+    """Read declaration arguments, never preprocessor replacement expressions."""
     header = line.split("{", 1)[0].strip()
-    if not header or header.endswith(";"):
+    if not header or header.startswith("#") or header.endswith(";"):
         return None
     close_idx = header.rfind(")")
     if close_idx < 0:
@@ -1873,6 +1874,10 @@ def _collect_declared_identifiers_8616(text_lines: list[str]) -> set[str]:
         for raw_line in text_lines:
             line = raw_line.strip()
             if not line or line.startswith(("//", "*", "/*", "///")):
+                continue
+            macro = re.match(r"^#\s*define\s+(?P<name>[A-Za-z_]\w*)\b", line)
+            if macro is not None:
+                declared.add(macro.group("name"))
                 continue
             first_token = line.split(None, 1)[0] if line.split(None, 1) else ""
             if first_token in {"return", "if", "for", "while", "switch", "case", "else", "do", "goto"}:
@@ -2164,7 +2169,7 @@ def _used_global_names_8616(
             return used
         for name in sorted(candidate_names):
             if name not in declared and re.search(rf"(?<![A-Za-z_]){re.escape(name)}(?![A-Za-z0-9_])", body_text):
-                used.append(name)  # noqa: PERF401
+                used.append(name)
         return used
 
     return _impl()
@@ -2262,6 +2267,7 @@ def _materialize_missing_synthetic_global_declarations_text(
     metadata: CODProcMetadata | None = None,
     synthetic_globals: dict[int, tuple[str, int]] | None = None,
 ) -> str:
+    """Keep reserved runtime lvalues out of legacy missing-global declarations."""
     def _impl() -> str:
         c_text_normalized = _normalize_duplicate_generic_hex_global_names_8616(c_text)
         if c_text_normalized != c_text:
@@ -2304,6 +2310,7 @@ def _materialize_missing_synthetic_global_declarations_text(
         if body_text:
             candidate_names.update(_collect_global_usage_candidates_from_body_8616(body_text, declared))
         candidate_names = {name for name in candidate_names if _is_strict_c_identifier_8616(name)}
+        candidate_names.difference_update(runtime_gp_word_symbols_8616())
 
         used = _used_global_names_8616(lines, body_text, declared, candidate_names)
         if not used:
@@ -4445,73 +4452,12 @@ def _normalize_unsupported_computed_goto_text(c_text: str) -> str:
 
 
 def _rewrite_known_helper_signature_text(c_text: str, function: object, *, codegen: object | None = None) -> str:
-    def _impl() -> str:
-        if bool(_dynamic_text_attr(codegen, "_inertia_codegen_signature_authoritative_8616", False)):
-            return c_text
-        SOURCE_EMPTY_HELPERS = {"_dos_getProcessId", "_dos_setProcessId"}
-        helper_name = _dynamic_text_attr(function, "name", None)
-        if not isinstance(helper_name, str) or not helper_name:
-            return c_text
-        helper_decl = preferred_known_helper_signature_decl(helper_name)
-        if helper_decl is None:
-            return c_text
+    """Preserve typed recovery; a helper label cannot authorize ABI text changes.
 
-        try:
-            _helper_name, helper_proto, _ = convert_cproto_to_py(helper_decl)
-        except Exception:
-            return c_text
-
-        helper_decl = helper_decl.rstrip(";").strip()
-        helper_arg_names = tuple(_dynamic_text_attr(helper_proto, "arg_names", ()) or ())
-
-        func_name = helper_name
-        lines = c_text.splitlines()
-        header_pattern = _compile_function_header_pattern_8616(func_name)
-        header_index, body_open_index = _find_function_body_open_8616(lines, header_pattern)
-        if header_index is None or body_open_index is None:
-            return c_text
-
-        header_match = header_pattern.match(lines[header_index])
-        if header_match is None:
-            return c_text
-
-        current_args = _split_c_signature_args_8616(header_match.group("args"))
-        old_arg_names = [_decl_arg_name_8616(arg_text) for arg_text in current_args]
-
-        renamed_pairs: list[tuple[str, str]] = [
-            (old_name, new_name)
-            for old_name, new_name in zip(old_arg_names, helper_arg_names, strict=False)
-            if old_name and old_name != new_name
-        ]
-        if not renamed_pairs:
-            annotated_arg_names = _annotated_bp_arg_names_8616(lines[:header_index])
-            renamed_pairs = [
-                (old_name, new_name)
-                for old_name, new_name in zip(annotated_arg_names, helper_arg_names, strict=False)
-                if old_name and old_name != new_name
-            ]
-
-        # Update the header with the correct signature regardless of whether arguments need renaming
-        replacement_header = f"{header_match.group('indent')}{helper_decl}"
-        if header_match.group("suffix") == "{":
-            replacement_header += " {"
-        lines[header_index] = replacement_header
-
-        # Only apply renaming logic if we have renamed pairs
-        if renamed_pairs:
-            body_end = _find_body_end_index_8616(lines, body_open_index)
-            _rename_identifiers_in_body_8616(lines, body_open_index + 1, body_end, renamed_pairs)
-            _remove_missing_arg_decls_8616(lines, body_open_index + 1, body_end, helper_arg_names)
-
-        normalized = "\n".join(lines)
-        if c_text.endswith("\n"):
-            normalized += "\n"
-        normalized = re.sub(r"\n{3,}", "\n\n", normalized)
-        if func_name in SOURCE_EMPTY_HELPERS:
-            normalized = _prune_void_function_return_values_text(normalized)
-        return normalized
-
-    return _impl()
+    Compatibility entry point only. Prototype evidence belongs in Types/Lowering,
+    before validation, never in a rendered-header or argument-name replacement.
+    """
+    return c_text
 
 
 def _compile_function_header_pattern_8616(func_name: str) -> re.Pattern[str]:

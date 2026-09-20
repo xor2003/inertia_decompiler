@@ -236,7 +236,7 @@ def _structured_slot_names_for_type_8616(value_type: type) -> tuple[str, ...]:
             slots = (slots,)
         for slot in slots:
             if isinstance(slot, str) and not slot.startswith("_") and slot not in _STRUCTURED_NON_CHILD_ATTRS_8616:
-                attrs.append(slot)  # noqa: PERF401
+                attrs.append(slot)
 
     seen = set()
     ordered: list[str] = []

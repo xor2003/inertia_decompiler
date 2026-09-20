@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr.sim_type import SimTypeChar, SimTypeFunction, SimTypeShort
 
 from inertia_decompiler.cli_c_text_postprocess import (
@@ -785,14 +786,17 @@ def test_cod_annotation_keeps_codegen_header_for_custom_source_pointer_type():
     assert "BAR *" not in rewritten
 
 
-def test_known_helper_signature_text_refuses_authoritative_codegen_signature():
+@pytest.mark.parametrize("authoritative", [False, True])
+@pytest.mark.parametrize("name", ["_dos_getProcessId", "_dos_setProcessId", "_ERROR"])
+def test_known_helper_signature_text_preserves_recovered_signature(authoritative, name):
     c_text = """void _dos_getProcessId(int pid)
 {
     return;
 }
 """
-    function = SimpleNamespace(name="_dos_getProcessId")
-    codegen = SimpleNamespace(_inertia_codegen_signature_authoritative_8616=True)
+    c_text = c_text.replace("_dos_getProcessId", name)
+    function = SimpleNamespace(name=name)
+    codegen = SimpleNamespace(_inertia_codegen_signature_authoritative_8616=authoritative)
 
     rewritten = _rewrite_known_helper_signature_text(c_text, function, codegen=codegen)
 

@@ -2,6 +2,9 @@
 
 Responsibility: provide debug printing helpers for the frontend emulator/lifter code.
 Forbidden: recovery diagnostics, validation verdicts, or decompiler output changes.
+Fatal ERROR/ASSERT diagnostics deliberately raise SystemExit(1), including for
+unsupported instructions. Do not replace this user-required termination policy
+with a recoverable LiftingException or silently continue decoding.
 """
 
 from __future__ import annotations

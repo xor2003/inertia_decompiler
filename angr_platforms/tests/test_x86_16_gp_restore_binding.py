@@ -85,7 +85,7 @@ def test_cross_register_restore_replay_does_not_duplicate_snapshot():
     assert stats.closed
 
 
-@pytest.mark.parametrize("corruption", [None, "value", "order", "overwrite", "goto", "clone", "branch"])
+@pytest.mark.parametrize("corruption", [None, "value", "order", "overwrite", "goto", "clone", "branch", "reader"])
 @pytest.mark.parametrize("nested", [False, True])
 def test_existing_byte_saves_need_no_duplicate_wide_snapshot(corruption, nested):
     """Existing byte storage counts only with matching values and dominance."""
@@ -119,6 +119,8 @@ def test_existing_byte_saves_need_no_duplicate_wide_snapshot(corruption, nested)
         body = c.CStatements([low_save, high_save], codegen=codegen)
         condition = c.CConstant(1, SimTypeChar(False), codegen=codegen)
         statements = [c.CIfElse([(condition, body)], codegen=codegen), marker, restore]
+    elif corruption == "reader":
+        marker.rhs = low
     if nested:
         statements = [c.CStatements(statements[:2], codegen=codegen),
                       c.CStatements(statements[2:], codegen=codegen)]
@@ -127,7 +129,7 @@ def test_existing_byte_saves_need_no_duplicate_wide_snapshot(corruption, nested)
 
     changed = materialize_gp_stack_restores_8616(codegen)
 
-    if corruption is None:
+    if corruption in (None, "reader"):
         assert not changed
         assert tuple(codegen.cfunc.statements.statements) == before
         assert not codegen._inertia_gp_stack_restore_snapshots_8616

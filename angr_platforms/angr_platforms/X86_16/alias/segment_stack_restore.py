@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final, Protocol, cast
 
+from ..ir.constant_flow import IRConstantFlow8616
 from ..ir.core import IRAddress, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from ..ir.segment_state_transfer import SEGMENT_REGISTER_SET, SegmentRestoreSource
 from .segment_stack_fragments import (
@@ -141,9 +142,12 @@ def _transfer_block(
     instructions: tuple[IRInstr, ...],
     entry_state: _SegmentStackAliasState8616,
     tracked_registers: frozenset[str] = SEGMENT_REGISTER_SET,
+    *,
+    allow_constant_values: bool = False,
 ) -> tuple[list[SegmentStackRestoreFact8616], _SegmentStackAliasState8616]:
     """Transfer exact stack identities and classify restorations in one block."""
-    values: dict[str, SegmentStackFragments8616] = {}
+    values: dict[str | int, SegmentStackFragments8616] = {}
+    constants = IRConstantFlow8616() if allow_constant_values and tracked_registers != SEGMENT_REGISTER_SET else None
     stack_pointers = StackPointerSnapshots8616()
     stack_bytes = entry_state.byte_map()
     sp_delta = entry_state.sp_delta
@@ -154,6 +158,8 @@ def _transfer_block(
     for instruction in instructions:
         if instruction.addr is None:
             continue
+        if constants is not None:
+            constants.observe(instruction)
         if instruction.addr != machine_instruction_addr:
             machine_instruction_addr = instruction.addr
             instruction_entry_state = _stack_state(sp_delta, stack_bytes, bp_delta)
@@ -167,6 +173,8 @@ def _transfer_block(
                 )
                 values[instruction.dst.name] = fragments
                 values[f"load_{instruction.dst.name}"] = fragments
+                if instruction.dst.source_tmp is not None:
+                    values[instruction.dst.source_tmp] = fragments
         elif instruction.op == "STORE" and len(instruction.args) >= 2:
             address, value = instruction.args[:2]
             if isinstance(address, IRAddress) and isinstance(value, IRValue):
@@ -178,6 +186,7 @@ def _transfer_block(
                         instruction.addr,
                         values,
                         tracked_registers=tracked_registers,
+                        constant_value=None if constants is None else constants.constant(value),
                     ),
                     stack_pointers.address_base(address, sp_delta, bp_delta),
                     stack_bytes,
@@ -190,6 +199,8 @@ def _transfer_block(
             )
             if instruction.dst.name is not None:
                 values[instruction.dst.name] = fragments
+            if instruction.dst.source_tmp is not None:
+                values[instruction.dst.source_tmp] = fragments
             if instruction.op != "MOV":
                 values[f"expr:{instruction.op}"] = fragments
 
@@ -205,10 +216,12 @@ def _transfer_block(
             complete = complete_stack_register_restore_8616(fragments)
             if complete is not None:
                 saved_register, saved_addr, stack_offsets = complete
+                saved_constant = complete_stack_constant_8616(fragments)
                 facts.append(
                     SegmentStackRestoreFact8616(
                         block_addr, instruction.addr, dst.name, saved_addr, saved_register,
                         stack_offsets, SegmentStackRestoreVerdict8616.PROVEN,
+                        constant_value=None if saved_constant is None else saved_constant[0],
                     )
                 )
             elif tracked_registers == SEGMENT_REGISTER_SET and (
@@ -262,6 +275,7 @@ def _solve_stack_states(
 ) -> dict[int, _SegmentStackAliasState8616]:
     """Reach a deterministic must-state fixed point across typed IR edges."""
     blocks_by_addr = {block.addr: block for block in artifact.blocks}
+    complete_ir = not any(block.refusals for block in artifact.blocks)
     predecessors = _predecessor_map(artifact)
     unknown = _SegmentStackAliasState8616(None)
     # An unvisited edge is not an analyzed unknown value. Seeding loop edges
@@ -282,6 +296,7 @@ def _solve_stack_states(
                 blocks_by_addr[block_addr].instrs,
                 entry_state,
                 tracked_registers,
+                allow_constant_values=complete_ir,
             )[1]
             if new_exit != exit_states.get(block_addr):
                 exit_states[block_addr] = new_exit
@@ -349,6 +364,7 @@ def build_x86_16_stack_register_restore_artifact_8616(
     tracked_registers: frozenset[str],
 ) -> SegmentStackRestoreArtifact8616:
     """Build exact stack save/restore facts for selected 16-bit registers."""
+    complete_ir = not any(block.refusals for block in artifact.blocks)
     exit_states = _solve_stack_states(artifact, tracked_registers)
     predecessors = _predecessor_map(artifact)
     instruction_blocks = {
@@ -368,6 +384,7 @@ def build_x86_16_stack_register_restore_artifact_8616(
                 + tuple(exit_states[pred] for pred in predecessors[block.addr])
             ),
             tracked_registers,
+            allow_constant_values=complete_ir,
         )[0]
     )
     proven = tuple(fact for fact in facts if fact.verdict is SegmentStackRestoreVerdict8616.PROVEN)

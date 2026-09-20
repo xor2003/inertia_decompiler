@@ -10,12 +10,16 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from angr_platforms.X86_16.lowering.gp_word_runtime import (
+    coherent_gp_runtime_definitions_8616,
+    coherent_gp_runtime_header_8616,
+)
+
 _HARNESS = r'''
 #include <stdlib.h>
 
 unsigned short ROWS;
 g_08F0_entry ITEMS[32768];
-unsigned long inertia_esi, inertia_edi;
 static int count, next_up, next_down, phase;
 
 static void require(int condition)
@@ -101,7 +105,8 @@ def assert_heapsort_behavior(text: str, directory: Path, *, named: bool = False)
     harness = directory / "harness.c"
     executable = directory / "heapsort"
     generated.write_text(text, encoding="utf-8")
-    harness.write_text('#include "generated.c"\n' + bindings + _HARNESS, encoding="ascii")
+    runtime = coherent_gp_runtime_header_8616() + coherent_gp_runtime_definitions_8616()
+    harness.write_text(runtime + '#include "generated.c"\n' + bindings + _HARNESS, encoding="ascii")
     compiled = subprocess.run(
         ["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", str(harness), "-o", str(executable)],
         capture_output=True, text=True, check=False, timeout=30,

@@ -317,7 +317,7 @@ class HelperWidget(Static):  # type: ignore[misc]
         if signature:
             lines.append(f"  sig:  {signature}")
         for note in notes:
-            lines.append(f"  note: {note}")  # noqa: PERF401
+            lines.append(f"  note: {note}")
         return "\n".join(lines)
 
 

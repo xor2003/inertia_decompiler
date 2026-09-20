@@ -14,6 +14,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from ..ir import AddressStatus, IRAddress, IRValue, MemSpace
+from .interprocedural_storage_return_discard import DiscardedReturnTrial8616
 from .interprocedural_storage_return_passthrough_contracts import ReturnPassThroughTrial8616
 
 if TYPE_CHECKING:
@@ -268,6 +269,7 @@ class CallsiteStorageTrials8616:
     pointer_effects: tuple[PointerParameterCallerTarget8616, ...] = ()
     return_passthroughs: tuple[ReturnPassThroughTrial8616, ...] = ()
     stack_delta: int | None = None
+    discarded_return: DiscardedReturnTrial8616 | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,6 +311,7 @@ class CallsiteStorageBinding8616:
     memory_effects: tuple[MemoryLiveOutUseFact8616, ...] = ()
     pointer_effects: tuple[PointerParameterCallerTarget8616, ...] = ()
     return_passthroughs: tuple[ReturnPassThroughTrial8616, ...] = ()
+    discarded_return: DiscardedReturnTrial8616 | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,7 +10,10 @@ from angr.sim_type import SimTypeChar, SimTypeShort
 from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.decompiler_postprocess_simplify import _simplify_structured_expressions_8616
+from angr_platforms.X86_16.lowering.condition_stack_operands import project_contained_stack_integer_view_8616
 from angr_platforms.X86_16.lowering.semantic_cast import CSemanticCast8616
+from angr_platforms.X86_16.tail_validation_fingerprint import _expr_fingerprint
+from angr_platforms.X86_16.validation_condition_precision import condition_precision_token_8616
 
 from inertia_decompiler import cli_c_ast_rewrites as rewrites
 
@@ -35,6 +38,32 @@ class _Codegen:
 
     def next_ident(self, name):
         return name
+
+
+@pytest.mark.parametrize("byte_delta", [0, 1])
+@pytest.mark.parametrize("extra_mask", [False, True])
+def test_bitwise_cleanup_preserves_proven_stack_byte_view(byte_delta, extra_mask):
+    """Flattening must not erase the owner/view proof of a retained byte read."""
+    codegen = _Codegen()
+    word = SimTypeShort(False).with_arch(codegen.project.arch)
+    owner = c.CVariable(SimStackVariable(-8, 2, base="bp", name="value"),
+                        variable_type=word, codegen=codegen)
+    expression = project_contained_stack_integer_view_8616(
+        codegen, owner, owner_bp_offset=-8, offset=-8 + byte_delta,
+        size=1, signed=False, tags=None,
+    )
+    if extra_mask:
+        expression = c.CBinaryOp("And", expression, c.CConstant(0xFF, word, codegen=codegen), codegen=codegen)
+    codegen.cfunc = SimpleNamespace(statements=c.CReturn(expression, codegen=codegen),
+                                   arg_list=(), variables_in_use={}, unified_local_vars={})
+    before = condition_precision_token_8616(_expr_fingerprint(expression, codegen.project))
+
+    rewrites._simplify_structured_c_expressions(codegen)
+
+    result = codegen.cfunc.statements.retval
+    after = condition_precision_token_8616(_expr_fingerprint(result, codegen.project))
+    assert before == f"stack_slot:SS:BP{-8 + byte_delta:+#x}:size1"
+    assert after == before
 
 
 @pytest.mark.parametrize("space", ["stack", "memory"])

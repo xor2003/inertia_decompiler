@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr_platforms.X86_16 import decompiler_structuring_stage as structuring_stage
 from angr_platforms.X86_16 import tail_validation as tail_validation_module
 from angr_platforms.X86_16.structuring.condition_evidence_closure import (
@@ -78,6 +79,62 @@ def test_condition_precision_validation_refuses_extra_semantic_field() -> None:
 
     assert result.accepted is False
     assert result.stats.failure_count == 1
+
+
+def _loop_validation() -> dict[str, object]:
+    return {
+        "changed": True,
+        "delta": {
+            "conditions": {"added": (WIDE_LT,), "removed": (HIGH_LE,)},
+            "control_flow_effects": {
+                "added": (
+                    f"loop:{WIDE_LT}",
+                    f"loop-body-calls:{WIDE_LT}:addr:0x1234,addr:0x5678",
+                    f"loop-body-writes:{WIDE_LT}:stack_slot:SS:BP-0x2:size2",
+                ),
+                "removed": (
+                    f"loop:{HIGH_LE}",
+                    f"loop-body-calls:{HIGH_LE}:addr:0x1234,addr:0x5678",
+                    f"loop-body-writes:{HIGH_LE}:stack_slot:SS:BP-0x2:size2",
+                ),
+            },
+        },
+    }
+
+
+def test_condition_precision_accepts_exact_loop_guard_and_unchanged_body() -> None:
+    result = condition_precision_validation_delta_8616(_codegen(), _loop_validation())
+    assert result.accepted
+    assert result.stats.materialized_count == 1
+
+
+@pytest.mark.parametrize("corruption", ["call", "order", "write", "kind", "missing", "extra"])
+def test_condition_precision_refuses_changed_loop_effects(corruption: str) -> None:
+    validation = _loop_validation()
+    controls = validation["delta"]["control_flow_effects"]
+    added = list(controls["added"])
+    if corruption == "call":
+        added[1] = f"loop-body-calls:{WIDE_LT}:addr:0x9999,addr:0x5678"
+    elif corruption == "order":
+        added[1] = f"loop-body-calls:{WIDE_LT}:addr:0x5678,addr:0x1234"
+    elif corruption == "write":
+        added[2] = f"loop-body-writes:{WIDE_LT}:stack_slot:SS:BP-0x4:size2"
+    elif corruption == "kind":
+        added[0] = f"if:{WIDE_LT}"
+    elif corruption == "missing":
+        added.pop()
+    else:
+        added.append(f"loop-body-calls:{WIDE_LT}:addr:0x9999")
+    controls["added"] = tuple(added)
+    assert not condition_precision_validation_delta_8616(_codegen(), validation).accepted
+
+
+def test_condition_precision_refuses_guard_kind_change() -> None:
+    validation = _validation()
+    validation["delta"]["control_flow_effects"]["added"] = (
+        f"while:{WIDE_GT}", f"if:{WIDE_LT}",
+    )
+    assert not condition_precision_validation_delta_8616(_codegen(), validation).accepted
 
 
 def test_structuring_precision_refuses_incomplete_condition_closure() -> None:

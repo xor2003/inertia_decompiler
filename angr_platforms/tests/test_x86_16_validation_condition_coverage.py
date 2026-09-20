@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 import pytest
-from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CStatements
+from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CStatements
 from angr.sim_type import SimTypeShort
 from angr_platforms.X86_16.lowering.semantic_cast import CSemanticCast8616
 from angr_platforms.X86_16.structuring.condition_chain_provenance import bind_condition_chain_provenance_8616
@@ -24,6 +24,34 @@ from test_x86_16_validation_branch_conditions import (
     _fingerprint,
     _root,
 )
+
+
+@pytest.mark.parametrize("operator", ["CmpEQ", "CmpNE"])
+@pytest.mark.parametrize("corrupted", [False, True])
+def test_precision_evidence_survives_decrement_temporary_elimination(operator, corrupted):
+    codegen = _Codegen(_fact())
+    codegen._inertia_callsite_summary_inventory_8616 = {}
+    root = _root(codegen, keep_increment=True)
+    condition, body = root.statements[0].condition_and_nodes[0]
+    one = CConstant(1, SimTypeShort(False), codegen=codegen)
+    zero = CConstant(0, SimTypeShort(False), codegen=codegen)
+    decrement = CBinaryOp("Sub", condition.lhs, one, codegen=codegen)
+    recorded = CBinaryOp(
+        operator, CBinaryOp("Sub", decrement, one, codegen=codegen), zero,
+        codegen=codegen, tags=dict(condition.tags),
+    )
+    assert record_condition_precision_evidence_8616(codegen.project, codegen, condition, recorded)
+    final = CBinaryOp(
+        operator, decrement, CConstant(2 if corrupted else 1, SimTypeShort(False), codegen=codegen),
+        codegen=codegen, tags=dict(condition.tags),
+    )
+    root.statements[0].condition_and_nodes = [(final, body)]
+    report = validate_materialized_branch_conditions_8616(
+        codegen, root,
+        condition_fingerprint=lambda node: _expr_fingerprint(node, codegen.project),
+        condition_ir_fingerprint=lambda _: "CmpEQ(reg:unavailable,const:0)",
+    )
+    assert report.passed is (not corrupted)
 
 
 @pytest.mark.parametrize("recorded_complete", [False, True])

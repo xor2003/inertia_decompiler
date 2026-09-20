@@ -56,11 +56,16 @@ They do not relax its architecture or function-fix acceptance contract.
 - Extract focused helpers when they clarify a coherent operation or remove real
   duplication. Do not create wrappers or meaningless names merely to satisfy a
   complexity threshold. Apply improvements to touched code, not unrelated files.
-- The shared Ruff configuration enforces `C901` (complexity above 10), `PLR0916`
-  (more than five Boolean terms in an if condition), and `PLR2004` (unnamed numeric
-  comparison values), alongside existing simplification, type and docstring
-  rules. `PLR0916` requires preview mode; preview-only rules require explicit
-  selection. Direct Ruff and Make invocations must use this same configuration.
+- The shared Ruff configuration enforces `C901` (complexity above 10) and
+  `PLR0916` (more than five Boolean terms in an if condition), alongside bug,
+  type and missing/empty docstring checks. `PLR0916` requires preview mode;
+  preview-only rules require explicit selection. Direct Ruff and Make
+  invocations must use this same configuration.
+- Do not enforce docstring punctuation/layout or blanket numeric-constant
+  extraction (`PLR2004`). Register widths, masks and test expectations often
+  read better literally; name meaningful domain limits when that adds clarity.
+  Explicit branches/loops are allowed instead of forced ternaries, any/all or
+  comprehensions. See [the Ruff policy](ruff-policy.md) for rationale and scope.
 - These checks are guardrails, not proof of clarity: review comment usefulness,
   descriptive names, constants outside comparisons, and complex expressions the
   rules do not cover. Do not silence findings with blanket exclusions or weaken

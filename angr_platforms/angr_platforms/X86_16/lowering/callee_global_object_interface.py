@@ -218,7 +218,7 @@ def _materialize_aggregate_interface_8616(
                 and isinstance(node.rhs, CIndexedVariable)
                 and is_named_struct_type_8616(node.rhs.type, struct_type)
             ):
-                aggregate_locals.append(node.lhs.variable)  # noqa: PERF401
+                aggregate_locals.append(node.lhs.variable)
     for local in aggregate_locals:
         cfunc.variable_manager.set_variable_type(
             local,

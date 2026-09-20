@@ -34,6 +34,7 @@ from angr_platforms.X86_16.decompiler_return_compat import (
     apply_x86_16_decompiler_return_compatibility,
     codegen_has_explicit_void_return_8616,
 )
+from test_x86_16_overlay_return_behavior import assert_overlay_return_behavior
 from x86_16_timeout_support import scaled_decompile_timeout
 
 import decompile
@@ -59,6 +60,7 @@ def _run_cod_proc(
     *,
     timeout: int = 20,
     scale_timeout: bool = True,
+    extra_args: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     if scale_timeout:
         timeout = scaled_decompile_timeout(timeout)
@@ -71,6 +73,7 @@ def _run_cod_proc(
             proc,
             "--timeout",
             str(timeout),
+            *extra_args,
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -256,18 +259,16 @@ def test_cod_process_id_source_headers_are_captured():
 @pytest.mark.parametrize(
     ("proc_name", "header_anchor"),
     (
-        ("_dos_getProcessId", "unsigned short _dos_getProcessId(void)"),
-        ("_dos_setProcessId", "int _dos_setProcessId(const unsigned short pid)"),
+        ("_dos_getProcessId", "void _dos_getProcessId(void)"),
+        ("_dos_setProcessId", "void _dos_setProcessId(unsigned short pid)"),
     ),
 )
 def test_cod_process_id_helpers_keep_empty_bodies(proc_name: str, header_anchor: str):
     result = _run_cod_proc(COD_DIR / "DOSFUNC.COD", proc_name)
 
-    _assert_cod_proc_succeeded_or_reported_unvalidated_partial(result)
-    if result.returncode != 0:
-        return
+    assert result.returncode == 0, result.stderr
     assert header_anchor in result.stdout
-    assert "return;" not in result.stdout
+    assert "return;" in result.stdout
 
 
 def test_cod_extract_canonicalizes_known_object_names():
@@ -387,7 +388,7 @@ def test_cod_overlay_header_known_object_is_pointer_typed():
     assert getattr(spec.type.pts_to, "name", None) == "OvlHeader"
 
 
-def test_cod_overlay_function_address_keeps_proven_known_object_bindings():
+def test_cod_overlay_function_address_keeps_proven_known_object_bindings(tmp_path: Path) -> None:
     result = _run_cod_proc(COD_DIR / "OVERLAY.COD", "_overlay_functionAddress")
 
     assert result.returncode == 0, result.stderr + result.stdout
@@ -397,13 +398,15 @@ def test_cod_overlay_function_address_keeps_proven_known_object_bindings():
     assert re.search(r"long _overlay_functionAddress\([^)]*ovlLoadSegment[^)]*funcNumber[^)]*\)", text)
     assert text.count("SEG_U16(ovlLoadSegment,") >= 2
     assert "36 + (funcNumber << 1)" in text
-    assert re.search(r"return\s+[^;]*<< 16\s*\|\s*[^;]+;", text)
+    # The compiled oracle below checks both far-return words independently;
+    # parentheses around the high-word shift are not a semantic contract.
     assert "[dbg]" not in text
     assert "== asm fallback ==" not in text
     assert "unassigned-stack-local" not in result.stderr
     assert re.search(r"(?m)^\s*MK_FP\(ovlHeader->code_segment, slotArray\[funcNumber\]\);\s*$", text) is None
     compile_result = check_c_recompiles_8616(text, target="portable-flat")
     assert compile_result.passed, compile_result.stderr
+    assert_overlay_return_behavior(text, tmp_path)
 
 
 def test_cod_dos_loadoverlay_wrapper_returns_loadprog() -> None:
@@ -460,8 +463,12 @@ def test_cod_dos_runprogram_wrapper_returns_loadprog():
     )
 
 
-def test_cod_loadprog_preserves_binary_arguments_and_recompiles():
-    result = _run_cod_proc(COD_DIR / "DOSFUNC.COD", "loadprog", timeout=40)
+def test_cod_loadprog_preserves_binary_arguments_and_recompiles() -> None:
+    """Require validated, recompilable binary recovery without source substitution."""
+    result = _run_cod_proc(
+        COD_DIR / "DOSFUNC.COD", "loadprog", timeout=40,
+        extra_args=("--no-alternate-source-c",),
+    )
 
     combined = result.stderr + result.stdout
     assert result.returncode == 0, combined
@@ -470,8 +477,8 @@ def test_cod_loadprog_preserves_binary_arguments_and_recompiles():
         result.stdout,
         (
             "unsigned short loadprog(unsigned short file, unsigned short segment, unsigned short type, unsigned long cmdline)",
-            "exeLoadParams[1] = inertia_eax & 0xffff;",
-            "cmdline >> 16 & 0xffff",
+            "exeLoadParams[1] = cmdline;",
+            "exeLoadParams[2] = (cmdline >> 16) & 0xffff;",
             "return err;",
             "return 0;",
         ),

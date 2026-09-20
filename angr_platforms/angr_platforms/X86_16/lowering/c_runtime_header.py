@@ -17,6 +17,7 @@ from ..analysis_helpers import (
     interrupt_service_spec,
 )
 from ..simos_86_16 import get_interrupt_handler_class
+from .gp_word_runtime import GPRegisterRuntimeABI8616, coherent_gp_runtime_header_8616
 
 LOWERED_RUNTIME_HELPER_DECLARATIONS_8616: dict[str, str] = {
     "clock": "clock_t clock(void);",
@@ -153,14 +154,22 @@ def render_pointer_storage_macros_8616(target: str) -> str:
     )
 
 
-def render_c_runtime_header_8616(target: str | None) -> str:
+def render_c_runtime_header_8616(
+    target: str | None,
+    *,
+    gp_runtime_abi: GPRegisterRuntimeABI8616 = GPRegisterRuntimeABI8616.SCALAR,
+) -> str:
     """Return the C helper header for the requested generated-C target."""
     normalized = str(target or "").strip().lower()
+    gp_header = (
+        coherent_gp_runtime_header_8616()
+        if gp_runtime_abi is GPRegisterRuntimeABI8616.COHERENT_WORD_VIEWS else ""
+    )
     runtime_helper_declarations = "\n".join(LOWERED_RUNTIME_HELPER_DECLARATIONS_8616.values())
     runtime_segment_state_declarations = "\n".join(_RUNTIME_SEGMENT_STATE_DECLARATIONS_8616)
     if normalized == "msc-dos":
         compiler_helper_declarations = "\n".join(_MSC_COMPILER_RUNTIME_HELPER_DECLARATIONS_8616)
-        return (
+        return gp_header + (
             "#include <DOS.H>\n"
             "\n"
             "typedef signed char    int8_t;\n"
@@ -191,7 +200,7 @@ def render_c_runtime_header_8616(target: str | None) -> str:
         )
     if normalized == "portable-flat":
         compiler_helper_declarations = "\n".join(_PORTABLE_COMPILER_RUNTIME_HELPER_DECLARATIONS_8616)
-        return (
+        return gp_header + (
             "#include <stdbool.h>\n"
             "#include <stddef.h>\n"
             "#include <stdint.h>\n"
@@ -220,7 +229,7 @@ def render_c_runtime_header_8616(target: str | None) -> str:
             "#define MEM_U32(ptr)         (*(uint32_t *)(ptr))\n"
             f"{render_pointer_storage_macros_8616(normalized)}"
         )
-    return ""
+    return gp_header
 
 
 __all__ = [

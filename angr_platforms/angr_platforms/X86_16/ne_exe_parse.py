@@ -39,7 +39,7 @@ def _dynamic_loader_ne_segment_selectors_8616(main_obj: object) -> dict[int, int
     typed_selectors: dict[int, int] = {}
     for segment, selector in selectors.items():
         if isinstance(segment, int) and isinstance(selector, int):
-            typed_selectors[segment] = selector  # noqa: PERF403
+            typed_selectors[segment] = selector
     return typed_selectors
 
 

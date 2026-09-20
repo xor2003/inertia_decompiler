@@ -23,6 +23,7 @@ from ..callsite_summary_program import (
     program_callsite_summary_evidence_from_facts_8616,
 )
 from ..callsite_target_inventory import CallsiteTargetInventory8616
+from ..frontend_boundary_transport import capture_function_boundary_8616
 from ..semantics.callsite_summary_request import (
     CallsiteSummaryRequestCache8616,
     CallsiteSummaryRequestStats8616,
@@ -42,10 +43,9 @@ __all__ = [
 
 
 class _FunctionSurface8616(Protocol):
-    """Third-party function coordinates used to derive exact fallback ranges."""
+    """Third-party function entry; executable bounds belong to Frontend."""
 
     addr: int
-    size: int
 
 
 class _CallerRangeSurface8616(Protocol):
@@ -102,7 +102,7 @@ def _function_ranges_8616(
     project: object,
     functions: Sequence[object],
 ) -> tuple[tuple[int, int], ...]:
-    """Return explicit caller ranges, falling back to complete catalog bounds."""
+    """Use explicit ranges or closed Frontend witnesses, never summed CFG size."""
     try:
         attached = cast(
             _CallerRangeSurface8616,
@@ -123,19 +123,9 @@ def _function_ranges_8616(
         )
     ranges: list[tuple[int, int]] = []
     for function in functions:
-        try:
-            surface = cast(_FunctionSurface8616, function)
-            start = surface.addr
-            size = surface.size
-        except AttributeError:
-            continue
-        if (
-            isinstance(start, int)
-            and isinstance(size, int)
-            and start >= 0
-            and size > 0
-        ):
-            ranges.append((start, start + size))
+        witness = capture_function_boundary_8616(project, function)
+        if witness is not None:
+            ranges.append((witness.entry, witness.end))
     return tuple(sorted(set(ranges)))
 
 

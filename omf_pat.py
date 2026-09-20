@@ -2029,7 +2029,7 @@ def _decode_pat_bytes(text: str) -> list[int | None]:
 def _encode_pat_bytes(data: bytes | bytearray | tuple[int | None, ...] | list[int | None]) -> str:
     parts: list[str] = []
     for byte in data:
-        parts.append(".." if byte is None else f"{byte:02X}")  # noqa: PERF401
+        parts.append(".." if byte is None else f"{byte:02X}")
     return "".join(parts)
 
 

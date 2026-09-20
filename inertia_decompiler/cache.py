@@ -22,6 +22,7 @@ from inertia_decompiler.cache_file_digest import (
 from inertia_decompiler.cache_io import load_cache_json_path, store_cache_json_path
 from inertia_decompiler.cache_lock import cache_path_lock
 from inertia_decompiler.cache_runtime_contract import cache_runtime_contract_8616
+from inertia_decompiler.external_unpacker_cache import deark_cache_identity
 from inertia_decompiler.cache_source_manifest import (
     DIRECT_GLOBAL_OBJECT_CACHE_SOURCE_FILES,
     FUNCTION_DISCOVERY_CACHE_SOURCE_FILES,
@@ -189,11 +190,15 @@ def is_non_semantic_cache_environment_name(name: str) -> bool:
 
 def _cache_runtime_environment() -> dict[str, str]:
     """Capture runtime switches that can change recovery or emitted diagnostics."""
-    return {
+    environment = {
         name: value
         for name, value in sorted(os.environ.items())
         if name.startswith("INERTIA_") and not is_non_semantic_cache_environment_name(name)
     }
+    decoder_digest = deark_cache_identity()
+    if decoder_digest is not None:
+        environment["INERTIA_DEARK_EXECUTABLE_SHA256"] = decoder_digest
+    return environment
 
 
 def _cache_sha256_bytes(data: bytes) -> str:

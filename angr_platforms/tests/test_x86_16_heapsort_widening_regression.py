@@ -131,7 +131,8 @@ def test_sortd_shellsort_sidecar_free_accepts_typed_segment_live_in(tmp_path: Pa
     generated_c = result.stdout.split(generated_c_marker, 1)[1]
     contract = GeneratedCContract(
         required_fragments=(
-            "g_0B4C[local_4 + local_2].field_0 < g_0B4C[local_4].field_0",
+            "(signed char)g_0B4C[local_4 + local_2].field_0 < "
+            "(signed char)g_0B4C[local_4].field_0",
         ),
         forbidden_fragments=("g_0B4C[local_4 + local_4]",),
         branch_body_effects=(
@@ -262,17 +263,13 @@ def test_sortd_percolate_down_uses_canonical_shifted_global_view(
     assert signature is not None, result.stdout
     bound = signature.group("bound")
     assert re.search(
-        rf"if \((?:\(short\))?local_4 \+ 1 <= {re.escape(bound)}\)",
+        rf"if \(\(short\)\(\(short\)local_4 \+ 1\) <= {re.escape(bound)}\)",
         result.stdout,
     )
-    assert len(
-        re.findall(
-            rf"if \((?:\(short\))?local_4 <= {re.escape(bound)}\)",
-            result.stdout,
-        )
-    ) == 1
+    assert f"if ((short)local_4 > {bound})" in result.stdout
     assert (
-        "g_0B4C[local_4 + 1].field_0 > g_0B4C[local_4].field_0"
+        "(signed char)g_0B4C[local_4 + 1].field_0 > "
+        "(signed char)g_0B4C[local_4].field_0"
         in result.stdout
     )
     assert re.search(

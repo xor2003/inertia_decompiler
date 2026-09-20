@@ -6,19 +6,23 @@ Responsibility: execute generated InitMenu pause guards against source behavior.
 import subprocess
 from pathlib import Path
 
+from angr_platforms.X86_16.lowering.gp_word_runtime import (
+    coherent_gp_runtime_definitions_8616,
+    coherent_gp_runtime_header_8616,
+)
+
 
 def assert_initmenu_pause_guard_behavior(body: str, tmp_path: Path) -> None:
     """Detect lost high-word guards using observable output calls."""
     source = tmp_path / "initmenu_pause.c"
     executable = tmp_path / "initmenu_pause"
     source.write_text(
-        """#include <stdint.h>
+        coherent_gp_runtime_header_8616() + coherent_gp_runtime_definitions_8616() + """#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 unsigned short cszMenu = 0, fSound = 0;
 char *aszMenu[] = {"unused"};
 long clPause;
-uint32_t inertia_esi, inertia_edi;
 static int row, col, limit_outputs, zero_outputs;
 int settextcolor(int color) { return color; }
 int32_t setbkcolor(int32_t color) { return color; }

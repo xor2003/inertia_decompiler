@@ -45,6 +45,11 @@ REVIEWED_TEST_MODULE_LAYERS: Final[Mapping[str, tuple[str, ...]]] = MappingProxy
         "angr_platforms/tests/test_x86_16_access_trait_strides.py": ("X86_16/lowering", "inertia_decompiler/cli"),
         "angr_platforms/tests/test_x86_16_boolean_simplify.py": ("X86_16/postprocess", "inertia_decompiler/cli"),
         "angr_platforms/tests/test_x86_16_helper_replacements.py": ("X86_16/postprocess", "inertia_decompiler/cli"),
+        # These modules reach the CLI or executable oracle through test helpers.
+        "angr_platforms/tests/test_x86_16_inbox_long_live.py": ("inertia_decompiler/cli",),
+        "angr_platforms/tests/test_x86_16_reinitbars_execution.py": ("tooling/gates",),
+        "angr_platforms/tests/test_x86_16_setgear_behavior.py": ("tooling/gates",),
+        "angr_platforms/tests/test_x86_16_tidshowrange_behavior.py": ("tooling/gates",),
         "angr_platforms/tests/test_x86_16_mypy_monkeytype_targets.py": ("tooling/gates",),
         "angr_platforms/tests/test_x86_16_msc6_regressions.py": ("inertia_decompiler/cli",),
         "angr_platforms/tests/test_x86_16_msc6_sort_patterns_regression.py": ("inertia_decompiler/cli",),

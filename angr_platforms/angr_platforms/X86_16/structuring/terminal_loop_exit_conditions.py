@@ -1,6 +1,10 @@
 """Consume complete wide decision graphs at existing terminal loop breaks.
 
 Layer: Structuring.
+Owns CFG shape, loops, switches, and structured condition lowering from proven
+IR/semantic evidence. Do not perform alias-state ownership, widening,
+type/materialization recovery, rewrite cleanup, postprocess, or CLI/reporting
+work here.
 Responsibility: bind an effect-free terminal guard to its proven natural-loop
 exit without moving preceding calls or changing the break body. Wide storage
 and call capture remain in Types/Lowering; this owner proves only CFG polarity
@@ -32,6 +36,16 @@ from .loop_break_topology import LoopBreakTopology8616
 from .natural_loop_topology import _header_dominated_nodes_8616
 from .wide_call_condition_plan import WideCallConditionPlan8616, plan_wide_call_condition_8616
 
+TERMINAL_WIDE_DECISION_TAG_8616: str = "inertia_terminal_wide_decision_8616"
+
+
+@dataclass(frozen=True, slots=True)
+class TerminalWideDecision8616:
+    """Immutable complete decision and natural-loop owner for final validation."""
+
+    comparison: WideCallConditionPlan8616
+    loop_header: int
+
 
 @dataclass(frozen=True, slots=True)
 class TerminalLoopExitPlan8616:
@@ -40,6 +54,7 @@ class TerminalLoopExitPlan8616:
     guard: CIfBreak | CIfElse
     current: CExpression
     comparison: WideCallConditionPlan8616
+    loop_header: int
 
 
 def _terminal_guard_8616(loop: CWhileLoop) -> tuple[CIfBreak | CIfElse, CExpression] | None:
@@ -101,7 +116,7 @@ def classify_terminal_loop_exit_8616(
     dominated = _header_dominated_nodes_8616(owner.header, root_block, lambda block: successors.get(block, ()))
     if not {*blocks, owner.latch}.issubset(dominated):
         return None
-    return TerminalLoopExitPlan8616(guard, current, plans[0])
+    return TerminalLoopExitPlan8616(guard, current, plans[0], owner.header)
 
 
 def materialize_terminal_loop_exit_conditions_8616(
@@ -135,6 +150,7 @@ def materialize_terminal_loop_exit_conditions_8616(
         if provenance is None:
             raise PipelineHardError(f"terminal-loop-exit jcc={fact.src_insn:#x}: incomplete branch provenance")
         replacement.tags.update({
+            TERMINAL_WIDE_DECISION_TAG_8616: TerminalWideDecision8616(plan.comparison, plan.loop_header),
             "ins_addr": fact.src_insn,
             "vex_block_addr": fact.block_addr,
             "inertia_structuring_condition_cfg_materialized_8616": True,

@@ -8,10 +8,12 @@ from pathlib import Path
 
 import pytest
 from x86_16_initmenu_execution import assert_initmenu_pause_guard_behavior
+from x86_16_insertionsort_behavior import assert_insertionsort_behavior
 from x86_16_quicksort_behavior import assert_quicksort_behavior
 from x86_16_reinitbars_execution import assert_reinitbars_loop_behavior
 from x86_16_runmenu_execution import assert_runmenu_behavior, assert_runmenu_oracle_rejects_corruption
-from x86_16_sleep_behavior import assert_sleep_behavior
+from x86_16_sleep_behavior import SLEEP_REGISTER_STATE_PRELUDE, assert_sleep_behavior
+from x86_16_swapbars_behavior import assert_swapbars_behavior
 from x86_16_telemetry_support import diagnostic_payloads, telemetry_integer
 from x86_16_timeout_support import scaled_decompile_timeout as _scaled_timeout
 
@@ -115,7 +117,7 @@ def _assert_clean_decompilation_output(combined_output: str) -> None:
         assert marker not in combined_output, combined_output
 
 
-def test_sortd_sidecar_free_swapbars_recovers_binary_stack_arguments(tmp_path):
+def test_sortd_sidecar_free_swapbars_recovers_binary_stack_arguments(tmp_path: Path) -> None:
     sortd_exe = tmp_path / "SORTD.EXE"
     sortd_exe.write_bytes(mz_executable_image(SORTDEMO_EXE.read_bytes()))
 
@@ -140,9 +142,7 @@ def test_sortd_sidecar_free_swapbars_recovers_binary_stack_arguments(tmp_path):
     # SORTDEMO.C declares SwapBars as void; the binary output must preserve
     # that source-backed contract while recovering both stack arguments.
     assert re.search(r"void sub_10768\(unsigned short \w+, unsigned short \w+\)", result.stdout)
-    assert "local_4" not in result.stdout
-    assert "local_6" not in result.stdout
-    assert result.stdout.count("sub_106c8(") == 3
+    assert_swapbars_behavior(result.stdout, tmp_path)
 
 
 def test_sortd_sidecar_free_initbars_preserves_binary_stack_array(tmp_path: Path) -> None:
@@ -276,7 +276,7 @@ def test_sortdemo_sleep_anchor_eliminates_raw_flag_guard_and_keeps_validation_cl
     assert "(flags_3 & 128) == (flags_3 & 0x800)" not in result.stdout
     assert result.stdout.count("clock()") == 2
     sleep_body = result.stdout[signature.start() :]
-    assert_sleep_behavior(result.stdout, tmp_path)
+    assert_sleep_behavior(result.stdout, tmp_path, harness_prelude=SLEEP_REGISTER_STATE_PRELUDE)
     assert "local_2" not in sleep_body
     assert not re.search(r"\b(?:ax|dx)(?:_\d+)?\b", sleep_body)
     assert re.search(r"\b(?:clock_t|unsigned long|long)\s+goal\b", result.stdout)
@@ -808,11 +808,8 @@ def test_sortd_insertionsort_sidecar_free_splits_header_and_rebases_source(
     assert "whole-tail validation clean across 1 functions" in combined
     assert "gcc syntax check failed:" not in combined
     final_body = _function_body_from_stdout(result.stdout, "void sub_10808")
+    assert_insertionsort_behavior(final_body, tmp_path)
     loop_header = "for (local_4 = local_2; local_4; local_4 -= 1)"
-    guard = re.compile(
-        r"if \((?:\(g_0B4C\[local_4 - 1\]\.field_0 & (?:255|0xff)\) <= (?:\(short\))?local_6|"
-        r"!\(\(g_0B4C\[local_4 - 1\]\.field_0 & (?:255|0xff)\) > (?:\(short\))?local_6\))\)"
-    )
     source_copy = "g_0B4C[local_4] = g_0B4C[local_4 - 1];"
     row_load = "local_8 = g_0B4C[local_2];"
     assert loop_header in final_body
@@ -820,15 +817,10 @@ def test_sortd_insertionsort_sidecar_free_splits_header_and_rebases_source(
     assert final_body.count(row_load) == 1
     assert "local_6 = (signed char)local_8.field_0;" in final_body
     assert "local_6 = local_8;" not in final_body
-    assert len(guard.findall(final_body)) == 1
     assert final_body.count("g_0BA4 += 1;") == 1
     assert final_body.count(source_copy) == 1
-    guard_match = guard.search(final_body)
-    assert guard_match is not None
     assert final_body.index("for (local_2 = 0;") < final_body.index(row_load)
     assert final_body.index(row_load) < final_body.index("local_6 = (signed char)local_8.field_0;")
-    assert final_body.index("g_0BAA += 1;") < guard_match.start()
-    assert guard_match.start() < final_body.index("g_0BA4 += 1;")
     assert final_body.index("g_0BA4 += 1;") < final_body.index(source_copy)
     assert len(
         re.findall(r"sub_106c8\((?:\(unsigned short\))?local_4\);", final_body)
@@ -1513,6 +1505,7 @@ def test_sortd_runmenu_sidecar_free_preserves_binary_escape_exit(tmp_path: Path)
     assert "whole-tail validation clean across 1 functions" in combined
     body = _function_body_from_stdout(result.stdout, "sub_102e0(")
     assert "inertia_esp" not in body
+    assert "inertia_flags" not in result.stdout
     assert re.search(r"local_2\s*=\s*sub_11292\(\);", body)
     assert body.count("sub_11278(") == 1
     # Execute the complete output: an exact if/else dispatch and shared ESC

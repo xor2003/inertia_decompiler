@@ -11,6 +11,8 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from inertia_decompiler.work_items import TailValidationDisplayOutcome
+
 __all__ = [
     "AcceptanceScorecard",
     "X86_16QualityMetrics",
@@ -185,6 +187,10 @@ _FLAGS_RE = re.compile(r"\bflags(?:_[A-Za-z0-9]+)?\b")
 _VVAR_RE = re.compile(r"\bvvar_[A-Za-z0-9]+\b")
 _SUB_RE = re.compile(r"\bsub_[0-9a-fA-F]+\b")
 _TAIL_VALIDATION_METADATA_RE = re.compile(r"@@INERTIA_TAIL_VALIDATION@@\s+(\{.*\})")
+_WHOLE_TAIL_REPORT_RE = re.compile(
+    r"^\[tail-validation\] whole-tail validation (clean|changed|failed|unknown|uncollected)"
+    r"(?: across \d+ functions)?\s*$", re.MULTILINE,
+)
 _DS_HELPER_LINEAR_RE = re.compile(r"\b(?:SEG_PTR|MK_FP|SEG_U8|SEG_U16|SEG_U32)\s*\(\s*ds\s*,")
 _SS_LINEAR_RE = re.compile(r"\bss\s*\*\s*16\b")
 
@@ -229,41 +235,37 @@ def _recovery_mode_from_output(output: str) -> str:
     return "unknown"
 
 
-def _validation_verdict_from_output(output: str) -> str:
-    def _impl() -> str:
-        lowered = output.lower()
-        metadata_match = _TAIL_VALIDATION_METADATA_RE.search(output)
-        if metadata_match is not None:
-            with_context = metadata_match.group(1)
-            try:
-                payload = json.loads(with_context)
-            except Exception:
-                payload = None
-            if isinstance(payload, dict):
-                surface = payload.get("surface", {})
-                severity = surface.get("severity")
-                if isinstance(severity, str) and severity:
-                    if severity == "changed":
-                        return "failed"
-                    return severity
-        for verdict in ("failed", "unknown", "uncollected", "stable", "changed"):
-            if f"tail-validation:{verdict}" in lowered or f"validation={verdict}" in lowered:
-                if verdict == "changed":
-                    return "failed"
-                return verdict
-        if "[tail-validation] whole-tail validation changed" in lowered:
-            return "failed"
-        if "[tail-validation] whole-tail validation failed" in lowered:
-            return "failed"
-        if "[tail-validation] whole-tail validation clean" in lowered:
-            return "stable"
-        if "[tail-validation] whole-tail validation unknown" in lowered:
-            return "unknown"
-        if "[tail-validation] whole-tail validation uncollected" in lowered:
-            return "uncollected"
-        return "uncollected"
+def _metadata_validation_verdict(output: str) -> str | None:
+    """Decode the legacy structured report without treating arbitrary JSON as evidence."""
+    match = _TAIL_VALIDATION_METADATA_RE.search(output)
+    if match is None:
+        return None
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+    surface = payload.get("surface") if isinstance(payload, dict) else None
+    severity = surface.get("severity") if isinstance(surface, dict) else None
+    if not isinstance(severity, str) or not severity:
+        return None
+    return "failed" if severity == "changed" else severity
 
-    return _impl()
+
+def _validation_verdict_from_output(output: str) -> str:
+    """Prefer published validation reports over diagnostics of rejected attempts."""
+    metadata = _metadata_validation_verdict(output)
+    if metadata is not None:
+        return metadata
+    reports = _WHOLE_TAIL_REPORT_RE.findall(output)
+    if reports:
+        final = reports[-1]
+        status = TailValidationDisplayOutcome.STABLE if final == "clean" else TailValidationDisplayOutcome(final)
+        return str(TailValidationDisplayOutcome.FAILED if status is TailValidationDisplayOutcome.CHANGED else status)
+    lowered = output.lower()
+    for verdict in ("failed", "unknown", "uncollected", "stable", "changed"):
+        if f"tail-validation:{verdict}" in lowered or f"validation={verdict}" in lowered:
+            return "failed" if verdict == "changed" else verdict
+    return "uncollected"
 
 
 def build_acceptance_scorecard(

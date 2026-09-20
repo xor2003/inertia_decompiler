@@ -230,7 +230,7 @@ def _build_x86_16_block_local_ssa_uncached(block: IRBlock) -> SSABlock:
     for index, instr in enumerate(block.instrs):
         rewritten_args: list[IRAtom] = []
         for arg in instr.args:
-            rewritten_args.append(_rewrite_atom(arg, versions, snapshots, definitions))  # noqa: PERF401
+            rewritten_args.append(_rewrite_atom(arg, versions, snapshots, definitions))
         rewritten_dst = instr.dst
         if rewritten_dst is not None and rewritten_dst.space not in {MemSpace.CONST, MemSpace.UNKNOWN}:
             key = _version_key(rewritten_dst)
@@ -242,13 +242,10 @@ def _build_x86_16_block_local_ssa_uncached(block: IRBlock) -> SSABlock:
         rewritten_args_tuple = tuple(rewritten_args)
         _record_temporary_snapshot(instr, rewritten_dst, rewritten_args_tuple, snapshots)
         rewritten.append(
-            IRInstr(
-                op=instr.op,
+            replace(
+                instr,
                 dst=rewritten_dst,
                 args=rewritten_args_tuple,
-                size=instr.size,
-                addr=instr.addr,
-                call_stack_effect=instr.call_stack_effect,
             )
         )
     return SSABlock(addr=block.addr, instrs=tuple(rewritten), bindings=tuple(bindings))

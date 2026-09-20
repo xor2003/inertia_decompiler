@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -145,6 +146,36 @@ def _result_is_accepted(result: GateProcessResult, expected_exit_code: int) -> b
     return "status=passed" in combined and f"run_exit={expected_exit_code}" in combined
 
 
+def _cached_process_result(
+    record: object, expected_exit_code: int,
+) -> subprocess.CompletedProcess[str] | None:
+    """Decode accepted process facts without trusting untyped JSON fields."""
+    if not isinstance(record, dict):
+        return None
+    arguments = record.get("args")
+    returncode = record.get("returncode")
+    stdout = record.get("stdout")
+    stderr = record.get("stderr")
+    if not isinstance(arguments, list) or not all(isinstance(value, str) for value in arguments):
+        return None
+    if not isinstance(returncode, int) or not isinstance(stdout, str) or not isinstance(stderr, str):
+        return None
+    result = subprocess.CompletedProcess(arguments, returncode, stdout, stderr)
+    return result if _result_is_accepted(result, expected_exit_code) else None
+
+
+def _artifact_hashes_match(output_root: Path, expected_hashes: dict[str, str]) -> bool:
+    """Require every persisted artifact to retain its accepted content."""
+    for relative_path, expected_hash in expected_hashes.items():
+        try:
+            actual_hash = hashlib.sha256((output_root / relative_path).read_bytes()).hexdigest()
+        except OSError:
+            return False
+        if actual_hash != expected_hash:
+            return False
+    return True
+
+
 def _load_cache(
     output_root: Path,
     cache_key: str,
@@ -167,29 +198,12 @@ def _load_cache(
         return None
     if not all(isinstance(path, str) and isinstance(value, str) for path, value in raw_hashes.items()):
         return None
-    for relative_path, expected_hash in raw_hashes.items():
-        artifact_path = output_root / relative_path
-        try:
-            actual_hash = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
-        except OSError:
-            return None
-        if actual_hash != expected_hash:
-            return None
+    if not _artifact_hashes_match(output_root, raw_hashes):
+        return None
     results: dict[str, GateProcessResult] = {}
     for name in example_names:
-        record = raw_results.get(name)
-        if not isinstance(record, dict):
-            return None
-        arguments = record.get("args")
-        returncode = record.get("returncode")
-        stdout = record.get("stdout")
-        stderr = record.get("stderr")
-        if not isinstance(arguments, list) or not all(isinstance(value, str) for value in arguments):
-            return None
-        if not isinstance(returncode, int) or not isinstance(stdout, str) or not isinstance(stderr, str):
-            return None
-        result = subprocess.CompletedProcess(arguments, returncode, stdout, stderr)
-        if not _result_is_accepted(result, expected_exit_code):
+        result = _cached_process_result(raw_results.get(name), expected_exit_code)
+        if result is None:
             return None
         results[name] = result
     return MSC6RuntimeGateArtifacts(results=results, output_root=output_root, cache_hit=True)
@@ -275,14 +289,19 @@ def _store_manifest(
     temporary_path.replace(manifest_path)
 
 
+def _private_output_root(parent: Path) -> Path:
+    """Allocate evidence storage whose lifetime is independent of later attempts."""
+    parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix="attempt-", dir=parent))
+
+
 def load_or_run_msc6_runtime_gate(inputs: MSC6RuntimeGateInputs) -> MSC6RuntimeGateArtifacts:
     """Reuse verified evidence or produce one complete source-bound gate entry."""
     cache_key = _cache_key(inputs)
     if cache_key is None:
-        shutil.rmtree(inputs.fallback_output_root, ignore_errors=True)
-        inputs.fallback_output_root.mkdir(parents=True)
-        results = _run_all(inputs, inputs.fallback_output_root)
-        return MSC6RuntimeGateArtifacts(results, inputs.fallback_output_root, False)
+        output_root = _private_output_root(inputs.fallback_output_root)
+        results = _run_all(inputs, output_root)
+        return MSC6RuntimeGateArtifacts(results, output_root, False)
 
     output_root = inputs.cache_root / cache_key
     with _cache_lock(inputs.cache_root / f"{cache_key}.lock"):
@@ -299,4 +318,11 @@ def load_or_run_msc6_runtime_gate(inputs: MSC6RuntimeGateInputs) -> MSC6RuntimeG
         results = _run_all(inputs, output_root)
         if all(_result_is_accepted(result, inputs.expected_exit_code) for result in results.values()):
             _store_manifest(output_root, cache_key, results)
+        else:
+            # A retry may replace the shared cache path as soon as this lock is
+            # released. Keep even successful siblings of a failed batch private.
+            attempt_root = _private_output_root(inputs.fallback_output_root)
+            preserved_root = attempt_root / "artifacts"
+            shutil.move(str(output_root), preserved_root)
+            output_root = preserved_root
         return MSC6RuntimeGateArtifacts(results, output_root, False)

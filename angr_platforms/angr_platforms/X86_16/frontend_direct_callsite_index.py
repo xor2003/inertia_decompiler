@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
+from .frontend_caller_entry_identity import CallerEntryIdentity8616, caller_target_identity_8616
+
 __all__ = [
     "DecodedDirectCallsite8616",
     "DecodedDirectCallsiteIndex8616",
@@ -32,6 +34,7 @@ class DecodedDirectCallsite8616:
     instruction_index: int
     callsite_addr: int
     target_addr: int
+    entry_identity: CallerEntryIdentity8616 | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,10 +72,16 @@ class DecodedDirectCallsiteIndex8616:
 
     _entries_by_normalized_target: dict[int, tuple[DecodedDirectCallsite8616, ...]]
     stats: DecodedDirectCallsiteIndexStats8616
+    entry_identities: tuple[CallerEntryIdentity8616, ...] = ()
+
+    def target_identity(self, target_addr: int) -> int:
+        """Use the same proven identity for lookup and recursive-cycle checks."""
+        return caller_target_identity_8616(target_addr, self.entry_identities)
 
     def for_target(self, target_addr: int) -> tuple[DecodedDirectCallsite8616, ...]:
         """Return exact callsites for the existing 16-bit target identity rule."""
-        return self._entries_by_normalized_target.get(target_addr & 0xFFFF, ())
+        target = self.target_identity(target_addr)
+        return self._entries_by_normalized_target.get(target, ())
 
 
 def build_decoded_direct_callsite_index_8616(
@@ -80,12 +89,21 @@ def build_decoded_direct_callsite_index_8616(
     *,
     direct_target_resolver: DirectCallTargetResolver8616,
     instruction_address_resolver: InstructionAddressResolver8616,
+    entry_identities: Mapping[tuple[int, int], CallerEntryIdentity8616] | None = None,
 ) -> DecodedDirectCallsiteIndex8616:
     """Scan decoded instructions once and return a closed direct-call index."""
     mutable_entries: dict[int, list[DecodedDirectCallsite8616]] = {}
     raw_fact_count = 0
     failure_count = 0
-    for (caller_start, _caller_end), instructions in sorted(decoded_ranges.items()):
+    identities = {} if entry_identities is None else entry_identities
+    if entry_identities is not None and set(identities) != set(decoded_ranges):
+        raise ValueError("caller entry identities do not cover the decoded ranges")
+    ordered_identities = tuple(identities[key] for key in sorted(identities))
+    for caller_range, instructions in sorted(decoded_ranges.items()):
+        identity = identities.get(caller_range)
+        caller_start = caller_range[0] if identity is None else identity.entry_addr
+        if identity is not None and (identity.decode_start, identity.decode_end) != caller_range:
+            raise ValueError(f"caller entry identity disagrees with decode range {caller_range!r}")
         for instruction_index, instruction in enumerate(instructions):
             target_addr = direct_target_resolver(instruction)
             if not isinstance(target_addr, int):
@@ -95,7 +113,7 @@ def build_decoded_direct_callsite_index_8616(
             if not isinstance(callsite_addr, int):
                 failure_count += 1
                 continue
-            normalized_target = target_addr & 0xFFFF
+            normalized_target = caller_target_identity_8616(target_addr, ordered_identities)
             mutable_entries.setdefault(normalized_target, []).append(
                 DecodedDirectCallsite8616(
                     caller_start=caller_start,
@@ -103,6 +121,7 @@ def build_decoded_direct_callsite_index_8616(
                     instruction_index=instruction_index,
                     callsite_addr=callsite_addr,
                     target_addr=target_addr,
+                    entry_identity=identity,
                 )
             )
     entries = {
@@ -119,4 +138,4 @@ def build_decoded_direct_callsite_index_8616(
     )
     if not stats.closed:
         raise ValueError("decoded direct-call index accounting did not close")
-    return DecodedDirectCallsiteIndex8616(entries, stats)
+    return DecodedDirectCallsiteIndex8616(entries, stats, ordered_identities)

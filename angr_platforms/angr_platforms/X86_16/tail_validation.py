@@ -2765,7 +2765,7 @@ def _node_boundary_fingerprint(
             "retval",
         ):
             if hasattr(node, attr):
-                fields.append((attr, _node_boundary_fingerprint(getattr(node, attr, None), project)))  # noqa: PERF401
+                fields.append((attr, _node_boundary_fingerprint(getattr(node, attr, None), project)))
         return (type(node).__name__, tuple(fields))
 
     result = _impl()
@@ -3111,7 +3111,7 @@ def _tail_validation_changed_family_summary(
 
         summarized = []
         for row in rows.values():
-            summarized.append(  # noqa: PERF401
+            summarized.append(
                 {
                     "family": row["family"],
                     "count": row["count"],

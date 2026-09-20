@@ -2,13 +2,17 @@
 
 import subprocess
 
+import pytest
+from angr_platforms.X86_16.lowering.gp_word_runtime import GPRegisterRuntimeABI8616
+
 from scripts import build_msc6_examples as build
-from scripts.msc6_runtime_support import msc6_runtime_support_source
+from scripts.msc6_runtime_support import msc6_runtime_state_declarations, msc6_runtime_support_source
 
 GP_REGISTERS = ("eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp")
 
 
-def test_msc6_runtime_defines_shared_gp_state(monkeypatch, tmp_path):
+@pytest.mark.parametrize("abi", list(GPRegisterRuntimeABI8616))
+def test_msc6_runtime_defines_shared_gp_state(monkeypatch, tmp_path, abi):
     """Use the real runtime writer, then link a separate C state consumer."""
     monkeypatch.setattr(
         build, "_run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "", ""),
@@ -16,10 +20,10 @@ def test_msc6_runtime_defines_shared_gp_state(monkeypatch, tmp_path):
     build._compile_and_link_unlocked(
         tmp_path / "consumer.c", tmp_path, kvikdos=tmp_path / "kvikdos",
         msc6_root=tmp_path, obj_name="TEST.OBJ", exe_name="TEST.EXE",
-        map_name="TEST.MAP", runtime_support=True,
+        map_name="TEST.MAP", runtime_support=True, gp_runtime_abi=abi,
     )
     consumer = tmp_path / "consumer.c"
-    declarations = "\n".join(f"extern unsigned long inertia_{name};" for name in GP_REGISTERS)
+    declarations = msc6_runtime_state_declarations(abi)
     checks = "\n".join(
         f"inertia_{name} = 0xabcd1234UL;\n"
         f"inertia_{name} = (inertia_{name} & 0xffff0000UL) | 0x8173UL;\n"
@@ -43,7 +47,6 @@ def test_c89_preparation_preserves_gp_runtime_abi_width(tmp_path):
         "unsigned long read_lane(void) { return inertia_esi; }\n"
     )
     source = prepared + """
-extern unsigned long inertia_esi;
 int main(void) {
     inertia_esi = 0xabcd8173UL;
     return read_lane() != 0xabcd8173UL;

@@ -807,7 +807,7 @@ def transfer_typed_conditions_from_emulator_8616(
             if isinstance(conds, list):
                 for cond in conds:
                     if isinstance(cond, ConditionIR):
-                        all_conditions.append(cond)  # noqa: PERF401
+                        all_conditions.append(cond)
 
     unique = deduplicate_conditions_8616(all_conditions)
     typing.cast(typing.Any, codegen)._inertia_typed_conditions = unique

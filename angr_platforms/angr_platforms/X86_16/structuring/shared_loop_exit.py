@@ -1,6 +1,10 @@
 """Preserve dispatch exits represented by breaks and a shared epilogue.
 
 Layer: Structuring.
+Owns CFG shape, loops, switches, and structured condition lowering from proven
+IR/semantic evidence. Do not perform alias-state ownership, widening,
+type/materialization recovery, rewrite cleanup, postprocess, or CLI/reporting
+work here.
 Responsibility: bind binary exit evidence to an immutable structured surface.
 Validation may compare these read-only snapshots, but must not mint new proof.
 No body replacement, rendered-text recovery or effect deletion belongs here.

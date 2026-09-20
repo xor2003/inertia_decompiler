@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from pytest import MonkeyPatch
 
 from scripts import msc6_runtime_gate_artifacts as artifact_gate
@@ -121,6 +122,44 @@ def test_runtime_gate_cache_serializes_concurrent_producers(tmp_path: Path) -> N
     assert (inputs.cache_root / "producer-count.txt").read_text(encoding="utf-8") == "1"
 
 
+@pytest.mark.parametrize("timed_out", [False, True])
+@pytest.mark.parametrize("cacheable", [False, True])
+def test_incomplete_batch_artifacts_survive_another_producer(
+    tmp_path: Path, monkeypatch: MonkeyPatch, timed_out: bool, cacheable: bool,
+) -> None:
+    """A sibling failure must not expose successful evidence to retry deletion."""
+    inputs = _inputs(tmp_path)
+    inputs = replace(inputs, examples=(*inputs.examples, ("sibling", inputs.examples[0][1])))
+    monkeypatch.setattr(artifact_gate, "_cache_key", lambda _inputs: "stable-inputs" if cacheable else None)
+    attempts = 0
+
+    def run_batch(_inputs, output_root):
+        nonlocal attempts
+        attempts += 1
+        artifact = output_root / "sample.dec.txt"
+        artifact.write_text(str(attempts), encoding="utf-8")
+        accepted = subprocess.CompletedProcess([], 0, "status=passed run_exit=255", "")
+        sibling = accepted
+        if attempts == 1:
+            sibling = (
+                subprocess.TimeoutExpired(["gate"], 1)
+                if timed_out else subprocess.CompletedProcess([], 1, "", "failed")
+            )
+        return {"sample": accepted, "sibling": sibling}
+
+    monkeypatch.setattr(artifact_gate, "_run_all", run_batch)
+    first = load_or_run_msc6_runtime_gate(inputs)
+    second = load_or_run_msc6_runtime_gate(inputs)
+
+    assert (first.output_root / "sample.dec.txt").read_text() == "1"
+    assert (second.output_root / "sample.dec.txt").read_text() == "2"
+    assert first.output_root != second.output_root
+    assert not first.cache_hit
+    assert not second.cache_hit
+    assert not artifact_gate._result_is_accepted(first.results["sibling"], inputs.expected_exit_code)
+    assert load_or_run_msc6_runtime_gate(inputs).cache_hit is cacheable
+
+
 def test_runtime_gate_defaults_to_one_example_controller(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -171,7 +210,8 @@ def test_runtime_gate_controller_watchdog_scales_with_function_budget(
 
     assert name == "sample"
     assert isinstance(result, subprocess.CompletedProcess)
-    assert captured_timeout == 1440
+    expected_controller_timeout = inputs.timeout_seconds * 12
+    assert captured_timeout == expected_controller_timeout
 
 
 def test_parallel_example_controllers_share_two_nested_decompiler_workers(

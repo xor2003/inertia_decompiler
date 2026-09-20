@@ -857,6 +857,7 @@ def test_full_lift_unmodeled_register_write_invalidates_condition_value() -> Non
 
 def test_indexed_byte_load_provenance_survives_word_cmp_operand_recovery():
     from angr_platforms.X86_16.arch_86_16 import Arch86_16
+    from angr_platforms.X86_16.ir.condition_value_extensions import sign_extend_condition_value_8616
     from angr_platforms.X86_16.lift_86_16 import Instruction_ANY
 
     original_index_state = dict(
@@ -904,14 +905,14 @@ def test_indexed_byte_load_provenance_survives_word_cmp_operand_recovery():
             original_value_state
         )
 
-    assert lhs == IRValue(
+    assert lhs == sign_extend_condition_value_8616(IRValue(
         MemSpace.DS,
         offset=0xB4A,
-        size=2,
+        size=1,
         index=IRValue(MemSpace.SS, name="bp", offset=-4, size=2),
         index_shift=1,
         memory_access_size=1,
-    )
+    ), 2)
     assert rhs == IRValue(
         MemSpace.SS,
         name="bp",

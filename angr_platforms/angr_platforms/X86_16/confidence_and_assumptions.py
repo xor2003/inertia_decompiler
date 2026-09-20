@@ -178,14 +178,14 @@ class FunctionConfidenceReport:
         if self.assumptions:
             lines.append(f"// Assumptions: {len(self.assumptions)} recorded")
             for assumption in self.assumptions[:3]:  # Show first 3
-                lines.append(f"//   - {assumption}")  # noqa: PERF401
+                lines.append(f"//   - {assumption}")
             if len(self.assumptions) > 3:
                 lines.append(f"//   ... and {len(self.assumptions) - 3} more")
 
         if self.critical_unknowns:
             lines.append("// ⚠️ CRITICAL UNKNOWNS:")
             for unknown in self.critical_unknowns:
-                lines.append(f"//   - {unknown}")  # noqa: PERF401
+                lines.append(f"//   - {unknown}")
 
         return "\n".join(lines)
 

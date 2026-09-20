@@ -44,6 +44,16 @@ from scripts.check_sortd_sidecar_free import mz_executable_image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SORTD_EXE = REPO_ROOT / "SORTD.EXE"
+_INIT_BARS_ADDR = 0x10560
+_INITIALIZATION_ADDR = 0x105F0
+_UPDATE_ADDR = 0x105F8
+_GUARD_ADDR = 0x105FB
+_GUARD_TAKEN_ADDR = 0x10607
+_GUARD_FALLTHROUGH_ADDR = 0x10604
+_COMPUTED_COLOR_ADDR = 0x10654
+_CONSTANT_COLOR_ADDR = 0x10647
+_BACKEDGE_ADDR = 0x10666
+_INDEXED_FACT_COUNT = 3
 
 
 def test_sortd_initbars_overlap_prefix_reaches_canonical_guard(
@@ -68,7 +78,7 @@ def test_sortd_initbars_overlap_prefix_reaches_canonical_guard(
     function = next(
         candidate
         for _cfg, candidate in recovered
-        if candidate.addr == 0x10560
+        if candidate.addr == _INIT_BARS_ADDR
     )
 
     artifact = build_x86_16_ir_function_artifact(project, function)
@@ -78,8 +88,8 @@ def test_sortd_initbars_overlap_prefix_reaches_canonical_guard(
     assert artifact.condition_evidence is not None
     assert artifact.condition_evidence.complete
     assert ssa.condition_evidence is artifact.condition_evidence
-    assert artifact.condition_evidence.conditions_for_block(0x105F8) == ()
-    guard_conditions = artifact.condition_evidence.conditions_for_block(0x105FB)
+    assert artifact.condition_evidence.conditions_for_block(_UPDATE_ADDR) == ()
+    guard_conditions = artifact.condition_evidence.conditions_for_block(_GUARD_ADDR)
     assert len(guard_conditions) == 1
     guard = guard_conditions[0]
     assert guard.op == "sgt"
@@ -95,14 +105,29 @@ def test_sortd_initbars_overlap_prefix_reaches_canonical_guard(
         -2,
         2,
     )
-    assert guard.taken_target == 0x10607
-    assert guard.fallthrough_target == 0x10604
-    assert artifact.summary["block_successor_rewrite_materialized_count"] >= 1
+    assert guard.taken_target == _GUARD_TAKEN_ADDR
+    assert guard.fallthrough_target == _GUARD_FALLTHROUGH_ADDR
+    # Coherent frontend graphs need no repair; require the resulting topology.
+    blocks = {block.addr: block for block in artifact.blocks}
+    assert blocks[_UPDATE_ADDR].successor_addrs == (_GUARD_ADDR,)
+    assert set(blocks[_GUARD_ADDR].successor_addrs) == {_GUARD_FALLTHROUGH_ADDR, _GUARD_TAKEN_ADDR}
+    summary = artifact.summary
+    assert (
+        summary["block_successor_rewrite_raw_fact_count"]
+        == summary["block_successor_rewrite_normalized_fact_count"]
+        == summary["block_successor_rewrite_classified_fact_count"]
+        == summary["block_successor_rewrite_materialized_count"]
+    )
     assert artifact.summary["block_successor_rewrite_failure_count"] == 0
-    assert ssa.predecessor_map[0x105F8] == (0x10654, 0x10666)
-    assert ssa.predecessor_map[0x105FB] == (0x105E9, 0x105F8)
-    assert ssa.predecessor_map[0x10604] == (0x105FB,)
-    assert ssa.predecessor_map[0x10607] == (0x105FB,)
+    # Both color paths reach the distinct jump block, not the update directly.
+    assert blocks[_COMPUTED_COLOR_ADDR].successor_addrs == (_BACKEDGE_ADDR,)
+    assert blocks[_CONSTANT_COLOR_ADDR].successor_addrs == (_BACKEDGE_ADDR,)
+    assert blocks[_BACKEDGE_ADDR].successor_addrs == (_UPDATE_ADDR,)
+    assert ssa.predecessor_map[_BACKEDGE_ADDR] == (_CONSTANT_COLOR_ADDR, _COMPUTED_COLOR_ADDR)
+    assert ssa.predecessor_map[_UPDATE_ADDR] == (_BACKEDGE_ADDR,)
+    assert ssa.predecessor_map[_GUARD_ADDR] == (0x105E9, _UPDATE_ADDR)
+    assert ssa.predecessor_map[_GUARD_FALLTHROUGH_ADDR] == (_GUARD_ADDR,)
+    assert ssa.predecessor_map[_GUARD_TAKEN_ADDR] == (_GUARD_ADDR,)
 
     indexed = collect_indexed_address_evidence_8616(ssa)
     writes = trace_logical_word_write_values_8616(ssa)
@@ -113,7 +138,7 @@ def test_sortd_initbars_overlap_prefix_reaches_canonical_guard(
     )
     ranges = collect_indexed_loop_ranges_from_ssa_8616(ssa, indexed)
 
-    assert len(candidates) == len(indexed.facts) == 3
+    assert len(candidates) == len(indexed.facts) == _INDEXED_FACT_COUNT
     assert all(candidate.upper_bound is None for candidate in candidates)
     assert all(not candidate.upper_bound_is_constant for candidate in candidates)
     assert all(candidate.guard is not None for candidate in candidates)
@@ -122,26 +147,26 @@ def test_sortd_initbars_overlap_prefix_reaches_canonical_guard(
         candidate.init_write is not None
         and candidate.init_write.kind
         is LogicalWordWriteValueKind8616.CONSTANT_ZERO
-        and candidate.init_write.access.key.insn_addr == 0x105F0
+        and candidate.init_write.access.key.insn_addr == _INITIALIZATION_ADDR
         for candidate in candidates
     )
     assert all(
         candidate.step_write is not None
         and candidate.step_write.kind
         is LogicalWordWriteValueKind8616.OLD_LOGICAL_WORD_PLUS_ONE
-        and candidate.step_write.access.key.insn_addr == 0x105F8
+        and candidate.step_write.access.key.insn_addr == _UPDATE_ADDR
         for candidate in candidates
     )
     assert ranges.closed
     assert ranges.facts == ()
-    assert ranges.stats.raw_fact_count == ranges.stats.failure_count == 3
+    assert ranges.stats.raw_fact_count == ranges.stats.failure_count == _INDEXED_FACT_COUNT
     assert {
         refusal.failure for refusal in ranges.refusals
     } == {IndexedLoopRangeFailureKind8616.DYNAMIC_BOUND}
 
     program = build_indexed_alias_program_evidence_8616(
         project,
-        (IndexedAliasFunctionSelection8616(0x10560, function),),
+        (IndexedAliasFunctionSelection8616(_INIT_BARS_ADDR, function),),
     )
     layouts = recover_global_object_layout_evidence_8616(program)
     project_ranges = recover_program_bounded_global_object_ranges_8616(

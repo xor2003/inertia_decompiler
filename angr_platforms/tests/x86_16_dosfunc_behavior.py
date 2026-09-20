@@ -7,6 +7,11 @@ Responsibility: verify generated calls, error messages, arguments and returns.
 import subprocess
 from pathlib import Path
 
+from angr_platforms.X86_16.lowering.gp_word_runtime import (
+    coherent_gp_runtime_definitions_8616,
+    coherent_gp_runtime_header_8616,
+)
+
 _HARNESS = r'''
 #include GENERATED_C
 #include <stdarg.h>
@@ -14,7 +19,6 @@ _HARNESS = r'''
 
 REGS rin, rout;
 SREGS sreg;
-unsigned long inertia_eax;
 static unsigned expected_segment, expected_result, expected_flag;
 static unsigned calls, errors, bad;
 
@@ -61,7 +65,8 @@ def assert_dos_free_behavior(text: str, directory: Path) -> None:
     harness = directory / "harness.c"
     executable = directory / "dos-free"
     generated.write_text(text, encoding="utf-8")
-    harness.write_text(_HARNESS, encoding="ascii")
+    runtime = coherent_gp_runtime_header_8616() + coherent_gp_runtime_definitions_8616()
+    harness.write_text(runtime + _HARNESS, encoding="ascii")
     compiled = subprocess.run(
         ["gcc", "-std=c11", "-Werror", "-O2", f'-DGENERATED_C="{generated}"',
          str(harness), "-o", str(executable)],

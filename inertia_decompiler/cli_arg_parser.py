@@ -10,6 +10,8 @@ import argparse
 import os
 from pathlib import Path
 
+from .catalog_policy import DEFAULT_CATALOG_TIMEOUT, positive_catalog_timeout
+
 __all__ = ["CliArguments", "_build_cli_argument_parser", "parse_cli_arguments"]
 
 
@@ -32,6 +34,7 @@ class CliArguments(argparse.Namespace):
     proc: str | None
     proc_kind: str
     timeout: int
+    catalog_timeout: int
     window: int
     exact_region_end: int | None
     max_memory_mb: int
@@ -159,6 +162,12 @@ def _build_cli_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=60,
         help="Analysis timeout in seconds. Defaults to 60.",
+    )
+    parser.add_argument(
+        "--catalog-timeout",
+        type=positive_catalog_timeout,
+        default=os.environ.get("INERTIA_CATALOG_TIMEOUT", str(DEFAULT_CATALOG_TIMEOUT)),
+        help="Candidate catalog recovery budget in seconds (default: 60; INERTIA_CATALOG_TIMEOUT). Independent of --timeout.",
     )
     parser.add_argument(
         "--window",

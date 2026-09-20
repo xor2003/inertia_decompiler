@@ -14,10 +14,11 @@ from angr_platforms.X86_16.structuring import condition_materialization as owner
 
 
 @pytest.mark.parametrize("signed", [False, True])
+@pytest.mark.parametrize("refine_declaration", [False, True])
 @pytest.mark.parametrize("variable_on_left", [False, True])
 @pytest.mark.parametrize(("width", "type_class", "scale"), [(16, SimTypeShort, 1), (32, SimTypeLong, 65537)])
 def test_condition_materialization_preserves_ordering_over_opposite_storage(
-    monkeypatch, signed, variable_on_left, width, type_class, scale, tmp_path,
+    monkeypatch, signed, refine_declaration, variable_on_left, width, type_class, scale, tmp_path,
 ):
     """Operand signedness is a view, not permission to mutate shared storage."""
     arch = Arch86_16()
@@ -26,7 +27,7 @@ def test_condition_materialization_preserves_ordering_over_opposite_storage(
         project=SimpleNamespace(arch=arch), show_casts=False, display_vvar_ids=False,
         cstyle_null_cmp=False, const_formats={},
     )
-    storage_type = type_class(not signed).with_arch(arch)
+    storage_type = type_class(signed if refine_declaration else not signed).with_arch(arch)
     variable = c.CVariable(
         SimMemoryVariable(0x200, width // 8, name="value"),
         variable_type=storage_type, codegen=codegen,
@@ -43,6 +44,9 @@ def test_condition_materialization_preserves_ordering_over_opposite_storage(
     assert converted.dst_type.signed is signed
     assert converted.expr is variable
     assert variable.variable_type is storage_type
+    if refine_declaration:
+        # Later declaration refinement must not erase the earlier ordering proof.
+        variable.variable_type = type_class(not signed).with_arch(arch)
     rendered = "".join(text for text, _node in result.c_repr_chunks())
     storage = f"{'u' if signed else ''}int{width}_t"
     interpreted = (

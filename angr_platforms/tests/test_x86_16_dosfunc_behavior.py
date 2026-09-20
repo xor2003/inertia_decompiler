@@ -14,7 +14,6 @@ typedef union REGS {
 typedef struct SREGS { unsigned short es, cs, ss, ds; } SREGS;
 extern REGS rin, rout;
 extern SREGS sreg;
-extern unsigned long inertia_eax;
 int intdosx(REGS *, REGS *, SREGS *);
 int ERROR(const char *, ...);
 """

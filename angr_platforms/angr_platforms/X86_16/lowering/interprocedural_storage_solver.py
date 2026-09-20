@@ -28,6 +28,7 @@ from .interprocedural_storage_function_solver import (
     join_function_storage_trials_8616,
     resolve_joined_function_storage_trials_8616,
 )
+from .interprocedural_storage_return_discard import discarded_return_census_proves_empty_8616
 
 __all__ = ["resolve_program_storage_trials_8616"]
 
@@ -107,6 +108,16 @@ def _deterministic_sccs_8616(
     return tuple(sorted(components, key=lambda item: item[0]))
 
 
+def _direct_output_seed_8616(
+    joined: FunctionStorageTrialJoin8616, scc: tuple[int, ...],
+) -> _OutputSeed8616 | None:
+    """Add empty seeds only from a closed independent discarded-result census."""
+    seed: _OutputSeed8616 | None = joined.direct_output_seed
+    if seed is not None or joined.failures:
+        return seed
+    return () if discarded_return_census_proves_empty_8616(joined.trials, frozenset(scc)) else None
+
+
 def _next_scc_output_state_8616(
     scc: tuple[int, ...],
     joined_by_addr: dict[int, FunctionStorageTrialJoin8616],
@@ -114,7 +125,7 @@ def _next_scc_output_state_8616(
 ) -> _SCCOutputState8616:
     """Advance direct seeds through exact recursive pass-through relations once."""
     direct_outputs = tuple(
-        (function_addr, joined_by_addr[function_addr].direct_output_seed)
+        (function_addr, _direct_output_seed_8616(joined_by_addr[function_addr], scc))
         for function_addr in scc
     )
     passthrough_outputs: list[tuple[int, _OutputSeed8616 | None]] = []
@@ -184,6 +195,7 @@ def resolve_program_storage_trials_8616(
             resolution = resolve_joined_function_storage_trials_8616(
                 joined_by_addr[address],
                 output_state.passthrough_for(address),
+                recursive_callers=frozenset(scc),
             )
             resolved[address] = resolution
     ordered = tuple(resolved[address] for address in sorted(resolved))

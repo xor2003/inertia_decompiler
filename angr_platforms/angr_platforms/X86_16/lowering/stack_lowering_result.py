@@ -97,5 +97,5 @@ def materialization_diagnostics_8616(result: StackLoweringResult) -> str:
     if result.failures:
         lines.append(f"  Failures: {len(result.failures)} slots not materialized")
         for f in result.failures:
-            lines.append(f"    SS:BP{f.offset:+d} ({f.size} bytes): {f.reason}")  # noqa: PERF401
+            lines.append(f"    SS:BP{f.offset:+d} ({f.size} bytes): {f.reason}")
     return "\n".join(lines)

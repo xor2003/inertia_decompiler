@@ -16,6 +16,7 @@ extern int color_calls;
 extern unsigned short last_color;
 extern unsigned short colors[8];
 extern unsigned short last_divisor;
+int beep_timer_programming_matches(unsigned short frequency);
 extern int background_calls;
 extern int key_calls;
 extern int display_cursor_calls;
@@ -224,7 +225,7 @@ int main(void)
         return 24;
     if (output_ports[0] != 67 || output_values[0] != 182)
         return 25;
-    if (output_ports[1] != 66 || output_ports[2] != 66)
+    if (!beep_timer_programming_matches(120))
         return 26;
     if (output_ports[3] != 97 || output_values[3] != 0x33)
         return 27;

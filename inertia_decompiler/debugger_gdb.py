@@ -715,7 +715,7 @@ class GDBServer:
                         # Approximate length
                         insn_len = 2
                         if (modrm & 0xC0) == 0x00:
-                            if (modrm & 0x07) == 0x05:  # noqa: SIM108
+                            if (modrm & 0x07) == 0x05:
                                 insn_len = 6  # disp32
                             else:
                                 insn_len = 2

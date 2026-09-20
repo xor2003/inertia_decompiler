@@ -1,6 +1,10 @@
 """Publish immutable shared-loop exit proof at the Structuring boundary.
 
 Layer: Structuring.
+Owns CFG shape, loops, switches, and structured condition lowering from proven
+IR/semantic evidence. Do not perform alias-state ownership, widening,
+type/materialization recovery, rewrite cleanup, postprocess, or CLI/reporting
+work here.
 Responsibility: connect owned SSA/CFG and dispatch evidence to one codegen
 surface. A published positive proof is never refreshed from a mutated AST.
 """

@@ -621,7 +621,7 @@ def _debug_signatures(exe_path: Path) -> list[str]:
     signatures: list[str] = []
     for signature in (b"NB00", b"NB02", b"NB04", b"NB05", b"NB08", b"NB09"):
         if signature in data:
-            signatures.append(signature.decode("ascii"))  # noqa: PERF401
+            signatures.append(signature.decode("ascii"))
     if b"\xfb\x52" in data:
         signatures.append("TDINFO_MAGIC")
     return signatures

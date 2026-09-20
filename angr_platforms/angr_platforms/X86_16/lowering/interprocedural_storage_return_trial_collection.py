@@ -71,6 +71,7 @@ from .interprocedural_storage_return_defs import (
     CallOutputDefinitionFailure8616,
     resolve_call_output_definitions_8616,
 )
+from .interprocedural_storage_return_discard import DiscardedReturnTrial8616
 from .interprocedural_storage_return_passthrough import (
     materialize_return_passthrough_trial_8616,
 )
@@ -143,6 +144,10 @@ def _return_census_complete_8616(evidence: CallerReturnUseEvidence8616) -> bool:
     included = tuple(fact for fact in evidence.facts if not fact.excluded_recursive_passthrough)
     used = sum(fact.verdict is CallerReturnUseVerdict8616.USED for fact in included)
     unused = sum(fact.verdict is CallerReturnUseVerdict8616.UNUSED for fact in included)
+    discard_facts_complete = all(
+        DiscardedReturnTrial8616(evidence.target_addr, fact).is_complete
+        for fact in included if fact.verdict is CallerReturnUseVerdict8616.UNUSED
+    )
     expected_verdict = CallerReturnUseVerdict8616.UNKNOWN
     if used:
         expected_verdict = CallerReturnUseVerdict8616.USED
@@ -150,6 +155,7 @@ def _return_census_complete_8616(evidence: CallerReturnUseEvidence8616) -> bool:
         expected_verdict = CallerReturnUseVerdict8616.UNUSED
     return (
         evidence.fact_census_complete
+        and discard_facts_complete
         and bool(evidence.facts)
         and evidence.failure_count == 0
         and evidence.excluded_callsite_count == len(evidence.facts) - len(included)
@@ -492,7 +498,7 @@ def collect_function_return_storage_trials_8616(
                 materialized_count += 1
                 continue
             if fact.verdict is CallerReturnUseVerdict8616.UNUSED:
-                merged.append(callsite)
+                merged.append(replace(callsite, discarded_return=DiscardedReturnTrial8616(callee_addr, fact)))
                 materialized_count += 1
                 continue
             return_trials, failure = materialize_callsite_return_trials_8616(

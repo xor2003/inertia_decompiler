@@ -23,10 +23,12 @@ from ..c_ast_utils import (
     _iter_c_nodes_deep_8616,
     _structured_slot_names_8616,
 )
+from ..ir.status_flag_lift_context import StatusFlagLiftArtifact8616
 from ..semantics.expression_analysis import (
     VirtualValueIdentityKind8616,
     describe_virtual_value_identity_8616,
 )
+from .packed_flags_calls import call_has_no_implicit_status_inputs_8616, flag_artifact_for_structured_root_8616
 from .physical_registers import physical_register_offset_8616
 
 type _ValueKey = tuple[str, int | str, int | str | None]
@@ -95,7 +97,8 @@ def _pure_value(root: object) -> bool:
         if isinstance(node, (c.CVariable, c.CDirtyExpression)) and _value_keys(node):
             continue
         if isinstance(node, c.CBinaryOp) and node.op in {
-            "And", "Or", "Xor", "Add", "Sub", "Mul", "Shl", "Shr", "CmpEQ",
+            "And", "Or", "Xor", "Add", "Sub", "Mul", "Mull", "Shl", "Shr",
+            "CmpEQ", "CmpNE", "CmpLT", "CmpLE", "CmpGT", "CmpGE",
         }:
             continue
         if isinstance(node, c.CUnaryOp) and node.op in {"Not", "Neg", "BitwiseNeg"}:
@@ -151,17 +154,53 @@ class PackedFlagsCycleStats8616:
     failure_count: int = 0
 
 
-def prune_unobserved_flag_cycles_8616(root: object, flags_offset: int) -> PackedFlagsCycleStats8616:
+def _flag_component_candidates(
+    blocks: tuple[c.CStatements, ...], flags_offset: int,
+) -> tuple[dict[int, c.CAssignment], int]:
+    """Include pure register carriers connected to physical FLAGS definitions."""
+    definitions = {
+        id(statement): statement
+        for block in blocks for statement in block.statements
+        if isinstance(statement, c.CAssignment) and _value_keys(statement.lhs)
+    }
+    connected = {
+        key for statement in definitions.values()
+        if physical_register_offset_8616(statement.lhs) == flags_offset
+        for key in _value_keys(statement.lhs)
+    }
+    pure = {identity: statement for identity, statement in definitions.items() if _pure_value(statement.rhs)}
+    selected: dict[int, c.CAssignment] = {}
+    while True:
+        added = False
+        for identity, statement in pure.items():
+            keys = _value_keys(statement.lhs) | (_read_keys(statement.rhs, flags_offset) or set())
+            if identity not in selected and not keys.isdisjoint(connected):
+                selected[identity] = statement
+                connected.update(keys)
+                added = True
+        if not added:
+            return selected, len(definitions)
+
+
+def prune_unobserved_flag_cycles_8616(
+    root: object, flags_offset: int, *, lift_artifact: StatusFlagLiftArtifact8616 | None = None,
+) -> PackedFlagsCycleStats8616:
     """Remove pure flag-only dependency components without an external consumer.
 
     Call only after complete condition materialization. Reads by any retained
     statement are roots; liveness propagates backward through every definition
-    sharing an existing SSA/unified-storage key. Calls and opaque payloads refuse
-    the proof because they may carry architectural effects outside this census.
+    sharing an existing SSA/unified-storage key. Calls require binary evidence
+    proving no implicit status inputs; explicit arguments always remain roots.
+    Opaque payloads refuse effects outside this census.
     """
     nodes = tuple(_iter_c_nodes_deep_8616(root))
-    opaque_types = (c.CFunctionCall, c.CDirtyStatement, c.CUnsupportedStatement, c.CAILBlock, c.CVEXCCallExpression)
-    if any(isinstance(node, opaque_types) for node in nodes):
+    lift_artifact = lift_artifact or flag_artifact_for_structured_root_8616(root)
+    opaque_types = (c.CDirtyStatement, c.CUnsupportedStatement, c.CAILBlock, c.CVEXCCallExpression)
+    if any(
+        isinstance(node, opaque_types)
+        or (isinstance(node, c.CFunctionCall) and not call_has_no_implicit_status_inputs_8616(node, lift_artifact))
+        for node in nodes
+    ):
         return PackedFlagsCycleStats8616(failure_count=1)
     blocks = tuple(node for node in nodes if isinstance(node, c.CStatements))
     definitions = {
@@ -172,19 +211,16 @@ def prune_unobserved_flag_cycles_8616(root: object, flags_offset: int) -> Packed
     }
     if any(not _value_keys(statement.lhs) for statement in definitions.values()):
         return PackedFlagsCycleStats8616(len(definitions), failure_count=1)
-    candidates = {
-        key: statement for key, statement in definitions.items()
-        if _value_keys(statement.lhs) and _pure_value(statement.rhs)
-    }
+    candidates, definition_count = _flag_component_candidates(blocks, flags_offset)
     live = _read_keys(root, flags_offset, frozenset(candidates))
     if live is None:
-        return PackedFlagsCycleStats8616(len(definitions), len(candidates), failure_count=1)
+        return PackedFlagsCycleStats8616(definition_count, len(candidates), failure_count=1)
     dependencies = {
         key: (_value_keys(statement.lhs), _read_keys(statement.rhs, flags_offset))
         for key, statement in candidates.items()
     }
     if any(inputs is None for _outputs, inputs in dependencies.values()):
-        return PackedFlagsCycleStats8616(len(definitions), len(candidates), failure_count=1)
+        return PackedFlagsCycleStats8616(definition_count, len(candidates), failure_count=1)
     # Start at observable reads, not at the cycle's own reads. This is the least
     # fixed point; seeding every backedge read would keep every dead cycle alive.
     while True:
@@ -199,4 +235,4 @@ def prune_unobserved_flag_cycles_8616(root: object, flags_offset: int) -> Packed
     dead = {key for key, (outputs, _inputs) in dependencies.items() if outputs.isdisjoint(live)}
     for block in blocks:
         block.statements = [statement for statement in block.statements if id(statement) not in dead]
-    return PackedFlagsCycleStats8616(len(definitions), len(candidates), len(dead), len(dead))
+    return PackedFlagsCycleStats8616(definition_count, len(candidates), len(dead), len(dead))

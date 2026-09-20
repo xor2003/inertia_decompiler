@@ -3709,7 +3709,7 @@ def materialize_empty_if_return_branches_8616(
                 assignment_fps = []
                 for child in child_items:
                     if isinstance(child, CAssignment):
-                        assignment_fps.append(  # noqa: PERF401
+                        assignment_fps.append(
                             (
                                 callbacks.expr_fingerprint(child.lhs, project),
                                 callbacks.expr_fingerprint(child.rhs, project),

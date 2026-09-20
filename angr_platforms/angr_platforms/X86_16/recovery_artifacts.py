@@ -123,7 +123,7 @@ def _mapping_rows(value: object) -> tuple[dict[str, object], ...]:
     rows: list[dict[str, object]] = []
     for item in value:
         if isinstance(item, Mapping):
-            rows.append({str(key): row_value for key, row_value in item.items()})  # noqa: PERF401
+            rows.append({str(key): row_value for key, row_value in item.items()})
     return tuple(rows)
 
 

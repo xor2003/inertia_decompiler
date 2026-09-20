@@ -155,7 +155,7 @@ def format_validation_aggregate_report_8616(agg: ValidationAggregate) -> str:
             lines.append("")
             lines.append("  Uncollected functions:")
             for name in sorted(uncollected_names):
-                lines.append(f"    - {name}")  # noqa: PERF401
+                lines.append(f"    - {name}")
     return "\n".join(lines)
 
 

@@ -7,7 +7,10 @@ from scripts.check_sortd_sidecar_free import evaluate_sortd_transcript
 
 
 @pytest.mark.parametrize(("argument", "accepted"), [
+    ("arg * 60, 75", True),
     ("(unsigned short)arg * 60, 75", True),
+    ("((unsigned short) arg) * 60, 75", True),
+    ("((short) arg) * 60, 75", False),
     ("(short)arg * 60, 75", False),
     ("(unsigned short)arg, 75", False),
     ("(unsigned short)arg * 60, 76", False),

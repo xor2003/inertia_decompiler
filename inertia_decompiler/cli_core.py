@@ -4446,6 +4446,8 @@ def _prepare_main_project_8616(
             else:
                 cod_image = build_cod_analysis_image_8616(selected_entries, image_base=args.base_addr)
             proc_code = cod_image.code
+            # The fixture body ends before synthetic callees, not at a guessed fast window.
+            args.exact_region_end = args.base_addr + min(cod_image.call_target_offsets, default=len(proc_code))
             synthetic_globals = cod_image.synthetic_globals
             project = _build_project_from_bytes(
                 proc_code,
@@ -7784,6 +7786,7 @@ def _run_main_cli_8616(argv: list[str] | None) -> int:
             low_memory=low_memory_path,
             auto_rizin_policy=os.environ.get("INERTIA_AUTO_RIZIN_8616", "default"),
             signature_catalog=effective_signature_catalog,
+            catalog_timeout=args.catalog_timeout,
         ),
     )
     interactive_stdout = _stdout_is_interactive()
@@ -7928,11 +7931,11 @@ def _run_main_cli_8616(argv: list[str] | None) -> int:
                     seeded_recovery_result = _run_with_timeout_in_daemon_thread(
                         lambda: _recover_seeded_exe_functions(
                             project,
-                            timeout=min(max(4, args.timeout), 8),
+                            timeout=args.catalog_timeout,
                             limit=discovery_limit,
                             return_addrs=True,
                         ),
-                        timeout=min(max(4, args.timeout + 2), 8),
+                        timeout=args.catalog_timeout + 2,
                         thread_name_prefix="seed-catalog",
                     )
                     if isinstance(seeded_recovery_result, tuple) and len(seeded_recovery_result) == 2:
@@ -7961,7 +7964,7 @@ def _run_main_cli_8616(argv: list[str] | None) -> int:
             function_cfg_pairs = _recover_cached_function_pairs(
                 project,
                 addrs=cached_catalog_addrs,
-                timeout=min(max(4, args.timeout), 8),
+                timeout=args.catalog_timeout,
                 limit=discovery_limit,
             )
             if function_cfg_pairs:
@@ -7997,6 +8000,7 @@ def _run_main_cli_8616(argv: list[str] | None) -> int:
                 # timeout would leave a live worker polluting fallback CFGs.
                 function_cfg_pairs = _recover_fast_exe_catalog(
                     project,
+                    catalog_timeout=args.catalog_timeout,
                     timeout=args.timeout,
                     window=args.window,
                     low_memory=low_memory_path,
@@ -8088,7 +8092,7 @@ def _run_main_cli_8616(argv: list[str] | None) -> int:
                 list[_FunctionCfgPair8616],
                 _recover_fast_seed_functions(
                     project,
-                    timeout=min(max(4, args.timeout), 8),
+                    timeout=args.catalog_timeout,
                     limit=discovery_limit,
                 ),
             )
@@ -8166,7 +8170,7 @@ def _run_main_cli_8616(argv: list[str] | None) -> int:
         if args.addr is None and args.binary.suffix.lower() == ".exe":
             _seeded_pairs_and_addrs = _recover_seeded_exe_functions(
                 project,
-                timeout=min(max(4, args.timeout // 2), 8),
+                timeout=args.catalog_timeout,
                 limit=None if (limit is None or defer_limit_until_after_seed_ranking) else max(0, limit - shown_total),
                 return_addrs=True,
             )
@@ -8475,6 +8479,11 @@ def _run_main_cli_8616(argv: list[str] | None) -> int:
             shown_total = len(function_tasks)
 
     selection_target = "decompilation" if args.max_functions <= 0 and args.addr is None else "display"
+    if (selection_target == "decompilation" and lst_metadata is None
+            and direct_inventory_total is not None and shown_total < direct_inventory_total):
+        print(f"[catalog] queued {shown_total} of {direct_inventory_total} candidate entries; "
+              f"catalog recovery budget={args.catalog_timeout}s. Unqueued candidates are not decompiled. "
+              "Increasing --catalog-timeout may recover more; candidates are not proven functions.", file=sys.stderr)
     print(f"/* info: selected {shown_total} function(s) for {selection_target} */")
 
     requested_workers = _choose_function_parallelism(len(function_tasks))

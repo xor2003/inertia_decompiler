@@ -22,7 +22,7 @@ _APPLIED = False
 class _InstructionWindow:
     """Zero-copy view over an instruction list slice.
     Used to avoid per-instruction list allocations in GymratLifter._lift.
-    """  # noqa: D205
+    """
 
     __slots__ = ("_end", "_seq", "_start")
 

@@ -230,7 +230,7 @@ def recover_project_direct_global_object_layout_evidence_8616(
             raise TypeError("direct-global function has no integer address")
         for collector in collectors:
             for fact in collector(project, function):
-                views.append(  # noqa: PERF401
+                views.append(
                     DirectGlobalStorageView8616(
                         function_addr=function_addr,
                         address=IRAddress(

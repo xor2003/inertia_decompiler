@@ -102,7 +102,7 @@ def _append_hotspot_and_family_lines_8616(
     changed_families: list[Mapping[str, object]],
 ) -> None:
     for hotspot in stage_hotspots[:2]:
-        lines.append(  # noqa: PERF401
+        lines.append(
             f"stage={hotspot.get('stage', 'unknown')} changed={hotspot.get('changed_count', 0)} rate={hotspot.get('changed_rate', 0.0)}"
         )
     for family_row in changed_families[:3]:

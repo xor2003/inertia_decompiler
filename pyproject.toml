@@ -75,7 +75,9 @@ preview = true
 explicit-preview-rules = true
 select = [
     "ANN",
-    "D",
+    # Require documentation, not a particular punctuation/section layout.
+    "D1",
+    "D419",
     "E",
     "F",
     "I",
@@ -86,7 +88,6 @@ select = [
     "LOG",
     "PIE",
     "PLR0916",
-    "PLR2004",
     "RSE",
     "RUF",
     "SIM",
@@ -94,6 +95,11 @@ select = [
 ]
 ignore = [
     "E501",
+    # Explicit control flow can be clearer than compressed expressions.
+    "SIM108",  # Prefer ternary operator over if/else assignment.
+    "SIM110",  # Prefer any()/all() over an explicit loop.
+    "PERF401", # Prefer a list comprehension.
+    "PERF403", # Prefer a dict comprehension.
 ]
 
 [tool.ruff.lint.pydocstyle]

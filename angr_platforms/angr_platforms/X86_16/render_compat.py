@@ -10,7 +10,7 @@ import typing
 from collections.abc import Iterable, Iterator
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
-from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable
+from angr.sim_variable import SimMemoryVariable, SimRegisterVariable, SimStackVariable, SimTemporaryVariable
 
 __all__ = ["install_structured_codegen_sort_compat_8616", "repair_cfunctioncall_render_targets_8616"]
 
@@ -34,7 +34,8 @@ def install_structured_codegen_sort_compat_8616() -> bool:
     same stack slot through different provenance paths, and angr's renderer
     sorts by ``(offset, ident)``. Python 3 rejects comparisons between
     ``None`` and ``str`` idents. The compatibility layer keeps angr's ordering
-    categories and only normalizes sort keys.
+    categories and normalizes sort keys. Proven temporary declarations must
+    also survive: upstream sorting otherwise silently omits that variable kind.
     Dynamic attribute boundary: this patches third-party angr renderer classes
     and reads optional third-party angr SimVariable identity fields.
     """
@@ -48,6 +49,7 @@ def install_structured_codegen_sort_compat_8616() -> bool:
     def _sort_local_vars(local_vars: Iterable[object]) -> list[object]:
         """Sort local variables across the dynamic third-party angr boundary."""
         reg_vars, stack_vars, mem_vars = [], [], []
+        temporary_vars: list[SimTemporaryVariable] = []
         for var in local_vars:
             if isinstance(var, SimRegisterVariable):
                 reg_vars.append(var)
@@ -55,6 +57,8 @@ def install_structured_codegen_sort_compat_8616() -> bool:
                 stack_vars.append(var)
             elif isinstance(var, SimMemoryVariable):
                 mem_vars.append(var)
+            elif isinstance(var, SimTemporaryVariable):
+                temporary_vars.append(var)
 
         reg_vars = sorted(reg_vars, key=lambda v: _stable_ident_key_8616(getattr(v, "ident", None)))
         stack_vars = sorted(
@@ -71,7 +75,8 @@ def install_structured_codegen_sort_compat_8616() -> bool:
                 _stable_ident_key_8616(getattr(v, "ident", None)),
             ),
         )
-        return reg_vars + stack_vars + mem_vars
+        temporary_vars.sort(key=lambda variable: variable.tmp_id)
+        return reg_vars + stack_vars + mem_vars + temporary_vars
 
     dynamic_sort_local_vars = typing.cast(typing.Any, _sort_local_vars)
     dynamic_sort_local_vars._inertia_x86_16_stable_sort = True

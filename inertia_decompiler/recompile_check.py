@@ -297,7 +297,7 @@ def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileChec
                 exit_code=127,
                 compiler=None,
                 stdout="",
-                stderr="kvikdos not found",
+                stderr="kvikdos not found; install from https://github.com/xor2003/kvikdos and set INERTIA_KVIKDOS_PATH",
                 command=("kvikdos",),
                 checked_payload=checked_payload,
                 checked_payload_hash=checked_hash,
@@ -313,7 +313,8 @@ def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileChec
                 exit_code=127,
                 compiler=str(kvikdos),
                 stdout="",
-                stderr="Microsoft C v5.1 root not found",
+                stderr=("Microsoft C v5.1 root not found; obtain the toolchain from "
+                        "https://github.com/davidly/dos_compilers and set INERTIA_MSC51_ROOT"),
                 command=(str(kvikdos),),
                 checked_payload=checked_payload,
                 checked_payload_hash=checked_hash,

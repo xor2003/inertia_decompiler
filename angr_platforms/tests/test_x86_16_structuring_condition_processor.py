@@ -55,3 +55,34 @@ def test_incomplete_branch_origin_is_not_invented(tags):
     processor = SimpleNamespace(_ast2annotations={})
     assert preserve_symbolic_condition_origin_8616(processor, SimpleNamespace(tags=tags), predicate) is predicate
     assert not processor._ast2annotations
+
+
+def test_ite_predicates_preserve_distinct_callsite_results():
+    arch = archinfo.ArchX86()
+    processor = ConditionProcessor(arch, Manager(arch=arch))
+    const = ailment.Expr.Const
+    predicates = []
+    for address in (0x4010, 0x4020):
+        call = ailment.Expr.Call(None, const(None, 0x2000, 32), args=(), bits=16, ins_addr=address)
+        condition = ailment.Expr.BinaryOp(None, "CmpEQ", (call, const(None, 1, 16)), False, bits=1)
+        predicates.append(ailment.Expr.ITE(None, condition, const(None, 0, 16), const(None, 1, 16)))
+    with _guard_condition_processor_multibit_bool_predicates_8616(SimpleNamespace()):
+        symbolic = [processor.claripy_ast_from_ail_condition(value, must_bool=True) for value in predicates]
+    assert all(isinstance(value, claripy.ast.Bool) for value in symbolic)
+    assert claripy.Solver().satisfiable(extra_constraints=[symbolic[0] != symbolic[1]])
+
+
+@pytest.mark.parametrize("must_bool", [False, True])
+def test_opaque_ite_roundtrip_preserves_source_and_reuses_identity(must_bool):
+    arch = archinfo.ArchX86()
+    processor = ConditionProcessor(arch, Manager(arch=arch))
+    const = ailment.Expr.Const
+    expression = ailment.Expr.ITE(None, const(None, 1, 16),
+                                 const(None, 0x8000, 16), const(None, 0x100, 16))
+    with _guard_condition_processor_multibit_bool_predicates_8616(SimpleNamespace()):
+        value = processor.claripy_ast_from_ail_condition(expression, must_bool=must_bool)
+        repeated = processor.claripy_ast_from_ail_condition(expression, must_bool=must_bool)
+    assert repeated is value
+    if not must_bool:
+        assert value.size() == 16
+    assert processor.convert_claripy_bool_ast(value) is expression

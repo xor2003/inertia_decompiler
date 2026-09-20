@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
     CExpressionStatement,
@@ -30,6 +32,9 @@ from angr_platforms.X86_16.lowering.wide_call_output_assignment_replay import (
     classify_authoritative_wide_call_output_projection_8616,
 )
 from angr_platforms.X86_16.semantics.carry_borrow_contracts import CarryBorrowKind8616
+
+_INITIAL_CALLSITE = 0x100B
+_LATER_CALLSITE = 0x101A
 
 
 class _Codegen:
@@ -93,7 +98,7 @@ def test_same_target_fallback_preserves_distinct_later_callsite() -> None:
 
     assert result is None
     assert root.statements == [existing, later_statement]
-    assert later_call.tags["ins_addr"] == 0x101A
+    assert later_call.tags["ins_addr"] == _LATER_CALLSITE
 
 
 def test_unique_same_target_fallback_remains_available_without_exact_callsite() -> None:
@@ -116,7 +121,7 @@ def test_unique_same_target_fallback_remains_available_without_exact_callsite() 
     )
 
     assert result is root.statements[0]
-    assert result.tags["ins_addr"] == 0x100B
+    assert result.tags["ins_addr"] == _INITIAL_CALLSITE
 
 
 def _wide_fact(callsite_addr: int = 0x100B) -> WideCallOutputAssignmentFact8616:
@@ -135,10 +140,17 @@ def _wide_fact(callsite_addr: int = 0x100B) -> WideCallOutputAssignmentFact8616:
     )
 
 
-def test_authoritative_wide_assignment_blocks_legacy_projection() -> None:
+@pytest.mark.parametrize("delta", [0, 0x10000])
+@pytest.mark.parametrize("target_adjustment", [0, 1])
+@pytest.mark.parametrize("shape", [IRCallOutputShape8616.DX_AX, IRCallOutputShape8616.AX])
+def test_authoritative_wide_assignment_blocks_legacy_projection(delta, target_adjustment, shape) -> None:
     """Treat the exact dedicated wide-call result as the sole semantic owner."""
-    _project, codegen, _destination = _fixture()
+    project, codegen, _destination = _fixture()
+    project._inertia_original_linear_delta = delta
     fact = _wide_fact()
+    fact = replace(fact, call_output=replace(
+        fact.call_output, target_addr=fact.call_output.target_addr + delta + target_adjustment, shape=shape,
+    ))
     resolution = WideCallOutputAssignmentResolution8616(
         source=object(),
         verdict=WideCallOutputAssignmentVerdict8616.MATERIALIZED,
@@ -171,9 +183,16 @@ def test_authoritative_wide_assignment_blocks_legacy_projection() -> None:
         high_store_addr=0x1017,
     )
 
-    assert ownership.status is WideCallOutputAuthoritativeOwnershipStatus8616.MATERIALIZED
-    assert ownership.blocks_legacy_materialization is True
-    assert ownership.materialized is True
+    accepted = target_adjustment == 0 and shape is IRCallOutputShape8616.DX_AX
+    expected_status = (
+        WideCallOutputAuthoritativeOwnershipStatus8616.MATERIALIZED if accepted
+        else WideCallOutputAuthoritativeOwnershipStatus8616.FACT_ABSENT
+    )
+    assert ownership.status is expected_status
+    assert ownership.blocks_legacy_materialization is accepted
+    assert ownership.materialized is accepted
+    if accepted:
+        assert ownership.fact == fact
 
 
 def test_different_wide_callsite_does_not_claim_legacy_projection() -> None:

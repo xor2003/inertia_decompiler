@@ -2,15 +2,18 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr.analyses.decompiler.structured_codegen.c import (
+    CAssignment,
     CBinaryOp,
     CConstant,
     CIndexedVariable,
+    CTypeCast,
     CVariable,
     CVariableField,
 )
-from angr.sim_type import SimTypeShort, TypeRef
-from angr.sim_variable import SimMemoryVariable
+from angr.sim_type import SimTypeChar, SimTypeShort, TypeRef
+from angr.sim_variable import SimMemoryVariable, SimStackVariable
 from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.ir.core import AddressStatus, IRAddress, MemSpace, SegmentOrigin
 from angr_platforms.X86_16.lowering.global_declarations import (
@@ -29,6 +32,7 @@ from angr_platforms.X86_16.lowering.segmented_global_loads import (
     _two_byte_global_struct_declaration_ctype_8616,
     _two_byte_global_struct_type_8616,
     reapply_proven_named_global_aggregate_types_8616,
+    stack_aggregate_field_projection_facts_8616,
 )
 from angr_platforms.X86_16.widening.global_object_layout import (
     GlobalObjectLayout8616,
@@ -83,7 +87,13 @@ def test_lowering_augments_only_current_exact_storage_identity() -> None:
     assert _augment_indexed_evidence_with_project_layouts_8616((), layouts) == ()
 
 
-def test_lowering_projects_zero_extended_aggregate_low_byte_to_field_zero() -> None:
+@pytest.mark.parametrize("wrapper", ["mask", "cast"])
+@pytest.mark.parametrize("operation,shift,field", [
+    (None, 0, "field_0"), ("Shr", 0, "field_0"), ("Shr", 8, "field_1"),
+    ("Shr", 1, None), ("Shr", 16, None), ("Shr", -8, None), ("Add", 8, None),
+    ("Shr", 8.0, None),
+])
+def test_lowering_projects_exact_aggregate_byte_view(wrapper, operation, shift, field) -> None:
     codegen = SimpleNamespace(
         cstyle_null_cmp=False,
         next_idx=lambda _name: 0,
@@ -102,18 +112,52 @@ def test_lowering_projects_zero_extended_aggregate_low_byte_to_field_zero() -> N
         codegen=codegen,
     )
     indexed.variable_type = TypeRef(struct_type.name, struct_type)
+    operand = indexed if operation is None else CBinaryOp(
+        operation, indexed, CConstant(shift, SimTypeShort(False), codegen=codegen), codegen=codegen,
+    )
     expression = CBinaryOp(
         "And",
-        indexed,
+        operand,
         CConstant(0xFF, SimTypeShort(False), codegen=codegen),
         codegen=codegen,
     )
+    if wrapper == "cast":
+        expression = CTypeCast(operand.type, SimTypeChar(True), operand, codegen=codegen)
 
     projected = _project_two_byte_aggregate_char_casts_8616(codegen, expression)
 
-    assert projected == 1
-    assert isinstance(expression.lhs, CVariableField)
-    assert expression.lhs.field.field == "field_0"
+    result = expression.lhs if wrapper == "mask" else expression.expr
+    if field is None:
+        assert projected == 0
+        assert result is operand
+    else:
+        assert projected == 1
+        assert isinstance(result, CVariableField)
+        assert result.variable is indexed
+        assert result.field.field == field
+
+
+def test_stack_high_byte_projection_publishes_matching_field_fact() -> None:
+    codegen = SimpleNamespace(
+        cstyle_null_cmp=False, next_idx=lambda _name: 0,
+        next_ident=lambda name: f"{name}_0", next_node_idx=lambda: 0,
+        project=SimpleNamespace(arch=Arch86_16()),
+    )
+    struct_type = _two_byte_global_struct_type_8616("pair")
+    source = CVariable(SimStackVariable(-4, 2, base="bp"), variable_type=struct_type, codegen=codegen)
+    destination = CVariable(SimStackVariable(-6, 2, base="bp"),
+                            variable_type=SimTypeShort(True), codegen=codegen)
+    shifted = CBinaryOp("Shr", source, CConstant(8, SimTypeShort(False), codegen=codegen), codegen=codegen)
+    conversion = CTypeCast(struct_type, SimTypeChar(True), shifted, codegen=codegen)
+    assignment = CAssignment(destination, conversion, codegen=codegen)
+
+    assert _project_two_byte_aggregate_char_casts_8616(codegen, assignment) == 1
+    fact, = stack_aggregate_field_projection_facts_8616(codegen)
+    assert fact.field_offset == 1
+    assert fact.struct_type.name == struct_type.name
+    assert fact.struct_type == conversion.expr.field.struct_type
+    assert conversion.expr.variable is source
+    assert conversion.expr.field.offset == fact.field_offset
 
 
 def test_named_aggregate_replay_restores_expression_type_before_low_byte_projection() -> None:

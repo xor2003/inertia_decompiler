@@ -21,10 +21,13 @@ from .interprocedural_storage_contracts import (
     CallsiteStorageBinding8616,
     FunctionStorageContract8616,
     FunctionStorageResolution8616,
+    FunctionStorageTrials8616,
     ProgramStorageResolution8616,
     StorageIdentityKind8616,
     StorageTrialVerdict8616,
 )
+from .interprocedural_storage_return_discard import discarded_return_publication_failure_8616
+from .interprocedural_storage_solver import resolve_program_storage_trials_8616
 
 __all__ = [
     "accepted_callsite_storage_binding_8616",
@@ -33,6 +36,7 @@ __all__ = [
     "apply_program_storage_resolution_8616",
     "function_storage_resolution_8616",
     "program_storage_resolution_8616",
+    "replace_function_storage_trials_8616",
 ]
 
 
@@ -40,6 +44,20 @@ class _ProjectStorageContractSurface8616(Protocol):
     """Owned contract artifact attached at the dynamic angr project boundary."""
 
     _inertia_interprocedural_storage_resolution_8616: ProgramStorageResolution8616
+
+
+def _validate_discard_publication_8616(
+    contract: FunctionStorageContract8616, resolution: ProgramStorageResolution8616,
+) -> None:
+    """Reject proof loss before any function or callsite contract is replaced."""
+    trials = next(item for item in resolution.function_trials if item.function_addr == contract.function_addr)
+    recursive_callers = next((frozenset(scc) for scc in resolution.sccs if contract.function_addr in scc), frozenset())
+    failure = discarded_return_publication_failure_8616(contract, trials, recursive_callers)
+    if failure is not None:
+        raise PipelineHardError(
+            f"discarded-return contract proof is incoherent: {failure.value}",
+            layer="types/lowering", function_addr=contract.function_addr, details=failure,
+        )
 
 
 def apply_program_storage_resolution_8616(
@@ -83,6 +101,7 @@ def apply_program_storage_resolution_8616(
                 layer="types/lowering",
                 details={"function_addr": function_resolution.function_addr},
             )
+        _validate_discard_publication_8616(contract, resolution)
         memory_validation = validate_memory_output_transaction_8616(contract)
         if not memory_validation.complete:
             failure = memory_validation.failure
@@ -120,6 +139,24 @@ def program_storage_resolution_8616(
     if not isinstance(resolution, ProgramStorageResolution8616):
         raise TypeError("project interprocedural storage resolution has an invalid type")
     return resolution
+
+
+def replace_function_storage_trials_8616(
+    project: object,
+    trials: FunctionStorageTrials8616,
+) -> tuple[ProgramStorageResolution8616, bool]:
+    """Replace one trial and atomically republish all retained SCC resolutions."""
+    previous = program_storage_resolution_8616(project)
+    trials_by_addr = {
+        item.function_addr: item
+        for item in (() if previous is None else previous.function_trials)
+    }
+    trials_by_addr[trials.function_addr] = trials
+    resolution = resolve_program_storage_trials_8616(
+        trials_by_addr[address] for address in sorted(trials_by_addr)
+    )
+    changed = apply_program_storage_resolution_8616(project, resolution)
+    return resolution, changed
 
 
 def function_storage_resolution_8616(

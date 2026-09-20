@@ -242,12 +242,14 @@ def test_project_loads_decoded_exepack_through_normal_mz_backend() -> None:
     ((_synthetic_pklite(), "PKLITE"), (_synthetic_diet(), "DIET")),
 )
 def test_cli_refuses_recognized_packer_without_a_proven_decoder(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     payload: bytes,
     packer_name: str,
 ) -> None:
     packed_path = tmp_path / "PACKED.EXE"
+    monkeypatch.setenv("INERTIA_DEARK_PATH", str(tmp_path / "missing-deark"))
     packed_path.write_bytes(payload)
     project_loading._detect_packed_mz_executable_cached.cache_clear()
 
@@ -256,4 +258,7 @@ def test_cli_refuses_recognized_packer_without_a_proven_decoder(
 
     assert rc == 7
     assert f"refused {packer_name}-packed executable" in captured.err
-    assert "unpack the executable first" in captured.err
+    if packer_name == "PKLITE":
+        assert "github.com/jsummers/deark" in captured.err
+    else:
+        assert "unpack the executable first" in captured.err

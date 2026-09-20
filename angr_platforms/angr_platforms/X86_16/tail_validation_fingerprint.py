@@ -93,7 +93,7 @@ __all__ = [
 ]
 
 
-TAIL_VALIDATION_FINGERPRINT_VERSION: int = 39
+TAIL_VALIDATION_FINGERPRINT_VERSION: int = 40
 _SUB_TARGET_RE = re.compile(r"^(?:sub_|0x)(?P<addr>[0-9a-fA-F]+)$")
 log: logging.Logger = logging.getLogger(__name__)
 _EXPR_FINGERPRINT_CACHE_LIMIT_8616 = 500000
@@ -661,7 +661,7 @@ def _resolve_validation_copy_alias_expr_8616(
         assignment_maps = _validation_assignment_maps_8616(codegen)
         if assignment_maps is None:
             return None
-        var_id_map, name_map, reg_map, first_name_map, first_reg_map = assignment_maps
+        var_id_map, name_map, reg_map, first_name_map, _first_reg_map = assignment_maps
 
         rhs = _validation_alias_rhs_lookup_8616(
             variable=variable,
@@ -678,17 +678,10 @@ def _resolve_validation_copy_alias_expr_8616(
             and not _rhs_references_same_variable_8616(resolved_rhs, variable)
         ):
             return resolved_rhs
-        if rhs is None and isinstance(variable, SimRegisterVariable):
-            reg = _dynamic_tail_validation_getattr_8616(variable, "reg", None)
-            size = _dynamic_tail_validation_getattr_8616(variable, "size", None)
-            if isinstance(reg, int) and isinstance(size, int):
-                first_rhs = _acceptable_validation_expr_rhs_8616(first_reg_map.get((reg, size)))
-                if (
-                    first_rhs is not None
-                    and first_rhs is not node
-                    and not _rhs_references_same_variable_8616(first_rhs, variable)
-                ):
-                    return first_rhs
+        # Address/traversal order is not a reaching-definition proof. An
+        # ambiguous register must never borrow its first physical/name writer.
+        if isinstance(variable, SimRegisterVariable):
+            return None
         if isinstance(name, str):
             # Validation-only fallback: generic stack carriers often receive a
             # final trivial/non-stack update after their initial widened stack-slot
@@ -827,7 +820,7 @@ def _rhs_references_same_variable_8616(value: Any, variable: Any) -> bool:
             return True
         for attr in ("variable", "index", "operand", "lhs", "rhs", "expr"):
             if hasattr(current, attr):
-                pending.append(_dynamic_tail_validation_getattr_8616(current, attr, None))  # noqa: PERF401
+                pending.append(_dynamic_tail_validation_getattr_8616(current, attr, None))
     return False
 
 
@@ -1015,7 +1008,7 @@ def _stack_alias_map_8616(codegen: object) -> dict[int, tuple[object, int]]:
                     if isinstance(condition_pairs, (list, tuple)):
                         for pair in reversed(tuple(condition_pairs)):
                             if isinstance(pair, tuple) and len(pair) >= 2:
-                                stack.append(pair[1])  # noqa: PERF401
+                                stack.append(pair[1])
                     continue
                 if isinstance(current, (CForLoop, CWhileLoop, CDoWhileLoop)):
                     for attr in ("body", "iterator", "initializer"):

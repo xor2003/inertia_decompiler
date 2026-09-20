@@ -364,6 +364,9 @@ _CLI_ALLOWED_X86_16_IMPORTS = frozenset(
         # preserves branch-carried call arguments; stack proof remains X86_16-owned.
         "angr_platforms.X86_16.lowering.callsite_prototype_seeding",
         "angr_platforms.X86_16.lowering.fact_transfer",
+        # CLI renders the explicitly selected ABI's declarations only; it must
+        # not infer register widths or recover partial-write semantics here.
+        "angr_platforms.X86_16.lowering.gp_word_runtime",
         # CLI only invokes the idempotent Types/Lowering consumer after angr
         # regeneration; binary fact classification remains outside the CLI.
         "angr_platforms.X86_16.lowering.function_pointer_parameters",
@@ -1330,6 +1333,8 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/alias/stack_restore_state.py",
     "angr_platforms/angr_platforms/X86_16/semantics/register_definition_return.py",
     "angr_platforms/angr_platforms/X86_16/lowering/gp_stack_local_return.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/codegen_return_origin.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/callsite_inventory.py",
     "angr_platforms/angr_platforms/X86_16/lowering/gp_stack_local_reload.py",
     "angr_platforms/angr_platforms/X86_16/semantics/call_stack_allocation.py",
     "angr_platforms/angr_platforms/X86_16/ir/stack_range_overlap.py",
@@ -1356,6 +1361,9 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/semantics/terminal_return_contract.py",
     "angr_platforms/angr_platforms/X86_16/stack_value_use.py",
     "angr_platforms/angr_platforms/X86_16/ir/register_live_in.py",
+    "angr_platforms/angr_platforms/X86_16/ir/constant_flow.py",
+    "angr_platforms/angr_platforms/X86_16/ir/instruction_origin.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/segmented_load_origins.py",
     "monkeytype_config.py",
     "angr_platforms/angr_platforms/X86_16/capstone_memory_segment.py",
     "angr_platforms/angr_platforms/X86_16/decoded_memory_width.py",
@@ -1430,6 +1438,7 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/ir/condition_fingerprint_masks.py",
     "angr_platforms/angr_platforms/X86_16/ir/condition_ir.py",
     "angr_platforms/angr_platforms/X86_16/ir/condition_register_bindings.py",
+    "angr_platforms/angr_platforms/X86_16/ir/condition_value_extensions.py",
     "angr_platforms/angr_platforms/X86_16/ir/core.py",
     "angr_platforms/angr_platforms/X86_16/ir/function_artifact.py",
     "angr_platforms/angr_platforms/X86_16/ir/function_condition_artifact.py",
@@ -1616,6 +1625,7 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/exepack.py",
     "angr_platforms/angr_platforms/X86_16/mz_image.py",
     "angr_platforms/angr_platforms/X86_16/packed_mz.py",
+    "angr_platforms/angr_platforms/X86_16/pklite.py",
     "angr_platforms/angr_platforms/X86_16/dev_io.py",
     "angr_platforms/angr_platforms/X86_16/io.py",
     "angr_platforms/angr_platforms/X86_16/instruction.py",
@@ -1668,6 +1678,7 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/validation_control_flow.py",
     "angr_platforms/angr_platforms/X86_16/validation_control_flow_obligations.py",
     "angr_platforms/angr_platforms/X86_16/validation_dataflow.py",
+    "angr_platforms/angr_platforms/X86_16/validation_indexed_bytes.py",
     "angr_platforms/angr_platforms/X86_16/validation_semantic_failures.py",
     "angr_platforms/angr_platforms/X86_16/validation_predicates.py",
     "angr_platforms/angr_platforms/X86_16/validation_storage.py",
@@ -1882,10 +1893,13 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/lowering/unused_void_return_types.py",
     "angr_platforms/angr_platforms/X86_16/lowering/scalar_return_types.py",
     "angr_platforms/angr_platforms/X86_16/validation_condition_precision.py",
+    "angr_platforms/angr_platforms/X86_16/validation_control_condition_delta.py",
     "angr_platforms/angr_platforms/X86_16/validation_terminal_returns.py",
     "angr_platforms/angr_platforms/X86_16/validation_switch_loop_tail_breaks.py",
     "angr_platforms/angr_platforms/X86_16/lowering/segment_register_state.py",
     "angr_platforms/angr_platforms/X86_16/lowering/segmented_global_loads.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/aggregate_byte_projection.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/condition_value_casts.py",
     "angr_platforms/angr_platforms/X86_16/lowering/segmented_lowering.py",
     "angr_platforms/angr_platforms/X86_16/lowering/segmented_memory_lowering.py",
     "angr_platforms/angr_platforms/X86_16/lowering/ir_segmented_load_carriers.py",
@@ -1956,6 +1970,8 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/postprocess/optimization/const_prop.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/optimization/copy_prop.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/optimization/dce.py",
+    "angr_platforms/angr_platforms/X86_16/postprocess/optimization/dce_local_array_reads.py",
+    "angr_platforms/angr_platforms/X86_16/postprocess/optimization/dce_value_identity.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/optimization/dce_noop_conditionals.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/optimization/dce_purity.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/optimization/dce_walk.py",
@@ -2055,6 +2071,8 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/structuring/composite_pretest_conditions.py",
     "angr_platforms/angr_platforms/X86_16/structuring/existing_loop_exit_conditions.py",
     "angr_platforms/angr_platforms/X86_16/structuring/terminal_loop_exit_conditions.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/wide_call_condition_binding.py",
+    "angr_platforms/angr_platforms/X86_16/validation_terminal_wide_conditions.py",
     "angr_platforms/angr_platforms/X86_16/structuring/symbolic_condition_origin.py",
     "angr_platforms/angr_platforms/X86_16/structuring/shared_loop_exit.py",
     "angr_platforms/angr_platforms/X86_16/structuring/shared_loop_exit_publication.py",
@@ -2297,6 +2315,7 @@ _PROMOTED_TYPED_FILES = (
     "inertia_decompiler/accepted_payload_integrity.py",
     "inertia_decompiler/angr_codegen_tags.py",
     "angr_platforms/angr_platforms/X86_16/alias/condition_register_bindings.py",
+    "angr_platforms/angr_platforms/X86_16/alias/condition_register_storage.py",
     "angr_platforms/angr_platforms/X86_16/callsite_register_instruction_facts.py",
     "angr_platforms/angr_platforms/X86_16/lowering/consumed_call_push_evidence.py",
     "angr_platforms/angr_platforms/X86_16/lowering/frame_instruction_evidence.py",
@@ -2346,10 +2365,12 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/lowering/direction_flag_state.py",
     "angr_platforms/angr_platforms/X86_16/lowering/global_object_source_codec.py",
     "angr_platforms/angr_platforms/X86_16/lowering/gp_register_state.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/gp_register_versions.py",
     "angr_platforms/angr_platforms/X86_16/lowering/interprocedural_storage_return_type_collection.py",
     "angr_platforms/angr_platforms/X86_16/lowering/interprocedural_storage_return_type_collection_contracts.py",
     "angr_platforms/angr_platforms/X86_16/lowering/packed_flags_state.py",
     "angr_platforms/angr_platforms/X86_16/lowering/packed_flags_liveness.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/packed_flags_calls.py",
     "angr_platforms/angr_platforms/X86_16/lowering/project_callee_callsite_collection.py",
     "angr_platforms/angr_platforms/X86_16/lowering/project_global_object_source_collection.py",
     "angr_platforms/angr_platforms/X86_16/lowering/segment_stack_restore_carriers.py",
@@ -2357,6 +2378,7 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/lowering/stack_word_load_candidate.py",
     "angr_platforms/angr_platforms/X86_16/lowering/wide_call_output_assignment_carriers.py",
     "angr_platforms/angr_platforms/X86_16/postprocess/affine_compound_assignment.py",
+    "angr_platforms/angr_platforms/X86_16/postprocess/bitwise_terms.py",
     "angr_platforms/angr_platforms/X86_16/semantics/callsite_summary_request.py",
     "angr_platforms/angr_platforms/X86_16/semantics/terminal_register_restore.py",
     "angr_platforms/angr_platforms/X86_16/structuring/call_return_register_index.py",
@@ -2399,6 +2421,9 @@ _FOCUSED_PYTEST_MARKERS = (
     "angr_platforms/tests/test_x86_16_callsite_replay_safety.py",
     "angr_platforms/tests/test_x86_16_decompiler_postprocess_typed_conditions.py",
     "angr_platforms/tests/test_x86_16_decompiler_postprocess_jcc.py",
+    "angr_platforms/tests/test_x86_16_jcc_register_evidence.py",
+    "angr_platforms/tests/test_x86_16_condition_register_source_bindings.py",
+    "angr_platforms/tests/test_x86_16_condition_register_byte_extension.py",
     "angr_platforms/tests/test_x86_16_validation_canonicalize.py",
     "angr_platforms/tests/test_x86_16_structuring_condition_materialization.py",
     "angr_platforms/tests/test_x86_16_structuring_loop_body_repair.py",
@@ -3411,7 +3436,7 @@ def _check_postprocess_file_imports(
     allowed = _POSTPROCESS_LEGACY_IMPORT_ALLOWLIST.get(path.name, frozenset())
     for module in _import_modules(tree):
         if _is_protected_import(module) and module not in allowed:
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(path, REPO_ROOT),
                     "postprocess-protected-import",
@@ -3532,7 +3557,7 @@ def _check_semantic_layer_file_does_not_import_postprocess(
     tree = _parse_python(path)
     for module in _semantic_layer_import_targets(tree):
         if _is_postprocess_import(module) and module not in allowed:
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(path, REPO_ROOT),
                     "semantic-layer-postprocess-import",
@@ -3575,7 +3600,7 @@ def _check_cli_imports(path: Path) -> tuple[ArchitectureViolation, ...]:
         & _CLI_FORBIDDEN_SEMANTIC_CALLS
     )
     for name in sorted(forbidden_imports):
-        violations.append(  # noqa: PERF401
+        violations.append(
             ArchitectureViolation(
                 _relative(path, REPO_ROOT),
                 "cli-semantic-mutation",
@@ -3622,7 +3647,7 @@ def _check_cli_c_text_cleanup(path: Path) -> tuple[ArchitectureViolation, ...]:
     violations: list[ArchitectureViolation] = []
     for node in _walk_ast(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in _BANNED_C_TEXT_SEMANTIC_HELPERS:
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(path, REPO_ROOT),
                     "cli-c-text-semantic-recovery",
@@ -3753,7 +3778,7 @@ def _check_cli_acceptance_not_source_evidence_gated(path: Path) -> tuple[Archite
 
     for helper_name in ("_with_source_evidence_comments_8616", "_source_evidence_payload_for_function_8616"):
         if _find_function(tree, helper_name) is not None:
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(path, REPO_ROOT),
                     "cli-source-evidence-acceptance-gate",
@@ -4661,7 +4686,7 @@ def _check_identical_assignment_arm_structuring_ownership(
         owner_tree = _parse_python(owner_path)
         for name in owner_names:
             if _find_function(owner_tree, name) is None:
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(owner_path, REPO_ROOT),
                         rule,
@@ -4720,7 +4745,7 @@ def _check_identical_assignment_arm_structuring_ownership(
         tree = _parse_python(path)
         for name in owner_names:
             if _find_function(tree, name) is not None:
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(path, REPO_ROOT),
                         rule,
@@ -4770,7 +4795,7 @@ def _check_terminal_call_result_structuring_ownership(
         owner_classes = {node.name for node in _walk_ast(owner_tree) if isinstance(node, ast.ClassDef)}
         for class_name in owner_class_names:
             if class_name not in owner_classes:
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(owner_path, REPO_ROOT),
                         rule,
@@ -4859,7 +4884,7 @@ def _check_terminal_call_result_structuring_ownership(
                 imported_owner_names.update(alias.name for alias in node.names if alias.name in owner_names)
         forbidden_names = sorted((defined_names | imported_owner_names).intersection(owner_names))
         for name in forbidden_names:
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(path, REPO_ROOT),
                     rule,
@@ -4960,7 +4985,7 @@ def _check_shared_body_wide_condition_ownership(
                     postprocess_imported_names.add(alias.asname)
         for name in protected_names:
             if _find_function(tree, name) is not None or name in postprocess_imported_names:
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(path, REPO_ROOT),
                         rule,
@@ -5013,7 +5038,7 @@ def _check_condition_origin_tags_use_dot_access(root: Path) -> tuple[Architectur
     violations: list[ArchitectureViolation] = []
     for node in _walk_ast(function):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "getattr":
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(path, REPO_ROOT),
                     "condition-origin-tags-dot-access",
@@ -5862,7 +5887,7 @@ def _check_compatibility_shims(root: Path) -> tuple[ArchitectureViolation, ...]:
         docstring = ast.get_docstring(tree) or ""
         for marker in _COMPATIBILITY_SHIM_HEADER_MARKERS:
             if not _contains_marker(docstring, marker):
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(path, REPO_ROOT),
                         "compat-shim-header",
@@ -5882,7 +5907,7 @@ def _check_compatibility_shims(root: Path) -> tuple[ArchitectureViolation, ...]:
             )
         for node in _walk_ast(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(path, REPO_ROOT),
                         "compat-shim-behavior",
@@ -6044,7 +6069,7 @@ def _function_missing_annotation_labels(node: ast.FunctionDef | ast.AsyncFunctio
     positional = (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
     for arg in positional:
         if arg.arg not in {"self", "cls"} and arg.annotation is None:
-            missing.append(arg.arg)  # noqa: PERF401
+            missing.append(arg.arg)
     if node.args.vararg is not None and node.args.vararg.annotation is None:
         missing.append(f"*{node.args.vararg.arg}")
     if node.args.kwarg is not None and node.args.kwarg.annotation is None:
@@ -6196,7 +6221,7 @@ def _check_promoted_typed_dataclass_fields(repo_root: Path = REPO_ROOT) -> tuple
                     continue
                 for target in stmt.targets:
                     if isinstance(target, ast.Name) and not target.id.startswith("_"):
-                        violations.append(  # noqa: PERF401
+                        violations.append(
                             ArchitectureViolation(
                                 _relative(path, repo_root),
                                 "promoted-typed-dataclass-field-annotation",
@@ -6656,7 +6681,7 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
     violations: list[ArchitectureViolation] = []
     for marker in _MAKEFILE_MARKERS:
         if not _contains_marker(makefile_text, marker):
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(makefile_path, repo_root),
                     "makefile-gate-marker",
@@ -6665,7 +6690,7 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
             )
     for marker in _MAKEFILE_FORBIDDEN_MARKERS:
         if _contains_marker(makefile_text, marker):
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(makefile_path, repo_root),
                     "makefile-type-ratchet-legacy-debt",
@@ -6693,7 +6718,7 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
             )
     for filename in _PYRIGHT_ONLY_TYPED_PROMOTION_FILES:
         if filename not in typed_targets:
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(makefile_path, repo_root),
                     "makefile-pyright-only-typed-file",
@@ -6704,7 +6729,7 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
         frozenset(_INERTIA_TYPED_PROMOTION_DEBT_FILES) | frozenset(_X86_16_TYPED_PROMOTION_DEBT_FILES)
     ) - frozenset(_PYRIGHT_ONLY_TYPED_PROMOTION_FILES)
     for filename in sorted(full_promotion_debt_files & typed_targets):
-        violations.append(  # noqa: PERF401
+        violations.append(
             ArchitectureViolation(
                 _relative(makefile_path, repo_root),
                 "makefile-full-promotion-debt-typed-target",
@@ -6712,7 +6737,7 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
             )
         )
     for filename in sorted(full_promotion_debt_files & ruff_targets):
-        violations.append(  # noqa: PERF401
+        violations.append(
             ArchitectureViolation(
                 _relative(makefile_path, repo_root),
                 "makefile-full-promotion-debt-ruff-target",
@@ -6721,7 +6746,7 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
         )
     for marker in _FOCUSED_PYTEST_MARKERS:
         if not _contains_marker(makefile_text, marker):
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(makefile_path, repo_root),
                     "makefile-focused-contract-test",
@@ -6733,7 +6758,7 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
         makefile_pytest_targets = frozenset(_makefile_variable_words(makefile_text, "QA_PYTEST_TARGETS"))
         for target in _focused_pytest_literals(_parse_python(pipeline_path)):
             if target not in makefile_pytest_targets:
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(makefile_path, repo_root),
                         "makefile-pipeline-fast-target",
@@ -6744,7 +6769,7 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
     for variable_name in ("QA_PYTEST_TARGETS", "QA_RUFF_TARGETS", "QA_TYPED_FILES"):
         targets = _makefile_variable_words(makefile_text, variable_name)
         for target in _duplicate_items(targets):
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(makefile_path, repo_root),
                     "makefile-duplicate-qa-target",
@@ -6791,7 +6816,7 @@ def _check_inertia_decompiler_typed_promotion_coverage(
     violations: list[ArchitectureViolation] = []
 
     for filename in sorted(debt & promoted):
-        violations.append(  # noqa: PERF401
+        violations.append(
             ArchitectureViolation(
                 filename,
                 "inertia-typed-promotion-debt-stale",
@@ -6800,7 +6825,7 @@ def _check_inertia_decompiler_typed_promotion_coverage(
         )
 
     for filename in sorted(pyright_only & promoted):
-        violations.append(  # noqa: PERF401
+        violations.append(
             ArchitectureViolation(
                 filename,
                 "inertia-pyright-only-promotion-stale",
@@ -6809,7 +6834,7 @@ def _check_inertia_decompiler_typed_promotion_coverage(
         )
 
     for filename in sorted(pyright_only - debt):
-        violations.append(  # noqa: PERF401
+        violations.append(
             ArchitectureViolation(
                 filename,
                 "inertia-pyright-only-promotion-untracked-debt",
@@ -6819,7 +6844,7 @@ def _check_inertia_decompiler_typed_promotion_coverage(
 
     for filename in sorted(debt):
         if not (repo_root / filename).exists():
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     filename,
                     "inertia-typed-promotion-debt-stale",
@@ -6829,7 +6854,7 @@ def _check_inertia_decompiler_typed_promotion_coverage(
 
     for filename in sorted(pyright_only):
         if not (repo_root / filename).exists():
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     filename,
                     "inertia-pyright-only-promotion-stale",
@@ -6865,7 +6890,7 @@ def _check_x86_16_typed_promotion_coverage(
     violations: list[ArchitectureViolation] = []
 
     for filename in sorted(debt & promoted):
-        violations.append(  # noqa: PERF401
+        violations.append(
             ArchitectureViolation(
                 filename,
                 "x86-16-typed-promotion-debt-stale",
@@ -6875,7 +6900,7 @@ def _check_x86_16_typed_promotion_coverage(
 
     for filename in sorted(debt):
         if not (repo_root / filename).exists():
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     filename,
                     "x86-16-typed-promotion-debt-stale",
@@ -6999,7 +7024,7 @@ def _check_test_pipeline_fast_targets(repo_root: Path = REPO_ROOT) -> tuple[Arch
             )
     for marker in _FOCUSED_PYTEST_MARKERS:
         if not _contains_marker(pipeline_text, marker):
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(pipeline_path, repo_root),
                     "focused-pipeline-contract-test",
@@ -7008,7 +7033,7 @@ def _check_test_pipeline_fast_targets(repo_root: Path = REPO_ROOT) -> tuple[Arch
             )
     focused_targets = _focused_pytest_literals(pipeline_tree)
     for duplicate_target in _duplicate_items(focused_targets):
-        violations.append(  # noqa: PERF401
+        violations.append(
             ArchitectureViolation(
                 _relative(pipeline_path, repo_root),
                 "focused-pipeline-duplicate-target",
@@ -7017,7 +7042,7 @@ def _check_test_pipeline_fast_targets(repo_root: Path = REPO_ROOT) -> tuple[Arch
         )
     for marker in _FOCUSED_PYTEST_FORBIDDEN_MARKERS:
         if marker in focused_targets:
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(pipeline_path, repo_root),
                     "focused-pipeline-slow-target",
@@ -7047,7 +7072,7 @@ def _check_test_pipeline_fast_targets(repo_root: Path = REPO_ROOT) -> tuple[Arch
             )
             continue
         for line_no in skip_xfail_lines:
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(target_path, repo_root),
                     "focused-pipeline-skip-xfail",
@@ -7234,7 +7259,7 @@ def _check_ownership_manifest_contract(repo_root: Path = REPO_ROOT) -> tuple[Arc
         paths, _fallback, _reason = rules.get(owner, (frozenset(), False, ""))
         for required_path in required_paths:
             if required_path not in paths:
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(manifest_path, repo_root),
                         "ownership-manifest-required-rule",
@@ -7245,7 +7270,7 @@ def _check_ownership_manifest_contract(repo_root: Path = REPO_ROOT) -> tuple[Arc
         tests = tests_by_owner.get(owner, frozenset())
         for required_test in required_tests:
             if required_test not in tests:
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(manifest_path, repo_root),
                         "ownership-manifest-required-test",
@@ -7256,7 +7281,7 @@ def _check_ownership_manifest_contract(repo_root: Path = REPO_ROOT) -> tuple[Arc
         target_path = repo_root / target.split("::", 1)[0]
         _target_exists, skip_xfail_lines = _fast_pytest_target_contract(repo_root, target, skip_calls)
         for line_no in skip_xfail_lines:
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(target_path, repo_root),
                     "ownership-manifest-fast-skip-xfail",
@@ -7399,7 +7424,7 @@ def _check_runtime_architecture_guard_entrypoints(repo_root: Path = REPO_ROOT) -
                 )
             )
         for line_no in _swallowed_module_guard_try_lines(tree, "assert_decompiler_architecture_clean"):
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(path, repo_root),
                     "runtime-architecture-guard-swallowed",
@@ -7555,7 +7580,7 @@ def _check_architecture_table_unique_keys(repo_root: Path = REPO_ROOT) -> tuple[
                 )
                 continue
             for skip_line in skip_xfail_lines:
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(target_path, repo_root),
                         "architecture-required-test-skip-xfail",
@@ -7698,7 +7723,7 @@ def _check_project_awareness_docs(
             )
         for marker in _AGENT_DOC_MARKERS:
             if not _contains_marker(agents_text, marker):
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(agents_path, repo_root),
                         "agent-doc-marker",
@@ -7707,7 +7732,7 @@ def _check_project_awareness_docs(
                 )
         for marker in _AGENT_DOC_FORBIDDEN_MARKERS:
             if _contains_marker(agents_text, marker):
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(agents_path, repo_root),
                         "agent-doc-duplicate-rulebook",
@@ -7736,7 +7761,7 @@ def _check_project_awareness_docs(
             )
         for marker in _PROJECT_MAP_MARKERS:
             if not _contains_marker(project_map_text, marker):
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(project_map_path, repo_root),
                         "project-map-marker",
@@ -7745,7 +7770,7 @@ def _check_project_awareness_docs(
                 )
         for marker in _REFERENCE_MAP_FORBIDDEN_RULEBOOK_MARKERS:
             if _contains_marker(project_map_text, marker):
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(project_map_path, repo_root),
                         "project-map-duplicate-rulebook",
@@ -7774,7 +7799,7 @@ def _check_project_awareness_docs(
             )
         for marker in _DECOMPILER_MAP_MARKERS:
             if not _contains_marker(decompiler_map_text, marker):
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(decompiler_map_path, repo_root),
                         "decompiler-map-marker",
@@ -7783,7 +7808,7 @@ def _check_project_awareness_docs(
                 )
         for marker in _DECOMPILER_MAP_FORBIDDEN_MARKERS:
             if _contains_marker(decompiler_map_text, marker):
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(decompiler_map_path, repo_root),
                         "decompiler-map-duplicate-rulebook",
@@ -7812,7 +7837,7 @@ def _check_project_awareness_docs(
             )
         for marker in _AGENT_RULES_MARKERS:
             if not _contains_marker(agent_rules_text, marker):
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(agent_rules_path, repo_root),
                         "agent-rules-canonical-contract",
@@ -7821,7 +7846,7 @@ def _check_project_awareness_docs(
                 )
         for marker in _AGENT_RULES_FORBIDDEN_MARKERS:
             if _contains_marker(agent_rules_text, marker):
-                violations.append(  # noqa: PERF401
+                violations.append(
                     ArchitectureViolation(
                         _relative(agent_rules_path, repo_root),
                         "agent-rules-duplicate-rulebook",
@@ -9405,7 +9430,7 @@ def _check_ss_bp_substitution_binding_dot_access(path: Path) -> tuple[Architectu
     violations: list[ArchitectureViolation] = []
     for arg in substitution.args.args:
         if arg.arg == "bindings" and "StackVariableBinding" not in _annotation_type_names(arg.annotation):
-            violations.append(  # noqa: PERF401
+            violations.append(
                 ArchitectureViolation(
                     _relative(path, REPO_ROOT),
                     "ss-bp-substitution-typed-bindings",

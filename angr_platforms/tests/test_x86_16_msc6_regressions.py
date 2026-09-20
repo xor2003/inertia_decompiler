@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from pycparser import c_ast, c_parser
+from test_x86_16_scalar_byte_behavior import assert_scalar_byte_add_behavior
 from x86_16_timeout_support import scaled_decompile_timeout
 
 from scripts.msc6_runtime_gate_artifacts import (
@@ -255,6 +256,7 @@ def test_msc6_simple_switch_fold_direct_output_uses_source_argument_identity(
 @pytest.mark.skipif(not TYPES_EXE.is_file(), reason="TYPES example binary is not available in this workspace.")
 def test_msc6_scalar_add_sc_keeps_byte_width_through_cli_regeneration(
     msc6_runtime_gate_artifacts: MSC6RuntimeGateArtifacts,
+    tmp_path: Path,
 ) -> None:
     combined = _runtime_decompile_output_8616(
         msc6_runtime_gate_artifacts, "scalar_types_io", "add_sc"
@@ -271,7 +273,8 @@ def test_msc6_scalar_add_sc_keeps_byte_width_through_cli_regeneration(
     ), emitted_body
     assert not re.search(r"\b(?:short|int) add_sc\(", emitted_body), emitted_body
     assert "return b + a;" in emitted_body or "return a + b;" in emitted_body
-    assert not re.search(r"\b[A-Za-z_]\w*_[0-9]+\b", emitted_body), emitted_body
+    # TYPES.COD saves SI/DI; their proven byte locals are not failed recovery.
+    assert_scalar_byte_add_behavior(emitted_body, tmp_path)
 
 
 @pytest.mark.skipif(not TYPES_EXE.is_file(), reason="TYPES example binary is not available in this workspace.")
@@ -429,7 +432,8 @@ def test_msc6_fptr_apply_twice_consumes_stack_probe_call_artifacts(
     assert "fn" in emitted_body
     assert "value" in emitted_body
     assert "(*fn)(" in emitted_body
-    assert emitted_body.count("fn(value)") == 2
+    expected_callback_calls = 2
+    assert emitted_body.count("fn(value)") == expected_callback_calls
     assert "return value;" in emitted_body
     assert "chkstk" not in emitted_body.lower()
     assert "SEG_U" not in emitted_body

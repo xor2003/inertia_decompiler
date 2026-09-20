@@ -51,6 +51,7 @@ from .gp_register_state import (
 )
 from .segment_access_policy import instruction_addrs_from_node_8616
 from .segment_register_state import runtime_segment_state_cvar_8616
+from .segmented_load_origins import materialize_segmented_load_origins_8616
 
 __all__ = ["IRSegmentedLoadCarrierStats8616", "materialize_ir_segmented_load_carriers_8616"]
 
@@ -1397,6 +1398,9 @@ def materialize_ir_segmented_load_carriers_8616(codegen: object) -> bool:
     )
     classified: set[tuple[str, int, int] | tuple[str, str, int]] = set(inserted_assignments.keys)
     materialized: set[tuple[str, int, int] | tuple[str, str, int]] = set(inserted_assignments.keys)
+    origin_keys = materialize_segmented_load_origins_8616(codegen, frozenset(facts))
+    materialized.update(("tmp", temporary_id, instruction_addr) for temporary_id, instruction_addr in origin_keys)
+    classified.update(materialized)
     read_replacements = _read_side_logical_replacements_8616(
         boundary,
         logical_register_facts,

@@ -1,5 +1,9 @@
 # Sleep Terminal Composite Exit
 
+The implementation checkpoint below is historical. See the subsequent
+[terminal wide validation acceptance](p0-terminal-wide-validation.md) for the
+proof contract, renderer root cause, and successful focused behavioral run.
+
 ## Implementation Checkpoint
 
 The new `structuring/terminal_loop_exit_conditions.py` consumer now uses the

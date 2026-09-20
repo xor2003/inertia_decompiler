@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 import os
 from collections import OrderedDict
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -57,8 +56,6 @@ from ..caller_return_use_contracts import CallsiteReturnUseKind8616
 from ..callsite_summary import (
     CallsiteReturnShape8616,
     CallsiteSummary8616,
-    build_callsite_summary_inventory_8616,
-    callsite_summary_inventory_8616,
 )
 from ..ir.condition_ir import ConditionIR
 from ..ir.core import IRValue, MemSpace
@@ -67,6 +64,7 @@ from .call_output_object_projection import (
     publish_call_output_object_projection_8616,
     synchronize_call_output_object_declaration_8616,
 )
+from .callsite_inventory import ensure_callsite_summary_inventory_8616 as _callsite_inventory_8616
 from .condition_stack_projection_contracts import (
     ConditionStackProjectionFact8616,
     condition_stack_projection_fact_8616,
@@ -127,13 +125,6 @@ class _CallOutputFunctionManager8616(Protocol):
 
     def function(self, *, addr: int, create: bool) -> Function | None:
         """Return one existing function without creating it."""
-
-
-class _CallOutputFunction8616(Protocol):
-    """Dynamic angr function callsite inventory boundary."""
-
-    def get_call_sites(self) -> object:
-        """Return the function's binary callsite addresses."""
 
 
 class _CallOutputCodegen8616(Protocol):
@@ -697,34 +688,8 @@ def _summary_bp_address_offsets_8616(summary: CallsiteSummary8616) -> tuple[int,
             and isinstance(source[1], int)
             and source[1] < 0
         ):
-            offsets.append(source[1])  # noqa: PERF401
+            offsets.append(source[1])
     return tuple(dict.fromkeys(offsets))
-
-
-def _callsite_inventory_8616(
-    codegen: _CallOutputCodegen8616,
-) -> dict[int, CallsiteSummary8616]:
-    """Return or build typed binary callsite summaries before AST arguments exist."""
-    inventory = callsite_summary_inventory_8616(codegen)
-    if inventory:
-        return inventory
-    try:
-        function_value = codegen.project.kb.functions.function(addr=codegen.cfunc.addr, create=False)
-    except AttributeError:
-        return {}
-    if function_value is None:
-        return {}
-    function = cast(_CallOutputFunction8616, function_value)
-    try:
-        raw_callsites = function.get_call_sites()
-    except AttributeError:
-        return {}
-    if not isinstance(raw_callsites, Iterable):
-        return {}
-    callsite_addrs = tuple(item for item in raw_callsites if isinstance(item, int))
-    inventory = build_callsite_summary_inventory_8616(function_value, callsite_addrs)
-    codegen._inertia_callsite_summary_inventory_8616 = inventory
-    return inventory
 
 
 def _call_addressed_bases_8616(

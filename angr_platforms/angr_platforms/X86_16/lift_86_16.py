@@ -12,7 +12,7 @@ import contextlib
 import logging
 import os
 from abc import update_abstractmethods
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, ClassVar, cast
 
 import bitstring
@@ -50,6 +50,7 @@ from .ir.condition_ir import (
     condition_sort_key_8616,
 )
 from .ir.condition_register_bindings import snapshot_condition_register_bindings_8616
+from .ir.condition_value_extensions import sign_extend_condition_value_8616
 from .ir.core import AddressStatus, IRAddress, IRBinaryValue, IRCondition, IRValue, MemSpace, SegmentOrigin
 from .ir.status_flag_lift_context import cfg_status_flag_dead_write_mask_8616
 from .jcc_condition import _direct_jcc_condition_from_last_condition_8616
@@ -2031,7 +2032,7 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
             state.pop((int(block_addr), dst_key), None)
 
     def _widen_condition_reg_value_state_8616(self, reg_name: str) -> None:
-        """Carry a contiguous low-byte provenance through CBW/CWDE."""
+        """Preserve signed CBW/CWDE value conversion and original load width."""
         state = Instruction_ANY._inertia_condition_reg_value_state_8616
         if not isinstance(state, dict):
             return
@@ -2043,16 +2044,21 @@ class Instruction_ANY(Instruction):  # type: ignore[misc]  # dynamic pyvex base
         if not isinstance(block_addr, int):
             return
         key = (int(block_addr), str(reg_name).lower())
-        source = state.get(key)
+        source = state.get((int(block_addr), "ax"))
+        destination_size = {"ax": 2, "eax": 4}.get(reg_name)
         if (
             not isinstance(source, _ConditionRegisterValueState8616)
             or source.next_addr > int(self.addr)
-            or source.value.size != 1
+            or destination_size is None
         ):
             state.pop(key, None)
             return
+        extended = sign_extend_condition_value_8616(source.value, destination_size)
+        if extended is None:
+            state.pop(key, None)
+            return
         state[key] = _ConditionRegisterValueState8616(
-            value=replace(source.value, size=2),
+            value=extended,
             next_addr=int(self.addr) + int(self.cs.size),
         )
 

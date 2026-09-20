@@ -1,3 +1,6 @@
+import pytest
+from angr_platforms.X86_16.lowering.gp_word_runtime import coherent_gp_runtime_header_8616
+
 from scripts.generated_c_contracts import (
     GeneratedCContract,
     GeneratedCContractStatus,
@@ -13,7 +16,8 @@ _REQUIREMENT = IndexedArgumentUseRequirement(
 )
 
 
-def test_segmented_near_pointer_index_uses_satisfy_structural_contract() -> None:
+@pytest.mark.parametrize("runtime_header", [False, True])
+def test_segmented_near_pointer_index_uses_satisfy_structural_contract(runtime_header) -> None:
     source = """
     unsigned short SEG_U16(unsigned short segment, unsigned short offset);
     unsigned short PTR_U16(unsigned short *pointer);
@@ -28,13 +32,15 @@ def test_segmented_near_pointer_index_uses_satisfy_structural_contract() -> None
     }
     """
 
+    source = (coherent_gp_runtime_header_8616() if runtime_header else "") + source
     result = GeneratedCContract(indexed_argument_uses=(_REQUIREMENT,)).assess(source)
 
     assert result.status is GeneratedCContractStatus.PASSED
     assert result.missing_indexed_argument_uses == ()
 
 
-def test_unscaled_pointer_arithmetic_fails_structural_contract() -> None:
+@pytest.mark.parametrize("runtime_header", [False, True])
+def test_unscaled_pointer_arithmetic_fails_structural_contract(runtime_header) -> None:
     source = """
     unsigned short SEG_U16(unsigned short segment, unsigned short offset);
     unsigned short PTR_U16(unsigned short *pointer);
@@ -43,7 +49,9 @@ def test_unscaled_pointer_arithmetic_fails_structural_contract() -> None:
     }
     """
 
+    source = (coherent_gp_runtime_header_8616() if runtime_header else "") + source
     result = GeneratedCContract(indexed_argument_uses=(_REQUIREMENT,)).assess(source)
 
     assert result.status is GeneratedCContractStatus.FAILED
+    assert result.parse_error is None
     assert result.missing_indexed_argument_uses == (_REQUIREMENT.label(),)

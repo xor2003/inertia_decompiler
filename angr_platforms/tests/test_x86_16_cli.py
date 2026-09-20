@@ -13383,7 +13383,7 @@ def test_main_hidden_seed_metadata_gives_seed_catalog_more_time(monkeypatch, tmp
     out = capsys.readouterr().out
 
     assert rc == 0
-    assert ("seed-catalog", 8) in seen_timeouts
+    assert ("seed-catalog", 62) in seen_timeouts
     assert "/* == function 0x11423 _start == */" in out
     assert "/* == function 0x10010 sub_10010 == */" in out
 
@@ -15604,7 +15604,9 @@ def test_decompile_cli_reports_monoprin_partial_validation_without_source_fallba
     assert "return" in result.stdout
 
 
-def test_decompile_cli_can_extract_and_name_cod_procedure():
+def test_decompile_cli_can_extract_and_name_cod_procedure(tmp_path):
+    from test_x86_16_changeweather_behavior import assert_changeweather_behavior
+
     result = _run_decompile_proc(
         NHORZ_COD,
         "_ChangeWeather",
@@ -15623,6 +15625,9 @@ def test_decompile_cli_can_extract_and_name_cod_procedure():
     assert "BadWeather = 0;" in result.stdout
     assert "CLOUDHEIGHT = 8150;" in result.stdout
     assert "CLOUDTHICK = 500;" in result.stdout
+    assert_changeweather_behavior(result.stdout, tmp_path)
+    assert "validation=passed" in result.stderr
+    assert "whole-tail validation clean" in result.stderr
     assert "0x7000" not in result.stdout
     assert "_start" not in result.stdout
 

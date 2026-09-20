@@ -1,6 +1,10 @@
 """Bind existing break predicates to exact natural-loop exit evidence.
 
 Layer: Structuring.
+Owns CFG shape, loops, switches, and structured condition lowering from proven
+IR/semantic evidence. Do not perform alias-state ownership, widening,
+type/materialization recovery, rewrite cleanup, postprocess, or CLI/reporting
+work here.
 Responsibility: orient a single typed condition at an existing loop break using
 the enclosing loop's proven header and unique CFG exit destination. Never infer
 an exit from break-statement source tags or from rendered expressions.
@@ -93,17 +97,20 @@ def _loop_owner_8616(
     """Match a bound guard or an unconditional loop's exact header and entry.
 
     A constant guard has no JCC identity. Require independent statement-entry
-    provenance agreeing with the loop's header, then the unique proven CFG
-    region; a copied loop tag alone cannot establish the break's scope.
+    provenance on the header itself and a direct in-loop body-entry edge, then
+    the unique proven CFG region; a copied loop tag alone cannot establish the
+    break's scope.
     """
     condition = node.condition
+    body_entry: int | None = None
     if isinstance(condition, CExpression) and is_owned_loop_continuation_8616(condition):
         block = condition.tags["vex_block_addr"]
         if isinstance(node, CDoWhileLoop):
             return _posttest_loop_owner_8616(node, block, topology)
     elif isinstance(node, CWhileLoop) and isinstance(condition, CConstant) and condition.value == 1:
-        block = first_statement_block_8616(node.body)
-        if block is None or node.tags.get("ins_addr") != block:
+        block = node.tags.get("ins_addr")
+        body_entry = first_statement_block_8616(node.body)
+        if not isinstance(block, int):
             return None
     else:
         return None
@@ -111,7 +118,34 @@ def _loop_owner_8616(
         loop for loop in topology.loops
         if loop.verdict is LoopTopologyVerdict8616.PROVEN and loop.header == block
     )
-    return owners[0] if len(owners) == 1 else None
+    if len(owners) != 1:
+        return None
+    owner = owners[0]
+    if isinstance(node, CWhileLoop) and isinstance(condition, CConstant):
+        body_entry_is_header = body_entry == owner.header
+        body_entry_is_direct_successor = (
+            body_entry is not None
+            and body_entry in owner.body
+            and (owner.header, body_entry) in topology.edges
+        )
+        header_guards = tuple(
+            guard
+            for guard, guard_condition in _local_guards_8616(node.body)
+            if guard_condition.tags.get("vex_block_addr") == owner.header
+            and guard.tags.get("ins_addr") == guard_condition.tags.get("ins_addr")
+            and (
+                guard_condition.tags.get("inertia_structuring_condition_cfg_materialized_8616") is True
+                or guard_condition.tags.get("inertia_jcc_materialized_8616") is True
+            )
+        )
+        body_entry_is_materialized_header_guard = body_entry is None and len(header_guards) == 1
+        if not (
+            body_entry_is_header
+            or body_entry_is_direct_successor
+            or body_entry_is_materialized_header_guard
+        ):
+            return None
+    return owner
 
 
 def _exit_polarity_8616(
@@ -213,5 +247,11 @@ def materialize_existing_loop_exit_conditions_8616(
             if polarity is None:
                 continue
             materialized += 1
-            changed += _replace_guard_8616(guard, current, fact, polarity, lower, invert, record_precision)
+            replaced = _replace_guard_8616(guard, current, fact, polarity, lower, invert, record_precision)
+            changed += replaced
+            if replaced:
+                replacement = guard.condition if isinstance(guard, CIfBreak) else guard.condition_and_nodes[0][0]
+                # Canonical loops expose the inverse continuation rather than
+                # the proven exit predicate. Publish both exact AST views.
+                record_precision(invert(current), invert(replacement))
     return ExistingLoopExitStats8616(raw, normalized, materialized, materialized, raw - materialized, changed)

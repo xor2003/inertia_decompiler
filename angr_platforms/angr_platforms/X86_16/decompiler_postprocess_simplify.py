@@ -1807,7 +1807,7 @@ def _simplify_structured_expressions_8616(codegen: object) -> bool:
                     if os.environ.get("INERTIA_DEBUG_WORD_OR_UPDATE"):
                         term_debug = []
                         for term in _or_terms_8616(stmt.rhs):
-                            term_debug.append(  # noqa: PERF401
+                            term_debug.append(
                                 (
                                     type(term).__name__,
                                     _c_constant_int_value_8616(term),

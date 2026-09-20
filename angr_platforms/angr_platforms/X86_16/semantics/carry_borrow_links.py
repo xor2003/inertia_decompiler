@@ -279,7 +279,7 @@ def analyze_carry_borrow_links_8616(artifact: SSAFunctionArtifact) -> CarryBorro
     blocks = build_carry_borrow_block_ssa_8616(artifact)
     for block in blocks:
         for candidate in _candidate_sites(block.sites, block.definitions):
-            resolutions.append(  # noqa: PERF401
+            resolutions.append(
                 _resolve_candidate(candidate, block, blocks, artifact)
             )
     materialized = sum(item.link is not None for item in resolutions)

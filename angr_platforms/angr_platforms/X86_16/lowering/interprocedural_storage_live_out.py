@@ -18,11 +18,13 @@ from ..semantics.call_stack_effect_pipeline import (
     semantic_function_ssa_artifact_at_address_8616,
 )
 from ..semantics.terminal_memory_outputs import collect_terminal_memory_output_evidence_8616
-from ..widening.terminal_memory_output_views import collect_terminal_memory_output_views_8616
 from .condition_transfer import collect_typed_condition_artifacts_8616
+from .interprocedural_storage_caller_context import (
+    CallerSSAContextVerdict8616,
+    caller_ssa_context_for_callsite_8616,
+)
 from .interprocedural_storage_contracts import (
     CallsiteStorageTrials8616,
-    StorageTrial8616,
     StorageTrialStats8616,
 )
 from .interprocedural_storage_live_out_contracts import (
@@ -31,42 +33,15 @@ from .interprocedural_storage_live_out_contracts import (
     MemoryLiveOutCollectionVerdict8616,
     MemoryLiveOutFailure8616,
     MemoryLiveOutFailureKind8616,
-    MemoryLiveOutUseFact8616,
 )
-from .interprocedural_storage_live_out_flow import materialize_memory_live_out_candidate_8616
+from .interprocedural_storage_live_out_contracts import (
+    refused_memory_live_out_collection_8616 as _failed_8616,
+)
+from .interprocedural_storage_live_out_flow import collect_callsite_memory_live_out_8616
 from .pointer_parameter_caller_target_contracts import (
     PointerParameterCallerTarget8616,
     PointerParameterCallerTargetEvidence8616,
 )
-
-
-def _failed_8616(
-    failure: MemoryLiveOutFailure8616,
-    raw: int,
-    normalized: int,
-) -> FunctionMemoryLiveOutCollection8616:
-    """Build one atomic refusal without publishing partial live-out trials."""
-    conflict = failure.kind in {
-        MemoryLiveOutFailureKind8616.CALL_OUTPUT_DEFINITION_CONFLICT,
-        MemoryLiveOutFailureKind8616.CONDITION_CONFLICT,
-        MemoryLiveOutFailureKind8616.SIGNEDNESS_CONFLICT,
-        MemoryLiveOutFailureKind8616.POINTER_TARGET_CONFLICT,
-    }
-    verdict = (
-        MemoryLiveOutCollectionVerdict8616.CONFLICT
-        if conflict
-        else MemoryLiveOutCollectionVerdict8616.UNKNOWN_REFUSE
-    )
-    return FunctionMemoryLiveOutCollection8616(
-        verdict,
-        (),
-        (failure,),
-        StorageTrialStats8616(
-            raw_fact_count=raw,
-            normalized_fact_count=normalized,
-            failure_count=max(1, raw - normalized),
-        ),
-    )
 
 
 def attach_callsite_memory_live_out_evidence_8616(
@@ -153,6 +128,42 @@ def _pointer_effects_by_callsite_8616(
     }, None
 
 
+def _pointer_only_collection_8616(
+    callee_addr: int,
+    callsites: tuple[CallsiteStorageTrials8616, ...],
+    pointer_by_callsite: dict[int, tuple[PointerParameterCallerTarget8616, ...]],
+    pointer_count: int,
+) -> FunctionMemoryLiveOutCollection8616:
+    """Retain closed pointer effects when the callee has no direct-memory output."""
+    sites = tuple(
+        CallsiteMemoryLiveOutEvidence8616(
+            site.caller_addr, callee_addr, site.callsite_addr,
+            pointer_effects=pointer_by_callsite[site.callsite_addr],
+        )
+        for site in callsites
+    )
+    return FunctionMemoryLiveOutCollection8616(
+        MemoryLiveOutCollectionVerdict8616.PROVEN,
+        sites, (),
+        StorageTrialStats8616(pointer_count, pointer_count, pointer_count, pointer_count),
+    )
+
+
+def _caller_conditions_8616(
+    project: object,
+    caller_addr: int,
+    cache: dict[tuple[int, int], tuple[ConditionIR, ...]],
+) -> tuple[ConditionIR, ...]:
+    """Keep equal-address conditions isolated by their authoritative project owner."""
+    key = (id(project), caller_addr)
+    conditions = cache.get(key)
+    if conditions is None:
+        collected, _edge_evidence = collect_typed_condition_artifacts_8616(project, caller_addr)
+        conditions = tuple(collected)
+        cache[key] = conditions
+    return conditions
+
+
 def collect_function_memory_live_out_trials_8616(
     project: object,
     callee_addr: int,
@@ -212,35 +223,32 @@ def collect_function_memory_live_out_trials_8616(
             pointer_count + aliases.stats.normalized_fact_count,
         )
     if not aliases.facts:
-        empty = tuple(
-            CallsiteMemoryLiveOutEvidence8616(
-                site.caller_addr,
-                callee_addr,
-                site.callsite_addr,
-                pointer_effects=pointer_by_callsite[site.callsite_addr],
-            )
-            for site in callsites
-        )
-        return FunctionMemoryLiveOutCollection8616(
-            MemoryLiveOutCollectionVerdict8616.PROVEN,
-            empty,
-            (),
-            StorageTrialStats8616(
-                pointer_count,
-                pointer_count,
-                pointer_count,
-                pointer_count,
-            ),
+        return _pointer_only_collection_8616(
+            callee_addr, callsites, pointer_by_callsite, pointer_count
         )
 
     targets = tuple(dict.fromkeys((callee_addr, *accepted_target_addrs)))
-    conditions_by_caller: dict[int, tuple[ConditionIR, ...]] = {}
+    conditions_by_caller: dict[tuple[int, int], tuple[ConditionIR, ...]] = {}
     collected_sites: list[CallsiteMemoryLiveOutEvidence8616] = []
     raw = normalized = materialized = pointer_count
     for site in sorted(callsites, key=lambda item: (item.callsite_addr, item.caller_addr)):
+        context = caller_ssa_context_for_callsite_8616(
+            project, callee_addr, site.caller_addr, site.callsite_addr
+        )
+        if context.verdict is CallerSSAContextVerdict8616.CONFLICT:
+            return _failed_8616(
+                MemoryLiveOutFailure8616(
+                    MemoryLiveOutFailureKind8616.CALLER_CONTEXT_CONFLICT,
+                    callee_addr, site.caller_addr, site.callsite_addr,
+                ),
+                max(1, raw), normalized,
+            )
+        caller_project = context.evidence_project if context.complete else project
+        caller_function = context.caller_function if context.complete else None
         caller_ssa = semantic_function_ssa_artifact_at_address_8616(
-            project,
+            caller_project,
             site.caller_addr,
+            function=caller_function,
         )
         artifact = caller_ssa.artifact
         if artifact is None:
@@ -255,74 +263,21 @@ def collect_function_memory_live_out_trials_8616(
                 max(1, raw),
                 normalized,
             )
-        conditions = conditions_by_caller.get(site.caller_addr)
-        if conditions is None:
-            condition_items, _edge_evidence = collect_typed_condition_artifacts_8616(
-                project, site.caller_addr
-            )
-            conditions = tuple(condition_items)
-            conditions_by_caller[site.caller_addr] = conditions
-        facts: list[MemoryLiveOutUseFact8616] = []
-        trials: list[StorageTrial8616] = []
-        for alias_output in aliases.canonical_facts:
-            output = alias_output.terminal_output
-            views = collect_terminal_memory_output_views_8616(alias_output, artifact)
-            if not views.complete:
-                return _failed_8616(
-                    MemoryLiveOutFailure8616(
-                        MemoryLiveOutFailureKind8616.WIDENING_EVIDENCE_REFUSED,
-                        callee_addr,
-                        site.caller_addr,
-                        site.callsite_addr,
-                        output.key,
-                        view_failure=views.failure,
-                    ),
-                    max(1, raw + views.stats.raw_fact_count),
-                    normalized + views.stats.normalized_fact_count,
-                )
-            for output_view in views.facts:
-                candidate = materialize_memory_live_out_candidate_8616(
-                    artifact,
-                    output_view,
-                    site.caller_addr,
-                    callee_addr,
-                    site.callsite_addr,
-                    targets,
-                    conditions,
-                )
-                if not candidate.activated:
-                    continue
-                raw += 1
-                normalized += 1
-                if candidate.failure is not None:
-                    return _failed_8616(
-                        MemoryLiveOutFailure8616(
-                            candidate.failure,
-                            callee_addr,
-                            site.caller_addr,
-                            site.callsite_addr,
-                            output.key,
-                            definition_failure=candidate.definition_failure,
-                        ),
-                        raw,
-                        normalized,
-                    )
-                if not candidate.complete or candidate.fact is None:
-                    raise RuntimeError(
-                        "complete memory live-out candidate lost its typed outcome"
-                    )
-                facts.append(candidate.fact)
-                if candidate.trial is not None:
-                    trials.append(replace(candidate.trial, logical_index=len(trials)))
-                materialized += 1
+        conditions = _caller_conditions_8616(
+            caller_project, site.caller_addr, conditions_by_caller
+        )
+        collected = collect_callsite_memory_live_out_8616(
+            aliases, artifact, site, targets, conditions
+        )
+        raw += collected.stats.raw_fact_count
+        normalized += collected.stats.normalized_fact_count
+        if not collected.complete:
+            return _failed_8616(collected.failures[0], max(1, raw), normalized)
+        materialized += collected.stats.materialized_count
         collected_sites.append(
-            CallsiteMemoryLiveOutEvidence8616(
-                site.caller_addr,
-                callee_addr,
-                site.callsite_addr,
-                tuple(facts),
-                tuple(trials),
-                pointer_by_callsite[site.callsite_addr],
+            replace(
+                collected.callsites[0],
+                pointer_effects=pointer_by_callsite[site.callsite_addr],
             )
         )
     stats = StorageTrialStats8616(raw, normalized, materialized, materialized)

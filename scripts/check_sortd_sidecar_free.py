@@ -29,6 +29,11 @@ from scripts.runmenu_behavior import (  # noqa: E402
     RunMenuExecutionEvidence,
     collect_runmenu_execution_evidence,
 )
+from scripts.sortd_function_gate import (  # noqa: E402
+    beep_contract_violations,
+    drawtime_contract_violations,
+    runmenu_contract_violations,
+)
 
 EXPECTED_SORTD_FUNCTION_ADDRS: tuple[int, ...] = (
     0x10010,
@@ -90,28 +95,12 @@ _SELECTED_RE = re.compile(r"selected (?P<count>\d+) function\(s\) for decompilat
 _ATTEMPTED_RE = re.compile(r"decompilation attempted for (?P<attempted>\d+)/(?P<selected>\d+) selected function")
 _SUMMARY_RE = re.compile(r"summary: decompiled (?P<decompiled>\d+)/(?P<selected>\d+) selected functions")
 _TIMEOUT_SIGNAL_RE = re.compile(r"(?:Decompilation timeout|c \([^)]*partial timeout[^)]*\))", re.IGNORECASE)
-_WORD_TYPE_RE = r"(?:unsigned\s+)?short"
 _RUNMENU_ADDR = 0x102E0
-_RUNMENU_SIGNATURE_RE = re.compile(r"\bvoid\s+sub_102e0\s*\(\s*void\s*\)")
-_RUNMENU_EXIT_CASE_RE = re.compile(r"\bcase\s+27\s*:\s*return\s*;")
-_RUNMENU_REDUNDANT_TAIL_RE = re.compile(
-    r"\b(?:goto\s+LABEL_10488|LABEL_10488\s*:)", re.IGNORECASE
-)
 _DRAWTIME_ADDR = 0x10498
-_DRAWTIME_SIGNATURE_RE = re.compile(
-    rf"\bvoid\s+sub_10498\s*\(\s*(?P<row_type>{_WORD_TYPE_RE})\s+(?P<row>[A-Za-z_]\w*)\s*\)"
-)
-_UNSUPPORTED_INSTRUCTION_RE = re.compile(r"\b(?:unsupported|unknown)\s+instruction\b", re.IGNORECASE)
-_FLAG_ARTIFACT_RE = re.compile(r"\b(?:e?flags|cc_op|cc_dep[12]?)\b", re.IGNORECASE)
-_EMPTY_IF_ELSE_RE = re.compile(r"\bif\s*\([^{};]*\)\s*\{\s*\}\s*else\s*\{\s*\}")
-_RAW_SS_LINEAR_RE = re.compile(r"\binertia_ss\s*<<\s*4\b")
 _BEEP_ADDR = 0x10E70
-_BEEP_SIGNATURE_RE = re.compile(
-    rf"\bvoid\s+sub_10e70\s*\(\s*{_WORD_TYPE_RE}\s+(?P<frequency>[A-Za-z_]\w*)\s*,\s*"
-    rf"{_WORD_TYPE_RE}\s+(?P<duration>[A-Za-z_]\w*)\s*\)"
-)
-_UNINITIALIZED_BP4_LOCAL_RE = re.compile(r"^[^/\n;]+;\s*//\s*\[bp\+0x4\]", re.MULTILINE)
-
+_MZ_SIZE_FIELDS_END = 6
+_UNSUPPORTED_INSTRUCTION_RE = re.compile(r"\b(?:unsupported|unknown)\s+instruction\b", re.IGNORECASE)
+_FLAG_ARTIFACT_RE = re.compile(r"\b(?:inertia_flags|e?flags|cc_op|cc_dep[12]?)\b", re.IGNORECASE)
 
 def _function_transcript_segment(transcript: str, address: int) -> str:
     """Return one function body from canonical C or a legacy marker segment."""
@@ -160,7 +149,7 @@ class SortdRatchetResult:
 
 def mz_executable_image(data: bytes) -> bytes:
     """Return the executable image declared by an MZ header, excluding overlays."""
-    if len(data) < 6 or data[:2] != b"MZ":
+    if len(data) < _MZ_SIZE_FIELDS_END or data[:2] != b"MZ":
         raise ValueError("source binary is not an MZ executable")
     bytes_in_last_page = int.from_bytes(data[2:4], "little")
     page_count = int.from_bytes(data[4:6], "little")
@@ -222,20 +211,20 @@ def evaluate_sortd_transcript(
     traceback_count = transcript.count("Traceback (most recent call last):")
 
     expected_count = len(EXPECTED_SORTD_FUNCTION_ADDRS)
-    if source_counts != (expected_count, expected_count, expected_count, expected_count, 0):
-        violations.append(f"source evidence regressed: {source_counts!r}")
-    if queued_count != expected_count:
-        violations.append(f"queued {queued_count}, expected {expected_count}")
-    if selected_count != expected_count:
-        violations.append(f"selected {selected_count}, expected {expected_count}")
-    if attempted_count != expected_count:
-        violations.append(f"attempted {attempted_count}, expected {expected_count}")
-    if tuple(sorted(function_addrs)) != EXPECTED_SORTD_FUNCTION_ADDRS:
-        violations.append("emitted function address set differs from the executable-only oracle")
-    if len(statuses) != expected_count:
-        violations.append(f"reported {len(statuses)} terminal function statuses, expected {expected_count}")
-    if decompiled_count < minimum_decompiled:
-        violations.append(f"decompiled {decompiled_count}, minimum is {minimum_decompiled}")
+    coverage_checks = (
+        (source_counts == (expected_count, expected_count, expected_count, expected_count, 0),
+         f"source evidence regressed: {source_counts!r}"),
+        (queued_count == expected_count, f"queued {queued_count}, expected {expected_count}"),
+        (selected_count == expected_count, f"selected {selected_count}, expected {expected_count}"),
+        (attempted_count == expected_count, f"attempted {attempted_count}, expected {expected_count}"),
+        (tuple(sorted(function_addrs)) == EXPECTED_SORTD_FUNCTION_ADDRS,
+         "emitted function address set differs from the executable-only oracle"),
+        (len(statuses) == expected_count,
+         f"reported {len(statuses)} terminal function statuses, expected {expected_count}"),
+        (decompiled_count >= minimum_decompiled,
+         f"decompiled {decompiled_count}, minimum is {minimum_decompiled}"),
+    )
+    violations.extend(message for passed, message in coverage_checks if not passed)
     missing_decompiled_addrs = tuple(
         address
         for address in REQUIRED_DECOMPILED_SORTD_FUNCTION_ADDRS
@@ -246,38 +235,11 @@ def evaluate_sortd_transcript(
             "required decompiled function regressions: "
             + ", ".join(f"{address:#x}" for address in missing_decompiled_addrs)
         )
-    runmenu_segment = _function_transcript_segment(transcript, _RUNMENU_ADDR)
-    escape_proven = (
-        runmenu_execution.accepts(runmenu_segment)
-        if runmenu_execution is not None
-        else _RUNMENU_EXIT_CASE_RE.search(runmenu_segment) is not None
-    )
-    if not _RUNMENU_SIGNATURE_RE.search(runmenu_segment) or not escape_proven:
-        violations.append("RunMenu lacks its void binary-proven ESC exit")
-    if runmenu_execution is not None and runmenu_execution.failure is not None:
-        violations.append(f"RunMenu execution gate failed: {runmenu_execution.failure}")
-    if _RUNMENU_REDUNDANT_TAIL_RE.search(runmenu_segment):
-        violations.append("RunMenu retains a redundant switch-to-loop-tail goto")
-    drawtime_segment = _function_transcript_segment(transcript, _DRAWTIME_ADDR)
-    drawtime_signature = _DRAWTIME_SIGNATURE_RE.search(drawtime_segment)
-    if drawtime_signature is None or _UNINITIALIZED_BP4_LOCAL_RE.search(drawtime_segment):
-        violations.append("DrawTime lacks its canonical void positive-BP signature")
-    elif re.search(
-        rf"\bsub_10e70\s*\(\s*(?:\(\s*{re.escape(drawtime_signature.group('row_type'))}\s*\)\s*)?"
-        rf"{re.escape(drawtime_signature.group('row'))}\s*\*\s*60\s*,\s*75\s*\)",
-        drawtime_segment,
-    ) is None:
-        violations.append("DrawTime lacks its binary-proven frequency and duration arguments")
-    if _EMPTY_IF_ELSE_RE.search(drawtime_segment):
-        violations.append("DrawTime retains an empty flag-only branch")
-    if _RAW_SS_LINEAR_RE.search(drawtime_segment):
-        violations.append("DrawTime retains raw SS linear-address arithmetic")
-    beep_segment = _function_transcript_segment(transcript, _BEEP_ADDR)
-    beep_signature = _BEEP_SIGNATURE_RE.search(beep_segment)
-    if beep_signature is None or _UNINITIALIZED_BP4_LOCAL_RE.search(beep_segment):
-        violations.append("Beep lacks its void two-argument positive-BP signature")
-    elif re.search(rf"\bif\s*\(\s*{re.escape(beep_signature.group('duration'))}\s*<\s*75\s*\)", beep_segment) is None:
-        violations.append("Beep lacks its binary-proven minimum-duration guard")
+    violations.extend(runmenu_contract_violations(
+        _function_transcript_segment(transcript, _RUNMENU_ADDR), runmenu_execution,
+    ))
+    violations.extend(drawtime_contract_violations(_function_transcript_segment(transcript, _DRAWTIME_ADDR)))
+    violations.extend(beep_contract_violations(_function_transcript_segment(transcript, _BEEP_ADDR)))
     if empty_count > maximum_empty:
         violations.append(f"empty function count {empty_count} exceeds {maximum_empty}")
     if timeout_count > maximum_timeouts:
@@ -373,9 +335,12 @@ def main(argv: list[str] | None = None) -> int:
                 returncode = completed.returncode
             except subprocess.TimeoutExpired:
                 returncode = 124
-        runmenu_execution = collect_runmenu_execution_evidence(function_c_dir, Path(temp_dir))
+        transcript = args.transcript_out.read_text(encoding="utf-8", errors="replace")
+        runmenu_execution = collect_runmenu_execution_evidence(
+            function_c_dir, Path(temp_dir),
+            definition=_function_transcript_segment(transcript, _RUNMENU_ADDR),
+        )
 
-    transcript = args.transcript_out.read_text(encoding="utf-8", errors="replace")
     result = evaluate_sortd_transcript(
         transcript,
         decompiler_returncode=returncode,

@@ -288,17 +288,35 @@ def _target_calls_8616(
     expression: object,
     target_addr: int,
 ) -> tuple[CFunctionCall, ...]:
-    """Return calls whose exact angr callee address matches the typed target."""
+    """Match retained numeric identities, refusing conflicting call targets.
+
+    Exact-slice calls may have no angr function object. Naming can subsequently
+    replace the numeric target with a label, retaining its authoritative tag.
+    A label alone is not evidence and every available numeric identity must agree.
+    """
     matches: list[CFunctionCall] = []
     for node in _iter_c_nodes_deep_8616(expression):
-        if not isinstance(node, CFunctionCall) or node.callee_func is None:
+        if not isinstance(node, CFunctionCall):
             continue
-        callee = cast(_CallReturnFunction8616, node.callee_func)
-        try:
-            callee_addr = callee.addr
-        except AttributeError:
-            continue
-        if x86_16_call_targets_equivalent_8616(project, callee_addr, target_addr):
+        identities: list[object] = []
+        target = node.callee_target
+        if isinstance(target, CConstant):
+            identities.append(target.value)
+        elif not isinstance(target, str):
+            identities.append(target)
+        if "inertia_target_addr_8616" in node.tags:
+            identities.append(node.tags["inertia_target_addr_8616"])
+        if node.callee_func is not None:
+            callee = cast(_CallReturnFunction8616, node.callee_func)
+            try:
+                identities.append(callee.addr)
+            except AttributeError:
+                continue
+        if identities and all(
+            type(identity) is int
+            and x86_16_call_targets_equivalent_8616(project, identity, target_addr)
+            for identity in identities
+        ):
             matches.append(node)
     return tuple(matches)
 

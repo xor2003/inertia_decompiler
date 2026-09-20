@@ -1206,7 +1206,7 @@ def test_runtime_gate_links_generic_runtime_support(monkeypatch, tmp_path):
     source = seen["source"]
     assert isinstance(source, str)
     for register in ("eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"):
-        declaration = f"extern unsigned long inertia_{register};"
+        declaration = f"extern inertia_gp_lane inertia_gp_{register};"
         assert declaration in source
         assert source.index(declaration) < source.index("int main(")
 

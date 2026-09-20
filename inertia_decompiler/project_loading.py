@@ -28,6 +28,7 @@ from angr_platforms.X86_16.packed_mz import (
     detect_packer,
     unpack_lzexe_091,
 )
+from angr_platforms.X86_16.pklite import unpack_pklite
 
 from inertia_decompiler.telemetry import trace_function
 
@@ -174,6 +175,8 @@ def _decoded_packed_stream(path: Path, detection: PackerDetection) -> io.BytesIO
         decoder = unpack_lzexe_091
     elif detection.packer_type is PackerType.EXEPACK:
         decoder = unpack_exepack
+    elif detection.packer_type is PackerType.PKLITE:
+        decoder = unpack_pklite
     else:
         raise PackedExecutableRefusedError(
             path=path,

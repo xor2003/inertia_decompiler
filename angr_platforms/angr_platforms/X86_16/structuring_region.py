@@ -496,7 +496,7 @@ class RegionGraphBuilder:
                     continue
                 for succ_addr in succs:
                     if isinstance(succ_addr, int) and succ_addr in blocks:
-                        edges.append((block_addr, succ_addr))  # noqa: PERF401
+                        edges.append((block_addr, succ_addr))
 
         return edges
 

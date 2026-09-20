@@ -2,6 +2,23 @@
 
 ## Scope And Truth Sources
 
+**Steps 10-12 scope approved September 19, 2026:** the
+[bounded remaining-step contract](reference/remaining-plan-acceptance.md)
+supersedes their historical broad DoD below. Audit the frozen SORTD inventory,
+retain accepted readability work, repair demonstrated correctness failures,
+measure reproducibility/resources, and close with the specified final gates.
+User clarification September 20: this boundary must retain the requested
+Ghidra/Reko parity features. Tasks 5 and 7.1-7.4 remain required for the selected
+inventory, including new mechanisms where missing. Audit-only closure is not
+acceptable; only unrelated generalization and optional optimization are deferred.
+
+**Step 9 scope approved September 19, 2026:** finish acceptance and comparison
+for the frozen 20-function SORTD inventory, then stop. The authoritative
+[bounded acceptance contract](reference/step9-acceptance-contract.md) supersedes
+historical Step 9 dependencies on unrelated COD repairs, all Tasks 3/8, and
+pre-existing global quality debt. Those remain explicit
+[separate open work](reference/post-step9-backlog.md), not completed work.
+
 This report covers only the 20 non-library functions emitted by Inertia for
 sidecar-free `SORTD.EXE`. Ghidra's 138 recovered functions are scanned only to
 find bodies corresponding to those 20 functions; runtime/library functions are
@@ -24,7 +41,301 @@ input path and conditional pointer-output/stack-initialization defects remain
 in scope. Preserve existing FPU behavior and tests; unsupported FPU handling
 must stay explicit rather than being counted as successful decompilation.
 
-## Current Checkpoint (2026-09-18)
+## Current Checkpoint (2026-09-20)
+
+User resumed Steps 11/12 and conditional Step 10 after bounded Step 9 closure.
+Current execution and per-slice acceptance: [remaining plan execution](reference/remaining-plan-execution.md).
+Step 11's first signed-conversion readability slice is complete: 20/20 SORTD
+validation, zero-warning compilation, generated behavior and all default
+pipeline lanes pass (5,885 routine tests in 227.61s). The broader step remains
+in progress; see [the slice report](reference/step11-signed-casts.md).
+
+The coherent GP word-view slice is now enabled in normal CLI lowering: the
+bounded SORTD exports contain zero upper-word preservation assignments (55 in
+the baseline). All 20 functions validate and compile with zero warnings; all
+19 behavior cases pass. The default pipeline passes all three lanes, including
+5,950 pytest cases in 296.99s, four QuickC fixtures and seven MS C round trips.
+See the execution ledger for proof boundaries, runtime migration and artifacts.
+This does not close the remaining Task 5/7 parity obligations or Step 10.
+
+Step 12 now rejects stale accepted storage contracts when a later collection
+refuses, before prototype consumers can reuse them. Scoped checks and 198 tests
+pass; SORTD remains byte-identical, 20/20 validated, zero compiler warnings and
+19 behavior cases passing. The refreshed default pipeline passes 5,956 pytest
+cases plus QuickC and all seven MS C round trips. The
+[parity evidence audit](reference/step12-parity-audit.md) records the completed
+all-body Step 9 comparison and the still-open live contract/transport, widening
+and aggregate proof obligations. This safety guard is not Step 12 completion.
+
+The subsequent live-contract audit fixed memory live-out collection using the
+wrong project for caller SSA. It now consumes census-owned caller context,
+with conflict and cross-project cache controls. SORTD stays byte-identical and
+passes every bounded gate. The following Frontend NOP-entry identity slice
+now gives Swaps an accepted unified contract for all nine callsites in-process.
+Explicit discarded-return proof now also accepts QuickSort's recursive contract
+in-process. Frontend block-witness transport and the Semantics typed-edge adapter
+now also produce accepted Swaps and QuickSort contracts in normal clean workers:
+nine/five input callsites and 27/five return-memory facts, respectively, without
+weakening either solver. Fresh exports validate 20/20, compile without warnings,
+and pass all 19 behavior cases; all default pipeline lanes pass.
+Current priority: [stability first, correctness next, remaining features last](reference/stability-first-execution.md).
+New Ghidra/Reko parity features are explicitly deferred by the user until
+stability work is accepted; they are not completed or cancelled. Small source
+fixtures from `/home/xor/nndecomp` are preferred over new feature work.
+The subsequent caller-range fallback repair replaces summed CFG byte counts
+with the same proven Frontend extents; all 20 exports remain byte-identical.
+Final gates: 6,023 pytest cases, four QuickC fixtures, seven MS C round trips,
+20/20 SORTD validation, zero compiler warnings and 19 behavior cases. The parity
+audit records the remaining typed-evidence tasks; Steps 10-12 remain open.
+
+Step 9 closure baseline: all 20 functions validate; strict compilation has zero errors and
+zero warnings; the 19-function behavior harness passes. RunMenu's DCE repair
+preserves distinct live SSA values while removing both unused carriers.
+Focused checks: 229 passed; project-wide MyPy, scoped lint/types/docs,
+architecture and ownership pass. Global quality remains Ruff-blocked.
+The final default pipeline passed all three lanes: 5,861 routine tests in
+352.04s, four QuickC fixtures, and seven MS C tiny round trips. Bounded Step 9
+is complete. See the [closure ledger](reference/step9-closure.md).
+The saved C, reports and address links use the zero-warning export.
+See the [root-cause report](reference/step9-runmenu-dce.md) and semantic review.
+
+Preceding checkpoint: the refreshed 20-function SORTD gate passes; generated sort-core
+compilation and behavior pass. Typed local aggregate projection cleanup removes
+one unused carrier, reducing strict compilation warnings from four to three
+(zero errors). The strict zero-warning gate remains red. Focused DCE: 89 passed;
+the refreshed pipeline passes all three lanes, including 5,819 routine tests
+in 377.64s and both external compiler lanes. RunMenu's remaining warnings follow
+a validator rollback with condition-provenance differences, not call/write loss.
+Current artifacts, limitations and evidence: [semantic review](reference/step9-current-comparison.md).
+Unrelated debt remains in the separate backlog, not a Step 9 dependency.
+
+### Historical Checkpoints
+
+Latest follow-up: captured-return publication has focused proof and consumer
+integration coverage; Lowering is consulted before legacy producer folding.
+Related call tests: 221 passed, two stack-probe failures also reproduced with
+the previous dispatch order. TID still exits 4 for unassigned stack locals;
+the capture fix does not close the live argument-materialization defect.
+Two missing test enrollments are repaired and architecture-check passes.
+Global quality is Ruff-blocked. See the failure refresh for exact gate evidence.
+The refreshed default pipeline passes all three lanes: 5,791 routine tests
+in 308.86s, QuickC, and all seven MS C tiny round trips. Complete-suite and
+expanded acceptance remain unrefreshed; Step 9 is not complete.
+
+Latest inventory at 19:59 +02:00: retrying the previous 22 failing nodes gives
+2 passes (LoadProg, Overlay) and 20 failures in 600.90s. These are not full-suite
+totals. A real MS C artifact-lifetime race was then repaired in gate tooling,
+with four fail-first cases, 121 related passes and clean scoped lint/type/doc
+checks. Its live MS C and broad acceptance remain to rerun. TID semantic errors,
+timeouts, output-contract assertions and global quality closure remain open.
+See [failure refresh](reference/step9-failure-refresh-20260919.md).
+
+Latest follow-up at 19:24 +02:00: LoadProg now exits 0 with clean whole-tail
+validation, including an isolated-cache run with alternate source-C disabled.
+Its existing live acceptance test and portable-flat recompilation pass. Alias
+composes proven low-byte storage with the proven zero upper byte; cleanup
+preserves existing stack-view evidence instead of flattening it away. Related
+tests: 173 passed. New module/scoped quality and architecture pass; legacy CLI
+lint debt remains. The default pipeline finished with 5,752 routine passes and
+one SetGear timeout; QuickC and MS C tiny round trips pass. SetGear repeats the
+timeout in isolated pytest, while direct CLI validation passes; investigation
+remains open. Global configured MyPy passes. LoadProg is now enrolled in the
+routine lane with alternate-source C disabled (51 focused/pipeline tests pass).
+Complete collection and expanded acceptance remain open. See the newest
+failure-refresh section.
+
+Earlier bounded fix: remove legacy comparison fallback that invented a bare AX
+read when no reaching value was proven. LoadProg's two uninitialized AX errors
+disappear, but two branch-ownership errors remain and the function still exits
+4. Related condition/pass-order tests: 105 passed; architecture passes. Refreshed
+default pipeline: 5,720 routine tests pass in 413.24s, with QuickC and all MS C
+tiny full round trips passing. Global quality remains lint-blocked; complete
+collection and expanded acceptance remain open. See the latest section of the
+failure-refresh report below. This is not Step 9 completion.
+
+Earlier gate refresh: **5,544 routine tests pass**, plus all QuickC and MS C tiny
+round trips. A mapped retry of the previous complete audit's 47 failures gives
+**25 passed, 22 failed**; this is not a full-suite count. Current failure groups
+and next proof obligations are in [the September 19 failure refresh](reference/step9-failure-refresh-20260919.md).
+Follow-up individually fixes the named `main` scorecard: it reported a rejected
+attempt instead of the accepted output's clean validation. Fourteen focused
+reporting/live tests and 132 enrollment tests pass, with scoped quality and
+architecture gates clean. This closes one retry failure, not the full suite.
+Overlay now passes its live validation, recompilation and 54-case far-return/ABI
+oracle. Fixes consume exact Alias temporary identities, preserve register
+versions at Lowering, and recognize typed indexed-byte storage in Validation.
+The introduced DrawBar and MS C pointer-fixture regressions were caught and
+repaired. The refreshed pipeline passes all QuickC/MS C round trips; its routine
+lane has 5,608 passes and three timeouts, all passing an unchanged-limit focused
+retry. The broad run is not green. Physical storage coverage and C initialization
+remain separate mandatory guards. See the failure-refresh report for evidence
+and limitations; this is not full-suite or Step 9 completion.
+Before the graph-cache follow-up, SORTD acceptance passed **20/20** with zero violations; all 21
+individual/combined C exports compile (16:02:50-16:05:10 +02:00, 140s CLI wall).
+
+TID reload follow-up: Lowering now proves a saved register's byte stores when
+they consume its exact, uniquely defined published temporary. The 52-test
+related surface and scoped Ruff/MyPy/type-doc gates pass. TID passes that gate
+but remains validation-failed (15 uninitialized reads, three missing branch
+surfaces, one duplicate callsite); LoadProg also remains failed. Neither is
+counted as fixed. Details and proof refusals are in the failure-refresh report.
+
+Graph-cache follow-up (September 19, 16:53 +02:00): frontend discovery now uses
+angr's cache-invalidating transition API and clears its local CFG cache on reset.
+Fail-first regressions prove that previously recovered edges disappeared between
+`transition_graph`, `function.graph`, IR and SSA. The focused surface passes
+71 tests; pipeline enrollment passes 110 tests; architecture passes. Live TID
+still fails, but missing branch surfaces decrease from three to one. LoadProg
+now reaches a distinct unmaterialized GP-save gate: its return crosses into a
+shared epilogue, outside the then-current same-block return proof. Neither function
+is fixed. Global quality remains Ruff-blocked. The routine refresh reports
+5,640 passes, one InBoxLng timeout and one stale InitBars topology expectation;
+QuickC and MS C tiny full round trips pass. Binary decoding proves the InitBars
+intermediate jump block; the test now asserts that exact topology and balanced
+counters instead of requiring an unnecessary repair. Its entire downstream
+Alias/bounds refusal contract and the unchanged-limit InBoxLng retry pass in an
+18-test final focused run. This does not erase the failed broad run. The earlier
+20/20 SORTD result is not verification of this change.
+
+Return-path follow-up (September 19, 17:22 +02:00): Semantics now retains an
+explicit finite CFG path from a register definition to its return. Four
+fail-first cases cover the missing cross-block proof and unsafe acceptance of
+same-address calls/unknown effects or a return with an outgoing edge. The final
+related/enrollment set passes 183 tests; scoped Ruff/MyPy/type-doc and full
+architecture checks pass. Global quality remains Ruff-blocked. LoadProg still
+fails its GP materialization gate: its machine path is now proven, but native
+AIL-to-C conversion drops the returned local's value-definition origin. All
+three C returns retain only the same shared return-instruction address. Next:
+preserve value origin at that conversion boundary, then join it to the path and
+Alias-proven initialized storage in Lowering. No function fix or new broad
+acceptance is claimed. Full details and counterexample requirements are in the
+failure-refresh report.
+
+Return-origin follow-up (September 19, 17:50 +02:00): native AIL-to-C conversion
+now preserves typed per-use value origin on each CReturn, without mutating
+shared CVariable or input AIL tags. Lowering joins that origin to the exact
+machine path, keeping other proven definitions at a shared RET independent.
+It still requires initialized Alias-proven storage. An additional fail-first
+test caught acceptance of an `UNKNOWN_REFUSE` Alias fact; the boundary now
+rejects it explicitly. The final related set passes **98 tests in 23.91s**;
+scoped Ruff/MyPy/type-doc checks pass. Full architecture passed before the
+final verdict guard; global quality remains lint-blocked. The fresh pipeline
+passes: **5,686 routine tests in 455.62s**, plus 268 preliminary tests and all
+QuickC/MS C tiny full round trips. All three pipeline stages pass, with zero
+skipped or timed-out stages. This is not the complete pytest collection.
+
+LoadProg still exits 4 at the GP materialization gate. Its saved bytes consume
+a native AX variable defined by the call at `0x10c5`, not the published temporary
+representation handled by the existing proof. Next: prove that call value
+reaches the save at `0x10cb`, and prove the complete nonescaping local stores
+dominate the conditional return. No name-based recognition or blanket call
+exception is acceptable. A subsequent probe finds the authoritative call-summary
+inventory empty at this gate. First trace its construction/publication and
+consumption order before adding another recovery path. See the failure-refresh
+report for evidence.
+
+Call-storage follow-up (18:20 +02:00): the carrier was absent, not merely empty;
+the existing binary summary owner proves the exact AX store at `0x10cb`.
+Lowering now shares the previous call-output inventory initializer, verifies
+native call-result byte snapshots, and proves complete nonescaping local stores
+dominate conditional returns. The live GP return proof now passes. LoadProg
+still exits 4 with two uninitialized AX reads and two missing branch surfaces
+(`0x10b1`, `0x10b9`); it is not fixed. The final focused set passes 103 tests in
+20.67s; scoped Ruff/MyPy/type-doc checks pass for the proof modules/tests.
+The extracted-from legacy module retains 18 Ruff findings; MyPy passes when
+its typed declaration-projection owner is included. At 18:31 the refreshed
+pipeline passes **5,716 routine tests in 383.11s**, 268 preliminary tests, and
+all QuickC/MS C tiny round trips (three passed stages; no failed, skipped or
+timed-out stages). Full architecture passes; global quality remains lint-blocked.
+This is not the complete pytest collection or function/Step 9 completion.
+
+The 17:25 disk interruption has cleared: the latest check finds 7.5 GB free on
+`/` and 15 GB on `/home`. Tests use the project's `.cache/step9-tmp` on `/home`.
+No source, caches, personal files or system logs were deleted by this agent.
+Step 9 remains incomplete.
+
+### Earlier Acceptance Results (Before These Follow-Ups)
+
+Sidecar-free numeric Sleep now passes focused validation and compiled deadline/ABI execution after
+terminal proof validation and temporary-declaration preservation fixes. See
+[acceptance contract and evidence](reference/p0-terminal-wide-validation.md).
+The latest whole-file run emits **20/20** functions with validation passing;
+BubbleSort, PercolateDown, and ShellSort now pass after condition-ownership and
+precision fixes. There are no timeouts, empty functions, or tracebacks.
+The refreshed whole-file acceptance gate passes, including RunMenu execution
+and the absence of raw flag-state artifacts. Named/sidecar-assisted Sleep now
+passes its two live regressions after branch-provenance preservation and
+checked binary-target identity fixes; the combined Sleep set passes 16 tests
+including compiled deadline/ABI execution and deliberate register corruption.
+The refreshed whole-file gate passes 20/20 with no violations; all 21 C exports
+compile, and the combined export is byte-identical to the saved comparison
+snapshot. The default pipeline is green; full-suite and quality closure remain outstanding.
+The latest full audit ended without a controller summary: saved shard results
+contain 6,315 passed, 39 failed, and 124 skipped, not a complete-suite result.
+Two stale ownership-manifest expectations have since been corrected (60 tests
+pass). Global quality closure remains open; Step 9 is not complete.
+
+Follow-up: CBW/CWDE condition provenance now preserves signed extension and
+original load width. InsertionSort now passes whole-tail validation, strict
+compilation, and a compiled behavioral oracle covering 65,581 cases. Aggregate
+byte projection consumes proven layout at Lowering. See
+[current evidence](reference/p0-condition-sign-extension.md).
+The focused surface passes 101 tests. The refreshed default pipeline passes
+5,536 routine tests (281.30s), four QuickC fixtures, and seven MS C tiny full
+round trips. Its routine stage exceeds the configured 30-second advisory
+budget. `quality-fast` still fails its global
+linter stage. Exact full collection and expanded-pipeline closure are pending.
+
+September 19 follow-up (observed 12:51-13:02 +02:00, approximately 11 minutes
+including checks): RunMenu's final whole-file body passes 2,560 compiled
+execution cases. The gate now executes that final definition with its exported
+declarations and retains exact digest binding, rather than comparing an export
+digest against a differently rendered definition. DrawTime's argument gate
+accepts the equivalent parenthesized identity cast; corrupted arguments remain
+rejected. The flag-artifact gate now includes `inertia_flags`, closing a false
+negative. The final focused condition, ownership, and gate surface passes
+134 tests in 8.44 seconds. Scoped parallel Ruff/MyPy/types/docs checks,
+startup architecture checks, ownership checks, and diff whitespace checks pass.
+Re-evaluating the saved whole-file transcript with execution evidence for its
+tested final RunMenu body reports only raw flag-state artifacts.
+
+September 19 follow-up (checks completed by 13:22 +02:00): RunMenu now
+passes whole-tail validation without `inertia_flags`. IR lift artifacts persist
+the existing binary callee status-input summaries; Lowering consumes exact
+target evidence to prune closed, pure flag/carrier components. Unknown calls,
+flags-reading callees, explicit argument/return consumers, memory effects, and
+unrelated definitions remain protected. Narrower retries refresh callee
+uncertainty rather than retaining older optimistic summaries. Validation uses
+the existing algebraic condition normalizer for immutable precision evidence,
+so removing a dead DEC carrier does not invalidate its equivalent predicate.
+The focused surface passes 166 tests in 38.14 seconds, including the live
+RunMenu compiled behavior and deliberate-corruption checks. Scoped Ruff, MyPy,
+types/docs, startup architecture, and ownership checks pass. A fresh whole-file
+gate subsequently passed at 13:26:46 +02:00: 20/20 accepted, no violations.
+All 20 function exports and their combined translation unit passed the project
+GCC recompilation check. The saved comparison artifact and all 20 line anchors
+are refreshed; see [current semantic review](reference/step9-current-comparison.md).
+`quality-fast` still fails repository-wide Ruff; the default pipeline now
+passes all three lanes. Full architecture checking found missing ownership
+headers, one missing future-annotations import, an insufficiently labeled
+third-party dynamic boundary, and a duplicate Makefile test selection. Those
+are corrected; 399 architecture/structuring tests pass (29.56s). Scoped Ruff,
+types/docs, configured global MyPy, full architecture, agent context, and test
+ownership now pass. These final changes are documentation, annotations, and
+test-selection hygiene, not another decompilation semantics change.
+
+At 13:39 +02:00, the current named Sleep check reproduced two failures, while
+21 frontend-condition tests passed (47.68s total). Both named/rebased routes
+report wide call-output `callsite_missing`, then uninitialized AX/DX and missing
+branch surfaces. This is not explained by stale stdout assertions: the CLI
+itself returns a validation failure. Next investigate preservation of the
+typed callsite/return-binding evidence across exact-region rebasing and
+Lowering, without moving semantic recovery into CLI or postprocess.
+Evidence: `/tmp/step9-sleep-current.log`. This is not whole-goal completion.
+The new condition-delta validator is enrolled in Make, architecture checks,
+and test ownership. Full quality closure remains outstanding; Step 9 is open.
+
+### Prior Checkpoint
 
 **Implementation in progress:** terminal composite loop exits now consume the
 existing complete wide-decision proof without moving the clock call. Two
@@ -3998,11 +4309,13 @@ by the easiest percentage gain:
    This is the only remaining step that advances both Task 3 and Task 8, makes
    the complete pytest collection trustworthy again, and removes correctness
    and recompilability defects on which every later quality task depends. The
-   first vertical slice, the larger DOS `loadprog` body, is closed: one
-   binary-proven four-byte stack owner and its exact Tail Validation subviews
-   survive, and each terminal return is recovered only from its own CFG
-   predecessor. The active boundary is now the exact full collection and its
-   refreshed failure inventory. Process remaining failures by shared owner:
+   earlier `loadprog` storage slice established a binary-proven four-byte
+   stack owner, exact Tail Validation subviews and predecessor-specific terminal
+   returns. September 19 then exposed missing byte-source bindings and lost
+   projection evidence. The latest live run and recompilation now pass after
+   generic Alias and cleanup fixes, including an isolated no-source-fallback
+   run. The active boundary remains the exact full collection and its refreshed
+   failure inventory. Process failures by shared owner:
    multi-output/indexed/indirect storage first, type and object identity second,
    CFG/condition recovery third, and isolated corpus regressions only after
    those shared mechanisms close.
@@ -4088,10 +4401,10 @@ or output filtering.
 | 9o | Resolve final C argument coordinates through the complete function interface | `2026-09-06 23:12 +02:00` | `2026-09-06 23:24 +02:00` | 12m focused; live-test waits separate | complete | Validation consumes the existing Types/Lowering whole-function coordinate projection before ambiguous per-variable fallback. Entry-SP `+4` no longer collides with the first argument's machine-BP `+4`; both QuickSort arguments initialize `BP+4..+7`, parameter width facts resolve at `BP+4/+6`, 53 focused unit tests pass, and named plus sidecar-free QuickSort validate and recompile. The source-comparison fixture now accepts only the explicit 16-bit semantic view while retaining exact call, pointer-index, and recursion-bound checks. |
 | 9p | Preserve wide far-pointer returns and materialize exact stack-offset constants | before `2026-09-07 00:30 +02:00`; exact first diagnostic not retained | `2026-09-07 01:05 +02:00` | exact subtotal unavailable across continuation; final implementation and verification about 25m; test waits separate | complete | Types/Lowering now recognizes only an exact byte-pair word-load shape, so materialization cannot consume its enclosing DX:AX return. Decoded same-block constant flow retains `36` only through exact register and BP-stack identities; overlapping or unresolved writes invalidate it. The focused OVERLAY body emits both words and `36 + (funcNumber << 1)`, passes clean whole-tail validation, avoids asm fallback, and recompiles as portable-flat C. Eight focused tests, the 190-test segmented-load surface, and the 52-test changed-file gate pass with Ruff `--fix`, MyPy, type/doc ratchet, startup architecture, context, and ownership checks green. |
 | 9q | Preserve caller-clean arguments and current typed stack-owner widths | before `2026-09-07 02:27 +02:00`; exact first diagnostic not retained | `2026-09-07 02:46 +02:00` | exact subtotal unavailable across continuation; final root fix and verification about 12m; executable waits separate | complete | Recovery Metadata no longer interprets a returning callee's zero terminal cleanup as zero arguments. ARGS retains its three physical CRT pushes, folds the stale `BP+5` byte view into the current word owner, materializes the `BP+6` pointer, passes strict recompilation and clean whole-tail validation, and is byte-deterministic across three generated-C checks. The 131-test argument surface, the 137-test callsite/fixture surface, focused Ruff/MyPy/type gates, and all four Ultra QuickC fixtures pass. The fixture AST parser is independent of host libc headers. |
-| 9 | Finish remaining general interprocedural contracts, full-suite failure families, and open Ghidra mechanisms | `2026-09-02 02:10 +02:00` | - | prior closures plus completed 9c/9d/9e slices; waits excluded where recorded | 55-76h pending exact recalibration | Tasks 3 and 8 meet their per-step DoD for general indexed, indirect, stack, multi-output, type, CFG, COD, and full-suite contracts; the exact complete collection reaches zero failures without hiding coverage. |
+| 9 | Finish remaining general interprocedural contracts, full-suite failure families, and open Ghidra mechanisms | `2026-09-02 02:10 +02:00` | - | prior closures plus completed 9c/9d/9e slices; waits excluded where recorded | Unestimated: historical 55-76h is stale; recalibrate against current complete-suite failures and open contracts | Tasks 3 and 8 meet their per-step DoD for general indexed, indirect, stack, multi-output, type, CFG, COD, and full-suite contracts; the exact complete collection reaches zero failures without hiding coverage. |
 | 10 | Profile and optimize the remaining serial decompiler tail | prior accepted work; see DECOMPILER_PERFORMANCE_PLAN.md | - | recorded per experiment; no reliable aggregate | needs current-HEAD profiling | Accepted optimizations already exist. Re-profile before extending or closing this step; retain aggregate-memory and semantic gates. Do not repeat rejected experiments. |
-| 11 | Add proof-backed readability improvements | restored by user, 2026-09-11; not started | - | 0h | needs recalibration | Follow Step 9, before Step 12; consume existing typed evidence and retain all semantic gates. |
-| 12 | Implement evidence-supported Reko mechanisms | not started | - | 0h | 9-15h | Task 7 per-step DoD passes; unsupported mechanisms remain explicit refusals. |
+| 11 | Audit accepted proof-backed readability | resumed 2026-09-19 23:11 +02:00 | - | first slice approximately 35m, including gates | bounded audit pending | Signed-conversion slice accepted; new SP-proof machinery deferred by approved remaining-plan-acceptance.md. |
+| 12 | Audit existing mechanisms and named-function correctness | audit started 2026-09-19 | - | not yet aggregated | bounded audit in progress | 168 storage-contract tests pass; seven-function acceptance and final gates remain. Broad mechanism implementation deferred. |
 
 #### Step 9c acceptance contract
 
@@ -5122,7 +5435,10 @@ Definition of failure:
 
 ### 5. Improve readability only from proof
 
-Status: pending after recompilation and behavior gates.
+Status: in progress. The first exact signed-conversion projection is accepted
+with whole-file validation, recompilation, behavior and default pipeline gates.
+See [the slice report](reference/step11-signed-casts.md); remaining work is
+tracked in [the execution ledger](reference/remaining-plan-execution.md).
 
 Reason: Stack locals, aggregates, signed conditions, and object names are useful
 only when they are projections of accepted Alias, Widening, Types, and
@@ -7138,7 +7454,12 @@ Definition of failure:
 - output is merely prettier while call, control-flow, validation, compilation,
   behavior, evidence-accounting, typing, documentation, or lint gates regress
 
-### 9. Direct decompilation-result comparison index
+### 9. Bounded SORTD acceptance and comparison index
+
+Status: complete under the user-approved bounded scope on September 19, 2026.
+Evidence and limitations: [closure ledger](reference/step9-closure.md). Follow the
+[acceptance contract](reference/step9-acceptance-contract.md) for the complete
+DoD and failure criteria; the index-specific obligations below remain required.
 
 Reason: Address-aligned, function-specific artifacts make quality changes
 reviewable and prevent subjective claims based on whichever peer output looks
@@ -7162,33 +7483,36 @@ Definition of failure:
 - Ghidra, Reko, or `SORTDEMO.C` output is used directly as recovery evidence
 
 Use these links immediately before and after each implementation change. They
-point to the current saved Inertia baseline, Ghidra C output, and Reko 0.12.4 C
-output. The peer outputs are diagnostics, not truth: an Inertia change is an
+point to the September 19 final Inertia translation-unit export, historical
+Ghidra C output, and historical Reko 0.12.4 C output. Artifact identity,
+compilation context, current semantic review, and remaining debt are recorded in
+[the current comparison](reference/step9-current-comparison.md). The peer
+outputs are diagnostics, not truth: an Inertia change is an
 improvement only when validation and behavior gates still pass and the result
 is semantically clearer or more complete than both peers.
 
 | Function | Inertia baseline | Ghidra result | Reko result |
 | --- | --- | --- | --- |
-| main | [`SORTD.default-check.dec:406`](SORTD.default-check.dec#L406) | [`FUN_1000_0010...c:4`](SORTD_decomp/FUN_1000_0010_1000_0010.c#L4) | [`SORTD_0800.c:8`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L8) |
-| InitMenu | [`:1400`](SORTD.default-check.dec#L1400) | [`FUN_1000_005d...c:4`](SORTD_decomp/FUN_1000_005d_1000_005d.c#L4) | [`:38`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L38) |
-| DrawFrame | [`:849`](SORTD.default-check.dec#L849) | [`FUN_1000_01db...c:2`](SORTD_decomp/FUN_1000_01db_1000_01db.c#L2) | [`:120`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L120) |
-| RunMenu | [`:105`](SORTD.default-check.dec#L105) | [`FUN_1000_02cc...c:4`](SORTD_decomp/FUN_1000_02cc_1000_02cc.c#L4) | [`:159`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L159) |
-| DrawTime | [`:717`](SORTD.default-check.dec#L717) | [`FUN_1000_0491...c:4`](SORTD_decomp/FUN_1000_0491_1000_0491.c#L4) | [`:336`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L336) |
-| InitBars | [`:1290`](SORTD.default-check.dec#L1290) | [`FUN_1000_0554...c:4`](SORTD_decomp/FUN_1000_0554_1000_0554.c#L4) | [`:399`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L399) |
-| ReInitBars | [`:472`](SORTD.default-check.dec#L472) | [`FUN_1000_0672...c:4`](SORTD_decomp/FUN_1000_0672_1000_0672.c#L4) | [`:454`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L454) |
-| DrawBar | [`:338`](SORTD.default-check.dec#L338) | [`FUN_1000_06c8...c:4`](SORTD_decomp/FUN_1000_06c8_1000_06c8.c#L4) | [`:482`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L482) |
-| SwapBars | [`:291`](SORTD.default-check.dec#L291) | [`FUN_1000_075b...c:2`](SORTD_decomp/FUN_1000_075b_1000_075b.c#L2) | [`:510`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L510) |
-| Swaps | [`:246`](SORTD.default-check.dec#L246) | [`FUN_1000_0794...c:4`](SORTD_decomp/FUN_1000_0794_1000_0794.c#L4) | [`:540`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L540) |
-| InsertionSort | [`:1136`](SORTD.default-check.dec#L1136) | missing (discovery loss) | [`:564`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L564) |
-| BubbleSort | [`:637`](SORTD.default-check.dec#L637) | missing (discovery loss) | [`:619`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L619) |
-| HeapSort | [`:785`](SORTD.default-check.dec#L785) | missing (discovery loss) | [`:668`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L668) |
-| PercolateUp | [`:576`](SORTD.default-check.dec#L576) | [`FUN_1000_09e8...c:4`](SORTD_decomp/FUN_1000_09e8_1000_09e8.c#L4) | [`:717`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L717) |
-| PercolateDown | [`:914`](SORTD.default-check.dec#L914) | missing (discovery loss) | [`:759`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L759) |
-| ExchangeSort | [`:1212`](SORTD.default-check.dec#L1212) | missing (discovery loss) | [`:809`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L809) |
-| ShellSort | [`:1057`](SORTD.default-check.dec#L1057) | missing (discovery loss) | [`:866`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L866) |
-| QuickSort | [`:1495`](SORTD.default-check.dec#L1495) | missing (discovery loss) | [`:920`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L920) |
-| Beep | [`:997`](SORTD.default-check.dec#L997) | [`FUN_1000_0e5d...c:2`](SORTD_decomp/FUN_1000_0e5d_1000_0e5d.c#L2) | [`:1060`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L1060) |
-| Sleep | [`:530`](SORTD.default-check.dec#L530) | [`FUN_1000_0f18...c:2`](SORTD_decomp/FUN_1000_0f18_1000_0f18.c#L2) | [`:1092`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L1092) |
+| main | [`SORTD.default-check.dec:114`](SORTD.default-check.dec#L114) | [`FUN_1000_0010...c:4`](SORTD_decomp/FUN_1000_0010_1000_0010.c#L4) | [`SORTD_0800.c:8`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L8) |
+| InitMenu | [`:137`](SORTD.default-check.dec#L137) | [`FUN_1000_005d...c:4`](SORTD_decomp/FUN_1000_005d_1000_005d.c#L4) | [`:38`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L38) |
+| DrawFrame | [`:183`](SORTD.default-check.dec#L183) | [`FUN_1000_01db...c:2`](SORTD_decomp/FUN_1000_01db_1000_01db.c#L2) | [`:120`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L120) |
+| RunMenu | [`:224`](SORTD.default-check.dec#L224) | [`FUN_1000_02cc...c:4`](SORTD_decomp/FUN_1000_02cc_1000_02cc.c#L4) | [`:159`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L159) |
+| DrawTime | [`:359`](SORTD.default-check.dec#L359) | [`FUN_1000_0491...c:4`](SORTD_decomp/FUN_1000_0491_1000_0491.c#L4) | [`:336`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L336) |
+| InitBars | [`:389`](SORTD.default-check.dec#L389) | [`FUN_1000_0554...c:4`](SORTD_decomp/FUN_1000_0554_1000_0554.c#L4) | [`:399`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L399) |
+| ReInitBars | [`:445`](SORTD.default-check.dec#L445) | [`FUN_1000_0672...c:4`](SORTD_decomp/FUN_1000_0672_1000_0672.c#L4) | [`:454`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L454) |
+| DrawBar | [`:468`](SORTD.default-check.dec#L468) | [`FUN_1000_06c8...c:4`](SORTD_decomp/FUN_1000_06c8_1000_06c8.c#L4) | [`:482`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L482) |
+| SwapBars | [`:492`](SORTD.default-check.dec#L492) | [`FUN_1000_075b...c:2`](SORTD_decomp/FUN_1000_075b_1000_075b.c#L2) | [`:510`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L510) |
+| Swaps | [`:510`](SORTD.default-check.dec#L510) | [`FUN_1000_0794...c:4`](SORTD_decomp/FUN_1000_0794_1000_0794.c#L4) | [`:540`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L540) |
+| InsertionSort | [`:526`](SORTD.default-check.dec#L526) | missing (discovery loss) | [`:564`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L564) |
+| BubbleSort | [`:569`](SORTD.default-check.dec#L569) | missing (discovery loss) | [`:619`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L619) |
+| HeapSort | [`:606`](SORTD.default-check.dec#L606) | missing (discovery loss) | [`:668`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L668) |
+| PercolateUp | [`:634`](SORTD.default-check.dec#L634) | [`FUN_1000_09e8...c:4`](SORTD_decomp/FUN_1000_09e8_1000_09e8.c#L4) | [`:717`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L717) |
+| PercolateDown | [`:664`](SORTD.default-check.dec#L664) | missing (discovery loss) | [`:759`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L759) |
+| ExchangeSort | [`:703`](SORTD.default-check.dec#L703) | missing (discovery loss) | [`:809`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L809) |
+| ShellSort | [`:742`](SORTD.default-check.dec#L742) | missing (discovery loss) | [`:866`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L866) |
+| QuickSort | [`:786`](SORTD.default-check.dec#L786) | missing (discovery loss) | [`:920`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L920) |
+| Beep | [`:864`](SORTD.default-check.dec#L864) | [`FUN_1000_0e5d...c:2`](SORTD_decomp/FUN_1000_0e5d_1000_0e5d.c#L2) | [`:1060`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L1060) |
+| Sleep | [`:894`](SORTD.default-check.dec#L894) | [`FUN_1000_0f18...c:2`](SORTD_decomp/FUN_1000_0f18_1000_0f18.c#L2) | [`:1092`](comparisons/reko/SORTD/reko-0.12.4/SORTD.reko/SORTD_0800.c#L1092) |
 
 The compact peer assessment and known defects are linked at
 [`NON_LIBRARY_COMPARISON.md:43`](comparisons/reko/SORTD/reko-0.12.4/NON_LIBRARY_COMPARISON.md#L43).

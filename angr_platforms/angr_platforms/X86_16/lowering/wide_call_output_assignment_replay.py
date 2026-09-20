@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Protocol, cast
 
@@ -29,6 +29,7 @@ from ..ir import IRCallOutputProvenance8616, IRCallOutputShape8616
 from ..semantics.carry_borrow_contracts import CarryBorrowKind8616
 from .wide_call_output_assignment_ast import (
     WideCallOutputCallSite8616,
+    _call_target_variants_8616,
     c_node_instruction_addrs_8616,
     callsite_tagged_calls_in_node_8616,
     callsite_tagged_statement_owners_8616,
@@ -172,7 +173,19 @@ def classify_authoritative_wide_call_output_projection_8616(
             WideCallOutputAuthoritativeOwnershipStatus8616.INVALID_ARTIFACT,
             expected,
         )
-    matches = tuple(resolution for resolution in artifact.resolutions if resolution.fact == expected)
+    # Legacy stack facts can retain a slice target while the dedicated owner
+    # publishes the original target. Every other instruction/storage fact must
+    # still agree; return the authoritative fact without rewriting its identity.
+    project = cast(_ProjectCodegenBoundary8616, codegen).project
+    targets = _call_target_variants_8616(target_addr, project)
+    matches = tuple(
+        resolution for resolution in artifact.resolutions
+        if resolution.fact is not None
+        and resolution.fact.call_output.target_addr in targets
+        and replace(resolution.fact, call_output=replace(
+            resolution.fact.call_output, target_addr=expected.call_output.target_addr,
+        )) == expected
+    )
     if not matches:
         status = WideCallOutputAuthoritativeOwnershipStatus8616.FACT_ABSENT
     elif len(matches) != 1:
@@ -181,7 +194,8 @@ def classify_authoritative_wide_call_output_projection_8616(
         status = WideCallOutputAuthoritativeOwnershipStatus8616.MATERIALIZED
     else:
         status = WideCallOutputAuthoritativeOwnershipStatus8616.REFUSED
-    return WideCallOutputAuthoritativeOwnership8616(status, expected)
+    matched_fact = (matches[0].fact or expected) if len(matches) == 1 else expected
+    return WideCallOutputAuthoritativeOwnership8616(status, matched_fact)
 
 
 def _refused_replay_8616(
@@ -229,6 +243,23 @@ def _delete_statement_owners_8616(
             del group.statements[index]
 
 
+def _duplicate_summary_failure_8616(
+    boundary: _ProjectCodegenBoundary8616,
+    fact: WideCallOutputAssignmentFact8616,
+    duplicate_count: int,
+) -> WideCallOutputReplayFailure8616 | None:
+    """Require exact published call identity before deleting duplicate effects."""
+    if not duplicate_count:
+        return None
+    try:
+        summary = boundary._inertia_callsite_summary_inventory_8616[fact.call_output.callsite_addr]
+    except (AttributeError, KeyError):
+        return WideCallOutputReplayFailure8616.SUMMARY_MISSING
+    if summary.target_addr != fact.call_output.target_addr:
+        return WideCallOutputReplayFailure8616.TARGET_CONFLICT
+    return None
+
+
 def reconcile_materialized_wide_call_output_assignment_8616(
     codegen: object,
     root: object,
@@ -274,21 +305,9 @@ def reconcile_materialized_wide_call_output_assignment_8616(
             WideCallOutputReplayFailure8616.UNOWNED_CALL_OCCURRENCE,
             len(duplicates),
         )
-    if duplicates:
-        try:
-            summary = boundary._inertia_callsite_summary_inventory_8616[
-                fact.call_output.callsite_addr
-            ]
-        except (AttributeError, KeyError):
-            return _refused_replay_8616(
-                WideCallOutputReplayFailure8616.SUMMARY_MISSING,
-                len(duplicates),
-            )
-        if summary.target_addr != fact.call_output.target_addr:
-            return _refused_replay_8616(
-                WideCallOutputReplayFailure8616.TARGET_CONFLICT,
-                len(duplicates),
-            )
+    failure = _duplicate_summary_failure_8616(boundary, fact, len(duplicates))
+    if failure is not None:
+        return _refused_replay_8616(failure, len(duplicates))
     required = frozenset(fact.carrier_ins_addrs)
     for owner in duplicates:
         statement_calls = tuple(

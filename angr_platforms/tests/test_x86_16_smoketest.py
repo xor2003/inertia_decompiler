@@ -634,7 +634,7 @@ def test_compiler_conditional_decomp_simplifies_bool_ite():
 
     assert dec.codegen is not None
     assert "? 0 : 1" not in dec.codegen.text
-    assert "if (arg > 2)\n        return 0;\n    return 1;" in dec.codegen.text
+    assert "if ((short)arg > 2)\n        return 0;\n    return 1;" in dec.codegen.text
     assert dec.codegen.text.count("return 0;") == 1
     assert dec.codegen.text.count("return 1;") == 1
     assert "return 0;" in dec.codegen.text

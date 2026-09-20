@@ -50,6 +50,12 @@ behaviorally checked C is more useful than attractive but unverified pseudocode.
 
 ## Install
 
+PKLITE-packed MZ inputs use the optional native [Deark](https://github.com/jsummers/deark)
+decoder (`deark` on PATH or `INERTIA_DEARK_PATH`). Function catalog recovery has
+its own `--catalog-timeout` budget, defaulting to 60 seconds. See
+[catalog, unpacking and DOS-tool setup](reference/pr1-adoption.md) for limitations
+and installation hints. Required compiler checks are not silently skipped.
+
 The repo is tested against the angr stack pinned in [pyproject.toml](pyproject.toml).
 
 ```bash

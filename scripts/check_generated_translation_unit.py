@@ -149,7 +149,7 @@ def assemble_translation_unit(
     parts = [render_c_runtime_header_8616("portable-flat").rstrip(), assembled.source.rstrip()]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n\n".join(parts) + "\n", encoding="utf-8")
-    return assembled.function_count
+    return len(expected_addresses)
 
 
 def compile_translation_unit(
@@ -162,7 +162,7 @@ def compile_translation_unit(
 ) -> TranslationUnitReport:
     """Compile one generated unit and evaluate its monotonic diagnostic ceilings."""
     completed = subprocess.run(
-        [compiler, "-std=c11", "-Wall", "-Wextra", "-fsyntax-only", str(translation_unit)],
+        [compiler, "-x", "c", "-std=c11", "-Wall", "-Wextra", "-fsyntax-only", str(translation_unit)],
         capture_output=True,
         text=True,
         check=False,

@@ -2,6 +2,7 @@
 
 import pytest
 from angr.sim_type import SimTypeInt, SimTypeShort
+from angr_platforms.X86_16.lowering.semantic_cast import CSemanticCast8616
 from angr_platforms.X86_16.structuring.condition_materialization import materialize_condition_ir_expression_8616
 from angr_platforms.X86_16.validation_condition_storage_views import condition_storage_views_match_8616
 from test_x86_16_validation_loop_condition_ir import _Codegen, _indexed_condition_ir, _indexed_final_loop, _Project
@@ -59,5 +60,6 @@ def test_memory_view_match_refuses_unproven_or_contradictory_storage(corruption)
     elif corruption == "helper_width":
         candidate.lhs.expr.callee_target = "SEG_U32"
     elif corruption == "stack_base":
-        candidate.rhs.variable.base = "sp"
+        operand = candidate.rhs.expr if isinstance(candidate.rhs, CSemanticCast8616) else candidate.rhs
+        operand.variable.base = "sp"
     assert not condition_storage_views_match_8616(project, codegen, condition, candidate, False)

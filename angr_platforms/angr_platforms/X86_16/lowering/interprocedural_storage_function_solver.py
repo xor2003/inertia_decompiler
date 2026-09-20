@@ -34,6 +34,7 @@ from .interprocedural_storage_contracts import (
     StorageTrialStats8616,
     StorageTrialVerdict8616,
 )
+from .interprocedural_storage_return_discard import discarded_return_census_proves_empty_8616
 from .interprocedural_storage_return_passthrough_contracts import ReturnPassThroughTrial8616
 from .interprocedural_storage_slot_join import (
     join_storage_slot_contracts_8616,
@@ -94,6 +95,25 @@ def _ordered_failures_8616(
     return tuple(sorted(set(failures), key=lambda item: item.value))
 
 
+def _return_evidence_failures_8616(
+    callsites: tuple[CallsiteStorageTrials8616, ...],
+) -> tuple[StorageTrialFailureKind8616, ...]:
+    """Require exclusive and correctly bound observed/deferred/discarded facts."""
+    failures: list[StorageTrialFailureKind8616] = []
+    for site in callsites:
+        deferred_valid = all(trial.belongs_to(site.callee_addr, site.caller_addr, site.callsite_addr)
+                             for trial in site.return_passthroughs)
+        discard_valid = site.discarded_return is None or site.discarded_return.belongs_to(
+            site.callee_addr, site.caller_addr, site.callsite_addr,
+        )
+        if not deferred_valid or not discard_valid:
+            failures.append(StorageTrialFailureKind8616.INCOMPLETE_TRIAL)
+        return_modes = (bool(site.return_passthroughs), bool(site.returns), site.discarded_return is not None)
+        if len(site.return_passthroughs) > 1 or sum(return_modes) > 1:
+            failures.append(StorageTrialFailureKind8616.CALLSITE_SET_CONFLICT)
+    return _ordered_failures_8616(failures)
+
+
 def join_function_storage_trials_8616(
     trials: FunctionStorageTrials8616,
 ) -> FunctionStorageTrialJoin8616:
@@ -106,6 +126,7 @@ def join_function_storage_trials_8616(
     passthroughs = tuple(
         trial for callsite in trials.callsites for trial in callsite.return_passthroughs
     )
+    discarded = tuple(site.discarded_return for site in trials.callsites if site.discarded_return is not None)
     memory_effects = tuple(
         effect for callsite in trials.callsites for effect in callsite.memory_effects
     )
@@ -120,12 +141,14 @@ def join_function_storage_trials_8616(
     raw_count = (
         len(interface_trials)
         + len(passthroughs)
+        + len(discarded)
         + len(memory_effects)
         + len(pointer_effects)
     )
     normalized_count = (
         sum(item.is_complete for item in interface_trials)
         + sum(item.is_complete for item in passthroughs)
+        + sum(item.is_complete for item in discarded)
         + sum(item.complete for item in memory_effects)
         + sum(item.complete for item in pointer_effects)
     )
@@ -144,18 +167,7 @@ def join_function_storage_trials_8616(
         for trial in (*callsite.arguments, *callsite.returns, *callsite.live_outs)
     ):
         failures.append(StorageTrialFailureKind8616.INCOMPLETE_TRIAL)
-    if any(
-        not trial.belongs_to(callsite.callee_addr, callsite.caller_addr, callsite.callsite_addr)
-        for callsite in trials.callsites
-        for trial in callsite.return_passthroughs
-    ):
-        failures.append(StorageTrialFailureKind8616.INCOMPLETE_TRIAL)
-    if any(
-        len(callsite.return_passthroughs) > 1
-        or bool(callsite.return_passthroughs and callsite.returns)
-        for callsite in trials.callsites
-    ):
-        failures.append(StorageTrialFailureKind8616.CALLSITE_SET_CONFLICT)
+    failures.extend(_return_evidence_failures_8616(trials.callsites))
     stack_deltas = {callsite.stack_delta for callsite in trials.callsites}
     if not trials.callsites or None in stack_deltas or len(stack_deltas) != 1:
         failures.append(StorageTrialFailureKind8616.STACK_DELTA_CONFLICT)
@@ -228,12 +240,17 @@ def _refused_resolution_8616(
 def resolve_joined_function_storage_trials_8616(
     joined: FunctionStorageTrialJoin8616,
     passthrough_outputs: tuple[StorageSlotContract8616, ...] | None,
+    *,
+    recursive_callers: frozenset[int] = frozenset(),
 ) -> FunctionStorageResolution8616:
     """Finalize one join after the SCC fixed point resolves pass-throughs."""
     failures = list(joined.failures)
     outputs = joined.direct_outputs
     if joined.passthroughs and not failures:
-        if not passthrough_outputs:
+        unproven_empty = passthrough_outputs == () and not discarded_return_census_proves_empty_8616(
+            joined.trials, recursive_callers,
+        )
+        if passthrough_outputs is None or unproven_empty:
             failures.append(StorageTrialFailureKind8616.PASSTHROUGH_OUTPUT_UNRESOLVED)
         elif outputs and outputs != passthrough_outputs:
             failures.append(StorageTrialFailureKind8616.STORAGE_CONFLICT)
@@ -258,6 +275,7 @@ def resolve_joined_function_storage_trials_8616(
             memory_effects=callsite.memory_effects,
             pointer_effects=callsite.pointer_effects,
             return_passthroughs=callsite.return_passthroughs,
+            discarded_return=callsite.discarded_return,
         )
         for callsite in sorted(joined.trials.callsites, key=lambda item: item.callsite_addr)
     )

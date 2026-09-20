@@ -1,6 +1,10 @@
 """Preserve AIL branch occurrences through symbolic condition interning.
 
 Layer: Structuring.
+Owns CFG shape, loops, switches, and structured condition lowering from proven
+IR/semantic evidence. Do not perform alias-state ownership, widening,
+type/materialization recovery, rewrite cleanup, postprocess, or CLI/reporting
+work here.
 Responsibility: retain distinct proven predicate origins at the angr symbolic
 conversion boundary. Equal values do not establish identical CFG occurrences.
 """

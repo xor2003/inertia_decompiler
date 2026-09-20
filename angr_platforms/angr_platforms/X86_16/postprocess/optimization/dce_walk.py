@@ -25,8 +25,8 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CVariable,
 )
 
-from ...decompiler_postprocess_utils import _same_c_expression_8616
 from ...lowering.stack_storage_evidence import alias_proves_private_stack_write_8616
+from .dce_value_identity import same_local_value_expression_8616
 
 _DceKey8616 = tuple[str, int | str]
 _DceNameKey8616 = tuple[str, str]
@@ -181,7 +181,7 @@ def _delete_proven_non_temp_statement_8616(
         and key not in protected
         and (name_key is None or name_key not in protected)
         and (
-            _same_c_expression_8616(lhs, rhs)
+            same_local_value_expression_8616(lhs, rhs)
             or context.callsite_materialization_proven_complete()
         )
     ):
@@ -365,7 +365,7 @@ def _walk_statements_8616(
             later_local_defs.add(key)
             continue
         if (
-            _same_c_expression_8616(lhs, rhs)
+            same_local_value_expression_8616(lhs, rhs)
             and (_dirty_key(lhs) is None or _dirty_is_storage_free_temp_8616(lhs))
             and not _is_observable_lvalue(lhs)
             and not _rhs_has_side_effects(rhs)

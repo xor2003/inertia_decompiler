@@ -426,7 +426,7 @@ def _plan(
     plans: list[LayerPlan] = []
     for layer in LAYER_ORDER:
         if layer in layer_to_plans:
-            plans.append(layer_to_plans[layer])  # noqa: PERF401
+            plans.append(layer_to_plans[layer])
 
     if include_shared:
         plans.append(

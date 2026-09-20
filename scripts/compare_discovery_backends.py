@@ -170,7 +170,7 @@ def _discover_rizin(binary: Path, *, timeout_seconds: int) -> tuple[list[Functio
 
     records: list[FunctionRecord] = []
     for addr in result.offsets:
-        records.append(  # noqa: PERF401
+        records.append(
             FunctionRecord(
                 addr=int(addr),
                 size=None,

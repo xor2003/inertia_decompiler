@@ -155,7 +155,7 @@ def test_sortd_initmenu_materializes_indexed_near_pointer_table(tmp_path: Path) 
     assert "gcc portable-flat syntax check failed:" not in combined
     assert "extern char * g_0136[];" in result.stdout
     assert "extern char * g_0136[1];" not in result.stdout
-    assert "sub_12756(g_0136[local_2], inertia_ds);" in result.stdout
+    assert "sub_12756(g_0136[(unsigned short)local_2], inertia_ds);" in result.stdout
     assert "sub_12756(SEG_U16(inertia_ds, 310 + (local_2 << 1)), inertia_ds);" not in result.stdout
     assert "g_0132[0]" not in result.stdout
     assert "g_0132[1]" not in result.stdout

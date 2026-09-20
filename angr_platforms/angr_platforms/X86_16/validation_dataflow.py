@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -53,6 +53,7 @@ from .semantics.expression_analysis import (
 )
 from .structuring.indexed_stack_ranges import IndexedStackReadProof8616
 from .validation.status_flag_preservation import PackedStatusFlagPreservationEvidence8616
+from .validation_indexed_bytes import indexed_scalar_byte_view_8616
 from .validation_predicates import PredicateToken8616, invert_predicate_token_8616
 from .validation_stack_projection import validated_stack_projection_fact_8616
 
@@ -345,6 +346,16 @@ def _indexed_stack_storage_key_8616(
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None = None,
 ) -> DefUseStorageKey8616 | None:
     """Return the exact element or conservative full-object stack identity."""
+    byte_view = indexed_scalar_byte_view_8616(node)
+    if byte_view is not None:
+        owner, byte_index = byte_view
+        storage = _stack_storage_key_8616(
+            owner, include_arguments=include_arguments,
+            stack_variable_offset_resolver=stack_variable_offset_resolver,
+        )
+        if storage is not None and byte_index < storage.width:
+            return replace(storage, offset=storage.offset + byte_index, width=1)
+        return None
     if not isinstance(node, CIndexedVariable):
         return None
     base = node.variable

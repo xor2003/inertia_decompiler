@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 
+from .instruction_origin import IRInstructionOrigin8616
+
 __all__ = [
     "SEGMENTED_LOAD_ADDRESS_TAG_8616",
     "AddressStatus",
@@ -289,6 +291,7 @@ class IRInstr:
     size: int = 0
     addr: int | None = None
     call_stack_effect: IRCallStackEffect8616 | None = None
+    origin: IRInstructionOrigin8616 | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this typed IR instruction for diagnostics and artifacts."""
@@ -301,6 +304,7 @@ class IRInstr:
             "call_stack_effect": (
                 None if self.call_stack_effect is None else self.call_stack_effect.to_dict()
             ),
+            "origin": None if self.origin is None else self.origin.to_dict(),
         }
 
 

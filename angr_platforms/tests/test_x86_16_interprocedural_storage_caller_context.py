@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from angr_platforms.X86_16.caller_return_use_contracts import (
     CallerReturnUseFact8616,
     CallerReturnUseVerdict8616,
@@ -150,3 +151,101 @@ def test_empty_census_before_fact_materialization_is_not_cached(monkeypatch) -> 
 
     assert rebuilt.complete
     assert rebuilt.facts[0].callsite_addr == CALLSITE_ADDR
+
+
+@pytest.mark.parametrize("duplicate", (False, True))
+def test_memory_live_out_uses_exact_census_owner(monkeypatch, duplicate) -> None:
+    """A callee-only slice must use caller-owned SSA and condition evidence."""
+    from angr_platforms.X86_16.ir import (
+        AddressStatus,
+        IRAddress,
+        IRInstr,
+        IRValue,
+        MemSpace,
+        SegmentOrigin,
+    )
+    from angr_platforms.X86_16.ir.condition_ir import ConditionIR
+    from angr_platforms.X86_16.ir.function_ssa_registry import FunctionSSAArtifactStage8616
+    from angr_platforms.X86_16.ir.ssa import SSABlock
+    from angr_platforms.X86_16.ir.ssa_function import SSAFunctionArtifact
+    from angr_platforms.X86_16.lowering import interprocedural_storage_live_out as live_out
+    from angr_platforms.X86_16.lowering.interprocedural_storage_contracts import CallsiteStorageTrials8616
+    from angr_platforms.X86_16.lowering.interprocedural_storage_live_out_contracts import (
+        MemoryLiveOutCollectionVerdict8616,
+    )
+
+    address = IRAddress(
+        MemSpace.DS, offset=0x200, size=1, status=AddressStatus.STABLE, segment_origin=SegmentOrigin.PROVEN
+    )
+    byte = IRValue(MemSpace.REG, name="al", size=1)
+    store = IRInstr("STORE", None, (address, byte), size=1, addr=CALLEE_ADDR)
+    callee = SSAFunctionArtifact(CALLEE_ADDR, (SSABlock(CALLEE_ADDR, (store,), ()),), predecessor_map={CALLEE_ADDR: ()})
+    load_addr = CALLSITE_ADDR + 3
+    call = IRInstr("CALL", None, (IRValue(MemSpace.CONST, const=CALLEE_ADDR, size=2),), size=2, addr=CALLSITE_ADDR)
+    load = IRInstr("LOAD", byte, (address,), size=1, addr=load_addr)
+    caller = SSAFunctionArtifact(
+        CALLER_ADDR, (SSABlock(CALLER_ADDR, (call, load), ()),), predecessor_map={CALLER_ADDR: ()}
+    )
+    source = SimpleNamespace(
+        _inertia_function_ssa_artifacts_8616={CALLER_ADDR: caller},
+        _inertia_function_ssa_stages_8616={CALLER_ADDR: FunctionSSAArtifactStage8616.SEMANTIC},
+    )
+    boundary = SimpleNamespace(addr=CALLER_ADDR, block_addrs_set={CALLER_ADDR})
+    fact = _caller_fact(source, boundary)
+    facts = (fact, _caller_fact(object(), boundary)) if duplicate else (fact,)
+    project = _project_with_facts(facts)
+    project._inertia_function_ssa_artifacts_8616 = {CALLEE_ADDR: callee}
+    project._inertia_function_ssa_stages_8616 = {CALLEE_ADDR: FunctionSSAArtifactStage8616.SEMANTIC}
+    project.factory = SimpleNamespace(
+        block=lambda *args, **kwargs: SimpleNamespace(
+            capstone=SimpleNamespace(insns=(SimpleNamespace(mnemonic="ret"),))
+        )
+    )
+    condition = ConditionIR(
+        op="slt",
+        lhs=IRValue(MemSpace.DS, offset=0x200, size=1, memory_access_size=1, memory_access_insn=load_addr),
+        rhs=IRValue(MemSpace.CONST, const=0, size=1),
+        width_bits=8,
+        producer_insn=load_addr,
+    )
+
+    def conditions(owner, function_addr):
+        assert not duplicate, "conflicting caller census must refuse before consuming SSA"
+        assert owner is source
+        assert function_addr == CALLER_ADDR
+        return (condition,), ()
+
+    monkeypatch.setattr(live_out, "collect_typed_condition_artifacts_8616", conditions)
+    result = live_out.collect_function_memory_live_out_trials_8616(
+        project,
+        CALLEE_ADDR,
+        (CallsiteStorageTrials8616(CALLER_ADDR, CALLEE_ADDR, CALLSITE_ADDR, stack_delta=0),),
+        (CALLEE_ADDR,),
+    )
+    if duplicate:
+        assert result.verdict is MemoryLiveOutCollectionVerdict8616.CONFLICT
+        assert not result.callsites
+        assert result.failures[0].caller_addr == CALLER_ADDR
+        assert result.failures[0].callsite_addr == CALLSITE_ADDR
+    else:
+        assert result.complete, result.failures
+        assert result.stats.materialized_count == 1
+        assert len(result.callsites[0].trials) == 1
+
+
+def test_memory_conditions_cache_is_scoped_to_the_caller_project(monkeypatch) -> None:
+    """Equal caller addresses in distinct evidence projects must not share facts."""
+    from angr_platforms.X86_16.lowering import interprocedural_storage_live_out as live_out
+
+    first, second = object(), object()
+    seen = []
+
+    def collect(project, caller_addr):
+        seen.append((project, caller_addr))
+        return (), ()
+
+    monkeypatch.setattr(live_out, "collect_typed_condition_artifacts_8616", collect)
+    cache = {}
+    for project in (first, second, first):
+        assert live_out._caller_conditions_8616(project, CALLER_ADDR, cache) == ()
+    assert seen == [(first, CALLER_ADDR), (second, CALLER_ADDR)]

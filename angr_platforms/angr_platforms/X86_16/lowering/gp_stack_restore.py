@@ -194,7 +194,7 @@ def _snapshot_variable_8616(
     project: _Project8616,
     function_addr: int,
 ) -> structured_c.CVariable:
-    """Build or reuse one exact stack object for the Alias-proven save range."""
+    """Build an unpublished snapshot for the Alias-proven save range."""
     offset = min(fact.stack_offsets)
     exemplars = tuple(
         node
@@ -235,10 +235,6 @@ def _snapshot_variable_8616(
         variable_type=value_type,
         codegen=codegen,
     )
-    cfunc = cast(_CodegenBoundary8616, codegen).cfunc
-    if cfunc is not None:
-        cfunc.unified_local_vars[variable] = {(cvar, value_type)}
-        cfunc.variables_in_use[variable] = cvar
     return cvar
 
 
@@ -259,11 +255,10 @@ def _materialize_fact_8616(
         fact.restore_instruction_addr,
         fact.restore_register,
     )
-    source = runtime_gp_state_expr_8616(
-        fact.saved_register,
-        codegen=codegen,
-        function_addr=function_addr,
-    )
+    if fact.constant_value is not None:
+        source = structured_c.CConstant(fact.constant_value, SimTypeShort(False).with_arch(project.arch), codegen=codegen)
+    else:
+        source = runtime_gp_state_expr_8616(fact.saved_register, codegen=codegen, function_addr=function_addr)
     if insertion is None or source is None:
         if os.environ.get("INERTIA_DEBUG_GP_STACK_RESTORE"):
             logging.getLogger(__name__).warning(
@@ -383,6 +378,11 @@ def _materialize_fact_8616(
             ),
         )
     target.statements.insert(index, assignment)
+    # A refused restore must not replace declarations for existing stack locals.
+    cfunc = cast(_CodegenBoundary8616, codegen).cfunc
+    if cfunc is not None:
+        cfunc.unified_local_vars[snapshot.variable] = {(snapshot, snapshot.type)}
+        cfunc.variables_in_use[snapshot.variable] = snapshot
     return True
 
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from ..semantics.status_flag_contracts import StatusFlag8616
+from ..semantics.status_flag_contracts import STATUS_FLAGS_8616, StatusFlag8616, StatusFlagEffect8616
 from .status_flag_lift_context import (
     StatusFlagLiftArtifact8616,
     StatusFlagLiftCandidate8616,
@@ -43,6 +43,10 @@ def encode_status_flag_lift_artifact_8616(
         ],
         "packed_preservation_addresses": sorted(artifact.packed_preservation_addresses),
         "original_linear_delta": artifact.original_linear_delta,
+        "callee_effects": [
+            {"target": target, "reads": int(effect.reads), "overwrites": int(effect.overwrites)}
+            for target, effect in artifact.callee_effects
+        ],
     }
 
 
@@ -90,7 +94,28 @@ def decode_status_flag_lift_artifact_8616(
         candidates=tuple(candidates),
         packed_preservation_addresses=frozenset(preservation_addresses),
         original_linear_delta=original_linear_delta,
+        callee_effects=_decode_callee_effects_8616(payload.get("callee_effects", [])),
     )
+
+
+def _decode_callee_effects_8616(payload: object) -> tuple[tuple[int, StatusFlagEffect8616], ...]:
+    """Refuse malformed or conflicting summaries without promoting evidence."""
+    if not isinstance(payload, list):
+        return ()
+    effects: dict[int, StatusFlagEffect8616] = {}
+    for entry in payload:
+        if not isinstance(entry, Mapping):
+            return ()
+        target = _plain_int_8616(entry.get("target"))
+        reads = _plain_int_8616(entry.get("reads"))
+        overwrites = _plain_int_8616(entry.get("overwrites"))
+        if target is None or reads is None or overwrites is None:
+            return ()
+        invalid_mask = reads < 0 or overwrites < 0 or (reads | overwrites) & ~int(STATUS_FLAGS_8616)
+        if target < 0 or invalid_mask or target in effects:
+            return ()
+        effects[target] = StatusFlagEffect8616(StatusFlag8616(reads), StatusFlag8616(overwrites))
+    return tuple(sorted(effects.items()))
 
 
 __all__ = [

@@ -61,6 +61,7 @@ from .validation_condition_identity import (
     condition_semantic_view_projection_fingerprint_8616,
 )
 from .validation_condition_precision import condition_precision_evidence_8616, condition_precision_token_8616
+from .validation_terminal_wide_conditions import TerminalWideValidation8616, validate_terminal_wide_condition_8616
 
 __all__ = [
     "BranchConditionIssue8616",
@@ -78,6 +79,7 @@ class BranchConditionIssueKind8616(StrEnum):
     MISSING_FACT = "missing-fact"
     MISSING_SURFACE = "missing-surface"
     PREDICATE_MISMATCH = "predicate-mismatch"
+    WIDE_PROOF_MISMATCH = "wide-proof-mismatch"
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -251,10 +253,13 @@ def _proven_call_return_condition_8616(
     candidate: object,
 ) -> bool:
     """Prove a bound call predicate equivalent to its AX-family comparison."""
+    from .ir.condition_zero_input import project_register_zero_input_8616
+
+    input_projection = project_register_zero_input_8616(fact)
     if (
         not isinstance(candidate, CBinaryOp)
         or candidate.op not in {"CmpEQ", "CmpNE"}
-        or fact.op not in {"eq", "ne"}
+        or (fact.op not in {"eq", "ne"} and input_projection is None)
     ):
         return False
     operands = (candidate.lhs, candidate.rhs)
@@ -271,9 +276,10 @@ def _proven_call_return_condition_8616(
         registers = surface.project.arch.registers
     except AttributeError:
         return False
+    if not isinstance(summary, CallsiteSummary8616):
+        return False
     if (
-        not isinstance(summary, CallsiteSummary8616)
-        or summary.return_used is not True
+        summary.return_used is not True
         or summary.return_use_kind is not CallsiteReturnUseKind8616.CONDITION
         or summary.return_addr != fact.block_addr
         or callsite_addr != summary.callsite_addr
@@ -290,7 +296,10 @@ def _proven_call_return_condition_8616(
         and (int(value.offset), int(value.size or register[1])) == (int(register[0]), int(register[1]))
         for value in values
     )
-    constant_matches = any(
+    constant_matches = (
+        input_projection is not None
+        and input_projection.constant == constants[0].value
+    ) or any(
         isinstance(value, IRValue)
         and value.space is MemSpace.CONST
         and value.const == constants[0].value
@@ -690,6 +699,15 @@ def validate_materialized_branch_conditions_8616(
                     len(facts),
                 )
             )
+            continue
+        wide_verdict = validate_terminal_wide_condition_8616(codegen, root, candidates[0], facts_by_jcc)
+        if wide_verdict is TerminalWideValidation8616.PROVEN:
+            materialized_count += 1
+            continue
+        if wide_verdict is not TerminalWideValidation8616.NOT_APPLICABLE:
+            issues.append(BranchConditionIssue8616(
+                BranchConditionIssueKind8616.WIDE_PROOF_MISMATCH, jcc_addr, actual=wide_verdict.value,
+            ))
             continue
         # Exact typed call-return proof does not depend on rendering its former
         # register carrier, which may no longer exist in the final C surface.

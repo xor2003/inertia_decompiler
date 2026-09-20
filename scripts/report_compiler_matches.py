@@ -843,7 +843,7 @@ def _find_candidate_function_offsets_raw(raw_bytes: bytes, limit: int = 256) -> 
     picked.sort()
     out: list[dict[str, object]] = []
     for i in picked:
-        out.append(  # noqa: PERF401
+        out.append(
             {
                 "function": f"SUB_{i:05X}",
                 "offset": i,

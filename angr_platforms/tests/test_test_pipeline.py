@@ -560,6 +560,7 @@ def test_msc6_tiny_lane_uses_build_examples_full_pipeline(monkeypatch, tmp_path)
     ]
     assert [child["name"] for child in result.children] == [
         "msc6-tiny:compare16",
+        "msc6-tiny:mixwidth",
         "msc6-tiny:simple_control",
         "msc6-tiny:loops_jumps",
         "msc6-tiny:storage_classes",
@@ -664,7 +665,8 @@ def test_msc6_tiny_lane_reports_child_timeout_as_structured_status(monkeypatch, 
     assert result.returncode is None
     assert "msc6-tiny:simple_control: timed out after 60 seconds" in (result.reason or "")
     assert result.children is not None
-    assert result.children[1]["status"] == test_pipeline.LaneStatus.TIMED_OUT
+    child = next(child for child in result.children if child["name"] == "msc6-tiny:simple_control")
+    assert child["status"] == test_pipeline.LaneStatus.TIMED_OUT
 
 
 def test_msc6_tiny_lane_reports_child_failure_as_structured_status(monkeypatch, tmp_path):
@@ -713,7 +715,8 @@ def test_msc6_tiny_lane_reports_child_failure_as_structured_status(monkeypatch, 
     assert result.returncode == 1
     assert "msc6-tiny:loops_jumps: exit 2" in (result.reason or "")
     assert result.children is not None
-    assert result.children[2]["status"] == test_pipeline.LaneStatus.FAILED
+    child = next(child for child in result.children if child["name"] == "msc6-tiny:loops_jumps")
+    assert child["status"] == test_pipeline.LaneStatus.FAILED
 
 
 def test_msc6_tiny_lane_skips_missing_external_tools_by_default(tmp_path):

@@ -142,6 +142,14 @@ def _owned_materialized_condition_fingerprint_8616(cond: object, project: object
         isinstance(current, CVariable) and isinstance(current.variable, SimRegisterVariable)
         for current in _iter_c_nodes_deep_8616(cond)
     ):
+        # Precision evidence is owned by Structuring and already checked at the
+        # final branch boundary. Import lazily to avoid its fingerprint cycle.
+        from .validation_condition_precision import matches_recorded_condition_precision_8616
+
+        codegen = _dynamic_attr_8616(project, "_inertia_tail_validation_active_codegen", None) or _dynamic_attr_8616(node, "codegen", None)
+        jcc_addr = tags.get("ins_addr")
+        if isinstance(jcc_addr, int) and matches_recorded_condition_precision_8616(codegen, jcc_addr, fingerprint):
+            return fingerprint
         return None
     if _fingerprint_contains_raw_register_8616(fingerprint) or "virtual:" in fingerprint:
         return None

@@ -55,7 +55,6 @@ from .frontend_block_inventory import (
     decoded_function_instructions_8616,
 )
 from .frontend_caller_return_use_program import (
-    CallerReturnUseProgramStatus8616,
     build_caller_return_use_program_evidence_8616,
     current_caller_return_use_program_evidence_8616,
     use_caller_return_use_program_evidence_8616,
@@ -3352,7 +3351,7 @@ def collect_caller_return_use_evidence_8616(
             direct_target_resolver=_linear_call_target_8616,
             instruction_address_resolver=_instruction_address_8616,
         )
-    if program.status is CallerReturnUseProgramStatus8616.DECODER_UNAVAILABLE:
+    if not program.range_census_complete:
         return CallerReturnUseEvidence8616(
             target_addr,
             CallerReturnUseVerdict8616.UNKNOWN,
@@ -3372,7 +3371,7 @@ def collect_caller_return_use_evidence_8616(
         candidate_target: int,
     ) -> dict[int, CallerReturnUseFact8616]:
         """Return decoded direct-call use facts keyed by callsite address."""
-        normalized_target = candidate_target & 0xFFFF
+        normalized_target = direct_callsite_index.target_identity(candidate_target)
         cached = callsite_cache.get(normalized_target)
         if cached is not None:
             return cached
@@ -3394,7 +3393,7 @@ def collect_caller_return_use_evidence_8616(
         active_targets: frozenset[int],
     ) -> CallerReturnUseVerdict8616:
         """Resolve terminal return pass-throughs only through independent callers."""
-        normalized_target = candidate_target & 0xFFFF
+        normalized_target = direct_callsite_index.target_identity(candidate_target)
         cached = transitive_cache.get(normalized_target)
         if cached is not None:
             return cached
@@ -3430,8 +3429,8 @@ def collect_caller_return_use_evidence_8616(
         transitive_cache[normalized_target] = result
         return result
 
-    normalized_target_aliases = frozenset(addr & 0xFFFF for addr in target_aliases)
-    census_targets = normalized_target_aliases | {target_addr & 0xFFFF}
+    normalized_target_aliases = frozenset(direct_callsite_index.target_identity(addr) for addr in target_aliases)
+    census_targets = normalized_target_aliases | {direct_callsite_index.target_identity(target_addr)}
     direct_facts = {
         callsite_addr: fact
         for candidate_target in census_targets

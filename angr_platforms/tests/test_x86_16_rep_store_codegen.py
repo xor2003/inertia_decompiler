@@ -6,6 +6,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from angr_platforms.X86_16.lowering.gp_word_runtime import (
+    coherent_gp_runtime_definitions_8616,
+    coherent_gp_runtime_header_8616,
+)
 from test_compare_ghidra_function_coverage import _write_mz
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -15,10 +19,10 @@ _HARNESS = r'''
 uint8_t inertia_memory[0x100000];
 uint16_t inertia_cs, inertia_ds, inertia_es = 0x1000, inertia_ss;
 uint16_t inertia_flags = REP_BACKWARD ? 0 : 0xffff;
-unsigned long inertia_edi = 0xcafe0000UL;
 static unsigned char expected[0x100000];
 int main(void)
 {
+    inertia_edi = 0xcafe0000UL;
     memset(inertia_memory, 0x5a, sizeof(inertia_memory));
     memset(expected, 0x5a, sizeof(expected));
     unsigned count = REP_COUNT;
@@ -28,6 +32,7 @@ int main(void)
         expected[0x10000 + ((offset + 1) & 0xffff)] = REP_VALUE >> 8;
     }
     if (sub_10010() != ((REP_VALUE + 1) & 0xffff)) return 2;
+    if ((inertia_edi >> 16) != 0xcafeUL) return 3;
     return memcmp(expected, inertia_memory, sizeof(expected)) != 0;
 }
 '''
@@ -53,7 +58,8 @@ def _assert_generated_stores(
     """Compile unchanged C and check termination, return and every memory byte."""
     (tmp_path / "generated.c").write_text(text, encoding="ascii")
     harness = tmp_path / "harness.c"
-    harness.write_text(_HARNESS, encoding="ascii")
+    runtime = coherent_gp_runtime_header_8616() + coherent_gp_runtime_definitions_8616()
+    harness.write_text(runtime + _HARNESS, encoding="ascii")
     executable = tmp_path / "repeat"
     compiled = subprocess.run(
         ["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",

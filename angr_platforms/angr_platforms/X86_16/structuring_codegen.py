@@ -90,7 +90,7 @@ def _metadata_provenance_keys_8616(value: object) -> tuple[tuple[str, int, int],
             and isinstance(item[1], int)
             and isinstance(item[2], int)
         ):
-            result.append((item[0], item[1], item[2]))  # noqa: PERF401
+            result.append((item[0], item[1], item[2]))
     return tuple(result)
 
 
@@ -125,7 +125,7 @@ def _c_ifelse_pairs_8616(
             and isinstance(pair[0], structured_c.CExpression)
             and (pair[1] is None or isinstance(pair[1], structured_c.CStatement))
         ):
-            result.append((pair[0], pair[1]))  # noqa: PERF401
+            result.append((pair[0], pair[1]))
     return tuple(result)
 
 
@@ -137,7 +137,7 @@ def _c_switch_cases_8616(node: object) -> tuple[tuple[object, object], ...]:
     result: list[tuple[object, object]] = []
     for case in cases:
         if isinstance(case, tuple) and len(case) == 2:
-            result.append((case[0], case[1]))  # noqa: PERF401
+            result.append((case[0], case[1]))
     return tuple(result)
 
 

@@ -26,6 +26,8 @@ def test_selects_manifest_tests_for_implementation_file():
 
     assert selected == (
         "angr_platforms/tests/test_check_sortd_sidecar_free.py",
+        "angr_platforms/tests/test_sortd_drawtime_gate.py",
+        "angr_platforms/tests/test_runmenu_execution_evidence.py",
         "angr_platforms/tests/test_test_pipeline.py",
     )
 
@@ -142,6 +144,7 @@ def test_selects_validation_dataflow_tests_for_root_validation_file():
 
     assert selected == (
         "angr_platforms/tests/test_x86_16_validation_dataflow.py",
+        "angr_platforms/tests/test_x86_16_validation_indexed_bytes.py",
         "angr_platforms/tests/test_x86_16_validation_predicates.py",
         "angr_platforms/tests/test_x86_16_validation_virtual_carriers.py",
     )
@@ -227,6 +230,8 @@ def test_selects_tail_validation_family_tests_for_related_modules():
 
     assert selected == (
         "angr_platforms/tests/test_x86_16_tail_validation.py",
+        "angr_platforms/tests/test_x86_16_tail_validation_alias_cycles.py",
+        "angr_platforms/tests/test_x86_16_validation_owned_condition_precision.py",
         "angr_platforms/tests/test_x86_16_tail_validation_fingerprint.py",
         "angr_platforms/tests/test_x86_16_tail_validation_routing.py",
     )
@@ -284,6 +289,7 @@ def test_selects_postprocess_stage_direct_stack_validation_tests_for_implementat
         "angr_platforms/tests/test_decompiler_architecture_check.py",
         "angr_platforms/tests/test_x86_16_jcc_instruction_reuse.py",
         "angr_platforms/tests/test_x86_16_jcc_typed_condition_order.py",
+        "angr_platforms/tests/test_x86_16_jcc_register_evidence.py",
         "angr_platforms/tests/test_x86_16_decompiler_postprocess_utils.py",
         "angr_platforms/tests/test_x86_16_postprocess_snapshot.py::"
         "test_direct_stack_move_materialization_delta_accepts_evidenced_loop_body_write_precision",
@@ -304,6 +310,7 @@ def test_selects_postprocess_callsite_argument_tests_for_implementation_file():
         "angr_platforms/tests/test_decompiler_architecture_check.py",
         "angr_platforms/tests/test_x86_16_jcc_instruction_reuse.py",
         "angr_platforms/tests/test_x86_16_jcc_typed_condition_order.py",
+        "angr_platforms/tests/test_x86_16_jcc_register_evidence.py",
         "angr_platforms/tests/test_x86_16_decompiler_postprocess_utils.py",
         "angr_platforms/tests/test_x86_16_runtime_call_results.py",
         "angr_platforms/tests/test_x86_16_recorded_return_argument_replay.py",
@@ -423,6 +430,8 @@ def test_manifest_cli_prints_space_separated_pytest_targets(capsys):
     assert rc == 0
     assert captured.out.strip() == (
         "angr_platforms/tests/test_check_sortd_sidecar_free.py "
+        "angr_platforms/tests/test_sortd_drawtime_gate.py "
+        "angr_platforms/tests/test_runmenu_execution_evidence.py "
         "angr_platforms/tests/test_test_pipeline.py "
         "angr_platforms/tests/test_decompile_cod_dir_parallelism.py "
         "angr_platforms/tests/test_decompiler_architecture_check.py "

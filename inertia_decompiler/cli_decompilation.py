@@ -95,6 +95,10 @@ from angr_platforms.X86_16.lowering.fact_transfer import transfer_semantic_alias
 from angr_platforms.X86_16.lowering.function_pointer_parameters import (
     materialize_function_pointer_parameters_8616,
 )
+from angr_platforms.X86_16.lowering.gp_word_runtime import (
+    gp_runtime_replaced_declaration_names_8616,
+    project_gp_runtime_declarations_8616,
+)
 from angr_platforms.X86_16.lowering.real_mode_linear import (
     DirectStackMoveSourceKind8616,
     lower_stable_ss_linear_stack_dereferences_8616,
@@ -3453,11 +3457,12 @@ def _materialize_codegen_global_externs_text_8616(c_text: str, codegen: object) 
     reconcile_registered_named_global_aggregate_declarations_8616(codegen)
     raw_specs: Any = getattr(codegen, "_inertia_global_declaration_specs_8616", ())
     specs: tuple[object, ...] = tuple(raw_specs) if isinstance(raw_specs, (list, tuple)) else ()
-    type_definitions = get_codegen_sequence_attr(
+    specs, gp_definitions = project_gp_runtime_declarations_8616(codegen, specs)
+    type_definitions = (*gp_definitions, *get_codegen_sequence_attr(
         codegen,
         getattr(codegen, "cfunc", None),
         "_inertia_named_type_definitions_8616",
-    )
+    ))
     if (not specs and not type_definitions) or not isinstance(c_text, str) or not c_text.strip():
         return c_text
     pending_type_definitions = tuple(
@@ -3467,7 +3472,7 @@ def _materialize_codegen_global_externs_text_8616(c_text: str, codegen: object) 
     )
 
     declarations: list[str] = []
-    names: set[str] = set()
+    names: set[str] = set(gp_runtime_replaced_declaration_names_8616(codegen))
     has_inline_struct_definition = False
     for spec in specs:
         if not isinstance(spec, (list, tuple)) or len(spec) != 3:
@@ -3488,7 +3493,7 @@ def _materialize_codegen_global_externs_text_8616(c_text: str, codegen: object) 
             declarations.append(f"extern {ctype} {name}[{array_len}];")
         else:
             declarations.append(f"extern {ctype} {name};")
-    if not declarations and not pending_type_definitions:
+    if not declarations and not pending_type_definitions and not names:
         return c_text
     existing_declarations = tuple(
         line.strip()
@@ -3538,7 +3543,8 @@ def _materialize_codegen_global_externs_text_8616(c_text: str, codegen: object) 
         ),
         None,
     )
-    if pending_type_definitions or has_inline_struct_definition:
+    has_pending_named_types = any(definition not in gp_definitions for definition in pending_type_definitions)
+    if has_pending_named_types or has_inline_struct_definition:
         prototype_re = re.compile(r"^\s*[A-Za-z_][\w\s*]*\s+[A-Za-z_]\w*\s*\([^;{}]*\)\s*;\s*$")
         prototype_idx = next((idx for idx, line in enumerate(kept_lines) if prototype_re.match(line)), None)
         insert_idx = prototype_idx if prototype_idx is not None else function_idx

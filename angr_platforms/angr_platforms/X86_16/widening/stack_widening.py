@@ -311,7 +311,7 @@ def describe_widening_candidates(exprs: Iterable[object]) -> tuple[dict[str, obj
     """Return deterministic descriptions of joinable widening candidates."""
     descriptions: list[dict[str, object]] = []
     for candidate in collect_widening_candidates(exprs):
-        descriptions.append(  # noqa: PERF401
+        descriptions.append(
             {
                 "domain": str(candidate.domain),
                 "view": {

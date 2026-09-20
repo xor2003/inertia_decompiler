@@ -6758,7 +6758,7 @@ def _abi_call_target_values_for_block(transfer: dict[str, Any]) -> list[tuple[in
         values.append(_abi_target_value_pair(target))
     for key in ("target_candidates", "targets", "candidate_targets", "recovered_targets"):
         for item in transfer.get(key, []) or []:
-            values.append(_abi_target_value_pair(item))  # noqa: PERF401
+            values.append(_abi_target_value_pair(item))
     unique: list[tuple[int | None, int | None]] = []
     seen: set[tuple[int | None, int | None]] = set()
     for raw, low16 in values:

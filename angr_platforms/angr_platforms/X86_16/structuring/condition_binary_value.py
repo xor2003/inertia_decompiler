@@ -15,6 +15,7 @@ from collections.abc import Callable
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CExpression
 
 from ..ir.core import IRBinaryValue, IRValue
+from ..lowering.condition_value_casts import materialize_signed_condition_value_8616
 
 
 def materialize_binary_ir_value_8616(
@@ -23,6 +24,9 @@ def materialize_binary_ir_value_8616(
     lower_operand: Callable[[IRValue | IRBinaryValue], object | None],
 ) -> CExpression | None:
     """Compose supported operands without manufacturing missing value evidence."""
+    signed_value = materialize_signed_condition_value_8616(value, codegen, lower_operand)
+    if signed_value is not None:
+        return signed_value
     operator = {"add": "Add", "and": "And", "or": "Or", "shr": "Shr",
                 "sub": "Sub", "xor": "Xor"}.get(value.op)
     if operator is None:

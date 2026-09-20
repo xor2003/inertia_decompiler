@@ -15,13 +15,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
+from angr_platforms.X86_16.lowering.gp_word_runtime import coherent_gp_runtime_header_8616
 from pycparser import c_ast, c_generator, c_parser
 
 from inertia_decompiler.generated_external_function_contracts import (
     canonical_external_function_decl,
 )
 
-_PARSE_PREFIX = (
+_PARSE_PREFIX: str = (
     "typedef _Bool bool;\n"
     "typedef signed char int8_t;\n"
     "typedef unsigned char uint8_t;\n"
@@ -32,7 +33,8 @@ _PARSE_PREFIX = (
     "typedef long clock_t;\n"
     "typedef long time_t;\n"
 )
-_PARSE_PREFIX_NODE_COUNT = 9
+_PARSE_PREFIX_NODE_COUNT: int = 9
+_RUNTIME_HEADER_SOURCE: str = "inertia_owned_gp_runtime.h"
 
 
 class DeclarationContractKind(StrEnum):
@@ -72,9 +74,21 @@ class _NamedDeclarationSet:
 
 
 def _preprocess_payload(payload: str, *, compiler: str) -> str:
-    """Use the C preprocessor to remove comments before structured parsing."""
+    """Parse macros while retaining provenance of the exact owned ABI header.
+
+    Its declarations are checked with all other contracts, but must be exported
+    through the portable header rather than frozen to the host compiler's ABI.
+    This recognizes only the authoritative generated header, not arbitrary C.
+    """
+    header = coherent_gp_runtime_header_8616()
+    marked_header = (
+        f'#line 1 "{_RUNTIME_HEADER_SOURCE}"\n'
+        + header
+        + '#line 1 "inertia_generated_payload.c"\n'
+    )
+    payload = payload.replace(header, marked_header)
     completed = subprocess.run(
-        [compiler, "-E", "-P", "-x", "c", "-"],
+        [compiler, "-E", "-x", "c", "-"],
         input=f"{_PARSE_PREFIX}{payload}",
         capture_output=True,
         text=True,
@@ -158,6 +172,7 @@ def assemble_generated_translation_unit(
     generator = c_generator.CGenerator()
     declaration_order: list[_NamedDeclarationSet] = []
     declarations_by_key: dict[tuple[DeclarationContractKind, str], _NamedDeclarationSet] = {}
+    runtime_keys: set[tuple[DeclarationContractKind, str]] = set()
     for payload_nodes in parsed_payloads:
         for node in payload_nodes:
             if isinstance(node, c_ast.FuncDef):
@@ -171,6 +186,8 @@ def assemble_generated_translation_unit(
             name, rendered = identity
             kind = _declaration_kind(node)
             key = kind, name
+            if node.coord is not None and node.coord.file == _RUNTIME_HEADER_SOURCE:
+                runtime_keys.add(key)
             declaration_set = declarations_by_key.get(key)
             if declaration_set is None:
                 declaration_set = _NamedDeclarationSet(kind=kind, name=name, nodes=[], variants=[])
@@ -215,13 +232,14 @@ def assemble_generated_translation_unit(
             DeclarationContractKind.EXTERNAL_FUNCTION,
         )
         for item in declaration_order
-        if item.kind is kind
+        if item.kind is kind and (item.kind, item.name) not in runtime_keys
         for node in item.nodes
     ]
     internal_prototypes = [definition.decl for definition in definitions]
     merged = c_ast.FileAST([*declaration_nodes, *internal_prototypes, *definitions])
     return GeneratedTranslationUnit(
-        source=generator.visit(merged).rstrip() + "\n",
+        source=(coherent_gp_runtime_header_8616() if runtime_keys else "")
+        + generator.visit(merged).rstrip() + "\n",
         function_count=len(definitions),
         conflicts=conflicts,
     )

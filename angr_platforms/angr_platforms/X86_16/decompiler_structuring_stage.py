@@ -1980,7 +1980,11 @@ def _guard_condition_processor_multibit_bool_predicates_8616(project: AngrProjec
         ins_addr: int = 0,
     ) -> ClaripyConditionSurface:
         nonlocal normalized_count, refused_count
-        result = orig(self, condition, nobool=nobool, must_bool=must_bool, ins_addr=ins_addr)
+        from .structuring.symbolic_ite import convert_symbolic_ite_8616
+
+        result = convert_symbolic_ite_8616(self, condition, must_bool=must_bool)
+        if result is None:
+            result = orig(self, condition, nobool=nobool, must_bool=must_bool, ins_addr=ins_addr)
         if must_bool and isinstance(result, claripy.ast.Bool):
             from .structuring.symbolic_condition_origin import preserve_symbolic_condition_origin_8616
 

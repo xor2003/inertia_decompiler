@@ -38,25 +38,12 @@ def _run(
 
 
 def _ensure_msvc6_compat_headers(out_dir: Path) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "STDBOOL.H").write_text(
-        "#ifndef _STDBOOL_H\n#define _STDBOOL_H\n\n"
-        "#define bool unsigned char\n#define true 1\n#define false 0\n\n#endif\n",
-        encoding="utf-8",
-    )
-    (out_dir / "STDINT.H").write_text(
-        "#ifndef _STDINT_H\n#define _STDINT_H\n\n"
-        "typedef unsigned char uint8_t;\ntypedef signed char int8_t;\n"
-        "typedef unsigned short uint16_t;\ntypedef signed short int16_t;\n"
-        "typedef unsigned long uint32_t;\ntypedef signed long int32_t;\n"
-        "typedef unsigned int uintptr_t;\ntypedef unsigned long size_t;\n"
-        "typedef uint8_t u8;\ntypedef uint16_t u16;\ntypedef uint32_t u32;\n"
-        "typedef int32_t ptrdiff_t;\ntypedef int16_t int_fast16_t;\n"
-        "typedef uint16_t uint_fast16_t;\ntypedef int32_t int_least32_t;\n"
-        "typedef uint32_t uint_least32_t;\ntypedef int16_t int_least16_t;\n"
-        "typedef uint16_t uint_least16_t;\n\n#endif\n",
-        encoding="utf-8",
-    )
+    """Use the shared target-compatible headers for standalone SSA runs."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from scripts.msc6_compat_headers import write_msc6_compat_headers
+
+    write_msc6_compat_headers(out_dir)
 
 
 def _load_report(path: Path) -> list[dict[str, Any]]:

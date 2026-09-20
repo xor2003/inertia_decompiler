@@ -57,7 +57,7 @@ def test_sortd_indexed_aggregate_load_and_store_recompile_sidecar_free(
     assert "gcc portable-flat syntax check failed:" not in combined
     assert "g_08F0_entry local_8;" in result.stdout
     assert "local_8 = g_0B4C[local_2];" in result.stdout
-    assert "local_6 = (char)local_8.field_0;" in result.stdout
+    assert "local_6 = (signed char)local_8.field_0;" in result.stdout
     assert "g_0B4C[local_4] = g_0B4C[local_4 - 1];" in result.stdout
     assert "g_0B4C[local_4] = local_8;" in result.stdout
     assert sum(

@@ -343,7 +343,7 @@ def _collect_type_record_names(
     for definition in type_definitions:
         for leaf in definition.leaves:
             if leaf.kind == "string" and isinstance(leaf.value, str) and leaf.value:
-                names.append(leaf.value)  # noqa: PERF401
+                names.append(leaf.value)
     return tuple(dict.fromkeys(names))
 
 

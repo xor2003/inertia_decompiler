@@ -73,7 +73,7 @@ def _owned_path_layer(path: str) -> str:
         return "dosunit"
     if "compiler_flag" in path or "compiler_match" in path:
         return "compiler-flags"
-    if path.startswith("scripts/") or path in {"Makefile", "pyproject.toml"}:
+    if path.startswith(("scripts/", "angr_platforms/tests/")) or path in {"Makefile", "pyproject.toml"}:
         return "tooling/gates"
     return "project"
 
@@ -160,6 +160,11 @@ def _inventory_hints(path: str, nodeid: str) -> tuple[str, str, list[str], Pytes
         purpose = "unclassified"
         owner = "owner-undetermined"
 
+    return purpose, owner, _inventory_evidence(facts, lowered), facts
+
+
+def _inventory_evidence(facts: PytestNodeFacts, lowered: str) -> list[str]:
+    """Collect assertion and observed-purpose evidence without assigning owners."""
     evidence: set[str] = set(facts.evidence_hints)
     if facts.effective_assertion_count > 0:
         evidence.add("assertion")
@@ -179,7 +184,7 @@ def _inventory_hints(path: str, nodeid: str) -> tuple[str, str, list[str], Pytes
     ):
         if token in lowered:
             evidence.add(label)
-    return purpose, owner, sorted(evidence), facts
+    return sorted(evidence)
 
 
 def record_for_item(item: pytest.Item) -> TestRecord:

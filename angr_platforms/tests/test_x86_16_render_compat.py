@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from angr.analyses.decompiler.structured_codegen.c import CFunction, CFunctionCall, CReturn, CStatements, CSwitchCase
-from angr.sim_variable import SimStackVariable
+from angr.sim_variable import SimStackVariable, SimTemporaryVariable
 from angr_platforms.X86_16.render_compat import (
     install_structured_codegen_sort_compat_8616,
     repair_cfunctioncall_render_targets_8616,
@@ -74,3 +74,10 @@ def test_render_compat_sort_local_vars_accepts_none_and_string_idents():
     named.ident = "local_2_alias"
 
     assert CFunction.sort_local_vars((named, unnamed)) == [unnamed, named]
+
+
+def test_render_compat_preserves_temporary_declarations():
+    install_structured_codegen_sort_compat_8616()
+    first, second = SimTemporaryVariable(0, 4), SimTemporaryVariable(1, 2)
+    stack = SimStackVariable(-4, 4, base="bp", ident=None)
+    assert CFunction.sort_local_vars((second, stack, first)) == [stack, first, second]

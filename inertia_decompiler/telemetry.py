@@ -584,7 +584,7 @@ def span_here(**attrs: object) -> contextlib.AbstractContextManager[None]:
 
 
 @overload
-def trace_function[**P, R](  # noqa: D418
+def trace_function[**P, R](
     func: None = None,
     *,
     name: str | None = None,
@@ -595,7 +595,7 @@ def trace_function[**P, R](  # noqa: D418
 
 
 @overload
-def trace_function[**P, R](  # noqa: D418
+def trace_function[**P, R](
     func: None = None,
     *,
     name: str | None = None,
@@ -606,7 +606,7 @@ def trace_function[**P, R](  # noqa: D418
 
 
 @overload
-def trace_function[**P, R](  # noqa: D418
+def trace_function[**P, R](
     func: Callable[P, R],
     *,
     name: str | None = None,

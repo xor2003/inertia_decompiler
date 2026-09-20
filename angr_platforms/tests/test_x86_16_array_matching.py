@@ -298,7 +298,7 @@ class TestPhase22Integration:
     def test_array_matching_caps_typed_candidate_sets(self):
         records = []
         for index in range(70):
-            records.append(  # noqa: PERF401
+            records.append(
                 IRStringEffectRecord(
                     index=index,
                     family="movs",

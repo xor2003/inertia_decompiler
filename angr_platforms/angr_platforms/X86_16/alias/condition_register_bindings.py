@@ -24,6 +24,12 @@ from ..ir.condition_ir import (
 )
 from ..ir.core import IRBinaryValue, IRValue, MemSpace
 from ..pipeline.errors import PipelineHardError
+from .condition_register_storage import (
+    storage_from_reaching_source_8616 as _storage_from_reaching_source_8616,
+)
+from .condition_register_storage import (
+    zero_extended_register_storage_8616,
+)
 from .register_reaching_source import RegisterReachingSourceVerdict8616
 
 __all__ = (
@@ -36,6 +42,9 @@ __all__ = (
     "condition_self_test_storage_bindings_8616",
     "condition_semantic_register_operands_8616",
 )
+
+_BINARY_PRODUCER_ARITY: int = 3
+_REGISTER_SUBVIEW_SOURCE_ARITY: int = 7
 
 
 class ConditionRegisterSourceBindingVerdict8616(StrEnum):
@@ -73,9 +82,12 @@ def condition_self_test_register_binding_8616(
     semantics = condition.producer_semantics
     if (
         not isinstance(semantics, tuple)
-        or len(semantics) < 3
+        or len(semantics) < _BINARY_PRODUCER_ARITY
         or semantics[0] not in {"and_reg_reg16", "or_reg_reg16"}
-        or not isinstance(semantics[1], str)
+    ):
+        return None
+    if (
+        not isinstance(semantics[1], str)
         or not isinstance(semantics[2], str)
         or semantics[1].lower() != semantics[2].lower()
     ):
@@ -111,7 +123,7 @@ def condition_semantic_register_operands_8616(
     kind = semantics[0]
     if (
         kind == "loop_counter_predecrement"
-        and len(semantics) == 3
+        and len(semantics) == _BINARY_PRODUCER_ARITY
         and isinstance(semantics[1], str)
         and semantics[2] == 1
     ):
@@ -157,31 +169,6 @@ def condition_operand_storage_binding_8616(
     return bindings[0]
 
 
-def _storage_from_reaching_source_8616(
-    source: tuple[object, ...] | None,
-    *,
-    width_bits: int,
-) -> IRValue | IRBinaryValue | None:
-    """Map one exact reaching source to a typed value without flattening."""
-    if not source or not isinstance(source[0], str):
-        return None
-    width = max(1, (width_bits + 7) // 8)
-    if source[0] == "imm" and len(source) == 2 and isinstance(source[1], int):
-        mask = (1 << (width * 8)) - 1
-        return IRValue(MemSpace.CONST, const=source[1] & mask, size=width)
-    if source[0] == "global" and len(source) == 3:
-        offset, source_width = source[1], source[2]
-        if isinstance(offset, int) and source_width == width:
-            return IRValue(MemSpace.DS, offset=offset, size=width)
-        return None
-    if source[0] == "bp" and len(source) in {2, 3}:
-        offset = source[1]
-        source_width = 2 if len(source) == 2 else source[2]
-        if isinstance(offset, int) and source_width == width:
-            return IRValue(MemSpace.SS, name="bp", offset=offset, size=width)
-    return None
-
-
 def _register_update_binding_from_reaching_source_8616(
     function: object,
     source: tuple[object, ...] | None,
@@ -189,7 +176,7 @@ def _register_update_binding_from_reaching_source_8616(
     width_bits: int,
 ) -> tuple[IRBinaryValue, ConditionRegisterUpdateIR] | None:
     """Materialize one decoded full-register update and projected condition view."""
-    if not source or source[0] != "register_binary_subview" or len(source) != 7:
+    if not source or source[0] != "register_binary_subview" or len(source) != _REGISTER_SUBVIEW_SOURCE_ARITY:
         return None
     op, lhs_name, rhs_name, shift_bits, view_bits, instruction_addr = source[1:]
     width = max(1, (width_bits + 7) // 8)
@@ -307,22 +294,25 @@ def bind_condition_register_sources_8616(
                 instruction_addr=condition.producer_insn,
                 register=register_name,
             )
-            if reaching.verdict is not RegisterReachingSourceVerdict8616.PROVEN:
-                failures += 1
-                continue
+            source = reaching.source if reaching.verdict is RegisterReachingSourceVerdict8616.PROVEN else None
             update_binding = _register_update_binding_from_reaching_source_8616(
                 function,
-                reaching.source,
+                source,
                 width_bits=condition.width_bits,
             )
             storage = (
                 update_binding[0]
                 if update_binding is not None
                 else _storage_from_reaching_source_8616(
-                    reaching.source,
+                    source,
                     width_bits=condition.width_bits,
                 )
             )
+            if storage is None:
+                storage = zero_extended_register_storage_8616(
+                    function, instruction_addr=condition.producer_insn,
+                    register=register_name, width_bits=condition.width_bits,
+                )
             if storage is None:
                 failures += 1
                 continue

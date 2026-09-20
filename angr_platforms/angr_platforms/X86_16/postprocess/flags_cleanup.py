@@ -1273,7 +1273,7 @@ def _prune_unused_flag_assignments_8616(project: object, codegen: object) -> boo
                         if isinstance(item, tuple):
                             for subitem in item:
                                 if _structured_codegen_node_8616(subitem):
-                                    traversal_stack.append((subitem, False))  # noqa: PERF401
+                                    traversal_stack.append((subitem, False))
 
                 pairs = _dynamic_attr_8616(node, "condition_and_nodes", None)
                 if pairs:
@@ -1392,7 +1392,7 @@ def _c_expr_uses_register_8616(node: object, reg_offset: int) -> bool:
                     if isinstance(item, tuple):
                         for subitem in item:
                             if _structured_codegen_node_8616(subitem):
-                                traversal_stack.append(subitem)  # noqa: PERF401
+                                traversal_stack.append(subitem)
 
             pairs = _dynamic_attr_8616(current, "condition_and_nodes", None)
             if pairs:

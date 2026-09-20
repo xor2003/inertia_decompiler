@@ -1027,22 +1027,22 @@ def _seqnode_switch_artifact_mappings_8616(
                     continue
                 for region_id in split.get("current_case_region_ids", ()) or ():
                     if isinstance(region_id, int):
-                        case_region_ids.append(region_id)  # noqa: PERF401
+                        case_region_ids.append(region_id)
                 for value in split.get("current_case_values", ()) or ():
                     if isinstance(value, int):
-                        case_values.append(value)  # noqa: PERF401
+                        case_values.append(value)
                 for subtree in split.get("subtrees", ()) or ():
                     if not isinstance(subtree, dict):
                         continue
                     for region_id in subtree.get("normalized_case_region_ids", ()) or ():
                         if isinstance(region_id, int):
-                            case_region_ids.append(region_id)  # noqa: PERF401
+                            case_region_ids.append(region_id)
                     for value in subtree.get("normalized_case_values", ()) or ():
                         if isinstance(value, int):
-                            case_values.append(value)  # noqa: PERF401
+                            case_values.append(value)
                     for region_id in subtree.get("default_candidate_region_ids", ()) or ():
                         if isinstance(region_id, int):
-                            default_region_ids.append(region_id)  # noqa: PERF401
+                            default_region_ids.append(region_id)
         return {
             "default_region_ids": list(dict.fromkeys(default_region_ids)),
             "normalized_case_region_ids": list(dict.fromkeys(case_region_ids)),
@@ -1224,22 +1224,22 @@ def _expanded_root_normalized_body_from_summary_8616(summary: DynamicRecord) -> 
                 continue
             for region_id in split.get("current_case_region_ids", ()) or ():
                 if isinstance(region_id, int):
-                    case_region_ids.append(region_id)  # noqa: PERF401
+                    case_region_ids.append(region_id)
             for value in split.get("current_case_values", ()) or ():
                 if isinstance(value, int):
-                    case_values.append(value)  # noqa: PERF401
+                    case_values.append(value)
             for subtree in split.get("subtrees", ()) or ():
                 if not isinstance(subtree, dict):
                     continue
                 for region_id in subtree.get("normalized_case_region_ids", ()) or ():
                     if isinstance(region_id, int):
-                        case_region_ids.append(region_id)  # noqa: PERF401
+                        case_region_ids.append(region_id)
                 for value in subtree.get("normalized_case_values", ()) or ():
                     if isinstance(value, int):
-                        case_values.append(value)  # noqa: PERF401
+                        case_values.append(value)
                 for region_id in subtree.get("default_candidate_region_ids", ()) or ():
                     if isinstance(region_id, int):
-                        default_region_ids.append(region_id)  # noqa: PERF401
+                        default_region_ids.append(region_id)
     return {
         "default_region_ids": list(dict.fromkeys(default_region_ids)),
         "normalized_case_region_ids": list(dict.fromkeys(case_region_ids)),

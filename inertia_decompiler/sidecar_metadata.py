@@ -436,7 +436,7 @@ def _load_tdinfo_sidecar(
     debug_source_files.extend(tdinfo.source_files)
     debug_type_names.extend(tdinfo.type_names)
     for descriptor in tdinfo.type_descriptors:
-        debug_type_descriptors.append(  # noqa: PERF401
+        debug_type_descriptors.append(
             DebugTypeDescriptorEvidence(
                 type_index=descriptor.type_index,
                 kind=descriptor.kind.name,
@@ -453,7 +453,7 @@ def _load_tdinfo_sidecar(
             )
         )
     for ref in tdinfo.type_references:
-        debug_type_references.append(  # noqa: PERF401
+        debug_type_references.append(
             DebugTypeReferenceEvidence(
                 name=ref.name,
                 type_index=ref.type_index,
@@ -469,7 +469,7 @@ def _load_tdinfo_sidecar(
         )
     )
     for member in tdinfo.type_members:
-        debug_type_members.append(  # noqa: PERF401
+        debug_type_members.append(
             DebugTypeMemberEvidence(
                 name=member.name,
                 offset=member.offset,
@@ -480,7 +480,7 @@ def _load_tdinfo_sidecar(
             )
         )
     for member in tdinfo.enum_members:
-        debug_enum_members.append(  # noqa: PERF401
+        debug_enum_members.append(
             DebugEnumMemberEvidence(
                 name=member.name,
                 value=member.value,

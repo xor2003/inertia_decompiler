@@ -18,7 +18,7 @@ from collections import defaultdict
 from collections.abc import Iterator, MutableMapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Protocol, cast
 
@@ -26,6 +26,7 @@ from ..pipeline.errors import PipelineHardError
 from ..semantics.status_flag_contracts import (
     STATUS_FLAGS_8616,
     StatusFlag8616,
+    StatusFlagEffect8616,
     StatusFlagLivenessStats8616,
 )
 
@@ -103,6 +104,7 @@ class StatusFlagLiftArtifact8616:
     candidates: tuple[StatusFlagLiftCandidate8616, ...]
     packed_preservation_addresses: frozenset[int]
     original_linear_delta: int = 0
+    callee_effects: tuple[tuple[int, StatusFlagEffect8616], ...] = ()
 
     def covers_packed_preservation_8616(self, instruction_address: int) -> bool:
         """Match one preservation site in current or original linear space."""
@@ -149,6 +151,7 @@ class StatusFlagLiftSession8616:
     packed_preservation_addresses: frozenset[int] = frozenset()
     projection_failure_count: int = 0
     original_linear_delta: int = 0
+    callee_effects: tuple[tuple[int, StatusFlagEffect8616], ...] = ()
     stats: StatusFlagLivenessStats8616 = field(
         default_factory=lambda: StatusFlagLivenessStats8616(0, 0, 0, 0, 0)
     )
@@ -175,6 +178,7 @@ class StatusFlagLiftSession8616:
         return StatusFlagLiftArtifact8616(
             self.function_address, self.candidates,
             self.packed_preservation_addresses, self.original_linear_delta,
+            self.callee_effects,
         )
 
     def dead_write_mask(
@@ -323,7 +327,7 @@ def _publish_stats_8616(function: object, session: StatusFlagLiftSession8616) ->
                 artifact.packed_preservation_addresses
             )
         ):
-            artifact = previous
+            artifact = replace(previous, callee_effects=artifact.callee_effects)
         info["status_flag_lift_artifact_8616"] = encode_status_flag_lift_artifact_8616(
             artifact
         )
@@ -387,6 +391,7 @@ def active_status_flag_lift_context_8616(
         candidates,
         _packed_preservation_addresses_8616(projection),
         original_linear_delta=_original_linear_delta_8616(project),
+        callee_effects=projection.callee_effects,
     )
     token = _active_session.set(session)
     completed = False

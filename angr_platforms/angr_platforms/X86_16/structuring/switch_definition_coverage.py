@@ -1,6 +1,10 @@
 """Check SSA definition survival before replacing a switch decision ladder.
 
 Layer: Structuring.
+Owns CFG shape, loops, switches, and structured condition lowering from proven
+IR/semantic evidence. Do not perform alias-state ownership, widening,
+type/materialization recovery, rewrite cleanup, postprocess, or CLI/reporting
+work here.
 Responsibility: refuse removal of dispatcher definitions still read by retained
 case/default bodies or the surrounding function. This is a loss check, not a
 reaching-definition, liveness, storage-recovery or switch-equivalence proof.
@@ -49,7 +53,7 @@ def _inventory_8616(
 ) -> _VariableInventory8616:
     """Collect retained SSA facts without crossing the excluded subtree.
 
-    Dynamic attributes below belong to third-party angr structurer nodes.
+    Dynamic boundary: attributes below belong to third-party angr structurer nodes.
     The caller supplies its authoritative child traversal, including cases.
     """
     result = _VariableInventory8616()

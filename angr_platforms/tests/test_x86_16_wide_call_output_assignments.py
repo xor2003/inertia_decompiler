@@ -28,6 +28,10 @@ from angr_platforms.X86_16.lowering.wide_call_output_assignments import (
 from angr_platforms.X86_16.pipeline.errors import PipelineHardError
 from x86_16_carry_borrow_call_output_support import wide_assignment_fixture
 
+_DESTINATION_ENTRY_SP_OFFSET = -6
+_SOURCE_ENTRY_SP_OFFSET = 2
+_EXPECTED_CARRIER_STATEMENT_COUNT = 4
+
 
 def test_lowering_materializes_wide_call_output_assignment_once() -> None:
     codegen, root, call, source = wide_assignment_fixture()
@@ -44,8 +48,8 @@ def test_lowering_materializes_wide_call_output_assignment_once() -> None:
     assert assignment.rhs.lhs is call
     assert assignment.rhs.rhs is source
     registry = stack_variable_coordinate_registry_8616(codegen)
-    assert registry.for_bp_range(-4, 4).entry_sp_offset == -6
-    assert registry.for_bp_range(4, 4).entry_sp_offset == 2
+    assert registry.for_bp_range(-4, 4).entry_sp_offset == _DESTINATION_ENTRY_SP_OFFSET
+    assert registry.for_bp_range(4, 4).entry_sp_offset == _SOURCE_ENTRY_SP_OFFSET
 
     replayed = lower_wide_call_output_stack_assignments_8616(codegen)
     assert replayed is not None and replayed.complete
@@ -122,6 +126,40 @@ def test_lowering_matches_typed_constant_call_target() -> None:
     assert isinstance(assignment, CAssignment)
     assert isinstance(assignment.rhs, CBinaryOp)
     assert assignment.rhs.lhs is call
+
+
+@pytest.mark.parametrize(("target", "attached", "callsite", "accepted"), [
+    ("arbitrary_label", 0x2000, 0xFF0, True),
+    ("clock", None, 0xFF0, False),
+    ("clock", 0x3000, 0xFF0, False),
+    ("clock", True, 0xFF0, False),
+    ("clock", "8192", 0xFF0, False),
+    ("clock", 0x2000, 0xFE0, False),
+    (0x2000, 0x2000, 0xFF0, True),
+    (0x2000, 0x3000, 0xFF0, False),
+    (0x3000, 0x2000, 0xFF0, False),
+])
+def test_named_call_preserves_binary_identity_without_trusting_its_name(
+    target, attached, callsite, accepted,
+) -> None:
+    codegen, root, call, _source = wide_assignment_fixture(callsite_tag=callsite)
+    call.callee_target = target
+    if attached is not None:
+        call.tags["inertia_target_addr_8616"] = attached
+    original = tuple(root.statements)
+
+    artifact = lower_wide_call_output_stack_assignments_8616(codegen)
+
+    assert artifact is not None and artifact.complete
+    assert artifact.stats.materialized_count == int(accepted)
+    if accepted:
+        assert root.statements[0].rhs.lhs is call
+        replayed = lower_wide_call_output_stack_assignments_8616(codegen)
+        assert replayed.stats.already_materialized_count == 1
+        assert replayed.stats.changed_count == 0
+    else:
+        assert artifact.resolutions[0].failure is WideCallOutputAssignmentFailure8616.CALLSITE_MISSING
+        assert tuple(root.statements) == original
 
 
 def test_lowering_materializes_exact_adjacent_nested_carrier_group() -> None:
@@ -266,4 +304,4 @@ def test_lowering_refuses_ambiguous_nested_carrier_parent() -> None:
         is WideCallOutputAssignmentFailure8616.CARRIER_PLACEMENT_AMBIGUOUS
     )
     assert len(call_group.statements) == 1
-    assert len(carrier_group.statements) == 4
+    assert len(carrier_group.statements) == _EXPECTED_CARRIER_STATEMENT_COUNT

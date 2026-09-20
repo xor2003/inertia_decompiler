@@ -282,7 +282,7 @@ def _child_scopes_8616(
     if isinstance(cases, (list, tuple)):
         for case in cases:
             if isinstance(case, tuple) and len(case) == 2 and isinstance(case[1], structured_c.CStatements):
-                children.append((case[1], path))  # noqa: PERF401 - narrows dynamic AST tuples
+                children.append((case[1], path))
     return tuple(children)
 
 

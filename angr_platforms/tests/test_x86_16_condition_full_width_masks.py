@@ -15,6 +15,30 @@ from angr_platforms.X86_16.ir.condition_ir import normalize_condition_fingerprin
 from angr_platforms.X86_16.ir.ir_canonicalize_8616 import canonicalize_expr_8616
 
 
+@pytest.mark.parametrize("bits,mask", [(8, 255), (16, 65535)])
+@pytest.mark.parametrize("signed", ["true", "false"])
+def test_integer_narrowing_cast_absorbs_exact_destination_mask(bits, mask, signed):
+    conversion = f"SimTypeLong:bits=32:signed=false->SimTypeShort:bits={bits}:signed={signed}"
+    before = f"SemanticCast({conversion},And(memory:unknown-width,const:{mask}))"
+    expected = f"SemanticCast({conversion},memory:unknown-width)"
+    assert normalize_condition_fingerprint_algebraic_8616(before) == expected
+
+
+@pytest.mark.parametrize(
+    "conversion,mask,operator",
+    [
+        ("SimTypeShort:bits=16:signed=false->SimTypeChar:bits=8:signed=true", 127, "And"),
+        ("SimTypeShort:bits=16:signed=false->SimTypeLong:bits=32:signed=true", 255, "And"),
+        ("SimTypeFloat:bits=32:signed=false->SimTypeChar:bits=8:signed=true", 255, "And"),
+        ("unknown->SimTypeChar:bits=8:signed=true", 255, "And"),
+        ("SimTypeShort:bits=16:signed=false->SimTypeChar:bits=8:signed=true", 255, "Or"),
+    ],
+)
+def test_cast_mask_normalization_refuses_unproven_conversion(conversion, mask, operator):
+    value = f"SemanticCast({conversion},{operator}(memory:unknown-width,const:{mask}))"
+    assert normalize_condition_fingerprint_algebraic_8616(value) == value
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     (
@@ -77,3 +101,24 @@ def test_local_value_canonicalizer_removes_proven_dword_identity_mask() -> None:
     variable = _variable(4)
 
     assert canonicalize_expr_8616(_masked(variable, 0xFFFFFFFF)) is variable
+
+
+@pytest.mark.parametrize("inner", ["And(load,const:255)", "And(const:0xff,load)"])
+@pytest.mark.parametrize("mask_first", [False, True])
+def test_repeated_exact_mask_preserves_inner_narrowing(inner, mask_first):
+    args = f"const:255,{inner}" if mask_first else f"{inner},const:255"
+    raw = f"CmpLE(Xor(And({args}),const:128),rhs)"
+    expected = f"CmpLE(Xor({inner},const:128),rhs)"
+    assert normalize_condition_full_width_masks_8616(raw) == expected
+    assert normalize_condition_fingerprint_algebraic_8616(raw) == expected
+
+
+@pytest.mark.parametrize("operand", [
+    "And(load,const:15)",
+    "Or(load,const:255)",
+    "SemanticCast(unsigned->signed,And(load,const:255))",
+    "And(load,const:unknown)",
+])
+def test_mask_identity_refuses_different_mask_or_intervening_operation(operand):
+    raw = f"And({operand},const:255)"
+    assert normalize_condition_full_width_masks_8616(raw) == raw

@@ -8,11 +8,15 @@ wrong pointer arguments, and failed sorting on bounded signed-byte inputs.
 import subprocess
 from pathlib import Path
 
+from angr_platforms.X86_16.lowering.gp_word_runtime import (
+    coherent_gp_runtime_definitions_8616,
+    coherent_gp_runtime_header_8616,
+)
+
 _HARNESS = r'''
 #include <stdlib.h>
 #include <stdio.h>
 unsigned short COMPARES;
-unsigned long inertia_esi, inertia_edi;
 g_08F0_entry ITEMS[3];
 static unsigned swaps, draws;
 static unsigned short last_left, last_right;
@@ -98,7 +102,8 @@ def assert_quicksort_behavior(text: str, directory: Path, *, named: bool) -> Non
     bindings = "\n".join(f"#define {key} {value}" for key, value in zip(keys, names, strict=True))
     (directory / "generated.c").write_text(text, encoding="utf-8")
     harness = directory / "harness.c"
-    harness.write_text('#include "generated.c"\n' + bindings + _HARNESS, encoding="ascii")
+    runtime = coherent_gp_runtime_header_8616() + coherent_gp_runtime_definitions_8616()
+    harness.write_text(runtime + '#include "generated.c"\n' + bindings + _HARNESS, encoding="ascii")
     executable = directory / "quicksort"
     compiled = subprocess.run(
         ["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", str(harness), "-o", str(executable)],

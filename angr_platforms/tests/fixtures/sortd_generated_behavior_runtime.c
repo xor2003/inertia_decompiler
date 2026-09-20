@@ -1,3 +1,7 @@
+/* Layer: Tooling/gates.
+ * Responsibility: provide the generated-C runtime ABI and observed external
+ * effects for SORTD execution tests, without replacing decompiled bodies.
+ */
 #include <stdint.h>
 #include <string.h>
 
@@ -6,7 +10,17 @@ uint16_t inertia_cs;
 uint16_t inertia_ds;
 uint16_t inertia_es;
 uint16_t inertia_ss;
+#ifndef INERTIA_COHERENT_GP_RUNTIME_H
+/* Legacy artifacts use scalar storage; coherent builds supply the shared ABI. */
+unsigned long inertia_eax;
+unsigned long inertia_ebx;
+unsigned long inertia_ecx;
+unsigned long inertia_edx;
 unsigned long inertia_esi;
+unsigned long inertia_edi;
+unsigned long inertia_esp;
+unsigned long inertia_ebp;
+#endif
 
 unsigned long fake_clock;
 int clock_calls;
@@ -21,6 +35,21 @@ int color_calls;
 unsigned short last_color;
 unsigned short colors[8];
 unsigned short last_divisor;
+
+/* Check both timer bytes from the same quotient, not merely the port order. */
+int beep_timer_programming_matches(unsigned short frequency)
+{
+    unsigned long quotient;
+    if (!frequency || output_calls != 5 || last_divisor != frequency)
+        return 0;
+    quotient = 1193180UL / frequency;
+    return output_ports[0] == 67 && output_values[0] == 182
+        && output_ports[1] == 66 && output_values[1] == (quotient & 255)
+        && output_ports[2] == 66 && output_values[2] == ((quotient >> 8) & 255)
+        && output_ports[3] == 97 && output_values[3] == 0x33
+        && output_ports[4] == 97 && output_values[4] == 0x30;
+}
+
 int background_calls;
 char *g_0136[2] = {"menu one", "menu two"};
 int key_calls;
@@ -187,7 +216,14 @@ void reset_runtime_observation(void)
     display_cursor_calls = 0;
     config_calls = 0;
     key_index = 0;
+    inertia_eax = 0;
+    inertia_ebx = 0;
+    inertia_ecx = 0;
+    inertia_edx = 0;
     inertia_esi = 0;
+    inertia_edi = 0;
+    inertia_esp = 0;
+    inertia_ebp = 0;
     memset(colors, 0, sizeof(colors));
     memset(output_ports, 0, sizeof(output_ports));
     memset(output_values, 0, sizeof(output_values));

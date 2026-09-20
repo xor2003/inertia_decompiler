@@ -229,7 +229,7 @@ def _generate_edge_vectors(
     refusals: list[dict[str, Any]] = []
     if exe_path is None:
         for function in functions:
-            refusals.append(  # noqa: PERF401
+            refusals.append(
                 {
                     "status": "refused",
                     "reason": "unsupported_ir",
@@ -247,7 +247,7 @@ def _generate_edge_vectors(
 
     if max_loop_unroll != 0:
         for function in functions:
-            refusals.append(  # noqa: PERF401
+            refusals.append(
                 {
                     "status": "refused",
                     "reason": "unsupported_ir",
@@ -272,7 +272,7 @@ def _generate_edge_vectors(
         )
     except DosUnitError as ex:
         for function in functions:
-            refusals.append(  # noqa: PERF401
+            refusals.append(
                 {
                     "status": "refused",
                     "reason": "unsupported_ir",

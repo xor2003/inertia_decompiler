@@ -8,7 +8,6 @@ from x86_16_heapsort_behavior import assert_heapsort_behavior
 _SOURCE = """
 typedef struct g_08F0_entry { char field_0, field_1; } g_08F0_entry;
 extern unsigned short g_0BA2;
-extern unsigned long inertia_esi, inertia_edi;
 extern g_08F0_entry g_0B4C[];
 void sub_109e8(unsigned short);
 void sub_107b8(g_08F0_entry *, g_08F0_entry *);

@@ -1,7 +1,7 @@
 """Resolve exact caller execution context from the direct-call census.
 
 Layer: Types/Lowering.
-Responsibility: join one return-use fact to the census-owned evidence project
+Responsibility: join one callsite identity to the census-owned evidence project
 and exact caller function boundary used by all interprocedural SSA consumers.
 This module does not rebuild boundaries, infer types, or mutate codegen.
 Consumes alias, widening, and typed facts.
@@ -19,6 +19,7 @@ from .callee_callsite_census import collect_callee_callsite_census_8616
 __all__ = [
     "CallerSSAContext8616",
     "CallerSSAContextVerdict8616",
+    "caller_ssa_context_for_callsite_8616",
     "caller_ssa_context_for_return_use_8616",
 ]
 
@@ -57,20 +58,32 @@ def caller_ssa_context_for_return_use_8616(
     fact: CallerReturnUseFact8616,
 ) -> CallerSSAContext8616:
     """Join one return-use fact to its unique normalized direct-call fact."""
+    return caller_ssa_context_for_callsite_8616(
+        project, callee_addr, fact.caller_addr, fact.callsite_addr
+    )
+
+
+def caller_ssa_context_for_callsite_8616(
+    project: object,
+    callee_addr: int,
+    caller_addr: int,
+    callsite_addr: int,
+) -> CallerSSAContext8616:
+    """Select the exact caller owner shared by return and memory-effect consumers."""
     census = collect_callee_callsite_census_8616(project, callee_addr)
     matches = tuple(
         caller
         for caller in census.facts
-        if caller.caller_addr == fact.caller_addr
-        and caller.callsite_addr == fact.callsite_addr
+        if caller.caller_addr == caller_addr
+        and caller.callsite_addr == callsite_addr
         and caller.summary is not None
     )
     if len(matches) == 1:
         match = matches[0]
         return CallerSSAContext8616(
             CallerSSAContextVerdict8616.PROVEN,
-            fact.caller_addr,
-            fact.callsite_addr,
+            caller_addr,
+            callsite_addr,
             evidence_project=match.evidence_project,
             caller_function=match.caller_function,
         )
@@ -78,6 +91,6 @@ def caller_ssa_context_for_return_use_8616(
         CallerSSAContextVerdict8616.CONFLICT
         if len(matches) > 1
         else CallerSSAContextVerdict8616.UNAVAILABLE,
-        fact.caller_addr,
-        fact.callsite_addr,
+        caller_addr,
+        callsite_addr,
     )

@@ -1346,6 +1346,7 @@ def _resolve_cmp_operand_expr_8616(
     reg_exprs: dict[tuple[int, str, int], object],
     ins_addr: int,
 ) -> object | None:
+    """Consume proven comparison values; refuse registers without a definition."""
     def _impl() -> object | None:
         op_type = int(getattr(operand, "type", -1))
         if op_type == 1:
@@ -1365,10 +1366,8 @@ def _resolve_cmp_operand_expr_8616(
             )
             if expr is not None:
                 return expr
-            reg_offset = _reg_offset_8616(project, reg_name)
-            reg_size = int(getattr(operand, "size", 0) or 2)
-            if reg_offset is not None:
-                return cast(object | None, CVariable(SimRegisterVariable(reg_offset, reg_size, name=reg_name), codegen=codegen))
+            # A physical register name does not establish its reaching value.
+            # Refusal preserves the existing condition instead of inventing a read.
             return None
         if op_type == 2:
             return cast(object | None, _const_8616(int(operand.imm), codegen))
@@ -3052,6 +3051,7 @@ def _rewrite_decoded_jcc_conditions_8616(project: object, codegen: object) -> bo
             *,
             polarity_evidence: _JccPolarityEvidence8616 = _JccPolarityEvidence8616.UNKNOWN,
         ) -> object | None:
+            """Publish a decoded guard with its original branch provenance."""
             decoded = _rebind_decoded_call_return_guard_8616(key, decoded)
             raw_tags = getattr(cond, "tags", None)
             tags: dict[str, object] = dict(raw_tags) if isinstance(raw_tags, dict) else {}
@@ -3077,9 +3077,11 @@ def _rewrite_decoded_jcc_conditions_8616(project: object, codegen: object) -> bo
                     )
                 decoded = _invert_decoded_guard_8616(decoded, tags)
             if decoded.expr is not None:
-                with contextlib.suppress(Exception):
-                    if not isinstance(getattr(decoded.expr, "tags", None), dict):
-                        cast(Any, decoded.expr).tags = tags
+                # A replacement denotes the branch, not its operand producer.
+                expression_tags = getattr(decoded.expr, "tags", None)
+                cast(Any, decoded.expr).tags = {
+                    **(expression_tags if isinstance(expression_tags, dict) else {}), **tags,
+                }
                 _record_consumed_decoded_guard_keys_8616(decoded)
                 return decoded.expr
             replacement = _try_build_arch_safe_binary_op_8616(

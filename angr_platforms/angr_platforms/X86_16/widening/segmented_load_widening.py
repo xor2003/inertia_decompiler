@@ -32,7 +32,7 @@ from capstone.x86_const import X86_INS_MOV, X86_OP_MEM, X86_OP_REG
 
 from ..c_ast_utils import _iter_c_nodes_deep_8616, _replace_c_children_8616, _same_c_expression_8616
 from ..frontend_function_instructions import collect_function_instruction_inventory_8616
-from ..ir.core import IRAddress, IRValue, MemSpace
+from ..ir.core import SEGMENTED_LOAD_ADDRESS_TAG_8616, IRAddress, IRValue, MemSpace
 from ..ir.function_ssa_registry import (
     FunctionSSAArtifactVerdict8616,
     registered_function_ssa_artifact_8616,
@@ -188,6 +188,10 @@ def _segmented_byte_load_8616(node: object) -> tuple[CFunctionCall, object, obje
     if not isinstance(node, CFunctionCall) or not isinstance(node.tags, dict):
         return None
     if node.tags.get("inertia_x86_16_runtime_segment_helper") != "SEG_U8":
+        return None
+    address = node.tags.get(SEGMENTED_LOAD_ADDRESS_TAG_8616)
+    # A register-relative offset can cross FFFFh; SEG_U16 is a contiguous lvalue.
+    if isinstance(address, IRAddress) and (address.base or address.base_values):
         return None
     if not isinstance(node.args, (list, tuple)) or len(node.args) != 2:
         return None

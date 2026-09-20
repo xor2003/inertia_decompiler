@@ -9,6 +9,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import cast
 
 from angr.analyses.decompiler.structured_codegen.c import (
@@ -24,12 +25,13 @@ from angr.sim_type import SimTypeLong
 from angr.sim_variable import SimRegisterVariable, SimStackVariable, SimTemporaryVariable
 
 from ..c_ast_utils import _iter_c_node_occurrences_8616, _iter_c_nodes_deep_8616
-from ..ir.condition_ir import ConditionIR, ConditionOp
+from ..ir.condition_ir import ConditionIR, ConditionOp, condition_sort_key_8616
 from ..ir.core import IRValue
 from ..pipeline.errors import PipelineHardError
 from .call_output_stack_objects import _CallOutputCodegen8616, _wide_condition_call_8616
 from .semantic_cast import CSemanticCast8616
 from .stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
+from .wide_call_condition_binding import WIDE_CALL_BINDING_TAG_8616, WideCallBinding8616, wide_call_identity_8616
 
 _PENDING_CAPTURE: str = "inertia_wide_condition_pending_call_capture_8616"
 _CAPTURED_CALL: str = "inertia_wide_condition_captured_call_8616"
@@ -89,6 +91,14 @@ def build_proven_wide_call_condition_8616(
     )
     if not captures:
         expression.tags[_PENDING_CAPTURE] = summary.callsite_addr
+    callee_identity = wide_call_identity_8616(call)
+    if callee_identity is not None and isinstance(low_stack.offset, int):
+        variable = captures[0].variable if captures else None
+        expression.tags[WIDE_CALL_BINDING_TAG_8616] = WideCallBinding8616(
+            tuple(condition_sort_key_8616(condition) for condition in conditions),
+            summary.callsite_addr, callee_identity, low_stack.offset,
+            variable.tmp_id if isinstance(variable, SimTemporaryVariable) else None,
+        )
     return expression
 
 
@@ -154,6 +164,9 @@ def commit_wide_call_condition_captures_8616(codegen: object) -> int:
         else:
             group.statements[index] = capture
         node.lhs.expr = value
+        binding = node.tags.get(WIDE_CALL_BINDING_TAG_8616)
+        if isinstance(binding, WideCallBinding8616):
+            node.tags[WIDE_CALL_BINDING_TAG_8616] = replace(binding, temporary_id=temporary_id)
         del node.tags[_PENDING_CAPTURE]
         boundary.cfunc.variables_in_use[temporary] = value
         # CFunction.refresh reads declaration types from the variable manager.

@@ -52,10 +52,42 @@ def matches_gp_restore_stack_bytes_8616(
     """Require both byte operands to match the Alias-proven restore range."""
     recomposition = recognize_stack_word_recomposition_8616(node)
     if recomposition is None:
-        return False
+        return fact.constant_value is not None and _constant_word_views_8616(codegen, node, fact)
     low = _entry_sp_byte_offset_8616(codegen, recomposition.low)
     high = _entry_sp_byte_offset_8616(codegen, recomposition.high)
     return low is not None and high is not None and (low, high) == fact.stack_offsets
+
+
+def _unsigned_byte_view_8616(node: object) -> object | None:
+    """Require an actual unsigned-byte truncation, not an arbitrary cast."""
+    if isinstance(node, structured_c.CTypeCast) and isinstance(node.dst_type, SimTypeChar) and node.dst_type.signed is False:
+        return cast(object, node.expr)
+    return None
+
+
+def _shifted_view_8616(node: object, operation: str) -> object | None:
+    """Require exactly one byte of shift in the requested direction."""
+    if (isinstance(node, structured_c.CBinaryOp) and node.op == operation
+            and isinstance(node.rhs, structured_c.CConstant) and node.rhs.value == 8):
+        return cast(object, node.lhs)
+    return None
+
+
+def _constant_word_views_8616(codegen: object, node: object, fact: SegmentStackRestoreFact8616) -> bool:
+    """Join two byte views of one local to Alias's exact proven word range."""
+    if not isinstance(node, structured_c.CBinaryOp) or node.op != "Or":
+        return False
+    for low, high in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
+        local = _unsigned_byte_view_8616(low)
+        upper = _shifted_view_8616(_unsigned_byte_view_8616(_shifted_view_8616(high, "Shl")), "Shr")
+        if not isinstance(local, structured_c.CVariable) or not isinstance(upper, structured_c.CVariable):
+            continue
+        if local.variable != upper.variable or local.variable.size not in {2, 4}:
+            continue
+        offset = _entry_sp_byte_offset_8616(codegen, local)
+        if offset is not None and fact.stack_offsets == (offset, offset + 1):
+            return True
+    return False
 
 
 _BYTE_BITS_8616 = 8

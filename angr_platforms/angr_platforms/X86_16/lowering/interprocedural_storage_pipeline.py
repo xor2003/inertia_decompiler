@@ -17,11 +17,11 @@ from typing import Protocol, cast
 
 from ..caller_return_use_contracts import CallerReturnUseEvidence8616
 from ..callsite_summary import caller_return_use_evidence_by_addr_8616
+from ..pipeline.errors import PipelineHardError
 from .interprocedural_storage_collection_contracts import (
     FunctionInputStorageTrialCollection8616,
 )
 from .interprocedural_storage_contracts import (
-    FunctionStorageTrials8616,
     ProgramStorageResolution8616,
 )
 from .interprocedural_storage_return_collection_contracts import (
@@ -30,11 +30,10 @@ from .interprocedural_storage_return_collection_contracts import (
 from .interprocedural_storage_return_trial_collection import (
     collect_function_return_storage_trials_8616,
 )
-from .interprocedural_storage_solver import resolve_program_storage_trials_8616
 from .interprocedural_storage_transaction import (
-    apply_program_storage_resolution_8616,
+    accepted_function_storage_contract_8616,
     function_storage_resolution_8616,
-    program_storage_resolution_8616,
+    replace_function_storage_trials_8616,
 )
 from .interprocedural_storage_trial_collection import (
     collect_function_input_storage_trials_8616,
@@ -122,10 +121,21 @@ class _ProjectSurface8616(Protocol):
 
 
 def _record_result_8616(
+    project: object,
     codegen: object,
     result: FunctionStoragePublicationResult8616,
 ) -> FunctionStoragePublicationResult8616:
-    """Persist one typed lifecycle result on the owned codegen surface."""
+    """Record current evidence, refusing stale accepted contracts before reuse."""
+    if not result.published and result.function_addr is not None:
+        previous = accepted_function_storage_contract_8616(project, result.function_addr)
+        if previous is not None:
+            raise PipelineHardError(
+                "previously accepted storage contract cannot survive refused refresh: "
+                f"function={result.function_addr:#x} verdict={result.verdict.value}",
+                layer="types/lowering",
+                function_addr=result.function_addr,
+                details=result,
+            )
     try:  # noqa: SIM105
         cast(
             _CodegenSurface8616,
@@ -206,24 +216,6 @@ def _return_evidence_8616(
     return reference, None
 
 
-def _publish_trials_8616(
-    project: object,
-    trials: FunctionStorageTrials8616,
-) -> tuple[ProgramStorageResolution8616, bool]:
-    """Replace one function trial and atomically republish the full retained set."""
-    previous = program_storage_resolution_8616(project)
-    trials_by_addr = {
-        item.function_addr: item
-        for item in (() if previous is None else previous.function_trials)
-    }
-    trials_by_addr[trials.function_addr] = trials
-    resolution = resolve_program_storage_trials_8616(
-        trials_by_addr[address] for address in sorted(trials_by_addr)
-    )
-    changed = apply_program_storage_resolution_8616(project, resolution)
-    return resolution, changed
-
-
 def collect_and_publish_function_storage_contract_8616(
     project: object,
     codegen: object,
@@ -232,6 +224,7 @@ def collect_and_publish_function_storage_contract_8616(
     context = _function_context_8616(project, codegen)
     if context is None:
         return _record_result_8616(
+            project,
             codegen,
             FunctionStoragePublicationResult8616(
                 None,
@@ -248,6 +241,7 @@ def collect_and_publish_function_storage_contract_8616(
     inputs = collect_function_input_storage_trials_8616(project, codegen, function_addr)
     if not inputs.complete:
         return _record_result_8616(
+            project,
             codegen,
             FunctionStoragePublicationResult8616(
                 function_addr,
@@ -263,6 +257,7 @@ def collect_and_publish_function_storage_contract_8616(
     )
     if evidence is None:
         return _record_result_8616(
+            project,
             codegen,
             FunctionStoragePublicationResult8616(
                 function_addr,
@@ -281,6 +276,7 @@ def collect_and_publish_function_storage_contract_8616(
     )
     if not returns.complete:
         return _record_result_8616(
+            project,
             codegen,
             FunctionStoragePublicationResult8616(
                 function_addr,
@@ -289,7 +285,7 @@ def collect_and_publish_function_storage_contract_8616(
                 return_collection=returns,
             ),
         )
-    resolution, changed = _publish_trials_8616(project, returns.trials)
+    resolution, changed = replace_function_storage_trials_8616(project, returns.trials)
     function_resolution = function_storage_resolution_8616(project, function_addr)
     accepted = function_resolution is not None and function_resolution.contract is not None
     verdict = (
@@ -306,6 +302,7 @@ def collect_and_publish_function_storage_contract_8616(
         )
     )
     return _record_result_8616(
+        project,
         codegen,
         FunctionStoragePublicationResult8616(
             function_addr,

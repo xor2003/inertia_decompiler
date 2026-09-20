@@ -38,7 +38,7 @@ def _format_variables(variable_manager: Any) -> list[str]:  # noqa: ANN401
 
     rendered: list[str] = []
     for variable in sorted(variables, key=_sort_key):
-        rendered.append(  # noqa: PERF401
+        rendered.append(
             f"{type(variable).__name__} offset={getattr(variable, 'offset', None)!r} "
             f"size={getattr(variable, 'size', None)!r} "
             f"base={getattr(variable, 'base', None)!r} "

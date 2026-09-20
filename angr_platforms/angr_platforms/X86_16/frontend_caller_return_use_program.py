@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol, cast
 
+from .frontend_caller_entry_identity import CallerEntryIdentity8616, prove_caller_entry_identity_8616
 from .frontend_direct_callsite_index import (
     DecodedDirectCallsiteIndex8616,
     build_decoded_direct_callsite_index_8616,
@@ -102,6 +103,15 @@ class CallerReturnUseProgramEvidence8616:
     stats: CallerReturnUseProgramStats8616
 
     @property
+    def range_census_complete(self) -> bool:
+        """Require every distinct caller range before interpreting absent uses."""
+        return (
+            self.status is CallerReturnUseProgramStatus8616.READY
+            and self.stats.closed
+            and self.stats.materialized_count == self.stats.normalized_fact_count
+        )
+
+    @property
     def complete(self) -> bool:
         """Return whether range and callsite accounting are coherent."""
         return bool(
@@ -175,6 +185,7 @@ def build_caller_return_use_program_evidence_8616(
         disassembler.detail = True
 
     decoded_ranges: dict[tuple[int, int], tuple[object, ...]] = {}
+    identities: dict[tuple[int, int], CallerEntryIdentity8616] = {}
     classified_fact_count = 0
     for start, end in normalized_ranges:
         if not isinstance(start, int) or not isinstance(end, int) or end <= start:
@@ -183,11 +194,16 @@ def build_caller_return_use_program_evidence_8616(
         try:
             loaded = memory.load(start, end - start)
             data = bytes(cast(bytes | bytearray | memoryview, loaded))
+            identity = prove_caller_entry_identity_8616(start, end, data)
+            if identity is None:
+                continue
             decoded_ranges[(start, end)] = tuple(disassembler.disasm(data, start))
+            identities[(start, end)] = identity
         except (AttributeError, KeyError, OSError, TypeError, ValueError):
             continue
     callsites = build_decoded_direct_callsite_index_8616(
         decoded_ranges,
+        entry_identities=identities,
         direct_target_resolver=direct_target_resolver,
         instruction_address_resolver=instruction_address_resolver,
     )
