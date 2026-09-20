@@ -84,10 +84,10 @@ def _direct_in_process_env(enabled: bool) -> Iterator[None]:
 
 
 def _build_proc_argv(args: argparse.Namespace, proc_name: str) -> list[str]:
-    """Return the decompiler CLI argv for one focused procedure."""
+    """Select a named procedure without enabling alternate source recovery."""
 
     argv = [
-        "--alternate-source-c",
+        "--no-alternate-source-c",
         "--timeout",
         str(args.timeout),
         "--function-discovery-backend",

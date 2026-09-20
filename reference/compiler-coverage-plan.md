@@ -648,3 +648,61 @@ unresolved issues and deferred parity remain visible, not silently declared done
 
 References: [NIST covering arrays](https://math.nist.gov/coveringarrays/) and
 [Csmith research](https://users.cs.utah.edu/~regehr/papers/pldi11-preprint.pdf).
+
+### Binary-Recovery Policy Checkpoint
+
+- 2026-09-20, approximately 17:02-17:06 local, four minutes including checks:
+  the shared MS C runner now explicitly disables alternate-source C in normal
+  main/function recovery, individual retries and batched named-procedure runs.
+  Metadata may still identify targets; this change alone does not prove complete
+  independence from source/debug semantics. Explicit JSON batch jobs retain their
+  requested policy and are not used to bypass the compiler-coverage adapter.
+- Four command-level controls failed before the change. The runner/adapter suite
+  now passes 78 tests; the Make compiler-coverage contract target passes 115.
+  These regressions are enrolled in that target and the routine pipeline.
+  Scoped MyPy passes and the new test module is Ruff-clean. Thirteen existing
+  legacy-tool Ruff findings remain; `quality-fast` still fails global lint.
+- Live `compare16` passed compile/run/decompile/recompile/run in 146.32 seconds,
+  with all six batch commands recording `--no-alternate-source-c`, successful
+  final validation and matching original/rebuilt exit code 255. Artifacts:
+  `.cache/compiler-coverage/binary-policy-001/`; logs:
+  `.cache/msc6-binary-policy-{before,focused,contracts,mypy,quality-fast}.log`.
+  The <=60-second routine target is not met. Other cases have not yet been
+  rerun under this stricter policy; previous pipeline results must not be
+  presented as verification of this change. Next: run the bounded admitted
+  small/large batch under this policy and repair its concrete failures.
+
+### Small/Large Batch And Procedure Selection
+
+- 2026-09-20, approximately 17:06-17:18 local, including both live runs and
+  focused checks: the stricter-policy batch passed all four small candidates.
+  Times: comparisons 32.38s, pointer writes 55.98s, flow 50.12s, nested calls
+  60.73s. Large storage failed validation in 164.63s. These are candidate round
+  trips, not admitted feature witnesses or a <=60s whole routine lane.
+  Artifacts: `.cache/compiler-coverage/binary-policy-batch-001/`.
+- Fixed a harness configuration defect: large-model unqualified procedures were
+  still selected as NEAR. The memory-model contract now supplies the default
+  procedure kind to batch selection and every individual retry. This is target
+  selection only, not evidence for recovered ABI or support for explicit
+  per-function near/far overrides. Two selector controls failed before the fix;
+  65 neighboring tests and 119 compiler-coverage contracts now pass. Scoped
+  MyPy and helper/test Ruff pass; the legacy build owner retains 12 Ruff findings.
+- Corrected large rerun still fails validation (231.97s), now with retained batch
+  reports and no false absent-procedure classification. `_sum_globals` leaks
+  `ss << 4`; `bump_static` reports classified GP stack-restores without any
+  materialization. The batch report preserves both failures even though the
+  rebuild stops at the first rejected function. Do not relax either gate.
+  Artifacts: `.cache/compiler-coverage/large-procedure-policy-001/`; logs:
+  `.cache/msc6-procedure-model-{before,focused,contracts,mypy,ruff,live}.log`.
+  Next semantic investigation: the small `bump_static` far-call stack frame,
+  including the binary stack-probe call and SI/DI save/restore ownership.
+- Pause checkpoint, 2026-09-20 17:19 local: a direct linked-binary probe of
+  `bump_static` at `0x10000`, window 30, with both local sidecars and alternate
+  source recovery disabled exits 4 before GP restore lowering: `KeyError: 712`,
+  `clinic=None`, no generated C, validation uncollected. This is a distinct
+  earlier blocker, not evidence that the sidecar-assisted restore defect is
+  fixed. Retained `.cache/large-bump-before.{c,err}` and stage bundle
+  `.codex_automation/stage_debug/STORE.EXE_47d5df5c7df1/0x10000_sub_10000_de74da18dd3a`.
+  No semantic owner was edited during this diagnostic. Investigate this earlier
+  source-free failure first on resume; keep both previously recorded large-model
+  failures blocking. Work paused at the user's request after the commit/push.

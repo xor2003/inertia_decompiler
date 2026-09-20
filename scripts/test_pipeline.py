@@ -92,6 +92,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_x86_16_instruction_fragment_placement.py",
     "angr_platforms/tests/test_x86_16_smoketest.py",
     "angr_platforms/tests/test_build_msc6_examples.py",
+    "angr_platforms/tests/test_msc6_binary_recovery_policy.py",
     "angr_platforms/tests/test_compiler_coverage_manifest.py",
     "angr_platforms/tests/test_compiler_coverage_csmith.py",
     "angr_platforms/tests/test_compiler_coverage_pointer_oracle.py",

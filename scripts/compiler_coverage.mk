@@ -1,11 +1,14 @@
 # Candidate round trips; semantic feature witnesses are reported separately.
 COMPILER_COVERAGE_TYPED_OWNERS := \
+	scripts/msc6_memory_model.py \
 	angr_platforms/angr_platforms/X86_16/callsite_pointer_values.py \
 	angr_platforms/angr_platforms/X86_16/lowering/near_pointer_argument_values.py \
 	inertia_decompiler/binary_signature_metadata.py \
 	inertia_decompiler/discovery_candidate_ranges.py \
 	inertia_decompiler/metadata_evidence.py
 COMPILER_COVERAGE_REGRESSION_FILES := \
+	angr_platforms/tests/test_msc6_memory_model.py \
+	angr_platforms/tests/test_msc6_binary_recovery_policy.py \
 	angr_platforms/tests/test_near_pointer_argument_values.py \
 	angr_platforms/tests/test_default_signature_provenance.py \
 	angr_platforms/tests/test_metadata_evidence.py \
@@ -54,6 +57,7 @@ compiler-coverage:
 
 compiler-coverage-contracts:
 	$(Q)PYTHON_JIT=1 PYTHONHASHSEED=0 $(PYTHON) -m pytest -n 7 -q --tb=short --no-header --durations=10 \
+		angr_platforms/tests/test_msc6_memory_model.py \
 		angr_platforms/tests/test_msc6_original_evidence.py \
 		angr_platforms/tests/test_compiler_coverage_csmith.py \
 		angr_platforms/tests/test_compiler_coverage_manifest.py \
@@ -61,4 +65,5 @@ compiler-coverage-contracts:
 		angr_platforms/tests/test_compiler_coverage_provenance.py \
 		angr_platforms/tests/test_compiler_coverage_result.py \
 		angr_platforms/tests/test_compiler_coverage_runner.py \
+		angr_platforms/tests/test_msc6_binary_recovery_policy.py \
 		angr_platforms/tests/test_compiler_coverage_suite.py

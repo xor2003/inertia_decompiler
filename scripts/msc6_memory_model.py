@@ -23,3 +23,8 @@ class MSCMemoryModel(StrEnum):
     def runtime_library(self) -> str:
         """Select the matching emulated-floating-point C runtime library."""
         return "SLIBCE.LIB" if self is MSCMemoryModel.SMALL else "LLIBCE.LIB"
+
+    @property
+    def default_procedure_kind(self) -> str:
+        """Select unqualified fixture procedures, not their recovered ABI."""
+        return "NEAR" if self is MSCMemoryModel.SMALL else "FAR"

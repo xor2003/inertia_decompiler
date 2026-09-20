@@ -2037,11 +2037,12 @@ def _decompile_function_with_options(
     function_name: str,
     proc_kind: str = "NEAR",
 ) -> tuple[bool, str, str, dict[str, object], str, str]:
+    """Recover a fixture function without substituting alternate source C."""
     start = time.perf_counter()
     cmd = [
         _decompile_python_executable(),
         str(decompile_py),
-        "--alternate-source-c",
+        "--no-alternate-source-c",
         "--timeout",
         str(decompile_timeout),
         "--function-discovery-backend",
@@ -2181,6 +2182,7 @@ def _build_from_function_decompiles(
         ]
         for function_name in fallback_functions:
             cmd.extend(["--proc", function_name])
+        cmd.extend(["--proc-kind", memory_model.default_procedure_kind])
         if decompile_pat_backend is not None:
             cmd.extend(["--pat-backend", decompile_pat_backend])
         if decompile_signature_catalog is not None:
@@ -2291,6 +2293,7 @@ def _build_from_function_decompiles(
                 decompile_pat_backend=decompile_pat_backend,
                 decompile_signature_catalog=decompile_signature_catalog,
                 function_name=function_name,
+                proc_kind=memory_model.default_procedure_kind,
             )
             function_debug.append((function_name, _name, _cmd, profile))
             if not ok:
@@ -2318,6 +2321,7 @@ def _build_from_function_decompiles(
                         decompile_pat_backend=decompile_pat_backend,
                         decompile_signature_catalog=decompile_signature_catalog,
                         function_name=function_name,
+                        proc_kind=memory_model.default_procedure_kind,
                     )
                     retry_profile = dict(profile)
                     retry_profile["retry_attempt"] = 2
@@ -2340,6 +2344,7 @@ def _build_from_function_decompiles(
                             decompile_pat_backend=decompile_pat_backend,
                             decompile_signature_catalog=decompile_signature_catalog,
                             function_name=function_name,
+                            proc_kind=memory_model.default_procedure_kind,
                         )
                         function_debug.append((function_name, _name, _cmd, retry_profile))
                         if ok:
@@ -2552,12 +2557,13 @@ def _decompile(
     decompile_pat_backend: str | None = None,
     decompile_signature_catalog: Path | None = None,
 ) -> tuple[bool, Path, Path, float, dict[str, object]]:
+    """Run binary recovery; metadata may select targets, never replace bodies."""
     stdout_path = out_dir / f"{exe_path.stem}.dec.txt"
     stderr_path = out_dir / f"{exe_path.stem}.dec.err.txt"
     cmd = [
         _decompile_python_executable(),
         str(decompile_py),
-        "--alternate-source-c",
+        "--no-alternate-source-c",
         "--timeout",
         str(decompile_timeout),
         "--function-discovery-backend",
