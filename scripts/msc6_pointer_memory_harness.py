@@ -53,6 +53,13 @@ int main(void)
     if (words[0] != 12 || words[1] != 13 || words[2] != 14 || words[3] != 13) {
         return 9;
     }
+    if (*select_word(words, 2) != 14) {
+        return 10;
+    }
+    *select_word(words, 3) = 15;
+    if (words[3] != 15) {
+        return 11;
+    }
     return 255;
 }
 """

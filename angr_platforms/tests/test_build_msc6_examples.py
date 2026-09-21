@@ -493,12 +493,20 @@ def test_scalar_types_fallback_tracks_active_non_fpu_functions():
 def test_pointer_memory_fallback_tracks_all_runtime_checked_functions():
     config = FALLBACK_EXAMPLE_REBUILD["pointer_memory"]
 
-    assert config["functions"] == ("fill_bytes", "sum_words", "swap_ptrs", "offset_copy")
+    assert config["functions"] == (
+        "fill_bytes",
+        "sum_words",
+        "swap_ptrs",
+        "offset_copy",
+        "select_word",
+    )
     harness = config["harness"]
     assert "fill_bytes(bytes, 3, 8);" in harness
     assert "sum_words(words, 4) != 100" in harness
     assert "swap_ptrs(&a, &b);" in harness
     assert "a != 9 || b != 5" in harness
+    assert "*select_word(words, 2) != 14" in harness
+    assert "*select_word(words, 3) = 15" in harness
     assert "return 255;" in harness
     assert config["source_contracts"] == (
         GeneratedFunctionSourceContract(
@@ -512,6 +520,10 @@ def test_pointer_memory_fallback_tracks_all_runtime_checked_functions():
         GeneratedFunctionSourceContract(
             function_name="swap_ptrs",
             required_return_class=GeneratedFunctionReturnClass.ANY,
+        ),
+        GeneratedFunctionSourceContract(
+            function_name="select_word",
+            required_return_class=GeneratedFunctionReturnClass.VALUE,
         ),
     )
 

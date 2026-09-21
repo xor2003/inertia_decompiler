@@ -37,6 +37,11 @@ void offset_copy(unsigned short *dst, const unsigned short *src, int count)
     }
 }
 
+unsigned short *select_word(unsigned short *words, int index)
+{
+    return words + index;
+}
+
 int main(void)
 {
     unsigned char bytes[8];
@@ -83,6 +88,13 @@ int main(void)
     offset_copy(words, words + 1, 3);
     if (words[0] != 12 || words[1] != 13 || words[2] != 14 || words[3] != 13) {
         return 9;
+    }
+    if (*select_word(words, 2) != 14) {
+        return 10;
+    }
+    *select_word(words, 3) = 15;
+    if (words[3] != 15) {
+        return 11;
     }
     return 255;
 }

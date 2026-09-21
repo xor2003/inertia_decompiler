@@ -844,3 +844,28 @@ References: [NIST covering arrays](https://math.nist.gov/coveringarrays/) and
   extraction. The broad fast lane also has unrelated pre-existing failures
   (cache-key surface, SORTD sidecar-free regressions, COD `loadprog`, and
   inbox long arithmetic), so this checkpoint does not claim broad-lane health.
+
+### Large Far-Pointer Candidate Slice
+
+ Delivered candidate wiring for the missing large-model pointer interactions,
+without admitting those obligations: `pointer_memory` gained `select_word`, a
+default-far pointer-result function, and both read/write harness checks.
+The source gate requires a value-returning generated `select_word`; the
+existing `function_pointers` construct supplies default-far indirect calls.
+The large manifest now exposes two candidate cases for `pointer.far_data`/
+`calls.pointer_return` and `pointer.far_function`, while keeping all three
+pointer obligations in `later` because their linked-EXE witnesses do not pass.
+Cheap manifest/build contracts pass (55 focused tests; MyPy clean; the touched
+legacy build owner retains its 12 known Ruff findings).
+- Live source-free candidate runs correctly exposed real blockers, not oracle
+failures. `pointer_memory` fails decompilation: `fill_bytes` has two
+uninitialized far-frame argument byte reads (`SS:BP+6/+7`) and postprocess
+changes control-flow, segmented-write, and stack-write semantics; the new
+`select_word` itself reaches `status=ok` with clean tail validation.
+`function_pointers` fails validation: `inc_one` still reports classified
+GP SI/DI stack restores with zero materialized, and `apply_twice` reports a
+classified far function-pointer parameter with `parameter_slot_missing`.
+Retained artifacts: `.cache/compiler-coverage/large-far-pointer-001/` and
+`.cache/compiler-coverage/large-far-function-001/`. These are the next two
+semantic owners to repair; do not weaken the materialization gates or count
+the candidate cases as feature coverage.

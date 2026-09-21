@@ -675,7 +675,7 @@ FALLBACK_EXAMPLE_REBUILD: dict[str, dict[str, object]] = {
         "harness": LOOPS_JUMPS_HARNESS_MAIN,
     },
     "pointer_memory": {
-        "functions": ("fill_bytes", "sum_words", "swap_ptrs", "offset_copy"),
+        "functions": ("fill_bytes", "sum_words", "swap_ptrs", "offset_copy", "select_word"),
         "harness": POINTER_MEMORY_HARNESS_MAIN,
         "source_contracts": (
             GeneratedFunctionSourceContract(
@@ -689,6 +689,10 @@ FALLBACK_EXAMPLE_REBUILD: dict[str, dict[str, object]] = {
             GeneratedFunctionSourceContract(
                 function_name="swap_ptrs",
                 required_return_class=GeneratedFunctionReturnClass.ANY,
+            ),
+            GeneratedFunctionSourceContract(
+                function_name="select_word",
+                required_return_class=GeneratedFunctionReturnClass.VALUE,
             ),
         ),
     },
