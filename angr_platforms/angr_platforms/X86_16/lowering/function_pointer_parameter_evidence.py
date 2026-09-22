@@ -77,6 +77,22 @@ def _used_return_width_8616(summary: CallsiteSummary8616) -> int | None:
     return None
 
 
+def _bp_target_source_8616(target_source: tuple[object, ...]) -> tuple[int, int] | None:
+    """Return the (BP displacement, pointer width) of one proven call target.
+
+    A BP-memory indirect call target must carry an integer displacement at or
+    beyond the first argument slot and a 2-byte (near) or 4-byte (far) call
+    operand width; the near width is the default when the operand width was
+    not retained.
+    """
+    if len(target_source) < 2 or not isinstance(target_source[1], int) or target_source[1] < 4:
+        return None
+    pointer_width = target_source[2] if len(target_source) >= 3 else 2
+    if not isinstance(pointer_width, int) or pointer_width not in {2, 4}:
+        return None
+    return target_source[1], pointer_width
+
+
 def collect_function_pointer_parameter_evidence_8616(
     summaries: Sequence[CallsiteSummary8616],
 ) -> FunctionPointerParameterEvidence8616:
@@ -97,20 +113,13 @@ def collect_function_pointer_parameter_evidence_8616(
         raw_count += 1
         widths = _supported_widths_8616(summary)
         return_width = _used_return_width_8616(summary)
-        pointer_width = target_source[2] if len(target_source) >= 3 else 2
-        if (
-            len(target_source) < 2
-            or not isinstance(target_source[1], int)
-            or target_source[1] < 4
-            or not isinstance(pointer_width, int)
-            or pointer_width not in {2, 4}
-            or widths is None
-            or return_width is None
-        ):
+        proven_target = _bp_target_source_8616(target_source)
+        if proven_target is None or widths is None or return_width is None:
             failures.append(FunctionPointerParameterFailure8616.INVALID_CALL_SIGNATURE)
             continue
         normalized_count += 1
-        grouped[target_source[1]].append((summary, widths, return_width, pointer_width))
+        stack_offset, pointer_width = proven_target
+        grouped[stack_offset].append((summary, widths, return_width, pointer_width))
 
     facts: list[FunctionPointerParameterFact8616] = []
     for stack_offset, candidates in sorted(grouped.items()):

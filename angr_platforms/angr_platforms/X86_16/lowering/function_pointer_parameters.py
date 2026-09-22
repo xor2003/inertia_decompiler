@@ -336,6 +336,63 @@ def _replace_prototype_argument_8616(
     )
 
 
+def _resolve_argument_slot_8616(
+    project: _Project8616,
+    codegen: _Codegen8616,
+    cfunc: _CFunction8616,
+    fact: FunctionPointerParameterFact8616,
+    pointer_type: SimType,
+    pointer_storage_width: int,
+) -> tuple[int, CVariable] | None:
+    """Resolve the argument slot a classified fact owns, re-flowing when proven.
+
+    The exact resolver wins when the layout and CVariables already agree with
+    the proven pointer width. Otherwise only a proven far pointer (a 4-byte
+    call operand) may widen its slot and re-site the remaining argument
+    CVars to the recomputed far-frame coordinates; every other surface
+    mismatch (for example a misordered codegen argument list) is refused
+    loudly rather than silently repaired.
+    """
+    matched = _stack_argument_at_offset_8616(
+        codegen,
+        cfunc,
+        fact.stack_offset,
+        pointer_storage_width,
+    )
+    if matched is not None:
+        return matched
+    matched_slot = _stack_argument_index_at_offset_8616(codegen, cfunc, fact.stack_offset)
+    if (
+        matched_slot is None
+        or fact.pointer_width != 4
+        or pointer_storage_width <= matched_slot[1].storage_width
+    ):
+        return None
+    reflow_index = matched_slot[0]
+    argument = _reflow_argument_surface_8616(project, codegen, cfunc, reflow_index, pointer_type)
+    if argument is None:
+        return None
+    return reflow_index, argument
+
+
+def _pointer_storage_width_8616(pointer_type: SimType, arch: Arch) -> int | None:
+    """Return the even storage width in bytes of one proven pointer type."""
+    try:
+        pointer_bits = pointer_type.size
+    except ValueError:
+        return None
+    byte_width = arch.byte_width
+    if (
+        not isinstance(pointer_bits, int)
+        or not isinstance(byte_width, int)
+        or byte_width <= 0
+        or pointer_bits <= 0
+        or pointer_bits % byte_width != 0
+    ):
+        return None
+    return max(2, ((pointer_bits // byte_width) + 1) & ~1)
+
+
 def _materialize_fact_8616(
     project: _Project8616,
     codegen: _Codegen8616,
@@ -347,53 +404,36 @@ def _materialize_fact_8616(
         return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
     prototype_args = tuple(cfunc.functy.args or ())
     pointer_type = _function_pointer_type_8616(fact, project.arch)
-    try:
-        pointer_bits = pointer_type.size
-    except ValueError:
+    pointer_storage_width = _pointer_storage_width_8616(pointer_type, project.arch)
+    if pointer_storage_width is None:
         return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
-    byte_width = project.arch.byte_width
-    if (
-        not isinstance(pointer_bits, int)
-        or not isinstance(byte_width, int)
-        or byte_width <= 0
-        or pointer_bits <= 0
-        or pointer_bits % byte_width != 0
-    ):
-        return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
-    pointer_storage_width = max(2, ((pointer_bits // byte_width) + 1) & ~1)
-    matched = _stack_argument_at_offset_8616(
+    resolved = _resolve_argument_slot_8616(
+        project,
         codegen,
         cfunc,
-        fact.stack_offset,
+        fact,
+        pointer_type,
         pointer_storage_width,
     )
-    if matched is not None:
-        index, argument = matched
-    else:
-        # The slot exists at the proven offset but with the wrong width or a
-        # near-based CVariable. Only a proven far pointer (a 4-byte call
-        # operand) may widen its slot and re-site the remaining argument
-        # CVars to the recomputed far-frame coordinates; every other surface
-        # mismatch (for example a misordered codegen argument list) is still
-        # refused loudly rather than silently repaired.
-        matched_slot = _stack_argument_index_at_offset_8616(codegen, cfunc, fact.stack_offset)
-        if (
-            matched_slot is None
-            or fact.pointer_width != 4
-            or pointer_storage_width <= matched_slot[1].storage_width
-            or matched_slot[0] >= len(prototype_args)
-        ):
-            return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
-        reflow_index = matched_slot[0]
-        argument = _reflow_argument_surface_8616(project, codegen, cfunc, reflow_index, pointer_type)
-        if argument is None:
-            return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
-        index = reflow_index
-        prototype_args = tuple(cfunc.functy.args or ())
+    if resolved is None or resolved[0] >= len(prototype_args):
+        return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
+    index, argument = resolved
+    prototype_args = tuple(cfunc.functy.args or ())
     if index >= len(prototype_args):
         return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
     if not isinstance(argument.variable, SimStackVariable):
         return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
+    return _persist_pointer_argument_type_8616(project, cfunc, index, argument, pointer_type)
+
+
+def _persist_pointer_argument_type_8616(
+    project: _Project8616,
+    cfunc: _CFunction8616,
+    index: int,
+    argument: CVariable,
+    pointer_type: SimType,
+) -> tuple[bool, FunctionPointerParameterFailure8616 | None]:
+    """Persist one proven pointer type across the argument, AST, and prototypes."""
     argument_offset = argument.variable.offset
     try:
         cfunc.variable_manager.set_variable_type(
