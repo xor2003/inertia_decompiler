@@ -1,8 +1,10 @@
-"""Classify stack parameters used as indirect near-call targets.
+"""Classify stack parameters used as indirect call targets.
 
 Layer: Types/Lowering.
 Responsibility: join typed binary callsite summaries into conservative
-function-pointer parameter facts without mutating structured C.
+function-pointer parameter facts without mutating structured C. A 4-byte
+indirect-call operand proves a far (segment:offset) function pointer; a
+2-byte operand proves a near one.
 Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
@@ -28,12 +30,17 @@ class FunctionPointerParameterFailure8616(Enum):
 
 @dataclass(frozen=True, order=True, slots=True)
 class FunctionPointerParameterFact8616:
-    """One consistent indirect near-call contract for an exact BP parameter."""
+    """One consistent indirect-call contract for an exact BP parameter.
+
+    ``pointer_width`` is the binary-proven call-operand width: 2 for a near
+    function pointer and 4 for a far (segment:offset) function pointer.
+    """
 
     stack_offset: int
     argument_widths: tuple[int, ...]
     return_width: int
     callsite_addresses: tuple[int, ...]
+    pointer_width: int = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +81,7 @@ def collect_function_pointer_parameter_evidence_8616(
     summaries: Sequence[CallsiteSummary8616],
 ) -> FunctionPointerParameterEvidence8616:
     """Join consistent BP-indirect call summaries into parameter type facts."""
-    grouped: dict[int, list[tuple[CallsiteSummary8616, tuple[int, ...], int]]] = defaultdict(list)
+    grouped: dict[int, list[tuple[CallsiteSummary8616, tuple[int, ...], int, int]]] = defaultdict(list)
     raw_count = 0
     normalized_count = 0
     failures: list[FunctionPointerParameterFailure8616] = []
@@ -90,33 +97,40 @@ def collect_function_pointer_parameter_evidence_8616(
         raw_count += 1
         widths = _supported_widths_8616(summary)
         return_width = _used_return_width_8616(summary)
+        pointer_width = target_source[2] if len(target_source) >= 3 else 2
         if (
             len(target_source) < 2
             or not isinstance(target_source[1], int)
             or target_source[1] < 4
+            or not isinstance(pointer_width, int)
+            or pointer_width not in {2, 4}
             or widths is None
             or return_width is None
         ):
             failures.append(FunctionPointerParameterFailure8616.INVALID_CALL_SIGNATURE)
             continue
         normalized_count += 1
-        grouped[target_source[1]].append((summary, widths, return_width))
+        grouped[target_source[1]].append((summary, widths, return_width, pointer_width))
 
     facts: list[FunctionPointerParameterFact8616] = []
     for stack_offset, candidates in sorted(grouped.items()):
-        signatures = {(widths, return_width) for _summary, widths, return_width in candidates}
+        signatures = {
+            (widths, return_width, pointer_width)
+            for _summary, widths, return_width, pointer_width in candidates
+        }
         if len(signatures) != 1:
             failures.extend(
                 FunctionPointerParameterFailure8616.CONFLICTING_CALL_SIGNATURES for _candidate in candidates
             )
             continue
-        argument_widths, return_width = next(iter(signatures))
+        argument_widths, return_width, pointer_width = next(iter(signatures))
         facts.append(
             FunctionPointerParameterFact8616(
                 stack_offset=stack_offset,
                 argument_widths=argument_widths,
                 return_width=return_width,
-                callsite_addresses=tuple(sorted(summary.callsite_addr for summary, _widths, _ret in candidates)),
+                callsite_addresses=tuple(sorted(summary.callsite_addr for summary, _widths, _ret, _ptr in candidates)),
+                pointer_width=pointer_width,
             )
         )
     return FunctionPointerParameterEvidence8616(

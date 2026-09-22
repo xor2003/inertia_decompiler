@@ -20,6 +20,7 @@ from typing import Any, Protocol, cast
 
 import claripy
 from angr import SimProcedure
+from angr.knowledge_plugins.functions.function import PrototypeSource
 from angr.sim_type import SimTypeFunction
 from capstone import CsInsn
 
@@ -147,6 +148,7 @@ class _PrototypeFunctionBoundary8616(Protocol):
     prototype: object | None
     calling_convention: object | None
     is_prototype_guessed: bool
+    prototype_source: PrototypeSource
 
 
 def _function_has_proven_prototype_8616(function: object) -> bool:
@@ -190,8 +192,22 @@ def _apply_far_return_calling_convention_8616(project: object, function: object)
         current, (SimCC8616MSCsmall, SimCC8616MSCmedium, SimCC8616MSClarge)
     ):
         return False
+    # Clinic re-runs CompleteCallingConventions for any function whose
+    # prototype source is below ``CCA_DECOMPILER`` and resets the convention
+    # to the near arch default, discarding the proven far base. Publishing the
+    # existing prototype at decompiler grade keeps the binary-proven far
+    # convention authoritative through clinic; body-owned evidence passes
+    # still refine the argument surface during decompilation. This must hold
+    # even when an earlier evidence pass already assigned the far convention.
+    source_bumped = False
+    if (
+        isinstance(typed_function.prototype, SimTypeFunction)
+        and typed_function.prototype_source < PrototypeSource.CCA_DECOMPILER
+    ):
+        typed_function.prototype_source = PrototypeSource.CCA_DECOMPILER
+        source_bumped = True
     if isinstance(current, SimCC8616MSClarge):
-        return False
+        return source_bumped
     typed_function.calling_convention = SimCC8616MSClarge(arch)
     return True
 

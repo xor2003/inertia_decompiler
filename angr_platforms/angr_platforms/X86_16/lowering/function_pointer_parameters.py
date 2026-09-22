@@ -1,8 +1,10 @@
-"""Recover stack parameters used as indirect near-call targets.
+"""Recover stack parameters used as indirect call targets.
 
 Layer: Types/Lowering.
 Responsibility: consume typed binary callsite summaries and persist exact
 positive-BP function-pointer parameter types across structured-C regeneration.
+A 4-byte call operand proves a far (segment:offset) function pointer whose
+slot widens to four bytes, re-siting every later argument.
 Consumes alias, widening, and typed facts.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
@@ -31,14 +33,16 @@ from ..callsite_summary import CallsiteSummary8616
 from ..pipeline.errors import PipelineHardError
 from .argument_frame_base import proven_first_argument_machine_bp_offset_8616
 from .callee_global_object_type_surface import cfunc_roots_8616
+from .far_pointer_type import far_pointer_type_8616
 from .function_pointer_parameter_evidence import (
     FunctionPointerParameterEvidence8616,
     FunctionPointerParameterFact8616,
     FunctionPointerParameterFailure8616,
     collect_function_pointer_parameter_evidence_8616,
 )
-from .near_pointer_type import SimTypeNearPointer16_8616, near_pointer_type_8616
+from .near_pointer_type import near_pointer_type_8616
 from .stack_prototype_layout import (
+    StackPrototypeArgument8616,
     stack_prototype_argument_layout_8616,
     stack_prototype_cvar_for_machine_bp_range_8616,
 )
@@ -122,13 +126,19 @@ def _integer_type_8616(width: int, arch: Arch) -> SimType:
 def _function_pointer_type_8616(
     fact: FunctionPointerParameterFact8616,
     arch: Arch,
-) -> SimTypeNearPointer16_8616:
-    """Build a near function-pointer type from one classified binary fact."""
+) -> SimType:
+    """Build the proven function-pointer type from one classified binary fact.
+
+    A 4-byte call operand proves a far (segment:offset) function pointer; a
+    2-byte operand proves a near one. The storage width follows the type.
+    """
     prototype = SimTypeFunction(
         [_integer_type_8616(width, arch) for width in fact.argument_widths],
         _integer_type_8616(fact.return_width, arch),
         variadic=False,
     ).with_arch(arch)
+    if fact.pointer_width == 4:
+        return far_pointer_type_8616(cast(SimType, prototype), arch)
     return near_pointer_type_8616(cast(SimType, prototype), arch)
 
 
@@ -219,6 +229,91 @@ def _stack_argument_at_offset_8616(
     return slots[0][0], argument
 
 
+def _stack_argument_index_at_offset_8616(
+    codegen: _Codegen8616,
+    cfunc: _CFunction8616,
+    offset: int,
+) -> tuple[int, StackPrototypeArgument8616] | None:
+    """Return the argument index and slot whose storage begins at one machine-BP offset.
+
+    Unlike the exact resolver this ignores the slot's current storage width,
+    so a proven wider pointer can re-type and re-flow the argument surface.
+    """
+    layout = stack_prototype_argument_layout_8616(
+        cfunc.functy,
+        codegen.project.arch,
+        first_argument_bp_offset=proven_first_argument_machine_bp_offset_8616(codegen),
+    )
+    slots = tuple(
+        (index, slot)
+        for index, slot in enumerate(layout)
+        if slot.offset == offset
+    )
+    return slots[0] if len(slots) == 1 else None
+
+
+def _reflow_argument_surface_8616(
+    project: _Project8616,
+    codegen: _Codegen8616,
+    cfunc: _CFunction8616,
+    index: int,
+    pointer_type: SimType,
+) -> CVariable | None:
+    """Widen one argument to its proven pointer type and re-site the tail.
+
+    Replacing a 2-byte near-pointer slot with the proven 4-byte far-pointer
+    type shifts every later argument slot; each argument CVariable is re-sited
+    to the recomputed machine-BP offset so the body's stack reads bind to the
+    proven coordinates.
+    """
+    if not isinstance(cfunc.functy, SimTypeFunction):
+        return None
+    new_functy = _replace_prototype_argument_8616(cfunc.functy, index, pointer_type, project.arch)
+    layout = stack_prototype_argument_layout_8616(
+        new_functy,
+        codegen.project.arch,
+        first_argument_bp_offset=proven_first_argument_machine_bp_offset_8616(codegen),
+    )
+    delta = proven_bp_entry_sp_delta_8616(codegen)
+    if not layout or not isinstance(delta, int):
+        return None
+    arg_names = tuple(cfunc.functy.arg_names or ())
+    existing = tuple(cfunc.arg_list or ())
+    desired: list[CVariable] = []
+    for slot_index, slot in enumerate(layout):
+        candidate: CVariable | None = None
+        if slot_index < len(existing):
+            current = existing[slot_index]
+            if (
+                isinstance(current, CVariable)
+                and isinstance(current.variable, SimStackVariable)
+                and current.variable.base == "bp"
+                and current.variable.offset == slot.offset + delta
+                and current.variable.size == slot.storage_width
+            ):
+                candidate = current
+        if candidate is None:
+            name = (
+                arg_names[slot_index]
+                if slot_index < len(arg_names) and isinstance(arg_names[slot_index], str) and arg_names[slot_index]
+                else f"arg_{slot.offset:x}"
+            )
+            variable = SimStackVariable(
+                slot.offset + delta,
+                slot.storage_width,
+                base="bp",
+                name=name,
+                region=cfunc.addr,
+            )
+            candidate = CVariable(variable, variable_type=slot.argument_type, codegen=codegen)
+        else:
+            candidate.variable_type = slot.argument_type
+        desired.append(candidate)
+    cfunc.functy = new_functy
+    cfunc.arg_list = desired
+    return desired[index] if index < len(desired) else None
+
+
 def _replace_prototype_argument_8616(
     prototype: SimTypeFunction,
     index: int,
@@ -272,9 +367,29 @@ def _materialize_fact_8616(
         fact.stack_offset,
         pointer_storage_width,
     )
-    if matched is None:
-        return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
-    index, argument = matched
+    if matched is not None:
+        index, argument = matched
+    else:
+        # The slot exists at the proven offset but with the wrong width or a
+        # near-based CVariable. Only a proven far pointer (a 4-byte call
+        # operand) may widen its slot and re-site the remaining argument
+        # CVars to the recomputed far-frame coordinates; every other surface
+        # mismatch (for example a misordered codegen argument list) is still
+        # refused loudly rather than silently repaired.
+        matched_slot = _stack_argument_index_at_offset_8616(codegen, cfunc, fact.stack_offset)
+        if (
+            matched_slot is None
+            or fact.pointer_width != 4
+            or pointer_storage_width <= matched_slot[1].storage_width
+            or matched_slot[0] >= len(prototype_args)
+        ):
+            return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
+        reflow_index = matched_slot[0]
+        argument = _reflow_argument_surface_8616(project, codegen, cfunc, reflow_index, pointer_type)
+        if argument is None:
+            return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
+        index = reflow_index
+        prototype_args = tuple(cfunc.functy.args or ())
     if index >= len(prototype_args):
         return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
     if not isinstance(argument.variable, SimStackVariable):
