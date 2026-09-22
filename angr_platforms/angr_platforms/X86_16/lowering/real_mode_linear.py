@@ -1271,6 +1271,9 @@ def stack_cvar_for_stable_ss_linear_access_8616(
             _ensure_positive_bp_stack_arg_8616(codegen, arg, target_type)
             publish_selected_stack_cvar_projection_8616(
                 codegen, arg, bp_offset=displacement, size=variable.size,
+                entry_sp_offset=entry_sp_offset_for_machine_bp_range_8616(
+                    codegen, displacement, variable.size,
+                ),
             )
             return arg
     if isinstance(variables_in_use, dict):
@@ -1300,6 +1303,9 @@ def stack_cvar_for_stable_ss_linear_access_8616(
                 _ensure_positive_bp_stack_arg_8616(codegen, cvar, target_type)
                 publish_selected_stack_cvar_projection_8616(
                     codegen, cvar, bp_offset=displacement, size=variable.size,
+                    entry_sp_offset=entry_sp_offset_for_machine_bp_range_8616(
+                        codegen, displacement, variable.size,
+                    ),
                 )
                 return cvar
     storage_size = requested_size or 1
@@ -7674,7 +7680,10 @@ def _resolve_direct_stack_update_cvar_8616(
         candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
         selected = candidates[0][2]
         _ensure_stack_cvar_min_width_8616(codegen, selected, width)
-        publish_selected_stack_cvar_projection_8616(codegen, selected, bp_offset=offset, size=width)
+        publish_selected_stack_cvar_projection_8616(
+            codegen, selected, bp_offset=offset, size=width,
+            entry_sp_offset=entry_sp_offset_for_machine_bp_range_8616(codegen, offset, width),
+        )
         return selected
 
     entry_sp_offset = entry_sp_offset_for_machine_bp_range_8616(
@@ -7713,7 +7722,10 @@ def _resolve_direct_stack_update_cvar_8616(
     unified = getattr(getattr(codegen, "cfunc", None), "unified_local_vars", None)
     if isinstance(unified, dict):
         unified[variable] = {(cvar, getattr(cvar, "variable_type", None))}
-    publish_selected_stack_cvar_projection_8616(codegen, cvar, bp_offset=offset, size=width)
+    publish_selected_stack_cvar_projection_8616(
+        codegen, cvar, bp_offset=offset, size=width,
+        entry_sp_offset=entry_sp_offset_for_machine_bp_range_8616(codegen, offset, width),
+    )
     return cvar
 
 

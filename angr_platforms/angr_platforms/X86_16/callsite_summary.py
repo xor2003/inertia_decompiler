@@ -1703,6 +1703,9 @@ def _call_target_source_8616(insn: object) -> _CallsiteTuple8616 | None:
         if isinstance(base, int) and isinstance(disp, int):
             base_name = _operand_reg_name(insn, type("_CallMemOperand", (), {"reg": base})())
             if base_name == "bp" and int(_dynamic_callsite_getattr_8616(mem, "index", 0) or 0) == 0:
+                width = _dynamic_callsite_getattr_8616(operand, "size", None)
+                if isinstance(width, int) and width > 0:
+                    return ("bp", int(disp), int(width))
                 return ("bp", int(disp))
     reg_name = _operand_reg_name(insn, operand)
     if isinstance(reg_name, str) and reg_name:

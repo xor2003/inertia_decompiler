@@ -19,6 +19,7 @@ from angr.sim_type import SimType, SimTypeFunction
 from angr.sim_variable import SimStackVariable
 from archinfo import Arch
 
+from .argument_frame_base import proven_first_argument_machine_bp_offset_8616
 from .stack_storage_evidence import proven_bp_entry_sp_delta_8616
 
 
@@ -55,14 +56,20 @@ class _PrototypeCodegen8616(Protocol):
 def stack_prototype_argument_layout_8616(
     prototype: object,
     arch: Arch,
+    *,
+    first_argument_bp_offset: int = 4,
 ) -> tuple[StackPrototypeArgument8616, ...]:
-    """Return a contiguous BP+4 layout, or no layout when a type lacks size evidence."""
+    """Return a contiguous argument layout, or no layout when a type lacks size evidence.
+
+    ``first_argument_bp_offset`` is the proven machine-BP argument base: 4 for a
+    near frame and 6 for a far frame whose retf reserves ``BP+4..+5`` for CS.
+    """
     if not isinstance(prototype, SimTypeFunction):
         return ()
     byte_width = arch.byte_width
     if not isinstance(byte_width, int) or byte_width <= 0:
         return ()
-    cursor = 4
+    cursor = first_argument_bp_offset
     layout: list[StackPrototypeArgument8616] = []
     for raw_type in prototype.args or ():
         if not isinstance(raw_type, SimType):
@@ -105,7 +112,11 @@ def stack_prototype_cvar_for_machine_bp_range_8616(
         )
     except AttributeError:
         return None
-    layout = stack_prototype_argument_layout_8616(prototype, arch)
+    layout = stack_prototype_argument_layout_8616(
+        prototype,
+        arch,
+        first_argument_bp_offset=proven_first_argument_machine_bp_offset_8616(codegen),
+    )
     arguments = tuple(cfunc.arg_list or ())
     delta = proven_bp_entry_sp_delta_8616(codegen)
     if len(layout) != len(arguments) or not isinstance(delta, int):

@@ -29,6 +29,7 @@ from archinfo import Arch
 from ..c_ast_utils import _iter_c_nodes_deep_8616
 from ..callsite_summary import CallsiteSummary8616
 from ..pipeline.errors import PipelineHardError
+from .argument_frame_base import proven_first_argument_machine_bp_offset_8616
 from .callee_global_object_type_surface import cfunc_roots_8616
 from .function_pointer_parameter_evidence import (
     FunctionPointerParameterEvidence8616,
@@ -186,7 +187,11 @@ def _stack_argument_at_offset_8616(
     storage_width: int,
 ) -> tuple[int, CVariable] | None:
     """Resolve one machine-BP slot through the authoritative frame layout."""
-    layout = stack_prototype_argument_layout_8616(cfunc.functy, codegen.project.arch)
+    layout = stack_prototype_argument_layout_8616(
+        cfunc.functy,
+        codegen.project.arch,
+        first_argument_bp_offset=proven_first_argument_machine_bp_offset_8616(codegen),
+    )
     slots = tuple(
         (index, slot)
         for index, slot in enumerate(layout)

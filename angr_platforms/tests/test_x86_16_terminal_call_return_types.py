@@ -61,7 +61,13 @@ class _Factory:
     def __init__(self, blocks: dict[int, _Block]) -> None:
         self._blocks = blocks
 
-    def block(self, address: int, *, size: int) -> _Block:
+    def block(
+        self,
+        address: int,
+        size: int | None = None,
+        num_inst: int | None = None,
+        opt_level: int = 0,
+    ) -> _Block:
         return self._blocks[address]
 
 

@@ -31,6 +31,7 @@ from ..calling_convention_compat import (
     collect_bp_word_stack_access_offsets_8616,
     collect_wide_stack_argument_width_evidence_8616,
 )
+from .argument_frame_base import proven_first_argument_machine_bp_offset_8616
 from .authoritative_function_prototypes import (
     authoritative_function_prototype_8616,
     publish_authoritative_function_prototype_8616,
@@ -158,12 +159,17 @@ def _existing_interface_matches_8616(
     prototype = cfunc.functy if isinstance(cfunc.functy, SimTypeFunction) else cfunc.prototype
     if not isinstance(prototype, SimTypeFunction):
         return False
+    first_argument_bp_offset = proven_first_argument_machine_bp_offset_8616(codegen)
     existing = tuple(cfunc.arg_list or ())
     if not existing:
         # A typed interface can precede its CVariable materialization. Require
         # exact ABI storage before preserving those types over body defaults.
         try:
-            layout = stack_prototype_argument_layout_8616(prototype, cast(Any, codegen).project.arch)
+            layout = stack_prototype_argument_layout_8616(
+                prototype,
+                cast(Any, codegen).project.arch,
+                first_argument_bp_offset=first_argument_bp_offset,
+            )
         except AttributeError:
             return False
         return bool(layout) and len(layout) == len(desired) and all(
@@ -176,7 +182,7 @@ def _existing_interface_matches_8616(
         )
     if len(existing) != len(desired) or len(tuple(prototype.args or ())) != len(desired):
         return False
-    cursor = 4
+    cursor = first_argument_bp_offset
     for current, wanted in zip(existing, desired, strict=False):
         if not isinstance(current, structured_c.CVariable):
             return False
@@ -285,6 +291,7 @@ def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> 
     except AttributeError:
         pass
 
+    first_argument_bp_offset = proven_first_argument_machine_bp_offset_8616(codegen)
     function = _function_for_codegen_8616(project, cfunc.addr)
     word_access_offsets = frozenset(
         collect_bp_word_stack_access_offsets_8616(project, function)
@@ -341,7 +348,7 @@ def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> 
         bp_offset = candidate_bp_offset(candidate)
         if not isinstance(variable, SimStackVariable) or not isinstance(
             bp_offset, int
-        ) or bp_offset < 4:
+        ) or bp_offset < first_argument_bp_offset:
             return
         bucket = candidates.setdefault(bp_offset, [])
         if all(existing is not candidate for existing in bucket):
@@ -369,7 +376,11 @@ def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> 
     try:
         project_arch = cast(Any, project).arch
         function_layout = (
-            stack_prototype_argument_layout_8616(function.prototype, project_arch)
+            stack_prototype_argument_layout_8616(
+                function.prototype,
+                project_arch,
+                first_argument_bp_offset=first_argument_bp_offset,
+            )
             if function is not None
             and not function.is_prototype_guessed
             and function.prototype_source >= PrototypeSource.SIGNATURES
@@ -386,7 +397,7 @@ def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> 
         else None
     )
     body_plan_entries: list[PositiveBpArgumentPlanEntry8616] = []
-    cursor = 4
+    cursor = first_argument_bp_offset
     for offset in sorted(candidates):
         if offset < cursor:
             continue
@@ -471,6 +482,7 @@ def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> 
             eligible_word_access_offsets,
             default_argument_type=SimTypeShort(False),
             wide_access_offsets=wide_argument_offsets,
+            first_argument_offset=first_argument_bp_offset,
         )
     )
     candidate_count = len(body_plan_entries)

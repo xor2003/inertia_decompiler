@@ -19,7 +19,7 @@ from typing import Protocol, cast
 from angr.sim_type import SimType, SimTypeBottom, SimTypeFunction, SimTypeLong, SimTypeShort
 
 from ..callsite_summary import CallsiteSummary8616, summarize_x86_16_callsite
-from ..simos_86_16 import SimCC8616MSCsmall
+from .argument_frame_base import msc_calling_convention_for_function_8616
 
 __all__ = [
     "CallsitePrototypeSeedDecision8616",
@@ -133,7 +133,7 @@ def materialize_physical_callsite_prototype_8616(
         variadic=False,
     ).with_arch(typed_project.arch)
     typed_callee.prototype = prototype
-    typed_callee.calling_convention = SimCC8616MSCsmall(typed_project.arch)
+    typed_callee.calling_convention = msc_calling_convention_for_function_8616(project, callee)
     typed_callee.is_prototype_guessed = False
     return CallsitePrototypeSeedResult8616(
         CallsitePrototypeSeedDecision8616.SEEDED,

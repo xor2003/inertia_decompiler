@@ -28,7 +28,7 @@ from ..semantics.terminal_call_paths import (
     prove_terminal_call_path_8616,
 )
 from ..semantics.terminal_return_storage import TerminalReturnStorage8616, terminal_return_storage_8616
-from ..simos_86_16 import SimCC8616MSCsmall
+from .argument_frame_base import msc_calling_convention_for_function_8616
 from .authoritative_function_prototypes import publish_authoritative_function_prototype_8616
 from .return_type_evidence import proven_function_result_observation_8616
 
@@ -338,7 +338,9 @@ def apply_terminal_call_return_type_evidence_8616(
     function_surface.prototype = rebuilt
     function_surface.prototype_source = PrototypeSource.CCA_DECOMPILER
     if function_surface.calling_convention is None:
-        function_surface.calling_convention = SimCC8616MSCsmall(project_surface.arch)
+        function_surface.calling_convention = msc_calling_convention_for_function_8616(
+            project, function_surface
+        )
     publish_authoritative_function_prototype_8616(
         project,
         function_surface.addr,

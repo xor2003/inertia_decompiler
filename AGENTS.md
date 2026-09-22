@@ -57,6 +57,7 @@ Semantic recovery → `X86_16/`. Cleanup-only → `postprocess/`. Do not add to 
 13. **Docstrings and types ratchet** — types are mandatory for non-test code: every new or touched non-test module must state `Layer:` and `Responsibility:`, and every new/touched function, method, dataclass, enum, and pipeline contract must keep explicit type annotations and useful docstrings on public owned definitions. Do not strip docs/types to silence tools; legacy missing docs/types are cleanup debt and must be fixed when touching nearby code.
 14. **Behavior must outlive its implementation** — important behavior must be recoverable from typed contracts, tests, and documentation, not exist only as an implicit peculiarity of the current code. When changing or replacing a module, preserve its required behavior in those durable sources before relying on a new implementation.
 15. **Keep all projections coherent** — after changing one concept, update every owned representation of it so IR, typed contracts, consumers, diagnostics, documentation, and tests describe the same behavior. One concept has one authoritative owner; other layers consume or derive from that owner rather than creating competing truths.
+16. **Loud exceptions** — never swallow exceptions broadly. `except Exception:` that silently substitutes a default (e.g. "proof failed → near") masks real defects and is forbidden. Catch only the specific exception types that name the boundary condition being handled; when a surface genuinely cannot produce evidence, return the typed non-result (`complete=False`, `UNKNOWN_REFUSE`, empty evidence) so the pipeline records "no proof" instead of guessing. An exception that survives to the user must carry its cause. If a test mock cannot satisfy a production call, fix the mock — do not add a catch-all in production to accommodate it.
 
 If a fix makes output prettier without improving underlying semantics, it is wrong.
 
@@ -79,6 +80,7 @@ Sidecars/COD/debug listings are optional evidence only. They may provide labels,
 - corpus-specific allowlists, address-specific helper substitution
 - avoidable `getattr`/`setattr` on owned Inertia objects instead of explicit dot access
 - removing docstrings or type annotations to pass checks instead of improving the owned contract
+- `except Exception:` catch-alls that silently substitute defaults, or widening production catches to accommodate incomplete test mocks
 
 ## Execution discipline
 

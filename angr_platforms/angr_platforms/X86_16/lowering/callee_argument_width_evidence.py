@@ -14,6 +14,7 @@ from enum import StrEnum
 
 from ..callsite_summary import CallsiteSummary8616, logical_argument_widths_from_callsite_8616
 from ..ir import AddressStatus, IRAddress, MemSpace, SegmentOrigin
+from .argument_frame_base import proven_first_argument_machine_bp_offset_at_8616
 from .callee_argument_count_evidence import (
     CalleeArgumentCountEvidence8616,
     collect_callee_argument_count_evidence_8616,
@@ -87,9 +88,12 @@ class CalleeArgumentWidthEvidence8616:
         return self.count_evidence
 
 
-def _widths_by_offset_8616(widths: tuple[int, ...]) -> tuple[tuple[int, int], ...]:
-    """Map source-order near-call argument widths onto BP+4 storage."""
-    offset = 4
+def _widths_by_offset_8616(
+    widths: tuple[int, ...],
+    first_argument_bp_offset: int = 4,
+) -> tuple[tuple[int, int], ...]:
+    """Map source-order argument widths onto the callee's BP argument storage."""
+    offset = first_argument_bp_offset
     mapped: list[tuple[int, int]] = []
     for width in widths:
         mapped.append((offset, width))
@@ -193,7 +197,10 @@ def collect_callee_argument_width_evidence_8616(
     if len(distinct_widths) == 1 and failure_count == 0:
         widths = next(iter(distinct_widths))
         verdict = CalleeArgumentWidthVerdict8616.CONSISTENT
-        mapped_widths = _widths_by_offset_8616(widths)
+        mapped_widths = _widths_by_offset_8616(
+            widths,
+            proven_first_argument_machine_bp_offset_at_8616(project, target_addr),
+        )
         argument_storage = _argument_storage_8616(mapped_widths)
         materialized_count = len(classified_widths)
     elif len(distinct_widths) > 1:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import archinfo
+from angr.errors import SimEngineError
 from angr.sim_type import SimTypeBottom, SimTypeFunction, SimTypeLong, SimTypeShort
 from angr_platforms.X86_16.analysis_helpers import (
     _analysis_function_addr_8616,
@@ -49,6 +50,18 @@ def test_seed_calling_conventions_preserves_binary_proven_stub_prototype() -> No
     assert function.prototype is prototype
     assert function.calling_convention is calling_convention
     assert function.is_prototype_guessed is False
+
+
+class _UndecodableFactory:
+    """Minimal project factory surface: every block decode request is refused.
+
+    ``seed_calling_conventions`` probes the terminal far-return frame, which
+    needs a decodable block surface. This fixture has no binary bytes, so the
+    factory declines decode the way a real project does for unmapped bytes.
+    """
+
+    def block(self, *_args: object, **_kwargs: object) -> object:
+        raise SimEngineError("no decodable block in minimal project")
 
 
 def test_seed_calling_conventions_caches_progress_per_cfg_function(monkeypatch) -> None:
@@ -119,7 +132,7 @@ def test_seed_calling_conventions_caches_progress_per_cfg_function(monkeypatch) 
 
     cfg = SimpleNamespace(
         functions={0x1000: _make_function(0x1000)},
-        project=SimpleNamespace(arch=SimpleNamespace(name="86_16")),
+        project=SimpleNamespace(arch=SimpleNamespace(name="86_16"), factory=_UndecodableFactory()),
     )
     seed_calling_conventions(cfg)
     seed_calling_conventions(cfg)

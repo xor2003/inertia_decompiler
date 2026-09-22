@@ -327,10 +327,28 @@ def _materialize_fact_8616(
             _replace_c_children_8616(statement, replace_restore)
     if replacement_count < 1:
         if os.environ.get("INERTIA_DEBUG_GP_STACK_RESTORE"):
+            byte_offsets = tuple(
+                (
+                    sorted(instruction_addrs_from_node_8616(statement)),
+                    tuple(
+                        (node.variable.base, node.variable.offset, node.variable.size)
+                        for node in _iter_c_nodes_deep_8616(statement)
+                        if isinstance(node, structured_c.CVariable)
+                        and isinstance(node.variable, SimStackVariable)
+                    ),
+                )
+                for container in containers
+                for statement in tuple(container.statements)
+                if isinstance(statement, (structured_c.CAssignment, structured_c.CReturn))
+                and fact.restore_instruction_addr in instruction_addrs_from_node_8616(statement)
+            )
             logging.getLogger(__name__).warning(
-                "[gp-stack-restore-refusal] restore=%#x replacement_count=%d",
+                "[gp-stack-restore-refusal] restore=%#x replacement_count=%d "
+                "expected_offsets=%r observed_byte_offsets=%r",
                 fact.restore_instruction_addr,
                 replacement_count,
+                fact.stack_offsets,
+                byte_offsets,
             )
         return False
     target, index = insertion

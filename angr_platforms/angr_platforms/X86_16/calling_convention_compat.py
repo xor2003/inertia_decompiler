@@ -753,8 +753,26 @@ def _set_function_prototype_8616(
     function_dynamic.prototype_source = PrototypeSource.CCA_DECOMPILER
     if cc is not None:
         with contextlib.suppress(Exception):
-            function_dynamic.calling_convention = cc
+            function_dynamic.calling_convention = _far_aware_cc_8616(function, cc)
     return cc, prototype
+
+
+def _far_aware_cc_8616(function: object, cc: object) -> object:
+    """Substitute the proven far-frame convention over a seeded near MSC CC.
+
+    Evidence passes build a near ``SimCC8616MSCsmall`` as the default caller-
+    cleanup ABI. When the callee's own terminal ``retf`` proves a four-byte
+    return frame, the far convention must win so arguments resolve at ``BP+6``.
+    """
+    from .lowering.argument_frame_base import msc_calling_convention_for_function_8616
+    from .simos_86_16 import SimCC8616MSCmedium, SimCC8616MSCsmall
+
+    if not isinstance(cc, (SimCC8616MSCsmall, SimCC8616MSCmedium)):
+        return cc
+    project = getattr(function, "project", None)
+    if project is None:
+        return cc
+    return msc_calling_convention_for_function_8616(project, function)
 
 
 def apply_x86_16_wide_stack_prototype_evidence(project: object, function: object) -> bool:

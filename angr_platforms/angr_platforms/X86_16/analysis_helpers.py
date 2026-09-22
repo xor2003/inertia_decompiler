@@ -158,6 +158,44 @@ def _function_has_proven_prototype_8616(function: object) -> bool:
         return False
 
 
+def _apply_far_return_calling_convention_8616(project: object, function: object) -> bool:
+    """Assign the far-frame calling convention when the terminal return proves it.
+
+    A function whose terminal return is ``retf``/``lret`` owns a four-byte
+    return frame, so its stack arguments begin at ``BP+6`` rather than ``BP+4``.
+    Seeding the matching ``SimCC8616MSClarge`` before variable recovery makes
+    angr's ``arg_locs`` place arguments at the proven far base natively. The
+    override only fires on proven far frames and never replaces an explicit
+    non-MSC convention.
+    """
+    from .lowering.argument_frame_base import proven_far_return_frame_at_8616
+    from .simos_86_16 import (
+        SimCC8616MSClarge,
+        SimCC8616MSCmedium,
+        SimCC8616MSCsmall,
+    )
+
+    typed_function = cast(_PrototypeFunctionBoundary8616, function)
+    function_addr = _analysis_function_addr_8616(function)
+    if not isinstance(function_addr, int):
+        return False
+    try:
+        arch = cast(Any, project).arch
+    except AttributeError:
+        return False
+    if not proven_far_return_frame_at_8616(project, function_addr):
+        return False
+    current = typed_function.calling_convention
+    if current is not None and not isinstance(
+        current, (SimCC8616MSCsmall, SimCC8616MSCmedium, SimCC8616MSClarge)
+    ):
+        return False
+    if isinstance(current, SimCC8616MSClarge):
+        return False
+    typed_function.calling_convention = SimCC8616MSClarge(arch)
+    return True
+
+
 def seed_wide_stack_prototype_from_binary_address_8616(
     project: object,
     source_function: object,
@@ -2686,6 +2724,10 @@ def seed_calling_conventions(cfg: object) -> None:
                 terminal_register_return_classified += terminal_register_result.stats.classified_fact_count
                 terminal_register_return_materialized += terminal_register_result.stats.materialized_count
                 terminal_register_return_failures += terminal_register_result.stats.failure_count
+            # Apply the far-frame convention last so evidence passes that seed a
+            # near CC do not clobber the proven ``BP+6`` argument base.
+            if project is not None:
+                _apply_far_return_calling_convention_8616(project, function)
             success_count += 1
             if _is_stack_probe_helper_name(_dynamic_analysis_getattr_8616(function, "name", None)):
                 stack_probe_count += 1
@@ -2718,6 +2760,7 @@ def seed_calling_conventions(cfg: object) -> None:
             terminal_call_return_failures += result.evidence.failure_count
             if result.changed:
                 terminal_call_return_count += 1
+            _apply_far_return_calling_convention_8616(project, function)
             seeded_ids.add(function_id)
             seeded_revisions[function_id] = _function_seed_revision_8616(function, result.evidence.inspected_target_addrs)
         try:

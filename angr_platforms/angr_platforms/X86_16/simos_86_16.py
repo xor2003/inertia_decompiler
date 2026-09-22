@@ -393,6 +393,25 @@ class SimCC8616MSCmedium(SimCC):  # type: ignore[misc, unused-ignore] # dynamic 
     CALLEE_CLEANUP: ClassVar[bool] = False
 
 
+class SimCC8616MSClarge(SimCC):  # type: ignore[misc, unused-ignore] # dynamic angr calling-convention base
+    """Microsoft C far-function 16-bit caller-cleanup convention.
+
+    A ``retf`` frame pushes a four-byte return address (IP then CS), so the
+    first stack argument sits two bytes deeper than the near frame: ``SP+4`` at
+    entry, ``BP+6`` after the prologue, instead of ``SP+2``/``BP+4``.
+    """
+
+    ARG_REGS: ClassVar[list[str]] = []
+    FP_ARG_REGS: ClassVar[list[str]] = []
+    STACKARG_SP_DIFF: ClassVar[int] = 4
+    RETURN_ADDR: ClassVar[SimStackArg] = SimStackArg(0, 4)
+    RETURN_VAL: ClassVar[SimRegArg] = SimRegArg("ax", 2)
+    OVERFLOW_RETURN_VAL: ClassVar[SimRegArg] = SimRegArg("dx", 2)
+    ARCH: ClassVar[type[Arch86_16]] = Arch86_16
+    STACK_ALIGNMENT: ClassVar[int] = 2
+    CALLEE_CLEANUP: ClassVar[bool] = False
+
+
 # Legacy compatibility alias for callers that imported the pre-memory-model
 # default Microsoft C calling convention by the unsuffixed name.
 SimCC8616MSC: type[SimCC8616MSCsmall] = SimCC8616MSCsmall

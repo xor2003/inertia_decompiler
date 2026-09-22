@@ -41,6 +41,7 @@ from .helper_abi import (
     known_helper_is_variadic_8616,
     known_helper_logical_argument_widths_8616,
 )
+from .lowering.argument_frame_base import proven_first_argument_machine_bp_offset_8616
 from .lowering.call_argument_shape import (
     accounted_target_prototype_shape_evidence_8616,
     accounted_variadic_target_shape_evidence_8616,
@@ -544,6 +545,7 @@ def _final_function_parameters_8616(
     normalized_addr = function_addr if isinstance(function_addr, int) else None
     if not isinstance(function_type, SimTypeFunction):
         return normalized_addr, None
+    first_argument_bp_offset = proven_first_argument_machine_bp_offset_8616(codegen)
     arg_types = tuple(function_type.args or ())
     try:
         raw_arg_list = surface.arg_list
@@ -559,7 +561,11 @@ def _final_function_parameters_8616(
             arch = cast(_ProjectArchSurface8616, cast(_CodegenProjectSurface8616, codegen).project).arch
         except AttributeError:
             return normalized_addr, None
-        layout = stack_prototype_argument_layout_8616(function_type, arch)
+        layout = stack_prototype_argument_layout_8616(
+            function_type,
+            arch,
+            first_argument_bp_offset=first_argument_bp_offset,
+        )
         if len(layout) != len(arg_types):
             return normalized_addr, None
         return normalized_addr, {
@@ -599,7 +605,7 @@ def _final_function_parameters_8616(
         if (
             not isinstance(variable, SimStackVariable)
             or not isinstance(bp_offset, int)
-            or bp_offset < 4
+            or bp_offset < first_argument_bp_offset
             or not isinstance(variable.size, int)
             or variable.size <= 0
             or not isinstance(arg_type, SimType)
