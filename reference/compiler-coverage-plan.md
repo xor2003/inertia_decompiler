@@ -869,3 +869,33 @@ Retained artifacts: `.cache/compiler-coverage/large-far-pointer-001/` and
 `.cache/compiler-coverage/large-far-function-001/`. These are the next two
 semantic owners to repair; do not weaken the materialization gates or count
 the candidate cases as feature coverage.
+
+### Far-Frame Argument Base Proven (uncommitted-obligation progress)
+
+The far-frame root cause is now owned by typed contracts rather than
+hardcoded near constants. A far function (`retf`) restores caller CS at
+`BP+4..+5`, so its first stack argument begins at machine `BP+6`, not
+`BP+4`. `lowering/argument_frame_base.py` derives the proven base from the
+terminal far-return evidence and selects `SimCC8616MSClarge`
+(`STACKARG_SP_DIFF=4`) for proven far functions; seeding publishes the
+prototype at `PrototypeSource.CCA_DECOMPILER` so clinic's
+CompleteCallingConventions cannot reset the far convention to the near
+arch default. The proven base is threaded through stack prototype layout,
+positive-BP argument materialization, callee width evidence, and validation
+parameter maps, and angr-native BP variables record their entry-SP
+projections correctly (`real_mode_linear` publish sites).
+
+Verified against the retained artifacts: far `inc_one` now decompiles with
+its argument at `BP+6` and `validation=passed`; near-model `apply_twice`
+and `inc_one` are unchanged (`validation=passed`). `apply_twice` far no
+longer hard-fails on `parameter_slot_missing`: the callsite evidence
+retains the indirect-call operand width, `FunctionPointerParameterFact8616`
+carries `pointer_width` (4 for `call DWORD PTR [bp+6]`), the new
+`SimTypeFarPointer16_8616` fixes the pointer at 32 bits, and materialization
+widens the proven slot and re-sites later arguments (`value` at `BP+10`).
+The far `apply_twice` body still binds reads to stale near-based merged
+variables and its `value` width is still wrong, so it does not validate
+and the obligation stays unadmitted. `fill_bytes`/`swap_ptrs`/`offset_copy`
+far-frame argument reads remain pending. Per AGENTS.md hard rule 16 (loud
+exceptions), the two silent far-proof catch-alls were removed and the
+incomplete test mocks were completed instead.
