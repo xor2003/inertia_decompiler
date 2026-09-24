@@ -195,6 +195,52 @@ def x86_16_block_successors_from_capstone_8616(
     return successors, unresolved
 
 
+def _visit_reachable_block_8616(
+    project: object,
+    block_addr: int,
+    region_start: int,
+    region_end: int,
+    reachable_instructions: set[int],
+    reachable_blocks: dict[int, object],
+    unresolved: set[int],
+    successor_edges: set[tuple[int, int]],
+) -> tuple[int, ...]:
+    """Decode one block and fold its proven successors into the traversal."""
+    try:
+        decoded = collect_decoded_block_evidence_8616(
+            project,
+            block_addr,
+            opt_level=0,
+        )
+    except Exception:  # angr exposes several backend-specific decode failures.
+        unresolved.add(block_addr)
+        return ()
+    block = decoded.block
+    instructions = decoded.instructions
+    if block is None or not instructions:
+        unresolved.add(block_addr)
+        return ()
+    block_boundary = cast(_BlockBoundary8616, block)
+    if block_boundary.size <= 0:
+        unresolved.add(block_addr)
+        return ()
+    reachable_blocks[block_addr] = block
+    reachable_instructions.update(
+        instruction.address
+        for instruction in instructions
+        if region_start <= instruction.address < region_end
+    )
+    successors, successor_unresolved = x86_16_block_successors_from_capstone_8616(
+        block_boundary,
+        region_start,
+        region_end,
+    )
+    if successor_unresolved:
+        unresolved.add(block_addr)
+    successor_edges.update((block_addr, successor) for successor in successors)
+    return successors
+
+
 def collect_instruction_reachability_8616(
     project: object,
     *,
@@ -222,38 +268,16 @@ def collect_instruction_reachability_8616(
         if block_addr in visited or not (region_start <= block_addr < region_end):
             continue
         visited.add(block_addr)
-        try:
-            decoded = collect_decoded_block_evidence_8616(
-                project,
-                block_addr,
-                opt_level=0,
-            )
-        except Exception:  # angr exposes several backend-specific decode failures.
-            unresolved.add(block_addr)
-            continue
-        block = decoded.block
-        if block is None:
-            unresolved.add(block_addr)
-            continue
-        block_boundary = cast(_BlockBoundary8616, block)
-        instructions = decoded.instructions
-        if not instructions or block_boundary.size <= 0:
-            unresolved.add(block_addr)
-            continue
-        reachable_blocks[block_addr] = block
-        reachable_instructions.update(
-            instruction.address
-            for instruction in instructions
-            if region_start <= instruction.address < region_end
-        )
-        successors, successor_unresolved = x86_16_block_successors_from_capstone_8616(
-            block_boundary,
+        successors = _visit_reachable_block_8616(
+            project,
+            block_addr,
             region_start,
             region_end,
+            reachable_instructions,
+            reachable_blocks,
+            unresolved,
+            successor_edges,
         )
-        if successor_unresolved:
-            unresolved.add(block_addr)
-        successor_edges.update((block_addr, successor) for successor in successors)
         for successor in sorted(successors):
             if successor not in visited:
                 queue.append(successor)

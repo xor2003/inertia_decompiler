@@ -37,7 +37,9 @@ __all__ = [
     "CallReturnFrameEffectFact8616",
     "CallReturnFrameEffectKey8616",
     "CallReturnFrameEffectRole8616",
+    "MachineCallFrame8616",
     "collect_call_return_frame_effects_8616",
+    "decode_machine_call_frame_8616",
 ]
 
 type DynamicValue = Any
@@ -53,6 +55,21 @@ class CallReturnFrameEffectRole8616(StrEnum):
 
     STACK_POINTER_UPDATE = "stack_pointer_update"
     STACK_STORE = "stack_store"
+
+
+@dataclass(frozen=True, slots=True)
+class MachineCallFrame8616:
+    """Encoded CALL frame, independent of target ABI or argument cleanup."""
+
+    callsite_addr: int
+    return_addr: int
+    operand_bits: int
+    far: bool
+
+    @property
+    def frame_bytes(self) -> int:
+        """Return the complete IP/EIP and optional CS slot width."""
+        return (self.operand_bits // 8) * (2 if self.far else 1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,8 +117,8 @@ def _collection_cache_8616(
     return cache
 
 
-def _decoded_instruction_id_8616(project: object, address: int) -> int | None:
-    """Decode one instruction id at the dynamic angr/Capstone boundary."""
+def decode_machine_call_frame_8616(project: object, address: int) -> MachineCallFrame8616 | None:
+    """Decode one exact CALL's frame at the dynamic angr/Capstone boundary."""
     project_dynamic = cast(DynamicValue, project)
     try:
         wrappers = tuple(
@@ -114,10 +131,23 @@ def _decoded_instruction_id_8616(project: object, address: int) -> int | None:
         )
         if len(wrappers) != 1:
             return None
-        instruction_id = wrappers[0].insn.id
+        instruction = wrappers[0].insn
+        if instruction.id not in {X86_INS_CALL, X86_INS_LCALL}:
+            return None
+        if instruction.address != address or instruction.size <= 0:
+            return None
+        # Capstone labels operand-size-overridden FF /3 as CALL, not LCALL.
+        # The decoded opcode and ModRM extension still identify a far transfer.
+        far = instruction.id == X86_INS_LCALL or (
+            instruction.opcode[0] == 0xFF and (instruction.modrm & 0x38) == 0x18
+        )
+        return MachineCallFrame8616(
+            address, address + instruction.size,
+            32 if 0x66 in instruction.prefix else 16,
+            far,
+        )
     except (AttributeError, KeyError, TypeError, ValueError):
         return None
-    return instruction_id if isinstance(instruction_id, int) else None
 
 
 def _unoptimized_vex_block_8616(project: object, block: object) -> DynamicValue | None:
@@ -210,6 +240,37 @@ def _effect_roles_for_call_8616(
     return tuple(roles)
 
 
+def _relift_function_blocks_8616(project: object, blocks: tuple[object, ...]) -> list[tuple[int, DynamicValue]]:
+    """Retain only address-bound unoptimized blocks from this function census."""
+    result: list[tuple[int, DynamicValue]] = []
+    for block in blocks:
+        block_addr = cast(DynamicValue, block).addr
+        vex = _unoptimized_vex_block_8616(project, block)
+        if isinstance(block_addr, int) and vex is not None:
+            result.append((block_addr, vex))
+    return result
+
+
+def _unique_call_effects_8616(
+    project: object, callsite_addr: int, return_addr: int,
+    vex_blocks: list[tuple[int, DynamicValue]], sp_offset: int,
+) -> tuple[int, DynamicValue, tuple[tuple[int, CallReturnFrameEffectRole8616], ...]] | None:
+    """Match one decoded CALL to exactly one complete VEX effect sequence."""
+    if not isinstance(callsite_addr, int) or not isinstance(return_addr, int):
+        return None
+    frame = decode_machine_call_frame_8616(project, callsite_addr)
+    if frame is None or frame.return_addr != return_addr:
+        return None
+    matches: list[tuple[int, DynamicValue, tuple[tuple[int, CallReturnFrameEffectRole8616], ...]]] = []
+    for block_addr, vex in vex_blocks:
+        roles = _effect_roles_for_call_8616(
+            vex, callsite_addr, return_addr, sp_offset=sp_offset, far_call=frame.far,
+        )
+        if roles is not None:
+            matches.append((block_addr, vex, roles))
+    return matches[0] if len(matches) == 1 else None
+
+
 def collect_call_return_frame_effects_8616(
     project: object,
     function: object,
@@ -260,39 +321,17 @@ def collect_call_return_frame_effects_8616(
             cache[cache_key] = result
         return result
 
-    vex_blocks: list[tuple[int, DynamicValue]] = []
-    for block in blocks:
-        block_addr = cast(DynamicValue, block).addr
-        vex = _unoptimized_vex_block_8616(project, block)
-        if isinstance(block_addr, int) and vex is not None:
-            vex_blocks.append((block_addr, vex))
+    vex_blocks = _relift_function_blocks_8616(project, blocks)
 
     effects: list[CallReturnFrameEffectFact8616] = []
     projection_collections: list[CallReturnFrameProjectionCollection8616] = []
     normalized_count = 0
     for callsite_addr, return_addr in sorted(return_addr_by_callsite.items()):
-        if not isinstance(callsite_addr, int) or not isinstance(return_addr, int):
-            continue
-        instruction_id = _decoded_instruction_id_8616(project, callsite_addr)
-        if instruction_id not in {X86_INS_CALL, X86_INS_LCALL}:
-            continue
-        matches: list[
-            tuple[int, DynamicValue, tuple[tuple[int, CallReturnFrameEffectRole8616], ...]]
-        ] = []
-        for block_addr, vex in vex_blocks:
-            roles = _effect_roles_for_call_8616(
-                vex,
-                callsite_addr,
-                return_addr,
-                sp_offset=sp_offset,
-                far_call=instruction_id == X86_INS_LCALL,
-            )
-            if roles is not None:
-                matches.append((block_addr, vex, roles))
-        if len(matches) != 1:
+        matched = _unique_call_effects_8616(project, callsite_addr, return_addr, vex_blocks, sp_offset)
+        if matched is None:
             continue
         normalized_count += 1
-        block_addr, vex, roles = matches[0]
+        block_addr, vex, roles = matched
         effects.extend(
             CallReturnFrameEffectFact8616(
                 CallReturnFrameEffectKey8616(

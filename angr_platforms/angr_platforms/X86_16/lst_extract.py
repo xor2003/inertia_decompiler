@@ -175,38 +175,56 @@ def _consume_summary_row_8616(
     return False
 
 
+def _segment_directive_target_8616(
+    stripped: str, current_segment: str | None
+) -> tuple[str | None, bool] | None:
+    """Resolve one ``SEGMENT`` directive to its space or keep the current one."""
+    segment_match = _SEGMENT_RE.match(stripped)
+    if segment_match is None:
+        return None
+    segment_name = segment_match.group(1).lower()
+    if "code" in segment_name or segment_name in {"text", "_text"}:
+        return "CODE", True
+    if "data" in segment_name or segment_name in {"_data", "dseg"}:
+        return "DATA", True
+    return current_segment, True
+
+
+def _ends_directive_target_8616(
+    stripped: str, current_segment: str | None
+) -> tuple[str | None, bool] | None:
+    """Resolve one ``ENDS`` directive closing the matching space."""
+    ends_match = _ENDS_RE.match(stripped)
+    if ends_match is None:
+        return None
+    segment_name = ends_match.group(1).lower()
+    if current_segment == "CODE" and ("code" in segment_name or segment_name in {"text", "_text"}):
+        return None, True
+    if current_segment == "DATA" and ("data" in segment_name or segment_name in {"_data", "dseg"}):
+        return None, True
+    return current_segment, True
+
+
 def _maybe_update_current_segment_8616(
     stripped: str, upper: str, current_segment: str | None
 ) -> tuple[str | None, bool]:
-    def _impl() -> tuple[str | None, bool]:
-        segment_match = _SEGMENT_RE.match(stripped)
-        if segment_match is not None:
-            segment_name = segment_match.group(1).lower()
-            if "code" in segment_name or segment_name in {"text", "_text"}:
-                return "CODE", True
-            if "data" in segment_name or segment_name in {"_data", "dseg"}:
-                return "DATA", True
-            return current_segment, True
-        ends_match = _ENDS_RE.match(stripped)
-        if ends_match is not None:
-            segment_name = ends_match.group(1).lower()
-            if current_segment == "CODE" and ("code" in segment_name or segment_name in {"text", "_text"}):
-                return None, True
-            if current_segment == "DATA" and ("data" in segment_name or segment_name in {"_data", "dseg"}):
-                return None, True
-            return current_segment, True
-        dot_segment_match = _DOT_SEGMENT_RE.match(stripped)
-        if dot_segment_match is not None:
-            return dot_segment_match.group(1).upper(), True
-        if "SEGMENT" in upper and "USE16" in upper:
-            if "CODE" in upper:
-                return "CODE", True
-            if "DATA" in upper:
-                return "DATA", True
-            return current_segment, True
-        return current_segment, False
-
-    return _impl()
+    """Track the listing's current segment space from its directives."""
+    target = _segment_directive_target_8616(stripped, current_segment)
+    if target is not None:
+        return target
+    target = _ends_directive_target_8616(stripped, current_segment)
+    if target is not None:
+        return target
+    dot_segment_match = _DOT_SEGMENT_RE.match(stripped)
+    if dot_segment_match is not None:
+        return dot_segment_match.group(1).upper(), True
+    if "SEGMENT" in upper and "USE16" in upper:
+        if "CODE" in upper:
+            return "CODE", True
+        if "DATA" in upper:
+            return "DATA", True
+        return current_segment, True
+    return current_segment, False
 
 
 def _consume_code_segment_line_8616(

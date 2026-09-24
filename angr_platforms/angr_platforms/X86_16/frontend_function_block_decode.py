@@ -218,17 +218,12 @@ def _content_identity_8616(
     return digest.digest()
 
 
-def collect_function_block_decode_artifact_8616(
-    project: object,
-    function: object,
-) -> FunctionBlockDecodeArtifact8616:
-    """Decode exact CFG block bytes directly, with mutation-aware reuse."""
-    extents_or_refusal = _function_block_extents_8616(function)
-    if isinstance(extents_or_refusal, FunctionBlockDecodeArtifact8616):
-        return extents_or_refusal
-    entry, extents = extents_or_refusal
-    assert entry is not None
-    boundary = cast(_ProjectBoundary8616, project)
+def _read_function_block_bytes_8616(
+    boundary: _ProjectBoundary8616,
+    entry: int,
+    extents: tuple[tuple[int, int], ...],
+) -> list[tuple[int, int, bytes]] | FunctionBlockDecodeArtifact8616:
+    """Load exact bytes for every graph extent or return a typed refusal."""
     block_bytes: list[tuple[int, int, bytes]] = []
     for address, size in extents:
         try:
@@ -248,6 +243,24 @@ def collect_function_block_decode_artifact_8616(
                 detail=f"expected={size} actual={len(code)}",
             )
         block_bytes.append((address, size, code))
+    return block_bytes
+
+
+def collect_function_block_decode_artifact_8616(
+    project: object,
+    function: object,
+) -> FunctionBlockDecodeArtifact8616:
+    """Decode exact CFG block bytes directly, with mutation-aware reuse."""
+    extents_or_refusal = _function_block_extents_8616(function)
+    if isinstance(extents_or_refusal, FunctionBlockDecodeArtifact8616):
+        return extents_or_refusal
+    entry, extents = extents_or_refusal
+    assert entry is not None
+    boundary = cast(_ProjectBoundary8616, project)
+    block_bytes_or_refusal = _read_function_block_bytes_8616(boundary, entry, extents)
+    if isinstance(block_bytes_or_refusal, FunctionBlockDecodeArtifact8616):
+        return block_bytes_or_refusal
+    block_bytes = block_bytes_or_refusal
     content_identity = _content_identity_8616(entry, block_bytes)
     try:
         cache = boundary._inertia_function_block_decode_artifacts_8616

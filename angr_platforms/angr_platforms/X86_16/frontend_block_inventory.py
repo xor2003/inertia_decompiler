@@ -201,6 +201,19 @@ def decoded_block_instructions_8616(
     ).instructions
 
 
+def _fold_instructions_by_address_8616(
+    by_address: dict[int, Any], instructions: tuple[Any, ...]
+) -> None:
+    """Fold decoded instructions into one address-ordered inventory."""
+    for instruction in instructions:
+        try:
+            address = instruction.address
+        except AttributeError:
+            continue
+        if isinstance(address, int):
+            by_address.setdefault(address, instruction)
+
+
 def decoded_function_instructions_8616(function: object) -> tuple[Any, ...]:
     """Return one address-ordered instruction inventory for a recovered function."""
     boundary = cast(_FunctionBoundary8616, function)
@@ -216,13 +229,7 @@ def decoded_function_instructions_8616(function: object) -> tuple[Any, ...]:
                 instructions = tuple(block.capstone.insns)
             except (AttributeError, TypeError):
                 continue
-            for instruction in instructions:
-                try:
-                    address = instruction.address
-                except AttributeError:
-                    continue
-                if isinstance(address, int):
-                    by_address.setdefault(address, instruction)
+            _fold_instructions_by_address_8616(by_address, instructions)
         return tuple(by_address[address] for address in sorted(by_address))
 
     try:
@@ -237,13 +244,7 @@ def decoded_function_instructions_8616(function: object) -> tuple[Any, ...]:
             instructions = decoded_block_instructions_8616(project, block_addr, opt_level=0)
         except Exception:
             continue
-        for instruction in instructions:
-            try:
-                address = instruction.address
-            except AttributeError:
-                continue
-            if isinstance(address, int):
-                by_address.setdefault(address, instruction)
+        _fold_instructions_by_address_8616(by_address, instructions)
     return tuple(by_address[address] for address in sorted(by_address))
 
 

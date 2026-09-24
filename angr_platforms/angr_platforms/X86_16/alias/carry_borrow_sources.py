@@ -16,7 +16,9 @@ from ..ir.logical_memory_contracts import (
     logical_memory_execution_address_matches_8616,
 )
 from ..semantics.carry_borrow_contracts import (
+    CarryBorrowDefinitionSite8616,
     CarryBorrowIROp8616,
+    CarryBorrowMemoryWordUse8616,
     CarryBorrowOperandUse8616,
 )
 from .alias_model_impl import AliasStorageFacts, alias_facts_for_ir_address_8616
@@ -78,16 +80,14 @@ def _register_source_alias_8616(
     )
 
 
-def _memory_word_alias_8616(
+def _execution_loads_shape_failure_8616(
     use: CarryBorrowOperandUse8616,
-) -> CarryBorrowOperandAlias8616 | CarryBorrowAliasFailure8616:
-    definition = use.definition
-    memory_word = use.memory_word
-    if definition is None or memory_word is None or use.value.source_tmp is None:
-        return CarryBorrowAliasFailure8616.SOURCE_DEFINITION_MISMATCH
+    definition: CarryBorrowDefinitionSite8616,
+    memory_word: CarryBorrowMemoryWordUse8616,
+) -> CarryBorrowAliasFailure8616 | None:
+    """Return a typed refusal when the execution load shape does not match the use."""
     destination = definition.instruction.dst
     execution_loads = memory_word.execution_loads
-    logical_address = memory_word.logical_address
     if len(execution_loads) == 1:
         expected_op = CarryBorrowIROp8616.LOAD
     elif len(execution_loads) == 2:
@@ -115,9 +115,17 @@ def _memory_word_alias_8616(
             or load.instruction.args != (address,)
         ):
             return CarryBorrowAliasFailure8616.SOURCE_DEFINITION_MISMATCH
-    execution_addresses = tuple(item.address for item in execution_loads)
+    return None
+
+
+def _execution_addresses_failure_8616(
+    memory_word: CarryBorrowMemoryWordUse8616,
+) -> CarryBorrowAliasFailure8616 | None:
+    """Return a typed refusal when execution addresses do not cover the logical word."""
+    execution_addresses = tuple(item.address for item in memory_word.execution_loads)
     if sum(address.size for address in execution_addresses) != memory_word.size:
         return CarryBorrowAliasFailure8616.SOURCE_DEFINITION_MISMATCH
+    logical_address = memory_word.logical_address
     first_execution = execution_addresses[0]
     if any(
         address.space is not first_execution.space
@@ -134,6 +142,23 @@ def _memory_word_alias_8616(
         for source_byte_offset, current in enumerate(execution_addresses)
     ):
         return CarryBorrowAliasFailure8616.SOURCE_RANGE_MISMATCH
+    return None
+
+
+def _memory_word_alias_8616(
+    use: CarryBorrowOperandUse8616,
+) -> CarryBorrowOperandAlias8616 | CarryBorrowAliasFailure8616:
+    definition = use.definition
+    memory_word = use.memory_word
+    if definition is None or memory_word is None or use.value.source_tmp is None:
+        return CarryBorrowAliasFailure8616.SOURCE_DEFINITION_MISMATCH
+    shape_failure = _execution_loads_shape_failure_8616(use, definition, memory_word)
+    if shape_failure is not None:
+        return shape_failure
+    range_failure = _execution_addresses_failure_8616(memory_word)
+    if range_failure is not None:
+        return range_failure
+    logical_address = memory_word.logical_address
     if (
         not logical_address.base
         and logical_memory_byte_offset_8616(

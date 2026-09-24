@@ -121,65 +121,93 @@ class ValidationGenerationAtomBuilder8616:
             self._memo[identity] = (value, atom)
         return atom, cacheable
 
+    def _dataclass_atom(
+        self,
+        value: object,
+    ) -> tuple[ValidationGenerationAtom8616, bool]:
+        """Normalize one dataclass instance field-by-field."""
+        field_atoms: list[ValidationGenerationAtom8616] = []
+        cacheable = True
+        for dataclass_field in fields(value):
+            field_atom, field_cacheable = (
+                self._dynamic_field_atom_with_cacheability(
+                    value,
+                    dataclass_field.name,
+                )
+            )
+            field_atoms.append((dataclass_field.name, field_atom))
+            cacheable = cacheable and field_cacheable
+        return (
+            "dataclass",
+            _qualified_type_name_8616(value),
+            tuple(field_atoms),
+        ), cacheable
+
+    def _mapping_atom(
+        self,
+        value: Mapping[object, object],
+    ) -> tuple[ValidationGenerationAtom8616, bool]:
+        """Normalize one mapping with order-independent item atoms."""
+        mapping_items: list[ValidationGenerationAtom8616] = []
+        cacheable = True
+        for key, item in value.items():
+            key_atom, key_cacheable = self._atom_with_cacheability(key)
+            item_atom, item_cacheable = self._atom_with_cacheability(item)
+            mapping_items.append((key_atom, item_atom))
+            cacheable = cacheable and key_cacheable and item_cacheable
+        return (
+            "mapping",
+            _qualified_type_name_8616(value),
+            tuple(sorted(mapping_items, key=repr)),
+        ), cacheable
+
+    def _set_atom(
+        self,
+        value: Set[object],
+    ) -> tuple[ValidationGenerationAtom8616, bool]:
+        """Normalize one set with order-independent item atoms."""
+        set_items: list[ValidationGenerationAtom8616] = []
+        cacheable = True
+        for item in value:
+            item_atom, item_cacheable = self._atom_with_cacheability(item)
+            set_items.append(item_atom)
+            cacheable = cacheable and item_cacheable
+        return (
+            "set",
+            _qualified_type_name_8616(value),
+            tuple(sorted(set_items, key=repr)),
+        ), cacheable
+
+    def _sequence_atom(
+        self,
+        value: Sequence[object],
+    ) -> tuple[ValidationGenerationAtom8616, bool]:
+        """Normalize one ordered sequence item-by-item."""
+        sequence_items: list[ValidationGenerationAtom8616] = []
+        cacheable = True
+        for item in value:
+            item_atom, item_cacheable = self._atom_with_cacheability(item)
+            sequence_items.append(item_atom)
+            cacheable = cacheable and item_cacheable
+        return (
+            "sequence",
+            _qualified_type_name_8616(value),
+            tuple(sequence_items),
+        ), cacheable
+
     def _uncached_atom(
         self,
         value: object,
     ) -> tuple[ValidationGenerationAtom8616, bool]:
         """Normalize one non-active, non-memoized compound value."""
         if is_dataclass(value) and not isinstance(value, type):
-            field_atoms: list[ValidationGenerationAtom8616] = []
-            cacheable = True
-            for dataclass_field in fields(value):
-                field_atom, field_cacheable = (
-                    self._dynamic_field_atom_with_cacheability(
-                        value,
-                        dataclass_field.name,
-                    )
-                )
-                field_atoms.append((dataclass_field.name, field_atom))
-                cacheable = cacheable and field_cacheable
-            return (
-                "dataclass",
-                _qualified_type_name_8616(value),
-                tuple(field_atoms),
-            ), cacheable
+            return self._dataclass_atom(value)
         if isinstance(value, Mapping):
-            mapping_items: list[ValidationGenerationAtom8616] = []
-            cacheable = True
-            for key, item in value.items():
-                key_atom, key_cacheable = self._atom_with_cacheability(key)
-                item_atom, item_cacheable = self._atom_with_cacheability(item)
-                mapping_items.append((key_atom, item_atom))
-                cacheable = cacheable and key_cacheable and item_cacheable
-            return (
-                "mapping",
-                _qualified_type_name_8616(value),
-                tuple(sorted(mapping_items, key=repr)),
-            ), cacheable
+            return self._mapping_atom(value)
         if isinstance(value, Set) and not isinstance(value, str | bytes | bytearray):
-            set_items: list[ValidationGenerationAtom8616] = []
-            cacheable = True
-            for item in value:
-                item_atom, item_cacheable = self._atom_with_cacheability(item)
-                set_items.append(item_atom)
-                cacheable = cacheable and item_cacheable
-            return (
-                "set",
-                _qualified_type_name_8616(value),
-                tuple(sorted(set_items, key=repr)),
-            ), cacheable
+            return self._set_atom(value)
         if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
-            sequence_items: list[ValidationGenerationAtom8616] = []
-            cacheable = True
-            for item in value:
-                item_atom, item_cacheable = self._atom_with_cacheability(item)
-                sequence_items.append(item_atom)
-                cacheable = cacheable and item_cacheable
-            return (
-                "sequence",
-                _qualified_type_name_8616(value),
-                tuple(sequence_items),
-            ), cacheable
+            return self._sequence_atom(value)
 
         semantic_fields: list[ValidationGenerationAtom8616] = []
         cacheable = True

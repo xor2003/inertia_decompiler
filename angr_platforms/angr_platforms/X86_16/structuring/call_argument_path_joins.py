@@ -13,11 +13,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast
+from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import CFunctionCall
 
-from ..alias.callsite_stack_merge import CallsiteSource8616
+from ..alias.callsite_stack_merge import (
+    CallsitePredecessorStackMerge8616,
+    CallsiteSource8616,
+)
 from ..c_ast_utils import _same_c_expression_8616
 from ..callsite_summary import CallsiteSummary8616
 from .call_argument_join_conditions import exact_call_argument_immediate_8616
@@ -87,60 +90,70 @@ def _unique_sources_8616(
     return tuple(unique)
 
 
-def _normalize_path_join_8616(summary: CallsiteSummary8616) -> _NormalizedPathJoin8616 | None:
-    """Validate and expand predecessor traces into complete physical lanes."""
-    merge = summary.predecessor_stack_merge
-    if merge is None or len(merge.traces) < 2:
-        return None
-    traces = merge.traces
-    if (
-        merge.raw_fact_count != len(traces)
-        or merge.normalized_fact_count != len(traces)
-        or merge.classified_fact_count != 1
-        or merge.materialized_count != 1
-        or merge.failure_count != 0
-    ):
-        return None
+class _ClosedEvidence8616(Protocol):
+    """Common closed-evidence counter shape shared by merge and join records."""
+
+    raw_fact_count: int
+    normalized_fact_count: int
+    classified_fact_count: int
+    materialized_count: int
+    failure_count: int
+
+
+def _closed_evidence_counts_8616(evidence: _ClosedEvidence8616, trace_count: int) -> bool:
+    """Check one merge/join evidence record closed exactly once per trace."""
+    return (
+        evidence.raw_fact_count == trace_count
+        and evidence.normalized_fact_count == trace_count
+        and evidence.classified_fact_count == 1
+        and evidence.materialized_count == 1
+        and evidence.failure_count == 0
+    )
+
+
+def _summary_lanes_align_8616(summary: CallsiteSummary8616, merge: CallsitePredecessorStackMerge8616) -> bool:
+    """Check the summary lanes are word-wide and agree with merge prefixes."""
     widths = summary.arg_widths
     sources = summary.push_arg_sources
     addresses = summary.push_arg_instruction_addrs
-    if (
-        not widths
-        or any(width != 2 for width in widths)
-        or len(widths) != len(sources)
-        or len(widths) != len(addresses)
-        or len(merge.widths) > len(widths)
-        or merge.widths != widths[: len(merge.widths)]
-        or merge.sources != sources[: len(merge.sources)]
-    ):
-        return None
-    predecessors = tuple(trace.predecessor_addr for trace in traces)
-    if any(not isinstance(addr, int) for addr in predecessors) or len(set(predecessors)) != len(predecessors):
-        return None
+    if not widths or any(width != 2 for width in widths):
+        return False
+    if len(widths) != len(sources) or len(widths) != len(addresses):
+        return False
+    if len(merge.widths) > len(widths) or merge.widths != widths[: len(merge.widths)]:
+        return False
+    return bool(merge.sources == sources[: len(merge.sources)])
 
-    register_sources: dict[int, CallsiteSource8616 | None] = {}
-    register_lane: int | None = None
+
+def _register_join_lanes_8616(
+    merge: CallsitePredecessorStackMerge8616,
+    addresses: tuple[int, ...],
+    predecessors: tuple[object, ...],
+) -> tuple[int | None, dict[int, CallsiteSource8616 | None]] | None:
+    """Bind the optional register-join lane to per-predecessor sources."""
     join = merge.register_join
-    if join is not None:
-        if (
-            join.raw_fact_count != len(traces)
-            or join.normalized_fact_count != len(traces)
-            or join.classified_fact_count != 1
-            or join.materialized_count != 1
-            or join.failure_count != 0
-            or len(join.traces) != len(traces)
-        ):
-            return None
-        join_lanes = tuple(index for index, addr in enumerate(addresses) if addr == join.push_instruction_addr)
-        if len(join_lanes) != 1:
-            return None
-        register_lane = join_lanes[0]
-        register_sources = {trace.predecessor_addr: trace.source for trace in join.traces}
-        if set(register_sources) != set(predecessors):
-            return None
+    if join is None:
+        return None, {}
+    if not _closed_evidence_counts_8616(join, len(merge.traces)) or len(join.traces) != len(merge.traces):
+        return None
+    join_lanes = tuple(index for index, addr in enumerate(addresses) if addr == join.push_instruction_addr)
+    if len(join_lanes) != 1:
+        return None
+    register_sources = {trace.predecessor_addr: trace.source for trace in join.traces}
+    if set(register_sources) != set(predecessors):
+        return None
+    return join_lanes[0], register_sources
 
+
+def _predecessor_path_sources_8616(
+    merge: CallsitePredecessorStackMerge8616,
+    sources: tuple[CallsiteSource8616 | None, ...],
+    register_lane: int | None,
+    register_sources: dict[int, CallsiteSource8616 | None],
+) -> dict[int, tuple[CallsiteSource8616 | None, ...]] | None:
+    """Expand each predecessor trace into complete physical lanes."""
     path_sources: dict[int, tuple[CallsiteSource8616 | None, ...]] = {}
-    for trace in traces:
+    for trace in merge.traces:
         predecessor_addr = trace.predecessor_addr
         if not isinstance(predecessor_addr, int) or not trace.is_well_formed() or trace.widths != merge.widths:
             return None
@@ -149,6 +162,34 @@ def _normalize_path_join_8616(summary: CallsiteSummary8616) -> _NormalizedPathJo
         if register_lane is not None:
             physical[register_lane] = register_sources[predecessor_addr]
         path_sources[predecessor_addr] = tuple(physical)
+    return path_sources
+
+
+def _normalize_path_join_8616(summary: CallsiteSummary8616) -> _NormalizedPathJoin8616 | None:
+    """Validate and expand predecessor traces into complete physical lanes."""
+    merge = summary.predecessor_stack_merge
+    if merge is None or len(merge.traces) < 2:
+        return None
+    traces = merge.traces
+    if not _closed_evidence_counts_8616(merge, len(traces)):
+        return None
+    widths = summary.arg_widths
+    sources = summary.push_arg_sources
+    addresses = summary.push_arg_instruction_addrs
+    if not _summary_lanes_align_8616(summary, merge):
+        return None
+    predecessors = tuple(trace.predecessor_addr for trace in traces)
+    if any(not isinstance(addr, int) for addr in predecessors) or len(set(predecessors)) != len(predecessors):
+        return None
+
+    joined = _register_join_lanes_8616(merge, addresses, predecessors)
+    if joined is None:
+        return None
+    register_lane, register_sources = joined
+
+    path_sources = _predecessor_path_sources_8616(merge, sources, register_lane, register_sources)
+    if path_sources is None:
+        return None
 
     varying_lanes = tuple(
         lane

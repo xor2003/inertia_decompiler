@@ -306,13 +306,10 @@ def apply_x86_16_structuring_diagnostics(codegen: object) -> bool:
             func_name = getattr(cfunc, "name", f"func_{hex(func_addr)}")
 
             # Check if structuring info is available
+            structuring_stats = _cfunc_structuring_stats_8616(cfunc)
             succeeded = True
             final_iteration = 0
-            structuring_stats = None
-
-            # Dynamic codegen boundary: angr cfunc metadata may carry this optional compatibility field.
-            structuring_stats = getattr(cfunc, "_structuring_stats", None)
-            if isinstance(structuring_stats, _StructuringFailureStatsLike8616):
+            if structuring_stats is not None:
                 final_iteration = structuring_stats.iterations
                 succeeded = not structuring_stats.max_iterations_reached
 
@@ -346,47 +343,11 @@ def apply_x86_16_structuring_diagnostics(codegen: object) -> bool:
                 ir_hints=build_structuring_ir_hint_artifact(codegen, succeeded=succeeded, iterations=final_iteration),
             )
 
-            if cfg_snapshot is not None:
-                collector.add_progress(cfg_snapshot.summary_line())
-            if cfg_ownership is not None:
-                collector.add_progress(cfg_ownership.summary_line())
-            if cfg_indirect is not None:
-                collector.add_progress(cfg_indirect.summary_line())
-            if cfg_grouping is not None:
-                collector.add_progress(cfg_grouping.summary_line())
-            if report.ir_hints is not None:
-                readiness = report.ir_hints.readiness
-                collector.add_progress(
-                    "ir_readiness "
-                    f"level={readiness.level} "
-                    f"cond={readiness.condition_count} "
-                    f"phi={readiness.phi_node_count} "
-                    f"defaulted={readiness.defaulted_segment_count} "
-                    f"provisional={readiness.provisional_address_count}"
-                )
-
-            # Generate recovery hints
-            if not succeeded and structuring_stats:
-                hints = suggest_recovery_hints(structuring_stats)
-                for hint in hints:
-                    report.add_recovery_hint(hint)
-            if report.ir_hints is not None:
-                for hint in report.ir_hints.hints:
-                    report.add_recovery_hint(hint)
-
-            # Attach to function
-            metadata = get_codegen_side_metadata(codegen)
-            metadata["structuring_diagnostics"] = report
-            try:
-                # Dynamic codegen boundary: read optional recovery metadata from an angr cfunc object.
-                cfunc_metadata = getattr(cfunc, "_recovery_metadata", None)
-                if not isinstance(cfunc_metadata, dict):
-                    cfunc_metadata = {}
-                    # Dynamic codegen boundary: attach optional recovery metadata to an angr cfunc object.
-                    typing.cast(typing.Any, cfunc)._recovery_metadata = cfunc_metadata
-                cfunc_metadata["structuring_diagnostics"] = report
-            except Exception:
-                pass
+            _collect_diagnostics_progress_8616(
+                collector, report, cfg_snapshot, cfg_ownership, cfg_indirect, cfg_grouping
+            )
+            _attach_report_hints_8616(report, structuring_stats, succeeded)
+            _attach_diagnostics_report_8616(codegen, cfunc, report)
 
             return False
 
@@ -396,3 +357,68 @@ def apply_x86_16_structuring_diagnostics(codegen: object) -> bool:
         return False
 
     return _impl()
+
+
+def _cfunc_structuring_stats_8616(cfunc: object) -> _StructuringFailureStatsLike8616 | None:
+    """Read the optional structuring stats attached at the codegen boundary."""
+    # Dynamic codegen boundary: angr cfunc metadata may carry this optional compatibility field.
+    stats = getattr(cfunc, "_structuring_stats", None)
+    if isinstance(stats, _StructuringFailureStatsLike8616):
+        return stats
+    return None
+
+
+def _collect_diagnostics_progress_8616(
+    collector: DiagnosticsCollector,
+    report: StructuringDiagnosticsReport,
+    cfg_snapshot: CFGSnapshot | None,
+    cfg_ownership: CFGOwnershipArtifact | None,
+    cfg_indirect: CFGIndirectSiteArtifact | None,
+    cfg_grouping: CFGGroupingArtifact | None,
+) -> None:
+    """Feed artifact summary lines into the diagnostics collector."""
+    for artifact in (cfg_snapshot, cfg_ownership, cfg_indirect, cfg_grouping):
+        if artifact is not None:
+            collector.add_progress(artifact.summary_line())
+    if report.ir_hints is not None:
+        readiness = report.ir_hints.readiness
+        collector.add_progress(
+            "ir_readiness "
+            f"level={readiness.level} "
+            f"cond={readiness.condition_count} "
+            f"phi={readiness.phi_node_count} "
+            f"defaulted={readiness.defaulted_segment_count} "
+            f"provisional={readiness.provisional_address_count}"
+        )
+
+
+def _attach_report_hints_8616(
+    report: StructuringDiagnosticsReport,
+    structuring_stats: _StructuringFailureStatsLike8616 | None,
+    succeeded: bool,
+) -> None:
+    """Generate recovery hints and attach them to the diagnostics report."""
+    if not succeeded and structuring_stats:
+        for hint in suggest_recovery_hints(structuring_stats):
+            report.add_recovery_hint(hint)
+    if report.ir_hints is not None:
+        for hint in report.ir_hints.hints:
+            report.add_recovery_hint(hint)
+
+
+def _attach_diagnostics_report_8616(
+    codegen: object, cfunc: object, report: StructuringDiagnosticsReport
+) -> None:
+    """Attach the diagnostics report to codegen side metadata and the cfunc."""
+    metadata = get_codegen_side_metadata(codegen)
+    metadata["structuring_diagnostics"] = report
+    try:
+        # Dynamic codegen boundary: read optional recovery metadata from an angr cfunc object.
+        cfunc_metadata = getattr(cfunc, "_recovery_metadata", None)
+        if not isinstance(cfunc_metadata, dict):
+            cfunc_metadata = {}
+            # Dynamic codegen boundary: attach optional recovery metadata to an angr cfunc object.
+            typing.cast(typing.Any, cfunc)._recovery_metadata = cfunc_metadata
+        cfunc_metadata["structuring_diagnostics"] = report
+    except Exception:
+        pass

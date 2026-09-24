@@ -20,6 +20,7 @@ from ..ir.constant_flow import IRConstantFlow8616
 from ..ir.core import IRAddress, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from ..ir.segment_state_transfer import SEGMENT_REGISTER_SET, SegmentRestoreSource
 from .segment_stack_fragments import (
+    SegmentStackByteOrigin8616,
     SegmentStackFragments8616,
     complete_stack_constant_8616,
     complete_stack_register_restore_8616,
@@ -137,6 +138,133 @@ def _predecessor_map(artifact: IRFunctionArtifact) -> dict[int, tuple[int, ...]]
     return {addr: tuple(sorted(values)) for addr, values in predecessors.items()}
 
 
+def _track_value_fragments_8616(
+    instruction: IRInstr,
+    values: dict[str | int, SegmentStackFragments8616],
+    constants: IRConstantFlow8616 | None,
+    stack_pointers: StackPointerSnapshots8616,
+    stack_bytes: dict[int, SegmentStackByteOrigin8616],
+    sp_delta: int | None,
+    bp_delta: int | None,
+    tracked_registers: frozenset[str],
+) -> None:
+    """Record exact stack-fragment identities produced by one instruction."""
+    if instruction.op == "LOAD" and isinstance(instruction.dst, IRValue) and instruction.args:
+        address = instruction.args[0]
+        if isinstance(address, IRAddress) and instruction.dst.name is not None:
+            fragments = stack_load_fragments_8616(
+                address, max(1, instruction.dst.size),
+                stack_pointers.address_base(address, sp_delta, bp_delta), stack_bytes,
+            )
+            values[instruction.dst.name] = fragments
+            values[f"load_{instruction.dst.name}"] = fragments
+            if instruction.dst.source_tmp is not None:
+                values[instruction.dst.source_tmp] = fragments
+    elif instruction.op == "STORE" and len(instruction.args) >= 2:
+        address, value = instruction.args[:2]
+        if isinstance(address, IRAddress) and isinstance(value, IRValue):
+            store_stack_fragments_8616(
+                address,
+                value,
+                register_value_fragments_8616(
+                    value,
+                    instruction.addr,
+                    values,
+                    tracked_registers=tracked_registers,
+                    constant_value=None if constants is None else constants.constant(value),
+                ),
+                stack_pointers.address_base(address, sp_delta, bp_delta),
+                stack_bytes,
+            )
+    elif isinstance(instruction.dst, IRValue) and instruction.dst.space is MemSpace.TMP:
+        fragments = computed_stack_register_fragments_8616(
+            instruction,
+            values,
+            tracked_registers=tracked_registers,
+        )
+        if instruction.dst.name is not None:
+            values[instruction.dst.name] = fragments
+        if instruction.dst.source_tmp is not None:
+            values[instruction.dst.source_tmp] = fragments
+        if instruction.op != "MOV":
+            values[f"expr:{instruction.op}"] = fragments
+
+
+def _restore_fact_for_write_8616(
+    block_addr: int,
+    instruction: IRInstr,
+    values: dict[str | int, SegmentStackFragments8616],
+    tracked_registers: frozenset[str],
+) -> SegmentStackRestoreFact8616 | None:
+    """Classify one tracked-register write as a proven or refused restore."""
+    dst = instruction.dst
+    if not (
+        isinstance(dst, IRValue)
+        and dst.space is MemSpace.REG
+        and dst.name in tracked_registers
+    ):
+        return None
+    source = instruction.args[0] if instruction.args else None
+    fragments = register_value_fragments_8616(
+        source,
+        instruction.addr,
+        values,
+        tracked_registers=tracked_registers,
+    )
+    complete = complete_stack_register_restore_8616(fragments)
+    if complete is not None:
+        saved_register, saved_addr, stack_offsets = complete
+        saved_constant = complete_stack_constant_8616(fragments)
+        return SegmentStackRestoreFact8616(
+            block_addr, instruction.addr, dst.name, saved_addr, saved_register,
+            stack_offsets, SegmentStackRestoreVerdict8616.PROVEN,
+            constant_value=None if saved_constant is None else saved_constant[0],
+        )
+    if tracked_registers == SEGMENT_REGISTER_SET and (
+        constant := complete_stack_constant_8616(fragments)
+    ) is not None:
+        constant_value, saved_addr, stack_offsets = constant
+        return SegmentStackRestoreFact8616(
+            block_addr,
+            instruction.addr,
+            dst.name,
+            saved_addr,
+            None,
+            stack_offsets,
+            SegmentStackRestoreVerdict8616.PROVEN,
+            constant_value,
+        )
+    if isinstance(source, IRValue) and source.space is MemSpace.TMP and source.name is not None:
+        return SegmentStackRestoreFact8616(
+            block_addr, instruction.addr, dst.name, None, None, (),
+            SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE,
+        )
+    return None
+
+
+def _call_effect_stack_state_8616(
+    instruction: IRInstr,
+    instruction_entry_state: _SegmentStackAliasState8616,
+) -> tuple[int | None, dict[int, SegmentStackByteOrigin8616], int | None]:
+    """Return (sp_delta, stack_bytes, bp_delta) after one CALL boundary."""
+    effect = instruction.call_stack_effect
+    bp_delta = (
+        instruction_entry_state.bp_delta
+        if effect is not None and effect.complete and effect.bp_preserved
+        else None
+    )
+    if (
+        effect is not None
+        and effect.complete
+        and effect.net_stack_delta is not None
+        and not effect.escaped_ranges
+    ):
+        call_entry_sp = instruction_entry_state.sp_delta
+        sp_delta = None if call_entry_sp is None else call_entry_sp + effect.net_stack_delta
+        return sp_delta, instruction_entry_state.byte_map(), bp_delta
+    return None, {}, bp_delta
+
+
 def _transfer_block(
     block_addr: int,
     instructions: tuple[IRInstr, ...],
@@ -164,108 +292,32 @@ def _transfer_block(
             machine_instruction_addr = instruction.addr
             instruction_entry_state = _stack_state(sp_delta, stack_bytes, bp_delta)
         stack_pointers.observe(instruction, sp_delta, bp_delta)
-        if instruction.op == "LOAD" and isinstance(instruction.dst, IRValue) and instruction.args:
-            address = instruction.args[0]
-            if isinstance(address, IRAddress) and instruction.dst.name is not None:
-                fragments = stack_load_fragments_8616(
-                    address, max(1, instruction.dst.size),
-                    stack_pointers.address_base(address, sp_delta, bp_delta), stack_bytes,
-                )
-                values[instruction.dst.name] = fragments
-                values[f"load_{instruction.dst.name}"] = fragments
-                if instruction.dst.source_tmp is not None:
-                    values[instruction.dst.source_tmp] = fragments
-        elif instruction.op == "STORE" and len(instruction.args) >= 2:
-            address, value = instruction.args[:2]
-            if isinstance(address, IRAddress) and isinstance(value, IRValue):
-                store_stack_fragments_8616(
-                    address,
-                    value,
-                    register_value_fragments_8616(
-                        value,
-                        instruction.addr,
-                        values,
-                        tracked_registers=tracked_registers,
-                        constant_value=None if constants is None else constants.constant(value),
-                    ),
-                    stack_pointers.address_base(address, sp_delta, bp_delta),
-                    stack_bytes,
-                )
-        elif isinstance(instruction.dst, IRValue) and instruction.dst.space is MemSpace.TMP:
-            fragments = computed_stack_register_fragments_8616(
-                instruction,
-                values,
-                tracked_registers=tracked_registers,
-            )
-            if instruction.dst.name is not None:
-                values[instruction.dst.name] = fragments
-            if instruction.dst.source_tmp is not None:
-                values[instruction.dst.source_tmp] = fragments
-            if instruction.op != "MOV":
-                values[f"expr:{instruction.op}"] = fragments
-
-        dst = instruction.dst
-        if isinstance(dst, IRValue) and dst.space is MemSpace.REG and dst.name in tracked_registers:
-            source = instruction.args[0] if instruction.args else None
-            fragments = register_value_fragments_8616(
-                source,
-                instruction.addr,
-                values,
-                tracked_registers=tracked_registers,
-            )
-            complete = complete_stack_register_restore_8616(fragments)
-            if complete is not None:
-                saved_register, saved_addr, stack_offsets = complete
-                saved_constant = complete_stack_constant_8616(fragments)
-                facts.append(
-                    SegmentStackRestoreFact8616(
-                        block_addr, instruction.addr, dst.name, saved_addr, saved_register,
-                        stack_offsets, SegmentStackRestoreVerdict8616.PROVEN,
-                        constant_value=None if saved_constant is None else saved_constant[0],
-                    )
-                )
-            elif tracked_registers == SEGMENT_REGISTER_SET and (
-                constant := complete_stack_constant_8616(fragments)
-            ) is not None:
-                constant_value, saved_addr, stack_offsets = constant
-                facts.append(
-                    SegmentStackRestoreFact8616(
-                        block_addr,
-                        instruction.addr,
-                        dst.name,
-                        saved_addr,
-                        None,
-                        stack_offsets,
-                        SegmentStackRestoreVerdict8616.PROVEN,
-                        constant_value,
-                    )
-                )
-            elif isinstance(source, IRValue) and source.space is MemSpace.TMP and source.name is not None:
-                facts.append(
-                    SegmentStackRestoreFact8616(
-                        block_addr, instruction.addr, dst.name, None, None, (),
-                        SegmentStackRestoreVerdict8616.UNKNOWN_REFUSE,
-                    )
-                )
+        _track_value_fragments_8616(
+            instruction,
+            values,
+            constants,
+            stack_pointers,
+            stack_bytes,
+            sp_delta,
+            bp_delta,
+            tracked_registers,
+        )
+        restore_fact = _restore_fact_for_write_8616(
+            block_addr,
+            instruction,
+            values,
+            tracked_registers,
+        )
+        if restore_fact is not None:
+            facts.append(restore_fact)
         next_sp = stack_pointers.updated_register("sp", instruction, sp_delta, bp_delta)
         bp_delta = stack_pointers.updated_register("bp", instruction, sp_delta, bp_delta)
         sp_delta = next_sp
         if instruction.op == "CALL":
-            effect = instruction.call_stack_effect
-            bp_delta = (instruction_entry_state.bp_delta
-                        if effect is not None and effect.complete and effect.bp_preserved else None)
-            if (
-                effect is not None
-                and effect.complete
-                and effect.net_stack_delta is not None
-                and not effect.escaped_ranges
-            ):
-                call_entry_sp = instruction_entry_state.sp_delta
-                sp_delta = None if call_entry_sp is None else call_entry_sp + effect.net_stack_delta
-                stack_bytes = instruction_entry_state.byte_map()
-            else:
-                sp_delta = None
-                stack_bytes.clear()
+            sp_delta, stack_bytes, bp_delta = _call_effect_stack_state_8616(
+                instruction,
+                instruction_entry_state,
+            )
     return facts, _stack_state(sp_delta, stack_bytes, bp_delta)
 
 

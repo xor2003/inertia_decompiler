@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import cast
+from typing import Protocol, cast
 
 import pyvex
 from angr.analyses.stack_pointer_tracker import (
@@ -28,10 +28,21 @@ from .semantics.call_stack_allocation import (
     binary_stack_allocation_target_8616,
     collect_call_stack_allocation_proofs_8616,
 )
-from .stack_tracker_return_segment import apply_native_argument_cleanup_8616, apply_native_return_segment_8616
+from .stack_tracker_return_segment import (
+    NativeMachineCallFrameResult8616,
+    apply_native_argument_cleanup_8616,
+    apply_native_machine_call_frame_8616,
+    apply_native_return_segment_8616,
+)
 
 _PATCH_NAME = "_process_vex_allocations_8616"
 type _ProcessVex8616 = Callable[[StackPointerTracker, object, pyvex.IRSB, StackPointerTrackerState], int | None]
+
+
+class _NativeFrameEvidence8616(Protocol):
+    """Owned frame-reconciliation census attached to a native tracker."""
+
+    _inertia_machine_call_frames_8616: tuple[NativeMachineCallFrameResult8616, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +92,14 @@ def apply_x86_16_stack_tracker_allocations_8616() -> None:
     ) -> int | None:
         """Reconcile proven cleanup, allocation and extra slots after native transfer."""
         callsite = original(self, node, vex_block, state)
+        result = apply_native_machine_call_frame_8616(self, vex_block, state, callsite)
+        if result.raw_fact_count:
+            surface = cast(_NativeFrameEvidence8616, self)
+            try:
+                prior = surface._inertia_machine_call_frames_8616
+            except AttributeError:
+                prior = ()
+            surface._inertia_machine_call_frames_8616 = (*prior, result)
         apply_native_argument_cleanup_8616(self, node, vex_block, state)
         _apply_allocation(self, vex_block, state, callsite)
         apply_native_return_segment_8616(self, vex_block, state, callsite)

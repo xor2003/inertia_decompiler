@@ -1484,16 +1484,12 @@ QA_TYPED_FILES := \
 	angr_platforms/angr_platforms/X86_16/lowering/interprocedural_storage_return_type_collection_contracts.py \
 	angr_platforms/angr_platforms/X86_16/lowering/packed_flags_state.py \
 	angr_platforms/angr_platforms/X86_16/lowering/packed_flags_liveness.py \
-angr_platforms/angr_platforms/X86_16/lowering/packed_flags_calls.py \
+	angr_platforms/angr_platforms/X86_16/lowering/packed_flags_calls.py \
 	angr_platforms/angr_platforms/X86_16/lowering/far_return_boundary_carriers.py \
 	angr_platforms/angr_platforms/X86_16/lowering/segment_stack_restore_carriers.py \
 	angr_platforms/angr_platforms/X86_16/structuring/condition_chain_provenance.py \
 	angr_platforms/angr_platforms/X86_16/structuring/condition_evidence_closure.py \
 	angr_platforms/angr_platforms/X86_16/structuring/pretest_condition_surface.py \
-	angr_platforms/angr_platforms/X86_16/structuring/pointer_array_sum_projection.py \
-	angr_platforms/angr_platforms/X86_16/structuring/typed_stack_effect_transfer.py \
-	angr_platforms/angr_platforms/X86_16/structuring/typed_widening.py \
-	angr_platforms/angr_platforms/X86_16/validation_cog/typed_instructions_cog.py \
 	angr_platforms/angr_platforms/X86_16/validation_condition_closure_delta.py \
 	angr_platforms/angr_platforms/X86_16/validation_observable_compaction.py \
 	angr_platforms/angr_platforms/X86_16/validation_pointer_parameter_output_contracts.py \
@@ -3131,16 +3127,12 @@ QA_RUFF_TARGETS := \
 	angr_platforms/angr_platforms/X86_16/lowering/interprocedural_storage_return_type_collection_contracts.py \
 	angr_platforms/angr_platforms/X86_16/lowering/packed_flags_state.py \
 	angr_platforms/angr_platforms/X86_16/lowering/packed_flags_liveness.py \
-angr_platforms/angr_platforms/X86_16/lowering/packed_flags_calls.py \
+	angr_platforms/angr_platforms/X86_16/lowering/packed_flags_calls.py \
 	angr_platforms/angr_platforms/X86_16/lowering/far_return_boundary_carriers.py \
 	angr_platforms/angr_platforms/X86_16/lowering/segment_stack_restore_carriers.py \
 	angr_platforms/angr_platforms/X86_16/structuring/condition_chain_provenance.py \
 	angr_platforms/angr_platforms/X86_16/structuring/condition_evidence_closure.py \
 	angr_platforms/angr_platforms/X86_16/structuring/pretest_condition_surface.py \
-	angr_platforms/angr_platforms/X86_16/structuring/pointer_array_sum_projection.py \
-	angr_platforms/angr_platforms/X86_16/structuring/typed_stack_effect_transfer.py \
-	angr_platforms/angr_platforms/X86_16/structuring/typed_widening.py \
-	angr_platforms/angr_platforms/X86_16/validation_cog/typed_instructions_cog.py \
 	angr_platforms/angr_platforms/X86_16/validation_condition_closure_delta.py \
 	angr_platforms/angr_platforms/X86_16/validation_observable_compaction.py \
 	angr_platforms/angr_platforms/X86_16/validation_pointer_parameter_output_contracts.py \
@@ -3759,6 +3751,14 @@ QA_PYTEST_TARGETS := \
 	angr_platforms/tests/test_acceptance_scorecard.py
 
 # Focused owner tests are appended while the legacy QA lists remain curated.
+LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/lowering/argument_frame_base.py
+QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/lowering/argument_frame_base.py
+QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/lowering/argument_frame_base.py angr_platforms/tests/test_x86_16_argument_frame_base.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_argument_frame_base.py
+LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/lowering/far_pointer_type.py
+QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/lowering/far_pointer_type.py
+QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/lowering/far_pointer_type.py angr_platforms/tests/test_x86_16_function_pointer_parameters.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_function_pointer_parameters.py
 LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/semantics/terminal_boundary_paths.py
 QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/semantics/terminal_boundary_paths.py
 QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/semantics/terminal_boundary_paths.py

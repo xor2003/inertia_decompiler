@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import functools
 import re
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
+from enum import StrEnum
 from typing import Protocol, cast
 
 from angr.sim_type import SimTypeFunction
@@ -125,6 +126,37 @@ _C_TYPE_KEYWORDS_8616 = {
     "volatile",
 }
 type AnnotationSpec8616 = str | dict[str, object]
+
+
+class StackAnnotationPurpose8616(StrEnum):
+    """Distinguish optional labels from explicit stack-layout contracts."""
+
+    NAME_ONLY = "name_only"
+    EXPLICIT_LAYOUT = "explicit_layout"
+
+
+def stack_layout_annotation_specs_8616(annotations: object) -> dict[int, AnnotationSpec8616]:
+    """Return layout contracts without promoting optional names to semantic facts.
+
+    Legacy explicit annotations omit purpose. COD producers must mark their
+    entries NAME_ONLY; those entries remain available to naming consumers but
+    cannot create, move, widen, or remove a parameter. Unknown purposes refuse.
+    """
+    if not isinstance(annotations, Mapping):
+        return {}
+    specs = annotations.get("stack_vars")
+    if not isinstance(specs, Mapping):
+        return {}
+    selected: dict[int, AnnotationSpec8616] = {}
+    for offset, spec in specs.items():
+        if not isinstance(offset, int) or not isinstance(spec, (str, dict)):
+            continue
+        if isinstance(spec, dict) and spec.get("purpose") not in (
+            None, StackAnnotationPurpose8616.EXPLICIT_LAYOUT,
+        ):
+            continue
+        selected[offset] = spec
+    return selected
 
 _SOURCE_DECL_RE_8616 = re.compile(
     r"^(?P<prefix>(?:(?:extern|static|inline|const|volatile|unsigned|signed|struct|union|enum|long|short|int|char|_Bool|[A-Za-z_]\w*)|\s|\*)+?)"

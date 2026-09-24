@@ -565,43 +565,38 @@ def _runtime_gp_subview_write_8616(
     ))
 
 
-def _addressed_gp_high_byte_view_8616(
-    node: object,
-    project: _ProjectGPRegisters8616,
-) -> tuple[str, structured_c.CVariable] | None:
-    """Recognize angr's ``*((byte *)&word_register + 1)`` high-byte view."""
-    def strip_casts(candidate: object) -> object:
-        """Remove representational casts from an angr address expression."""
-        while isinstance(candidate, structured_c.CTypeCast):
-            candidate = candidate.expr
-        return candidate
+def _strip_gp_casts_8616(candidate: object) -> object:
+    """Remove representational casts from an angr address expression."""
+    while isinstance(candidate, structured_c.CTypeCast):
+        candidate = candidate.expr
+    return candidate
 
-    if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
-        return None
-    address = strip_casts(node.operand)
-    if not isinstance(address, structured_c.CBinaryOp) or address.op != "Add":
-        return None
-    reference: structured_c.CUnaryOp | None = None
-    displacement: structured_c.CConstant | None = None
+
+def _byte_one_address_reference_8616(
+    address: structured_c.CBinaryOp,
+) -> structured_c.CUnaryOp | None:
+    """Find the ``&register + 1`` reference inside a stripped Add expression."""
     for candidate_reference, candidate_displacement in (
         (address.lhs, address.rhs),
         (address.rhs, address.lhs),
     ):
-        candidate_reference = strip_casts(candidate_reference)
-        candidate_displacement = strip_casts(candidate_displacement)
+        candidate_reference = _strip_gp_casts_8616(candidate_reference)
+        candidate_displacement = _strip_gp_casts_8616(candidate_displacement)
         if (
             isinstance(candidate_reference, structured_c.CUnaryOp)
             and candidate_reference.op in {"Reference", "AddressOf"}
             and isinstance(candidate_displacement, structured_c.CConstant)
             and candidate_displacement.value == 1
         ):
-            reference = candidate_reference
-            displacement = candidate_displacement
-            break
-    if reference is None or displacement is None:
-        return None
-    carrier = strip_casts(reference.operand)
-    source: structured_c.CVariable | None = None
+            return candidate_reference
+    return None
+
+
+def _addressed_carrier_projection_8616(
+    carrier: object,
+    project: _ProjectGPRegisters8616,
+) -> tuple[str, int, int, structured_c.CVariable] | None:
+    """Resolve a stripped carrier to (register name, bit shift, width, source)."""
     if isinstance(carrier, structured_c.CVariable) and isinstance(
         carrier.variable,
         SimRegisterVariable,
@@ -614,26 +609,44 @@ def _addressed_gp_high_byte_view_8616(
         if projection is None:
             return None
         register_name, bit_shift, view_width = projection
-        source = carrier
-    else:
-        runtime_view = runtime_gp_expression_view_8616(carrier)
-        if runtime_view is None:
-            return None
-        register_name = runtime_view.parent_name
-        bit_shift = runtime_view.bit_shift
-        view_width = runtime_view.width
-        source = next(
-            (
-                candidate
-                for candidate in (carrier, *_iter_c_nodes_deep_8616(carrier))
-                if isinstance(candidate, structured_c.CVariable)
-                and runtime_gp_name_for_variable_8616(candidate.variable) == register_name
-            ),
-            None,
-        )
-    if bit_shift != 0 or view_width not in {2, 4}:
+        return register_name, bit_shift, view_width, carrier
+    runtime_view = runtime_gp_expression_view_8616(carrier)
+    if runtime_view is None:
         return None
+    source = next(
+        (
+            candidate
+            for candidate in (carrier, *_iter_c_nodes_deep_8616(carrier))
+            if isinstance(candidate, structured_c.CVariable)
+            and runtime_gp_name_for_variable_8616(candidate.variable) == runtime_view.parent_name
+        ),
+        None,
+    )
     if source is None:
+        return None
+    return runtime_view.parent_name, runtime_view.bit_shift, runtime_view.width, source
+
+
+def _addressed_gp_high_byte_view_8616(
+    node: object,
+    project: _ProjectGPRegisters8616,
+) -> tuple[str, structured_c.CVariable] | None:
+    """Recognize angr's ``*((byte *)&word_register + 1)`` high-byte view."""
+    if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
+        return None
+    address = _strip_gp_casts_8616(node.operand)
+    if not isinstance(address, structured_c.CBinaryOp) or address.op != "Add":
+        return None
+    reference = _byte_one_address_reference_8616(address)
+    if reference is None:
+        return None
+    resolved = _addressed_carrier_projection_8616(
+        _strip_gp_casts_8616(reference.operand), project
+    )
+    if resolved is None:
+        return None
+    register_name, bit_shift, view_width, source = resolved
+    if bit_shift != 0 or view_width not in {2, 4}:
         return None
     return register_name, source
 
@@ -663,6 +676,191 @@ def runtime_gp_state_names_8616(codegen: object) -> frozenset[str]:
     return frozenset(state_owned_names)
 
 
+def _record_runtime_gp_global_8616(codegen: object, register_name: str) -> None:
+    """Record the runtime global declaration for one lowered register lane."""
+    record_global_declaration_spec_8616(
+        codegen,
+        ctype=GlobalDeclarationCType8616.UNSIGNED_LONG,
+        name=_RUNTIME_GP_STATE_SYMBOLS_8616[register_name],
+        array_len=None,
+    )
+
+
+@dataclass(slots=True)
+class _GpStateLoweringContext8616:
+    """Mutable evidence and boundary context for the GP-state traversal."""
+
+    codegen: object
+    cfunc_addr: int
+    project: _ProjectGPRegisters8616
+    state_owned_names: frozenset[str]
+    raw_ids: set[int]
+    materialized_ids: set[int]
+
+
+def _lhs_register_projection_8616(
+    project: _ProjectGPRegisters8616, lhs: object
+) -> tuple[str, int, int] | None:
+    """Resolve a register projection from an assignment lvalue."""
+    if isinstance(lhs, structured_c.CDirtyExpression):
+        dirty = lhs.dirty
+        if (
+            # Dynamic angr boundary: opaque dirty expressions may omit category.
+            getattr(dirty, "category", None) is VirtualVariableCategory.REGISTER
+            and isinstance(dirty.oident, int)
+            # Dynamic angr AIL boundary: compatibility nodes may omit size.
+            and isinstance(getattr(dirty, "size", None), int)
+        ):
+            return _register_projection_for_shape_8616(
+                project,
+                dirty.oident,
+                cast(int, dirty.size),
+            )
+        return None
+    if isinstance(lhs, structured_c.CVariable) and isinstance(
+        lhs.variable,
+        SimRegisterVariable,
+    ):
+        return _register_projection_for_shape_8616(
+            project,
+            lhs.variable.reg,
+            lhs.variable.size,
+        )
+    return None
+
+
+def _node_register_projection_8616(
+    project: _ProjectGPRegisters8616, node: object
+) -> tuple[str, int, int] | None:
+    """Resolve a register projection from a bare expression node."""
+    if isinstance(node, structured_c.CDirtyExpression):
+        dirty = node.dirty
+        # Dynamic angr boundary: opaque dirty expressions may omit category.
+        if getattr(dirty, "category", None) is VirtualVariableCategory.REGISTER:
+            offset = dirty.oident
+            # Dynamic angr AIL boundary: compatibility nodes may omit size.
+            size = getattr(dirty, "size", None)
+            if isinstance(offset, int) and isinstance(size, int):
+                return _register_projection_for_shape_8616(project, offset, size)
+        return None
+    if isinstance(node, structured_c.CVariable):
+        variable = node.variable
+        if isinstance(variable, SimRegisterVariable):
+            return _register_projection_for_shape_8616(project, variable.reg, variable.size)
+    return None
+
+
+def _transform_high_byte_view_8616(
+    ctx: _GpStateLoweringContext8616, node: object
+) -> object | None:
+    """Materialize one addressed high-byte view read, or None."""
+    high_byte_view = _addressed_gp_high_byte_view_8616(node, ctx.project)
+    if high_byte_view is None:
+        return None
+    register_name, carrier = high_byte_view
+    ctx.raw_ids.add(id(node))
+    if register_name not in ctx.state_owned_names:
+        return node
+    ctx.materialized_ids.add(id(node))
+    _record_runtime_gp_global_8616(ctx.codegen, register_name)
+    return cast(
+        object,
+        _runtime_gp_expr_8616(
+            register_name,
+            8,
+            1,
+            carrier,
+            ctx.cfunc_addr,
+        ),
+    )
+
+
+def _transform_assignment_lhs_8616(
+    ctx: _GpStateLoweringContext8616, node: object
+) -> object | None:
+    """Materialize a subview write assignment to a live-in lane, or None."""
+    if not isinstance(node, structured_c.CAssignment):
+        return None
+    lhs = node.lhs
+    lhs_projection = _lhs_register_projection_8616(ctx.project, lhs)
+    if lhs_projection is None:
+        return None
+    register_name, bit_shift, view_width = lhs_projection
+    if register_name not in ctx.state_owned_names or view_width >= 4:
+        return None
+    ctx.raw_ids.add(id(lhs))
+    ctx.materialized_ids.add(id(lhs))
+    _record_runtime_gp_global_8616(ctx.codegen, register_name)
+    return cast(
+        object,
+        _runtime_gp_subview_write_8616(
+            register_name,
+            bit_shift,
+            view_width,
+            lhs,
+            node.rhs,
+            ctx.cfunc_addr,
+            tags=node.tags,
+        ),
+    )
+
+
+def _transform_node_projection_8616(
+    ctx: _GpStateLoweringContext8616, node: object
+) -> object:
+    """Materialize one bare live-in register read/write expression node."""
+    projection = _node_register_projection_8616(ctx.project, node)
+    if projection is None:
+        return node
+    register_name, bit_shift, view_width = projection
+    ctx.raw_ids.add(id(node))
+    if register_name not in ctx.state_owned_names:
+        return node
+    ctx.materialized_ids.add(id(node))
+    _record_runtime_gp_global_8616(ctx.codegen, register_name)
+    return cast(
+        object,
+        _runtime_gp_expr_8616(
+            register_name,
+            bit_shift,
+            view_width,
+            cast(structured_c.CVariable | structured_c.CDirtyExpression, node),
+            ctx.cfunc_addr,
+        ),
+    )
+
+
+def _transform_gp_state_node_8616(ctx: _GpStateLoweringContext8616, node: object) -> object:
+    """Apply the high-byte view, assignment-lhs, or bare-projection arm."""
+    result = _transform_high_byte_view_8616(ctx, node)
+    if result is not None:
+        return result
+    result = _transform_assignment_lhs_8616(ctx, node)
+    if result is not None:
+        return result
+    return _transform_node_projection_8616(ctx, node)
+
+
+def _drop_shadowed_unified_locals_8616(
+    cfunc: object,
+    project: _ProjectGPRegisters8616,
+    state_owned_names: frozenset[str],
+) -> bool:
+    """Remove unified-local register entries shadowed by lowered runtime lanes."""
+    # Dynamic angr/codegen boundary adapters may omit the unified-local mapping.
+    unified_local_vars = getattr(cfunc, "unified_local_vars", None)
+    if not isinstance(unified_local_vars, MutableMapping):
+        return False
+    changed = False
+    for variable in tuple(unified_local_vars):
+        if isinstance(variable, SimRegisterVariable):
+            projection = _register_projection_for_shape_8616(project, variable.reg, variable.size)
+            if projection is not None and projection[0] in state_owned_names:
+                del unified_local_vars[variable]
+                changed = True
+    return changed
+
+
 def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
     """Materialize SSA-proven GP live-ins as explicit runtime globals."""
     initialize_gp_runtime_abi_8616(codegen)
@@ -676,111 +874,11 @@ def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
     captured = capture_gp_register_versions_8616(
         codegen, state_owned_names, lambda node: _c_register_identity_8616(node, project),
     )
-    raw_ids: set[int] = set()
-    materialized_ids: set[int] = set()
+    ctx = _GpStateLoweringContext8616(codegen, cfunc.addr, project, state_owned_names, set(), set())
 
     def transform(node: object) -> object:
         """Replace one exact live-in register carrier."""
-        high_byte_view = _addressed_gp_high_byte_view_8616(node, project)
-        if high_byte_view is not None:
-            register_name, carrier = high_byte_view
-            raw_ids.add(id(node))
-            if register_name not in state_owned_names:
-                return node
-            materialized_ids.add(id(node))
-            record_global_declaration_spec_8616(
-                codegen,
-                ctype=GlobalDeclarationCType8616.UNSIGNED_LONG,
-                name=_RUNTIME_GP_STATE_SYMBOLS_8616[register_name],
-                array_len=None,
-            )
-            return _runtime_gp_expr_8616(
-                register_name,
-                8,
-                1,
-                carrier,
-                cfunc.addr,
-            )
-        if isinstance(node, structured_c.CAssignment):
-            lhs = node.lhs
-            lhs_projection: tuple[str, int, int] | None = None
-            if isinstance(lhs, structured_c.CDirtyExpression):
-                dirty = lhs.dirty
-                if (
-                    # Dynamic angr boundary: opaque dirty expressions may omit category.
-                    getattr(dirty, "category", None) is VirtualVariableCategory.REGISTER
-                    and isinstance(dirty.oident, int)
-                    # Dynamic angr AIL boundary: compatibility nodes may omit size.
-                    and isinstance(getattr(dirty, "size", None), int)
-                ):
-                    lhs_projection = _register_projection_for_shape_8616(
-                        project,
-                        dirty.oident,
-                        cast(int, dirty.size),
-                    )
-            elif isinstance(lhs, structured_c.CVariable) and isinstance(
-                lhs.variable,
-                SimRegisterVariable,
-            ):
-                lhs_projection = _register_projection_for_shape_8616(
-                    project,
-                    lhs.variable.reg,
-                    lhs.variable.size,
-                )
-            if lhs_projection is not None:
-                register_name, bit_shift, view_width = lhs_projection
-                if register_name in state_owned_names and view_width < 4:
-                    raw_ids.add(id(lhs))
-                    materialized_ids.add(id(lhs))
-                    record_global_declaration_spec_8616(
-                        codegen,
-                        ctype=GlobalDeclarationCType8616.UNSIGNED_LONG,
-                        name=_RUNTIME_GP_STATE_SYMBOLS_8616[register_name],
-                        array_len=None,
-                    )
-                    return _runtime_gp_subview_write_8616(
-                        register_name,
-                        bit_shift,
-                        view_width,
-                        lhs,
-                        node.rhs,
-                        cfunc.addr,
-                        tags=node.tags,
-                    )
-        projection: tuple[str, int, int] | None = None
-        if isinstance(node, structured_c.CDirtyExpression):
-            dirty = node.dirty
-            # Dynamic angr boundary: opaque dirty expressions may omit category.
-            if getattr(dirty, "category", None) is VirtualVariableCategory.REGISTER:
-                offset = dirty.oident
-                # Dynamic angr AIL boundary: compatibility nodes may omit size.
-                size = getattr(dirty, "size", None)
-                if isinstance(offset, int) and isinstance(size, int):
-                    projection = _register_projection_for_shape_8616(project, offset, size)
-        elif isinstance(node, structured_c.CVariable):
-            variable = node.variable
-            if isinstance(variable, SimRegisterVariable):
-                projection = _register_projection_for_shape_8616(project, variable.reg, variable.size)
-        if projection is None:
-            return node
-        register_name, bit_shift, view_width = projection
-        raw_ids.add(id(node))
-        if register_name not in state_owned_names:
-            return node
-        materialized_ids.add(id(node))
-        record_global_declaration_spec_8616(
-            codegen,
-            ctype=GlobalDeclarationCType8616.UNSIGNED_LONG,
-            name=_RUNTIME_GP_STATE_SYMBOLS_8616[register_name],
-            array_len=None,
-        )
-        return _runtime_gp_expr_8616(
-            register_name,
-            bit_shift,
-            view_width,
-            cast(structured_c.CVariable | structured_c.CDirtyExpression, node),
-            cfunc.addr,
-        )
+        return _transform_gp_state_node_8616(ctx, node)
 
     root = cfunc.statements
     new_root = transform(root)
@@ -789,19 +887,12 @@ def lower_architectural_gp_register_state_8616(codegen: object) -> bool:
         cfunc.statements = new_root
     if _replace_c_children_8616(cfunc.statements, transform):
         changed = True
-    # Dynamic angr/codegen boundary adapters may omit the unified-local mapping.
-    unified_local_vars = getattr(cfunc, "unified_local_vars", None)
-    if isinstance(unified_local_vars, MutableMapping):
-        for variable in tuple(unified_local_vars):
-            if isinstance(variable, SimRegisterVariable):
-                projection = _register_projection_for_shape_8616(project, variable.reg, variable.size)
-                if projection is not None and projection[0] in state_owned_names:
-                    del unified_local_vars[variable]
-                    changed = True
-    classified = len(materialized_ids)
+    if _drop_shadowed_unified_locals_8616(cfunc, project, state_owned_names):
+        changed = True
+    classified = len(ctx.materialized_ids)
     boundary._inertia_gp_register_state_lowering_stats_8616 = GPRegisterStateLoweringStats8616(
-        raw_fact_count=len(raw_ids),
-        normalized_fact_count=len(raw_ids),
+        raw_fact_count=len(ctx.raw_ids),
+        normalized_fact_count=len(ctx.raw_ids),
         classified_fact_count=classified,
         materialized_count=classified,
         failure_count=0,

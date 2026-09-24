@@ -80,6 +80,38 @@ class _CalleeFunction8616(Protocol):
     block_addrs_set: set[int]
 
 
+def _leaf_block_addrs_8616(
+    project: _Project8616,
+    target: int,
+) -> tuple[int, ...] | None:
+    """Resolve the callee's owned block set or the single direct target."""
+    try:
+        callee = project.kb.functions.function(addr=target, create=False)
+    except (AttributeError, TypeError):
+        callee = None
+    if callee is None:
+        return (target,)
+    try:
+        block_addrs = tuple(sorted(cast(_CalleeFunction8616, callee).block_addrs_set))
+    except (AttributeError, TypeError):
+        return None
+    return block_addrs or (target,)
+
+
+def _leaf_block_body_preserves_register_8616(
+    instructions: tuple[DecodedInstructionFactSurface8616, ...],
+    register: str,
+) -> bool:
+    """Require every pre-return instruction to leave ``register`` untouched."""
+    for candidate in instructions[:-1]:
+        mnemonic = candidate.mnemonic.lower()
+        if is_x86_16_call_mnemonic_8616(mnemonic) or mnemonic.startswith(("j", "loop")):
+            return False
+        if instruction_writes_register_8616(candidate, register):
+            return False
+    return True
+
+
 def _direct_leaf_call_preserves_register_8616(
     project: _Project8616,
     target: int | None,
@@ -95,21 +127,8 @@ def _direct_leaf_call_preserves_register_8616(
         return False
     if is_synthetic_call_stub_8616(project, target):
         return False
-    try:
-        callee = project.kb.functions.function(addr=target, create=False)
-    except (AttributeError, TypeError):
-        callee = None
-    block_addrs: tuple[int, ...]
-    if callee is None:
-        block_addrs = (target,)
-    else:
-        try:
-            block_addrs = tuple(sorted(cast(_CalleeFunction8616, callee).block_addrs_set))
-        except (AttributeError, TypeError):
-            return False
-        if not block_addrs:
-            block_addrs = (target,)
-    if len(block_addrs) != 1:
+    block_addrs = _leaf_block_addrs_8616(project, target)
+    if block_addrs is None or len(block_addrs) != 1:
         return False
     try:
         instructions = decoded_block_instructions_8616(
@@ -121,13 +140,7 @@ def _direct_leaf_call_preserves_register_8616(
         return False
     if not instructions or instructions[-1].mnemonic.lower() not in {"ret", "retf", "retw"}:
         return False
-    for candidate in instructions[:-1]:
-        mnemonic = candidate.mnemonic.lower()
-        if is_x86_16_call_mnemonic_8616(mnemonic) or mnemonic.startswith(("j", "loop")):
-            return False
-        if instruction_writes_register_8616(candidate, register):
-            return False
-    return True
+    return _leaf_block_body_preserves_register_8616(instructions, register)
 
 
 def _synthetic_call_preserves_register_8616(
@@ -147,6 +160,43 @@ def _synthetic_call_preserves_register_8616(
         effect.closes_evidence
         and effect.verdict is SyntheticCallRegisterEffectVerdict8616.PRESERVED
     )
+
+
+def _call_instruction_preserves_register_8616(
+    project: _Project8616,
+    instruction: DecodedInstructionFactSurface8616,
+    register: str,
+) -> bool:
+    """Prove one call instruction leaves ``register`` intact."""
+    target = resolve_direct_call_target_from_instruction_8616(
+        project,
+        instruction,
+    )
+    return _direct_leaf_call_preserves_register_8616(
+        project,
+        target,
+        register,
+    ) or _synthetic_call_preserves_register_8616(
+        project,
+        instruction.address,
+        target,
+        register,
+    )
+
+
+def _register_write_transfer_8616(
+    instruction: DecodedInstructionFactSurface8616,
+    register: str,
+) -> tuple[RegisterBlockTransferKind8616, tuple[object, ...] | None] | None:
+    """Classify one non-call register write as replace, kill, or untouched."""
+    if not instruction_writes_register_8616(instruction, register):
+        return None
+    if decoded_instruction_preserves_register_value_8616(instruction, register):
+        return None
+    replacement = register_replacement_source_8616(instruction, register)
+    if replacement is None:
+        return RegisterBlockTransferKind8616.KILL, None
+    return RegisterBlockTransferKind8616.REPLACE, replacement
 
 
 def _block_transfer_8616(
@@ -174,40 +224,16 @@ def _block_transfer_8616(
             clobbers_memory_sources = False
             continue
         if is_x86_16_call_mnemonic_8616(mnemonic):
-            target = resolve_direct_call_target_from_instruction_8616(
-                project,
-                instruction,
-            )
-            if not (
-                _direct_leaf_call_preserves_register_8616(
-                    project,
-                    target,
-                    register,
-                )
-                or _synthetic_call_preserves_register_8616(
-                    project,
-                    instruction.address,
-                    target,
-                    register,
-                )
-            ):
+            if not _call_instruction_preserves_register_8616(project, instruction, register):
                 kind = RegisterBlockTransferKind8616.KILL
                 source = None
                 clobbers_memory_sources = False
             continue
-        if not instruction_writes_register_8616(instruction, register):
+        write_transfer = _register_write_transfer_8616(instruction, register)
+        if write_transfer is None:
             continue
-        if decoded_instruction_preserves_register_value_8616(instruction, register):
-            continue
-        replacement = register_replacement_source_8616(instruction, register)
-        if replacement is None:
-            kind = RegisterBlockTransferKind8616.KILL
-            source = None
-            clobbers_memory_sources = False
-        else:
-            kind = RegisterBlockTransferKind8616.REPLACE
-            source = replacement
-            clobbers_memory_sources = False
+        kind, source = write_transfer
+        clobbers_memory_sources = False
     return kind, source, clobbers_memory_sources
 
 

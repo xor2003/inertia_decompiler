@@ -76,38 +76,15 @@ _COD_BYTE_ROW_RE = re.compile(
 )
 
 
-def build_cod_module_analysis_image_8616(
+def _scan_cod_byte_rows_8616(
     cod_path: Path,
-    listing: CODListingMetadata,
-    *,
-    image_base: int = 0x10000,
-) -> CODModuleAnalysisImage8616:
-    """Build a complete module image from COD byte rows and proven bounds.
-
-    Named unresolved calls to uniquely bounded module procedures receive their
-    missing relocation. Other unresolved calls are redirected to synthetic
-    return stubs so they cannot masquerade as calls to adjacent functions.
-    Linked nonzero calls retain their exact bytes.
-    """
-    function_ranges = tuple(sorted(set(listing.code_ranges.values())))
-    if not function_ranges:
-        raise ValueError(f"COD listing has no bounded functions: {cod_path}")
-    original_base = min(start for start, _end in function_ranges)
-    original_end = max(end for _start, end in function_ranges)
-    if original_end <= original_base or original_end - original_base > 0x10000:
-        raise ValueError("COD module image must fit one 16-bit code segment")
-
-    image = bytearray(b"\xcc" * (original_end - original_base))
-    written = bytearray(len(image))
-    label_offsets: dict[str, list[int]] = {}
-    for offset, label in listing.code_labels.items():
-        label_offsets.setdefault(_canonical_call_name_8616(label), []).append(offset)
-    internal_targets = {
-        name: offsets[0]
-        for name, offsets in label_offsets.items()
-        if len(offsets) == 1
-    }
-
+    function_ranges: tuple[tuple[int, int], ...],
+    original_base: int,
+    internal_targets: dict[str, int],
+    image: bytearray,
+    written: bytearray,
+) -> tuple[list[tuple[int, int, int | None]], list[tuple[int, int, int | None]], int]:
+    """Write COD byte rows into the image and collect unresolved call sites."""
     unresolved_near_calls: list[tuple[int, int, int | None]] = []
     unresolved_far_calls: list[tuple[int, int, int | None]] = []
     instruction_row_count = 0
@@ -145,7 +122,44 @@ def build_cod_module_analysis_image_8616(
                 else None
             )
             unresolved_far_calls.append((cursor, far_prefix_length, target_offset))
+    return unresolved_near_calls, unresolved_far_calls, instruction_row_count
 
+
+def build_cod_module_analysis_image_8616(
+    cod_path: Path,
+    listing: CODListingMetadata,
+    *,
+    image_base: int = 0x10000,
+) -> CODModuleAnalysisImage8616:
+    """Build a complete module image from COD byte rows and proven bounds.
+
+    Named unresolved calls to uniquely bounded module procedures receive their
+    missing relocation. Other unresolved calls are redirected to synthetic
+    return stubs so they cannot masquerade as calls to adjacent functions.
+    Linked nonzero calls retain their exact bytes.
+    """
+    function_ranges = tuple(sorted(set(listing.code_ranges.values())))
+    if not function_ranges:
+        raise ValueError(f"COD listing has no bounded functions: {cod_path}")
+    original_base = min(start for start, _end in function_ranges)
+    original_end = max(end for _start, end in function_ranges)
+    if original_end <= original_base or original_end - original_base > 0x10000:
+        raise ValueError("COD module image must fit one 16-bit code segment")
+
+    image = bytearray(b"\xcc" * (original_end - original_base))
+    written = bytearray(len(image))
+    label_offsets: dict[str, list[int]] = {}
+    for offset, label in listing.code_labels.items():
+        label_offsets.setdefault(_canonical_call_name_8616(label), []).append(offset)
+    internal_targets = {
+        name: offsets[0]
+        for name, offsets in label_offsets.items()
+        if len(offsets) == 1
+    }
+
+    unresolved_near_calls, unresolved_far_calls, instruction_row_count = _scan_cod_byte_rows_8616(
+        cod_path, function_ranges, original_base, internal_targets, image, written,
+    )
     if instruction_row_count == 0:
         raise ValueError(f"COD listing has no instruction byte rows: {cod_path}")
     near_sink_offset = len(image)

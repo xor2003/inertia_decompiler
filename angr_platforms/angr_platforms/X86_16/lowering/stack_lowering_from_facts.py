@@ -22,7 +22,7 @@ from archinfo import Arch
 
 from ..alias.alias_model_impl import AliasStorageFacts
 from ..analysis.stack_frame_ir import FrameAccessArtifact, StackFrameSlot
-from ..annotations import ANNOTATION_KEY, annotate_function
+from ..annotations import ANNOTATION_KEY, StackAnnotationPurpose8616, annotate_function
 from ..pipeline.errors import PipelineHardError
 from .stack_lowering_result import (
     StackLoweringResult,
@@ -108,13 +108,29 @@ def _unbound_typed_frame_slots_8616(
     return tuple(slot for slot in slots if not any(_binding_covers_frame_slot_8616(binding, slot) for binding in binding_tuple))
 
 
+def _normalized_cod_stack_names_8616(stack_aliases: dict[object, object]) -> dict[int, dict[str, object]]:
+    """Normalize optional label coordinates without manufacturing layout facts."""
+    valid_aliases = (
+        (bp_disp, alias)
+        for bp_disp, alias in stack_aliases.items()
+        if isinstance(bp_disp, int) and isinstance(alias, str) and alias
+    )
+    return {
+        (bp_disp - 2 if bp_disp > 0 else bp_disp): {
+            "name": alias,
+            "purpose": StackAnnotationPurpose8616.NAME_ONLY,
+        }
+        for bp_disp, alias in sorted(valid_aliases)
+    }
+
+
 def attach_cod_stack_alias_annotations_8616(project: object, func_addr: int, cod_metadata: object) -> bool:
     """Attach COD BP stack aliases as lowering-owned stack-name evidence.
 
     COD aliases are optional naming evidence, not a source-body oracle.  This
-    bridge records them as normalized stack slots before decompiler recovery so
-    the stack/prototype lowering path can consume the same structured
-    ``stack_vars`` map as other metadata sources.
+    bridge records normalized names before decompiler recovery. Their typed
+    purpose excludes them from stack/prototype layout recovery: a label is
+    never evidence for an argument's existence, position, or width.
     """
     stack_aliases = _dynamic_boundary_attr_8616(cod_metadata, "stack_aliases")
     if not isinstance(stack_aliases, dict) or not stack_aliases:
@@ -128,7 +144,7 @@ def attach_cod_stack_alias_annotations_8616(project: object, func_addr: int, cod
         if not callable(function_for_addr):
             return False
         func = function_for_addr(addr=func_addr, create=True)
-    except Exception:
+    except (AttributeError, KeyError):
         return False
     if func is None:
         return False
@@ -150,17 +166,12 @@ def attach_cod_stack_alias_annotations_8616(project: object, func_addr: int, cod
     stack_vars = annotations.setdefault("stack_vars", {})
     if not isinstance(stack_vars, dict):
         return False
-    normalized_specs: dict[int, dict[str, object]] = {}
-    for bp_disp, alias in sorted(stack_aliases.items()):
-        if not isinstance(bp_disp, int) or not isinstance(alias, str) or not alias:
-            continue
-        stack_offset = bp_disp - 2 if bp_disp > 0 else bp_disp
-        spec: dict[str, object] = {"name": alias}
-        normalized_specs[stack_offset] = spec
+    normalized_specs = _normalized_cod_stack_names_8616(stack_aliases)
     if not normalized_specs:
         return False
     changed = any(
-        not isinstance(stack_vars.get(offset), dict) or stack_vars.get(offset, {}).get("name") != spec["name"]
+        not isinstance(stack_vars.get(offset), dict)
+        or any(stack_vars[offset].get(key) != value for key, value in spec.items())
         for offset, spec in normalized_specs.items()
     )
     annotate_function(

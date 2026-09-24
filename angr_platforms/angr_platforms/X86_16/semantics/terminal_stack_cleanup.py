@@ -12,7 +12,7 @@ Forbidden: source/COD/name evidence, rendered-text recovery, or prototype repair
 from __future__ import annotations
 
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
 
 from angr.errors import SimEngineError, SimTranslationError
@@ -186,81 +186,101 @@ def collect_terminal_stack_cleanup_evidence_8616(
         block_addrs, entry_addr = frozenset(), None
     if not isinstance(entry_addr, int) or entry_addr not in block_addrs:
         return TerminalStackCleanupEvidence8616(frozenset(), 1, 0, 0, 0, 1)
-    amounts: set[int] = set()
-    frame_kinds: set[TerminalReturnFrameKind8616] = set()
-    operand_bits: set[int | None] = set()
-    counts = [0, 0, 0, 0, 0]
+
+    scan = _CleanupScan8616(project=project, block_addrs=block_addrs)
+    scan.follow(entry_addr, frozenset())
+    return TerminalStackCleanupEvidence8616(
+        cleanup_amounts=frozenset(scan.amounts),
+        raw_fact_count=scan.counts[0],
+        normalized_fact_count=scan.counts[1],
+        classified_fact_count=scan.counts[2],
+        materialized_count=scan.counts[3],
+        failure_count=scan.counts[4],
+        return_frame_kinds=frozenset(scan.frame_kinds),
+        return_operand_bits=frozenset(scan.operand_bits),
+    )
+
+
+@dataclass
+class _CleanupScan8616:
+    """Bounded entry-reachable path walker collecting cleanup evidence."""
+
+    project: object
+    block_addrs: frozenset[int]
+    amounts: set[int] = field(default_factory=set)
+    frame_kinds: set[TerminalReturnFrameKind8616] = field(default_factory=set)
+    operand_bits: set[int | None] = field(default_factory=set)
+    counts: list[int] = field(default_factory=lambda: [0, 0, 0, 0, 0])
 
     def record_cleanup(
+        self,
         cleanup: int,
         frame_kind: TerminalReturnFrameKind8616,
         width: int | None,
     ) -> None:
         """Record one classified terminal cleanup and frame-shape fact."""
         for index in range(4):
-            counts[index] += 1
-        amounts.add(cleanup)
-        frame_kinds.add(frame_kind)
-        operand_bits.add(width)
+            self.counts[index] += 1
+        self.amounts.add(cleanup)
+        self.frame_kinds.add(frame_kind)
+        self.operand_bits.add(width)
 
-    def record_failure() -> None:
+    def record_failure(self) -> None:
         """Record one terminal/control fact that cannot be classified."""
-        counts[0] += 1
-        counts[4] += 1
+        self.counts[0] += 1
+        self.counts[4] += 1
 
-    def scan(block_addr: int, path: frozenset[int]) -> None:
+    def follow(self, block_addr: int, path: frozenset[int]) -> None:
         """Follow one bounded control-flow path to a return."""
         if block_addr in path:
             return
         try:
-            insns = decoded_block_instructions_8616(cast(Any, project), block_addr, opt_level=0)
+            insns = decoded_block_instructions_8616(cast(Any, self.project), block_addr, opt_level=0)
         except (KeyError, SimEngineError, SimTranslationError, ValueError):
-            record_failure()
+            self.record_failure()
             return
         if not insns:
-            record_failure()
+            self.record_failure()
             return
         for insn in insns:
-            mnemonic = _mnemonic_8616(insn)
-            if mnemonic.startswith("ret") or mnemonic == "iret":
-                cleanup = _return_cleanup_8616(insn)
-                frame_kind = _return_frame_kind_8616(insn)
-                if isinstance(cleanup, int) and frame_kind is not None:
-                    record_cleanup(cleanup, frame_kind, decoded_return_operand_bits_8616(_inner_instruction_8616(insn)))
-                else:
-                    record_failure()
-                return
-            if mnemonic in {"jmp", "jmpw", "ljmp"}:
-                target = _direct_target_8616(insn)
-                if isinstance(target, int) and target in block_addrs:
-                    scan(target, path | {block_addr})
-                else:
-                    record_failure()
-                return
-            if _is_conditional_branch_8616(mnemonic):
-                for successor in dict.fromkeys((_direct_target_8616(insn), _fallthrough_8616(insn))):
-                    if isinstance(successor, int) and successor in block_addrs:
-                        scan(successor, path | {block_addr})
-                    else:
-                        record_failure()
+            if self._follow_insn(insn, block_addr, path):
                 return
         fallthrough = _fallthrough_8616(insns[-1])
-        if isinstance(fallthrough, int) and fallthrough in block_addrs:
-            scan(fallthrough, path | {block_addr})
+        if isinstance(fallthrough, int) and fallthrough in self.block_addrs:
+            self.follow(fallthrough, path | {block_addr})
         else:
-            record_failure()
+            self.record_failure()
 
-    scan(entry_addr, frozenset())
-    return TerminalStackCleanupEvidence8616(
-        cleanup_amounts=frozenset(amounts),
-        raw_fact_count=counts[0],
-        normalized_fact_count=counts[1],
-        classified_fact_count=counts[2],
-        materialized_count=counts[3],
-        failure_count=counts[4],
-        return_frame_kinds=frozenset(frame_kinds),
-        return_operand_bits=frozenset(operand_bits),
-    )
+    def _follow_insn(self, insn: object, block_addr: int, path: frozenset[int]) -> bool:
+        """Handle one instruction; return True when the path was consumed."""
+        mnemonic = _mnemonic_8616(insn)
+        if mnemonic.startswith("ret") or mnemonic == "iret":
+            cleanup = _return_cleanup_8616(insn)
+            frame_kind = _return_frame_kind_8616(insn)
+            if isinstance(cleanup, int) and frame_kind is not None:
+                self.record_cleanup(
+                    cleanup,
+                    frame_kind,
+                    decoded_return_operand_bits_8616(_inner_instruction_8616(insn)),
+                )
+            else:
+                self.record_failure()
+            return True
+        if mnemonic in {"jmp", "jmpw", "ljmp"}:
+            target = _direct_target_8616(insn)
+            if isinstance(target, int) and target in self.block_addrs:
+                self.follow(target, path | {block_addr})
+            else:
+                self.record_failure()
+            return True
+        if _is_conditional_branch_8616(mnemonic):
+            for successor in dict.fromkeys((_direct_target_8616(insn), _fallthrough_8616(insn))):
+                if isinstance(successor, int) and successor in self.block_addrs:
+                    self.follow(successor, path | {block_addr})
+                else:
+                    self.record_failure()
+            return True
+        return False
 
 
 def terminal_stack_cleanup_at_address_8616(
@@ -283,6 +303,23 @@ def terminal_stack_cleanup_at_address_8616(
             return known
     else:
         known = None
+    direct = _direct_body_cleanup_evidence_8616(project, address)
+    if direct is not None:
+        cache[address] = direct
+        return direct
+    reachable = _reachable_body_cleanup_evidence_8616(project, address)
+    if reachable is not None:
+        cache[address] = reachable
+        return reachable
+    if known is not None:
+        return known
+    return TerminalStackCleanupEvidence8616(frozenset(), 1, 0, 0, 0, 1)
+
+
+def _direct_body_cleanup_evidence_8616(
+    project: object, address: int
+) -> TerminalStackCleanupEvidence8616 | None:
+    """Classify cleanup when the callee body is a single unbranched block."""
     try:
         insns = decoded_block_instructions_8616(cast(Any, project), address, opt_level=0)
     except (KeyError, SimEngineError, SimTranslationError, ValueError):
@@ -299,40 +336,43 @@ def terminal_stack_cleanup_at_address_8616(
         else None
     )
     frame_kind = _return_frame_kind_8616(terminal) if terminal is not None else None
-    if isinstance(cleanup, int) and frame_kind is not None:
-        evidence = TerminalStackCleanupEvidence8616(
-            frozenset({cleanup}),
-            1,
-            1,
-            1,
-            1,
-            0,
-            frozenset({frame_kind}),
-            frozenset({decoded_return_operand_bits_8616(_inner_instruction_8616(terminal))}),
-        )
-        cache[address] = evidence
-        return evidence
+    if not (isinstance(cleanup, int) and frame_kind is not None):
+        return None
+    return TerminalStackCleanupEvidence8616(
+        frozenset({cleanup}),
+        1,
+        1,
+        1,
+        1,
+        0,
+        frozenset({frame_kind}),
+        frozenset({decoded_return_operand_bits_8616(_inner_instruction_8616(terminal))}),
+    )
 
+
+def _reachable_body_cleanup_evidence_8616(
+    project: object, address: int
+) -> TerminalStackCleanupEvidence8616 | None:
+    """Classify cleanup over bounded reachable blocks in the containing object."""
     try:
         loaded = cast(_ProjectLoaderSurface8616, project).loader.find_object_containing(address)
     except (AttributeError, KeyError, TypeError):
-        loaded = None
-    if loaded is not None and isinstance(loaded.min_addr, int) and isinstance(loaded.max_addr, int):
-        reachability = collect_instruction_reachability_8616(
-            project,
-            entry=address,
-            region_start=loaded.min_addr,
-            region_end=loaded.max_addr + 1,
-        )
-        if reachability.complete:
-            reachable = _ReachableFunctionSurface8616(
-                address,
-                frozenset(reachability.reachable_block_addrs),
-            )
-            evidence = collect_terminal_stack_cleanup_evidence_8616(project, reachable)
-            if evidence.complete:
-                cache[address] = evidence
-                return evidence
-    if known is not None:
-        return known
-    return TerminalStackCleanupEvidence8616(frozenset(), 1, 0, 0, 0, 1)
+        return None
+    if not (
+        loaded is not None and isinstance(loaded.min_addr, int) and isinstance(loaded.max_addr, int)
+    ):
+        return None
+    reachability = collect_instruction_reachability_8616(
+        project,
+        entry=address,
+        region_start=loaded.min_addr,
+        region_end=loaded.max_addr + 1,
+    )
+    if not reachability.complete:
+        return None
+    reachable = _ReachableFunctionSurface8616(
+        address,
+        frozenset(reachability.reachable_block_addrs),
+    )
+    evidence = collect_terminal_stack_cleanup_evidence_8616(project, reachable)
+    return evidence if evidence.complete else None

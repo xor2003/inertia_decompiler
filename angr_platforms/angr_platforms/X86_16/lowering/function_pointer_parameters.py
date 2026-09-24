@@ -47,6 +47,7 @@ from .stack_prototype_layout import (
     stack_prototype_cvar_for_machine_bp_range_8616,
 )
 from .stack_storage_evidence import proven_bp_entry_sp_delta_8616
+from .stack_variable_coordinates import publish_selected_stack_cvar_projection_8616
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ class _Codegen8616(Protocol):
 
     cfunc: _CFunction8616 | None
     project: _Project8616
+    _func_args: Sequence[SimStackVariable]
     _inertia_callsite_summaries: object
     _inertia_codegen_decl_refresh_required_8616: bool
     _inertia_function_pointer_parameter_evidence_8616: FunctionPointerParameterEvidence8616
@@ -140,6 +142,39 @@ def _function_pointer_type_8616(
     if fact.pointer_width == 4:
         return far_pointer_type_8616(cast(SimType, prototype), arch)
     return near_pointer_type_8616(cast(SimType, prototype), arch)
+
+
+def materialized_function_pointer_slots_8616(
+    codegen_raw: object,
+    arch: Arch,
+) -> tuple[StackPrototypeArgument8616, ...]:
+    """Project closed pointer evidence without asserting a complete signature.
+
+    Scalar body views cannot narrow these slots. Other argument positions and
+    the end of the argument interface remain unproven by this evidence.
+    """
+    codegen = cast(_Codegen8616, codegen_raw)
+    try:
+        evidence = codegen._inertia_function_pointer_parameter_evidence_8616
+    except AttributeError:
+        return ()
+    if not isinstance(evidence, FunctionPointerParameterEvidence8616):
+        return ()
+    if (
+        evidence.failure_count != 0
+        or evidence.failures
+        or evidence.materialized_count != len(evidence.facts)
+        or evidence.classified_fact_count != len(evidence.facts)
+    ):
+        return ()
+    return tuple(
+        StackPrototypeArgument8616(
+            fact.stack_offset,
+            fact.pointer_width,
+            _function_pointer_type_8616(fact, arch),
+        )
+        for fact in evidence.facts
+    )
 
 
 def _typed_summary_values_8616(codegen: _Codegen8616) -> tuple[CallsiteSummary8616, ...]:
@@ -308,9 +343,20 @@ def _reflow_argument_surface_8616(
             candidate = CVariable(variable, variable_type=slot.argument_type, codegen=codegen)
         else:
             candidate.variable_type = slot.argument_type
+        publish_selected_stack_cvar_projection_8616(
+            codegen,
+            candidate,
+            bp_offset=slot.offset,
+            size=slot.storage_width,
+            entry_sp_offset=cast(SimStackVariable, candidate.variable).offset,
+        )
         desired.append(candidate)
     cfunc.functy = new_functy
     cfunc.arg_list = desired
+    # angr rebuilds the CFunction from this separate argument-storage surface.
+    # Updating only arg_list lets a later _analyze restore the old slot widths
+    # and offsets even though the retained prototype already owns a far pointer.
+    codegen._func_args = [cast(SimStackVariable, argument.variable) for argument in desired]
     return desired[index] if index < len(desired) else None
 
 
@@ -402,6 +448,7 @@ def _materialize_fact_8616(
     """Persist one classified fact to the argument, AST, manager, and prototypes."""
     if not isinstance(cfunc.functy, SimTypeFunction):
         return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
+    original_prototype = cfunc.functy
     prototype_args = tuple(cfunc.functy.args or ())
     pointer_type = _function_pointer_type_8616(fact, project.arch)
     pointer_storage_width = _pointer_storage_width_8616(pointer_type, project.arch)
@@ -423,7 +470,13 @@ def _materialize_fact_8616(
         return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
     if not isinstance(argument.variable, SimStackVariable):
         return False, FunctionPointerParameterFailure8616.PARAMETER_SLOT_MISSING
-    return _persist_pointer_argument_type_8616(project, cfunc, index, argument, pointer_type)
+    changed, failure = _persist_pointer_argument_type_8616(
+        project, cfunc, index, argument, pointer_type,
+    )
+    # Slot resolution may already have widened the declaration and re-sited
+    # later parameters. Persistence can then be a no-op, but codegen must still
+    # refresh the changed interface even when the KB prototype already agrees.
+    return changed or cfunc.functy != original_prototype, failure
 
 
 def _persist_pointer_argument_type_8616(
@@ -526,4 +579,5 @@ __all__ = [
     "FunctionPointerParameterFailure8616",
     "collect_function_pointer_parameter_evidence_8616",
     "materialize_function_pointer_parameters_8616",
+    "materialized_function_pointer_slots_8616",
 ]

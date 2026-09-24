@@ -95,6 +95,32 @@ class _ProjectInventoryBoundary8616(Protocol):
     ]
 
 
+def _callsite_surface_8616(
+    boundary: _FunctionBoundary8616,
+) -> tuple[tuple[int, int | None, int | None], ...]:
+    """Snapshot each proven callsite with its target and continuation."""
+    try:
+        callsite_addrs = tuple(boundary.get_call_sites())
+    except (AttributeError, TypeError):
+        callsite_addrs = ()
+    callsites: list[tuple[int, int | None, int | None]] = []
+    for raw_callsite_addr in callsite_addrs:
+        try:
+            callsite_addr = int(raw_callsite_addr)
+            target = boundary.get_call_target(callsite_addr)
+            return_addr = boundary.get_call_return(callsite_addr)
+        except (AttributeError, TypeError, ValueError):
+            continue
+        callsites.append(
+            (
+                callsite_addr,
+                target if isinstance(target, int) else None,
+                return_addr if isinstance(return_addr, int) else None,
+            )
+        )
+    return tuple(sorted(callsites))
+
+
 def _function_binary_surface_8616(
     function: object,
     *,
@@ -130,28 +156,7 @@ def _function_binary_surface_8616(
         except AttributeError:
             size = -1
         extents.append((block_addr, size))
-    callsites: list[tuple[int, int | None, int | None]] = []
-    if include_callsites:
-        try:
-            callsite_addrs = tuple(boundary.get_call_sites())
-        except (AttributeError, TypeError):
-            callsite_addrs = ()
-    else:
-        callsite_addrs = ()
-    for raw_callsite_addr in callsite_addrs:
-        try:
-            callsite_addr = int(raw_callsite_addr)
-            target = boundary.get_call_target(callsite_addr)
-            return_addr = boundary.get_call_return(callsite_addr)
-        except (AttributeError, TypeError, ValueError):
-            continue
-        callsites.append(
-            (
-                callsite_addr,
-                target if isinstance(target, int) else None,
-                return_addr if isinstance(return_addr, int) else None,
-            )
-        )
+    callsites = _callsite_surface_8616(boundary) if include_callsites else ()
     return FunctionBinarySurface8616(
         identity,
         function_size,

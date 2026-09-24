@@ -2014,10 +2014,12 @@ def test_lowering_attaches_cod_stack_aliases_as_normalized_stack_specs():
     )
 
     assert changed is True
+    from angr_platforms.X86_16.annotations import StackAnnotationPurpose8616
+
     assert active.info[ANNOTATION_KEY]["stack_vars"] == {
-        -4: {"name": "i"},
-        2: {"name": "iRow1"},
-        4: {"name": "iRow2"},
+        -4: {"name": "i", "purpose": StackAnnotationPurpose8616.NAME_ONLY},
+        2: {"name": "iRow1", "purpose": StackAnnotationPurpose8616.NAME_ONLY},
+        4: {"name": "iRow2", "purpose": StackAnnotationPurpose8616.NAME_ONLY},
     }
 
 

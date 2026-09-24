@@ -899,3 +899,153 @@ and the obligation stays unadmitted. `fill_bytes`/`swap_ptrs`/`offset_copy`
 far-frame argument reads remain pending. Per AGENTS.md hard rule 16 (loud
 exceptions), the two silent far-proof catch-alls were removed and the
 incomplete test mocks were completed instead.
+
+### Far-Pointer Rebuild State Checkpoint (2026-09-24)
+
+- Investigation began with the retained linked `apply_twice` replay at
+  09:16:46 local time; checkpoint at 09:28 local time (about eleven minutes
+  including diagnostic runs and checks, not a pure implementation timing).
+- The pointer owner now reports declaration changes even when its retained KB
+  prototype already matches. It also publishes widened/re-sited argument
+  storage to angr's `_func_args`, the separate input used by a later
+  `StructuredCodeGenerator._analyze` rebuild. Previously only the live
+  `CFunction.arg_list` was updated. The new rebuild-storage regression failed
+  before this change and passes afterward; the existing refresh/replay
+  regression remains passing. Both are in the routine pipeline through the
+  enrolled function-pointer test module.
+- Focused pointer/layout/codegen neighborhood: **16 passed** (33.02 seconds,
+  seven workers, JIT enabled). Touched owner/test Ruff clean; focused owner
+  MyPy clean. This is not function acceptance or broad-suite acceptance.
+- Linked replay `.cache/coverage-apply-twice-rebuild.{c,err}` still exits 4.
+  It retains `parameter_slot_missing` in an intermediate attempt and final
+  uninitialized SI/DI restore reads at `SS:BP-8..-5`. Diagnostics show a
+  correct native argument layout `(4,4)/(8,2)` reverting to `(2,4)/(6,2)`
+  before pre-validation callsite replay. Updating the rebuild input alone
+  does not fix that reset; trace the pre-validation stack-interface consumers
+  next. Temporary diagnostic source edits were removed.
+- `quality-dev` was invoked with output retained in
+  `.cache/far-pointer-rebuild-quality-dev.log`; its MyPy lane reports errors
+  in `validation_condition_storage_views.py` and `semantics/call_stack_effects.py`,
+  outside this slice. No large-pointer obligation is admitted at this checkpoint.
+
+### Optional Stack Names Cannot Override Binary Layout (2026-09-24)
+
+- The live argument-write trace identified the reset precisely:
+  `materialize_annotated_stack_prototype_8616` interpreted normalized COD
+  labels `{4: fn, 8: value}` as machine-BP argument slots. That replaced
+  the already-proven far layout. Diagnostics are retained in
+  `.cache/coverage-apply-twice-arg-writes.err` and
+  `.cache/coverage-apply-twice-annotations.err`; temporary instrumentation
+  was removed.
+- COD stack aliases now carry `StackAnnotationPurpose8616.NAME_ONLY`.
+  The shared annotation-contract selector excludes them (and unknown
+  purposes) from layout recovery. Lowering and legacy prototype consumers
+  use that selector; existing naming consumers still receive the labels.
+  Explicit layout annotations retain their compatibility behavior. This is
+  an evidence-authority correction, not a source-derived far-frame fix.
+- Near/far naming-only regressions failed before the change. The first
+  focused neighborhood passed **87 tests** in 55.05 seconds with seven
+  workers. A subsequent helper extraction and unknown-purpose control are
+  included in the pending default pipeline gate. MyPy passes on the three
+  annotation owners. Baseline Ruff had 74 findings across the four legacy
+  implementation files; the touched COD-label function's complexity finding
+  was removed, leaving the unrelated debt visible.
+- Linked replay `.cache/coverage-apply-twice-naming-only.{c,err}` exits 4:
+  binary-only positive-BP recovery still narrows the proven pointer storage
+  and drops the following value argument in the full rebased attempt.
+  A fallback also fails gcc due to a missing indirect-call argument. No
+  candidate or far-pointer obligation is admitted. GP restore diagnostics
+  show incomplete call-stack effects invalidate save provenance across calls;
+  SI/DI restore reads remain uninitialized rather than being deleted.
+- Default `make test-pipeline` is running as of 09:40 local time; its
+  prerequisite passed 292 tests. Log:
+  `.cache/stack-annotation-authority-pipeline.log`. Confirm terminal status
+  and inspect its structured summary before claiming pipeline success.
+
+### Binary Pointer Slot Replay (2026-09-24)
+
+- Resumed investigation around 09:48 local. The focused regression proves
+  positive-BP replay narrowed native `(4,4)/(8,2)` to `(4,2)` despite a
+  successfully materialized far function pointer. The pointer owner now
+  projects its closed evidence into exact typed slots; argument recovery
+  consumes these without asserting a complete signature or promoting
+  `CCA_DECOMPILER` to `SIGNATURES`. Existing signature layouts keep precedence.
+- Initial pointer neighborhood: 12 passed, 24.72 seconds. Added near/far
+  projection and missing/unclosed-evidence refusal controls, enrolled in the
+  routine pipeline. Focused MyPy passes; pointer owner/tests Ruff clean.
+  The legacy positive-BP owner still has two complexity findings.
+- Linked `apply_twice` replay finished at 09:51 local, exit 4. It now emits
+  both arguments (`arg_6` pointer and `arg_a` value), but SI/DI restore reads
+  remain uninitialized and validation fails. Retained artifacts:
+  `.cache/coverage-apply-twice-pointer-slots.{c,err}`. No obligation admitted.
+- The earlier pipeline process is gone and its summary is stale; only its
+  292 prerequisite passes are confirmed. A fresh default gate is required.
+  `quality-dev` currently exposes repository lint debt and an unrelated
+  mypyc typing error in `validation_control_flow.py`; see
+  `.cache/pointer-slot-replay-quality-dev.log`.
+- Final focused neighborhood: **38 passed** in 48.42 seconds, seven workers,
+  JIT enabled. Four old mock failures required supplying the missing decoder
+  surface (empty body); no production exception fallback was introduced.
+  Quality-dev terminated with exit 2. Fresh default pipeline started with log
+  `.cache/pointer-slot-replay-pipeline.log`; its result remains pending.
+
+### Far Stack-Allocation Frame Proof (2026-09-24)
+
+- A seeded in-process probe (`PYTHONHASHSEED=0`, to avoid the CLI's exec
+  restart discarding hooks) captured the actual `apply_twice` call-effect
+  refusals: the first direct far call is `STACK_ALLOCATION_UNPROVEN`; both
+  BP+6 far-pointer calls are `TARGET_UNRESOLVED`. Artifacts:
+  `.cache/coverage-apply-twice-call-proof-seeded.{c,err}` (exit 4).
+- Semantics accepted only near frames in `CallStackAllocationProof8616`,
+  although Frontend already distinguishes near/far stack helpers by binary
+  evidence. The proof now carries the exact binary return-frame kind, and
+  matching requires agreement with the call frame. Conflicting proofs remain
+  visible to the consumer so an unmarked allocation cannot silently become
+  a zero-allocation call. This does not weaken unknown indirect-call refusal.
+- Before: **3 failed / 12 passed**, 68.55 seconds, including an unmarked far
+  allocation incorrectly reported as zero and a mismatched near/far frame
+  incorrectly accepted. Initial after-fix neighborhood: **42 passed** in
+  56.52 seconds. Focused MyPy and Ruff pass. Final unmarked-mismatch controls
+  and required frame-kind constructor are being checked separately.
+- Linked replay `.cache/coverage-apply-twice-far-allocation.{c,err}` is pending.
+  The live default gate predates this allocation edit; do not treat it as
+  full-suite acceptance for this subsequent change. No far obligation admitted.
+- Linked replay has now finished, exit 4. Its typed call-effect artifact
+  improves from three refusals to two: the allocation call is PROVEN with
+  BP preservation; both indirect targets remain unresolved. SI/DI local
+  initialization validation still fails, so this is not function acceptance.
+  The final focused run encountered a transient concurrent indentation error
+  in `calling_convention_compat.py`; after verifying that file compiles, a
+  rerun is active in `.cache/far-allocation-final-stable.log`.
+- Final focused rerun: **44 passed** in 53.60 seconds, including the required
+  frame-kind proof constructor and marked/unmarked mismatch refusal controls.
+  This completes the bounded allocation regression loop, not the far-function
+  witness or the compiler-coverage plan.
+
+### Native Machine CALL Frame Reconciliation (2026-09-24)
+
+- The pre-SSA probe accepted both indirect far calls and consumed all 12
+  machine-frame effects. Native VEX stack tracking independently popped only
+  one architecture word, leaving SP two bytes low after each far CALL.
+  Binary-only before-fix regressions: two far failures, one near pass.
+- Semantics now publishes the decoded CALL frame width separately from target
+  ABI, argument cleanup and preservation. The native adapter reconciles that
+  frame with angr's fixed-word pop and records a closed typed census. Unknown
+  frames and mismatched return edges invalidate SP evidence. Operand-size
+  overridden FF /3 is identified from decoded opcode/ModRM, not Capstone's
+  CALL versus LCALL id alone. Existing PUSH CS / near CALL proofs remain separate.
+- Initial neighborhood: 69 passed. Added 32-bit width and refusal controls
+  exposed the Capstone FF /3 id distinction; final rerun is retained in
+  `.cache/native-call-frame-final-widths.log`. Scoped Ruff and MyPy pass.
+- Linked replay `.cache/coverage-apply-twice-machine-frame.{c,err}` exits 4.
+  The rebased native SI/DI save and restore offsets now agree and the final
+  whole-tail check is clean. Compilation still rejects pointer bitwise masks
+  around the materialized function-pointer calls. Direct-address fallback
+  separately fails argument materialization. No far obligation is admitted.
+- `quality-dev` exits 2 on existing repository lint/typing debt; full log
+  `.cache/native-call-frame-quality-dev.log`. The prior default gate's pytest
+  lane has 6,468 passes and 23 failures; its external stages remain pending.
+  It predates this correction and cannot establish acceptance for it.
+- Final focused rerun: **73 passed** in 32.19 seconds, seven workers with JIT.
+  Scoped Ruff/MyPy and diff whitespace checks pass. The existing default gate
+  is still running its QuickC external lane; no duplicate broad gate started.

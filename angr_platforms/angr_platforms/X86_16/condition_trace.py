@@ -93,52 +93,52 @@ def _node_condition_key_8616(node: object) -> tuple[int, int] | None:
     return _condition_trace_key_8616(ins_addr, block_addr)
 
 
+def _condition_rows_for_node_8616(
+    node: object,
+) -> list[tuple[tuple[int, int], object, str]]:
+    """Return the tagged condition rows contributed by one C-AST node."""
+    rows: list[tuple[tuple[int, int], object, str]] = []
+    if isinstance(node, CIfElse):
+        condition_pairs = cast(
+            tuple[tuple[object, object], ...],
+            # Dynamic angr boundary: CIfElse condition pairs are stored in a variant-specific C-AST field.
+            tuple(getattr(node, "condition_and_nodes", ()) or ()),
+        )
+        for cond, _body in condition_pairs:
+            key = _node_condition_key_8616(cond)
+            if key is not None:
+                rows.append((key, cond, "if"))
+    elif isinstance(node, (CIfBreak, CForLoop)):
+        cond = node.condition
+        key = _node_condition_key_8616(cond)
+        if key is not None:
+            tag = "ifbreak" if isinstance(node, CIfBreak) else "for"
+            rows.append((key, cond, tag))
+    elif hasattr(node, "condition"):
+        cond = getattr(node, "condition", None)
+        key = _node_condition_key_8616(cond)
+        if key is not None:
+            rows.append((key, cond, type(node).__name__))
+    return rows
+
+
 def _iter_condition_nodes_8616(codegen: object) -> Iterable[tuple[tuple[int, int], object, str]]:
     """Iterate condition-bearing nodes through the dynamic third-party angr C-AST boundary."""
-
-    def _impl() -> tuple[tuple[tuple[int, int], object, str], ...]:
-        """Traverse optional C-AST condition fields at the dynamic angr codegen boundary."""
-        cfunc = getattr(codegen, "cfunc", None)
-        root = None
-        for attr in ("body", "statements", "stmt"):
-            value = getattr(cfunc, attr, None)
-            if value is not None:
-                root = value
-                break
-        if root is None:
-            root = cfunc
-        if root is None:
-            return ()
-        rows: list[tuple[tuple[int, int], object, str]] = []
-        for node in _iter_c_nodes_deep_8616(root):
-            if isinstance(node, CIfElse):
-                condition_pairs = cast(
-                    tuple[tuple[object, object], ...],
-                    # Dynamic angr boundary: CIfElse condition pairs are stored in a variant-specific C-AST field.
-                    tuple(getattr(node, "condition_and_nodes", ()) or ()),
-                )
-                for cond, _body in condition_pairs:
-                    key = _node_condition_key_8616(cond)
-                    if key is not None:
-                        rows.append((key, cond, "if"))
-            elif isinstance(node, CIfBreak):
-                cond = node.condition
-                key = _node_condition_key_8616(cond)
-                if key is not None:
-                    rows.append((key, cond, "ifbreak"))
-            elif isinstance(node, CForLoop):
-                cond = node.condition
-                key = _node_condition_key_8616(cond)
-                if key is not None:
-                    rows.append((key, cond, "for"))
-            elif hasattr(node, "condition"):
-                cond = getattr(node, "condition", None)
-                key = _node_condition_key_8616(cond)
-                if key is not None:
-                    rows.append((key, cond, type(node).__name__))
-        return tuple(rows)
-
-    return _impl()
+    cfunc = getattr(codegen, "cfunc", None)
+    root = None
+    for attr in ("body", "statements", "stmt"):
+        value = getattr(cfunc, attr, None)
+        if value is not None:
+            root = value
+            break
+    if root is None:
+        root = cfunc
+    if root is None:
+        return ()
+    rows: list[tuple[tuple[int, int], object, str]] = []
+    for node in _iter_c_nodes_deep_8616(root):
+        rows.extend(_condition_rows_for_node_8616(node))
+    return tuple(rows)
 
 
 def record_classified_conditions_trace_8616(project: object, codegen: object, conditions: list[ConditionIR]) -> None:

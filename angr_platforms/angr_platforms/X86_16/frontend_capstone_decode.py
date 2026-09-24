@@ -193,6 +193,52 @@ def _instruction_terminates_block_8616(instruction: object) -> tuple[bool, bool,
     return terminates, True, repeats
 
 
+def _scan_decoded_instructions_8616(
+    decoder: object,
+    address: int,
+    code: bytes,
+    *,
+    require_full_extent: bool,
+) -> CapstoneBlockDecodeArtifact8616 | tuple[tuple[object, ...], int, bool]:
+    """Decode until a proven terminator or return a typed decode refusal."""
+    instructions: list[object] = []
+    expected = address
+    terminated = False
+    for instruction in decoder.disasm(code, address):
+        instruction_boundary = cast(_InstructionBoundary8616, instruction)
+        instruction_address = int(instruction_boundary.address)
+        instruction_size = int(instruction_boundary.size)
+        if instruction_address != expected or instruction_size <= 0:
+            return _refused_8616(
+                CapstoneBlockDecodeFailureReason8616.DECODE_INCOMPLETE,
+                "Capstone instruction ownership is not contiguous",
+            )
+        terminates = False
+        if not require_full_extent:
+            terminates, supported, repeats = _instruction_terminates_block_8616(instruction)
+            if not supported:
+                return _refused_8616(
+                    CapstoneBlockDecodeFailureReason8616.TERMINATOR_UNSUPPORTED,
+                    str(instruction_boundary.mnemonic),
+                )
+            if repeats and instructions:
+                terminated = True
+                break
+        expected += instruction_size
+        if expected > address + len(code):
+            return _refused_8616(
+                CapstoneBlockDecodeFailureReason8616.DECODE_INCOMPLETE,
+                "Capstone instruction exceeds the requested byte extent",
+            )
+        instructions.append(instruction)
+        if require_full_extent:
+            continue
+        terminated = terminates
+        if terminated:
+            break
+    return tuple(instructions), expected - address, terminated
+
+
 def _decode_8616(
     project: object,
     address: int,
@@ -211,49 +257,21 @@ def _decode_8616(
             CapstoneBlockDecodeFailureReason8616.DECODER_UNAVAILABLE,
             f"{type(error).__name__}: {error}",
         )
-    instructions: list[object] = []
-    expected = address
-    terminated = False
     try:
-        decoded = decoder.disasm(code, address)
-        for instruction in decoded:
-            instruction_boundary = cast(_InstructionBoundary8616, instruction)
-            instruction_address = int(instruction_boundary.address)
-            instruction_size = int(instruction_boundary.size)
-            if instruction_address != expected or instruction_size <= 0:
-                return _refused_8616(
-                    CapstoneBlockDecodeFailureReason8616.DECODE_INCOMPLETE,
-                    "Capstone instruction ownership is not contiguous",
-                )
-            terminates = False
-            if not require_full_extent:
-                terminates, supported, repeats = _instruction_terminates_block_8616(instruction)
-                if not supported:
-                    return _refused_8616(
-                        CapstoneBlockDecodeFailureReason8616.TERMINATOR_UNSUPPORTED,
-                        str(instruction_boundary.mnemonic),
-                    )
-                if repeats and instructions:
-                    terminated = True
-                    break
-            expected += instruction_size
-            if expected > address + len(code):
-                return _refused_8616(
-                    CapstoneBlockDecodeFailureReason8616.DECODE_INCOMPLETE,
-                    "Capstone instruction exceeds the requested byte extent",
-                )
-            instructions.append(instruction)
-            if require_full_extent:
-                continue
-            terminated = terminates
-            if terminated:
-                break
+        scan = _scan_decoded_instructions_8616(
+            decoder,
+            address,
+            code,
+            require_full_extent=require_full_extent,
+        )
     except Exception as error:
         return _refused_8616(
             CapstoneBlockDecodeFailureReason8616.DECODE_INCOMPLETE,
             f"{type(error).__name__}: {error}",
         )
-    consumed = expected - address
+    if isinstance(scan, CapstoneBlockDecodeArtifact8616):
+        return scan
+    instructions, consumed, terminated = scan
     if not instructions or consumed <= 0:
         return _refused_8616(CapstoneBlockDecodeFailureReason8616.DECODE_INCOMPLETE)
     if require_full_extent and consumed != len(code):

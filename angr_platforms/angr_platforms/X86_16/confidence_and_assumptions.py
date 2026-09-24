@@ -338,62 +338,9 @@ def apply_x86_16_confidence_and_assumptions(codegen: object) -> bool:
                 # Build confidence tracker from recovered types/structures
                 tracker = ConfidenceTracker()
 
-                # Check for recovered structs (Phase 2.3)
-                if hasattr(cfunc, "_struct_recovery_info"):
-                    struct_info = cfunc._struct_recovery_info
-                    if struct_info and hasattr(struct_info, "structs"):
-                        for struct in struct_info.structs:
-                            # Struct from multi-function agreement = HIGH confidence
-                            struct_name = getattr(struct, "name", "unknown_struct")
-                            evidence_count = len(getattr(struct, "functions", []))  # Number of functions using it
-                            confidence = ConfidenceLevel.HIGH if evidence_count >= 2 else ConfidenceLevel.MEDIUM
-                            tracker.add_marker(
-                                fact_kind="struct",
-                                fact_detail=f"struct {struct_name}",
-                                confidence=confidence,
-                                evidence_count=evidence_count,
-                                reason=f"recovered from {evidence_count} function(s)",
-                            )
-
-                # Check for recovered arrays (Phase 2.2)
-                if hasattr(cfunc, "_array_recovery_info"):
-                    array_info = cfunc._array_recovery_info
-                    if array_info and hasattr(array_info, "arrays"):
-                        for array in array_info.arrays:
-                            # Array with stride pattern = MEDIUM to HIGH confidence
-                            array_name = getattr(array, "array_name", "unknown_array")
-                            pattern_count = len(getattr(array, "access_patterns", []))
-                            confidence = ConfidenceLevel.HIGH if pattern_count >= 3 else ConfidenceLevel.MEDIUM
-                            tracker.add_marker(
-                                fact_kind="array",
-                                fact_detail=f"array {array_name}",
-                                confidence=confidence,
-                                evidence_count=pattern_count,
-                                reason=f"detected from {pattern_count} access pattern(s)",
-                            )
-
-                # Check for segmented memory associations (Phase 3)
-                if hasattr(cfunc, "_segmented_memory_info"):
-                    seg_info = cfunc._segmented_memory_info
-                    if seg_info and hasattr(seg_info, "associations"):
-                        for assoc in seg_info.associations:
-                            # Stable segment association = HIGH, over-associated = LOW
-                            segment_reg = getattr(assoc, "segment_reg", "unknown")
-                            seg_str = str(getattr(segment_reg, "value", segment_reg))
-                            stability = getattr(assoc, "stability", 0.5)
-                            if stability >= 0.8:
-                                confidence = ConfidenceLevel.HIGH
-                            elif stability >= 0.5:
-                                confidence = ConfidenceLevel.MEDIUM
-                            else:
-                                confidence = ConfidenceLevel.LOW
-                            tracker.add_marker(
-                                fact_kind="segmented_memory",
-                                fact_detail=f"segment {seg_str} association",
-                                confidence=confidence,
-                                evidence_count=int(stability * 10),
-                                reason=f"stability={stability:.2f}",
-                            )
+                _collect_struct_confidence_8616(tracker, cfunc)
+                _collect_array_confidence_8616(tracker, cfunc)
+                _collect_segmented_memory_confidence_8616(tracker, cfunc)
 
                 # Build report
                 report = FunctionConfidenceReport(func_addr=func_addr, func_name=func_name, confidence_tracker=tracker)
@@ -415,3 +362,78 @@ def apply_x86_16_confidence_and_assumptions(codegen: object) -> bool:
             return False
 
     return _impl()
+
+
+def _collect_struct_confidence_8616(tracker: ConfidenceTracker, cfunc: object) -> None:
+    """Record confidence markers for recovered structs (Phase 2.3)."""
+    cfunc_dynamic = cast(Any, cfunc)
+    if not hasattr(cfunc_dynamic, "_struct_recovery_info"):
+        return
+    struct_info = cfunc_dynamic._struct_recovery_info
+    if not (struct_info and hasattr(struct_info, "structs")):
+        return
+    for struct in struct_info.structs:
+        # Struct from multi-function agreement = HIGH confidence
+        struct_name = getattr(struct, "name", "unknown_struct")
+        evidence_count = len(getattr(struct, "functions", []))  # Number of functions using it
+        confidence = ConfidenceLevel.HIGH if evidence_count >= 2 else ConfidenceLevel.MEDIUM
+        tracker.add_marker(
+            fact_kind="struct",
+            fact_detail=f"struct {struct_name}",
+            confidence=confidence,
+            evidence_count=evidence_count,
+            reason=f"recovered from {evidence_count} function(s)",
+        )
+
+
+def _collect_array_confidence_8616(tracker: ConfidenceTracker, cfunc: object) -> None:
+    """Record confidence markers for recovered arrays (Phase 2.2)."""
+    cfunc_dynamic = cast(Any, cfunc)
+    if not hasattr(cfunc_dynamic, "_array_recovery_info"):
+        return
+    array_info = cfunc_dynamic._array_recovery_info
+    if not (array_info and hasattr(array_info, "arrays")):
+        return
+    for array in array_info.arrays:
+        # Array with stride pattern = MEDIUM to HIGH confidence
+        array_name = getattr(array, "array_name", "unknown_array")
+        pattern_count = len(getattr(array, "access_patterns", []))
+        confidence = ConfidenceLevel.HIGH if pattern_count >= 3 else ConfidenceLevel.MEDIUM
+        tracker.add_marker(
+            fact_kind="array",
+            fact_detail=f"array {array_name}",
+            confidence=confidence,
+            evidence_count=pattern_count,
+            reason=f"detected from {pattern_count} access pattern(s)",
+        )
+
+
+def _segment_association_confidence_8616(stability: float) -> ConfidenceLevel:
+    """Map segment-association stability to a confidence level."""
+    if stability >= 0.8:
+        return ConfidenceLevel.HIGH
+    if stability >= 0.5:
+        return ConfidenceLevel.MEDIUM
+    return ConfidenceLevel.LOW
+
+
+def _collect_segmented_memory_confidence_8616(tracker: ConfidenceTracker, cfunc: object) -> None:
+    """Record confidence markers for segmented memory associations (Phase 3)."""
+    cfunc_dynamic = cast(Any, cfunc)
+    if not hasattr(cfunc_dynamic, "_segmented_memory_info"):
+        return
+    seg_info = cfunc_dynamic._segmented_memory_info
+    if not (seg_info and hasattr(seg_info, "associations")):
+        return
+    for assoc in seg_info.associations:
+        # Stable segment association = HIGH, over-associated = LOW
+        segment_reg = getattr(assoc, "segment_reg", "unknown")
+        seg_str = str(getattr(segment_reg, "value", segment_reg))
+        stability = getattr(assoc, "stability", 0.5)
+        tracker.add_marker(
+            fact_kind="segmented_memory",
+            fact_detail=f"segment {seg_str} association",
+            confidence=_segment_association_confidence_8616(stability),
+            evidence_count=int(stability * 10),
+            reason=f"stability={stability:.2f}",
+        )

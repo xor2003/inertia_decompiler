@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from .lowering.callee_saved_frame import (
     CalleeSavedFrameCarrierKind8616,
     CalleeSavedFrameInstructionRole8616,
+    CalleeSavedFramePruneFact8616,
     CalleeSavedFramePruneRecord8616,
 )
 
@@ -55,6 +56,21 @@ def _ss_sp_displacement_8616(token: object) -> int | None:
     return int(displacement) if displacement is not None else 0
 
 
+def _push_facts_proven_8616(facts: tuple[CalleeSavedFramePruneFact8616, ...]) -> bool:
+    """Require one complete PUSH-fact census with typed store coordinates."""
+    return bool(
+        facts
+        and all(
+            fact.instruction_role is CalleeSavedFrameInstructionRole8616.PUSH for fact in facts
+        )
+        and all(fact.instruction_addr == fact.push_addr for fact in facts)
+        and all(fact.stack_displacement is not None for fact in facts)
+        and all(
+            fact.access_width is not None and fact.access_width > 0 for fact in facts
+        )
+    )
+
+
 def callee_saved_frame_prune_delta_8616(
     record: CalleeSavedFramePruneRecord8616 | None,
     validation: Mapping[str, object],
@@ -72,14 +88,7 @@ def callee_saved_frame_prune_delta_8616(
         return False
     removed = _fingerprints_8616(segmented_delta.get("removed"))
     facts = record.frame_stack_store_evidence
-    if (
-        not removed
-        or not facts
-        or any(fact.instruction_role is not CalleeSavedFrameInstructionRole8616.PUSH for fact in facts)
-        or any(fact.instruction_addr != fact.push_addr for fact in facts)
-        or any(fact.stack_displacement is None for fact in facts)
-        or any(fact.access_width is None or fact.access_width <= 0 for fact in facts)
-    ):
+    if not removed or not _push_facts_proven_8616(facts):
         return False
     actual = tuple(_ss_sp_displacement_8616(token) for token in removed)
     if None in actual or len(actual) != len(set(actual)) or len(actual) != len(facts):

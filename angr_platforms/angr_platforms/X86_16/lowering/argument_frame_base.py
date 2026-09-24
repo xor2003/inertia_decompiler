@@ -5,8 +5,8 @@ Responsibility: expose the argument-frame base proven by the terminal return
 frame. A near function's two-byte return leaves the first argument at machine
 ``BP+4``; a far function's ``retf`` frame restores caller CS at ``BP+4..+5``, so
 its first argument starts at ``BP+6``. Without far-frame proof the near base is
-kept rather than guessed. Consumes alias segment-restore facts and IR terminal
-control flow. Do not infer the frame from names, opcodes, or rendered C text.
+kept rather than guessed. Consumes alias, widening, and typed facts. Do not
+recover semantics from COD, source, assembly, or rendered C text.
 """
 
 from __future__ import annotations
@@ -117,6 +117,7 @@ def msc_calling_convention_for_function_8616(project: object, function: object) 
     from ..simos_86_16 import SimCC8616MSClarge, SimCC8616MSCsmall
 
     arch = cast(Any, project).arch
+    # Dynamic angr boundary: recovered Function objects may lack .addr.
     addr = getattr(function, "addr", None)
     far = isinstance(addr, int) and proven_far_return_frame_at_8616(project, addr)
     if far:

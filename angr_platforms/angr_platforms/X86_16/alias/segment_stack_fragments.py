@@ -278,14 +278,10 @@ def complete_stack_register_restore_8616(
         for fragment in fragments
         if fragment.stack_offset is not None
     )
-    if (
-        len(registers) != 1
-        or len(save_sites) != 1
-        or origin_bytes != {0, 1}
-        or value_bytes != {0, 1}
-        or len(stack_offsets) != 2
-        or stack_offsets[1] - stack_offsets[0] != 1
-    ):
+    single_save_identity = len(registers) == 1 and len(save_sites) == 1
+    complete_byte_pair = origin_bytes == {0, 1} and value_bytes == {0, 1}
+    adjacent_stack_pair = len(stack_offsets) == 2 and stack_offsets[1] - stack_offsets[0] == 1
+    if not (single_save_identity and complete_byte_pair and adjacent_stack_pair):
         return None
     saved_register = next(iter(registers))
     if not isinstance(saved_register, str):

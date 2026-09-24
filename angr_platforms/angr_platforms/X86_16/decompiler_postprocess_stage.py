@@ -125,6 +125,7 @@ from .ir.condition_ir import (
     normalize_condition_fingerprint_string_8616,
 )
 from .ir.status_flag_lift_context import active_status_flag_lift_context_8616
+from .lowering.argument_frame_base import proven_first_argument_machine_bp_offset_8616
 from .lowering.condition_argument_types import apply_condition_argument_types_8616
 from .lowering.condition_transfer import transfer_typed_conditions_to_codegen_8616
 from .lowering.fact_transfer import transfer_semantic_alias_facts_to_codegen_8616
@@ -3669,7 +3670,8 @@ def _ensure_typed_stack_arg_expr_8616(
 ) -> StructuredAstValue:
     """Materialize one typed argument using its authoritative machine-BP identity."""
     cfunc = getattr(codegen, "cfunc", None)
-    if cfunc is None or int(disp) < 4:
+    first_argument_bp_offset = proven_first_argument_machine_bp_offset_8616(codegen)
+    if cfunc is None or int(disp) < first_argument_bp_offset:
         return None
     disp = int(disp)
     word_type = _word_type_for_project_8616(project)
@@ -3693,7 +3695,7 @@ def _ensure_typed_stack_arg_expr_8616(
     arg_type = _bind_type_to_project_arch_8616(project, arg_type)
     args = _boundary_list_8616(getattr(prototype, "args", ()) or ())
     arg_names = _boundary_list_8616(getattr(prototype, "arg_names", None) or ())
-    cursor = 4
+    cursor = first_argument_bp_offset
     target_index = None
     for idx, existing_type in enumerate(args):
         if cursor == disp:
@@ -3713,12 +3715,12 @@ def _ensure_typed_stack_arg_expr_8616(
 
     args[target_index] = arg_type
     while len(arg_names) < len(args):
-        arg_names.append(_fallback_stack_arg_name_8616(4 + len(arg_names) * 2))
+        arg_names.append(_fallback_stack_arg_name_8616(first_argument_bp_offset + len(arg_names) * 2))
     arg_names[target_index] = arg_name
 
     desired_args: list[CVariable] = []
     func_addr = getattr(cfunc, "addr", None)
-    cursor = 4
+    cursor = first_argument_bp_offset
     target_cvar = None
     for idx, current_type in enumerate(args):
         width = max(2, _type_size_bytes_for_stack_arg_8616(project, current_type))
@@ -3759,7 +3761,10 @@ def _ensure_typed_stack_arg_expr_8616(
 
     cfunc.arg_list = desired_args
     normalized_arg_names = tuple(
-        name if isinstance(name, str) and name else _fallback_stack_arg_name_8616(4 + idx * 2)
+        name
+        if isinstance(name, str)
+        and name
+        else _fallback_stack_arg_name_8616(first_argument_bp_offset + idx * 2)
         for idx, name in enumerate(arg_names[: len(args)])
     )
     new_prototype = SimTypeFunction(

@@ -345,3 +345,40 @@ def test_far_pointer_fact_widens_slot_and_resites_tail() -> None:
     evidence = codegen._inertia_function_pointer_parameter_evidence_8616
     assert evidence.materialized_count == 1
     assert evidence.failure_count == 0
+
+
+def test_far_pointer_reflow_requests_refresh_when_kb_type_already_matches() -> None:
+    """Regenerated scalar parameters must publish their changed declaration surface."""
+    project, codegen, function = _far_fixture()
+    assert materialize_function_pointer_parameters_8616(project, codegen)
+    proven_prototype = function.prototype
+
+    project, codegen, function = _far_fixture()
+    function.prototype = proven_prototype
+    codegen.cfunc.body = None
+    codegen._inertia_codegen_decl_refresh_required_8616 = False
+
+    assert materialize_function_pointer_parameters_8616(project, codegen)
+    assert codegen._inertia_codegen_decl_refresh_required_8616 is True
+    assert codegen.cfunc.arg_list[0].variable.size == 4
+    assert codegen.cfunc.arg_list[1].variable.offset == 8
+
+    codegen._inertia_codegen_decl_refresh_required_8616 = False
+    assert not materialize_function_pointer_parameters_8616(project, codegen)
+    assert codegen._inertia_codegen_decl_refresh_required_8616 is False
+
+
+def test_far_pointer_reflow_preserves_codegen_rebuild_argument_storage() -> None:
+    """A later angr AST rebuild must use the same proven slots as the live header."""
+    project, codegen, _function = _far_fixture()
+    codegen._func_args = [argument.variable for argument in codegen.cfunc.arg_list]
+
+    assert materialize_function_pointer_parameters_8616(project, codegen)
+
+    # StructuredCodeGenerator._analyze rebuilds arg_list from _func_args,
+    # rather than from the previous CFunction's argument list.
+    rebuilt_storage = tuple((variable.offset, variable.size) for variable in codegen._func_args)
+    assert rebuilt_storage == ((4, 4), (8, 2))
+    assert tuple(codegen._func_args) == tuple(
+        argument.variable for argument in codegen.cfunc.arg_list
+    )

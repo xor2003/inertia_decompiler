@@ -76,24 +76,10 @@ def _evidence_is_closed_8616(result: IdenticalReturnGuardCollapseResult8616) -> 
     )
 
 
-def consume_identical_return_guard_validation_delta_8616(
-    result: IdenticalReturnGuardCollapseResult8616 | None,
-    validation: MutableMapping[str, object],
-) -> IdenticalReturnGuardValidationResult8616:
-    """Consume one proved guard collapse and preserve a balanced residual delta."""
-    if result is None:
-        return IdenticalReturnGuardValidationResult8616(
-            IdenticalReturnGuardValidationStatus8616.REFUSED_NO_RESULT
-        )
-    if not _evidence_is_closed_8616(result):
-        return IdenticalReturnGuardValidationResult8616(
-            IdenticalReturnGuardValidationStatus8616.REFUSED_UNCLOSED_EVIDENCE
-        )
-    delta = validation.get("delta")
-    if not isinstance(delta, MutableMapping):
-        return IdenticalReturnGuardValidationResult8616(
-            IdenticalReturnGuardValidationStatus8616.REFUSED_MALFORMED_DELTA
-        )
+def _delta_channels_8616(
+    delta: MutableMapping[str, object],
+) -> dict[str, tuple[tuple[object, ...], tuple[object, ...]]] | IdenticalReturnGuardValidationResult8616:
+    """Return per-field added/removed channels or a malformed-delta refusal."""
     channels: dict[str, tuple[tuple[object, ...], tuple[object, ...]]] = {}
     for field_name, field_delta in delta.items():
         added = _tokens_8616(field_delta, "added")
@@ -104,24 +90,15 @@ def consume_identical_return_guard_validation_delta_8616(
             )
         if added or removed:
             channels[str(field_name)] = (added, removed)
-    if set(channels) - {"conditions", "control_flow_effects"}:
-        return IdenticalReturnGuardValidationResult8616(
-            IdenticalReturnGuardValidationStatus8616.REFUSED_UNEXPECTED_EFFECT
-        )
-    condition_added, condition_removed = channels.get("conditions", ((), ()))
-    control_added, control_removed = channels.get("control_flow_effects", ((), ()))
-    if any(
-        not isinstance(item, str)
-        for item in condition_added + condition_removed + control_added + control_removed
-    ):
-        return IdenticalReturnGuardValidationResult8616(
-            IdenticalReturnGuardValidationStatus8616.REFUSED_UNEXPECTED_EFFECT
-        )
-    if validation.get("semantic_failures", ()):
-        return IdenticalReturnGuardValidationResult8616(
-            IdenticalReturnGuardValidationStatus8616.REFUSED_UNEXPECTED_EFFECT
-        )
+    return channels
 
+
+def _consume_removed_guard_effects_8616(
+    shape: IdenticalReturnGuardShape8616,
+    condition_removed: tuple[object, ...],
+    control_removed: tuple[object, ...],
+) -> tuple[tuple[object, ...], tuple[object, ...], int, int] | IdenticalReturnGuardValidationResult8616:
+    """Match the one collapsed guard against removed condition/control effects."""
     matched_conditions = tuple(
         condition
         for condition in condition_removed
@@ -141,8 +118,7 @@ def consume_identical_return_guard_validation_delta_8616(
     )
     consumed_control_count = 1
     if (
-        result.materializations[0].shape
-        is IdenticalReturnGuardShape8616.ELSE_RETURN
+        shape is IdenticalReturnGuardShape8616.ELSE_RETURN
         and "if:else" in remaining_control
     ):
         remaining_control = tuple(effect for effect in remaining_control if effect != "if:else")
@@ -167,7 +143,23 @@ def consume_identical_return_guard_validation_delta_8616(
         )
         consumed_control_count += 1
         consumed_selector_return_count = 1
+    return (
+        remaining_conditions,
+        remaining_control,
+        consumed_control_count,
+        consumed_selector_return_count,
+    )
 
+
+def _apply_residual_guard_delta_8616(
+    validation: MutableMapping[str, object],
+    delta: MutableMapping[str, object],
+    condition_added: tuple[object, ...],
+    remaining_conditions: tuple[object, ...],
+    control_added: tuple[object, ...],
+    remaining_control: tuple[object, ...],
+) -> bool | IdenticalReturnGuardValidationResult8616:
+    """Write the balanced residual delta or refuse an unbalanced one."""
     residual_changed = bool(
         condition_added
         or remaining_conditions
@@ -196,6 +188,73 @@ def consume_identical_return_guard_validation_delta_8616(
         validation["status"] = "stable"
         validation["summary_text"] = "no observable whole-tail changes"
         validation.pop("delta", None)
+    return residual_changed
+
+
+def consume_identical_return_guard_validation_delta_8616(
+    result: IdenticalReturnGuardCollapseResult8616 | None,
+    validation: MutableMapping[str, object],
+) -> IdenticalReturnGuardValidationResult8616:
+    """Consume one proved guard collapse and preserve a balanced residual delta."""
+    if result is None:
+        return IdenticalReturnGuardValidationResult8616(
+            IdenticalReturnGuardValidationStatus8616.REFUSED_NO_RESULT
+        )
+    if not _evidence_is_closed_8616(result):
+        return IdenticalReturnGuardValidationResult8616(
+            IdenticalReturnGuardValidationStatus8616.REFUSED_UNCLOSED_EVIDENCE
+        )
+    delta = validation.get("delta")
+    if not isinstance(delta, MutableMapping):
+        return IdenticalReturnGuardValidationResult8616(
+            IdenticalReturnGuardValidationStatus8616.REFUSED_MALFORMED_DELTA
+        )
+    channels = _delta_channels_8616(delta)
+    if isinstance(channels, IdenticalReturnGuardValidationResult8616):
+        return channels
+    if set(channels) - {"conditions", "control_flow_effects"}:
+        return IdenticalReturnGuardValidationResult8616(
+            IdenticalReturnGuardValidationStatus8616.REFUSED_UNEXPECTED_EFFECT
+        )
+    condition_added, condition_removed = channels.get("conditions", ((), ()))
+    control_added, control_removed = channels.get("control_flow_effects", ((), ()))
+    if any(
+        not isinstance(item, str)
+        for item in condition_added + condition_removed + control_added + control_removed
+    ):
+        return IdenticalReturnGuardValidationResult8616(
+            IdenticalReturnGuardValidationStatus8616.REFUSED_UNEXPECTED_EFFECT
+        )
+    if validation.get("semantic_failures", ()):
+        return IdenticalReturnGuardValidationResult8616(
+            IdenticalReturnGuardValidationStatus8616.REFUSED_UNEXPECTED_EFFECT
+        )
+
+    consumed = _consume_removed_guard_effects_8616(
+        result.materializations[0].shape,
+        condition_removed,
+        control_removed,
+    )
+    if isinstance(consumed, IdenticalReturnGuardValidationResult8616):
+        return consumed
+    (
+        remaining_conditions,
+        remaining_control,
+        consumed_control_count,
+        consumed_selector_return_count,
+    ) = consumed
+
+    residual = _apply_residual_guard_delta_8616(
+        validation,
+        delta,
+        condition_added,
+        remaining_conditions,
+        control_added,
+        remaining_control,
+    )
+    if isinstance(residual, IdenticalReturnGuardValidationResult8616):
+        return residual
+    residual_changed = residual
     return IdenticalReturnGuardValidationResult8616(
         IdenticalReturnGuardValidationStatus8616.ACCEPTED,
         consumed_condition_count=1,

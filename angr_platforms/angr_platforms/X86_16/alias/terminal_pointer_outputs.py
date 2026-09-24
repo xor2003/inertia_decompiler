@@ -58,20 +58,22 @@ def _parameter_storage_8616(
     if source.verdict is not RegisterReachingSourceVerdict8616.PROVEN:
         return None
     identity = source.source
-    if (
-        not isinstance(identity, tuple)
-        or len(identity) != 3
-        or identity[0] != CallsitePushSourceKind8616.BP_VALUE.value
-        or not isinstance(identity[1], int)
-        or isinstance(identity[1], bool)
-        or identity[1] < 4
-        or identity[2] != 2
-    ):
+    if not isinstance(identity, tuple) or len(identity) != 3:
+        return None
+    kind, offset, width = identity
+    bp_word_slot = (
+        kind == CallsitePushSourceKind8616.BP_VALUE.value
+        and isinstance(offset, int)
+        and not isinstance(offset, bool)
+        and offset >= 4
+        and width == 2
+    )
+    if not bp_word_slot:
         return None
     return IRAddress(
         MemSpace.SS,
         base=("bp",),
-        offset=identity[1],
+        offset=offset,
         size=2,
         status=AddressStatus.STABLE,
         segment_origin=SegmentOrigin.PROVEN,

@@ -122,8 +122,23 @@ def _register_scalar_type_8616(size: int, arch: object) -> object | None:
     return scalar_type.with_arch(arch) if scalar_type is not None else None
 
 
-def _materialize_register_virtual_carriers_8616(codegen: object, root: object) -> int:
-    """Rebind exact general-register virtual carriers to typed C locals."""
+@dataclass(slots=True)
+class _RegisterCarrierContext8616:
+    """Shared boundary and evidence state for the carrier rebinding pass."""
+
+    codegen: object
+    project: _ProjectArchBoundary8616
+    region: int
+    exact_registers: set[tuple[int, int, str]]
+    declarations: dict[tuple[int, int, str], structured_c.CVariable]
+    register_variables: dict[tuple[int, int, str], SimRegisterVariable]
+    changed_count: int = 0
+
+
+def _carrier_boundary_8616(
+    codegen: object,
+) -> tuple[_ProjectArchBoundary8616, dict[str, tuple[int, int]], _CFunctionDeclarationBoundary8616] | None:
+    """Resolve the typed codegen boundary for register materialization."""
     try:
         boundary = cast(_CodegenDeclarationBoundary8616, codegen)
         project = cast(_ProjectArchBoundary8616, boundary.project)
@@ -131,108 +146,157 @@ def _materialize_register_virtual_carriers_8616(codegen: object, root: object) -
         registers = arch.registers
         cfunc = cast(_CFunctionDeclarationBoundary8616, boundary.cfunc)
     except AttributeError:
-        return 0
+        return None
     if not isinstance(registers, dict):
-        return 0
+        return None
+    return project, registers, cfunc
+
+
+def _declaration_region_8616(cfunc: object, root: object) -> int | None:
+    """Resolve the owning region address from the function or root node."""
     try:
-        region = cfunc.addr
+        region = cast(_CFunctionDeclarationBoundary8616, cfunc).addr
     except AttributeError:
         region = None
     if not isinstance(region, int):
         try:
             region = cast(_RootAddressBoundary8616, root).addr
         except AttributeError:
-            return 0
-    if not isinstance(region, int):
-        return 0
-    exact_registers = {
+            return None
+    return region if isinstance(region, int) else None
+
+
+def _exact_register_keys_8616(registers: object) -> set[tuple[int, int, str]]:
+    """Collect exact (offset, size, lowercase-name) register identities."""
+    return {
         (shape[0], shape[1], name.lower())
-        for name, shape in registers.items()
+        for name, shape in cast(dict[object, object], registers).items()
         if isinstance(name, str)
         and isinstance(shape, tuple)
         and len(shape) >= 2
         and isinstance(shape[0], int)
         and isinstance(shape[1], int)
     }
-    declarations: dict[tuple[int, int, str], structured_c.CVariable] = {}
-    register_variables: dict[tuple[int, int, str], SimRegisterVariable] = {}
-    changed_count = 0
+
+
+def _shared_register_variable_8616(
+    ctx: _RegisterCarrierContext8616, offset: int, size: int, normalized_name: str
+) -> SimRegisterVariable:
+    """Return the shared SimRegisterVariable for one exact register lane."""
+    key = (offset, size, normalized_name)
+    shared = ctx.register_variables.get(key)
+    if shared is None:
+        shared = SimRegisterVariable(
+            offset,
+            size,
+            ident=f"inertia-register-{normalized_name}",
+            region=ctx.region,
+            name=normalized_name,
+        )
+        ctx.register_variables[key] = shared
+    return shared
+
+
+def _rebind_c_variable_8616(ctx: _RegisterCarrierContext8616, node: object) -> object | None:
+    """Rebind one direct CVariable register carrier, or None."""
+    if not isinstance(node, structured_c.CVariable) or not isinstance(node.variable, SimRegisterVariable):
+        return None
+    variable = node.variable
+    normalized_name = variable.name.lower() if isinstance(variable.name, str) else None
+    if normalized_name is None:
+        return None
+    key = (variable.reg, variable.size, normalized_name)
+    if key not in ctx.exact_registers or normalized_name in _NONLOCAL_REGISTER_NAMES_8616:
+        return None
+    shared = _shared_register_variable_8616(ctx, variable.reg, variable.size, normalized_name)
+    if node.variable is not shared or node.unified_variable is not shared:
+        node.variable = shared
+        node.unified_variable = shared
+        ctx.changed_count += 1
+    if node.variable_type is None:
+        node.variable_type = _register_scalar_type_8616(variable.size, ctx.project.arch)
+    return cast(object, node)
+
+
+def _virtual_dirty_key_8616(
+    virtual: Expr.VirtualVariable, exact_registers: set[tuple[int, int, str]]
+) -> tuple[int, int, str] | None:
+    """Resolve a dirty virtual register to its exact register-set key."""
+    if virtual.category is not VirtualVariableCategory.REGISTER:
+        return None
+    offset = virtual.oident
+    size = virtual.size
+    name = dict(virtual.tags).get("reg_name")
+    if not isinstance(offset, int) or not isinstance(size, int):
+        return None
+    if not isinstance(name, str):
+        matching_names = {
+            register_name
+            for register_offset, register_size, register_name in exact_registers
+            if register_offset == offset and register_size == size
+        }
+        if len(matching_names) != 1:
+            return None
+        name = next(iter(matching_names))
+    normalized_name = name.lower()
+    key = (offset, size, normalized_name)
+    if key not in exact_registers or normalized_name in _NONLOCAL_REGISTER_NAMES_8616:
+        return None
+    return key
+
+
+def _rebind_virtual_dirty_8616(ctx: _RegisterCarrierContext8616, node: object) -> object:
+    """Rebind one register-origin dirty virtual carrier to a typed local."""
+    if not isinstance(node, structured_c.CDirtyExpression) or not isinstance(node.dirty, Expr.VirtualVariable):
+        return node
+    key = _virtual_dirty_key_8616(node.dirty, ctx.exact_registers)
+    if key is None:
+        return node
+    offset, size, normalized_name = key
+    variable_type = _register_scalar_type_8616(size, ctx.project.arch)
+    if variable_type is None:
+        return node
+    declaration = ctx.declarations.get(key)
+    if declaration is None:
+        shared = _shared_register_variable_8616(ctx, offset, size, normalized_name)
+        declaration = structured_c.CVariable(
+            shared,
+            unified_variable=shared,
+            variable_type=variable_type,
+            codegen=ctx.codegen,
+        )
+        ctx.declarations[key] = declaration
+    ctx.changed_count += 1
+    return declaration
+
+
+def _materialize_register_virtual_carriers_8616(codegen: object, root: object) -> int:
+    """Rebind exact general-register virtual carriers to typed C locals."""
+    boundary = _carrier_boundary_8616(codegen)
+    if boundary is None:
+        return 0
+    project, registers, cfunc = boundary
+    region = _declaration_region_8616(cfunc, root)
+    if region is None:
+        return 0
+    ctx = _RegisterCarrierContext8616(
+        codegen,
+        project,
+        region,
+        _exact_register_keys_8616(registers),
+        {},
+        {},
+    )
 
     def _transform(node: object) -> object:
         """Replace one exact register-origin virtual carrier."""
-        nonlocal changed_count
-        if isinstance(node, structured_c.CVariable) and isinstance(node.variable, SimRegisterVariable):
-            variable = node.variable
-            normalized_name = variable.name.lower() if isinstance(variable.name, str) else None
-            key = (variable.reg, variable.size, normalized_name) if normalized_name is not None else None
-            if key in exact_registers and normalized_name not in _NONLOCAL_REGISTER_NAMES_8616:
-                shared = register_variables.get(key)
-                if shared is None:
-                    shared = SimRegisterVariable(
-                        variable.reg,
-                        variable.size,
-                        ident=f"inertia-register-{normalized_name}",
-                        region=region,
-                        name=normalized_name,
-                    )
-                    register_variables[key] = shared
-                if node.variable is not shared or node.unified_variable is not shared:
-                    node.variable = shared
-                    node.unified_variable = shared
-                    changed_count += 1
-                if node.variable_type is None:
-                    node.variable_type = _register_scalar_type_8616(variable.size, project.arch)
-                return node
-        if not isinstance(node, structured_c.CDirtyExpression) or not isinstance(node.dirty, Expr.VirtualVariable):
-            return node
-        virtual = node.dirty
-        if virtual.category is not VirtualVariableCategory.REGISTER:
-            return node
-        offset = virtual.oident
-        size = virtual.size
-        name = dict(virtual.tags).get("reg_name")
-        if not isinstance(offset, int) or not isinstance(size, int):
-            return node
-        if not isinstance(name, str):
-            matching_names = {
-                register_name
-                for register_offset, register_size, register_name in exact_registers
-                if register_offset == offset and register_size == size
-            }
-            if len(matching_names) != 1:
-                return node
-            name = next(iter(matching_names))
-        normalized_name = name.lower()
-        key = (offset, size, normalized_name)
-        if key not in exact_registers or normalized_name in _NONLOCAL_REGISTER_NAMES_8616:
-            return node
-        variable_type = _register_scalar_type_8616(size, project.arch)
-        if variable_type is None:
-            return node
-        declaration = declarations.get(key)
-        if declaration is None:
-            shared = register_variables.get(key)
-            if shared is None:
-                shared = SimRegisterVariable(
-                    offset,
-                    size,
-                    ident=f"inertia-register-{normalized_name}",
-                    region=region,
-                    name=normalized_name,
-                )
-                register_variables[key] = shared
-            declaration = structured_c.CVariable(
-                shared,
-                unified_variable=shared,
-                variable_type=variable_type,
-                codegen=codegen,
-            )
-            declarations[key] = declaration
-        changed_count += 1
-        return declaration
+        result = _rebind_c_variable_8616(ctx, node)
+        if result is not None:
+            return result
+        return _rebind_virtual_dirty_8616(ctx, node)
 
     _replace_c_children_8616(root, _transform)
-    return changed_count
+    return ctx.changed_count
 
 
 def _remove_declaration_entries_8616(
@@ -269,6 +333,78 @@ def _unified_register_identity_8616(
     return unified if isinstance(unified, SimRegisterVariable) else variable
 
 
+def _register_declaration_maps_8616(
+    codegen: object,
+) -> tuple[
+    _CFunctionDeclarationBoundary8616,
+    dict[object, object],
+    dict[object, object],
+]:
+    """Return the two angr declaration maps or raise a contract error."""
+    try:
+        cfunc = cast(_CFunctionDeclarationBoundary8616, cast(_CodegenDeclarationBoundary8616, codegen).cfunc)
+        variables_in_use = cfunc.variables_in_use
+        unified_local_vars = cfunc.unified_local_vars
+    except AttributeError as exc:
+        raise PipelineHardError(
+            "structured codegen omitted register-local declaration maps",
+            layer="types/lowering:register_local_declarations",
+        ) from exc
+    if not isinstance(variables_in_use, dict) or not isinstance(unified_local_vars, dict):
+        raise PipelineHardError(
+            "structured codegen exposed invalid register-local declaration maps",
+            layer="types/lowering:register_local_declarations",
+        )
+    return cfunc, variables_in_use, unified_local_vars
+
+
+def _sync_variables_in_use_8616(
+    variables_in_use: dict[object, object],
+    variable: SimRegisterVariable,
+    declaration: structured_c.CVariable,
+) -> bool:
+    """Drop stale aliases and bind the declaration under its variable."""
+    changed = False
+    for prior_variable, prior_declaration in tuple(variables_in_use.items()):
+        if prior_declaration is declaration and prior_variable is not variable:
+            del variables_in_use[prior_variable]
+            changed = True
+    if variables_in_use.get(variable) is not declaration:
+        variables_in_use[variable] = declaration
+        changed = True
+    return changed
+
+
+def _sync_unified_local_vars_8616(
+    unified_local_vars: dict[object, object],
+    declaration_identity: SimRegisterVariable,
+    declaration: structured_c.CVariable,
+    variable_type: object,
+) -> bool:
+    """Keep the identity's typed-entry set holding exactly this declaration."""
+    changed = False
+    typed_entry = (declaration, variable_type)
+    for prior_variable, entries in tuple(unified_local_vars.items()):
+        if prior_variable is declaration_identity or not isinstance(entries, set):
+            continue
+        typed_entries = cast(set[object], entries)
+        if _remove_declaration_entries_8616(typed_entries, declaration):
+            changed = True
+            if not typed_entries:
+                del unified_local_vars[prior_variable]
+    entries = unified_local_vars.get(declaration_identity)
+    if not isinstance(entries, set):
+        unified_local_vars[declaration_identity] = {typed_entry}
+        return True
+    typed_entries = cast(set[object], entries)
+    if _remove_declaration_entries_8616(typed_entries, declaration, keep=typed_entry):
+        changed = True
+    if typed_entry not in typed_entries:
+        typed_entries.add(typed_entry)
+        changed = True
+    return changed
+
+
 def register_typed_register_local_8616(
     codegen: object,
     declaration: structured_c.CVariable,
@@ -285,20 +421,7 @@ def register_typed_register_local_8616(
             "typed register local declaration requires SimRegisterVariable storage",
             layer="types/lowering:register_local_declarations",
         )
-    try:
-        cfunc = cast(_CFunctionDeclarationBoundary8616, cast(_CodegenDeclarationBoundary8616, codegen).cfunc)
-        variables_in_use = cfunc.variables_in_use
-        unified_local_vars = cfunc.unified_local_vars
-    except AttributeError as exc:
-        raise PipelineHardError(
-            "structured codegen omitted register-local declaration maps",
-            layer="types/lowering:register_local_declarations",
-        ) from exc
-    if not isinstance(variables_in_use, dict) or not isinstance(unified_local_vars, dict):
-        raise PipelineHardError(
-            "structured codegen exposed invalid register-local declaration maps",
-            layer="types/lowering:register_local_declarations",
-        )
+    cfunc, variables_in_use, unified_local_vars = _register_declaration_maps_8616(codegen)
 
     variable_type = declaration.variable_type
     if variable_type is None:
@@ -307,45 +430,16 @@ def register_typed_register_local_8616(
             layer="types/lowering:register_local_declarations",
         )
 
-    changed = False
     declaration_identity = _unified_register_identity_8616(cfunc, variable)
-    if declaration_identity is not variable and declaration.unified_variable is not declaration_identity:
+    changed = declaration_identity is not variable and declaration.unified_variable is not declaration_identity
+    if changed:
         declaration.unified_variable = declaration_identity
+    if _sync_variables_in_use_8616(variables_in_use, variable, declaration):
         changed = True
-    for prior_variable, prior_declaration in tuple(variables_in_use.items()):
-        if prior_declaration is declaration and prior_variable is not variable:
-            del variables_in_use[prior_variable]
-            changed = True
-    if variables_in_use.get(variable) is not declaration:
-        variables_in_use[variable] = declaration
+    if _sync_unified_local_vars_8616(
+        unified_local_vars, declaration_identity, declaration, variable_type
+    ):
         changed = True
-
-    typed_entry = (declaration, variable_type)
-    for prior_variable, entries in tuple(unified_local_vars.items()):
-        if prior_variable is declaration_identity or not isinstance(entries, set):
-            continue
-        typed_entries = cast(set[object], entries)
-        if _remove_declaration_entries_8616(typed_entries, declaration):
-            changed = True
-            if not typed_entries:
-                del unified_local_vars[prior_variable]
-    entries = unified_local_vars.get(declaration_identity)
-    if not isinstance(entries, set):
-        unified_local_vars[declaration_identity] = {typed_entry}
-        changed = True
-    else:
-        typed_entries = cast(set[object], entries)
-        changed = (
-            _remove_declaration_entries_8616(
-                typed_entries,
-                declaration,
-                keep=typed_entry,
-            )
-            or changed
-        )
-        if typed_entry not in typed_entries:
-            typed_entries.add(typed_entry)
-            changed = True
     return changed
 
 

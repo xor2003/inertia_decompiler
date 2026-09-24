@@ -336,6 +336,47 @@ def _loop_matches_branch_region_8616(
     )
 
 
+def _semantic_fingerprint_pair_8616(
+    fact: LoopBranchGuardFact8616,
+    condition_ir_fingerprint: Callable[[ConditionIR], str | None] | None,
+) -> tuple[object, object] | None:
+    """Prefer inverted typed-IR fingerprints when the fact carries condition IR."""
+    decoded_fingerprint = fact.decoded_condition_fingerprint
+    guard_fingerprint = fact.guard_condition_fingerprint
+    if fact.condition_ir is not None and condition_ir_fingerprint is not None:
+        materialized = condition_ir_fingerprint(fact.condition_ir)
+        if materialized is None:
+            return None
+        inverted = invert_condition_fingerprint_string_8616(materialized)
+        if inverted is None:
+            return None
+        decoded_fingerprint = materialized
+        guard_fingerprint = inverted
+    return decoded_fingerprint, guard_fingerprint
+
+
+def _semantic_guard_matches_8616(
+    candidate: object,
+    expected: object,
+    fact: LoopBranchGuardFact8616,
+    condition_fingerprint: Callable[[object], str],
+    condition_fingerprint_normalizer: Callable[[str], str] | None,
+    condition_storage_matcher: Callable[[ConditionIR, object, bool], bool] | None,
+    *,
+    inverted: bool,
+) -> bool:
+    """Use typed storage views only when ordinary identity is insufficient."""
+    if _condition_fingerprint_matches_8616(
+        candidate, expected, condition_fingerprint, condition_fingerprint_normalizer,
+    ):
+        return True
+    return bool(
+        fact.condition_ir is not None
+        and condition_storage_matcher is not None
+        and condition_storage_matcher(fact.condition_ir, candidate, inverted)
+    )
+
+
 def _semantic_loop_branch_guards_8616(
     ast_index: ControlFlowAstIndex8616,
     fact: LoopBranchGuardFact8616,
@@ -345,30 +386,23 @@ def _semantic_loop_branch_guards_8616(
     condition_storage_matcher: Callable[[ConditionIR, object, bool], bool] | None = None,
 ) -> tuple[object, ...]:
     """Join an untagged folded guard by exact condition and CFG evidence."""
-    decoded_fingerprint = fact.decoded_condition_fingerprint
-    guard_fingerprint = fact.guard_condition_fingerprint
-    if fact.condition_ir is not None and condition_ir_fingerprint is not None:
-        materialized = condition_ir_fingerprint(fact.condition_ir)
-        if materialized is None:
-            return ()
-        inverted = invert_condition_fingerprint_string_8616(materialized)
-        if inverted is None:
-            return ()
-        decoded_fingerprint = materialized
-        guard_fingerprint = inverted
+    pair = _semantic_fingerprint_pair_8616(fact, condition_ir_fingerprint)
+    if pair is None:
+        return ()
+    decoded_fingerprint, guard_fingerprint = pair
     guards: list[object] = []
     seen: set[int] = set()
 
-    def matches(candidate: object, expected: str, *, inverted: bool) -> bool:
-        """Use typed storage views only when ordinary identity is insufficient."""
-        if _condition_fingerprint_matches_8616(
-            candidate, expected, condition_fingerprint, condition_fingerprint_normalizer,
-        ):
-            return True
-        return bool(
-            fact.condition_ir is not None
-            and condition_storage_matcher is not None
-            and condition_storage_matcher(fact.condition_ir, candidate, inverted)
+    def matches(candidate: object, expected: object, *, inverted: bool) -> bool:
+        """Dispatch to fingerprint or typed-storage equivalence."""
+        return _semantic_guard_matches_8616(
+            candidate,
+            expected,
+            fact,
+            condition_fingerprint,
+            condition_fingerprint_normalizer,
+            condition_storage_matcher,
+            inverted=inverted,
         )
 
     for loop in ast_index.loops:
@@ -390,52 +424,15 @@ def _semantic_loop_branch_guards_8616(
     return tuple(guards)
 
 
-def _loop_branch_issue_8616(
-    fact: LoopBranchGuardFact8616,
-    kind: LoopBranchGuardIssueKind8616,
-    *,
-    match_count: int = 0,
-) -> LoopBranchGuardIssue8616:
-    """Build one deterministic final loop-branch issue."""
-    return LoopBranchGuardIssue8616(
-        kind=kind,
-        jcc_addr=fact.jcc_addr,
-        block_addr=fact.block_addr,
-        body_target=fact.body_target,
-        false_target=fact.false_target,
-        match_count=match_count,
-    )
-
-
-def validate_structured_control_flow_8616(
-    root: object,
-    *,
-    query_index: StructuredAstQueryIndex8616 | None = None,
-    loop_branch_facts: tuple[LoopBranchGuardFact8616, ...] = (),
-    condition_fingerprint: Callable[[object], str] | None = None,
-    condition_ir_fingerprint: Callable[[ConditionIR], str | None] | None = None,
-    condition_fingerprint_normalizer: Callable[[str], str] | None = None,
-    condition_storage_matcher: Callable[[ConditionIR, object, bool], bool] | None = None,
-) -> ControlFlowValidationReport8616:
-    """Validate final guarded reachability and proven loop-branch presence.
-
-    For ``if (condition) break; if (condition) { body; }``, a repeatable
-    condition must be false on every path reaching the second statement.
-    Therefore a nonempty second true body is unreachable. Different guards are
-    counted as successfully materialized; uncertain equivalence is refused.
-    Structuring-owned loop-branch facts additionally require exactly one tagged
-    loop-header condition or in-loop break guard. When angr folds away the JCC
-    tag, an untagged guard is accepted only by a unique exact condition
-    fingerprint plus taken/exit target membership. Validation does not repair it.
-    A storage matcher may additionally prove equivalent typed memory views;
-    it must retain access width, signedness and the requested branch polarity.
-    """
+def _adjacent_guard_sequence_issues_8616(
+    ast_index: ControlFlowAstIndex8616,
+) -> tuple[int, int, int, int, list[ControlFlowValidationIssue8616]]:
+    """Count and report adjacent ``if/break`` + ``if`` duplicate-guard pairs."""
     raw_fact_count = 0
     normalized_fact_count = 0
     classified_fact_count = 0
     materialized_count = 0
     issues: list[ControlFlowValidationIssue8616] = []
-    ast_index = ControlFlowAstIndex8616.build(root, root_index=query_index)
     sequences = (
         node
         for node in ast_index.nodes
@@ -480,19 +477,121 @@ def validate_structured_control_flow_8616(
                     statement_index=statement_index,
                 )
             )
+    return (
+        raw_fact_count,
+        normalized_fact_count,
+        classified_fact_count,
+        materialized_count,
+        issues,
+    )
 
-    normalized_loop_branch_facts = tuple(sorted(set(loop_branch_facts)))
-    raw_fact_count += len(loop_branch_facts)
-    normalized_fact_count += len(normalized_loop_branch_facts)
-    facts_by_key: dict[int, list[LoopBranchGuardFact8616]] = {}
-    for fact in normalized_loop_branch_facts:
-        facts_by_key.setdefault(fact.jcc_addr, []).append(fact)
+
+def _loop_branch_issue_8616(
+    fact: LoopBranchGuardFact8616,
+    kind: LoopBranchGuardIssueKind8616,
+    *,
+    match_count: int = 0,
+) -> LoopBranchGuardIssue8616:
+    """Build one deterministic final loop-branch issue."""
+    return LoopBranchGuardIssue8616(
+        kind=kind,
+        jcc_addr=fact.jcc_addr,
+        block_addr=fact.block_addr,
+        body_target=fact.body_target,
+        false_target=fact.false_target,
+        match_count=match_count,
+    )
+
+
+def _untagged_loop_branch_verdict_8616(
+    ast_index: ControlFlowAstIndex8616,
+    fact: LoopBranchGuardFact8616,
+    condition_fingerprint: Callable[[object], str] | None,
+    condition_ir_fingerprint: Callable[[ConditionIR], str | None] | None,
+    condition_fingerprint_normalizer: Callable[[str], str] | None,
+    condition_storage_matcher: Callable[[ConditionIR, object, bool], bool] | None,
+) -> tuple[int, LoopBranchGuardIssue8616 | None]:
+    """Accept one untagged guard only on a unique exact-condition match."""
+    semantic_guards = (
+        _semantic_loop_branch_guards_8616(
+            ast_index,
+            fact,
+            condition_fingerprint,
+            condition_ir_fingerprint,
+            condition_fingerprint_normalizer,
+            condition_storage_matcher,
+        )
+        if condition_fingerprint is not None
+        else ()
+    )
+    if len(semantic_guards) == 1:
+        return 1, None
+    if len(semantic_guards) > 1:
+        return 0, _loop_branch_issue_8616(
+            fact,
+            LoopBranchGuardIssueKind8616.DUPLICATE_GUARD,
+            match_count=len(semantic_guards),
+        )
+    return 0, _loop_branch_issue_8616(
+        fact,
+        LoopBranchGuardIssueKind8616.MISSING_GUARD,
+    )
+
+
+def _tagged_loop_branch_verdict_8616(
+    ast_index: ControlFlowAstIndex8616,
+    fact: LoopBranchGuardFact8616,
+    tagged_conditions: tuple[object, ...],
+    break_guards: tuple[object, ...],
+    loop_guards: tuple[object, ...],
+    loop_bodies: tuple[object, ...],
+) -> tuple[int, LoopBranchGuardIssue8616 | None]:
+    """Require exactly one tagged in-loop guard for a tagged loop-branch fact."""
+    associated_guards = tuple(
+        guard
+        for guard in break_guards
+        if any(
+            ast_index.subtree_contains_node(body, guard)
+            for body in loop_bodies
+        )
+    )
+    materialized_guards = (*associated_guards, *loop_guards)
+    if break_guards and not associated_guards and not loop_guards:
+        return 0, _loop_branch_issue_8616(
+            fact,
+            LoopBranchGuardIssueKind8616.GUARD_OUTSIDE_LOOP,
+            match_count=len(break_guards),
+        )
+    if not materialized_guards:
+        return 0, _loop_branch_issue_8616(
+            fact,
+            LoopBranchGuardIssueKind8616.WRONG_GUARD_SHAPE,
+            match_count=len(tagged_conditions),
+        )
+    if (
+        len(break_guards) != len(associated_guards)
+        or len(materialized_guards) != 1
+    ):
+        return 0, _loop_branch_issue_8616(
+            fact,
+            LoopBranchGuardIssueKind8616.DUPLICATE_GUARD,
+            match_count=len(tagged_conditions),
+        )
+    return 1, None
+
+
+def _conflicted_fact_keys_8616(
+    facts_by_key: dict[int, list[LoopBranchGuardFact8616]],
+) -> tuple[set[int], int, list[LoopBranchGuardIssue8616]]:
+    """Mark jcc keys with conflicting facts and count them as classified."""
     conflicted_keys: set[int] = set()
+    classified_count = 0
+    issues: list[LoopBranchGuardIssue8616] = []
     for key, facts in sorted(facts_by_key.items()):
         if len(facts) <= 1:
             continue
         conflicted_keys.add(key)
-        classified_fact_count += len(facts)
+        classified_count += len(facts)
         issues.append(
             _loop_branch_issue_8616(
                 facts[0],
@@ -500,6 +599,132 @@ def validate_structured_control_flow_8616(
                 match_count=len(facts),
             )
         )
+    return conflicted_keys, classified_count, issues
+
+
+def _debug_log_control_flow_8616(
+    ast_index: ControlFlowAstIndex8616,
+    normalized_loop_branch_facts: tuple[LoopBranchGuardFact8616, ...],
+    issues: list[ControlFlowValidationIssue8616],
+    condition_fingerprint: Callable[[object], str] | None,
+    condition_ir_fingerprint: Callable[[ConditionIR], str | None] | None,
+    condition_fingerprint_normalizer: Callable[[str], str] | None,
+    condition_storage_matcher: Callable[[ConditionIR, object, bool], bool] | None,
+    raw_fact_count: int,
+    normalized_fact_count: int,
+    classified_fact_count: int,
+    materialized_count: int,
+) -> None:
+    """Emit the optional loop-branch validation diagnostic trace."""
+    if not os.environ.get("INERTIA_DEBUG_VALIDATION_CONTROL_FLOW"):
+        return
+    log.warning(
+        "control-flow validation loop_branch_facts=%r matches=%r "
+        "semantic_matches=%r loops=%r issues=%r counters=(raw=%d normalized=%d "
+        "classified=%d materialized=%d)",
+        normalized_loop_branch_facts,
+        tuple(
+            (
+                fact,
+                ast_index.tagged_conditions(fact.jcc_addr),
+                ast_index.break_guards(fact.jcc_addr),
+                ast_index.loop_guards(fact.jcc_addr),
+            )
+            for fact in normalized_loop_branch_facts
+        ),
+        tuple(
+            (
+                fact,
+                _semantic_loop_branch_guards_8616(
+                    ast_index,
+                    fact,
+                    condition_fingerprint,
+                    condition_ir_fingerprint,
+                    condition_fingerprint_normalizer,
+                    condition_storage_matcher,
+                )
+                if condition_fingerprint is not None
+                and _loop_branch_fact_is_valid_8616(fact)
+                else (),
+            )
+            for fact in normalized_loop_branch_facts
+        ),
+        tuple(
+            (
+                type(loop).__name__,
+                _ast_tags_8616(loop),
+                _ast_tags_8616(loop.condition),
+                condition_fingerprint(loop.condition)
+                if condition_fingerprint is not None
+                else None,
+                tuple(
+                    (
+                        fact.jcc_addr,
+                        ast_index.subtree_contains_instruction(
+                            loop.body,
+                            fact.body_target,
+                        ),
+                        ast_index.subtree_contains_instruction(
+                            loop.body,
+                            fact.false_target,
+                        ),
+                    )
+                    for fact in normalized_loop_branch_facts
+                ),
+            )
+            for loop in ast_index.loops
+        ),
+        tuple(issue.token() for issue in issues),
+        raw_fact_count,
+        normalized_fact_count,
+        classified_fact_count,
+        materialized_count,
+    )
+
+
+def validate_structured_control_flow_8616(
+    root: object,
+    *,
+    query_index: StructuredAstQueryIndex8616 | None = None,
+    loop_branch_facts: tuple[LoopBranchGuardFact8616, ...] = (),
+    condition_fingerprint: Callable[[object], str] | None = None,
+    condition_ir_fingerprint: Callable[[ConditionIR], str | None] | None = None,
+    condition_fingerprint_normalizer: Callable[[str], str] | None = None,
+    condition_storage_matcher: Callable[[ConditionIR, object, bool], bool] | None = None,
+) -> ControlFlowValidationReport8616:
+    """Validate final guarded reachability and proven loop-branch presence.
+
+    For ``if (condition) break; if (condition) { body; }``, a repeatable
+    condition must be false on every path reaching the second statement.
+    Therefore a nonempty second true body is unreachable. Different guards are
+    counted as successfully materialized; uncertain equivalence is refused.
+    Structuring-owned loop-branch facts additionally require exactly one tagged
+    loop-header condition or in-loop break guard. When angr folds away the JCC
+    tag, an untagged guard is accepted only by a unique exact condition
+    fingerprint plus taken/exit target membership. Validation does not repair it.
+    A storage matcher may additionally prove equivalent typed memory views;
+    it must retain access width, signedness and the requested branch polarity.
+    """
+    ast_index = ControlFlowAstIndex8616.build(root, root_index=query_index)
+    (
+        raw_fact_count,
+        normalized_fact_count,
+        classified_fact_count,
+        materialized_count,
+        issues,
+    ) = _adjacent_guard_sequence_issues_8616(ast_index)
+
+    normalized_loop_branch_facts = tuple(sorted(set(loop_branch_facts)))
+    raw_fact_count += len(loop_branch_facts)
+    normalized_fact_count += len(normalized_loop_branch_facts)
+    facts_by_key: dict[int, list[LoopBranchGuardFact8616]] = {}
+    for fact in normalized_loop_branch_facts:
+        facts_by_key.setdefault(fact.jcc_addr, []).append(fact)
+    conflicted_keys, conflicted_classified, conflicted_issues = (
+        _conflicted_fact_keys_8616(facts_by_key)
+    )
+    classified_fact_count += conflicted_classified
+    issues.extend(conflicted_issues)
 
     loop_bodies = tuple(loop.body for loop in ast_index.loops)
     for fact in normalized_loop_branch_facts:
@@ -519,140 +744,42 @@ def validate_structured_control_flow_8616(
         break_guards = ast_index.break_guards(key)
         loop_guards = _loop_guards_for_fact_8616(ast_index, fact)
         if not tagged_conditions:
-            semantic_guards = (
-                _semantic_loop_branch_guards_8616(
-                    ast_index,
-                    fact,
-                    condition_fingerprint,
-                    condition_ir_fingerprint,
-                    condition_fingerprint_normalizer,
-                    condition_storage_matcher,
-                )
-                if condition_fingerprint is not None
-                else ()
+            materialized_delta, issue = _untagged_loop_branch_verdict_8616(
+                ast_index,
+                fact,
+                condition_fingerprint,
+                condition_ir_fingerprint,
+                condition_fingerprint_normalizer,
+                condition_storage_matcher,
             )
-            if len(semantic_guards) == 1:
-                materialized_count += 1
-                continue
-            if len(semantic_guards) > 1:
-                issues.append(
-                    _loop_branch_issue_8616(
-                        fact,
-                        LoopBranchGuardIssueKind8616.DUPLICATE_GUARD,
-                        match_count=len(semantic_guards),
-                    )
-                )
-                continue
-            issues.append(
-                _loop_branch_issue_8616(
-                    fact,
-                    LoopBranchGuardIssueKind8616.MISSING_GUARD,
-                )
-            )
+            materialized_count += materialized_delta
+            if issue is not None:
+                issues.append(issue)
             continue
-        associated_guards = tuple(
-            guard
-            for guard in break_guards
-            if any(
-                ast_index.subtree_contains_node(body, guard)
-                for body in loop_bodies
-            )
+        materialized_delta, issue = _tagged_loop_branch_verdict_8616(
+            ast_index,
+            fact,
+            tagged_conditions,
+            break_guards,
+            loop_guards,
+            loop_bodies,
         )
-        materialized_guards = (*associated_guards, *loop_guards)
-        if break_guards and not associated_guards and not loop_guards:
-            issues.append(
-                _loop_branch_issue_8616(
-                    fact,
-                    LoopBranchGuardIssueKind8616.GUARD_OUTSIDE_LOOP,
-                    match_count=len(break_guards),
-                )
-            )
-            continue
-        if not materialized_guards:
-            issues.append(
-                _loop_branch_issue_8616(
-                    fact,
-                    LoopBranchGuardIssueKind8616.WRONG_GUARD_SHAPE,
-                    match_count=len(tagged_conditions),
-                )
-            )
-            continue
-        if (
-            len(break_guards) != len(associated_guards)
-            or len(materialized_guards) != 1
-        ):
-            issues.append(
-                _loop_branch_issue_8616(
-                    fact,
-                    LoopBranchGuardIssueKind8616.DUPLICATE_GUARD,
-                    match_count=len(tagged_conditions),
-                )
-            )
-            continue
-        materialized_count += 1
-    if os.environ.get("INERTIA_DEBUG_VALIDATION_CONTROL_FLOW"):
-        log.warning(
-            "control-flow validation loop_branch_facts=%r matches=%r "
-            "semantic_matches=%r loops=%r issues=%r counters=(raw=%d normalized=%d "
-            "classified=%d materialized=%d)",
-            normalized_loop_branch_facts,
-            tuple(
-                (
-                    fact,
-                    ast_index.tagged_conditions(fact.jcc_addr),
-                    ast_index.break_guards(fact.jcc_addr),
-                    ast_index.loop_guards(fact.jcc_addr),
-                )
-                for fact in normalized_loop_branch_facts
-            ),
-            tuple(
-                (
-                    fact,
-                    _semantic_loop_branch_guards_8616(
-                        ast_index,
-                        fact,
-                        condition_fingerprint,
-                        condition_ir_fingerprint,
-                        condition_fingerprint_normalizer,
-                        condition_storage_matcher,
-                    )
-                    if condition_fingerprint is not None
-                    and _loop_branch_fact_is_valid_8616(fact)
-                    else (),
-                )
-                for fact in normalized_loop_branch_facts
-            ),
-            tuple(
-                (
-                    type(loop).__name__,
-                    _ast_tags_8616(loop),
-                    _ast_tags_8616(loop.condition),
-                    condition_fingerprint(loop.condition)
-                    if condition_fingerprint is not None
-                    else None,
-                    tuple(
-                        (
-                            fact.jcc_addr,
-                            ast_index.subtree_contains_instruction(
-                                loop.body,
-                                fact.body_target,
-                            ),
-                            ast_index.subtree_contains_instruction(
-                                loop.body,
-                                fact.false_target,
-                            ),
-                        )
-                        for fact in normalized_loop_branch_facts
-                    ),
-                )
-                for loop in ast_index.loops
-            ),
-            tuple(issue.token() for issue in issues),
-            raw_fact_count,
-            normalized_fact_count,
-            classified_fact_count,
-            materialized_count,
-        )
+        materialized_count += materialized_delta
+        if issue is not None:
+            issues.append(issue)
+    _debug_log_control_flow_8616(
+        ast_index,
+        normalized_loop_branch_facts,
+        issues,
+        condition_fingerprint,
+        condition_ir_fingerprint,
+        condition_fingerprint_normalizer,
+        condition_storage_matcher,
+        raw_fact_count,
+        normalized_fact_count,
+        classified_fact_count,
+        materialized_count,
+    )
     if not ast_index.stats().is_closed:
         raise RuntimeError("control-flow AST index query accounting is not closed")
     return ControlFlowValidationReport8616(

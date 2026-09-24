@@ -163,22 +163,8 @@ def _require_slice(data: bytes, offset: int, size: int, detail: str) -> bytes:
     return data[offset : offset + size]
 
 
-def unpack_lzexe_091(data: bytes) -> UnpackedMZImage:
-    """Decode LZEXE 0.91 while retaining relocations for the normal MZ loader."""
-    header = MZHeaderView.parse(data)
-    if header is None:
-        raise PackedMZError(PackedMZErrorKind.NOT_MZ, "missing MZ signature or fixed header")
-    if data[0x1C:0x20] != b"LZ91":
-        raise PackedMZError(PackedMZErrorKind.UNSUPPORTED_PACKER, "only LZEXE 0.91 decoding is proven")
-
-    lz_header_offset = (header.header_paragraphs + header.entry_cs) << 4
-    lz_entry = lz_header_offset + header.entry_ip
-    if _require_slice(data, lz_entry, 4, "LZEXE entry stub is truncated") != b"\x06\x0e\x1f\x8b":
-        raise PackedMZError(PackedMZErrorKind.MALFORMED_LZEXE, "entry stub does not match LZEXE 0.91")
-
-    info = _require_slice(data, lz_header_offset, 12, "LZEXE information block is truncated")
-    entry_ip, entry_cs, stack_sp, stack_ss, packed_paragraphs, unpacked_paragraphs = struct.unpack("<6H", info)
-    packed_stream_offset = lz_header_offset - (packed_paragraphs << 4)
+def _decode_lzexe_image(data: bytes, packed_stream_offset: int, unpacked_paragraphs: int) -> tuple[bytearray, int]:
+    """Decode the LZEXE literal/back-reference stream into the output image."""
     output = bytearray((unpacked_paragraphs * 2) << 4)
     stream = _LZEXEBitStream(data, packed_stream_offset)
     output_position = 0
@@ -214,8 +200,13 @@ def unpack_lzexe_091(data: bytes) -> UnpackedMZImage:
                 raise PackedMZError(PackedMZErrorKind.MALFORMED_LZEXE, "invalid compressed back-reference")
             output[output_position] = output[source_position]
             output_position += 1
+    return output, output_position
 
-    relocation_position = lz_header_offset + 0x158
+
+def _read_lzexe_relocations(
+    data: bytes, relocation_position: int, output_size: int
+) -> tuple[tuple[int, int], ...]:
+    """Read the LZEXE relocation span stream into segment:offset pairs."""
     relocation_linear = 0
     relocations: list[tuple[int, int]] = []
     while True:
@@ -233,9 +224,31 @@ def unpack_lzexe_091(data: bytes) -> UnpackedMZImage:
             if span == 1:
                 break
         relocation_linear += span
-        if relocation_linear + 2 > len(output):
+        if relocation_linear + 2 > output_size:
             raise PackedMZError(PackedMZErrorKind.MALFORMED_LZEXE, "relocation lies outside decoded image")
         relocations.append((relocation_linear >> 4, relocation_linear & 0xF))
+    return tuple(relocations)
+
+
+def unpack_lzexe_091(data: bytes) -> UnpackedMZImage:
+    """Decode LZEXE 0.91 while retaining relocations for the normal MZ loader."""
+    header = MZHeaderView.parse(data)
+    if header is None:
+        raise PackedMZError(PackedMZErrorKind.NOT_MZ, "missing MZ signature or fixed header")
+    if data[0x1C:0x20] != b"LZ91":
+        raise PackedMZError(PackedMZErrorKind.UNSUPPORTED_PACKER, "only LZEXE 0.91 decoding is proven")
+
+    lz_header_offset = (header.header_paragraphs + header.entry_cs) << 4
+    lz_entry = lz_header_offset + header.entry_ip
+    if _require_slice(data, lz_entry, 4, "LZEXE entry stub is truncated") != b"\x06\x0e\x1f\x8b":
+        raise PackedMZError(PackedMZErrorKind.MALFORMED_LZEXE, "entry stub does not match LZEXE 0.91")
+
+    info = _require_slice(data, lz_header_offset, 12, "LZEXE information block is truncated")
+    entry_ip, entry_cs, stack_sp, stack_ss, packed_paragraphs, unpacked_paragraphs = struct.unpack("<6H", info)
+    packed_stream_offset = lz_header_offset - (packed_paragraphs << 4)
+    output, output_position = _decode_lzexe_image(data, packed_stream_offset, unpacked_paragraphs)
+
+    relocations = _read_lzexe_relocations(data, lz_header_offset + 0x158, len(output))
 
     relocation_image_size = max(((segment << 4) + offset + 2 for segment, offset in relocations), default=0)
     image_size = max(output_position, relocation_image_size)

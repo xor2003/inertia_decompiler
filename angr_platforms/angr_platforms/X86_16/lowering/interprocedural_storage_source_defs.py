@@ -48,14 +48,7 @@ def _load_definitions_8616(
         if instr.op != "LOAD" or instr.addr != fact.push_addr or instr.dst is None or not instr.args:
             continue
         address = instr.args[0]
-        if (
-            not isinstance(address, IRAddress)
-            or address.base != base
-            or (space is not None and address.space is not space)
-            or address.offset < offset
-            or address.offset + address.size > end
-            or address.size <= 0
-        ):
+        if not _load_address_covers_8616(address, base, space, offset, end):
             continue
         candidates.append((site, address, instr.dst))
     selected: list[tuple[SSAInstructionSite8616, IRAddress, IRValue]] = []
@@ -96,15 +89,54 @@ def _store_data_sites_8616(
         if instr.op != "STORE" or instr.addr != fact.push_addr or len(instr.args) != 2:
             continue
         address, value = instr.args
-        if (
-            isinstance(address, IRAddress)
-            and address.space is MemSpace.SS
-            and address.base == ("sp",)
-            and isinstance(value, IRValue)
-            and (value.size <= 0 or value.size == fact.width)
-        ):
+        if _is_ss_sp_address_8616(address) and _store_value_matches_8616(value, fact.width):
             stores.append((site, value))
     return tuple(stores)
+
+
+def _is_ss_sp_address_8616(address: object) -> bool:
+    """Check the STORE target is the SS:SP push slot."""
+    return (
+        isinstance(address, IRAddress)
+        and address.space is MemSpace.SS
+        and address.base == ("sp",)
+    )
+
+
+def _store_value_matches_8616(value: object, width: int) -> bool:
+    """Check the stored IRValue's size agrees with the pushed piece width."""
+    return isinstance(value, IRValue) and (value.size <= 0 or value.size == width)
+
+
+def _load_address_covers_8616(
+    address: object,
+    base: tuple[str, ...],
+    space: MemSpace | None,
+    offset: int,
+    end: int,
+) -> bool:
+    """Check a LOAD address lands fully inside the pushed memory window."""
+    return (
+        isinstance(address, IRAddress)
+        and _address_origin_matches_8616(address, base, space)
+        and _address_range_covers_8616(address, offset, end)
+    )
+
+
+def _address_origin_matches_8616(
+    address: IRAddress, base: tuple[str, ...], space: MemSpace | None
+) -> bool:
+    """Check the LOAD address shares the expected base and segment space."""
+    return address.base == base and (space is None or address.space is space)
+
+
+def _address_range_covers_8616(address: IRAddress, offset: int, end: int) -> bool:
+    """Check the LOAD range is bounded by the pushed window."""
+    return bool(
+        address.offset >= offset
+        and address.offset + address.size <= end
+        and address.size > 0
+    )
 
 
 def _has_prior_binding_8616(site: SSAInstructionSite8616, value: IRValue) -> bool:
@@ -298,46 +330,91 @@ def resolve_argument_source_definitions_8616(
     source = fact.source
     kind = _source_kind_8616(source)
     if kind is CallsitePushSourceKind8616.IMMEDIATE:
-        if len(source) != 2 or not isinstance(source[1], int):
-            return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT
-        return _store_definition_8616(sites, fact, expected_const=source[1])
+        return _resolve_immediate_source_8616(sites, fact, source)
     if kind is CallsitePushSourceKind8616.BP_VALUE:
-        if len(source) not in {2, 3} or not isinstance(source[1], int):
-            return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT
-        if len(source) == 3 and source[2] != fact.width:
-            return None, CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT
-        return _load_definitions_8616(
-            sites,
-            fact,
-            space=MemSpace.SS,
-            base=("bp",),
-            offset=source[1],
-        )
+        return _resolve_bp_value_source_8616(sites, fact, source)
     if kind is CallsitePushSourceKind8616.GLOBAL_VALUE:
-        if len(source) != 3 or not isinstance(source[1], int) or source[2] != fact.width:
-            return None, CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT
-        return _load_definitions_8616(sites, fact, space=None, base=(), offset=source[1])
+        return _resolve_global_value_source_8616(sites, fact, source)
     if kind is CallsitePushSourceKind8616.BP_ADDRESS:
-        if len(source) != 2 or not isinstance(source[1], int):
-            return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT
-        return _bp_address_definition_8616(
-            sites,
-            fact,
-            offset=source[1],
-        )
+        return _resolve_bp_address_source_8616(sites, fact, source)
     if kind == "reg":
-        if len(source) != 2 or not isinstance(source[1], str):
-            return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT
-        return _store_definition_8616(
-            sites,
-            fact,
-            source_storage=StorageIdentity8616(
-                kind=StorageIdentityKind8616.REGISTER,
-                width=fact.width,
-                register=source[1],
-            ),
-            source_register=source[1],
-        )
+        return _resolve_register_source_8616(sites, fact, source)
     if kind is CallsitePushSourceKind8616.RETURN_REGISTER:
         return None, CallArgumentDefinitionFailure8616.UNMODELED_CALL_OUTPUT
     return None, CallArgumentDefinitionFailure8616.UNSUPPORTED_SOURCE_KIND
+
+
+def _resolve_immediate_source_8616(
+    sites: tuple[SSAInstructionSite8616, ...],
+    fact: PhysicalCallArgumentPiece8616,
+    source: tuple[object, ...],
+) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
+    """Resolve a pushed immediate to its exact STORE definition."""
+    if len(source) != 2 or not isinstance(source[1], int):
+        return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT
+    return _store_definition_8616(sites, fact, expected_const=source[1])
+
+
+def _resolve_bp_value_source_8616(
+    sites: tuple[SSAInstructionSite8616, ...],
+    fact: PhysicalCallArgumentPiece8616,
+    source: tuple[object, ...],
+) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
+    """Resolve a pushed SS:BP load to its exact LOAD definitions."""
+    if len(source) not in {2, 3} or not isinstance(source[1], int):
+        return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT
+    if len(source) == 3 and source[2] != fact.width:
+        return None, CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT
+    return _load_definitions_8616(
+        sites,
+        fact,
+        space=MemSpace.SS,
+        base=("bp",),
+        offset=source[1],
+    )
+
+
+def _resolve_global_value_source_8616(
+    sites: tuple[SSAInstructionSite8616, ...],
+    fact: PhysicalCallArgumentPiece8616,
+    source: tuple[object, ...],
+) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
+    """Resolve a pushed global load to its exact LOAD definitions."""
+    if len(source) != 3 or not isinstance(source[1], int) or source[2] != fact.width:
+        return None, CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT
+    return _load_definitions_8616(sites, fact, space=None, base=(), offset=source[1])
+
+
+def _resolve_bp_address_source_8616(
+    sites: tuple[SSAInstructionSite8616, ...],
+    fact: PhysicalCallArgumentPiece8616,
+    source: tuple[object, ...],
+) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
+    """Resolve a pushed BP-address value to its exact definition."""
+    if len(source) != 2 or not isinstance(source[1], int):
+        return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT
+    return _bp_address_definition_8616(
+        sites,
+        fact,
+        offset=source[1],
+    )
+
+
+def _resolve_register_source_8616(
+    sites: tuple[SSAInstructionSite8616, ...],
+    fact: PhysicalCallArgumentPiece8616,
+    source: tuple[object, ...],
+) -> tuple[tuple[StorageReachingDefinition8616, ...] | None, CallArgumentDefinitionFailure8616 | None]:
+    """Resolve a pushed register value to its exact STORE definition."""
+    if len(source) != 2 or not isinstance(source[1], str):
+        return None, CallArgumentDefinitionFailure8616.SOURCE_SHAPE_CONFLICT
+    return _store_definition_8616(
+        sites,
+        fact,
+        source_storage=StorageIdentity8616(
+            kind=StorageIdentityKind8616.REGISTER,
+            width=fact.width,
+            register=source[1],
+        ),
+        source_register=source[1],
+    )

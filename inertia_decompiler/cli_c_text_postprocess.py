@@ -2300,7 +2300,7 @@ def _materialize_missing_synthetic_global_declarations_text(
 
         synthetic_names = {
             global_name
-            for _addr, (global_name, _width) in (synthetic_globals or {}).items()
+            for global_name, _width in (synthetic_globals or {}).values()
             if _is_strict_c_identifier_8616(global_name)
         }
         candidate_names = set(synthetic_names)

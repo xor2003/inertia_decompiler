@@ -21,8 +21,8 @@ from ..callsite_summary import (
     callsite_machine_frame_kind_8616,
 )
 from ..compiler_helpers import (
+    CompilerHelperEvidenceKind8616,
     identify_x86_16_compiler_helper_at_8616,
-    is_x86_16_stack_probe_evidence_kind_8616,
 )
 from ..ir import IRAddress, IRCallStackEffect8616, IRFunctionArtifact, IRInstr, IRValue, MemSpace
 from .call_stack_effect_contracts import CallStackEffectFailure8616
@@ -35,24 +35,29 @@ _AX_FAMILY = register_value_family_8616("ax")
 
 @dataclass(frozen=True, slots=True)
 class CallStackAllocationProof8616:
-    """A binary-backed returning call effect with its reaching operand origin."""
+    """A binary-backed allocation with its operand origin and exact return frame.
+
+    The call frame must agree with this binary return-frame evidence before
+    consumers may apply the allocation to their caller stack coordinate.
+    """
 
     callsite_addr: int
     target_addr: int
     value_instruction_addr: int
     allocation_size: int
+    frame_kind: CallsiteMachineFrameKind8616
 
     def matches(self, summary: CallsiteSummary8616) -> bool:
         """Reject conflicting call identity, argument frame or requested size."""
         same_site = self.callsite_addr == summary.callsite_addr and self.target_addr == summary.target_addr
-        near_frame = callsite_machine_frame_kind_8616(summary) is CallsiteMachineFrameKind8616.NEAR
+        same_frame = callsite_machine_frame_kind_8616(summary) is self.frame_kind
         no_arguments = (
             summary.arg_count == 0 and not summary.arg_widths
             and not summary.push_arg_sources and summary.stack_cleanup in {None, 0}
         )
         request_agrees = summary.stack_probe_allocation_size in {None, self.allocation_size}
         valid_allocation = 0 <= self.allocation_size < _WORD_LIMIT
-        return bool(same_site and near_frame and no_arguments and request_agrees
+        return bool(same_site and same_frame and no_arguments and request_agrees
                     and valid_allocation and summary.return_addr is not None)
 
 
@@ -86,10 +91,10 @@ def _constant_ax_write(instruction: IRInstr) -> int | None:
     return value if isinstance(value, int) and 0 <= value < _WORD_LIMIT else None
 
 
-def binary_stack_allocation_target_8616(
+def _binary_stack_allocation_target_frame_8616(
     project: object, instruction: IRInstr, summary: CallsiteSummary8616 | None = None,
-) -> int | None:
-    """Prove the binary target, requiring summary agreement when supplied."""
+) -> tuple[int, CallsiteMachineFrameKind8616] | None:
+    """Prove the target and return frame from the same binary helper evidence."""
     target = instruction.args[0] if instruction.args else None
     if not isinstance(target, IRValue) or target.space is not MemSpace.CONST:
         return None
@@ -97,15 +102,29 @@ def binary_stack_allocation_target_8616(
         return None
     target_addr = (normalize_x86_16_call_target_addr_8616(project, target.const)
                    if summary is None else summary.target_addr)
+    if target_addr is None:
+        return None
     same_target = target.const == target_addr or x86_16_call_targets_equivalent_8616(
         project, target.const, target_addr,
     )
     if not same_target:
         return None
     evidence = identify_x86_16_compiler_helper_at_8616(project, target_addr)
-    if evidence is None or not is_x86_16_stack_probe_evidence_kind_8616(evidence.kind):
+    if evidence is None:
         return None
-    return target_addr
+    if evidence.kind is CompilerHelperEvidenceKind8616.STACK_PROBE:
+        return target_addr, CallsiteMachineFrameKind8616.NEAR
+    if evidence.kind is CompilerHelperEvidenceKind8616.STACK_PROBE_FAR:
+        return target_addr, CallsiteMachineFrameKind8616.FAR
+    return None
+
+
+def binary_stack_allocation_target_8616(
+    project: object, instruction: IRInstr, summary: CallsiteSummary8616 | None = None,
+) -> int | None:
+    """Project the exact binary target for consumers that do not need its frame."""
+    evidence = _binary_stack_allocation_target_frame_8616(project, instruction, summary)
+    return None if evidence is None else evidence[0]
 
 
 def collect_call_stack_allocation_proofs_8616(
@@ -136,11 +155,14 @@ def collect_call_stack_allocation_proofs_8616(
             summary = summaries.get(site) if summaries is not None and site is not None else None
             candidate_present = summaries is None or summary is not None
             if candidate_present and allocation is not None and origin is not None and site is not None:
-                target = binary_stack_allocation_target_8616(project, instruction, summary)
-                if target is not None:
-                    proof = CallStackAllocationProof8616(site, target, origin, allocation)
-                    if summary is None or proof.matches(summary):
-                        proofs[site] = proof
+                target_frame = _binary_stack_allocation_target_frame_8616(project, instruction, summary)
+                if target_frame is not None:
+                    target, frame_kind = target_frame
+                    # Keep conflicting binary evidence so the consumer refuses
+                    # the call instead of falling back to a zero-allocation ABI.
+                    proofs[site] = CallStackAllocationProof8616(
+                        site, target, origin, allocation, frame_kind,
+                    )
             allocation = None
             origin = None
     return proofs

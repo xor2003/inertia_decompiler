@@ -173,57 +173,51 @@ def _parse_validation_state_8616(v: str | None) -> ValidationState:
     return ValidationState.UNKNOWN
 
 
+_STATE_RANK_8616: dict[ValidationState, int] = {
+    ValidationState.CRASH: 0,
+    ValidationState.TIMEOUT: 1,
+    ValidationState.FALLBACK: 2,
+    ValidationState.UNCOLLECTED: 3,
+    ValidationState.CHANGED: 4,
+    ValidationState.PASSED: 5,
+}
+
+
+def _worst_record_state_8616(record: ValidationRecord) -> ValidationState:
+    """Pick the worst state across the record's structuring/postprocess verdicts."""
+    worst: ValidationState | None = None
+    for state in (record.structuring_state, record.postprocess_state):
+        rank = _STATE_RANK_8616.get(state)
+        if rank is None:
+            continue
+        if rank == 0:
+            return ValidationState.CRASH
+        if worst is None or rank < _STATE_RANK_8616[worst]:
+            worst = state
+    return worst if worst is not None else ValidationState.UNCOLLECTED
+
+
 def _count_record_into_aggregate_8616(agg: ValidationAggregate, r: ValidationRecord) -> None:
-    def _impl() -> None:
-        """Count the worst state for a record into the aggregate.
+    """Count the worst state for a record into the aggregate.
 
-        A record contributes to the worst category it falls into:
-          crash > timeout > fallback > uncollected > changed > passed
+    A record contributes to the worst category it falls into:
+      crash > timeout > fallback > uncollected > changed > passed
 
-        Only the worst state is counted — one record = one bucket.
-        """
-        # Order: worst first
-        worst: ValidationState | None = None
-        for state in (r.structuring_state, r.postprocess_state):
-            if state in (ValidationState.CRASH,):
-                worst = ValidationState.CRASH
-                break
-            if state == ValidationState.TIMEOUT and worst not in (ValidationState.CRASH,):
-                worst = ValidationState.TIMEOUT
-            elif state == ValidationState.FALLBACK and worst not in (ValidationState.CRASH, ValidationState.TIMEOUT):
-                worst = ValidationState.FALLBACK
-            elif state == ValidationState.UNCOLLECTED and worst not in (
-                ValidationState.CRASH,
-                ValidationState.TIMEOUT,
-                ValidationState.FALLBACK,
-            ):
-                worst = ValidationState.UNCOLLECTED
-            elif state == ValidationState.CHANGED and worst not in (
-                ValidationState.CRASH,
-                ValidationState.TIMEOUT,
-                ValidationState.FALLBACK,
-                ValidationState.UNCOLLECTED,
-            ):
-                worst = ValidationState.CHANGED
-            elif state == ValidationState.PASSED and worst is None:
-                worst = ValidationState.PASSED
+    Only the worst state is counted — one record = one bucket.
+    """
+    worst = _worst_record_state_8616(r)
 
-        if worst is None:
-            worst = ValidationState.UNCOLLECTED
-
-        if worst == ValidationState.PASSED:
-            agg.passed += 1
-        elif worst == ValidationState.CHANGED:
-            agg.changed += 1
-        elif worst == ValidationState.UNCOLLECTED:
-            agg.uncollected += 1
-        elif worst == ValidationState.UNKNOWN:
-            agg.unknown += 1
-        elif worst == ValidationState.TIMEOUT:
-            agg.timeout += 1
-        elif worst == ValidationState.FALLBACK:
-            agg.fallback += 1
-        elif worst == ValidationState.CRASH:
-            agg.crash += 1
-
-    return _impl()
+    if worst == ValidationState.PASSED:
+        agg.passed += 1
+    elif worst == ValidationState.CHANGED:
+        agg.changed += 1
+    elif worst == ValidationState.UNCOLLECTED:
+        agg.uncollected += 1
+    elif worst == ValidationState.UNKNOWN:
+        agg.unknown += 1
+    elif worst == ValidationState.TIMEOUT:
+        agg.timeout += 1
+    elif worst == ValidationState.FALLBACK:
+        agg.fallback += 1
+    elif worst == ValidationState.CRASH:
+        agg.crash += 1

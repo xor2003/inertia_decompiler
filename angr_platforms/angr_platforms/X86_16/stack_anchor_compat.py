@@ -23,17 +23,23 @@ class _AnchorEvidenceBoundary8616(Protocol):
     _inertia_native_anchor_stats_8616: NativeStackAnchorStats8616
 
 
+def _is_exact_stack_reference_8616(result: Expression, offset: object) -> bool:
+    """Match one direct SSA stack reference carrying exact source coordinates."""
+    return (
+        isinstance(result, UnaryOp)
+        and result.op == "Reference"
+        and isinstance(result.operand, VirtualVariable)
+        and result.operand.was_stack
+        and type(offset) is int
+        and result.operand.stack_offset == offset
+    )
+
+
 def publish_native_stack_anchor_8616(source: StackBaseOffset, result: Expression | None) -> bool:
     """Tag only exact direct SSA replacements, without changing either value."""
     if result is None:
         return False
-    if (
-        not isinstance(result, UnaryOp) or result.op != "Reference"
-        or not isinstance(result.operand, VirtualVariable)
-        or not result.operand.was_stack
-        or type(source.offset) is not int
-        or result.operand.stack_offset != source.offset
-    ):
+    if not _is_exact_stack_reference_8616(result, source.offset):
         return False
     result.tags[NATIVE_ENTRY_SP_ANCHOR_TAG8616] = source.offset
     return True

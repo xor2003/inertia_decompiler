@@ -99,6 +99,9 @@ from .lowering.direct_stack_replay import (
 )
 from .lowering.explicit_char_types import materialize_explicit_scalar_char_types_8616
 from .lowering.fact_transfer import transfer_semantic_alias_facts_to_codegen_8616
+from .lowering.far_return_boundary_carriers import (
+    consume_terminal_far_return_boundary_carriers_8616,
+)
 from .lowering.gp_register_state import lower_architectural_gp_register_state_8616
 from .lowering.indexed_address_collector_parity import (
     collect_indexed_address_collector_parity_8616,
@@ -135,9 +138,6 @@ from .lowering.return_type_evidence import proven_function_result_observation_86
 from .lowering.segment_global_materialization import (
     cod_metadata_for_codegen_8616,
     run_segment_global_materialization_8616,
-)
-from .lowering.far_return_boundary_carriers import (
-    consume_terminal_far_return_boundary_carriers_8616,
 )
 from .lowering.segment_stack_restore_carriers import prune_proven_segment_stack_restore_carriers_8616
 from .lowering.segmented_global_loads import (

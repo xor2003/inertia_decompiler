@@ -111,39 +111,79 @@ def _decompress(data: bytearray, compressed_length: int, output_length: int) -> 
     destination = output_length
 
     while True:
-        if source < 3:
-            raise _malformed("EXEPACK command stream is truncated")
-        source -= 1
-        command = data[source]
-        source -= 2
-        length = int.from_bytes(data[source : source + 2], "little")
-
-        command_type = command & 0xFE
-        if command_type == 0xB0:
-            if source < 1:
-                raise _malformed("EXEPACK fill command is truncated")
-            source -= 1
-            fill = data[source]
-            if length > destination:
-                raise _malformed("EXEPACK fill command exceeds the decoded image")
-            destination -= length
-            data[destination : destination + length] = bytes([fill]) * length
-        elif command_type == 0xB2:
-            if length > source or length > destination:
-                raise _malformed("EXEPACK copy command exceeds the decoded image")
-            source -= length
-            destination -= length
-            for index in range(length - 1, -1, -1):
-                data[destination + index] = data[source + index]
-        else:
-            raise _malformed(f"unknown EXEPACK command 0x{command:02x}")
-
-        if command & 1:
+        source, destination, done = _exepack_command_step(data, source, destination)
+        if done:
             break
 
     if compressed_length < destination:
         raise _malformed("EXEPACK command stream leaves an uninitialized gap")
     del data[output_length:]
+
+
+def _exepack_command_step(data: bytearray, source: int, destination: int) -> tuple[int, int, bool]:
+    """Apply one EXEPACK fill/copy command and report stream completion."""
+    if source < 3:
+        raise _malformed("EXEPACK command stream is truncated")
+    source -= 1
+    command = data[source]
+    source -= 2
+    length = int.from_bytes(data[source : source + 2], "little")
+
+    command_type = command & 0xFE
+    if command_type == 0xB0:
+        if source < 1:
+            raise _malformed("EXEPACK fill command is truncated")
+        source -= 1
+        fill = data[source]
+        if length > destination:
+            raise _malformed("EXEPACK fill command exceeds the decoded image")
+        destination -= length
+        data[destination : destination + length] = bytes([fill]) * length
+    elif command_type == 0xB2:
+        if length > source or length > destination:
+            raise _malformed("EXEPACK copy command exceeds the decoded image")
+        source -= length
+        destination -= length
+        for index in range(length - 1, -1, -1):
+            data[destination + index] = data[source + index]
+    else:
+        raise _malformed(f"unknown EXEPACK command 0x{command:02x}")
+
+    return source, destination, bool(command & 1)
+
+
+def _exepack_header_block(
+    mz: MZHeaderView, packed_body: bytes
+) -> tuple[_EXEPACKHeader, int, int, int]:
+    """Parse the EXEPACK metadata block inside the packed image."""
+    header_offset = mz.entry_cs << 4
+    header_length = mz.entry_ip
+    header_end = header_offset + header_length
+    if header_offset > len(packed_body) or header_end > len(packed_body):
+        raise _malformed("EXEPACK header lies beyond the packed image")
+    header = _EXEPACKHeader.parse(packed_body[header_offset:header_end])
+    block_end = header_offset + header.exepack_size
+    if header.exepack_size < header_length or block_end > len(packed_body):
+        raise _malformed("EXEPACK metadata block has an invalid size")
+    return header, header_offset, header_end, block_end
+
+
+def _exepack_stream_window(
+    header: _EXEPACKHeader, packed_body: bytes, header_offset: int
+) -> tuple[bytearray, int, int]:
+    """Compute the bounded compressed stream and decoded output extents."""
+    skip_value = header.skip_paragraphs_plus_one
+    if skip_value == 0:
+        raise _malformed("EXEPACK skip length cannot be zero")
+    skipped_bytes = (skip_value - 1) * 16
+    compressed = bytearray(packed_body[:header_offset])
+    if skipped_bytes > len(compressed):
+        raise _malformed("EXEPACK skip length exceeds the compressed image")
+    compressed_length = len(compressed) - skipped_bytes
+    output_length = header.destination_paragraphs * 16 - skipped_bytes
+    if output_length < 0:
+        raise _malformed("EXEPACK skip length exceeds the decoded image")
+    return compressed, compressed_length, output_length
 
 
 def unpack_exepack(data: bytes) -> UnpackedMZImage:
@@ -160,31 +200,15 @@ def unpack_exepack(data: bytes) -> UnpackedMZImage:
         raise _malformed("packed EXEPACK MZ files must not have outer relocations")
 
     packed_body = data[mz.header_size : declared_size]
-    header_offset = mz.entry_cs << 4
-    header_length = mz.entry_ip
-    header_end = header_offset + header_length
-    if header_offset > len(packed_body) or header_end > len(packed_body):
-        raise _malformed("EXEPACK header lies beyond the packed image")
-    header = _EXEPACKHeader.parse(packed_body[header_offset:header_end])
-    block_end = header_offset + header.exepack_size
-    if header.exepack_size < header_length or block_end > len(packed_body):
-        raise _malformed("EXEPACK metadata block has an invalid size")
+    header, header_offset, header_end, block_end = _exepack_header_block(mz, packed_body)
 
     stub_and_relocations = packed_body[header_end:block_end]
     relocation_offset = _locate_relocation_table(stub_and_relocations)
     relocations = _parse_relocations(stub_and_relocations[relocation_offset:])
 
-    skip_value = header.skip_paragraphs_plus_one
-    if skip_value == 0:
-        raise _malformed("EXEPACK skip length cannot be zero")
-    skipped_bytes = (skip_value - 1) * 16
-    compressed = bytearray(packed_body[:header_offset])
-    if skipped_bytes > len(compressed):
-        raise _malformed("EXEPACK skip length exceeds the compressed image")
-    compressed_length = len(compressed) - skipped_bytes
-    output_length = header.destination_paragraphs * 16 - skipped_bytes
-    if output_length < 0:
-        raise _malformed("EXEPACK skip length exceeds the decoded image")
+    compressed, compressed_length, output_length = _exepack_stream_window(
+        header, packed_body, header_offset
+    )
     _decompress(compressed, compressed_length, output_length)
 
     available_paragraphs = paragraph_count(len(packed_body)) + mz.min_alloc

@@ -300,40 +300,55 @@ def _parse_type_record(record: bytes) -> tuple[CodeViewNB00TypeLeaf, ...]:
     return tuple(leaves)
 
 
-def _read_leaf(record: bytes, offset: int) -> tuple[CodeViewNB00TypeLeaf, int]:
-    def _impl() -> tuple[CodeViewNB00TypeLeaf, int]:
-        if offset >= len(record):
-            return CodeViewNB00TypeLeaf("invalid", None), 0
-        tag = record[offset]
-        if tag <= 0x7F:
-            return CodeViewNB00TypeLeaf("int8", tag), 1
-        if tag == 0x89 and offset + 3 <= len(record):
-            return CodeViewNB00TypeLeaf("uint16", struct.unpack_from("<H", record, offset + 1)[0]), 3
-        if tag == 0x8A and offset + 5 <= len(record):
-            return CodeViewNB00TypeLeaf("uint32", struct.unpack_from("<I", record, offset + 1)[0]), 5
-        if tag == 0x8D and offset + 2 <= len(record):
-            strlen = record[offset + 1]
-            end = offset + 2 + strlen
-            if end <= len(record):
-                return CodeViewNB00TypeLeaf(
-                    "string", record[offset + 2 : end].decode("ascii", errors="ignore")
-                ), 2 + strlen
-        if tag == 0x83 and offset + 3 <= len(record):
-            return CodeViewNB00TypeLeaf("index", struct.unpack_from("<H", record, offset + 1)[0]), 3
-        if tag == 0x82 and offset + 2 <= len(record):
-            strlen = record[offset + 1]
-            end = offset + 2 + strlen
-            if end <= len(record):
-                return CodeViewNB00TypeLeaf(
-                    "string", record[offset + 2 : end].decode("ascii", errors="ignore")
-                ), 2 + strlen
-        if tag == 0x88 and offset + 2 <= len(record):
-            return CodeViewNB00TypeLeaf("uint8", record[offset + 1]), 2
-        if tag in {0x8B, 0x8C, 0x8E, 0x8F, 0x92, 0x94}:
-            return CodeViewNB00TypeLeaf(f"leaf_{tag:02x}", None), 1
-        return CodeViewNB00TypeLeaf(f"unknown_{tag:02x}", None), 1
+def _fixed_width_leaf(
+    record: bytes, offset: int, tag: int
+) -> tuple[CodeViewNB00TypeLeaf, int] | None:
+    """Decode one fixed-width integer leaf when the full extent fits."""
+    if tag == 0x89 and offset + 3 <= len(record):
+        return CodeViewNB00TypeLeaf("uint16", struct.unpack_from("<H", record, offset + 1)[0]), 3
+    if tag == 0x8A and offset + 5 <= len(record):
+        return CodeViewNB00TypeLeaf("uint32", struct.unpack_from("<I", record, offset + 1)[0]), 5
+    if tag == 0x83 and offset + 3 <= len(record):
+        return CodeViewNB00TypeLeaf("index", struct.unpack_from("<H", record, offset + 1)[0]), 3
+    if tag == 0x88 and offset + 2 <= len(record):
+        return CodeViewNB00TypeLeaf("uint8", record[offset + 1]), 2
+    return None
 
-    return _impl()
+
+def _length_prefixed_string_leaf(
+    record: bytes, offset: int
+) -> tuple[CodeViewNB00TypeLeaf, int] | None:
+    """Decode one length-prefixed string leaf when the full extent fits."""
+    strlen = record[offset + 1]
+    end = offset + 2 + strlen
+    if end > len(record):
+        return None
+    return CodeViewNB00TypeLeaf(
+        "string", record[offset + 2 : end].decode("ascii", errors="ignore")
+    ), 2 + strlen
+
+
+def _read_leaf(record: bytes, offset: int) -> tuple[CodeViewNB00TypeLeaf, int]:
+    """Decode one CodeView leaf record at ``offset``."""
+    if offset >= len(record):
+        return CodeViewNB00TypeLeaf("invalid", None), 0
+    tag = record[offset]
+    if tag <= 0x7F:
+        return CodeViewNB00TypeLeaf("int8", tag), 1
+    fixed = _fixed_width_leaf(record, offset, tag)
+    if fixed is not None:
+        return fixed
+    if tag == 0x8D and offset + 2 <= len(record):
+        string_leaf = _length_prefixed_string_leaf(record, offset)
+        if string_leaf is not None:
+            return string_leaf
+    if tag == 0x82 and offset + 2 <= len(record):
+        string_leaf = _length_prefixed_string_leaf(record, offset)
+        if string_leaf is not None:
+            return string_leaf
+    if tag in {0x8B, 0x8C, 0x8E, 0x8F, 0x92, 0x94}:
+        return CodeViewNB00TypeLeaf(f"leaf_{tag:02x}", None), 1
+    return CodeViewNB00TypeLeaf(f"unknown_{tag:02x}", None), 1
 
 
 def _collect_type_record_names(

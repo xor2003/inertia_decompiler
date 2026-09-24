@@ -172,19 +172,24 @@ def project_indexed_address_aliases_8616(
     return result
 
 
-def apply_x86_16_indexed_address_aliases_8616(
-    project: object,
-    codegen: object,
-) -> bool:
-    """Publish Alias projection and fail if the preceding IR owner is absent."""
-    boundary = cast(_CodegenBoundary8616, codegen)
+def _required_ir_evidence_8616(
+    boundary: _CodegenBoundary8616,
+) -> (
+    tuple[
+        IndexedAddressEvidence8616,
+        IndexedAddressCopyEvidence8616,
+        IndexedLoopRangeEvidence8616,
+    ]
+    | None
+):
+    """Read required IR evidence or return None when no IR owner ran."""
     try:
         source = boundary._inertia_indexed_address_evidence_8616
     except AttributeError as error:
         try:
             boundary._inertia_vex_ir_function_ssa  # noqa: B018
         except AttributeError:
-            return False
+            return None
         raise PipelineHardError(
             "indexed-address IR evidence is missing before Alias projection",
             layer="alias",
@@ -218,6 +223,16 @@ def apply_x86_16_indexed_address_aliases_8616(
             "indexed loop-range IR evidence has the wrong pipeline contract",
             layer="alias",
         )
+    return source, copy_source, range_source
+
+
+def _project_alias_evidence_8616(
+    boundary: _CodegenBoundary8616,
+    source: IndexedAddressEvidence8616,
+    copy_source: IndexedAddressCopyEvidence8616,
+    range_source: IndexedLoopRangeEvidence8616,
+) -> None:
+    """Refresh cached Alias projections when upstream evidence changed."""
     try:
         existing = boundary._inertia_indexed_address_alias_evidence_8616
     except AttributeError:
@@ -270,6 +285,19 @@ def apply_x86_16_indexed_address_aliases_8616(
                 access_evidence,
             )
         )
+
+
+def apply_x86_16_indexed_address_aliases_8616(
+    project: object,
+    codegen: object,
+) -> bool:
+    """Publish Alias projection and fail if the preceding IR owner is absent."""
+    boundary = cast(_CodegenBoundary8616, codegen)
+    required = _required_ir_evidence_8616(boundary)
+    if required is None:
+        return False
+    source, copy_source, range_source = required
+    _project_alias_evidence_8616(boundary, source, copy_source, range_source)
     return False
 
 

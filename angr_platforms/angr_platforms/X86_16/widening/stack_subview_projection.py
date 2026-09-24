@@ -23,6 +23,7 @@ from angr.analyses.decompiler.structured_codegen import c as structured_c
 from ..c_ast_utils import _clone_c_ast_tree_8616, _replace_c_children_8616
 from ..pipeline.errors import PipelineHardError
 from .stack_subview_expression import (
+    StackSubviewRhsEffect8616,
     StackSubviewRhsEffectKind8616,
     classify_subview_rhs_8616,
     make_scalar_subview_read_expr_8616,
@@ -30,7 +31,9 @@ from .stack_subview_expression import (
     scalar_subview_proof_8616,
 )
 from .stack_subview_proof import (
+    StackMemoryObjectWideningArtifact8616,
     StackObjectViewProof8616,
+    StackObjectViewResolution8616,
     StackObjectViewResolutionKind8616,
     current_stack_object_widening_8616,
     resolve_stack_object_view_8616,
@@ -142,91 +145,13 @@ def materialize_contained_stack_subviews_8616(codegen: object) -> bool:
 
     def transform(node: object) -> object:
         """Materialize one proven recomposition, direct read, or direct write."""
-        if isinstance(node, structured_c.CAssignment) and isinstance(
-            node.lhs, structured_c.CVariable
-        ):
-            resolution = resolve_stack_object_view_8616(
-                codegen,
-                cfunc,
-                artifact,
-                node.lhs,
-            )
-            if resolution.kind is not StackObjectViewResolutionKind8616.NOT_CANDIDATE:
-                stats.raw_fact_count += 1
-                proof = scalar_subview_proof_8616(resolution.proof)
-                rhs_effect = classify_subview_rhs_8616(node.rhs)
-                if (
-                    resolution.kind is not StackObjectViewResolutionKind8616.ACCEPTED
-                    or proof is None
-                    or not isinstance(node.rhs, structured_c.CExpression)
-                    or rhs_effect.kind is StackSubviewRhsEffectKind8616.UNSUPPORTED
-                    or (
-                        rhs_effect.kind
-                        is StackSubviewRhsEffectKind8616.OWNER_PRESERVING_CALLS
-                        and not proof.source.calls_preserve_owner(rhs_effect.callsite_addrs)
-                    )
-                ):
-                    stats.failure_count += 1
-                    return node
-                stats.normalized_fact_count += 1
-                stats.classified_fact_count += 1
-                stats.materialized_count += 1
-                return make_scalar_subview_write_assignment_8616(codegen, node, proof)
-
-        candidate = _stack_subview_candidate_8616(node)
-        if candidate is not None:
-            stats.raw_fact_count += 1
-            resolution = resolve_stack_object_view_8616(
-                codegen,
-                cfunc,
-                artifact,
-                candidate.subview,
-            )
-            proof = _word_byte_proof_8616(resolution.proof)
-            container_range = (
-                stack_variable_range_8616(candidate.container.variable, artifact.function_addr, codegen=codegen)
-                if artifact is not None
-                else None
-            )
-            owner_range = (
-                (proof.source.address.offset, proof.source.address.size) if proof is not None else None
-            )
-            if (
-                candidate.projection_bits != 8
-                or resolution.kind is not StackObjectViewResolutionKind8616.ACCEPTED
-                or proof is None
-                or proof.relative_offset != 1
-                or owner_range is None
-                or container_range not in {(owner_range[0], 1), owner_range}
-            ):
-                stats.failure_count += 1
-            else:
-                stats.normalized_fact_count += 1
-                stats.classified_fact_count += 1
-                stats.materialized_count += 1
-                return _clone_c_ast_tree_8616(proof.owner)
-
-        if isinstance(node, structured_c.CVariable):
-            resolution = resolve_stack_object_view_8616(codegen, cfunc, artifact, node)
-            if resolution.kind is StackObjectViewResolutionKind8616.NOT_CANDIDATE:
-                resolution = resolve_widened_stack_object_read_8616(
-                    codegen,
-                    cfunc,
-                    artifact,
-                    node,
-                )
-            if resolution.kind is StackObjectViewResolutionKind8616.NOT_CANDIDATE:
-                return node
-            stats.raw_fact_count += 1
-            proof = scalar_subview_proof_8616(resolution.proof)
-            if resolution.kind is not StackObjectViewResolutionKind8616.ACCEPTED or proof is None:
-                stats.failure_count += 1
-                return node
-            stats.normalized_fact_count += 1
-            stats.classified_fact_count += 1
-            stats.materialized_count += 1
-            return make_scalar_subview_read_expr_8616(codegen, proof)
-        return node
+        result = _write_assignment_subview_8616(codegen, cfunc, artifact, stats, node)
+        if result is not None:
+            return result
+        result = _projection_candidate_subview_8616(codegen, cfunc, artifact, stats, node)
+        if result is not None:
+            return result
+        return _read_subview_8616(codegen, cfunc, artifact, stats, node)
 
     def should_process_child(parent: object, attr: str) -> bool:
         """Keep assignment lvalues and address operands outside value projection."""
@@ -239,31 +164,14 @@ def materialize_contained_stack_subviews_8616(codegen: object) -> bool:
         )
 
     changed = _replace_c_children_8616(root, transform, should_process_child=should_process_child)
-    _increment_codegen_counter_8616(
-        codegen,
-        "_inertia_stack_subview_raw_fact_count",
-        stats.raw_fact_count,
-    )
-    _increment_codegen_counter_8616(
-        codegen,
-        "_inertia_stack_subview_normalized_fact_count",
-        stats.normalized_fact_count,
-    )
-    _increment_codegen_counter_8616(
-        codegen,
-        "_inertia_stack_subview_classified_fact_count",
-        stats.classified_fact_count,
-    )
-    _increment_codegen_counter_8616(
-        codegen,
-        "_inertia_stack_subview_materialized_count",
-        stats.materialized_count,
-    )
-    _increment_codegen_counter_8616(
-        codegen,
-        "_inertia_stack_subview_failure_count",
-        stats.failure_count,
-    )
+    for counter, value in (
+        ("_inertia_stack_subview_raw_fact_count", stats.raw_fact_count),
+        ("_inertia_stack_subview_normalized_fact_count", stats.normalized_fact_count),
+        ("_inertia_stack_subview_classified_fact_count", stats.classified_fact_count),
+        ("_inertia_stack_subview_materialized_count", stats.materialized_count),
+        ("_inertia_stack_subview_failure_count", stats.failure_count),
+    ):
+        _increment_codegen_counter_8616(codegen, counter, value)
     cast(Any, codegen)._inertia_stack_subview_last_stats_8616 = stats
     if stats.classified_fact_count > 0 and stats.materialized_count == 0:
         raise PipelineHardError(
@@ -271,6 +179,156 @@ def materialize_contained_stack_subviews_8616(codegen: object) -> bool:
             layer="widening",
         )
     return bool(changed and stats.materialized_count > 0)
+
+
+def _write_assignment_subview_8616(
+    codegen: object,
+    cfunc: object,
+    artifact: StackMemoryObjectWideningArtifact8616 | None,
+    stats: StackSubviewProjectionStats8616,
+    node: object,
+) -> object | None:
+    """Materialize a proven scalar-subview write assignment, or None."""
+    if not (
+        isinstance(node, structured_c.CAssignment) and isinstance(node.lhs, structured_c.CVariable)
+    ):
+        return None
+    resolution = resolve_stack_object_view_8616(
+        codegen,
+        cfunc,
+        artifact,
+        node.lhs,
+    )
+    if resolution.kind is StackObjectViewResolutionKind8616.NOT_CANDIDATE:
+        return None
+    stats.raw_fact_count += 1
+    proof = scalar_subview_proof_8616(resolution.proof)
+    rhs_effect = classify_subview_rhs_8616(node.rhs)
+    if not _write_rhs_supported_8616(resolution, proof, node.rhs, rhs_effect):
+        stats.failure_count += 1
+        return cast(object, node)
+    stats.normalized_fact_count += 1
+    stats.classified_fact_count += 1
+    stats.materialized_count += 1
+    return cast(object, make_scalar_subview_write_assignment_8616(codegen, node, proof))
+
+
+def _write_rhs_supported_8616(
+    resolution: StackObjectViewResolution8616,
+    proof: StackObjectViewProof8616 | None,
+    rhs: object,
+    rhs_effect: StackSubviewRhsEffect8616,
+) -> bool:
+    """Check the resolution, proof, and RHS effect all support the write."""
+    return (
+        resolution.kind is StackObjectViewResolutionKind8616.ACCEPTED
+        and proof is not None
+        and isinstance(rhs, structured_c.CExpression)
+        and _rhs_effect_supported_8616(rhs_effect, proof)
+    )
+
+
+def _rhs_effect_supported_8616(
+    rhs_effect: StackSubviewRhsEffect8616, proof: StackObjectViewProof8616
+) -> bool:
+    """Check the RHS effect kind is proven safe for owner writes."""
+    if rhs_effect.kind is StackSubviewRhsEffectKind8616.UNSUPPORTED:
+        return False
+    return (
+        rhs_effect.kind is not StackSubviewRhsEffectKind8616.OWNER_PRESERVING_CALLS
+        or proof.source.calls_preserve_owner(rhs_effect.callsite_addrs)
+    )
+
+
+def _projection_candidate_subview_8616(
+    codegen: object,
+    cfunc: object,
+    artifact: StackMemoryObjectWideningArtifact8616 | None,
+    stats: StackSubviewProjectionStats8616,
+    node: object,
+) -> object | None:
+    """Materialize a proven contained byte projection, or None."""
+    candidate = _stack_subview_candidate_8616(node)
+    if candidate is None:
+        return None
+    stats.raw_fact_count += 1
+    resolution = resolve_stack_object_view_8616(
+        codegen,
+        cfunc,
+        artifact,
+        candidate.subview,
+    )
+    proof = _word_byte_proof_8616(resolution.proof)
+    if proof is None or not _candidate_projection_proven_8616(candidate, resolution, proof, codegen, artifact):
+        stats.failure_count += 1
+        return None
+    stats.normalized_fact_count += 1
+    stats.classified_fact_count += 1
+    stats.materialized_count += 1
+    return cast(object, _clone_c_ast_tree_8616(proof.owner))
+
+
+def _candidate_projection_proven_8616(
+    candidate: _StackSubviewCandidate8616,
+    resolution: StackObjectViewResolution8616,
+    proof: StackObjectViewProof8616,
+    codegen: object,
+    artifact: StackMemoryObjectWideningArtifact8616 | None,
+) -> bool:
+    """Check the projection shape, proof, and owner range all agree."""
+    return (
+        candidate.projection_bits == 8
+        and resolution.kind is StackObjectViewResolutionKind8616.ACCEPTED
+        and proof.relative_offset == 1
+        and _owner_range_matches_8616(proof, candidate, artifact, codegen)
+    )
+
+
+def _owner_range_matches_8616(
+    proof: StackObjectViewProof8616,
+    candidate: _StackSubviewCandidate8616,
+    artifact: StackMemoryObjectWideningArtifact8616 | None,
+    codegen: object,
+) -> bool:
+    """Check the proven owner range covers the projected container byte."""
+    container_range = (
+        stack_variable_range_8616(candidate.container.variable, artifact.function_addr, codegen=codegen)
+        if artifact is not None
+        else None
+    )
+    owner_range = (proof.source.address.offset, proof.source.address.size)
+    return container_range in {(owner_range[0], 1), owner_range}
+
+
+def _read_subview_8616(
+    codegen: object,
+    cfunc: object,
+    artifact: StackMemoryObjectWideningArtifact8616 | None,
+    stats: StackSubviewProjectionStats8616,
+    node: object,
+) -> object:
+    """Materialize a proven scalar-subview read of a stack variable."""
+    if not isinstance(node, structured_c.CVariable):
+        return node
+    resolution = resolve_stack_object_view_8616(codegen, cfunc, artifact, node)
+    if resolution.kind is StackObjectViewResolutionKind8616.NOT_CANDIDATE:
+        resolution = resolve_widened_stack_object_read_8616(
+            codegen,
+            cfunc,
+            artifact,
+            node,
+        )
+    if resolution.kind is StackObjectViewResolutionKind8616.NOT_CANDIDATE:
+        return node
+    stats.raw_fact_count += 1
+    proof = scalar_subview_proof_8616(resolution.proof)
+    if resolution.kind is not StackObjectViewResolutionKind8616.ACCEPTED or proof is None:
+        stats.failure_count += 1
+        return node
+    stats.normalized_fact_count += 1
+    stats.classified_fact_count += 1
+    stats.materialized_count += 1
+    return make_scalar_subview_read_expr_8616(codegen, proof)
 
 
 __all__ = [

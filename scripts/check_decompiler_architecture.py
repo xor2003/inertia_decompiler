@@ -113,6 +113,10 @@ _POSTPROCESS_LEGACY_IMPORT_ALLOWLIST: dict[str, frozenset[str]] = {
     ),
     "decompiler_postprocess_stage.py": frozenset(
         {
+            # Orchestration-only edge: the proven argument-frame base stays
+            # owned by Lowering; the final AST stage only replays its proven
+            # near/far machine-BP coordinates when materializing typed args.
+            ".lowering.argument_frame_base",
             # Orchestration-only edge: Lowering owns ConditionIR-derived
             # argument types; the final AST stage only replays its typed result.
             ".lowering.condition_argument_types",
@@ -1821,6 +1825,8 @@ _PROMOTED_TYPED_FILES = (
     "angr_platforms/angr_platforms/X86_16/lowering/far_pointer_constant_flow.py",
     "angr_platforms/angr_platforms/X86_16/lowering/far_pointer_segmented_load_evidence.py",
     "angr_platforms/angr_platforms/X86_16/lowering/far_pointer_segmented_load_materialization.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/far_pointer_type.py",
+    "angr_platforms/angr_platforms/X86_16/lowering/argument_frame_base.py",
     "angr_platforms/angr_platforms/X86_16/lowering/register_constant_segmented_store.py",
     "angr_platforms/angr_platforms/X86_16/lowering/near_pointer_argument.py",
     "angr_platforms/angr_platforms/X86_16/lowering/near_pointer_index_binding.py",

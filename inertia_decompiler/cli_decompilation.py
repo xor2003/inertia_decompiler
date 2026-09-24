@@ -3370,7 +3370,7 @@ def _candidate_expected_global_names_8616(
     if synthetic_globals:
         expected.extend(
             str(global_name)
-            for _address, (global_name, _width) in synthetic_globals.items()
+            for global_name, _width in synthetic_globals.values()
             if isinstance(global_name, str) and global_name.strip()
         )
     return tuple(dict.fromkeys(expected))

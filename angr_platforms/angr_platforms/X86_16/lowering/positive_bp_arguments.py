@@ -1,8 +1,8 @@
 """Materialize binary-derived positive-BP storage as function arguments.
 
 Layer: Types/Lowering.
-Responsibility: convert structured angr BP+4-and-above stack variables into one
-canonical near-call argument interface before argument-identity unification.
+Responsibility: convert structured angr positive-BP stack variables into one
+canonical near/far argument interface before argument-identity unification.
 Consumes alias, widening, and typed facts from binary-derived C-AST storage.
 Do not recover semantics from COD, source, assembly, or rendered C text.
 """
@@ -41,6 +41,7 @@ from .callee_argument_interface import (
     reconcile_callee_argument_interface_8616,
 )
 from .callee_argument_width_evidence import collect_callee_argument_width_evidence_8616
+from .function_pointer_parameters import materialized_function_pointer_slots_8616
 from .live_stack_word_inputs import collect_live_stack_word_inputs_8616
 from .near_return_address_arguments import prune_near_return_address_argument_8616
 from .positive_bp_argument_plan import (
@@ -261,11 +262,11 @@ def _merge_existing_and_body_argument_type_8616(
 
 
 def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> bool:
-    """Build one contiguous near-call argument interface from BP stack storage.
+    """Build one contiguous argument interface from proven BP stack storage.
 
-    Only exact ``SimStackVariable(base="bp", offset>=4)`` nodes are considered.
-    Arguments must form a contiguous ABI layout beginning at BP+4. Contained
-    byte/word views are folded into their wider owner; a gap ends recovery.
+    Arguments begin at the proven near/far frame base. Contained byte/word
+    views are folded into their wider owner; a gap ends recovery. Closed
+    pointer facts constrain individual slots, not the full argument census.
     """
     typed_codegen = cast(_PositiveBpCodegen8616, codegen)
     try:
@@ -389,6 +390,8 @@ def materialize_positive_bp_arguments_8616(project: object, codegen: object) -> 
     except AttributeError:
         function_layout = ()
     layout_by_offset = {argument.offset: argument for argument in function_layout}
+    for argument in materialized_function_pointer_slots_8616(codegen, cast(Any, project).arch):
+        layout_by_offset.setdefault(argument.offset, argument)
     authoritative_layout_end = (
         function_layout[-1].offset + function_layout[-1].storage_width
         if function_layout

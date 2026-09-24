@@ -219,11 +219,75 @@ def _segment_source_identity_8616(node: object) -> IRAddress | int | None:
     )
 
 
+_LvalueLocation8616 = tuple[MemSpace, int | None, int, IRAddress | int | None, int | None]
+
+
+def _call_lvalue_location_8616(
+    project: object,
+    codegen: object,
+    node: structured_c.CFunctionCall,
+) -> _LvalueLocation8616 | None:
+    """Classify one segmented helper call lvalue from typed call evidence."""
+    width = _helper_width_8616(node)
+    args = _boundary_tuple_8616(node.args or ())
+    offset = _constant_int_8616(args[1]) if len(args) == 2 else None
+    affine_base = _dynamic_affine_base_8616(args[1]) if len(args) == 2 else None
+    space = runtime_segment_access_space_8616(project, codegen, node)
+    if width is not None and (offset is not None or affine_base is not None) and space is not None:
+        source = _segment_source_identity_8616(args[0]) if len(args) == 2 else None
+        return space, offset & 0xFFFF if offset is not None else None, width, source, affine_base
+    return None
+
+
+def _memory_variable_location_8616(
+    project: object,
+    node: structured_c.CVariable,
+) -> _LvalueLocation8616 | None:
+    """Classify one direct global variable lvalue in the DS space."""
+    variable = node.variable
+    if not isinstance(variable, SimMemoryVariable):
+        return None
+    width = int(variable.size)
+    variable_type = node.variable_type
+    if variable_type is not None:
+        try:
+            arch = cast(_ProjectArchBoundary8616, project).arch
+            size_bits = variable_type.with_arch(arch).size
+            byte_width = arch.byte_width
+        except (AttributeError, TypeError, ValueError):
+            pass
+        else:
+            if (
+                isinstance(size_bits, int)
+                and isinstance(byte_width, int)
+                and byte_width > 0
+                and size_bits > 0
+                and size_bits % byte_width == 0
+            ):
+                width = max(width, size_bits // byte_width)
+    return MemSpace.DS, int(variable.addr) & 0xFFFF, width, None, None
+
+
+def _indexed_lvalue_location_8616(
+    node: structured_c.CIndexedVariable,
+) -> _LvalueLocation8616 | None:
+    """Classify one constant-indexed global array lvalue in the DS space."""
+    base = _strip_casts_8616(node.variable)
+    index = _constant_int_8616(node.index)
+    if not isinstance(base, structured_c.CVariable) or index is None:
+        return None
+    variable = base.variable
+    if not isinstance(variable, SimMemoryVariable):
+        return None
+    width = int(variable.size)
+    return MemSpace.DS, (int(variable.addr) + index * width) & 0xFFFF, width, None, None
+
+
 def _segmented_lvalue_location_8616(
     project: object,
     codegen: object,
     lvalue: object,
-) -> tuple[MemSpace, int | None, int, IRAddress | int | None, int | None] | None:
+) -> _LvalueLocation8616 | None:
     """Classify one final assignment lvalue without parsing rendered text."""
     node = _strip_casts_8616(lvalue)
     aggregate_storage = aggregate_field_storage_8616(node)
@@ -235,49 +299,12 @@ def _segmented_lvalue_location_8616(
         source = _segment_source_identity_8616(args[0]) if len(args) == 2 else None
         return identity.space, identity.offset, identity.width, source, None
     if isinstance(node, structured_c.CFunctionCall):
-        width = _helper_width_8616(node)
-        args = _boundary_tuple_8616(node.args or ())
-        offset = _constant_int_8616(args[1]) if len(args) == 2 else None
-        affine_base = _dynamic_affine_base_8616(args[1]) if len(args) == 2 else None
-        space = runtime_segment_access_space_8616(project, codegen, node)
-        if width is not None and (offset is not None or affine_base is not None) and space is not None:
-            source = _segment_source_identity_8616(args[0]) if len(args) == 2 else None
-            return space, offset & 0xFFFF if offset is not None else None, width, source, affine_base
-        return None
+        return _call_lvalue_location_8616(project, codegen, node)
     if isinstance(node, structured_c.CVariable):
-        variable = node.variable
-        if isinstance(variable, SimMemoryVariable):
-            width = int(variable.size)
-            variable_type = node.variable_type
-            if variable_type is not None:
-                try:
-                    arch = cast(_ProjectArchBoundary8616, project).arch
-                    size_bits = variable_type.with_arch(arch).size
-                    byte_width = arch.byte_width
-                except (AttributeError, TypeError, ValueError):
-                    pass
-                else:
-                    if (
-                        isinstance(size_bits, int)
-                        and isinstance(byte_width, int)
-                        and byte_width > 0
-                        and size_bits > 0
-                        and size_bits % byte_width == 0
-                    ):
-                        width = max(width, size_bits // byte_width)
-            return MemSpace.DS, int(variable.addr) & 0xFFFF, width, None, None
-        return None
+        return _memory_variable_location_8616(project, node)
     if not isinstance(node, structured_c.CIndexedVariable):
         return None
-    base = _strip_casts_8616(node.variable)
-    index = _constant_int_8616(node.index)
-    if not isinstance(base, structured_c.CVariable) or index is None:
-        return None
-    variable = base.variable
-    if not isinstance(variable, SimMemoryVariable):
-        return None
-    width = int(variable.size)
-    return MemSpace.DS, (int(variable.addr) + index * width) & 0xFFFF, width, None, None
+    return _indexed_lvalue_location_8616(node)
 
 
 def _final_segmented_writes_8616(

@@ -58,6 +58,7 @@ from .annotations import (
     ANNOTATION_KEY,
     _parse_c_prototype_8616,
     annotate_function,
+    stack_layout_annotation_specs_8616,
 )
 from .c_ast_utils import _replace_c_children_8616 as _replace_c_children_syntax_8616
 from .decompiler_postprocess_utils import (
@@ -511,7 +512,7 @@ def _prune_return_address_stack_arguments_8616(project: SimpleNamespace, codegen
             if isinstance(annotated_prototype, SimTypeFunction)
             else getattr(func, "prototype", None)
         )
-        stack_specs = annotations.get("stack_vars", {}) if isinstance(annotations, dict) else {}
+        stack_specs = stack_layout_annotation_specs_8616(annotations)
         arg_list = list(getattr(codegen.cfunc, "arg_list", ()) or ())
         if prototype is None or not arg_list:
             changed_body = _prune_return_address_body_assignments(codegen.cfunc)
@@ -1101,7 +1102,7 @@ def _promote_positive_bp_stack_slots_to_args_8616(project: SimpleNamespace, code
             func = project.kb.functions.function(addr=func_addr, create=False)
     # Dynamic angr/codegen compatibility boundary.
     annotations = getattr(func, "info", {}).get(ANNOTATION_KEY) if func is not None else None
-    stack_specs = annotations.get("stack_vars", {}) if isinstance(annotations, dict) else {}
+    stack_specs = stack_layout_annotation_specs_8616(annotations)
     if isinstance(stack_specs, dict):
         positive_offsets = sorted(offset for offset in stack_specs if isinstance(offset, int) and offset > 0)
         positive_specs_are_normalized = bool(positive_offsets) and positive_offsets[0] == 2
@@ -1548,7 +1549,7 @@ def _collect_stack_promotion_inputs_8616(
                 file=sys.stderr,
                 flush=True,
             )
-        stack_specs = annotations.get("stack_vars", {}) if isinstance(annotations, dict) else {}
+        stack_specs = stack_layout_annotation_specs_8616(annotations)
         annotated_args: list[tuple[int, str | None]] = []
         if isinstance(stack_specs, dict):
             positive_offsets = sorted(offset for offset in stack_specs if isinstance(offset, int) and offset > 0)
@@ -3265,7 +3266,7 @@ def _prevalidated_positive_stack_annotations_complete_8616(
     global_specs = annotations.get("global_vars", {})
     if isinstance(global_specs, Mapping) and global_specs:
         return False
-    stack_specs = annotations.get("stack_vars", {})
+    stack_specs = stack_layout_annotation_specs_8616(annotations)
     if not isinstance(stack_specs, Mapping) or not stack_specs:
         return False
     positive_offsets = [offset for offset in stack_specs if isinstance(offset, int) and offset > 0]
@@ -3348,7 +3349,7 @@ def _apply_annotations_8616(project: SimpleNamespace, codegen: SimpleNamespace) 
         if not annotations:
             return False
 
-        stack_specs = annotations.get("stack_vars", {})
+        stack_specs = stack_layout_annotation_specs_8616(annotations)
         global_specs = annotations.get("global_vars", {})
         promote_near_pointers = True
         if os.environ.get("INERTIA_DEBUG_X87_PROTO") == "1":

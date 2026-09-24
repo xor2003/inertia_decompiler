@@ -81,6 +81,26 @@ def list_flair_sig_libraries(flair_root: Path) -> tuple[FlairSigLibrary, ...]:
     return _list_flair_sig_libraries_cached(str(flair_root))
 
 
+def _dumpsig_header_8616(stdout: str) -> tuple[str, str, str, str]:
+    """Extract signature title and type fields from one dumpsig listing."""
+    title = ""
+    os_types = ""
+    app_types = ""
+    file_types = ""
+    for line in stdout.splitlines():
+        if line.startswith("Signature     : "):
+            title = line.split(":", 1)[1].strip()
+        elif line.startswith("OS types      : "):
+            os_types = line.split(":", 1)[1].strip()
+        elif line.startswith("App types     : "):
+            app_types = line.split(":", 1)[1].strip()
+        elif line.startswith("File types    : "):
+            file_types = line.split(":", 1)[1].strip()
+        if title and os_types and app_types and file_types:
+            break
+    return title, os_types, app_types, file_types
+
+
 @lru_cache(maxsize=2)
 def _list_flair_sig_libraries_cached(flair_root: str) -> tuple[FlairSigLibrary, ...]:
     root = Path(flair_root)
@@ -101,21 +121,7 @@ def _list_flair_sig_libraries_cached(flair_root: str) -> tuple[FlairSigLibrary, 
             continue
         if proc.returncode != 0:
             continue
-        title = ""
-        os_types = ""
-        app_types = ""
-        file_types = ""
-        for line in proc.stdout.splitlines():
-            if line.startswith("Signature     : "):
-                title = line.split(":", 1)[1].strip()
-            elif line.startswith("OS types      : "):
-                os_types = line.split(":", 1)[1].strip()
-            elif line.startswith("App types     : "):
-                app_types = line.split(":", 1)[1].strip()
-            elif line.startswith("File types    : "):
-                file_types = line.split(":", 1)[1].strip()
-            if title and os_types and app_types and file_types:
-                break
+        title, os_types, app_types, file_types = _dumpsig_header_8616(proc.stdout)
         if title:
             libraries.append(
                 FlairSigLibrary(

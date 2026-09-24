@@ -102,29 +102,23 @@ def collect_direct_global_register_updates_8616(
                 if isinstance(update_operands_value, Iterable)
                 else ()
             )
-            if (
-                operation is None
-                or _boundary_attr_8616(previous, "id", None) != X86_INS_MOV
-                or len(previous_operands) != 2
-                or len(update_operands) != 2
-                or _boundary_attr_8616(previous_operands[0], "type", None) != X86_OP_REG
-                or _boundary_attr_8616(update_operands[1], "type", None) != X86_OP_REG
-            ):
+            if not _mov_update_shape_8616(previous, previous_operands, update_operands, operation):
                 continue
             source = _direct_memory_identity_8616(previous_operands[1])
             destination = _direct_memory_identity_8616(update_operands[0])
             register_id = _boundary_attr_8616(previous_operands[0], "reg", None)
             previous_address = _boundary_attr_8616(previous, "address", None)
             update_address = _boundary_attr_8616(update, "address", None)
-            if (
-                source is None
-                or destination is None
-                or source[1] != destination[1]
-                or not isinstance(register_id, int)
-                or register_id != _boundary_attr_8616(update_operands[1], "reg", None)
-                or not isinstance(previous_address, int)
-                or not isinstance(update_address, int)
+            if not _direct_update_facts_match_8616(
+                source,
+                destination,
+                register_id,
+                _boundary_attr_8616(update_operands[1], "reg", None),
+                previous_address,
+                update_address,
             ):
+                continue
+            if source is None or destination is None:
                 continue
             facts.append(
                 DirectGlobalRegisterUpdate8616(
@@ -133,6 +127,57 @@ def collect_direct_global_register_updates_8616(
                 )
             )
     return tuple(dict.fromkeys(facts))
+
+
+def _mov_update_shape_8616(
+    previous: object,
+    previous_operands: tuple[object, ...],
+    update_operands: tuple[object, ...],
+    operation: DirectGlobalRegisterUpdateOp8616 | None,
+) -> bool:
+    """Check the adjacent pair has the MOV-load plus 2-operand-update shape."""
+    return (
+        operation is not None
+        and _boundary_attr_8616(previous, "id", None) == X86_INS_MOV
+        and _update_operand_shape_8616(previous_operands, update_operands)
+    )
+
+
+def _update_operand_shape_8616(
+    previous_operands: tuple[object, ...], update_operands: tuple[object, ...]
+) -> bool:
+    """Check both instructions expose the expected 2-operand register slots."""
+    return (
+        len(previous_operands) == 2
+        and len(update_operands) == 2
+        and _boundary_attr_8616(previous_operands[0], "type", None) == X86_OP_REG
+        and _boundary_attr_8616(update_operands[1], "type", None) == X86_OP_REG
+    )
+
+
+def _direct_update_facts_match_8616(
+    source: tuple[int, int] | None,
+    destination: tuple[int, int] | None,
+    register_id: object,
+    update_register_id: object,
+    previous_address: object,
+    update_address: object,
+) -> bool:
+    """Check memory identity, register, and address facts all align."""
+    return (
+        _mem_identities_align_8616(source, destination)
+        and isinstance(register_id, int)
+        and register_id == update_register_id
+        and isinstance(previous_address, int)
+        and isinstance(update_address, int)
+    )
+
+
+def _mem_identities_align_8616(
+    source: tuple[int, int] | None, destination: tuple[int, int] | None
+) -> bool:
+    """Check both memory operands resolved to the same segment space."""
+    return source is not None and destination is not None and source[1] == destination[1]
 
 
 def _source_variable_8616(
@@ -244,69 +289,19 @@ def materialize_direct_global_register_updates_8616(
         if facts
         else ()
     )
-    debug = os.environ.get("INERTIA_DEBUG_DIRECT_GLOBAL_UPDATES") == "1"
-    if debug:
-        candidates = [
-            (
-                _boundary_attr_8616(_boundary_attr_8616(node, "lhs", None), "variable", None),
-                type(_boundary_attr_8616(node, "lhs", None)).__name__,
-                sorted(instruction_addrs_from_node_8616(node)),
-                type(_boundary_attr_8616(node, "rhs", None)).__name__,
-                sum(
-                    isinstance(item, structured_c.CDirtyExpression)
-                    for item in _iter_c_nodes_deep_8616(_boundary_attr_8616(node, "rhs", None))
-                ),
-            )
-            for node in all_assignments
-        ]
-        print(f"[direct-global-register-update] facts={facts!r} assignments={candidates!r}", file=sys.stderr)
+    if os.environ.get("INERTIA_DEBUG_DIRECT_GLOBAL_UPDATES") == "1":
+        _debug_dump_update_candidates_8616(facts, all_assignments)
     materialized = failures = 0
     ast_changed = False
     for fact in facts:
-        direct_lane_matches = [
-            node
-            for node in all_assignments
-            if fact.update_insn_addr in instruction_addrs_from_node_8616(node)
-            and isinstance(node.lhs, structured_c.CVariable)
-            and isinstance(node.lhs.variable, SimMemoryVariable)
-            and isinstance(node.lhs.variable.addr, int)
-            and (node.lhs.variable.addr & 0xFFFF)
-            in range(fact.destination_offset, fact.destination_offset + fact.width)
-            and node.lhs.variable.size == 1
-        ]
-        segmented_store_matches = [
-            node
-            for node in all_assignments
-            if fact.update_insn_addr in instruction_addrs_from_node_8616(node)
-            and isinstance(node.lhs, structured_c.CFunctionCall)
-            and any(
-                isinstance(item, structured_c.CDirtyExpression)
-                for item in _iter_c_nodes_deep_8616(node.rhs)
-            )
-        ]
-        lanes = {
-            int(node.lhs.variable.addr) & 0xFFFF: node
-            for node in direct_lane_matches
-        }
-        expected_lanes = set(range(fact.destination_offset, fact.destination_offset + fact.width))
-        if set(lanes) == expected_lanes and len(direct_lane_matches) == fact.width:
-            matched_assignments = tuple(lanes.values())
-        elif len(segmented_store_matches) == fact.width:
-            matched_assignments = tuple(segmented_store_matches)
+        ok, fact_changed = _apply_update_fact_8616(
+            project, codegen, synthetic_globals, fact, all_assignments
+        )
+        ast_changed |= fact_changed
+        if ok:
+            materialized += 1
         else:
             failures += 1
-            continue
-        replacements = 0
-        for assignment in matched_assignments:
-            source = _source_variable_8616(project, codegen, synthetic_globals, fact, assignment.lhs.type)
-            if source is None:
-                break
-            replacements += _replace_unsupported_carrier_8616(assignment.rhs, source)
-        ast_changed |= replacements > 0
-        if replacements < fact.width:
-            failures += 1
-            continue
-        materialized += 1
     stats = DirectGlobalRegisterUpdateStats8616(len(facts), len(facts), len(facts), materialized, failures)
     codegen._inertia_direct_global_register_update_stats_8616 = stats
     if not stats.complete:
@@ -314,6 +309,82 @@ def materialize_direct_global_register_updates_8616(
     if query_session is not None:
         query_session.record_mutation(ast_changed)
     return ast_changed
+
+
+def _debug_dump_update_candidates_8616(
+    facts: tuple[DirectGlobalRegisterUpdate8616, ...],
+    all_assignments: Iterable[structured_c.CAssignment],
+) -> None:
+    """Emit the fact/assignment census used for debug correlation."""
+    candidates = [
+        (
+            _boundary_attr_8616(_boundary_attr_8616(node, "lhs", None), "variable", None),
+            type(_boundary_attr_8616(node, "lhs", None)).__name__,
+            sorted(instruction_addrs_from_node_8616(node)),
+            type(_boundary_attr_8616(node, "rhs", None)).__name__,
+            sum(
+                isinstance(item, structured_c.CDirtyExpression)
+                for item in _iter_c_nodes_deep_8616(_boundary_attr_8616(node, "rhs", None))
+            ),
+        )
+        for node in all_assignments
+    ]
+    print(f"[direct-global-register-update] facts={facts!r} assignments={candidates!r}", file=sys.stderr)
+
+
+def _fact_match_assignments_8616(
+    fact: DirectGlobalRegisterUpdate8616,
+    all_assignments: Iterable[structured_c.CAssignment],
+) -> tuple[structured_c.CAssignment, ...] | None:
+    """Find the assignments covering every destination byte lane of a fact."""
+    direct_lane_matches = [
+        node
+        for node in all_assignments
+        if fact.update_insn_addr in instruction_addrs_from_node_8616(node)
+        and isinstance(node.lhs, structured_c.CVariable)
+        and isinstance(node.lhs.variable, SimMemoryVariable)
+        and isinstance(node.lhs.variable.addr, int)
+        and (node.lhs.variable.addr & 0xFFFF)
+        in range(fact.destination_offset, fact.destination_offset + fact.width)
+        and node.lhs.variable.size == 1
+    ]
+    segmented_store_matches = [
+        node
+        for node in all_assignments
+        if fact.update_insn_addr in instruction_addrs_from_node_8616(node)
+        and isinstance(node.lhs, structured_c.CFunctionCall)
+        and any(
+            isinstance(item, structured_c.CDirtyExpression)
+            for item in _iter_c_nodes_deep_8616(node.rhs)
+        )
+    ]
+    lanes = {int(node.lhs.variable.addr) & 0xFFFF: node for node in direct_lane_matches}
+    expected_lanes = set(range(fact.destination_offset, fact.destination_offset + fact.width))
+    if set(lanes) == expected_lanes and len(direct_lane_matches) == fact.width:
+        return tuple(lanes.values())
+    if len(segmented_store_matches) == fact.width:
+        return tuple(segmented_store_matches)
+    return None
+
+
+def _apply_update_fact_8616(
+    project: ProjectBoundary8616,
+    codegen: CodegenBoundary8616,
+    synthetic_globals: object,
+    fact: DirectGlobalRegisterUpdate8616,
+    all_assignments: Iterable[structured_c.CAssignment],
+) -> tuple[bool, bool]:
+    """Apply one update fact; return (materialized, ast_changed)."""
+    matched_assignments = _fact_match_assignments_8616(fact, all_assignments)
+    if matched_assignments is None:
+        return False, False
+    replacements = 0
+    for assignment in matched_assignments:
+        source = _source_variable_8616(project, codegen, synthetic_globals, fact, assignment.lhs.type)
+        if source is None:
+            break
+        replacements += _replace_unsupported_carrier_8616(assignment.rhs, source)
+    return replacements >= fact.width, replacements > 0
 
 
 __all__ = [

@@ -142,29 +142,39 @@ def _callsite_addr_8616(call: structured_c.CFunctionCall) -> int | None:
     return addr if isinstance(addr, int) else None
 
 
+def _constant_fingerprint_8616(node: structured_c.CConstant) -> str | None:
+    """Fingerprint one integer constant with a proven byte width."""
+    if isinstance(node.type, SimTypeChar):
+        size = 1
+    elif isinstance(node.type, SimTypeShort):
+        size = 2
+    else:
+        return None
+    return f"const:{node.value:#x}:size{size}"
+
+
+def _variable_fingerprint_8616(node: structured_c.CVariable) -> str | None:
+    """Fingerprint one stack or register variable with proven coordinates."""
+    try:
+        variable = cast(_CVariableSurface8616, node).variable
+    except AttributeError:
+        return None
+    if isinstance(variable, SimStackVariable):
+        return f"stack:SS:BP{variable.offset:+#x}:size{variable.size}"
+    if isinstance(variable, SimRegisterVariable) and isinstance(variable.name, str):
+        return f"reg:{variable.name.lower()}:size{variable.size}"
+    return None
+
+
 def _actual_value_fingerprint_8616(node: object) -> str | None:
     """Fingerprint the final C subset permitted by interrupt lowering."""
     gp_view = runtime_gp_expression_view_8616(node)
     if gp_view is not None:
         return f"reg:{gp_view.register_name}:size{gp_view.width}"
     if isinstance(node, structured_c.CConstant) and isinstance(node.value, int):
-        if isinstance(node.type, SimTypeChar):
-            size = 1
-        elif isinstance(node.type, SimTypeShort):
-            size = 2
-        else:
-            return None
-        return f"const:{node.value:#x}:size{size}"
+        return _constant_fingerprint_8616(node)
     if isinstance(node, structured_c.CVariable):
-        try:
-            variable = cast(_CVariableSurface8616, node).variable
-        except AttributeError:
-            return None
-        if isinstance(variable, SimStackVariable):
-            return f"stack:SS:BP{variable.offset:+#x}:size{variable.size}"
-        if isinstance(variable, SimRegisterVariable) and isinstance(variable.name, str):
-            return f"reg:{variable.name.lower()}:size{variable.size}"
-        return None
+        return _variable_fingerprint_8616(node)
     if isinstance(node, structured_c.CBinaryOp):
         lhs = _actual_value_fingerprint_8616(node.lhs)
         rhs = _actual_value_fingerprint_8616(node.rhs)

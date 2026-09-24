@@ -8,6 +8,7 @@ from angr_platforms.X86_16.ir import IRBlock, IRFunctionArtifact, IRInstr, IRVal
 from angr_platforms.X86_16.semantics import call_stack_effect_pipeline as pipeline
 
 PROBE = bytes.fromhex("59 8b dc 2b d8 72 0a 3b 1e b6 00 72 04 8b e3 ff e1")
+FAR_PROBE = bytes.fromhex("59 5a 8b dc 2b d8 72 0b 3b 1e c6 00 72 05 8b e3 52 51 cb")
 TARGET = 0x2000
 ALLOCATION = 18
 
@@ -17,7 +18,8 @@ def _write(register, source, address=0x1000, size=2):
                    (source,), size=size, addr=address)
 
 
-def _run(monkeypatch, *, code=PROBE, between=(), request=18, delta=0, marked_probe=True):
+def _run(monkeypatch, *, code=PROBE, between=(), request=18, delta=0, marked_probe=True,
+         kind="direct_near"):
     def load(address, size):
         if address != TARGET:
             raise KeyError(address)
@@ -34,8 +36,9 @@ def _run(monkeypatch, *, code=PROBE, between=(), request=18, delta=0, marked_pro
             _inertia_original_project=project, _inertia_original_linear_delta=delta,
         )
     summary = CallsiteSummary8616(
-        callsite_addr=0x1006, target_addr=0x2000, return_addr=0x1009,
-        kind="direct_near", arg_count=0, arg_widths=(), stack_cleanup=0,
+        callsite_addr=0x1006, target_addr=0x2000,
+        return_addr=0x100B if kind == "direct_far" else 0x1009,
+        kind=kind, arg_count=0, arg_widths=(), stack_cleanup=0,
         return_register=None, return_used=False, stack_probe_helper=marked_probe,
         stack_probe_allocation_size=request,
     )
@@ -96,3 +99,23 @@ def test_binary_allocation_does_not_require_a_named_probe_summary(monkeypatch):
 
     assert fact.effect.complete
     assert fact.effect.net_stack_delta == -ALLOCATION
+
+
+@pytest.mark.parametrize("marked_probe", [False, True])
+def test_far_binary_allocation_preserves_the_proven_frame(monkeypatch, marked_probe):
+    fact = _run(monkeypatch, code=FAR_PROBE, kind="direct_far",
+                request=None, marked_probe=marked_probe)
+
+    assert fact.effect.complete
+    assert fact.effect.net_stack_delta == -ALLOCATION
+    assert fact.effect.bp_preserved
+    assert fact.failure is None
+
+
+@pytest.mark.parametrize("code,kind", [(PROBE, "direct_far"), (FAR_PROBE, "direct_near")])
+@pytest.mark.parametrize("marked_probe", [False, True])
+def test_call_frame_must_match_binary_allocation_return_frame(monkeypatch, code, kind, marked_probe):
+    fact = _run(monkeypatch, code=code, kind=kind, marked_probe=marked_probe, request=None)
+
+    assert not fact.effect.complete
+    assert fact.effect.net_stack_delta is None

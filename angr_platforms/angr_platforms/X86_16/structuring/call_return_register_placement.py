@@ -100,56 +100,69 @@ def _case_statement_blocks_8616(statement: object) -> tuple[CStatements, ...]:
     return tuple(blocks)
 
 
+def _visit_statement_branches_8616(
+    positions: list[_StatementPosition8616],
+    seen: set[tuple[int, tuple[tuple[int, str, int], ...]]],
+    statement: object,
+    control_path: tuple[tuple[int, str, int], ...],
+) -> None:
+    """Recurse into every control alternative of one structured statement."""
+    marker = id(statement)
+    if isinstance(statement, CIfElse):
+        for branch_index, pair in enumerate(tuple(statement.condition_and_nodes or ())):
+            if isinstance(pair, (list, tuple)) and len(pair) >= 2 and isinstance(pair[1], CStatements):
+                _visit_statements_8616(positions, seen, pair[1], (*control_path, (marker, "if", branch_index)), ())
+        if isinstance(statement.else_node, CStatements):
+            _visit_statements_8616(positions, seen, statement.else_node, (*control_path, (marker, "else", 0)), ())
+        return
+    for child_index, attr in enumerate(("body", "default")):
+        boundary = cast(_StructuredStatementChildren8616, statement)
+        try:
+            child = boundary.body if attr == "body" else boundary.default
+        except AttributeError:
+            continue
+        if isinstance(child, CStatements):
+            _visit_statements_8616(positions, seen, child, (*control_path, (marker, attr, child_index)), ())
+    for case_index, child in enumerate(_case_statement_blocks_8616(statement)):
+        _visit_statements_8616(positions, seen, child, (*control_path, (marker, "case", case_index)), ())
+
+
+def _visit_statements_8616(
+    positions: list[_StatementPosition8616],
+    seen: set[tuple[int, tuple[tuple[int, str, int], ...]]],
+    block: CStatements,
+    control_path: tuple[tuple[int, str, int], ...],
+    sequence_path: tuple[tuple[CStatements, int], ...],
+) -> None:
+    """Index one sequence block, recursing through control alternatives."""
+    key = (id(block), control_path)
+    if key in seen:
+        return
+    seen.add(key)
+    for index, statement in enumerate(tuple(block.statements or ())):
+        statement_sequence_path = (*sequence_path, (block, index))
+        if isinstance(statement, CStatements):
+            _visit_statements_8616(positions, seen, statement, control_path, statement_sequence_path)
+            continue
+        positions.append(
+            _StatementPosition8616(
+                block,
+                index,
+                statement,
+                control_path,
+                statement_sequence_path,
+            )
+        )
+        _visit_statement_branches_8616(positions, seen, statement, control_path)
+
+
 def _statement_positions_8616(root: object) -> tuple[_StatementPosition8616, ...]:
     """Index transparent sequence groups while preserving control alternatives."""
     if not isinstance(root, CStatements):
         return ()
     positions: list[_StatementPosition8616] = []
     seen: set[tuple[int, tuple[tuple[int, str, int], ...]]] = set()
-
-    def visit(
-        block: CStatements,
-        control_path: tuple[tuple[int, str, int], ...],
-        sequence_path: tuple[tuple[CStatements, int], ...],
-    ) -> None:
-        key = (id(block), control_path)
-        if key in seen:
-            return
-        seen.add(key)
-        for index, statement in enumerate(tuple(block.statements or ())):
-            statement_sequence_path = (*sequence_path, (block, index))
-            if isinstance(statement, CStatements):
-                visit(statement, control_path, statement_sequence_path)
-                continue
-            positions.append(
-                _StatementPosition8616(
-                    block,
-                    index,
-                    statement,
-                    control_path,
-                    statement_sequence_path,
-                )
-            )
-            marker = id(statement)
-            if isinstance(statement, CIfElse):
-                for branch_index, pair in enumerate(tuple(statement.condition_and_nodes or ())):
-                    if isinstance(pair, (list, tuple)) and len(pair) >= 2 and isinstance(pair[1], CStatements):
-                        visit(pair[1], (*control_path, (marker, "if", branch_index)), ())
-                if isinstance(statement.else_node, CStatements):
-                    visit(statement.else_node, (*control_path, (marker, "else", 0)), ())
-                continue
-            for child_index, attr in enumerate(("body", "default")):
-                boundary = cast(_StructuredStatementChildren8616, statement)
-                try:
-                    child = boundary.body if attr == "body" else boundary.default
-                except AttributeError:
-                    continue
-                if isinstance(child, CStatements):
-                    visit(child, (*control_path, (marker, attr, child_index)), ())
-            for case_index, child in enumerate(_case_statement_blocks_8616(statement)):
-                visit(child, (*control_path, (marker, "case", case_index)), ())
-
-    visit(root, (), ())
+    _visit_statements_8616(positions, seen, root, (), ())
     return tuple(positions)
 
 
@@ -193,21 +206,16 @@ def _unique_adjacent_owner_8616(
     return assignment_position.container, assignment_position.index
 
 
-def classify_call_return_register_placement_8616(
-    root: object,
-    condition_owner: object,
-    *,
+def _placement_candidates_8616(
+    register_index: CallReturnRegisterIndex8616,
+    register_slice: tuple[int, int],
     callsite_addr: int,
     condition_producer_insn: int,
-    register_slice: tuple[int, int],
-    assignment_index: CallReturnRegisterIndex8616 | None = None,
-) -> CallReturnRegisterPlacement8616:
-    """Classify the unique exact call assignment feeding one condition."""
-    register_index = (
-        assignment_index
-        if assignment_index is not None and assignment_index.matches_root(root)
-        else build_call_return_register_index_8616(root)
-    )
+) -> tuple[
+    dict[int, tuple[CAssignment, CFunctionCall]],
+    dict[int, tuple[CAssignment, CFunctionCall]],
+]:
+    """Census candidate and bound assignments matching slice and callsite."""
     candidates: dict[int, tuple[CAssignment, CFunctionCall]] = {}
     bound_assignments: dict[int, tuple[CAssignment, CFunctionCall]] = {}
     for record in register_index.assignments:
@@ -225,6 +233,71 @@ def classify_call_return_register_placement_8616(
         if assignment_addr not in {callsite_addr, condition_producer_insn}:
             continue
         candidates[id(node)] = (node, call)
+    return candidates, bound_assignments
+
+
+def _exact_placement_8616(
+    positions: tuple[_StatementPosition8616, ...],
+    candidates: dict[int, tuple[CAssignment, CFunctionCall]],
+    bound_assignments: dict[int, tuple[CAssignment, CFunctionCall]],
+    adjacent: tuple[CAssignment, CFunctionCall, CStatements, int],
+    condition_owner: object,
+    register_index: CallReturnRegisterIndex8616,
+) -> CallReturnRegisterPlacement8616:
+    """Confirm the single adjacent candidate and census redundant duplicates."""
+    assignment, call, owner, index = adjacent
+    redundant: list[CallReturnRegisterAssignment8616] = []
+    for duplicate, duplicate_call in bound_assignments.values():
+        if duplicate is assignment:
+            continue
+        duplicate_owner = _unique_adjacent_owner_8616(
+            positions,
+            duplicate,
+            condition_owner,
+        )
+        if duplicate_owner is None:
+            return CallReturnRegisterPlacement8616(
+                CallReturnRegisterPlacementVerdict8616.CONFLICT,
+                len(candidates),
+            )
+        redundant.append(
+            CallReturnRegisterAssignment8616(
+                duplicate,
+                duplicate_call,
+                duplicate_owner[0],
+                duplicate_owner[1],
+            )
+        )
+    return CallReturnRegisterPlacement8616(
+        CallReturnRegisterPlacementVerdict8616.EXACT,
+        len(candidates),
+        assignment,
+        call,
+        owner,
+        index,
+        tuple(redundant),
+        register_index,
+    )
+
+
+def classify_call_return_register_placement_8616(
+    root: object,
+    condition_owner: object,
+    *,
+    callsite_addr: int,
+    condition_producer_insn: int,
+    register_slice: tuple[int, int],
+    assignment_index: CallReturnRegisterIndex8616 | None = None,
+) -> CallReturnRegisterPlacement8616:
+    """Classify the unique exact call assignment feeding one condition."""
+    register_index = (
+        assignment_index
+        if assignment_index is not None and assignment_index.matches_root(root)
+        else build_call_return_register_index_8616(root)
+    )
+    candidates, bound_assignments = _placement_candidates_8616(
+        register_index, register_slice, callsite_addr, condition_producer_insn
+    )
     if not candidates:
         return CallReturnRegisterPlacement8616(
             CallReturnRegisterPlacementVerdict8616.MISSING,
@@ -237,37 +310,12 @@ def classify_call_return_register_placement_8616(
         if owner is not None:
             adjacent.append((assignment, call, owner[0], owner[1]))
     if len(adjacent) == 1:
-        assignment, call, owner, index = adjacent[0]
-        redundant: list[CallReturnRegisterAssignment8616] = []
-        for duplicate, duplicate_call in bound_assignments.values():
-            if duplicate is assignment:
-                continue
-            duplicate_owner = _unique_adjacent_owner_8616(
-                positions,
-                duplicate,
-                condition_owner,
-            )
-            if duplicate_owner is None:
-                return CallReturnRegisterPlacement8616(
-                    CallReturnRegisterPlacementVerdict8616.CONFLICT,
-                    len(candidates),
-                )
-            redundant.append(
-                CallReturnRegisterAssignment8616(
-                    duplicate,
-                    duplicate_call,
-                    duplicate_owner[0],
-                    duplicate_owner[1],
-                )
-            )
-        return CallReturnRegisterPlacement8616(
-            CallReturnRegisterPlacementVerdict8616.EXACT,
-            len(candidates),
-            assignment,
-            call,
-            owner,
-            index,
-            tuple(redundant),
+        return _exact_placement_8616(
+            positions,
+            candidates,
+            bound_assignments,
+            adjacent[0],
+            condition_owner,
             register_index,
         )
     if len(candidates) != 1 or adjacent:

@@ -42,18 +42,17 @@ class IRReadinessSummary:
         }
 
 
-def summarize_x86_16_ir_readiness(source: IRRecoverySource) -> IRReadinessSummary:
-    """Summarize whether recovered IR is ready for later decompiler stages."""
-    summary = summarize_x86_16_ir_recovery(source)
-    provisional_address_count = int(summary.address_status_counts.get("provisional", 0) or 0)
-    defaulted_segment_count = int(summary.segment_origin_counts.get("defaulted", 0) or 0)
-    proven_segment_count = int(summary.segment_origin_counts.get("proven", 0) or 0)
-    unknown_segment_count = int(summary.segment_origin_counts.get("unknown", 0) or 0)
-    condition_count = int(sum(summary.condition_counts.values()))
-    phi_node_count = int(summary.phi_node_count)
+def _readiness_reasons_8616(
+    block_count: int,
+    provisional_address_count: int,
+    defaulted_segment_count: int,
+    unknown_segment_count: int,
+    condition_count: int,
+    phi_node_count: int,
+) -> tuple[str, ...]:
+    """List every readiness defect proven by the recovery census."""
     reasons: list[str] = []
-
-    if summary.block_count <= 0:
+    if block_count <= 0:
         reasons.append("no_ir_blocks")
     if provisional_address_count > 0:
         reasons.append("provisional_addresses_present")
@@ -65,19 +64,57 @@ def summarize_x86_16_ir_readiness(source: IRRecoverySource) -> IRReadinessSummar
         reasons.append("no_typed_conditions")
     if phi_node_count <= 0:
         reasons.append("no_cross_block_ssa")
+    return tuple(reasons)
 
-    if summary.block_count <= 0:
-        level = "missing"
-    elif condition_count > 0 and (proven_segment_count > 0 or defaulted_segment_count > 0) and phi_node_count > 0:
-        level = "typed_address_condition_and_ssa"
-    elif condition_count > 0 and (proven_segment_count > 0 or defaulted_segment_count > 0):
-        level = "typed_address_and_condition"
-    elif condition_count > 0:
-        level = "typed_condition_only"
-    elif provisional_address_count > 0 or defaulted_segment_count > 0 or proven_segment_count > 0:
-        level = "typed_address_only"
-    else:
-        level = "minimal"
+
+def _readiness_level_8616(
+    block_count: int,
+    provisional_address_count: int,
+    defaulted_segment_count: int,
+    proven_segment_count: int,
+    condition_count: int,
+    phi_node_count: int,
+) -> str:
+    """Classify readiness from the strongest proven IR evidence downward."""
+    if block_count <= 0:
+        return "missing"
+    typed_segments = proven_segment_count > 0 or defaulted_segment_count > 0
+    if condition_count > 0 and typed_segments and phi_node_count > 0:
+        return "typed_address_condition_and_ssa"
+    if condition_count > 0 and typed_segments:
+        return "typed_address_and_condition"
+    if condition_count > 0:
+        return "typed_condition_only"
+    if provisional_address_count > 0 or typed_segments:
+        return "typed_address_only"
+    return "minimal"
+
+
+def summarize_x86_16_ir_readiness(source: IRRecoverySource) -> IRReadinessSummary:
+    """Summarize whether recovered IR is ready for later decompiler stages."""
+    summary = summarize_x86_16_ir_recovery(source)
+    provisional_address_count = int(summary.address_status_counts.get("provisional", 0) or 0)
+    defaulted_segment_count = int(summary.segment_origin_counts.get("defaulted", 0) or 0)
+    proven_segment_count = int(summary.segment_origin_counts.get("proven", 0) or 0)
+    unknown_segment_count = int(summary.segment_origin_counts.get("unknown", 0) or 0)
+    condition_count = int(sum(summary.condition_counts.values()))
+    phi_node_count = int(summary.phi_node_count)
+    reasons = _readiness_reasons_8616(
+        summary.block_count,
+        provisional_address_count,
+        defaulted_segment_count,
+        unknown_segment_count,
+        condition_count,
+        phi_node_count,
+    )
+    level = _readiness_level_8616(
+        summary.block_count,
+        provisional_address_count,
+        defaulted_segment_count,
+        proven_segment_count,
+        condition_count,
+        phi_node_count,
+    )
 
     return IRReadinessSummary(
         level=level,

@@ -62,12 +62,8 @@ def _default_out(_state: _DirtyState, _portno: object, _data: object, _sz: objec
     return None, []
 
 
-def apply_patch() -> int:
-    """Install best-effort x86 IN/OUT dirty-helper fallbacks.
-
-    Dynamic attribute boundary: this function patches optional attributes on
-    third-party angr modules discovered through imports and sys.modules.
-    """
+def _register_io_simprocedures_8616() -> None:
+    """Register the x86 IN/OUT SimProcedures when angr is importable."""
     try:
         import angr as _angr
 
@@ -83,6 +79,9 @@ def apply_patch() -> int:
         # Best-effort registration; if angr is absent or API differs, continue silently.
         pass
 
+
+def _patch_vex_dirty_module_8616() -> None:
+    """Patch angr's VEX dirty helpers for x86 to deterministic defaults."""
     try:
         # Patch angr's VEX dirty helpers for x86 to return deterministic defaults
         # when no PortIO device is present. This overrides the engine-level helpers
@@ -110,6 +109,9 @@ def apply_patch() -> int:
     except Exception:
         pass
 
+
+def _patch_loaded_module_helpers_8616() -> int:
+    """Replace dirty-helper attributes on every module already imported."""
     patched = 0
     for _name, mod in list(sys.modules.items()):
         if not mod:
@@ -124,3 +126,14 @@ def apply_patch() -> int:
         except Exception:
             continue
     return patched
+
+
+def apply_patch() -> int:
+    """Install best-effort x86 IN/OUT dirty-helper fallbacks.
+
+    Dynamic attribute boundary: this function patches optional attributes on
+    third-party angr modules discovered through imports and sys.modules.
+    """
+    _register_io_simprocedures_8616()
+    _patch_vex_dirty_module_8616()
+    return _patch_loaded_module_helpers_8616()

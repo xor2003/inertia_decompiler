@@ -358,6 +358,7 @@ def _table_target_candidates_8616(
         segments = initialized_data_segments
     projection_boundary = cast(_ProjectBoundary8616, projection_project)
     require_projected_mapping = projection_project is not project
+    projection_memory: _MemoryBoundary8616 | None = None
     if require_projected_mapping:
         try:
             projection_memory = projection_boundary.loader.memory
@@ -366,41 +367,66 @@ def _table_target_candidates_8616(
     table_offset = displacement & 0xFFFF
     candidates: set[tuple[int, int, int, int, int]] = set()
     for data_segment in segments:
-        table_linear = (data_segment << 4) + table_offset
-        selected_ip: int | None = None
-        selected_linear: int | None = None
-        selected_projected: int | None = None
-        valid = True
-        for byte_offset in range(0, selector_byte_offset + 1, 2):
-            try:
-                data = bytes(loader.memory.load(table_linear + byte_offset, 2))
-            except (KeyError, TypeError, ValueError):
-                valid = False
-                break
-            if len(data) != 2:
-                valid = False
-                break
-            target_ip = int.from_bytes(data, "little")
-            target_linear = (code_segment << 4) + target_ip
-            projected_target = target_linear - original_delta
-            if not (region_start <= projected_target < region_end):
-                valid = False
-                break
-            if require_projected_mapping:
-                try:
-                    projected_byte = bytes(projection_memory.load(projected_target, 1))
-                except (KeyError, TypeError, ValueError):
-                    valid = False
-                    break
-                if len(projected_byte) != 1:
-                    valid = False
-                    break
-            selected_ip = target_ip
-            selected_linear = target_linear
-            selected_projected = projected_target
-        if valid and selected_ip is not None and selected_linear is not None and selected_projected is not None:
-            candidates.add((data_segment, table_linear, selected_ip, selected_linear, selected_projected))
+        prefix = _table_prefix_candidate_8616(
+            loader,
+            projection_memory,
+            code_segment=code_segment,
+            table_linear=(data_segment << 4) + table_offset,
+            selector_byte_offset=selector_byte_offset,
+            original_delta=original_delta,
+            region_start=region_start,
+            region_end=region_end,
+            require_projected_mapping=require_projected_mapping,
+        )
+        if prefix is not None:
+            candidates.add(
+                (data_segment, (data_segment << 4) + table_offset, *prefix)
+            )
     return tuple(sorted(candidates))
+
+
+def _table_prefix_candidate_8616(
+    loader: _LoaderBoundary8616,
+    projection_memory: _MemoryBoundary8616 | None,
+    *,
+    code_segment: int,
+    table_linear: int,
+    selector_byte_offset: int,
+    original_delta: int,
+    region_start: int,
+    region_end: int,
+    require_projected_mapping: bool,
+) -> tuple[int, int, int] | None:
+    """Return the proven last prefix target for one relocation-backed table."""
+    selected_ip: int | None = None
+    selected_linear: int | None = None
+    selected_projected: int | None = None
+    for byte_offset in range(0, selector_byte_offset + 1, 2):
+        try:
+            data = bytes(loader.memory.load(table_linear + byte_offset, 2))
+        except (KeyError, TypeError, ValueError):
+            return None
+        if len(data) != 2:
+            return None
+        target_ip = int.from_bytes(data, "little")
+        target_linear = (code_segment << 4) + target_ip
+        projected_target = target_linear - original_delta
+        if not (region_start <= projected_target < region_end):
+            return None
+        if require_projected_mapping:
+            assert projection_memory is not None
+            try:
+                projected_byte = bytes(projection_memory.load(projected_target, 1))
+            except (KeyError, TypeError, ValueError):
+                return None
+            if len(projected_byte) != 1:
+                return None
+        selected_ip = target_ip
+        selected_linear = target_linear
+        selected_projected = projected_target
+    if selected_ip is None or selected_linear is None or selected_projected is None:
+        return None
+    return selected_ip, selected_linear, selected_projected
 
 
 def collect_constant_indirect_jump_edges_8616(

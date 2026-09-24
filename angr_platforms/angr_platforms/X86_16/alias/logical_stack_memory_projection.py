@@ -19,6 +19,7 @@ from ..ir.logical_memory_contracts import (
     IRMemoryAccessKind8616,
     IRMemoryExecutionSlice8616,
 )
+from ..ir.ssa import SSABlock
 from ..ir.ssa_function import SSAFunctionArtifact
 from ..ir.ssa_memory_contracts import SSAMemoryAccess8616, SSAMemoryAccessKind8616, SSAMemoryAccessSlice8616
 from .alias_model_impl import AliasStorageFacts, alias_facts_for_ir_address_8616
@@ -237,6 +238,38 @@ def _refusal(
     return LogicalStackMemoryAliasRefusal8616(failure, detail, source, source_refusal)
 
 
+def _project_execution_slice_8616(
+    execution: IRMemoryExecutionSlice8616,
+    kinds: tuple[SSAMemoryAccessKind8616, StackMemoryAliasFactKind8616],
+    source: IRLogicalMemoryAccess8616,
+    blocks: dict[int, SSABlock],
+    raw_accesses: tuple[SSAMemoryAccess8616, ...],
+    raw_facts: tuple[StackMemorySSAAliasFact8616, ...],
+    raw_composed: tuple[StackMemorySSAAliasAccess8616, ...],
+) -> LogicalStackMemoryAliasSlice8616 | LogicalStackMemoryAliasRefusal8616:
+    """Bind one logical execution byte to its raw SSA site and Alias owner."""
+    block = blocks.get(execution.block_addr)
+    candidates = _raw_slice_candidates(execution, kinds[0], raw_accesses)
+    if not candidates:
+        return _refusal(LogicalStackMemoryAliasFailure8616.MISSING_EXECUTION_SLICE, "logical byte has no exact raw memory-SSA site", source)
+    if len(candidates) != 1:
+        return _refusal(LogicalStackMemoryAliasFailure8616.AMBIGUOUS_RAW_SITE_MATCH, "logical byte matches multiple raw memory-SSA sites", source)
+    raw_access, raw_slice = candidates[0]
+    if block is None or not 0 <= execution.instr_index < len(block.instrs):
+        return _refusal(LogicalStackMemoryAliasFailure8616.MISSING_EXECUTION_SLICE, "logical byte points outside its SSA block", source)
+    instruction = block.instrs[execution.instr_index]
+    raw_address = instruction.args[0] if instruction.args else None
+    if instruction.addr != execution.insn_addr or not isinstance(raw_address, IRAddress) or not _same_range(raw_address, raw_access.address):
+        return _refusal(LogicalStackMemoryAliasFailure8616.INSTRUCTION_IDENTITY_MISMATCH, "raw SSA instruction does not match logical site and address", source)
+    aliases = _alias_slice_candidates(raw_access, raw_slice, kinds[1], raw_facts, raw_composed)
+    if not aliases:
+        return _refusal(LogicalStackMemoryAliasFailure8616.MISSING_RAW_ALIAS, "raw SSA slice has no exact Alias projection", source)
+    if len(aliases) != 1:
+        return _refusal(LogicalStackMemoryAliasFailure8616.AMBIGUOUS_RAW_ALIAS, "raw SSA slice has multiple Alias projections", source)
+    storage, fact, composed = aliases[0]
+    return LogicalStackMemoryAliasSlice8616(execution, raw_access, raw_slice, storage, fact, composed)
+
+
 def _project_access(
     function_ssa: SSAFunctionArtifact,
     source: IRLogicalMemoryAccess8616,
@@ -256,26 +289,18 @@ def _project_access(
     blocks = {block.addr: block for block in function_ssa.blocks}
     projected: list[LogicalStackMemoryAliasSlice8616] = []
     for execution in source.execution_slices:
-        block = blocks.get(execution.block_addr)
-        candidates = _raw_slice_candidates(execution, kinds[0], function_ssa.memory_accesses)
-        if not candidates:
-            return _refusal(LogicalStackMemoryAliasFailure8616.MISSING_EXECUTION_SLICE, "logical byte has no exact raw memory-SSA site", source)
-        if len(candidates) != 1:
-            return _refusal(LogicalStackMemoryAliasFailure8616.AMBIGUOUS_RAW_SITE_MATCH, "logical byte matches multiple raw memory-SSA sites", source)
-        raw_access, raw_slice = candidates[0]
-        if block is None or not 0 <= execution.instr_index < len(block.instrs):
-            return _refusal(LogicalStackMemoryAliasFailure8616.MISSING_EXECUTION_SLICE, "logical byte points outside its SSA block", source)
-        instruction = block.instrs[execution.instr_index]
-        raw_address = instruction.args[0] if instruction.args else None
-        if instruction.addr != execution.insn_addr or not isinstance(raw_address, IRAddress) or not _same_range(raw_address, raw_access.address):
-            return _refusal(LogicalStackMemoryAliasFailure8616.INSTRUCTION_IDENTITY_MISMATCH, "raw SSA instruction does not match logical site and address", source)
-        aliases = _alias_slice_candidates(raw_access, raw_slice, kinds[1], raw_facts, raw_composed)
-        if not aliases:
-            return _refusal(LogicalStackMemoryAliasFailure8616.MISSING_RAW_ALIAS, "raw SSA slice has no exact Alias projection", source)
-        if len(aliases) != 1:
-            return _refusal(LogicalStackMemoryAliasFailure8616.AMBIGUOUS_RAW_ALIAS, "raw SSA slice has multiple Alias projections", source)
-        storage, fact, composed = aliases[0]
-        projected.append(LogicalStackMemoryAliasSlice8616(execution, raw_access, raw_slice, storage, fact, composed))
+        item = _project_execution_slice_8616(
+            execution,
+            kinds,
+            source,
+            blocks,
+            function_ssa.memory_accesses,
+            raw_facts,
+            raw_composed,
+        )
+        if isinstance(item, LogicalStackMemoryAliasRefusal8616):
+            return item
+        projected.append(item)
     owner_storage = alias_facts_for_ir_address_8616(source.address)
     if not isinstance(owner_storage, AliasStorageFacts) or any(
         not owner_storage.contains(item.storage) for item in projected

@@ -9,7 +9,7 @@ Forbidden: CFG joining, argument materialization, structuring, or C rewriting.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Final, Protocol
 
 from capstone import CS_AC_WRITE
 from capstone.x86_const import X86_OP_IMM, X86_OP_MEM, X86_OP_REG
@@ -104,6 +104,79 @@ def instruction_writes_memory_8616(
     return False
 
 
+_BYTE_VIEW_PARENTS_8616: Final[dict[str, tuple[str, int]]] = {
+    "al": ("ax", 0),
+    "ah": ("ax", 8),
+    "bl": ("bx", 0),
+    "bh": ("bx", 8),
+    "cl": ("cx", 0),
+    "ch": ("cx", 8),
+    "dl": ("dx", 0),
+    "dh": ("dx", 8),
+}
+
+
+def _subview_replacement_source_8616(
+    instruction: DecodedInstructionFactSurface8616,
+    register: str,
+    destination_name: str,
+    mnemonic: str,
+    rhs: _Operand8616,
+) -> CallsiteSource8616 | None:
+    """Return an exact source when the write targets a different register."""
+    projection = register_value_projection_8616(destination_name, register)
+    if mnemonic == "mov" and rhs.type == X86_OP_IMM and projection is not None:
+        shift, bits = projection
+        return ("imm", (int(rhs.imm) >> shift) & ((1 << bits) - 1))
+    requested_view = _BYTE_VIEW_PARENTS_8616.get(register)
+    rhs_name = _register_name_8616(instruction, rhs)
+    if (
+        requested_view is not None
+        and destination_name == requested_view[0]
+        and mnemonic in {"add", "and", "or", "sub", "xor"}
+        and rhs_name is not None
+    ):
+        return (
+            "register_binary_subview",
+            mnemonic,
+            destination_name,
+            rhs_name,
+            requested_view[1],
+            8,
+            instruction.address,
+        )
+    return None
+
+
+def _direct_mov_source_8616(
+    instruction: DecodedInstructionFactSurface8616,
+    mnemonic: str,
+    rhs: _Operand8616,
+) -> CallsiteSource8616 | None:
+    """Return an exact immediate or memory source for a direct MOV write."""
+    if mnemonic != "mov":
+        return None
+    if rhs.type == X86_OP_IMM:
+        return ("imm", int(rhs.imm))
+    if rhs.type == X86_OP_MEM and rhs.mem.index == 0:
+        base_name = (
+            instruction.insn.reg_name(rhs.mem.base).lower()
+            if rhs.mem.base
+            else ""
+        )
+        segment_name = (
+            instruction.insn.reg_name(rhs.mem.segment).lower()
+            if rhs.mem.segment
+            else ""
+        )
+        width = int(rhs.size) if int(rhs.size) > 0 else 2
+        if base_name == "bp" and segment_name in {"", "ss"}:
+            return ("bp", int(rhs.mem.disp), width)
+        if not base_name and segment_name in {"", "ds"}:
+            return ("global", int(rhs.mem.disp), width)
+    return None
+
+
 def register_replacement_source_8616(
     instruction: DecodedInstructionFactSurface8616,
     register: str,
@@ -118,57 +191,12 @@ def register_replacement_source_8616(
     mnemonic = instruction.mnemonic.lower()
     rhs = operands[1]
     if destination_name != register:
-        projection = register_value_projection_8616(destination_name, register)
-        if mnemonic == "mov" and rhs.type == X86_OP_IMM and projection is not None:
-            shift, bits = projection
-            return ("imm", (int(rhs.imm) >> shift) & ((1 << bits) - 1))
-        byte_views = {
-            "al": ("ax", 0),
-            "ah": ("ax", 8),
-            "bl": ("bx", 0),
-            "bh": ("bx", 8),
-            "cl": ("cx", 0),
-            "ch": ("cx", 8),
-            "dl": ("dx", 0),
-            "dh": ("dx", 8),
-        }
-        requested_view = byte_views.get(register)
-        rhs_name = _register_name_8616(instruction, rhs)
-        if (
-            requested_view is not None
-            and destination_name == requested_view[0]
-            and mnemonic in {"add", "and", "or", "sub", "xor"}
-            and rhs_name is not None
-        ):
-            return (
-                "register_binary_subview",
-                mnemonic,
-                destination_name,
-                rhs_name,
-                requested_view[1],
-                8,
-                instruction.address,
-            )
-        return None
-    if mnemonic == "mov":
-        if rhs.type == X86_OP_IMM:
-            return ("imm", int(rhs.imm))
-        if rhs.type == X86_OP_MEM and rhs.mem.index == 0:
-            base_name = (
-                instruction.insn.reg_name(rhs.mem.base).lower()
-                if rhs.mem.base
-                else ""
-            )
-            segment_name = (
-                instruction.insn.reg_name(rhs.mem.segment).lower()
-                if rhs.mem.segment
-                else ""
-            )
-            width = int(rhs.size) if int(rhs.size) > 0 else 2
-            if base_name == "bp" and segment_name in {"", "ss"}:
-                return ("bp", int(rhs.mem.disp), width)
-            if not base_name and segment_name in {"", "ds"}:
-                return ("global", int(rhs.mem.disp), width)
+        return _subview_replacement_source_8616(
+            instruction, register, destination_name, mnemonic, rhs,
+        )
+    source = _direct_mov_source_8616(instruction, mnemonic, rhs)
+    if source is not None:
+        return source
     if mnemonic in {"sub", "xor"} and _register_name_8616(instruction, rhs) == register:
         return ("imm", 0)
     return None

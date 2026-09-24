@@ -69,54 +69,69 @@ def _extract_proc_text_from_evidence(
     proc_kind: str,
     proc_name: str,
 ) -> str | None:
-    def _impl() -> str | None:
-        """Extract one named procedure body from source-evidence decompiler text."""
-        lines = dec_text.splitlines()
-        section_lines: list[str] = []
-        in_target_section = False
-        saw_any_proc_marker = False
-        for line in lines:
-            marker = _EVIDENCE_PROC_MARKER_RE.fullmatch(line.strip())
-            if marker is not None:
-                saw_any_proc_marker = True
-                if in_target_section:
-                    break
-                in_target_section = marker.group("proc") == proc_name and marker.group("kind") == proc_kind
-                continue
-            if in_target_section:
-                section_lines.append(line)
-        if not section_lines and not saw_any_proc_marker:
-            section_lines = lines
-        if not section_lines:
-            return None
-        for start_idx, line in enumerate(section_lines):
-            stripped = line.strip()
-            if not stripped or stripped.startswith(("/*", "*")):
-                continue
-            if "(" not in stripped:
-                continue
-            brace_depth = 0
-            saw_open_brace = False
-            saw_prototype = False
-            end_idx: int | None = None
-            for idx in range(start_idx, len(section_lines)):
-                current = section_lines[idx]
-                if not saw_open_brace and ";" in current:
-                    saw_prototype = True
-                    break
-                brace_depth += current.count("{")
-                if "{" in current:
-                    saw_open_brace = True
-                brace_depth -= current.count("}")
-                if saw_open_brace and brace_depth == 0:
-                    end_idx = idx
-                    break
-            if saw_prototype or end_idx is None:
-                continue
-            return "\n".join(section_lines[: end_idx + 1]).strip() + "\n"
+    """Extract one named procedure body from source-evidence decompiler text."""
+    lines = dec_text.splitlines()
+    section_lines, saw_any_proc_marker = _evidence_proc_section_8616(
+        lines, proc_kind=proc_kind, proc_name=proc_name
+    )
+    if not section_lines and not saw_any_proc_marker:
+        section_lines = lines
+    if not section_lines:
         return None
+    for start_idx, line in enumerate(section_lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("/*", "*")):
+            continue
+        if "(" not in stripped:
+            continue
+        text = _brace_bounded_proc_text_8616(section_lines, start_idx)
+        if text is not None:
+            return text
+    return None
 
-    return _impl()
+
+def _evidence_proc_section_8616(
+    lines: list[str],
+    *,
+    proc_kind: str,
+    proc_name: str,
+) -> tuple[list[str], bool]:
+    """Collect the lines between the target procedure marker and the next one."""
+    section_lines: list[str] = []
+    in_target_section = False
+    saw_any_proc_marker = False
+    for line in lines:
+        marker = _EVIDENCE_PROC_MARKER_RE.fullmatch(line.strip())
+        if marker is not None:
+            saw_any_proc_marker = True
+            if in_target_section:
+                break
+            in_target_section = marker.group("proc") == proc_name and marker.group("kind") == proc_kind
+            continue
+        if in_target_section:
+            section_lines.append(line)
+    return section_lines, saw_any_proc_marker
+
+
+def _brace_bounded_proc_text_8616(section_lines: list[str], start_idx: int) -> str | None:
+    """Return the header-to-close-brace text starting at ``start_idx``."""
+    brace_depth = 0
+    saw_open_brace = False
+    end_idx: int | None = None
+    for idx in range(start_idx, len(section_lines)):
+        current = section_lines[idx]
+        if not saw_open_brace and ";" in current:
+            return None
+        brace_depth += current.count("{")
+        if "{" in current:
+            saw_open_brace = True
+        brace_depth -= current.count("}")
+        if saw_open_brace and brace_depth == 0:
+            end_idx = idx
+            break
+    if end_idx is None:
+        return None
+    return "\n".join(section_lines[: end_idx + 1]).strip() + "\n"
 
 
 def _load_evidence_c_text(case: RecompilableSubsetCase) -> str | None:

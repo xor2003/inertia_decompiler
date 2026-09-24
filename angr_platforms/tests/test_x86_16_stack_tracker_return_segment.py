@@ -7,6 +7,8 @@ import angr
 import pytest
 from angr.calling_conventions import SimCCStdcall
 from angr.sim_type import SimTypeFunction, SimTypeInt
+from angr_platforms.X86_16 import stack_tracker_return_segment as adapter
+from angr_platforms.X86_16.arch_86_16 import Arch86_16
 from angr_platforms.X86_16.ir import IRFunctionArtifact
 from angr_platforms.X86_16.ir.vex_import import _block_to_ir
 from angr_platforms.X86_16.semantics.call_return_segment import collect_return_segment_frames_8616
@@ -14,6 +16,50 @@ from angr_platforms.X86_16.semantics.call_stack_effects import materialize_call_
 from test_x86_16_call_return_segment import _project
 from test_x86_16_call_stack_effects import _summary
 from test_x86_16_packed_mz import _mz
+
+
+def _track_machine_frame(call):
+    # Save DI, pass one word, call, discard the argument, then restore DI.
+    # Unknown indirect targets do not change the encoded machine frame width.
+    prefix = bytes.fromhex("55 8b ec 57 50 " + call)
+    code = prefix + bytes.fromhex("83 c4 02 5f 8b e5 5d c3")
+    code = code.ljust(0x20, b"\x90") + b"\xcb"
+    project = angr.load_shellcode(code, arch=Arch86_16(), load_address=0x1000)
+    cfg = project.analyses.CFGFast(normalize=True, function_starts=[0x1000])
+    tracker = project.analyses.StackPointerTracker(cfg.kb.functions[0x1000], {project.arch.sp_offset})
+    return tracker, 0x1000 + len(prefix) + 3, project.arch.sp_offset
+
+
+@pytest.mark.parametrize(("call", "adjustment"), [
+    ("ff 56 06", 0), ("ff 5e 06", 2), ("9a 20 10 00 00", 2),
+    ("66 ff 56 06", 2), ("66 ff 5e 06", 6),
+])
+def test_native_tracker_balances_machine_call_frame_before_restore(call, adjustment):
+    tracker, restore, sp_offset = _track_machine_frame(call)
+    assert tracker.offset_before(restore, sp_offset) == (-4 & 0xffffffff)
+    reports = tracker._inertia_machine_call_frames_8616
+    assert reports
+    assert all(report.adjustment == adjustment for report in reports)
+    assert all(report.raw_fact_count == report.normalized_fact_count == 1 for report in reports)
+    assert all(report.classified_fact_count == report.materialized_count == 1 for report in reports)
+    assert all(report.failure_count == 0 for report in reports)
+
+
+@pytest.mark.parametrize("refusal", ["unknown", "wrong_return_edge"])
+def test_native_tracker_refuses_unproven_machine_frame(monkeypatch, refusal):
+    original = adapter.decode_machine_call_frame_8616
+
+    def decode(project, address):
+        frame = original(project, address)
+        if refusal == "unknown":
+            return None
+        return replace(frame, return_addr=frame.return_addr + 1)
+
+    monkeypatch.setattr(adapter, "decode_machine_call_frame_8616", decode)
+    tracker, restore, sp_offset = _track_machine_frame("ff 5e 06")
+    assert tracker.offset_before(restore, sp_offset) is None
+    assert all(report.failure_count == 1 for report in tracker._inertia_machine_call_frames_8616)
+    assert all(report.materialized_count == 0 for report in tracker._inertia_machine_call_frames_8616)
 
 
 @pytest.mark.parametrize("base", [0x1000, 0x11000])

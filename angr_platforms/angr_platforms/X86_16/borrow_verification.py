@@ -214,6 +214,43 @@ def _has_suppressed_sib_index_oracle_defect(case: dict[str, Any]) -> bool:
     return ((sib >> 3) & 7) == 4
 
 
+def _idiv8_divisor_byte_8616(
+    case: dict[str, Any], modrm: int, regs: dict[str, Any]
+) -> int | None:
+    """Resolve the raw unsigned divisor byte for one IDIV r/m8 form."""
+    if (modrm >> 6) == 3:
+        register_values = (
+            int(regs.get("eax", 0)),
+            int(regs.get("ecx", 0)),
+            int(regs.get("edx", 0)),
+            int(regs.get("ebx", 0)),
+        )
+        register_code = modrm & 7
+        register_value = register_values[register_code & 3]
+        return (register_value >> (8 if register_code >= 4 else 0)) & 0xFF
+    initial = case.get("initial", {})
+    effective_address = initial.get("ea")
+    if not isinstance(effective_address, dict) or "p_addr" not in effective_address:
+        return None
+    ram = dict(initial.get("ram", []))
+    divisor = ram.get(int(effective_address["p_addr"]))
+    if divisor is None:
+        return None
+    return int(divisor) & 0xFF
+
+
+def _idiv8_quotient_overflows_8616(divisor_raw: int, dividend_raw: int) -> bool:
+    """Return whether signed IDIV8 semantics must fault for these operands."""
+    divisor_signed = divisor_raw - 0x100 if divisor_raw & 0x80 else divisor_raw
+    dividend_signed = dividend_raw - 0x10000 if dividend_raw & 0x8000 else dividend_raw
+    if divisor_signed == 0:
+        return True
+    quotient = abs(dividend_signed) // abs(divisor_signed)
+    if (dividend_signed < 0) != (divisor_signed < 0):
+        quotient = -quotient
+    return not -0x80 <= quotient <= 0x7F
+
+
 def _has_missing_idiv8_fault_oracle_defect(case: dict[str, Any]) -> bool:
     """Return whether a 386E IDIV8 trace omits a mandatory divide error."""
     raw = bytes(int(value) for value in case.get("bytes", []))
@@ -233,41 +270,17 @@ def _has_missing_idiv8_fault_oracle_defect(case: dict[str, Any]) -> bool:
     regs = initial.get("regs", {})
     if not isinstance(regs, dict) or "eax" not in regs:
         return False
-    if (modrm >> 6) == 3:
-        register_values = (
-            int(regs.get("eax", 0)),
-            int(regs.get("ecx", 0)),
-            int(regs.get("edx", 0)),
-            int(regs.get("ebx", 0)),
-        )
-        register_code = modrm & 7
-        register_value = register_values[register_code & 3]
-        divisor_raw = (register_value >> (8 if register_code >= 4 else 0)) & 0xFF
-    else:
-        effective_address = initial.get("ea")
-        if not isinstance(effective_address, dict) or "p_addr" not in effective_address:
-            return False
-        ram = dict(initial.get("ram", []))
-        divisor = ram.get(int(effective_address["p_addr"]))
-        if divisor is None:
-            return False
-        divisor_raw = int(divisor) & 0xFF
-
-    divisor_signed = divisor_raw - 0x100 if divisor_raw & 0x80 else divisor_raw
+    divisor_raw = _idiv8_divisor_byte_8616(case, modrm, regs)
+    if divisor_raw is None:
+        return False
     dividend_raw = int(regs["eax"]) & 0xFFFF
-    dividend_signed = dividend_raw - 0x10000 if dividend_raw & 0x8000 else dividend_raw
-    if divisor_signed == 0:
-        return True
-    quotient = abs(dividend_signed) // abs(divisor_signed)
-    if (dividend_signed < 0) != (divisor_signed < 0):
-        quotient = -quotient
-    return not -0x80 <= quotient <= 0x7F
+    return _idiv8_quotient_overflows_8616(divisor_raw, dividend_raw)
 
 
-def classify_borrow_case(cpu: str, opcode: str, case: dict[str, Any]) -> BorrowCaseClassification:
-    """Classify one 80286 or 80386 corpus case without executing it."""
-    normalized_cpu = cpu.strip().lower()
-    normalized_opcode = opcode.upper()
+def _classify_scope_exclusion_8616(
+    case: dict[str, Any],
+) -> BorrowCaseClassification | None:
+    """Return the out-of-scope or undefined exclusion that applies, if any."""
     if _has_unusable_lock_prefix(case):
         return BorrowCaseClassification(
             BorrowCaseDisposition.OUT_OF_SCOPE_EXCLUDED,
@@ -288,48 +301,68 @@ def classify_borrow_case(cpu: str, opcode: str, case: dict[str, Any]) -> BorrowC
             BorrowCaseDisposition.OUT_OF_SCOPE_EXCLUDED,
             "far-pointer object straddles the 64 KiB end of its segment",
         )
+    return None
+
+
+def _classify_80386_case_8616(
+    case: dict[str, Any],
+) -> BorrowCaseClassification | None:
+    """Return the 80386-specific oracle defect or scope verdict, if any."""
+    if _has_missing_idiv8_fault_oracle_defect(case):
+        return BorrowCaseClassification(
+            BorrowCaseDisposition.ORACLE_DEFECT_EXCLUDED,
+            "386E trace omits the mandatory signed-byte divide error",
+        )
+    if _has_suppressed_sib_index_oracle_defect(case):
+        return BorrowCaseClassification(
+            BorrowCaseDisposition.ORACLE_DEFECT_EXCLUDED,
+            "386E trace applies a SIB index that architectural decoding suppresses",
+        )
+    first_opcode, second_opcode = _instruction_opcode(case)
+    if 0xD8 <= first_opcode <= 0xDF:
+        return BorrowCaseClassification(
+            BorrowCaseDisposition.OUT_OF_SCOPE_EXCLUDED,
+            "x87 coprocessor instructions are deferred to a separate implementation",
+        )
+    if first_opcode == 0x0F and second_opcode in {0x20, 0x21, 0x22, 0x23, 0x24, 0x26}:
+        return BorrowCaseClassification(
+            BorrowCaseDisposition.OUT_OF_SCOPE_EXCLUDED,
+            "control, debug, and test registers are outside DOS real-mode scope",
+        )
+    double_shift = _double_shift_width_and_count(case)
+    if double_shift is not None:
+        width, count = double_shift
+        if count > width:
+            return BorrowCaseClassification(
+                BorrowCaseDisposition.UNDEFINED_EXCLUDED,
+                f"double-shift count {count} exceeds {width}-bit operand width",
+            )
+    if first_opcode == 0x0F and second_opcode in {0xBC, 0xBD}:
+        source = int(case["initial"].get("src", 1))
+        if source == 0:
+            return BorrowCaseClassification(
+                BorrowCaseDisposition.UNDEFINED_EXCLUDED,
+                "BSF/BSR destination is undefined for a zero source",
+            )
+    return None
+
+
+def classify_borrow_case(cpu: str, opcode: str, case: dict[str, Any]) -> BorrowCaseClassification:
+    """Classify one 80286 or 80386 corpus case without executing it."""
+    normalized_cpu = cpu.strip().lower()
+    normalized_opcode = opcode.upper()
+    scope_exclusion = _classify_scope_exclusion_8616(case)
+    if scope_exclusion is not None:
+        return scope_exclusion
     if normalized_cpu == "80286" and normalized_opcode in COMPARE_VERIFIED_MOO_OPCODES:
         return BorrowCaseClassification(
             BorrowCaseDisposition.PYVEX_PROVEN,
             "opcode family has symbolic upstream-pyvex comparison coverage",
         )
     if normalized_cpu == "80386":
-        if _has_missing_idiv8_fault_oracle_defect(case):
-            return BorrowCaseClassification(
-                BorrowCaseDisposition.ORACLE_DEFECT_EXCLUDED,
-                "386E trace omits the mandatory signed-byte divide error",
-            )
-        if _has_suppressed_sib_index_oracle_defect(case):
-            return BorrowCaseClassification(
-                BorrowCaseDisposition.ORACLE_DEFECT_EXCLUDED,
-                "386E trace applies a SIB index that architectural decoding suppresses",
-            )
-        first_opcode, second_opcode = _instruction_opcode(case)
-        if 0xD8 <= first_opcode <= 0xDF:
-            return BorrowCaseClassification(
-                BorrowCaseDisposition.OUT_OF_SCOPE_EXCLUDED,
-                "x87 coprocessor instructions are deferred to a separate implementation",
-            )
-        if first_opcode == 0x0F and second_opcode in {0x20, 0x21, 0x22, 0x23, 0x24, 0x26}:
-            return BorrowCaseClassification(
-                BorrowCaseDisposition.OUT_OF_SCOPE_EXCLUDED,
-                "control, debug, and test registers are outside DOS real-mode scope",
-            )
-        double_shift = _double_shift_width_and_count(case)
-        if double_shift is not None:
-            width, count = double_shift
-            if count > width:
-                return BorrowCaseClassification(
-                    BorrowCaseDisposition.UNDEFINED_EXCLUDED,
-                    f"double-shift count {count} exceeds {width}-bit operand width",
-                )
-        if first_opcode == 0x0F and second_opcode in {0xBC, 0xBD}:
-            source = int(case["initial"].get("src", 1))
-            if source == 0:
-                return BorrowCaseClassification(
-                    BorrowCaseDisposition.UNDEFINED_EXCLUDED,
-                    "BSF/BSR destination is undefined for a zero source",
-                )
+        classified = _classify_80386_case_8616(case)
+        if classified is not None:
+            return classified
     exception = case.get("exception")
     if isinstance(exception, dict) and int(exception.get("number", -1)) not in {-1, 0}:
         return BorrowCaseClassification(

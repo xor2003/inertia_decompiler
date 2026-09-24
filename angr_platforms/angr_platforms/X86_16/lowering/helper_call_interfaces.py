@@ -236,24 +236,68 @@ def _materialize_required_pointer_casts_8616(
             continue
         if _type_width_bytes_8616(expected) != widths[index]:
             return False, False, 0
-        argument = args[index]
-        if isinstance(argument, CSemanticCast8616) and argument.dst_type == expected:
-            materialized += 1
-            continue
-        current = _expression_type_8616(argument)
-        if isinstance(current, SimTypeArray):
-            current = SimTypePointer(current.elem_type).with_arch(codegen.project.arch)
-        if not isinstance(current, SimTypePointer):
+        coerced = _coerce_pointer_arg_8616(codegen, args[index], expected)
+        if coerced is None:
             return False, False, 0
-        if _pointer_types_compatible_8616(current, expected):
-            materialized += 1
-            continue
-        args[index] = CSemanticCast8616(current, expected, argument, codegen=codegen)
+        args[index], arg_changed = coerced
         materialized += 1
-        changed = True
+        changed = changed or arg_changed
     if changed:
         call.args = args
     return True, changed, materialized
+
+
+def _coerce_pointer_arg_8616(
+    codegen: _CodegenBoundary8616,
+    argument: object,
+    expected: SimTypePointer,
+) -> tuple[object, bool] | None:
+    """Return (arg, changed) when the arg can satisfy the expected pointer type."""
+    if isinstance(argument, CSemanticCast8616) and argument.dst_type == expected:
+        return argument, False
+    current = _expression_type_8616(argument)
+    if isinstance(current, SimTypeArray):
+        current = SimTypePointer(current.elem_type).with_arch(codegen.project.arch)
+    if not isinstance(current, SimTypePointer):
+        return None
+    if _pointer_types_compatible_8616(current, expected):
+        return argument, False
+    return CSemanticCast8616(current, expected, argument, codegen=codegen), True
+
+
+def _bound_call_callee_8616(
+    node: structured_c.CFunctionCall,
+) -> tuple[_CalleeBoundary8616, object, object] | None:
+    """Bind a call node's callee name/address at the angr object boundary."""
+    callee_obj = node.callee_func
+    if callee_obj is None:
+        return None
+    callee = cast(_CalleeBoundary8616, callee_obj)
+    try:
+        return callee, callee.name, callee.addr
+    except AttributeError:
+        return None
+
+
+def _exact_helper_prototype_8616(
+    node: structured_c.CFunctionCall,
+    callee: _CalleeBoundary8616,
+    callee_addr: object,
+    prototype: SimTypeFunction,
+    summary: CallsiteSummary8616 | None,
+    arch: Arch,
+) -> SimTypeFunction | None:
+    """Return the exact-width helper prototype when callsite evidence agrees."""
+    if summary is None or not isinstance(callee_addr, int) or summary.target_addr != callee_addr:
+        return None
+    exact_prototype = _prototype_with_exact_pointer_widths_8616(prototype, summary, arch)
+    if (
+        exact_prototype is None
+        or not _prototype_matches_summary_8616(exact_prototype, summary, len(node.args))
+        or not _prototype_return_width_compatible_8616(callee.prototype, exact_prototype)
+    ):
+        return None
+    return exact_prototype
 
 
 def materialize_known_helper_call_interfaces_8616(
@@ -277,61 +321,56 @@ def materialize_known_helper_call_interfaces_8616(
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, structured_c.CFunctionCall):
             continue
-        callee_obj = node.callee_func
-        if callee_obj is None:
-            continue
-        callee = cast(_CalleeBoundary8616, callee_obj)
-        try:
-            callee_name = callee.name
-            callee_addr = callee.addr
-        except AttributeError:
-            continue
-        prototype = known_helper_prototype_8616(
-            callee_name if isinstance(callee_name, str) else None,
-            typed_codegen.project.arch,
+        changed = (
+            _materialize_helper_call_node_8616(typed_codegen, node, summaries, stats) or changed
         )
-        if prototype is None:
-            continue
-        stats.raw_fact_count += 1
-        summary = summaries.get(id(node))
-        exact_prototype = (
-            None
-            if summary is None
-            else _prototype_with_exact_pointer_widths_8616(
-                prototype,
-                summary,
-                typed_codegen.project.arch,
-            )
-        )
-        if (
-            summary is None
-            or exact_prototype is None
-            or not isinstance(callee_addr, int)
-            or summary.target_addr != callee_addr
-            or not _prototype_matches_summary_8616(exact_prototype, summary, len(node.args))
-            or not _prototype_return_width_compatible_8616(callee.prototype, exact_prototype)
-        ):
-            stats.failure_count += 1
-            continue
-        pointer_compatible, cast_changed, cast_count = _materialize_required_pointer_casts_8616(
-            typed_codegen,
-            node,
-            exact_prototype,
-            summary,
-        )
-        if not pointer_compatible:
-            stats.failure_count += 1
-            continue
-        stats.normalized_fact_count += 1
-        stats.classified_fact_count += 1
-        if callee.prototype != exact_prototype:
-            callee.prototype = exact_prototype
-            callee.is_prototype_guessed = False
-            stats.prototype_materialized_count += 1
-            changed = True
-        stats.pointer_cast_materialized_count += cast_count
-        stats.materialized_count += 1
-        changed = cast_changed or changed
     if stats.classified_fact_count > 0 and stats.materialized_count == 0:
         raise PipelineHardError("classified helper call interfaces were not materialized")
+    return changed
+
+
+def _materialize_helper_call_node_8616(
+    codegen: _CodegenBoundary8616,
+    node: structured_c.CFunctionCall,
+    summaries: dict[int, CallsiteSummary8616],
+    stats: KnownHelperCallInterfaceStats8616,
+) -> bool:
+    """Materialize one known-helper call node and record evidence counts."""
+    bound = _bound_call_callee_8616(node)
+    if bound is None:
+        return False
+    callee, callee_name, callee_addr = bound
+    prototype = known_helper_prototype_8616(
+        callee_name if isinstance(callee_name, str) else None,
+        codegen.project.arch,
+    )
+    if prototype is None:
+        return False
+    stats.raw_fact_count += 1
+    summary = summaries.get(id(node))
+    exact_prototype = _exact_helper_prototype_8616(
+        node, callee, callee_addr, prototype, summary, codegen.project.arch
+    )
+    if summary is None or exact_prototype is None:
+        stats.failure_count += 1
+        return False
+    pointer_compatible, cast_changed, cast_count = _materialize_required_pointer_casts_8616(
+        codegen,
+        node,
+        exact_prototype,
+        summary,
+    )
+    if not pointer_compatible:
+        stats.failure_count += 1
+        return False
+    stats.normalized_fact_count += 1
+    stats.classified_fact_count += 1
+    changed = cast_changed
+    if callee.prototype != exact_prototype:
+        callee.prototype = exact_prototype
+        callee.is_prototype_guessed = False
+        stats.prototype_materialized_count += 1
+        changed = True
+    stats.pointer_cast_materialized_count += cast_count
+    stats.materialized_count += 1
     return changed

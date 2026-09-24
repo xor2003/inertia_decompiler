@@ -84,10 +84,14 @@ def _effect_key_8616(statement: Statement) -> CallReturnFrameEffectKey8616 | Non
     return CallReturnFrameEffectKey8616(address, block, index)
 
 
-def consume_returning_call_frames_8616(
-    project: object, function: object, graph: nx.DiGraph[Block], *, sp_offset: int,
-) -> CallFrameBoundaryStats8616:
-    """Consume complete, uniquely projected frames for calls with return edges."""
+def _scan_returning_calls_8616(
+    graph: nx.DiGraph[Block],
+) -> tuple[
+    dict[int, int],
+    dict[CallReturnFrameEffectKey8616, list[tuple[Block, Statement]]],
+    int,
+]:
+    """Index tagged statements and census unique CALL sites with return edges."""
     calls: dict[int, int] = {}
     raw_count = 0
     occurrences: Counter[int] = Counter()
@@ -107,30 +111,34 @@ def consume_returning_call_frames_8616(
             return_addr = block.addr + block.original_size
             if any(successor.addr == return_addr for successor in graph.successors(block)):
                 calls[address] = return_addr
-    calls = {address: target for address, target in calls.items() if occurrences[address] == 1}
-    if not calls:
-        return CallFrameBoundaryStats8616(raw_fact_count=raw_count, failure_count=raw_count)
-    collection = collect_call_return_frame_effects_8616(project, function, calls)
-    by_call: dict[int, list[tuple[Block, Statement]]] = defaultdict(list)
-    refused: set[int] = set()
-    for fact in collection.effects:
-        matches = locations.get(fact.key, [])
-        if len(matches) != 1:
-            refused.add(fact.key.callsite_addr)
-            continue
-        block, statement = matches[0]
-        role_matches = (
-            fact.role is CallReturnFrameEffectRole8616.STACK_STORE and isinstance(statement, Store)
-        ) or (
-            fact.role is CallReturnFrameEffectRole8616.STACK_POINTER_UPDATE
-            and isinstance(statement, Assignment) and isinstance(statement.dst, Register)
-            and statement.dst.reg_offset == sp_offset
-        )
-        if not role_matches:
-            refused.add(fact.key.callsite_addr)
-            continue
-        by_call[fact.key.callsite_addr].append((block, statement))
-    segment_frames = collect_return_segment_frames_8616(project, function, calls)
+    unique_calls = {address: target for address, target in calls.items() if occurrences[address] == 1}
+    return unique_calls, locations, raw_count
+
+
+def _effect_role_matches_8616(
+    role: CallReturnFrameEffectRole8616,
+    statement: Statement,
+    sp_offset: int,
+) -> bool:
+    """Return whether one uniquely located statement plays the proven role."""
+    if role is CallReturnFrameEffectRole8616.STACK_STORE:
+        return isinstance(statement, Store)
+    return (
+        role is CallReturnFrameEffectRole8616.STACK_POINTER_UPDATE
+        and isinstance(statement, Assignment)
+        and isinstance(statement.dst, Register)
+        and statement.dst.reg_offset == sp_offset
+    )
+
+
+def _match_segment_frame_effects_8616(
+    segment_frames: tuple[ReturnSegmentFrame8616, ...],
+    locations: dict[CallReturnFrameEffectKey8616, list[tuple[Block, Statement]]],
+    by_call: dict[int, list[tuple[Block, Statement]]],
+    refused: set[int],
+    sp_offset: int,
+) -> None:
+    """Bind segment-frame effects to located statements or refuse the call."""
     for frame in segment_frames:
         if frame.refusal is not None or frame.callsite_addr not in by_call:
             continue
@@ -142,17 +150,34 @@ def consume_returning_call_frames_8616(
                 refused.add(frame.callsite_addr)
                 continue
             block, statement = matches[0]
-            role_matches = (
-                effect.role is CallReturnFrameEffectRole8616.STACK_STORE and isinstance(statement, Store)
-            ) or (
-                effect.role is CallReturnFrameEffectRole8616.STACK_POINTER_UPDATE
-                and isinstance(statement, Assignment) and isinstance(statement.dst, Register)
-                and statement.dst.reg_offset == sp_offset
-            )
-            if not role_matches:
-                refused.add(frame.callsite_addr)
-            else:
+            if _effect_role_matches_8616(effect.role, statement, sp_offset):
                 by_call[frame.callsite_addr].append((block, statement))
+            else:
+                refused.add(frame.callsite_addr)
+
+
+def consume_returning_call_frames_8616(
+    project: object, function: object, graph: nx.DiGraph[Block], *, sp_offset: int,
+) -> CallFrameBoundaryStats8616:
+    """Consume complete, uniquely projected frames for calls with return edges."""
+    calls, locations, raw_count = _scan_returning_calls_8616(graph)
+    if not calls:
+        return CallFrameBoundaryStats8616(raw_fact_count=raw_count, failure_count=raw_count)
+    collection = collect_call_return_frame_effects_8616(project, function, calls)
+    by_call: dict[int, list[tuple[Block, Statement]]] = defaultdict(list)
+    refused: set[int] = set()
+    for fact in collection.effects:
+        matches = locations.get(fact.key, [])
+        if len(matches) != 1:
+            refused.add(fact.key.callsite_addr)
+            continue
+        block, statement = matches[0]
+        if not _effect_role_matches_8616(fact.role, statement, sp_offset):
+            refused.add(fact.key.callsite_addr)
+            continue
+        by_call[fact.key.callsite_addr].append((block, statement))
+    segment_frames = collect_return_segment_frames_8616(project, function, calls)
+    _match_segment_frame_effects_8616(segment_frames, locations, by_call, refused, sp_offset)
     accepted = {address: items for address, items in by_call.items() if address not in refused}
     removal_ids = {id(statement) for items in accepted.values() for _block, statement in items}
     for block in graph:

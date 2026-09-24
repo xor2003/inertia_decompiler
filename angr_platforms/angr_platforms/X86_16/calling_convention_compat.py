@@ -349,7 +349,6 @@ def _caller_sign_extends_byte_return_8616(project: object, function: object) -> 
     """Return whether callers prove signed or non-signed AL consumption."""
     try:
         from .analysis_helpers import collect_neighbor_call_targets
-        from .callsite_summary import _block_insns_for_callsite, _find_call_index
     except Exception:
         return None
     target_addrs = _function_target_addrs_8616(function)
@@ -374,19 +373,29 @@ def _caller_sign_extends_byte_return_8616(project: object, function: object) -> 
             if seed.target_addr not in target_addrs:
                 continue
             saw_matching_call = True
-            callsite_addr = seed.callsite_addr
-            insns = _block_insns_for_callsite(caller, callsite_addr)
-            call_idx = _find_call_index(insns, callsite_addr) if insns else None
-            if call_idx is None:
-                continue
-            for follow in insns[call_idx + 1 : call_idx + 5]:
-                # Dynamic capstone compatibility boundary.
-                mnemonic = str(getattr(follow, "mnemonic", "") or "").lower()
-                if mnemonic == "cbw":
-                    return True
-                if _instruction_reads_reg_8616(follow, {"al"}) or _instruction_writes_reg_8616(follow, "ax"):
-                    break
+            if _callsite_cbw_verdict_8616(caller, seed.callsite_addr) is True:
+                return True
     return False if saw_matching_call else None
+
+
+def _callsite_cbw_verdict_8616(caller: object, callsite_addr: int) -> bool | None:
+    """Return True when the instructions after this callsite prove CBW."""
+    try:
+        from .callsite_summary import _block_insns_for_callsite, _find_call_index
+    except Exception:
+        return None
+    insns = _block_insns_for_callsite(caller, callsite_addr)
+    call_idx = _find_call_index(insns, callsite_addr) if insns else None
+    if call_idx is None:
+        return None
+    for follow in insns[call_idx + 1 : call_idx + 5]:
+        # Dynamic capstone compatibility boundary.
+        mnemonic = str(getattr(follow, "mnemonic", "") or "").lower()
+        if mnemonic == "cbw":
+            return True
+        if _instruction_reads_reg_8616(follow, {"al"}) or _instruction_writes_reg_8616(follow, "ax"):
+            break
+    return False
 
 
 def _terminal_wide_return_evidence_from_instructions_8616(
@@ -538,6 +547,57 @@ def _sim_type_stack_width_8616(sim_type: object) -> int:
     return max(2, (bit_width + 7) // 8)
 
 
+def _existing_prototype_parts_8616(
+    project: object, function: object
+) -> tuple[list[SimType], SimType, bool]:
+    """Read the current function prototype's args/return/variadic shape."""
+    project_dynamic = cast(Any, project)
+    existing = cast(Any, function).prototype
+    if isinstance(existing, SimTypeFunction):
+        return (
+            list(cast(Iterable[SimType], existing.args or ())),
+            existing.returnty,
+            existing.variadic,
+        )
+    return [], SimTypeBottom(label="void").with_arch(project_dynamic.arch), False
+
+
+def _merge_wide_stack_args_8616(
+    physical_args: list[SimType],
+    wide_offsets: set[int],
+    arch: object,
+    *,
+    signed: bool,
+) -> tuple[list[SimType], set[int]]:
+    """Merge carry-linked adjacent stack words into logical wide arguments."""
+    logical_args: list[SimType] = []
+    materialized_offsets: set[int] = set()
+    physical_index = 0
+    stack_offset = 4
+    while physical_index < len(physical_args):
+        arg_type = physical_args[physical_index]
+        arg_width = _sim_type_stack_width_8616(arg_type)
+        if stack_offset in wide_offsets:
+            if arg_width >= 4:
+                logical_args.append(arg_type)
+                materialized_offsets.add(stack_offset)
+                stack_offset += arg_width
+                physical_index += 1
+                continue
+            if physical_index + 1 < len(physical_args):
+                high_type = physical_args[physical_index + 1]
+                if arg_width == 2 and _sim_type_stack_width_8616(high_type) == 2:
+                    logical_args.append(SimTypeLong(signed=signed).with_arch(cast(Any, arch)))
+                    materialized_offsets.add(stack_offset)
+                    stack_offset += 4
+                    physical_index += 2
+                    continue
+        logical_args.append(arg_type)
+        stack_offset += arg_width
+        physical_index += 1
+    return logical_args, materialized_offsets
+
+
 def _wide_stack_arithmetic_prototype_from_evidence_8616(
     project: object,
     function: object,
@@ -552,16 +612,7 @@ def _wide_stack_arithmetic_prototype_from_evidence_8616(
         return None
 
     project_dynamic = cast(Any, project)
-    function_dynamic = cast(Any, function)
-    existing = function_dynamic.prototype
-    if isinstance(existing, SimTypeFunction):
-        physical_args: list[SimType] = list(cast(Iterable[SimType], existing.args or ()))
-        return_type = existing.returnty
-        variadic = existing.variadic
-    else:
-        physical_args = []
-        return_type = SimTypeBottom(label="void").with_arch(project_dynamic.arch)
-        variadic = False
+    physical_args, return_type, variadic = _existing_prototype_parts_8616(project, function)
     if terminal_wide_return and not isinstance(return_type, SimTypeLong):
         # Width evidence cannot override an already established wide signedness.
         return_type = SimTypeLong(signed=signed).with_arch(project_dynamic.arch)
@@ -572,32 +623,9 @@ def _wide_stack_arithmetic_prototype_from_evidence_8616(
     while len(physical_args) < required_word_count:
         physical_args.append(SimTypeShort(False).with_arch(project_dynamic.arch))
 
-    logical_args: list[SimType] = []
-    materialized_offsets: set[int] = set()
-    physical_index = 0
-    stack_offset = 4
-    wide_offsets = set(evidence.classified_offsets)
-    while physical_index < len(physical_args):
-        arg_type = physical_args[physical_index]
-        arg_width = _sim_type_stack_width_8616(arg_type)
-        if stack_offset in wide_offsets:
-            if arg_width >= 4:
-                logical_args.append(arg_type)
-                materialized_offsets.add(stack_offset)
-                stack_offset += arg_width
-                physical_index += 1
-                continue
-            if physical_index + 1 < len(physical_args):
-                high_type = physical_args[physical_index + 1]
-                if arg_width == 2 and _sim_type_stack_width_8616(high_type) == 2:
-                    logical_args.append(SimTypeLong(signed=signed).with_arch(project_dynamic.arch))
-                    materialized_offsets.add(stack_offset)
-                    stack_offset += 4
-                    physical_index += 2
-                    continue
-        logical_args.append(arg_type)
-        stack_offset += arg_width
-        physical_index += 1
+    logical_args, materialized_offsets = _merge_wide_stack_args_8616(
+        physical_args, set(evidence.classified_offsets), project_dynamic.arch, signed=signed
+    )
 
     materialized_evidence = evidence.with_materialized_count(len(materialized_offsets))
     if materialized_evidence.materialized_count != materialized_evidence.classified_fact_count:
@@ -878,57 +906,67 @@ def apply_x86_16_stack_byte_prototype_evidence(project: object, function: object
 
 def apply_x86_16_calling_convention_compatibility() -> None:
     """Install x86-16 calling-convention compatibility patches once per process."""
-    if getattr(_cc_utils.is_sane_register_variable, "__name__", "") != "_is_sane_register_variable_8616":
-        _orig_is_sane_register_variable = _cc_utils.is_sane_register_variable
-
-        def _is_sane_register_variable_8616(
-            arch: object, reg_offset: object, reg_size: object, def_cc: object = None
-        ) -> bool:
-            arch_dynamic = cast(Any, arch)
-            if arch_dynamic.name == "86_16":
-                return True
-            return bool(cast(Any, _orig_is_sane_register_variable)(arch, reg_offset, reg_size, def_cc=def_cc))
-
-        cast(Any, _cc_utils).is_sane_register_variable = _is_sane_register_variable_8616
-        cast(Any, _cc_analysis).is_sane_register_variable = _is_sane_register_variable_8616
-        cast(Any, _cc_fact_collector).is_sane_register_variable = _is_sane_register_variable_8616
-
-    if getattr(_cc_analysis.CallingConventionAnalysis._analyze_function, "__name__", "") != "_analyze_function_8616":
-        cast(Any, _guess_retval_type_8616)._orig = _cc_analysis.CallingConventionAnalysis._guess_retval_type
-        _analyze_function_orig = _cc_analysis.CallingConventionAnalysis._analyze_function
-
-        def _analyze_function_8616(self: object) -> object:
-            self_dynamic = cast(Any, self)
-            existing_prototype = getattr(self_dynamic._function, "prototype", None)
-            had_explicit_prototype = existing_prototype is not None and not bool(
-                getattr(self_dynamic._function, "is_prototype_guessed", True)
-            )
-            result = cast(Any, _analyze_function_orig)(self)
-            if result is None:
-                fallback = _fallback_wide_stack_return_prototype_8616(self)
-                if fallback is None:
-                    return result
-                return _set_function_prototype_8616(self_dynamic._function, *fallback)
-            cc, prototype = result
-            if prototype is None:
-                fallback = _fallback_wide_stack_return_prototype_8616(self)
-                if fallback is not None:
-                    return _set_function_prototype_8616(self_dynamic._function, *fallback)
-            promoted = _promote_wide_return_and_stack_args_8616(
-                self,
-                prototype,
-                promote_return=not had_explicit_prototype,
-            )
-            if (
-                promoted is not prototype
-                and not had_explicit_prototype
-                and not _has_explicit_arg_names_8616(promoted)
-            ):
-                return _set_function_prototype_8616(self_dynamic._function, cc, promoted)
-            return cc, promoted
-
-        cast(Any, _cc_analysis.CallingConventionAnalysis)._analyze_function = _analyze_function_8616
-
+    _patch_sane_register_variable_8616()
+    _patch_cca_analyze_function_8616()
     if getattr(_cc_analysis.CallingConventionAnalysis._guess_retval_type, "__name__", "") != "_guess_retval_type_8616":
         cast(Any, _guess_retval_type_8616)._orig = _cc_analysis.CallingConventionAnalysis._guess_retval_type
         cast(Any, _cc_analysis.CallingConventionAnalysis)._guess_retval_type = _guess_retval_type_8616
+
+
+def _patch_sane_register_variable_8616() -> None:
+    """Accept every register variable on the 16-bit architecture."""
+    if getattr(_cc_utils.is_sane_register_variable, "__name__", "") == "_is_sane_register_variable_8616":
+        return
+    _orig_is_sane_register_variable = _cc_utils.is_sane_register_variable
+
+    def _is_sane_register_variable_8616(
+        arch: object, reg_offset: object, reg_size: object, def_cc: object = None
+    ) -> bool:
+        arch_dynamic = cast(Any, arch)
+        if arch_dynamic.name == "86_16":
+            return True
+        return bool(cast(Any, _orig_is_sane_register_variable)(arch, reg_offset, reg_size, def_cc=def_cc))
+
+    cast(Any, _cc_utils).is_sane_register_variable = _is_sane_register_variable_8616
+    cast(Any, _cc_analysis).is_sane_register_variable = _is_sane_register_variable_8616
+    cast(Any, _cc_fact_collector).is_sane_register_variable = _is_sane_register_variable_8616
+
+
+def _patch_cca_analyze_function_8616() -> None:
+    """Install the wide-return prototype fallback into CallingConventionAnalysis."""
+    if getattr(_cc_analysis.CallingConventionAnalysis._analyze_function, "__name__", "") == "_analyze_function_8616":
+        return
+    cast(Any, _guess_retval_type_8616)._orig = _cc_analysis.CallingConventionAnalysis._guess_retval_type
+    _analyze_function_orig = _cc_analysis.CallingConventionAnalysis._analyze_function
+
+    def _analyze_function_8616(self: object) -> object:
+        self_dynamic = cast(Any, self)
+        existing_prototype = getattr(self_dynamic._function, "prototype", None)
+        had_explicit_prototype = existing_prototype is not None and not bool(
+            getattr(self_dynamic._function, "is_prototype_guessed", True)
+        )
+        result = cast(Any, _analyze_function_orig)(self)
+        if result is None:
+            fallback = _fallback_wide_stack_return_prototype_8616(self)
+            if fallback is None:
+                return result
+            return _set_function_prototype_8616(self_dynamic._function, *fallback)
+        cc, prototype = result
+        if prototype is None:
+            fallback = _fallback_wide_stack_return_prototype_8616(self)
+            if fallback is not None:
+                return _set_function_prototype_8616(self_dynamic._function, *fallback)
+        promoted = _promote_wide_return_and_stack_args_8616(
+            self,
+            prototype,
+            promote_return=not had_explicit_prototype,
+        )
+        if (
+            promoted is not prototype
+            and not had_explicit_prototype
+            and not _has_explicit_arg_names_8616(promoted)
+        ):
+            return _set_function_prototype_8616(self_dynamic._function, cc, promoted)
+        return cc, promoted
+
+    cast(Any, _cc_analysis.CallingConventionAnalysis)._analyze_function = _analyze_function_8616

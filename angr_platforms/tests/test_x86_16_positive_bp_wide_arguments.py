@@ -61,6 +61,10 @@ def test_body_owned_wide_slot_is_not_narrowed_by_contained_word_access(
     )
     project = SimpleNamespace(
         arch=arch,
+        # No binary body is supplied by this argument-storage fixture.
+        factory=SimpleNamespace(
+            block=lambda *_args, **_kwargs: SimpleNamespace(capstone=SimpleNamespace(insns=())),
+        ),
         kb=SimpleNamespace(
             functions=SimpleNamespace(function=lambda addr, create=False: function),
         ),

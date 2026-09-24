@@ -91,6 +91,10 @@ def _production_shape(
     )
     project = SimpleNamespace(
         arch=arch,
+        # This fixture supplies caller evidence, but no decoded callee body.
+        factory=SimpleNamespace(
+            block=lambda *_args, **_kwargs: SimpleNamespace(capstone=SimpleNamespace(insns=())),
+        ),
         kb=SimpleNamespace(
             functions=SimpleNamespace(function=lambda addr, create=False: function),
         ),

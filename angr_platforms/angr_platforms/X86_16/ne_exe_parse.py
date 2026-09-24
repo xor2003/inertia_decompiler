@@ -272,7 +272,7 @@ def parse_ne_entry_table(
 
         Returns: {ordinal: (segment_index, offset_in_segment)}
         """
-        offsets = {}
+        offsets: dict[int, tuple[int, int]] = {}
         pos = ne_offset + entry_off
         end = pos + entry_len
         ordinal = 1
@@ -286,41 +286,9 @@ def parse_ne_entry_table(
 
                 bundle_type = data[pos + 1]
                 pos += 2
-
-                if bundle_type == 0x00:
-                    # Type 0x00: null bundle (skip count entries)
-                    ordinal += bundle_count
-
-                elif bundle_type == 0xFF:
-                    # Type 0xFF: movable entries (info, reserved, segment, offset)
-                    for _ in range(bundle_count):
-                        if pos + 6 > len(data):
-                            break
-                        segment = data[pos + 3]
-                        offset = struct.unpack_from("<H", data, pos + 4)[0]
-
-                        # Only add if we have a name for this ordinal
-                        # and segment is valid (1-based index into segment table)
-                        if ordinal in ordinal_names and 1 <= segment <= 255:
-                            offsets[ordinal] = (segment, offset)
-
-                        ordinal += 1
-                        pos += 6
-
-                else:
-                    # Fixed entry: segment embedded in type (0x01-0xFE)
-                    segment_num = bundle_type
-                    for _ in range(bundle_count):
-                        if pos + 3 > len(data):
-                            break
-                        offset = struct.unpack_from("<H", data, pos + 1)[0]
-
-                        # Only add if we have a name for this ordinal
-                        if ordinal in ordinal_names and 1 <= segment_num <= 255:
-                            offsets[ordinal] = (segment_num, offset)
-
-                        ordinal += 1
-                        pos += 3
+                pos, ordinal = _consume_ne_entry_bundle(
+                    data, pos, bundle_type, bundle_count, ordinal, ordinal_names, offsets
+                )
 
         except (struct.error, IndexError):
             pass
@@ -328,6 +296,52 @@ def parse_ne_entry_table(
         return offsets
 
     return _impl()
+
+
+def _consume_ne_entry_bundle(
+    data: bytes,
+    pos: int,
+    bundle_type: int,
+    bundle_count: int,
+    ordinal: int,
+    ordinal_names: dict[int, str],
+    offsets: dict[int, tuple[int, int]],
+) -> tuple[int, int]:
+    """Consume one entry-table bundle and advance the (position, ordinal)."""
+    if bundle_type == 0x00:
+        # Type 0x00: null bundle (skip count entries)
+        return pos, ordinal + bundle_count
+
+    if bundle_type == 0xFF:
+        # Type 0xFF: movable entries (info, reserved, segment, offset)
+        for _ in range(bundle_count):
+            if pos + 6 > len(data):
+                break
+            segment = data[pos + 3]
+            offset = struct.unpack_from("<H", data, pos + 4)[0]
+
+            # Only add if we have a name for this ordinal
+            # and segment is valid (1-based index into segment table)
+            if ordinal in ordinal_names and 1 <= segment <= 255:
+                offsets[ordinal] = (segment, offset)
+
+            ordinal += 1
+            pos += 6
+        return pos, ordinal
+
+    # Fixed entry: segment embedded in type (0x01-0xFE)
+    for _ in range(bundle_count):
+        if pos + 3 > len(data):
+            break
+        offset = struct.unpack_from("<H", data, pos + 1)[0]
+
+        # Only add if we have a name for this ordinal
+        if ordinal in ordinal_names and 1 <= bundle_type <= 255:
+            offsets[ordinal] = (bundle_type, offset)
+
+        ordinal += 1
+        pos += 3
+    return pos, ordinal
 
 
 def parse_ne_exe(

@@ -33,7 +33,7 @@ from angr.sim_type import (
 )
 from angr.sim_variable import SimStackVariable
 
-from ..annotations import ANNOTATION_KEY
+from ..annotations import ANNOTATION_KEY, stack_layout_annotation_specs_8616
 from ..calling_convention_compat import collect_wide_stack_argument_width_evidence_8616
 from ..widening.stack_argument_widths import WideStackArgumentWidthEvidence8616
 from ..widening.widening_rules import collect_bp_stack_access_widths_from_instructions_8616
@@ -258,9 +258,7 @@ def positive_stack_specs_8616(func: object) -> tuple[tuple[int, str | None], ...
     annotations = info.get(ANNOTATION_KEY) if isinstance(info, Mapping) else None
     if not isinstance(annotations, Mapping):
         return ()
-    stack_specs = annotations.get("stack_vars")
-    if not isinstance(stack_specs, Mapping):
-        return ()
+    stack_specs = stack_layout_annotation_specs_8616(annotations)
     positive_offsets = sorted(offset for offset in stack_specs if isinstance(offset, int) and offset > 0)
     if not positive_offsets:
         return ()
