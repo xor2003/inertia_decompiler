@@ -61,11 +61,10 @@ def _name_dictionary(rows: list[dict[str, object]]) -> dict[str, int] | None:
     return names
 
 
-def convert_otlp_jsonl_text(text: str) -> str:
-    """Convert Inertia OTEL JSONL trace text into compact line-oriented text."""
+def _collect_otlp_rows_8616(text: str) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
+    """Split JSONL lines into the summary object and span rows."""
     summary: dict[str, object] | None = None
     rows: list[dict[str, object]] = []
-
     for line in text.splitlines():
         line = line.strip()
         if not line:
@@ -78,6 +77,24 @@ def convert_otlp_jsonl_text(text: str) -> str:
             continue
         if "id" in obj and "name" in obj:
             rows.append(obj)
+    return summary, rows
+
+
+def _render_otlp_row_8616(row: dict[str, object], name_ids: dict[str, int]) -> str:
+    """Render one span row in compact ``id|parent|ms|n|attrs`` form."""
+    parent = row.get("parent")
+    parent_text = "-" if parent is None else str(parent)
+    name = str(row.get("name", "unknown"))
+    name_text = str(name_ids[name]) if name_ids else name
+    attrs = row.get("attrs", {})
+    if not isinstance(attrs, dict):
+        attrs = {}
+    return f"{row.get('id')}|{parent_text}|{row.get('duration_ms')}|{name_text}|{_format_attrs(attrs)}"
+
+
+def convert_otlp_jsonl_text(text: str) -> str:
+    """Convert Inertia OTEL JSONL trace text into compact line-oriented text."""
+    summary, rows = _collect_otlp_rows_8616(text)
 
     total = summary.get("total_ms", "?") if summary else "?"
     otel = summary.get("otel_export", "?") if summary else "?"
@@ -95,14 +112,7 @@ def convert_otlp_jsonl_text(text: str) -> str:
             lines.append(f"{name_id}={name}")
 
     for row in rows:
-        parent = row.get("parent")
-        parent_text = "-" if parent is None else str(parent)
-        name = str(row.get("name", "unknown"))
-        name_text = str(name_ids[name]) if name_ids else name
-        attrs = row.get("attrs", {})
-        if not isinstance(attrs, dict):
-            attrs = {}
-        lines.append(f"{row.get('id')}|{parent_text}|{row.get('duration_ms')}|{name_text}|{_format_attrs(attrs)}")
+        lines.append(_render_otlp_row_8616(row, name_ids))
 
     return "\n".join(lines) + "\n"
 

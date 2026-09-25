@@ -59,56 +59,63 @@ def _looks_like_function_header(line: str, function_name: str) -> bool:
     return bool(re.match(rf"^\s*(?:[A-Za-z_][\w\s\*\[\]]+\s+)?{re.escape(function_name)}\s*\(", stripped))
 
 
+def _function_header_span_8616(lines: tuple[str, ...], function_name: str) -> tuple[int, int] | None:
+    """Locate the header line and opening-brace line for a function definition."""
+    for idx, raw in enumerate(lines):
+        line = _strip_c_comments_and_strings(raw)
+        if not _looks_like_function_header(line, function_name):
+            continue
+        if "{" in line:
+            return idx, idx
+        for probe in range(idx + 1, min(idx + 12, len(lines))):
+            probe_line = _strip_c_comments_and_strings(lines[probe])
+            if "{" in probe_line:
+                return idx, probe
+        # Header without an opening brace: keep scanning later candidates.
+    return None
+
+
+def _leading_comment_start_8616(lines: tuple[str, ...], start_idx: int) -> int:
+    """Walk backwards over blank and comment lines belonging to the function."""
+    comment_start = start_idx
+    while comment_start > 0:
+        prev = lines[comment_start - 1].strip()
+        if not prev:
+            comment_start -= 1
+            continue
+        if prev.startswith(_COMMENT_PREFIXES):
+            comment_start -= 1
+            continue
+        break
+    return comment_start
+
+
+def _function_body_end_8616(lines: tuple[str, ...], open_idx: int) -> int | None:
+    """Find the line where the brace depth first returns to zero."""
+    depth = 0
+    for idx in range(open_idx, len(lines)):
+        line = _strip_c_comments_and_strings(lines[idx])
+        depth += line.count("{")
+        depth -= line.count("}")
+        if idx > open_idx and depth <= 0 and "}" in line:
+            return idx
+    return None
+
+
 def _extract_function_from_lines(lines: tuple[str, ...], function_name: str) -> str | None:
-    def _impl() -> str | None:
-        start_idx = None
-        open_idx = None
-        for idx, raw in enumerate(lines):
-            line = _strip_c_comments_and_strings(raw)
-            if not _looks_like_function_header(line, function_name):
-                continue
-            start_idx = idx
-            if "{" in line:
-                open_idx = idx
-                break
-            for probe in range(idx + 1, min(idx + 12, len(lines))):
-                probe_line = _strip_c_comments_and_strings(lines[probe])
-                if "{" in probe_line:
-                    open_idx = probe
-                    break
-            if open_idx is not None:
-                break
-        if start_idx is None or open_idx is None:
-            return None
+    span = _function_header_span_8616(lines, function_name)
+    if span is None or span[1] is None:
+        return None
+    start_idx, open_idx = span
 
-        comment_start = start_idx
-        while comment_start > 0:
-            prev = lines[comment_start - 1].strip()
-            if not prev:
-                comment_start -= 1
-                continue
-            if prev.startswith(_COMMENT_PREFIXES):
-                comment_start -= 1
-                continue
-            break
-
-        depth = 0
-        end_idx = None
-        for idx in range(open_idx, len(lines)):
-            line = _strip_c_comments_and_strings(lines[idx])
-            depth += line.count("{")
-            depth -= line.count("}")
-            if idx > open_idx and depth <= 0 and "}" in line:
-                end_idx = idx
-                break
-        if end_idx is None:
-            return None
-        selected = list(lines[comment_start : end_idx + 1])
-        while selected and not selected[0].strip():
-            selected.pop(0)
-        return "\n".join(selected).rstrip() + "\n"
-
-    return _impl()
+    comment_start = _leading_comment_start_8616(lines, start_idx)
+    end_idx = _function_body_end_8616(lines, open_idx)
+    if end_idx is None:
+        return None
+    selected = list(lines[comment_start : end_idx + 1])
+    while selected and not selected[0].strip():
+        selected.pop(0)
+    return "\n".join(selected).rstrip() + "\n"
 
 
 def _source_function_header_match(line: str) -> re.Match[str] | None:

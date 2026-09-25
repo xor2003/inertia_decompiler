@@ -46,32 +46,31 @@ def _run_banner(root: Path, exe: Path) -> str:
     return proc.stdout or ""
 
 
-def _canonical(root_name: str, banner: str) -> str | None:
-    def _impl() -> str | None:
-        first = banner.splitlines()[0].strip().lower() if banner.splitlines() else ""
-        m = VERSION_RE.search(banner)
-        if "microsoft" in first and "c" in first and m:
-            ver = m.group(1)
-            if ver == "5.10":
-                return "Microsoft C 5.1 (CL 5.10)"
-            if ver.startswith("6."):
-                return "Microsoft C 6.x"
-            if ver.startswith("5."):
-                return "Microsoft C 5.x"
-            if ver.startswith("4."):
-                return "Microsoft C 4.x"
-            if ver.startswith("3."):
-                return "Microsoft C 3.x"
-            if ver.startswith("2."):
-                return "Microsoft C 2.x"
-            return f"Microsoft C {ver}"
-        if "quick c" in root_name.lower():
-            return "Microsoft QuickC family"
-        if "borland" in root_name.lower():
-            return "Borland C family"
-        return None
+_MS_VERSION_PREFIXES_8616: tuple[tuple[str, str], ...] = (
+    ("6.", "Microsoft C 6.x"),
+    ("5.", "Microsoft C 5.x"),
+    ("4.", "Microsoft C 4.x"),
+    ("3.", "Microsoft C 3.x"),
+    ("2.", "Microsoft C 2.x"),
+)
 
-    return _impl()
+
+def _canonical(root_name: str, banner: str) -> str | None:
+    first = banner.splitlines()[0].strip().lower() if banner.splitlines() else ""
+    m = VERSION_RE.search(banner)
+    if "microsoft" in first and "c" in first and m:
+        ver = m.group(1)
+        if ver == "5.10":
+            return "Microsoft C 5.1 (CL 5.10)"
+        for prefix, label in _MS_VERSION_PREFIXES_8616:
+            if ver.startswith(prefix):
+                return label
+        return f"Microsoft C {ver}"
+    if "quick c" in root_name.lower():
+        return "Microsoft QuickC family"
+    if "borland" in root_name.lower():
+        return "Borland C family"
+    return None
 
 
 def main() -> int:

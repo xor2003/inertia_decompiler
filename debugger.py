@@ -202,120 +202,144 @@ def launch_tui(host: str, port: int, arch: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _build_parser_8616() -> argparse.ArgumentParser:
+    """Construct the debugger CLI parser."""
+    parser = argparse.ArgumentParser(
+        description="DOS Debugger with GDB server and Textual TUI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+    Examples:
+    %(prog)s LIFE.EXE                    Debug with angr backend
+    %(prog)s LIFE.EXE --backend dosbox   Debug with libdosbox
+    %(prog)s --connect 127.0.0.1:1234    Connect TUI to existing server
+    %(prog)s --list-backends             List available backends
+        """,
+    )
+    parser.add_argument("exe", nargs="?", help="DOS executable to debug")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="GDB server port (0 = auto)")
+    parser.add_argument("--host", default=DEFAULT_HOST, help="GDB server host")
+    parser.add_argument("--arch", choices=["x86_16", "x86", "x86_64"], default="x86_16", help="Target architecture")
+    parser.add_argument("--backend", choices=["angr", "dosbox", "gdbserver"], default=None, help="Simulator backend")
+    parser.add_argument("--connect", metavar="HOST:PORT", help="Connect TUI to existing GDB server")
+    parser.add_argument("--list-backends", action="store_true", help="List available backends")
+    parser.add_argument("--tui-only", action="store_true", help="Only launch TUI (no server)")
+    parser.add_argument("--no-tui", action="store_true", help="Only start server (no TUI)")
+    return parser
+
+
+def _list_backends_8616() -> None:
+    """Print backend availability and exit."""
+    print("Available backends:")
+    print(f"  angr:    {'available' if WORKSPACE_PATH / 'angr_platforms' else 'not found'}")
+    dosbox_bin = find_libdosbox_binary()
+    print(f"  dosbox:  {f'available ({dosbox_bin})' if dosbox_bin else 'not found'}")
+    print(
+        f"  gdbserver: {'available' if subprocess.run(['which', 'gdbserver'], capture_output=True).returncode == 0 else 'not found'}"
+    )
+
+
+def _connect_tui_8616(connect: str, arch: str) -> None:
+    """Attach the Textual TUI to an existing GDB server."""
+    if not module_available("textual"):
+        print("Error: missing Python module 'textual' required for the TUI")
+        sys.exit(1)
+    parts = connect.rsplit(":", 1)
+    host = parts[0] if len(parts) == 2 else DEFAULT_HOST
+    port = int(parts[1]) if len(parts) == 2 else DEFAULT_PORT
+    print(f"[*] Connecting to {host}:{port}")
+    launch_tui(host, port, arch)
+
+
+def _start_backend_server_8616(backend: str, exe_path: Path, args: argparse.Namespace) -> DebugServer:
+    """Start the GDB server for the selected backend."""
+    if backend == "angr":
+        if not module_available("angr"):
+            print("Error: missing Python module 'angr' required for the angr backend")
+            sys.exit(1)
+        return start_angr_gdb_server(str(exe_path), args.port, args.host)
+    if backend == "dosbox":
+        return start_dosbox_gdb_server(str(exe_path), args.port, args.host)
+    if backend == "gdbserver":
+        return start_gdbserver_standalone(str(exe_path), args.port, args.host)
+    print(f"Error: unknown backend '{backend}'")
+    sys.exit(1)
+
+
+def _run_server_session_8616(server: DebugServer, args: argparse.Namespace) -> None:
+    """Wait for the server, attach the TUI, and serve until interrupted."""
+    print(f"[*] Waiting for GDB server on {args.host}:{server.port}...")
+    wait_for_server(args.host, server.port, server.process)
+
+    # Launch TUI unless --no-tui
+    if not args.no_tui:
+        if not module_available("textual"):
+            print("Error: missing Python module 'textual' required for the TUI")
+            sys.exit(1)
+        print("[*] Launching TUI...")
+        launch_tui(args.host, server.port, args.arch)
+    else:
+        print("[*] Server running. Connect with:")
+        print(f"    python {__file__} --connect {args.host}:{server.port}")
+        # Wait for server to exit
+        server.process.wait()
+
+
+def _stop_server_8616(server: DebugServer | None) -> None:
+    """Terminate the GDB server process group cleanly."""
+    if server:
+        print("[*] Stopping GDB server...")
+        server.process.terminate()
+        try:
+            server.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            server.process.kill()
+    print("[*] Debugger exited")
+
+
+def _resolve_backend_8616(backend: str | None) -> str:
+    """Auto-detect the simulator backend when not specified."""
+    if backend is None:
+        # Auto-detect: prefer angr for DOS MZ, dosbox if available
+        return "dosbox" if has_libdosbox_gdb_support() else "angr"
+    return backend
+
+
 def main() -> None:
     """Start a debugger backend and optionally attach the Textual TUI."""
+    ensure_project_venv()
+    parser = _build_parser_8616()
+    args = parser.parse_args()
 
-    def _impl() -> None:
-        ensure_project_venv()
-        parser = argparse.ArgumentParser(
-            description="DOS Debugger with GDB server and Textual TUI",
-            formatter_class=argparse.RawDescriptionHelpFormatter,
-            epilog="""
-        Examples:
-        %(prog)s LIFE.EXE                    Debug with angr backend
-        %(prog)s LIFE.EXE --backend dosbox   Debug with libdosbox
-        %(prog)s --connect 127.0.0.1:1234    Connect TUI to existing server
-        %(prog)s --list-backends             List available backends
-            """,
-        )
-        parser.add_argument("exe", nargs="?", help="DOS executable to debug")
-        parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="GDB server port (0 = auto)")
-        parser.add_argument("--host", default=DEFAULT_HOST, help="GDB server host")
-        parser.add_argument("--arch", choices=["x86_16", "x86", "x86_64"], default="x86_16", help="Target architecture")
-        parser.add_argument(
-            "--backend", choices=["angr", "dosbox", "gdbserver"], default=None, help="Simulator backend"
-        )
-        parser.add_argument("--connect", metavar="HOST:PORT", help="Connect TUI to existing GDB server")
-        parser.add_argument("--list-backends", action="store_true", help="List available backends")
-        parser.add_argument("--tui-only", action="store_true", help="Only launch TUI (no server)")
-        parser.add_argument("--no-tui", action="store_true", help="Only start server (no TUI)")
+    # List backends
+    if args.list_backends:
+        _list_backends_8616()
+        return
 
-        args = parser.parse_args()
+    # Connect mode (TUI only)
+    if args.connect:
+        _connect_tui_8616(args.connect, args.arch)
+        return
 
-        # List backends
-        if args.list_backends:
-            print("Available backends:")
-            print(f"  angr:    {'available' if WORKSPACE_PATH / 'angr_platforms' else 'not found'}")
-            dosbox_bin = find_libdosbox_binary()
-            print(f"  dosbox:  {f'available ({dosbox_bin})' if dosbox_bin else 'not found'}")
-            print(
-                f"  gdbserver: {'available' if subprocess.run(['which', 'gdbserver'], capture_output=True).returncode == 0 else 'not found'}"
-            )
-            return
+    # Validate executable
+    if not args.exe:
+        parser.error("executable required (or use --connect/--list-backends)")
 
-        # Connect mode (TUI only)
-        if args.connect:
-            if not module_available("textual"):
-                print("Error: missing Python module 'textual' required for the TUI")
-                sys.exit(1)
-            parts = args.connect.rsplit(":", 1)
-            host = parts[0] if len(parts) == 2 else DEFAULT_HOST
-            port = int(parts[1]) if len(parts) == 2 else DEFAULT_PORT
-            print(f"[*] Connecting to {host}:{port}")
-            launch_tui(host, port, args.arch)
-            return
+    exe_path = Path(args.exe)
+    if not exe_path.exists():
+        print(f"Error: {exe_path} not found")
+        sys.exit(1)
 
-        # Validate executable
-        if not args.exe:
-            parser.error("executable required (or use --connect/--list-backends)")
+    backend = _resolve_backend_8616(args.backend)
 
-        exe_path = Path(args.exe)
-        if not exe_path.exists():
-            print(f"Error: {exe_path} not found")
-            sys.exit(1)
-
-        # Determine backend
-        backend = args.backend
-        if backend is None:
-            # Auto-detect: prefer angr for DOS MZ, dosbox if available
-            backend = "dosbox" if has_libdosbox_gdb_support() else "angr"
-
-        # Start GDB server
-        server: DebugServer | None = None
-        try:
-            if backend == "angr":
-                if not module_available("angr"):
-                    print("Error: missing Python module 'angr' required for the angr backend")
-                    sys.exit(1)
-                server = start_angr_gdb_server(str(exe_path), args.port, args.host)
-            elif backend == "dosbox":
-                server = start_dosbox_gdb_server(str(exe_path), args.port, args.host)
-            elif backend == "gdbserver":
-                server = start_gdbserver_standalone(str(exe_path), args.port, args.host)
-            else:
-                print(f"Error: unknown backend '{backend}'")
-                sys.exit(1)
-
-            # Wait for server to start
-            print(f"[*] Waiting for GDB server on {args.host}:{server.port}...")
-            wait_for_server(args.host, server.port, server.process)
-
-            # Launch TUI unless --no-tui
-            if not args.no_tui:
-                if not module_available("textual"):
-                    print("Error: missing Python module 'textual' required for the TUI")
-                    sys.exit(1)
-                print("[*] Launching TUI...")
-                launch_tui(args.host, server.port, args.arch)
-            else:
-                print("[*] Server running. Connect with:")
-                print(f"    python {__file__} --connect {args.host}:{server.port}")
-                # Wait for server to exit
-                server.process.wait()
-
-        except KeyboardInterrupt:
-            print("\n[*] Interrupted")
-        finally:
-            if server:
-                print("[*] Stopping GDB server...")
-                server.process.terminate()
-                try:
-                    server.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    server.process.kill()
-            print("[*] Debugger exited")
-
-    return _impl()
+    # Start GDB server
+    server: DebugServer | None = None
+    try:
+        server = _start_backend_server_8616(backend, exe_path, args)
+        _run_server_session_8616(server, args)
+    except KeyboardInterrupt:
+        print("\n[*] Interrupted")
+    finally:
+        _stop_server_8616(server)
 
 
 if __name__ == "__main__":

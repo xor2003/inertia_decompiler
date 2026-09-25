@@ -13,7 +13,7 @@ Unknown register writes erase carriers. Ambiguous address terms are refused.
 from __future__ import annotations
 
 import contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from capstone.x86_const import (
@@ -149,23 +149,14 @@ def _far_pointer_load_kind_8616(instruction_id: int | None) -> FarPointerSegment
     return None
 
 
-def _segmented_load_evidence_8616(
+def _segmented_pointer_source_8616(
     instruction: InstructionView8616,
-    stack_indices: dict[str, _StackIndex8616],
-    far_offsets: dict[str, FarPointerStackSource8616],
+    memory: object,
+    source: object,
     segment_sources: dict[FarPointerSegmentRegister8616, FarPointerStackSource8616],
-    *,
-    register_name: RegisterNameResolver8616,
     segment_name: RegisterNameResolver8616,
-) -> FarPointerSegmentedLoadEvidence8616 | None:
-    """Classify one MOV load whose segment and offset share a proven far pair."""
-    operands = instruction.operands
-    if instruction.instruction_id != X86_INS_MOV or len(operands) != 2:
-        return None
-    destination, source = operands
-    memory = source.memory
-    if destination.kind != X86_OP_REG or source.kind != X86_OP_MEM or memory is None:
-        return None
+) -> tuple[FarPointerSegmentRegister8616, FarPointerStackSource8616] | None:
+    """Resolve the segment override to a proven far-pointer stack source."""
     segment_text = segment_name(instruction.raw, memory.segment)
     if segment_text is None:
         return None
@@ -176,8 +167,18 @@ def _segmented_load_evidence_8616(
     pointer_source = segment_sources.get(segment_register)
     if pointer_source is None or source.size not in {1, 2, 4}:
         return None
-    if not isinstance(memory.displacement, int) or not isinstance(instruction.address, int):
-        return None
+    return segment_register, pointer_source
+
+
+def _pointer_index_parts_8616(
+    instruction: InstructionView8616,
+    memory: object,
+    pointer_source: FarPointerStackSource8616,
+    stack_indices: dict[str, _StackIndex8616],
+    far_offsets: dict[str, FarPointerStackSource8616],
+    register_name: RegisterNameResolver8616,
+) -> tuple[int | None, int, int] | None:
+    """Resolve base/index registers to one far pointer plus an optional stack index."""
     address_registers = tuple(
         dict.fromkeys(
             name
@@ -199,6 +200,38 @@ def _segmented_load_evidence_8616(
     index_offset, index_width, index_shift = index if index is not None else (None, 2, 0)
     if index_shift < 0 or index_shift > 4:
         return None
+    return index_offset, index_width, index_shift
+
+
+def _segmented_load_evidence_8616(
+    instruction: InstructionView8616,
+    stack_indices: dict[str, _StackIndex8616],
+    far_offsets: dict[str, FarPointerStackSource8616],
+    segment_sources: dict[FarPointerSegmentRegister8616, FarPointerStackSource8616],
+    *,
+    register_name: RegisterNameResolver8616,
+    segment_name: RegisterNameResolver8616,
+) -> FarPointerSegmentedLoadEvidence8616 | None:
+    """Classify one MOV load whose segment and offset share a proven far pair."""
+    operands = instruction.operands
+    if instruction.instruction_id != X86_INS_MOV or len(operands) != 2:
+        return None
+    destination, source = operands
+    memory = source.memory
+    if destination.kind != X86_OP_REG or source.kind != X86_OP_MEM or memory is None:
+        return None
+    gated = _segmented_pointer_source_8616(instruction, memory, source, segment_sources, segment_name)
+    if gated is None:
+        return None
+    segment_register, pointer_source = gated
+    if not isinstance(memory.displacement, int) or not isinstance(instruction.address, int):
+        return None
+    resolved = _pointer_index_parts_8616(
+        instruction, memory, pointer_source, stack_indices, far_offsets, register_name
+    )
+    if resolved is None:
+        return None
+    index_offset, index_width, index_shift = resolved
     return FarPointerSegmentedLoadEvidence8616(
         segment_register=segment_register,
         pointer_source=pointer_source,
@@ -211,6 +244,172 @@ def _segmented_load_evidence_8616(
     )
 
 
+@dataclass(slots=True)
+class _FarPointerScanState8616:
+    """Mutable per-block state while scanning instructions for far loads."""
+
+    stack_indices: dict[str, _StackIndex8616] = field(default_factory=dict)
+    far_offsets: dict[str, FarPointerStackSource8616] = field(default_factory=dict)
+    segment_sources: dict[FarPointerSegmentRegister8616, FarPointerStackSource8616] = field(default_factory=dict)
+    stack_value_sources: dict[int, FarPointerStackValueSource8616] = field(default_factory=dict)
+
+
+def _scan_stack_slot_8616(
+    instruction: InstructionView8616,
+    operand: OperandView8616,
+    *,
+    register_name: RegisterNameResolver8616,
+    segment_name: RegisterNameResolver8616,
+) -> tuple[int, int] | None:
+    """Resolve one operand to a typed stack slot when it names one."""
+    return _stack_slot_8616(
+        instruction,
+        operand,
+        register_name=register_name,
+        segment_name=segment_name,
+    )
+
+
+def _apply_far_pointer_load_8616(
+    state: _FarPointerScanState8616,
+    constant_state: FarPointerConstantState8616,
+    instruction: InstructionView8616,
+    operands: tuple[OperandView8616, ...],
+    *,
+    register_name: RegisterNameResolver8616,
+    segment_name: RegisterNameResolver8616,
+) -> bool:
+    """Track one LES/LDS-style load; return True when it was handled."""
+    far_kind = _far_pointer_load_kind_8616(instruction.instruction_id)
+    if far_kind is None or len(operands) != 2 or operands[0].kind != X86_OP_REG:
+        return False
+    destination = register_name(instruction.raw, operands[0].register)
+    source_slot = _scan_stack_slot_8616(
+        instruction, operands[1], register_name=register_name, segment_name=segment_name
+    )
+    if destination is not None:
+        _forget_register_8616(destination, state.stack_indices, state.far_offsets)
+    state.segment_sources.pop(far_kind, None)
+    if destination is not None and source_slot is not None and source_slot[1] in {2, 4}:
+        segment_offset = source_slot[0] + 2
+        pointer_source = FarPointerStackSource8616(
+            source_slot[0],
+            segment_offset,
+            state.stack_value_sources.get(segment_offset),
+            constant_state.stack_constant(source_slot[0], 2),
+        )
+        state.far_offsets[destination] = pointer_source
+        state.segment_sources[far_kind] = pointer_source
+    return True
+
+
+def _update_stack_slot_target_8616(
+    state: _FarPointerScanState8616,
+    instruction: InstructionView8616,
+    operands: tuple[OperandView8616, ...],
+    *,
+    register_name: RegisterNameResolver8616,
+    segment_name: RegisterNameResolver8616,
+) -> None:
+    """Invalidate a stack destination and record proven stack value copies."""
+    destination_slot = (
+        _scan_stack_slot_8616(
+            instruction, operands[0], register_name=register_name, segment_name=segment_name
+        )
+        if operands
+        else None
+    )
+    if destination_slot is None:
+        return
+    destination_offset, destination_width = destination_slot
+    _forget_stack_value_sources_8616(
+        destination_offset,
+        destination_width,
+        state.stack_value_sources,
+    )
+    if instruction.instruction_id == X86_INS_MOV and len(operands) == 2 and operands[1].kind == X86_OP_REG:
+        source_name = register_name(instruction.raw, operands[1].register)
+        copied_source = state.stack_indices.get(source_name) if source_name is not None else None
+        if copied_source is not None:
+            source_offset, source_width, source_shift = copied_source
+            if source_shift == 0 and source_width == destination_width:
+                state.stack_value_sources[destination_offset] = FarPointerStackValueSource8616(
+                    source_offset,
+                    source_width,
+                )
+
+
+def _apply_mov_register_copy_8616(
+    state: _FarPointerScanState8616,
+    instruction: InstructionView8616,
+    operands: tuple[OperandView8616, ...],
+    *,
+    register_name: RegisterNameResolver8616,
+    segment_name: RegisterNameResolver8616,
+) -> bool:
+    """Track one MOV into a register; return True when it was handled."""
+    if instruction.instruction_id != X86_INS_MOV or len(operands) != 2 or operands[0].kind != X86_OP_REG:
+        return False
+    destination = register_name(instruction.raw, operands[0].register)
+    source_operand = operands[1]
+    copied_stack = None
+    copied_far = None
+    if source_operand.kind == X86_OP_REG:
+        source_name = register_name(instruction.raw, source_operand.register)
+        copied_stack = state.stack_indices.get(source_name) if source_name is not None else None
+        copied_far = state.far_offsets.get(source_name) if source_name is not None else None
+    stack_slot = _scan_stack_slot_8616(
+        instruction, source_operand, register_name=register_name, segment_name=segment_name
+    )
+    if destination is not None:
+        _forget_register_8616(destination, state.stack_indices, state.far_offsets)
+        if copied_stack is not None:
+            state.stack_indices[destination] = copied_stack
+        elif stack_slot is not None and stack_slot[1] in {1, 2}:
+            state.stack_indices[destination] = (stack_slot[0], stack_slot[1], 0)
+        if copied_far is not None:
+            state.far_offsets[destination] = copied_far
+        with contextlib.suppress(ValueError):
+            state.segment_sources.pop(FarPointerSegmentRegister8616(destination), None)
+    return True
+
+
+def _apply_shift_index_8616(
+    state: _FarPointerScanState8616,
+    instruction: InstructionView8616,
+    operands: tuple[OperandView8616, ...],
+    register_name: RegisterNameResolver8616,
+) -> bool:
+    """Track one SHL/SAL index update; return True when it was handled."""
+    if instruction.instruction_id not in {X86_INS_SHL, X86_INS_SAL} or len(operands) != 2:
+        return False
+    destination = register_name(instruction.raw, operands[0].register) if operands[0].kind == X86_OP_REG else None
+    amount = operands[1].immediate
+    previous = state.stack_indices.get(destination) if destination is not None else None
+    if destination is not None:
+        _forget_register_8616(destination, state.stack_indices, state.far_offsets)
+        if previous is not None and isinstance(amount, int):
+            offset, width, old_shift = previous
+            if 0 <= old_shift + int(amount) <= 4:
+                state.stack_indices[destination] = (offset, width, old_shift + int(amount))
+    return True
+
+
+def _invalidate_register_destination_8616(
+    state: _FarPointerScanState8616,
+    instruction: InstructionView8616,
+    operands: tuple[OperandView8616, ...],
+    register_name: RegisterNameResolver8616,
+) -> None:
+    """Forget tracking for any other instruction that clobbers a register."""
+    if operands and operands[0].kind == X86_OP_REG:
+        destination = register_name(instruction.raw, operands[0].register)
+        if destination is not None:
+            _forget_register_8616(destination, state.stack_indices, state.far_offsets)
+            with contextlib.suppress(ValueError):
+                state.segment_sources.pop(FarPointerSegmentRegister8616(destination), None)
+
+
 def recover_far_pointer_segmented_loads_8616(
     instructions: tuple[InstructionView8616, ...],
     *,
@@ -218,18 +417,15 @@ def recover_far_pointer_segmented_loads_8616(
     segment_name: RegisterNameResolver8616,
 ) -> tuple[FarPointerSegmentedLoadEvidence8616, ...]:
     """Recover exact same-block loads through LES/LDS stack far pointers."""
-    stack_indices: dict[str, _StackIndex8616] = {}
-    far_offsets: dict[str, FarPointerStackSource8616] = {}
-    segment_sources: dict[FarPointerSegmentRegister8616, FarPointerStackSource8616] = {}
-    stack_value_sources: dict[int, FarPointerStackValueSource8616] = {}
+    state = _FarPointerScanState8616()
     constant_state = FarPointerConstantState8616()
     recovered: list[FarPointerSegmentedLoadEvidence8616] = []
     for instruction in instructions:
         evidence = _segmented_load_evidence_8616(
             instruction,
-            stack_indices,
-            far_offsets,
-            segment_sources,
+            state.stack_indices,
+            state.far_offsets,
+            state.segment_sources,
             register_name=register_name,
             segment_name=segment_name,
         )
@@ -240,104 +436,28 @@ def recover_far_pointer_segmented_loads_8616(
             constant_state,
             instruction,
             register_name=register_name,
-            stack_slot=lambda current_instruction, operand: _stack_slot_8616(
+            stack_slot=lambda current_instruction, operand: _scan_stack_slot_8616(
                 current_instruction,
                 operand,
                 register_name=register_name,
                 segment_name=segment_name,
             ),
         )
-        far_kind = _far_pointer_load_kind_8616(instruction.instruction_id)
-        if far_kind is not None and len(operands) == 2 and operands[0].kind == X86_OP_REG:
-            destination = register_name(instruction.raw, operands[0].register)
-            source_slot = _stack_slot_8616(
-                instruction,
-                operands[1],
-                register_name=register_name,
-                segment_name=segment_name,
-            )
-            if destination is not None:
-                _forget_register_8616(destination, stack_indices, far_offsets)
-            segment_sources.pop(far_kind, None)
-            if destination is not None and source_slot is not None and source_slot[1] in {2, 4}:
-                segment_offset = source_slot[0] + 2
-                pointer_source = FarPointerStackSource8616(
-                    source_slot[0],
-                    segment_offset,
-                    stack_value_sources.get(segment_offset),
-                    constant_state.stack_constant(source_slot[0], 2),
-                )
-                far_offsets[destination] = pointer_source
-                segment_sources[far_kind] = pointer_source
+        if _apply_far_pointer_load_8616(
+            state, constant_state, instruction, operands,
+            register_name=register_name, segment_name=segment_name,
+        ):
             continue
-        destination_slot = (
-            _stack_slot_8616(
-                instruction,
-                operands[0],
-                register_name=register_name,
-                segment_name=segment_name,
-            )
-            if operands
-            else None
+        _update_stack_slot_target_8616(
+            state, instruction, operands,
+            register_name=register_name, segment_name=segment_name,
         )
-        if destination_slot is not None:
-            destination_offset, destination_width = destination_slot
-            _forget_stack_value_sources_8616(
-                destination_offset,
-                destination_width,
-                stack_value_sources,
-            )
-            if instruction.instruction_id == X86_INS_MOV and len(operands) == 2 and operands[1].kind == X86_OP_REG:
-                source_name = register_name(instruction.raw, operands[1].register)
-                copied_source = stack_indices.get(source_name) if source_name is not None else None
-                if copied_source is not None:
-                    source_offset, source_width, source_shift = copied_source
-                    if source_shift == 0 and source_width == destination_width:
-                        stack_value_sources[destination_offset] = FarPointerStackValueSource8616(
-                            source_offset,
-                            source_width,
-                        )
-        if instruction.instruction_id == X86_INS_MOV and len(operands) == 2 and operands[0].kind == X86_OP_REG:
-            destination = register_name(instruction.raw, operands[0].register)
-            source_operand = operands[1]
-            copied_stack = None
-            copied_far = None
-            if source_operand.kind == X86_OP_REG:
-                source_name = register_name(instruction.raw, source_operand.register)
-                copied_stack = stack_indices.get(source_name) if source_name is not None else None
-                copied_far = far_offsets.get(source_name) if source_name is not None else None
-            stack_slot = _stack_slot_8616(
-                instruction,
-                source_operand,
-                register_name=register_name,
-                segment_name=segment_name,
-            )
-            if destination is not None:
-                _forget_register_8616(destination, stack_indices, far_offsets)
-                if copied_stack is not None:
-                    stack_indices[destination] = copied_stack
-                elif stack_slot is not None and stack_slot[1] in {1, 2}:
-                    stack_indices[destination] = (stack_slot[0], stack_slot[1], 0)
-                if copied_far is not None:
-                    far_offsets[destination] = copied_far
-                with contextlib.suppress(ValueError):
-                    segment_sources.pop(FarPointerSegmentRegister8616(destination), None)
+        if _apply_mov_register_copy_8616(
+            state, instruction, operands,
+            register_name=register_name, segment_name=segment_name,
+        ):
             continue
-        if instruction.instruction_id in {X86_INS_SHL, X86_INS_SAL} and len(operands) == 2:
-            destination = register_name(instruction.raw, operands[0].register) if operands[0].kind == X86_OP_REG else None
-            amount = operands[1].immediate
-            previous = stack_indices.get(destination) if destination is not None else None
-            if destination is not None:
-                _forget_register_8616(destination, stack_indices, far_offsets)
-                if previous is not None and isinstance(amount, int):
-                    offset, width, old_shift = previous
-                    if 0 <= old_shift + int(amount) <= 4:
-                        stack_indices[destination] = (offset, width, old_shift + int(amount))
+        if _apply_shift_index_8616(state, instruction, operands, register_name):
             continue
-        if operands and operands[0].kind == X86_OP_REG:
-            destination = register_name(instruction.raw, operands[0].register)
-            if destination is not None:
-                _forget_register_8616(destination, stack_indices, far_offsets)
-                with contextlib.suppress(ValueError):
-                    segment_sources.pop(FarPointerSegmentRegister8616(destination), None)
+        _invalidate_register_destination_8616(state, instruction, operands, register_name)
     return tuple(dict.fromkeys(recovered))

@@ -110,13 +110,12 @@ def join_adjacent_stack_alias_facts_8616(
         return None
     low_identity = low.identity
     high_identity = high.identity
-    if (
-        low_identity is None
-        or high_identity is None
-        or low_identity[0] != "stack"
-        or high_identity[0] != "stack"
-        or not isinstance(low_identity[1], _StackSlotIdentity)
-        or not isinstance(high_identity[1], _StackSlotIdentity)
+    if low_identity is None or high_identity is None:
+        return None
+    if low_identity[0] != "stack" or high_identity[0] != "stack":
+        return None
+    if not isinstance(low_identity[1], _StackSlotIdentity) or not isinstance(
+        high_identity[1], _StackSlotIdentity
     ):
         return None
     domain = low.domain.join(high.domain)
@@ -164,6 +163,86 @@ def _stack_fact_matches_address_8616(
     )
 
 
+def _first_segmented_address_valid_8616(first: IRAddress) -> bool:
+    """Gate the range's head address to stable proven segmented storage."""
+    if first.space not in {MemSpace.SS, MemSpace.DS, MemSpace.ES}:
+        return False
+    if first.status is not AddressStatus.STABLE:
+        return False
+    if first.segment_origin is not SegmentOrigin.PROVEN:
+        return False
+    if first.size <= 0:
+        return False
+    return not (first.space in {MemSpace.DS, MemSpace.ES} and first.offset < 0)
+
+
+def _address_matches_range_head_8616(current: IRAddress, first: IRAddress) -> bool:
+    """Require one address to share the head address's identity fields."""
+    if current.space is not first.space:
+        return False
+    if current.base != first.base:
+        return False
+    if current.status is not first.status:
+        return False
+    if current.segment_origin is not first.segment_origin:
+        return False
+    if current.expr != first.expr:
+        return False
+    return current.version == first.version
+
+
+def _addresses_contiguous_uniform_8616(addresses: tuple[IRAddress, ...], first: IRAddress) -> bool:
+    """Require all addresses to share identity fields and be gap-free."""
+    for previous, current in itertools.pairwise(addresses):
+        if not _address_matches_range_head_8616(current, first):
+            return False
+        if current.size <= 0 or current.offset != previous.offset + previous.size:
+            return False
+    return True
+
+
+def _join_stack_alias_facts_8616(
+    addresses: tuple[IRAddress, ...], facts: tuple[AliasStorageFacts, ...]
+) -> AliasStorageFacts | None:
+    """Join stack-lane facts after every fact matches its address."""
+    if not all(
+        _stack_fact_matches_address_8616(address, fact)
+        for address, fact in zip(addresses, facts, strict=True)
+    ):
+        return None
+    combined = facts[0]
+    for fact in facts[1:]:
+        joined = join_adjacent_stack_alias_facts_8616(combined, fact)
+        if joined is None:
+            return None
+        combined = joined
+    return combined
+
+
+def _join_memory_alias_facts_8616(
+    addresses: tuple[IRAddress, ...], facts: tuple[AliasStorageFacts, ...], first: IRAddress
+) -> AliasStorageFacts | None:
+    """Join non-stack memory-lane facts into a merged domain identity."""
+    if not all(
+        _memory_fact_matches_address_8616(address, fact)
+        for address, fact in zip(addresses, facts, strict=True)
+    ):
+        return None
+    domain = facts[0].domain
+    for fact in facts[1:]:
+        joined_domain = domain.join(fact.domain)
+        if joined_domain is None:
+            return None
+        domain = joined_domain
+    return AliasStorageFacts(
+        domain=domain,
+        identity=(
+            "memory",
+            (first.space.value, first.offset, sum(address.size for address in addresses)),
+        ),
+    )
+
+
 def build_segmented_alias_range_8616(
     addresses: tuple[IRAddress, ...],
     facts: tuple[AliasStorageFacts, ...],
@@ -172,60 +251,21 @@ def build_segmented_alias_range_8616(
     if not addresses or len(addresses) != len(facts):
         return None
     first = addresses[0]
-    if (
-        first.space not in {MemSpace.SS, MemSpace.DS, MemSpace.ES}
-        or first.status is not AddressStatus.STABLE
-        or first.segment_origin is not SegmentOrigin.PROVEN
-        or first.size <= 0
-        or (first.space in {MemSpace.DS, MemSpace.ES} and first.offset < 0)
-    ):
+    if not _first_segmented_address_valid_8616(first):
         return None
-    for previous, current in itertools.pairwise(addresses):
-        if (
-            current.space is not first.space
-            or current.base != first.base
-            or current.status is not first.status
-            or current.segment_origin is not first.segment_origin
-            or current.expr != first.expr
-            or current.version != first.version
-            or current.size <= 0
-            or current.offset != previous.offset + previous.size
-        ):
-            return None
+    if not _addresses_contiguous_uniform_8616(addresses, first):
+        return None
     if addresses[-1].offset + addresses[-1].size > 0x10000:
         return None
 
     if first.space is MemSpace.SS:
-        if not all(
-            _stack_fact_matches_address_8616(address, fact)
-            for address, fact in zip(addresses, facts, strict=True)
-        ):
+        combined = _join_stack_alias_facts_8616(addresses, facts)
+        if combined is None:
             return None
-        combined = facts[0]
-        for fact in facts[1:]:
-            joined = join_adjacent_stack_alias_facts_8616(combined, fact)
-            if joined is None:
-                return None
-            combined = joined
     else:
-        if not all(
-            _memory_fact_matches_address_8616(address, fact)
-            for address, fact in zip(addresses, facts, strict=True)
-        ):
+        combined = _join_memory_alias_facts_8616(addresses, facts, first)
+        if combined is None:
             return None
-        domain = facts[0].domain
-        for fact in facts[1:]:
-            joined_domain = domain.join(fact.domain)
-            if joined_domain is None:
-                return None
-            domain = joined_domain
-        combined = AliasStorageFacts(
-            domain=domain,
-            identity=(
-                "memory",
-                (first.space.value, first.offset, sum(address.size for address in addresses)),
-            ),
-        )
     return SegmentedAliasRange8616(
         space=first.space,
         addresses=addresses,

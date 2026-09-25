@@ -231,92 +231,110 @@ class SemanticLaneState:
         return f"{self.name}: [{status}] " + " ".join(parts)
 
 
+def _semantic_lane_or_none_8616(contract: _PipelineCodegenContract, attr: str) -> object | None:
+    """Read an owned semantic-lane attribute; missing lane is a typed absence."""
+    try:
+        return getattr(contract, attr)
+    except AttributeError:
+        return None
+
+
+def _assert_semantic_lane_type_8616(lane: object, lane_name: str, layer_tag: str) -> None:
+    """Reject lanes that are not ``SemanticLaneState`` contracts."""
+    if lane is not None and not isinstance(lane, SemanticLaneState):
+        raise PipelineHardError(
+            f"{lane_name} has invalid contract type: {type(lane).__name__}",
+            layer=f"pipeline_contract:{layer_tag}",
+        )
+
+
+def _pipeline_function_size_8616(contract: _PipelineCodegenContract) -> int | None:
+    """Best-effort function size for the tiny-thunk stack-lane allowance."""
+    try:
+        cfunc = contract.cfunc
+    except AttributeError:
+        return None
+    try:
+        project = contract.project
+    except AttributeError:
+        return None
+    if project is None or cfunc is None:
+        return None
+    try:
+        project_like = cast(_ProjectLike, project)
+        cfunc_like = cast(_CFunctionAddressLike, cfunc)
+        kb_func = project_like.kb.functions.function(addr=cfunc_like.addr, create=False)
+        if kb_func is None:
+            return None
+        size = cast(_FunctionSizeLike, kb_func).size
+        if isinstance(size, int) and size > 0:
+            return size
+    except Exception:
+        return None
+    return None
+
+
+def _assert_stack_lane_closed_8616(contract: _PipelineCodegenContract, stack_lane: SemanticLaneState) -> None:
+    """Close the stack lane, with a documented allowance for micro bridge thunks."""
+    # Tiny thunk allowance:
+    # Some 86_16 micro-stubs (e.g. 3-8 byte bridge thunks) can trip raw
+    # stack-lane probes without producing meaningful normalized/classified
+    # stack semantics. Keep the hard contract for all non-trivial
+    # procedures, but avoid false-positive hard stops on these tiny stubs.
+    func_size = _pipeline_function_size_8616(contract)
+    tiny_stack_stub = (
+        isinstance(func_size, int)
+        and func_size <= 8
+        and stack_lane.raw > 0
+        and stack_lane.normalized == 0
+        and stack_lane.classified == 0
+        and stack_lane.bound == 0
+        and stack_lane.materialized == 0
+    )
+    if not tiny_stack_stub:
+        stack_lane.assert_closed_loop(layer="pipeline_contract:stack_lane")
+
+
+def _assert_extra_semantic_lanes_8616(
+    contract: _PipelineCodegenContract,
+    stack_lane: object,
+    condition_lane: object,
+) -> None:
+    """Close every registered semantic lane beyond the two primary lanes."""
+    try:
+        extra_lanes = contract._inertia_semantic_lanes_8616
+    except AttributeError:
+        extra_lanes = ()
+    if not isinstance(extra_lanes, Iterable):
+        extra_lanes = ()
+    for lane in tuple(extra_lanes):
+        if lane is None or lane is stack_lane or lane is condition_lane:
+            continue
+        if not isinstance(lane, SemanticLaneState):
+            raise PipelineHardError(
+                f"semantic lane has invalid contract type: {type(lane).__name__}",
+                layer="pipeline_contract:semantic_lane",
+            )
+        lane_name = lane.name or "semantic_lane"
+        lane.assert_closed_loop(layer=f"pipeline_contract:{lane_name}")
+
+
 def assert_pipeline_contracts_8616(codegen: object) -> None:
-    """Hard gate: assert every owned semantic lane is closed before codegen."""
+    """Hard gate: assert every owned semantic lane is closed before codegen.
 
-    def _impl() -> None:
-        """Hard gate: assert stack and condition lanes are closed before codegen.
+    Call this after all lowering passes and before code emission.
+    Raises PipelineHardError if any lane has un-materialized facts.
+    """
+    contract = cast(_PipelineCodegenContract, codegen)
+    stack_lane = _semantic_lane_or_none_8616(contract, "_inertia_stack_lane")
+    condition_lane = _semantic_lane_or_none_8616(contract, "_inertia_condition_lane")
 
-        Call this after all lowering passes and before code emission.
-        Raises PipelineHardError if any lane has un-materialized facts.
-        """
-        contract = cast(_PipelineCodegenContract, codegen)
-        try:
-            stack_lane = contract._inertia_stack_lane
-        except AttributeError:
-            stack_lane = None
-        try:
-            condition_lane = contract._inertia_condition_lane
-        except AttributeError:
-            condition_lane = None
+    _assert_semantic_lane_type_8616(stack_lane, "stack lane", "stack_lane")
+    _assert_semantic_lane_type_8616(condition_lane, "condition lane", "condition_lane")
 
-        if stack_lane is not None and not isinstance(stack_lane, SemanticLaneState):
-            raise PipelineHardError(
-                f"stack lane has invalid contract type: {type(stack_lane).__name__}",
-                layer="pipeline_contract:stack_lane",
-            )
-        if condition_lane is not None and not isinstance(condition_lane, SemanticLaneState):
-            raise PipelineHardError(
-                f"condition lane has invalid contract type: {type(condition_lane).__name__}",
-                layer="pipeline_contract:condition_lane",
-            )
+    if stack_lane is not None:
+        _assert_stack_lane_closed_8616(contract, cast(SemanticLaneState, stack_lane))
+    if condition_lane is not None:
+        cast(SemanticLaneState, condition_lane).assert_closed_loop(layer="pipeline_contract:condition_lane")
 
-        if stack_lane is not None:
-            # Tiny thunk allowance:
-            # Some 86_16 micro-stubs (e.g. 3-8 byte bridge thunks) can trip raw
-            # stack-lane probes without producing meaningful normalized/classified
-            # stack semantics. Keep the hard contract for all non-trivial
-            # procedures, but avoid false-positive hard stops on these tiny stubs.
-            try:
-                cfunc = contract.cfunc
-            except AttributeError:
-                cfunc = None
-            try:
-                project = contract.project
-            except AttributeError:
-                project = None
-            func_size = None
-            if project is not None and cfunc is not None:
-                try:
-                    project_like = cast(_ProjectLike, project)
-                    cfunc_like = cast(_CFunctionAddressLike, cfunc)
-                    kb_func = project_like.kb.functions.function(addr=cfunc_like.addr, create=False)
-                    if kb_func is not None:
-                        size = cast(_FunctionSizeLike, kb_func).size
-                        if isinstance(size, int) and size > 0:
-                            func_size = size
-                except Exception:
-                    func_size = None
-            tiny_stack_stub = (
-                isinstance(func_size, int)
-                and func_size <= 8
-                and stack_lane.raw > 0
-                and stack_lane.normalized == 0
-                and stack_lane.classified == 0
-                and stack_lane.bound == 0
-                and stack_lane.materialized == 0
-            )
-            if not tiny_stack_stub:
-                stack_lane.assert_closed_loop(layer="pipeline_contract:stack_lane")
-
-        if condition_lane is not None:
-            condition_lane.assert_closed_loop(layer="pipeline_contract:condition_lane")
-
-        try:
-            extra_lanes = contract._inertia_semantic_lanes_8616
-        except AttributeError:
-            extra_lanes = ()
-        if not isinstance(extra_lanes, Iterable):
-            extra_lanes = ()
-        for lane in tuple(extra_lanes):
-            if lane is None or lane is stack_lane or lane is condition_lane:
-                continue
-            if not isinstance(lane, SemanticLaneState):
-                raise PipelineHardError(
-                    f"semantic lane has invalid contract type: {type(lane).__name__}",
-                    layer="pipeline_contract:semantic_lane",
-                )
-            lane_name = lane.name or "semantic_lane"
-            lane.assert_closed_loop(layer=f"pipeline_contract:{lane_name}")
-
-    return _impl()
+    _assert_extra_semantic_lanes_8616(contract, stack_lane, condition_lane)

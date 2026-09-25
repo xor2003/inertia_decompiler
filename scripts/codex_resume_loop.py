@@ -169,60 +169,71 @@ def _write_marker(
     cfg.marker_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
+@dataclasses.dataclass
+class _CodexLoopState8616:
+    """Mutable loop state carried across resume iterations."""
+
+    best: IterationResult | None = None
+    last: IterationResult | None = None
+    stagnation: int = 0
+
+
+def _run_loop_iteration_8616(cfg: LoopConfig, i: int, state: _CodexLoopState8616) -> StopReason | None:
+    """Execute one resume iteration, returning a stop reason or None."""
+    res = _run_codex_iteration(cfg, i)
+    state.last = res
+    if res.codex_returncode != 0:
+        _write_marker(cfg, StopReason.CODEX_ERROR, state.best, state.last)
+        return StopReason.CODEX_ERROR
+
+    improved = state.best is None or res.quality_score > state.best.quality_score
+    if improved:
+        state.best = res
+        state.stagnation = 0
+    else:
+        state.stagnation += 1
+
+    print(
+        f"[codex-loop] iter={res.iteration} sec={res.elapsed_sec:.1f} "
+        f"codex_rc={res.codex_returncode} status_rc={res.status_returncode} "
+        f"quality={res.quality_score} stagnation={state.stagnation}"
+    )
+    print(f"[codex-loop] codex_log={res.codex_output_path}")
+    if res.status_output_path is not None:
+        print(f"[codex-loop] status_log={res.status_output_path}")
+
+    post_goal = _goal_met(cfg)
+    if post_goal is not None:
+        _write_marker(cfg, post_goal, state.best, state.last)
+        return post_goal
+    if state.stagnation >= cfg.stagnation_limit:
+        _write_marker(cfg, StopReason.STAGNATED, state.best, state.last)
+        return StopReason.STAGNATED
+    return None
+
+
 def run_loop(cfg: LoopConfig) -> StopReason:
     """Run Codex resume iterations until an explicit stop condition is met."""
+    state = _CodexLoopState8616()
 
-    def _impl() -> StopReason:
-        best: IterationResult | None = None
-        last: IterationResult | None = None
-        stagnation = 0
+    for i in range(1, cfg.max_iterations + 1):
+        if cfg.stop_file is not None and cfg.stop_file.exists():
+            _write_marker(cfg, StopReason.STOP_FILE, state.best, state.last)
+            return StopReason.STOP_FILE
 
-        for i in range(1, cfg.max_iterations + 1):
-            if cfg.stop_file is not None and cfg.stop_file.exists():
-                _write_marker(cfg, StopReason.STOP_FILE, best, last)
-                return StopReason.STOP_FILE
+        pre_goal = _goal_met(cfg)
+        if pre_goal is not None:
+            _write_marker(cfg, pre_goal, state.best, state.last)
+            return pre_goal
 
-            pre_goal = _goal_met(cfg)
-            if pre_goal is not None:
-                _write_marker(cfg, pre_goal, best, last)
-                return pre_goal
+        stop = _run_loop_iteration_8616(cfg, i, state)
+        if stop is not None:
+            return stop
+        if i < cfg.max_iterations:
+            time.sleep(cfg.sleep_sec)
 
-            res = _run_codex_iteration(cfg, i)
-            last = res
-            if res.codex_returncode != 0:
-                _write_marker(cfg, StopReason.CODEX_ERROR, best, last)
-                return StopReason.CODEX_ERROR
-
-            improved = best is None or res.quality_score > best.quality_score
-            if improved:
-                best = res
-                stagnation = 0
-            else:
-                stagnation += 1
-
-            print(
-                f"[codex-loop] iter={res.iteration} sec={res.elapsed_sec:.1f} "
-                f"codex_rc={res.codex_returncode} status_rc={res.status_returncode} "
-                f"quality={res.quality_score} stagnation={stagnation}"
-            )
-            print(f"[codex-loop] codex_log={res.codex_output_path}")
-            if res.status_output_path is not None:
-                print(f"[codex-loop] status_log={res.status_output_path}")
-
-            post_goal = _goal_met(cfg)
-            if post_goal is not None:
-                _write_marker(cfg, post_goal, best, last)
-                return post_goal
-            if stagnation >= cfg.stagnation_limit:
-                _write_marker(cfg, StopReason.STAGNATED, best, last)
-                return StopReason.STAGNATED
-            if i < cfg.max_iterations:
-                time.sleep(cfg.sleep_sec)
-
-        _write_marker(cfg, StopReason.MAX_ITERATIONS, best, last)
-        return StopReason.MAX_ITERATIONS
-
-    return _impl()
+    _write_marker(cfg, StopReason.MAX_ITERATIONS, state.best, state.last)
+    return StopReason.MAX_ITERATIONS
 
 
 def _parse_args() -> LoopConfig:

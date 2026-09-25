@@ -178,6 +178,41 @@ def caller_return_use_evidence_record_8616(
     }
 
 
+def _assert_unused_verdict_closed_8616(counts: dict[str, int]) -> None:
+    """An unused verdict requires every classified fact accounted for."""
+    if (
+        counts["used_callsite_count"] != 0
+        or counts["raw_fact_count"] == 0
+        or counts["normalized_fact_count"] != counts["raw_fact_count"]
+        or counts["classified_fact_count"] == 0
+        or counts["classified_fact_count"] + counts["excluded_callsite_count"]
+        != counts["normalized_fact_count"]
+    ):
+        raise ValueError("unused caller-return verdict is not fully classified")
+
+
+def _assert_caller_return_count_closure_8616(
+    counts: dict[str, int],
+    callsite_addrs: tuple[int, ...],
+    verdict: CallerReturnUseVerdict8616,
+) -> None:
+    """Enforce the closed-loop counter invariants for caller-return evidence."""
+    if counts["normalized_fact_count"] > counts["raw_fact_count"]:
+        raise ValueError("caller-return normalized facts exceed raw facts")
+    if counts["classified_fact_count"] > counts["normalized_fact_count"]:
+        raise ValueError("caller-return classified facts exceed normalized facts")
+    if counts["materialized_count"] != counts["classified_fact_count"]:
+        raise ValueError("caller-return materialized facts do not close classified facts")
+    if counts["used_callsite_count"] + counts["unused_callsite_count"] != counts["classified_fact_count"]:
+        raise ValueError("caller-return callsite classifications do not close")
+    if len(callsite_addrs) != counts["raw_fact_count"]:
+        raise ValueError("caller-return callsite addresses do not match raw facts")
+    if verdict is CallerReturnUseVerdict8616.USED and counts["used_callsite_count"] == 0:
+        raise ValueError("used caller-return verdict has no used callsite")
+    if verdict is CallerReturnUseVerdict8616.UNUSED:
+        _assert_unused_verdict_closed_8616(counts)
+
+
 def caller_return_use_evidence_from_record_8616(record: object) -> CallerReturnUseEvidence8616:
     """Validate and deserialize one caller-return evidence record."""
     if not isinstance(record, dict):
@@ -205,27 +240,7 @@ def caller_return_use_evidence_from_record_8616(record: object) -> CallerReturnU
     if not isinstance(raw_facts, list):
         raise ValueError("caller-return facts must be a list")
     facts = tuple(_caller_return_use_fact_from_record_8616(item) for item in raw_facts)
-    if counts["normalized_fact_count"] > counts["raw_fact_count"]:
-        raise ValueError("caller-return normalized facts exceed raw facts")
-    if counts["classified_fact_count"] > counts["normalized_fact_count"]:
-        raise ValueError("caller-return classified facts exceed normalized facts")
-    if counts["materialized_count"] != counts["classified_fact_count"]:
-        raise ValueError("caller-return materialized facts do not close classified facts")
-    if counts["used_callsite_count"] + counts["unused_callsite_count"] != counts["classified_fact_count"]:
-        raise ValueError("caller-return callsite classifications do not close")
-    if len(callsite_addrs) != counts["raw_fact_count"]:
-        raise ValueError("caller-return callsite addresses do not match raw facts")
-    if verdict is CallerReturnUseVerdict8616.USED and counts["used_callsite_count"] == 0:
-        raise ValueError("used caller-return verdict has no used callsite")
-    if verdict is CallerReturnUseVerdict8616.UNUSED and (
-        counts["used_callsite_count"] != 0
-        or counts["raw_fact_count"] == 0
-        or counts["normalized_fact_count"] != counts["raw_fact_count"]
-        or counts["classified_fact_count"] == 0
-        or counts["classified_fact_count"] + counts["excluded_callsite_count"]
-        != counts["normalized_fact_count"]
-    ):
-        raise ValueError("unused caller-return verdict is not fully classified")
+    _assert_caller_return_count_closure_8616(counts, callsite_addrs, verdict)
     evidence = CallerReturnUseEvidence8616(
         target_addr=target_addr,
         verdict=verdict,

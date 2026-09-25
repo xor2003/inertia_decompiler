@@ -133,6 +133,20 @@ def _induction_candidate_index_key(candidate: object) -> object | None:
     return getattr(candidate, "index_key", None)
 
 
+def _stable_induction_index_keys_8616(
+    traits: dict,
+    build_access_trait_evidence_profiles: BuildAccessTraitEvidenceProfiles,
+    infer_induction_variable: InferInductionVariable,
+) -> set[object]:
+    """Collect index keys for access-trait profiles that prove an induction variable."""
+    stable_index_keys: set[object] = set()
+    for profile in build_access_trait_evidence_profiles(traits).values():
+        index_key = _induction_candidate_index_key(infer_induction_variable(profile))
+        if index_key is not None:
+            stable_index_keys.add(index_key)
+    return stable_index_keys
+
+
 def rewrite_for_loop_conditions_from_access_traits(
     project: _ProjectLike,
     codegen: _CodegenLike,
@@ -142,38 +156,33 @@ def rewrite_for_loop_conditions_from_access_traits(
     iter_c_nodes_deep: Callable[[object], Iterable[object]],
 ) -> bool:
     """Simplify boolified for-loop conditions only when access-trait induction evidence proves the index."""
+    cfunc = codegen.cfunc
+    if cfunc is None:
+        return False
+    cache = project._inertia_access_traits
+    if not isinstance(cache, dict):
+        return False
+    traits = cache.get(cfunc.addr)
+    if not isinstance(traits, dict):
+        return False
 
-    def _impl() -> bool:
-        cfunc = codegen.cfunc
-        if cfunc is None:
-            return False
-        cache = project._inertia_access_traits
-        if not isinstance(cache, dict):
-            return False
-        traits = cache.get(cfunc.addr)
-        if not isinstance(traits, dict):
-            return False
+    stable_index_keys = _stable_induction_index_keys_8616(
+        traits, build_access_trait_evidence_profiles, infer_induction_variable
+    )
+    if not stable_index_keys:
+        return False
 
-        stable_index_keys = set()
-        for profile in build_access_trait_evidence_profiles(traits).values():
-            index_key = _induction_candidate_index_key(infer_induction_variable(profile))
-            if index_key is not None:
-                stable_index_keys.add(index_key)
-        if not stable_index_keys:
-            return False
+    changed = False
+    for node in iter_c_nodes_deep(cfunc.statements):
+        if not isinstance(node, structured_c.CForLoop):
+            continue
+        simplified = _unwrap_boolified_condition(node.condition)
+        if simplified is None:
+            continue
+        index_key = _condition_index_key(simplified)
+        if index_key not in stable_index_keys:
+            continue
+        node.condition = simplified
+        changed = True
+    return changed
 
-        changed = False
-        for node in iter_c_nodes_deep(cfunc.statements):
-            if not isinstance(node, structured_c.CForLoop):
-                continue
-            simplified = _unwrap_boolified_condition(node.condition)
-            if simplified is None:
-                continue
-            index_key = _condition_index_key(simplified)
-            if index_key not in stable_index_keys:
-                continue
-            node.condition = simplified
-            changed = True
-        return changed
-
-    return _impl()

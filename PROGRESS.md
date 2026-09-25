@@ -542,3 +542,15 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   `_count_var_uses_8616`/`_replace_var_use_8616` (+ seq/pairs/attrs helpers).
   Frozen `SingleUseTemporaryEliminationStats8616` still published per run.
 - Owning tests: 90 passed.
+
+## far_pointer_segmented_load_evidence.py (lowering) — clean
+
+- Recovered file from truncated write (disk-full mid-edit); restored tail from
+  HEAD verbatim, then refactored.
+- `recover_far_pointer_segmented_loads_8616` (22) -> `_FarPointerScanState8616`
+  scan-state dataclass + per-arm helpers `_apply_far_pointer_load_8616`,
+  `_update_stack_slot_target_8616`, `_apply_mov_register_copy_8616`,
+  `_apply_shift_index_8616`, `_invalidate_register_destination_8616`.
+  Arm ordering and `continue` semantics preserved exactly.
+- Owning tests: 7 passed.
+- Disk: freed ~2.1G on /home (caches); /tmp overflow files removed.

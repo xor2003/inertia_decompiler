@@ -239,50 +239,62 @@ def _resolve_msc51_root() -> Path | None:
     return candidate
 
 
+def _resolve_msc51_dir_8616(source_root: Path, lower: str, upper: str) -> Path:
+    """Resolve a case-variant tool directory under the MSC51 source root."""
+    candidate = source_root / lower
+    if not candidate.exists():
+        candidate = source_root / upper
+    return candidate
+
+
+def _mirror_bin_entries_8616(bin_src: Path, bin_dst: Path) -> None:
+    """Copy tool binaries under both original and lowercase names for kvikdos."""
+    for entry in bin_src.iterdir():
+        if not entry.is_file():
+            continue
+        dst = bin_dst / entry.name
+        if not dst.exists():
+            shutil.copy2(entry, dst)
+        lowered = bin_dst / entry.name.lower()
+        if not lowered.exists():
+            shutil.copy2(entry, lowered)
+
+
+def _cached_msc51_mirror_8616(source_root: Path) -> Path | None:
+    """Return the cached mirror root when it still has the expected layout."""
+    cached = _MSC51_MIRROR_CACHE.get(source_root)
+    if (
+        cached is not None
+        and cached.exists()
+        and (cached / "bin").exists()
+        and (cached / "include").exists()
+        and (cached / "lib").exists()
+    ):
+        return cached
+    return None
+
+
 def _prepare_msc51_mirror_tree(source_root: Path) -> Path:
-    def _impl() -> Path:
-        cached = _MSC51_MIRROR_CACHE.get(source_root)
-        if (
-            cached is not None
-            and cached.exists()
-            and (cached / "bin").exists()
-            and (cached / "include").exists()
-            and (cached / "lib").exists()
-        ):
-            return cached
+    cached = _cached_msc51_mirror_8616(source_root)
+    if cached is not None:
+        return cached
 
-        mirror_root = Path(tempfile.mkdtemp(prefix="inertia-msc51-kvikdos-"))
-        bin_src = source_root / "bin"
-        if not bin_src.exists():
-            bin_src = source_root / "BIN"
-        include_src = source_root / "include"
-        if not include_src.exists():
-            include_src = source_root / "INCLUDE"
-        lib_src = source_root / "lib"
-        if not lib_src.exists():
-            lib_src = source_root / "LIB"
-        bin_dst = mirror_root / "bin"
-        bin_dst.mkdir(parents=True, exist_ok=True)
+    mirror_root = Path(tempfile.mkdtemp(prefix="inertia-msc51-kvikdos-"))
+    bin_src = _resolve_msc51_dir_8616(source_root, "bin", "BIN")
+    include_src = _resolve_msc51_dir_8616(source_root, "include", "INCLUDE")
+    lib_src = _resolve_msc51_dir_8616(source_root, "lib", "LIB")
+    bin_dst = mirror_root / "bin"
+    bin_dst.mkdir(parents=True, exist_ok=True)
 
-        if include_src.exists():
-            (mirror_root / "include").symlink_to(include_src)
-        if lib_src.exists():
-            (mirror_root / "lib").symlink_to(lib_src)
+    if include_src.exists():
+        (mirror_root / "include").symlink_to(include_src)
+    if lib_src.exists():
+        (mirror_root / "lib").symlink_to(lib_src)
 
-        for entry in bin_src.iterdir():
-            if not entry.is_file():
-                continue
-            dst = bin_dst / entry.name
-            if not dst.exists():
-                shutil.copy2(entry, dst)
-            lowered = bin_dst / entry.name.lower()
-            if not lowered.exists():
-                shutil.copy2(entry, lowered)
+    _mirror_bin_entries_8616(bin_src, bin_dst)
 
-        _MSC51_MIRROR_CACHE[source_root] = mirror_root
-        return mirror_root
-
-    return _impl()
+    _MSC51_MIRROR_CACHE[source_root] = mirror_root
+    return mirror_root
 
 
 def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileCheckResult:

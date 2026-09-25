@@ -45,72 +45,85 @@ def _sanitize_placeholder_names(c_text: str) -> str:
     return _PLACEHOLDER_RE.sub(_replace, c_text)
 
 
+_DECL_HEADER_RE_8616 = re.compile(
+    r"^(?P<indent>\s*)(?P<ret>[A-Za-z_][\w\s\*\[\]]*?)\s+(?P<name>[A-Za-z_]\w*)\s*\((?P<args>[^()]*)\)\s*(?P<suffix>[{;]?)\s*$"
+)
+_DECL_LOCAL_RE_8616 = re.compile(
+    r"^(?P<indent>\s*)(?!(?:return|if|while|for|switch|goto|case|default)\b)(?P<type>[A-Za-z_][\w\s\*\[\]]*?)\s+(?P<name>[A-Za-z_]\w*)\s*;\s*(?P<comment>//.*)?$"
+)
+
+
+def _decl_body_bounds_8616(lines: list[str], index: int) -> tuple[int | None, int, int]:
+    """Locate the opening brace and closing line for a function starting at index."""
+    brace_index = None
+    scan_index = index
+    while scan_index < len(lines):
+        if "{" in lines[scan_index]:
+            brace_index = scan_index
+            break
+        if ";" in lines[scan_index] and "{" not in lines[scan_index]:
+            break
+        scan_index += 1
+    if brace_index is None:
+        return None, index, scan_index
+
+    body_start = brace_index + 1
+    body_end = body_start
+    brace_depth = lines[brace_index].count("{") - lines[brace_index].count("}")
+    while body_end < len(lines) and brace_depth > 0:
+        brace_depth += lines[body_end].count("{") - lines[body_end].count("}")
+        body_end += 1
+    return brace_index, body_start, body_end
+
+
+def _duplicate_decl_lines_8616(lines: list[str], body_start: int, body_end: int) -> set[int]:
+    """Collect line indices of duplicate local declarations inside one body."""
+    decls_by_name: dict[str, list[tuple[int, bool]]] = {}
+    for line_index in range(body_start, body_end):
+        decl_match = _DECL_LOCAL_RE_8616.match(lines[line_index])
+        if decl_match is None:
+            continue
+        name = decl_match.group("name")
+        decls_by_name.setdefault(name, []).append((line_index, decl_match.group("comment") is not None))
+
+    remove_lines: set[int] = set()
+    for decls in decls_by_name.values():
+        if len(decls) < 2:
+            continue
+        best_index, _ = max(decls, key=lambda item: (item[1], item[0]))
+        for line_index, _ in decls:
+            if line_index != best_index:
+                remove_lines.add(line_index)
+    return remove_lines
+
+
 def _dedupe_local_declarations(c_text: str) -> str:
-    def _impl() -> str:
-        trailing_newline = c_text.endswith("\n")
-        lines = c_text.splitlines()
-        header_re = re.compile(
-            r"^(?P<indent>\s*)(?P<ret>[A-Za-z_][\w\s\*\[\]]*?)\s+(?P<name>[A-Za-z_]\w*)\s*\((?P<args>[^()]*)\)\s*(?P<suffix>[{;]?)\s*$"
-        )
-        decl_re = re.compile(
-            r"^(?P<indent>\s*)(?!(?:return|if|while|for|switch|goto|case|default)\b)(?P<type>[A-Za-z_][\w\s\*\[\]]*?)\s+(?P<name>[A-Za-z_]\w*)\s*;\s*(?P<comment>//.*)?$"
-        )
+    """Remove duplicate same-name local declarations inside each function body."""
+    trailing_newline = c_text.endswith("\n")
+    lines = c_text.splitlines()
 
-        index = 0
-        while index < len(lines):
-            match = header_re.match(lines[index])
-            if match is None:
-                index += 1
-                continue
-            brace_index = None
-            scan_index = index
-            while scan_index < len(lines):
-                if "{" in lines[scan_index]:
-                    brace_index = scan_index
-                    break
-                if ";" in lines[scan_index] and "{" not in lines[scan_index]:
-                    break
-                scan_index += 1
-            if brace_index is None:
-                index = scan_index + 1
-                continue
+    index = 0
+    while index < len(lines):
+        match = _DECL_HEADER_RE_8616.match(lines[index])
+        if match is None:
+            index += 1
+            continue
+        brace_index, body_start, body_end = _decl_body_bounds_8616(lines, index)
+        if brace_index is None:
+            index = body_end + 1
+            continue
 
-            body_start = brace_index + 1
-            body_end = body_start
-            brace_depth = lines[brace_index].count("{") - lines[brace_index].count("}")
-            while body_end < len(lines) and brace_depth > 0:
-                brace_depth += lines[body_end].count("{") - lines[body_end].count("}")
-                body_end += 1
+        remove_lines = _duplicate_decl_lines_8616(lines, body_start, body_end)
+        if remove_lines:
+            lines = [line for i, line in enumerate(lines) if i not in remove_lines]
+            index = max(index - len([i for i in remove_lines if i < index]), 0)
+            continue
+        index = body_end
 
-            decls_by_name: dict[str, list[tuple[int, bool]]] = {}
-            for line_index in range(body_start, body_end):
-                decl_match = decl_re.match(lines[line_index])
-                if decl_match is None:
-                    continue
-                name = decl_match.group("name")
-                decls_by_name.setdefault(name, []).append((line_index, decl_match.group("comment") is not None))
-
-            remove_lines: set[int] = set()
-            for decls in decls_by_name.values():
-                if len(decls) < 2:
-                    continue
-                best_index, _ = max(decls, key=lambda item: (item[1], item[0]))
-                for line_index, _ in decls:
-                    if line_index != best_index:
-                        remove_lines.add(line_index)
-
-            if remove_lines:
-                lines = [line for i, line in enumerate(lines) if i not in remove_lines]
-                index = max(index - len([i for i in remove_lines if i < index]), 0)
-                continue
-            index = body_end
-
-        normalized = "\n".join(lines)
-        if trailing_newline:
-            normalized += "\n"
-        return normalized
-
-    return _impl()
+    normalized = "\n".join(lines)
+    if trailing_newline:
+        normalized += "\n"
+    return normalized
 
 
 def normalize_unresolved_c_text(c_text: str) -> str:

@@ -59,50 +59,55 @@ def prepare(arch, data):  # noqa: ANN001, ANN201, D103
     return simgr
 
 
+def _compare_state_registers_8616(state32, state16, instruction, differencies):  # noqa: ANN001, ANN202
+    """Compare symbolic register values between the 32-bit and 16-bit states."""
+    state16.regs.eip &= 0xFFFF
+    skip_regs = {"eflags", "d"}
+    if not instruction.startswith("j") and not instruction.startswith("l"):
+        skip_regs.add("eip")
+    # Compare registers
+    for reg in state16.arch.register_list:
+        reg_name = reg.name
+        if reg_name in skip_regs:
+            continue
+        val32 = repr(claripy.simplify(getattr(state32.regs, reg_name)))
+        try:
+            val16 = repr(claripy.simplify(getattr(state16.regs, reg_name)))
+            # print(f"Register {reg_name}: state32={val32}, state16={val16}")
+            if val32 != val16:
+                val32 = filter_symbolic(val32)
+                val16 = filter_symbolic(val16)
+                print(f"Register {reg_name} differs: state32={val32}\n                 state16={val16}")
+                differencies.append((reg_name, val32, val16))
+        except KeyError:
+            pass
+            # print(f"Register {reg_name} not found in state")
+
+
+def _compare_state_flags_8616(state32, state16, differencies):  # noqa: ANN001, ANN202
+    """Compare the lazily-computed condition flags between the two states."""
+    flags32 = {key: state32.regs.flags[bit] for key, bit in FLAGS.items()}
+    flags16 = {key: state16.regs.flags[bit] for key, bit in FLAGS.items()}
+    for flag, value32 in flags32.items():
+        if flag not in {"CF", "ZF", "SF", "OF"}:
+            continue
+        value32 = repr(claripy.simplify(flags32[flag]))
+        value16 = repr(claripy.simplify(flags16[flag]))
+        # print(f"Flag {flag}: state32={value32}\n         state16={value16}")
+
+        if value32 != value16:
+            value32 = filter_symbolic(value32)
+            value16 = filter_symbolic(value16)
+            print(f"Flag {flag} differs: state32={value32}\n                 state16={value16}")
+            differencies.append((flag, value32, value16))
+
+
 def compare_states(instruction, state32_, state16_):  # noqa: ANN001, ANN201, D103
-    def _impl():  # noqa: ANN202
-        differencies = []
-        for state32, state16 in zip(state32_, state16_, strict=False):
-            state16.regs.eip &= 0xFFFF
-            skip_regs = {"eflags", "d"}
-            if not instruction.startswith("j") and not instruction.startswith("l"):
-                skip_regs.add("eip")
-            # Compare registers
-            for reg in state16.arch.register_list:
-                reg_name = reg.name
-                if reg_name in skip_regs:
-                    continue
-                val32 = repr(claripy.simplify(getattr(state32.regs, reg_name)))
-                try:
-                    val16 = repr(claripy.simplify(getattr(state16.regs, reg_name)))
-                    # print(f"Register {reg_name}: state32={val32}, state16={val16}")
-                    if val32 != val16:
-                        val32 = filter_symbolic(val32)
-                        val16 = filter_symbolic(val16)
-                        print(f"Register {reg_name} differs: state32={val32}\n                 state16={val16}")
-                        differencies.append((reg_name, val32, val16))
-                except KeyError:
-                    pass
-                    # print(f"Register {reg_name} not found in state")
-            # return differencies
-            # To handle lazy flag calculation, print individual flags
-            flags32 = {key: state32.regs.flags[bit] for key, bit in FLAGS.items()}
-            flags16 = {key: state16.regs.flags[bit] for key, bit in FLAGS.items()}
-            for flag, value32 in flags32.items():
-                if flag not in {"CF", "ZF", "SF", "OF"}:
-                    continue
-                value32 = repr(claripy.simplify(flags32[flag]))
-                value16 = repr(claripy.simplify(flags16[flag]))
-                # print(f"Flag {flag}: state32={value32}\n         state16={value16}")
-
-                if value32 != value16:
-                    value32 = filter_symbolic(value32)
-                    value16 = filter_symbolic(value16)
-                    print(f"Flag {flag} differs: state32={value32}\n                 state16={value16}")
-                    differencies.append((flag, value32, value16))
-        return differencies
-
-    return _impl()
+    differencies = []
+    for state32, state16 in zip(state32_, state16_, strict=False):
+        _compare_state_registers_8616(state32, state16, instruction, differencies)
+        _compare_state_flags_8616(state32, state16, differencies)
+    return differencies
 
 
 def filter_symbolic(value32):  # noqa: ANN001, ANN201, D103
