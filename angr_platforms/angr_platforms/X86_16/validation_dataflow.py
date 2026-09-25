@@ -338,24 +338,12 @@ def _type_width_bytes_8616(type_: object) -> int | None:
     return max(1, (type_bits + 7) // 8)
 
 
-def _indexed_stack_storage_key_8616(
+def _indexed_array_base_8616(
     node: object,
-    *,
-    dynamic_array_as_object: bool,
-    include_arguments: bool = False,
-    stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None = None,
-) -> DefUseStorageKey8616 | None:
-    """Return the exact element or conservative full-object stack identity."""
-    byte_view = indexed_scalar_byte_view_8616(node)
-    if byte_view is not None:
-        owner, byte_index = byte_view
-        storage = _stack_storage_key_8616(
-            owner, include_arguments=include_arguments,
-            stack_variable_offset_resolver=stack_variable_offset_resolver,
-        )
-        if storage is not None and byte_index < storage.width:
-            return replace(storage, offset=storage.offset + byte_index, width=1)
-        return None
+    include_arguments: bool,
+    stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None,
+) -> tuple[CVariable, SimStackVariable, int, str] | None:
+    """Resolve an indexed node's stack array base, offset, and display name."""
     if not isinstance(node, CIndexedVariable):
         return None
     base = node.variable
@@ -381,10 +369,53 @@ def _indexed_stack_storage_key_8616(
     if not isinstance(offset, int) or (offset >= 0 and not include_arguments):
         return None
     name = variable.name if isinstance(variable.name, str) else ""
-    element_width = _type_width_bytes_8616(node.type)
-    element_count = base.type.length
+    return base, variable, offset, name
+
+
+def _indexed_element_key_8616(
+    node: CIndexedVariable,
+    offset: int,
+    name: str,
+    element_width: int,
+    object_width: int | None,
+    variable: SimStackVariable,
+    *,
+    dynamic_array_as_object: bool,
+) -> DefUseStorageKey8616 | None:
+    """Return the element-range or conservative full-object stack identity."""
+    index = node.index.value if isinstance(node.index, CConstant) else None
+    if isinstance(index, int) and not isinstance(index, bool):
+        relative_offset = index * element_width
+        if (
+            index < 0
+            or relative_offset < 0
+            or relative_offset + element_width > (object_width or variable.size)
+        ):
+            if dynamic_array_as_object:
+                return _untrackable_stack_key_8616(offset, object_width or variable.size, name)
+            return None
+        offset = offset + relative_offset
+        width = element_width
+    elif dynamic_array_as_object and object_width is not None:
+        width = object_width
+    elif dynamic_array_as_object:
+        return _untrackable_stack_key_8616(offset, object_width or variable.size, name)
+    else:
+        return None
+    return DefUseStorageKey8616(
+        kind=DefUseStorageKind8616.STACK_LOCAL,
+        offset=offset,
+        width=width,
+        display_name=name,
+    )
+
+
+def _indexed_object_width_8616(
+    base: CVariable, element_count: object, variable: SimStackVariable
+) -> int | None:
+    """Return the proven full-array byte width when shape matches the slot."""
     array_element_width = _type_width_bytes_8616(base.type.elem_type)
-    object_width = (
+    return (
         array_element_width * element_count
         if array_element_width is not None
         and isinstance(element_count, int)
@@ -396,6 +427,44 @@ def _indexed_stack_storage_key_8616(
         }
         else None
     )
+
+
+def _untrackable_stack_key_8616(offset: int, width: int, name: str) -> DefUseStorageKey8616:
+    """Return the conservative full-object stack identity for unproven indices."""
+    return DefUseStorageKey8616(
+        kind=DefUseStorageKind8616.STACK_LOCAL,
+        offset=offset,
+        width=width,
+        definition_trackable=False,
+        display_name=name,
+    )
+
+
+def _indexed_stack_storage_key_8616(
+    node: object,
+    *,
+    dynamic_array_as_object: bool,
+    include_arguments: bool = False,
+    stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None = None,
+) -> DefUseStorageKey8616 | None:
+    """Return the exact element or conservative full-object stack identity."""
+    byte_view = indexed_scalar_byte_view_8616(node)
+    if byte_view is not None:
+        owner, byte_index = byte_view
+        storage = _stack_storage_key_8616(
+            owner, include_arguments=include_arguments,
+            stack_variable_offset_resolver=stack_variable_offset_resolver,
+        )
+        if storage is not None and byte_index < storage.width:
+            return replace(storage, offset=storage.offset + byte_index, width=1)
+        return None
+    base_facts = _indexed_array_base_8616(node, include_arguments, stack_variable_offset_resolver)
+    if base_facts is None:
+        return None
+    base, variable, offset, name = base_facts
+    element_width = _type_width_bytes_8616(node.type)
+    element_count = base.type.length
+    object_width = _indexed_object_width_8616(base, element_count, variable)
     if (
         element_width is None
         and object_width is not None
@@ -404,50 +473,16 @@ def _indexed_stack_storage_key_8616(
         element_width = object_width // element_count
     if element_width is None:
         if dynamic_array_as_object:
-            return DefUseStorageKey8616(
-                kind=DefUseStorageKind8616.STACK_LOCAL,
-                offset=offset,
-                width=object_width or variable.size,
-                definition_trackable=False,
-                display_name=name,
-            )
+            return _untrackable_stack_key_8616(offset, object_width or variable.size, name)
         return None
-    index = node.index.value if isinstance(node.index, CConstant) else None
-    if isinstance(index, int) and not isinstance(index, bool):
-        relative_offset = index * element_width
-        if (
-            index < 0
-            or relative_offset < 0
-            or relative_offset + element_width > (object_width or variable.size)
-        ):
-            if dynamic_array_as_object:
-                return DefUseStorageKey8616(
-                    kind=DefUseStorageKind8616.STACK_LOCAL,
-                    offset=offset,
-                    width=object_width or variable.size,
-                    definition_trackable=False,
-                    display_name=name,
-                )
-            return None
-        offset = offset + relative_offset
-        width = element_width
-    elif dynamic_array_as_object and object_width is not None:
-        width = object_width
-    elif dynamic_array_as_object:
-        return DefUseStorageKey8616(
-            kind=DefUseStorageKind8616.STACK_LOCAL,
-            offset=offset,
-            width=object_width or variable.size,
-            definition_trackable=False,
-            display_name=name,
-        )
-    else:
-        return None
-    return DefUseStorageKey8616(
-        kind=DefUseStorageKind8616.STACK_LOCAL,
-        offset=offset,
-        width=width,
-        display_name=name,
+    return _indexed_element_key_8616(
+        node,
+        offset,
+        name,
+        element_width,
+        object_width,
+        variable,
+        dynamic_array_as_object=dynamic_array_as_object,
     )
 
 
@@ -587,20 +622,11 @@ def _semantic_partial_lvalue_storage_key_8616(
     byte_offset = 0
     if isinstance(expression, CVariable):
         base = expression
-    elif (
-        isinstance(expression, CBinaryOp)
-        and expression.op == "Shr"
-        and isinstance(expression.lhs, CVariable)
-        and isinstance(expression.rhs, CConstant)
-        and isinstance(expression.rhs.value, int)
-        and not isinstance(expression.rhs.value, bool)
-        and expression.rhs.value >= 0
-        and expression.rhs.value % 8 == 0
-    ):
-        base = expression.lhs
-        byte_offset = expression.rhs.value // 8
     else:
-        return None
+        shifted = _shr_byte_base_8616(expression)
+        if shifted is None:
+            return None
+        base, byte_offset = shifted
     storage = _storage_key_8616(
         base,
         segment_register_offsets,
@@ -620,6 +646,33 @@ def _semantic_partial_lvalue_storage_key_8616(
     )
 
 
+def _shr_rhs_byte_offset_8616(shift: object) -> int | None:
+    """Return the byte offset for a constant byte-aligned Shr amount."""
+    if not (
+        isinstance(shift, CConstant)
+        and isinstance(shift.value, int)
+        and not isinstance(shift.value, bool)
+        and shift.value >= 0
+        and shift.value % 8 == 0
+    ):
+        return None
+    return shift.value // 8
+
+
+def _shr_byte_base_8616(expression: object) -> tuple[CVariable, int] | None:
+    """Match ``var >> (8 * n)`` and return the base variable plus byte offset."""
+    if not (
+        isinstance(expression, CBinaryOp)
+        and expression.op == "Shr"
+        and isinstance(expression.lhs, CVariable)
+    ):
+        return None
+    byte_offset = _shr_rhs_byte_offset_8616(expression.rhs)
+    if byte_offset is None:
+        return None
+    return expression.lhs, byte_offset
+
+
 def _predicate_storage_key_8616(
     node: object,
     segment_register_offsets: frozenset[int],
@@ -637,48 +690,109 @@ def _predicate_storage_key_8616(
     return _register_storage_key_8616(node, segment_register_offsets)
 
 
+def _visit_value_node_children_8616(node: object, nodes: list[object], active: set[int]) -> None:
+    """Visit a node's structured-codegen children with recursion guard."""
+    node_id = id(node)
+    active.add(node_id)
+    try:
+        for attr in _structured_slot_names_8616(node):
+            try:
+                # Dynamic third-party angr/codegen boundary.
+                value = getattr(node, attr)
+            except Exception:
+                continue
+            for child in _iter_c_node_children_8616(value, set()):
+                _visit_value_node_8616(child, nodes, active)
+    finally:
+        active.remove(node_id)
+
+
+def _visit_value_node_8616(node: object, nodes: list[object], active: set[int]) -> None:
+    """Collect one value-evaluated AST node and its evaluated children."""
+    if not _structured_codegen_node_8616(node):
+        return
+    node_id = id(node)
+    if node_id in active:
+        return
+    nodes.append(node)
+    if validated_stack_projection_fact_8616(node) is not None:
+        return
+    if isinstance(node, CUnaryOp) and node.op == "Reference" and isinstance(node.operand, CVariable):
+        return
+    if isinstance(node, CFunctionCall) and node.callee_func is not None:
+        # angr renders and evaluates the authoritative direct callee_func;
+        # callee_target is stale compatibility storage in this form.
+        active.add(node_id)
+        try:
+            for argument in node.args:
+                _visit_value_node_8616(argument, nodes, active)
+        finally:
+            active.remove(node_id)
+        return
+
+    _visit_value_node_children_8616(node, nodes, active)
+
+
 def _iter_value_nodes_8616(root: object) -> tuple[object, ...]:
     """Return value-evaluated AST nodes without treating ``&var`` as a read."""
     nodes: list[object] = []
     active: set[int] = set()
-
-    def _visit(node: object) -> None:
-        if not _structured_codegen_node_8616(node):
-            return
-        node_id = id(node)
-        if node_id in active:
-            return
-        nodes.append(node)
-        if validated_stack_projection_fact_8616(node) is not None:
-            return
-        if isinstance(node, CUnaryOp) and node.op == "Reference" and isinstance(node.operand, CVariable):
-            return
-        if isinstance(node, CFunctionCall) and node.callee_func is not None:
-            # angr renders and evaluates the authoritative direct callee_func;
-            # callee_target is stale compatibility storage in this form.
-            active.add(node_id)
-            try:
-                for argument in node.args:
-                    _visit(argument)
-            finally:
-                active.remove(node_id)
-            return
-
-        active.add(node_id)
-        try:
-            for attr in _structured_slot_names_8616(node):
-                try:
-                    # Dynamic third-party angr/codegen boundary.
-                    value = getattr(node, attr)
-                except Exception:
-                    continue
-                for child in _iter_c_node_children_8616(value, set()):
-                    _visit(child)
-        finally:
-            active.remove(node_id)
-
-    _visit(root)
+    _visit_value_node_8616(root, nodes, active)
     return tuple(nodes)
+
+
+def _debug_value_shape_8616(node: object, depth: int = 0) -> object:
+    """Render a bounded structured value shape for opt-in diagnostics."""
+    if depth >= 4:
+        return type(node).__name__
+    if isinstance(node, CVariable):
+        return (
+            "var",
+            node.name,
+            repr(node.variable),
+        )
+    if isinstance(node, CConstant):
+        return ("const", node.value)
+    if isinstance(node, CFakeVariable):
+        return ("fake-var", node.name)
+    if isinstance(node, CBinaryOp):
+        return (
+            "binary",
+            node.op,
+            _debug_value_shape_8616(node.lhs, depth + 1),
+            _debug_value_shape_8616(node.rhs, depth + 1),
+        )
+    if isinstance(node, CUnaryOp):
+        return ("unary", node.op, _debug_value_shape_8616(node.operand, depth + 1))
+    return type(node).__name__
+
+
+def _debug_call_reads_8616(expr: object) -> None:
+    """Emit opt-in diagnostics for a CFunctionCall read node."""
+    if os.environ.get("INERTIA_DEBUG_DEF_USE") != "1" or not isinstance(expr, CFunctionCall):
+        return
+    logging.getLogger(__name__).warning(
+        "def-use call-node callee_func=%r callee_target_type=%s callee_target=%r args=%r",
+        expr.callee_func,
+        type(expr.callee_target).__name__,
+        expr.callee_target,
+        tuple(_debug_value_shape_8616(argument) for argument in expr.args),
+    )
+
+
+def _debug_value_read_8616(key: DefUseStorageKey8616, node: object) -> None:
+    """Emit opt-in diagnostics for one collected value read."""
+    if os.environ.get("INERTIA_DEBUG_DEF_USE") != "1":
+        return
+    logging.getLogger(__name__).warning(
+        "def-use value-node storage=%s name=%s node_type=%s variable=%r dirty=%r tags=%r",
+        key.token(),
+        key.display_name,
+        type(node).__name__,
+        node.variable if isinstance(node, CVariable) else None,
+        node.dirty if isinstance(node, CDirtyExpression) else None,
+        node.tags if isinstance(node, (CVariable, CDirtyExpression)) else None,
+    )
 
 
 def _value_read_keys_8616(
@@ -692,39 +806,7 @@ def _value_read_keys_8616(
     """Collect tracked storage views whose stored values are evaluated."""
     if expr is None:
         return ()
-    if os.environ.get("INERTIA_DEBUG_DEF_USE") == "1" and isinstance(expr, CFunctionCall):
-        def _shape(node: object, depth: int = 0) -> object:
-            """Render a bounded structured value shape for opt-in diagnostics."""
-            if depth >= 4:
-                return type(node).__name__
-            if isinstance(node, CVariable):
-                return (
-                    "var",
-                    node.name,
-                    repr(node.variable),
-                )
-            if isinstance(node, CConstant):
-                return ("const", node.value)
-            if isinstance(node, CFakeVariable):
-                return ("fake-var", node.name)
-            if isinstance(node, CBinaryOp):
-                return (
-                    "binary",
-                    node.op,
-                    _shape(node.lhs, depth + 1),
-                    _shape(node.rhs, depth + 1),
-                )
-            if isinstance(node, CUnaryOp):
-                return ("unary", node.op, _shape(node.operand, depth + 1))
-            return type(node).__name__
-
-        logging.getLogger(__name__).warning(
-            "def-use call-node callee_func=%r callee_target_type=%s callee_target=%r args=%r",
-            expr.callee_func,
-            type(expr.callee_target).__name__,
-            expr.callee_target,
-            tuple(_shape(argument) for argument in expr.args),
-        )
+    _debug_call_reads_8616(expr)
     reads: list[_DefUseValueRead8616] = []
     for node in _iter_value_nodes_8616(expr):
         key = _storage_key_8616(
@@ -738,16 +820,7 @@ def _value_read_keys_8616(
         if key is None:
             continue
         reads.append(_DefUseValueRead8616(node=node, storage=key))
-        if os.environ.get("INERTIA_DEBUG_DEF_USE") == "1":
-            logging.getLogger(__name__).warning(
-                "def-use value-node storage=%s name=%s node_type=%s variable=%r dirty=%r tags=%r",
-                key.token(),
-                key.display_name,
-                type(node).__name__,
-                node.variable if isinstance(node, CVariable) else None,
-                node.dirty if isinstance(node, CDirtyExpression) else None,
-                node.tags if isinstance(node, (CVariable, CDirtyExpression)) else None,
-            )
+        _debug_value_read_8616(key, node)
     return tuple(reads)
 
 
@@ -764,6 +837,91 @@ def _storage_bytes_8616(key: DefUseStorageKey8616) -> frozenset[_DefUseStorageBy
     )
 
 
+def _predicate_leaf_token_8616(
+    node: object,
+    segment_register_offsets: frozenset[int],
+    stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None,
+) -> tuple[PredicateToken8616, frozenset[_DefUseStorageByte8616]] | None:
+    """Return the storage/constant token for a leaf node."""
+    if isinstance(node, CVariable):
+        key = _predicate_storage_key_8616(
+            node,
+            segment_register_offsets,
+            stack_variable_offset_resolver=stack_variable_offset_resolver,
+        )
+        if key is None or not key.definition_trackable:
+            return None
+        return (
+            (
+                "storage",
+                key.kind,
+                key.offset,
+                key.width,
+                key.region,
+                key.ssa_id,
+            ),
+            _storage_bytes_8616(key),
+        )
+    value = node.value
+    if not isinstance(value, (bool, int, float, str, type(None))):
+        return None
+    return (("constant", type(value).__name__, value), frozenset())
+
+
+def _predicate_op_token_8616(
+    node: object,
+    active: set[int],
+    segment_register_offsets: frozenset[int],
+    stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None,
+) -> tuple[PredicateToken8616, frozenset[_DefUseStorageByte8616]] | None:
+    """Build the unary/binary operator token for a predicate node."""
+    if isinstance(node, CUnaryOp):
+        operand = _predicate_node_token_8616(
+            node.operand, active, segment_register_offsets, stack_variable_offset_resolver
+        )
+        if operand is None:
+            return None
+        operand_token, dependencies = operand
+        if node.op == "Not":
+            return (invert_predicate_token_8616(operand_token), dependencies)
+        return (("unary", node.op, operand_token), dependencies)
+    lhs = _predicate_node_token_8616(node.lhs, active, segment_register_offsets, stack_variable_offset_resolver)
+    rhs = _predicate_node_token_8616(node.rhs, active, segment_register_offsets, stack_variable_offset_resolver)
+    if lhs is None or rhs is None:
+        return None
+    lhs_token, lhs_dependencies = lhs
+    rhs_token, rhs_dependencies = rhs
+    return (
+        ("binary", node.op, lhs_token, rhs_token),
+        lhs_dependencies | rhs_dependencies,
+    )
+
+
+def _predicate_node_token_8616(
+    node: object,
+    active: set[int],
+    segment_register_offsets: frozenset[int],
+    stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None,
+) -> tuple[PredicateToken8616, frozenset[_DefUseStorageByte8616]] | None:
+    """Build a predicate token and its storage-byte dependencies."""
+    node_id = id(node)
+    if node_id in active:
+        return None
+    if isinstance(node, (CVariable, CConstant)):
+        return _predicate_leaf_token_8616(
+            node, segment_register_offsets, stack_variable_offset_resolver
+        )
+    if not isinstance(node, (CUnaryOp, CBinaryOp)):
+        return None
+    active.add(node_id)
+    try:
+        return _predicate_op_token_8616(
+            node, active, segment_register_offsets, stack_variable_offset_resolver
+        )
+    finally:
+        active.remove(node_id)
+
+
 def _predicate_fact_8616(
     expression: object,
     segment_register_offsets: frozenset[int],
@@ -772,61 +930,9 @@ def _predicate_fact_8616(
 ) -> _DefUsePredicate8616 | None:
     """Build an exact non-text predicate identity from structured C expressions."""
     active: set[int] = set()
-
-    def _visit(node: object) -> tuple[PredicateToken8616, frozenset[_DefUseStorageByte8616]] | None:
-        node_id = id(node)
-        if node_id in active:
-            return None
-        if isinstance(node, CVariable):
-            key = _predicate_storage_key_8616(
-                node,
-                segment_register_offsets,
-                stack_variable_offset_resolver=stack_variable_offset_resolver,
-            )
-            if key is None or not key.definition_trackable:
-                return None
-            return (
-                (
-                    "storage",
-                    key.kind,
-                    key.offset,
-                    key.width,
-                    key.region,
-                    key.ssa_id,
-                ),
-                _storage_bytes_8616(key),
-            )
-        if isinstance(node, CConstant):
-            value = node.value
-            if not isinstance(value, (bool, int, float, str, type(None))):
-                return None
-            return (("constant", type(value).__name__, value), frozenset())
-        if not isinstance(node, (CUnaryOp, CBinaryOp)):
-            return None
-        active.add(node_id)
-        try:
-            if isinstance(node, CUnaryOp):
-                operand = _visit(node.operand)
-                if operand is None:
-                    return None
-                operand_token, dependencies = operand
-                if node.op == "Not":
-                    return (invert_predicate_token_8616(operand_token), dependencies)
-                return (("unary", node.op, operand_token), dependencies)
-            lhs = _visit(node.lhs)
-            rhs = _visit(node.rhs)
-            if lhs is None or rhs is None:
-                return None
-            lhs_token, lhs_dependencies = lhs
-            rhs_token, rhs_dependencies = rhs
-            return (
-                ("binary", node.op, lhs_token, rhs_token),
-                lhs_dependencies | rhs_dependencies,
-            )
-        finally:
-            active.remove(node_id)
-
-    result = _visit(expression)
+    result = _predicate_node_token_8616(
+        expression, active, segment_register_offsets, stack_variable_offset_resolver
+    )
     if result is None:
         return None
     token, dependencies = result
@@ -992,6 +1098,405 @@ def _debug_def_use_event_8616(
     )
 
 
+@dataclass(slots=True)
+class _DefUseWalker8616:
+    """Flow-state walker for structured def-use validation."""
+
+    report: _MutableDefUseReport8616
+    definitions_by_call: Mapping[int, tuple[DefUseCallOutputDefinition8616, ...]]
+    proofs_by_read: Mapping[int, IndexedStackReadProof8616]
+    segment_register_offsets: frozenset[int]
+    entry_defined_segment_register_offsets: frozenset[int]
+    packed_status_flag_preservation: PackedStatusFlagPreservationEvidence8616 | None
+    include_virtual_carriers: bool
+    stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None
+    break_exit_scopes: list[list[_DefUseFlowState8616] | None] = field(default_factory=list)
+
+    def check_reads(
+        self,
+        expr: OpaqueValidationNode8616,
+        defined: set[_DefUseStorageByte8616],
+        *,
+        context: str,
+        architectural_live_in_register_offsets: frozenset[int] = frozenset(),
+    ) -> None:
+        """Record issues for reads not proven defined on this path."""
+        try:
+            instruction_address = expr.tags.get("ins_addr")
+        except AttributeError:
+            instruction_address = None
+        if (
+            self.packed_status_flag_preservation is not None
+            and self.packed_status_flag_preservation.covers_instruction(instruction_address)
+        ):
+            architectural_live_in_register_offsets |= frozenset(
+                {self.packed_status_flag_preservation.register_offset}
+            )
+        reads = _value_read_keys_8616(
+            expr,
+            self.segment_register_offsets,
+            include_virtual_carriers=self.include_virtual_carriers,
+            include_stack_arguments=True,
+            stack_variable_offset_resolver=self.stack_variable_offset_resolver,
+        )
+        self.report.raw_fact_count += len(reads)
+        self.report.normalized_fact_count += len(reads)
+        self.report.classified_fact_count += len(reads)
+        for read in reads:
+            if self._read_is_defined_8616(read, defined, architectural_live_in_register_offsets):
+                self.report.materialized_count += 1
+            else:
+                _debug_def_use_event_8616("issue", read.storage, defined, context=context)
+                self.report.issues.append(DefUseIssue8616(storage=read.storage, context=context))
+
+    def _read_is_defined_8616(
+        self,
+        read: _DefUseValueRead8616,
+        defined: set[_DefUseStorageByte8616],
+        architectural_live_in_register_offsets: frozenset[int],
+    ) -> bool:
+        """Return whether one collected read is proven defined here."""
+        key = read.storage
+        proof = self.proofs_by_read.get(id(read.node))
+        proof_matches = (
+            isinstance(read.node, CIndexedVariable)
+            and proof is not None
+            and proof.matches(
+                read.node,
+                array_offset=key.offset,
+                array_width=key.width,
+            )
+        )
+        segment_live_in = (
+            key.kind is DefUseStorageKind8616.SEGMENT_CARRIER
+            and key.offset in self.entry_defined_segment_register_offsets
+        )
+        packed_preservation_live_in = (
+            key.kind is DefUseStorageKind8616.REGISTER_CARRIER
+            and key.offset in architectural_live_in_register_offsets
+        )
+        return proof_matches or segment_live_in or packed_preservation_live_in or (
+            key.definition_trackable
+            and _storage_bytes_8616(key).issubset(defined)
+        )
+
+    def check_lvalue_reads(
+        self,
+        lhs: object,
+        defined: set[_DefUseStorageByte8616],
+        *,
+        context: str,
+    ) -> None:
+        """Validate only value-evaluated operands of an assignment lvalue."""
+        if isinstance(lhs, CIndexedVariable):
+            self.check_reads(lhs.index, defined, context=f"{context}.index")
+            base = lhs.variable
+            if isinstance(base, CVariable) and isinstance(
+                base.type,
+                (SimTypeArray, SimTypeFixedSizeArray),
+            ):
+                return
+            self.check_reads(base, defined, context=f"{context}.base")
+            return
+        self.check_reads(lhs, defined, context=context)
+
+    def apply_call_output_definitions(
+        self,
+        expr: object,
+        state: _DefUseFlowState8616,
+        *,
+        context: str,
+    ) -> None:
+        """Apply only lowering-proven output ranges after their owning call executes."""
+        _invalidate_call_affected_guards_8616(
+            expr,
+            state,
+            self.segment_register_offsets,
+            stack_variable_offset_resolver=self.stack_variable_offset_resolver,
+        )
+        for value_node in _iter_value_nodes_8616(expr):
+            if not isinstance(value_node, CFunctionCall):
+                continue
+            for definition in self.definitions_by_call.get(id(value_node), ()):
+                key = definition.storage_key()
+                storage_bytes = _storage_bytes_8616(key)
+                _debug_def_use_event_8616("call-define", key, state.defined, context=context)
+                _invalidate_guarded_definitions_8616(state, storage_bytes)
+                state.defined.update(storage_bytes)
+
+    def _walk_assignment_8616(
+        self, node: object, state: _DefUseFlowState8616, context: str
+    ) -> _DefUseFlowState8616:
+        """Apply the def-use transfer for one CAssignment."""
+        _debug_assignment_read_8616(node, context)
+        preservation_offsets: frozenset[int] = frozenset()
+        if self.packed_status_flag_preservation is not None and self.packed_status_flag_preservation.covers_instruction(
+            node.tags.get("ins_addr")
+        ):
+            preservation_offsets = frozenset({self.packed_status_flag_preservation.register_offset})
+        self.check_reads(
+            node.rhs,
+            state.defined,
+            context=f"{context}.rhs",
+            architectural_live_in_register_offsets=preservation_offsets,
+        )
+        self.apply_call_output_definitions(node.rhs, state, context=f"{context}.rhs")
+        predicate_lhs_key = _predicate_storage_key_8616(
+            node.lhs,
+            self.segment_register_offsets,
+            stack_variable_offset_resolver=self.stack_variable_offset_resolver,
+        )
+        if predicate_lhs_key is None:
+            predicate_lhs_key = _semantic_partial_lvalue_storage_key_8616(
+                node.lhs,
+                self.segment_register_offsets,
+                include_stack_arguments=True,
+                stack_variable_offset_resolver=self.stack_variable_offset_resolver,
+            )
+        if predicate_lhs_key is not None:
+            _invalidate_guarded_definitions_8616(
+                state,
+                _storage_bytes_8616(predicate_lhs_key),
+            )
+        lhs_key = _storage_key_8616(
+            node.lhs,
+            self.segment_register_offsets,
+            include_virtual_carriers=self.include_virtual_carriers,
+            include_stack_arguments=True,
+            stack_variable_offset_resolver=self.stack_variable_offset_resolver,
+        )
+        if lhs_key is None:
+            lhs_key = _semantic_partial_lvalue_storage_key_8616(
+                node.lhs,
+                self.segment_register_offsets,
+                include_stack_arguments=True,
+                stack_variable_offset_resolver=self.stack_variable_offset_resolver,
+            )
+        if lhs_key is None:
+            self.check_lvalue_reads(node.lhs, state.defined, context=f"{context}.lhs")
+        elif lhs_key.definition_trackable:
+            _debug_def_use_event_8616("define", lhs_key, state.defined, context=context)
+            state.defined.update(_storage_bytes_8616(lhs_key))
+        return state
+
+    def _walk_if_else_8616(
+        self, node: object, state: _DefUseFlowState8616, context: str
+    ) -> _DefUseFlowState8616:
+        """Merge branch def-use states for one CIfElse node."""
+        branch_states: list[_DefUseFlowState8616] = []
+        branch_predicates: list[_DefUsePredicate8616 | None] = []
+        for index, (condition, branch) in enumerate(node.condition_and_nodes):
+            self.check_reads(condition, state.defined, context=f"{context}.if{index}.condition")
+            predicate = _predicate_fact_8616(
+                condition,
+                self.segment_register_offsets,
+                stack_variable_offset_resolver=self.stack_variable_offset_resolver,
+            )
+            branch_predicates.append(predicate)
+            branch_incoming = state.copy()
+            _activate_guarded_definitions_8616(branch_incoming, predicate)
+            branch_states.append(
+                self.walk(
+                    branch,
+                    branch_incoming,
+                    context=f"{context}.if{index}.body",
+                )
+            )
+        if node.else_node is None:
+            branch_states.append(state.copy())
+        else:
+            else_incoming = state.copy()
+            if len(branch_predicates) == 1:
+                _activate_guarded_definitions_8616(
+                    else_incoming,
+                    _inverted_predicate_fact_8616(branch_predicates[0]),
+                )
+            branch_states.append(
+                self.walk(node.else_node, else_incoming, context=f"{context}.else")
+            )
+        merged = _intersect_flow_states_8616(branch_states, state)
+        if (
+            node.else_node is None
+            and len(branch_states) == 2
+            and len(branch_predicates) == 1
+            and branch_predicates[0] is not None
+        ):
+            guarded_definitions = branch_states[0].defined - state.defined
+            if guarded_definitions:
+                merged.guarded.setdefault(branch_predicates[0], set()).update(
+                    guarded_definitions
+                )
+        return merged
+
+    def _walk_for_loop_8616(
+        self, node: object, state: _DefUseFlowState8616, context: str
+    ) -> _DefUseFlowState8616:
+        """Apply the conservative single-pass transfer for a CForLoop."""
+        initialized = self.walk(node.initializer, state, context=f"{context}.for.init")
+        self.check_reads(node.condition, initialized.defined, context=f"{context}.for.condition")
+        body_incoming = initialized.copy()
+        _activate_guarded_definitions_8616(
+            body_incoming,
+            _predicate_fact_8616(
+                node.condition,
+                self.segment_register_offsets,
+                stack_variable_offset_resolver=self.stack_variable_offset_resolver,
+            ),
+        )
+        self.break_exit_scopes.append([])
+        try:
+            body_state = self.walk(node.body, body_incoming, context=f"{context}.for.body")
+        finally:
+            self.break_exit_scopes.pop()
+        iterated = self.walk(node.iterator, body_state, context=f"{context}.for.iterator")
+        initialized.guarded = _intersect_guarded_8616(
+            [initialized.guarded, iterated.guarded],
+            initialized.guarded,
+        )
+        return initialized
+
+    def _walk_while_loop_8616(
+        self, node: object, state: _DefUseFlowState8616, context: str
+    ) -> _DefUseFlowState8616:
+        """Apply the single-pass transfer for a CWhileLoop."""
+        self.check_reads(node.condition, state.defined, context=f"{context}.while.condition")
+        body_incoming = state.copy()
+        _activate_guarded_definitions_8616(
+            body_incoming,
+            _predicate_fact_8616(
+                node.condition,
+                self.segment_register_offsets,
+                stack_variable_offset_resolver=self.stack_variable_offset_resolver,
+            ),
+        )
+        break_exit_states: list[_DefUseFlowState8616] = []
+        self.break_exit_scopes.append(break_exit_states)
+        try:
+            body_state = self.walk(node.body, body_incoming, context=f"{context}.while.body")
+        finally:
+            self.break_exit_scopes.pop()
+        state.guarded = _intersect_guarded_8616(
+            [state.guarded, body_state.guarded],
+            state.guarded,
+        )
+        if (
+            isinstance(node.condition, CConstant)
+            and isinstance(node.condition.value, (bool, int))
+            and bool(node.condition.value)
+            and break_exit_states
+        ):
+            return _intersect_flow_states_8616(break_exit_states, state)
+        return state
+
+    def _walk_switch_8616(
+        self, node: object, state: _DefUseFlowState8616, context: str
+    ) -> _DefUseFlowState8616:
+        """Merge per-case def-use states for one CSwitchCase node."""
+        self.check_reads(node.switch, state.defined, context=f"{context}.switch.selector")
+        self.break_exit_scopes.append(None)
+        try:
+            branch_states = [
+                self.walk(branch, state, context=f"{context}.switch.case")
+                for branch in _switch_case_bodies_8616(node.cases)
+            ]
+        finally:
+            self.break_exit_scopes.pop()
+        if node.default is None:
+            branch_states.append(state.copy())
+        else:
+            self.break_exit_scopes.append(None)
+            try:
+                branch_states.append(self.walk(node.default, state, context=f"{context}.switch.default"))
+            finally:
+                self.break_exit_scopes.pop()
+        return _intersect_flow_states_8616(branch_states, state)
+
+    def walk(
+        self,
+        node: object,
+        incoming: _DefUseFlowState8616,
+        *,
+        context: str,
+    ) -> _DefUseFlowState8616:
+        """Apply the def-use transfer for one structured statement."""
+        state = incoming.copy()
+        if node is None:
+            return state
+        if isinstance(node, CStatements):
+            for index, statement in enumerate(node.statements):
+                if not state.falls_through:
+                    break
+                state = self.walk(statement, state, context=f"{context}.stmt{index}")
+            return state
+        if isinstance(node, CAssignment):
+            return self._walk_assignment_8616(node, state, context)
+        if isinstance(node, CExpressionStatement):
+            self.check_reads(node.expr, state.defined, context=f"{context}.expr")
+            self.apply_call_output_definitions(node.expr, state, context=f"{context}.expr")
+            return state
+        if isinstance(node, CReturn):
+            self.check_reads(node, state.defined, context=context)
+            self.apply_call_output_definitions(node, state, context=context)
+            state.falls_through = False
+            return state
+        return self._walk_tail_8616(node, state, context)
+
+    def _walk_tail_8616(
+        self, node: object, state: _DefUseFlowState8616, context: str
+    ) -> _DefUseFlowState8616:
+        """Apply the transfer for break/branch/loop/switch statement kinds."""
+        if isinstance(node, CBreak):
+            if self.break_exit_scopes and self.break_exit_scopes[-1] is not None:
+                self.break_exit_scopes[-1].append(state.copy())
+            return state
+        if isinstance(node, CIfElse):
+            return self._walk_if_else_8616(node, state, context)
+        if isinstance(node, CForLoop):
+            return self._walk_for_loop_8616(node, state, context)
+        if isinstance(node, CWhileLoop):
+            return self._walk_while_loop_8616(node, state, context)
+        if isinstance(node, CDoWhileLoop):
+            self.break_exit_scopes.append([])
+            try:
+                body_state = self.walk(node.body, state, context=f"{context}.do.body")
+            finally:
+                self.break_exit_scopes.pop()
+            self.check_reads(node.condition, body_state.defined, context=f"{context}.do.condition")
+            return body_state
+        if isinstance(node, CSwitchCase):
+            return self._walk_switch_8616(node, state, context)
+        self.check_reads(node, state.defined, context=context)
+        self.apply_call_output_definitions(node, state, context=context)
+        return state
+
+
+def _debug_assignment_read_8616(node: object, context: str) -> None:
+    """Emit opt-in diagnostics for one CAssignment walk step."""
+    if os.environ.get("INERTIA_DEBUG_DEF_USE", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return
+    lhs_variable = node.lhs.variable if isinstance(node.lhs, CVariable) else None
+    lhs_name = lhs_variable.name if isinstance(lhs_variable, SimStackVariable) else None
+    lhs_offset = lhs_variable.offset if isinstance(lhs_variable, SimStackVariable) else None
+    rhs_op = node.rhs.op if isinstance(node.rhs, CUnaryOp) else None
+    logging.getLogger(__name__).warning(
+        "def-use assignment context=%s lhs=%s lhs_type=%s lhs_variable=%r "
+        "offset=%s rhs=%s rhs_op=%s tags=%r",
+        context,
+        lhs_name,
+        type(node.lhs).__name__,
+        lhs_variable,
+        lhs_offset,
+        type(node.rhs).__name__,
+        rhs_op,
+        node.tags,
+    )
+
+
 def validate_structured_def_use_8616(
     root: object,
     *,
@@ -1020,337 +1525,16 @@ def validate_structured_def_use_8616(
     identities; the final emission guard enables them after mutation stops.
     """
     report = _MutableDefUseReport8616()
-    definitions_by_call = call_output_definitions or {}
-    proofs_by_read = indexed_stack_read_proofs or {}
-    break_exit_scopes: list[list[_DefUseFlowState8616] | None] = []
-
-    def _check_reads(
-        expr: OpaqueValidationNode8616,
-        defined: set[_DefUseStorageByte8616],
-        *,
-        context: str,
-        architectural_live_in_register_offsets: frozenset[int] = frozenset(),
-    ) -> None:
-        try:
-            instruction_address = expr.tags.get("ins_addr")
-        except AttributeError:
-            instruction_address = None
-        if (
-            packed_status_flag_preservation is not None
-            and packed_status_flag_preservation.covers_instruction(instruction_address)
-        ):
-            architectural_live_in_register_offsets |= frozenset(
-                {packed_status_flag_preservation.register_offset}
-            )
-        reads = _value_read_keys_8616(
-            expr,
-            segment_register_offsets,
-            include_virtual_carriers=include_virtual_carriers,
-            include_stack_arguments=True,
-            stack_variable_offset_resolver=stack_variable_offset_resolver,
-        )
-        report.raw_fact_count += len(reads)
-        report.normalized_fact_count += len(reads)
-        report.classified_fact_count += len(reads)
-        for read in reads:
-            key = read.storage
-            proof = proofs_by_read.get(id(read.node))
-            proof_matches = (
-                isinstance(read.node, CIndexedVariable)
-                and proof is not None
-                and proof.matches(
-                    read.node,
-                    array_offset=key.offset,
-                    array_width=key.width,
-                )
-            )
-            segment_live_in = (
-                key.kind is DefUseStorageKind8616.SEGMENT_CARRIER
-                and key.offset in entry_defined_segment_register_offsets
-            )
-            packed_preservation_live_in = (
-                key.kind is DefUseStorageKind8616.REGISTER_CARRIER
-                and key.offset in architectural_live_in_register_offsets
-            )
-            if proof_matches or segment_live_in or packed_preservation_live_in or (
-                key.definition_trackable
-                and _storage_bytes_8616(key).issubset(defined)
-            ):
-                report.materialized_count += 1
-            else:
-                _debug_def_use_event_8616("issue", key, defined, context=context)
-                report.issues.append(DefUseIssue8616(storage=key, context=context))
-
-    def _check_lvalue_reads(
-        lhs: object,
-        defined: set[_DefUseStorageByte8616],
-        *,
-        context: str,
-    ) -> None:
-        """Validate only value-evaluated operands of an assignment lvalue."""
-        if isinstance(lhs, CIndexedVariable):
-            _check_reads(lhs.index, defined, context=f"{context}.index")
-            base = lhs.variable
-            if isinstance(base, CVariable) and isinstance(
-                base.type,
-                (SimTypeArray, SimTypeFixedSizeArray),
-            ):
-                return
-            _check_reads(base, defined, context=f"{context}.base")
-            return
-        _check_reads(lhs, defined, context=context)
-
-    def _apply_call_output_definitions(
-        expr: object,
-        state: _DefUseFlowState8616,
-        *,
-        context: str,
-    ) -> None:
-        """Apply only lowering-proven output ranges after their owning call executes."""
-        _invalidate_call_affected_guards_8616(
-            expr,
-            state,
-            segment_register_offsets,
-            stack_variable_offset_resolver=stack_variable_offset_resolver,
-        )
-        for value_node in _iter_value_nodes_8616(expr):
-            if not isinstance(value_node, CFunctionCall):
-                continue
-            for definition in definitions_by_call.get(id(value_node), ()):
-                key = definition.storage_key()
-                storage_bytes = _storage_bytes_8616(key)
-                _debug_def_use_event_8616("call-define", key, state.defined, context=context)
-                _invalidate_guarded_definitions_8616(state, storage_bytes)
-                state.defined.update(storage_bytes)
-
-    def _walk(
-        node: object,
-        incoming: _DefUseFlowState8616,
-        *,
-        context: str,
-    ) -> _DefUseFlowState8616:
-        state = incoming.copy()
-        if node is None:
-            return state
-        if isinstance(node, CStatements):
-            for index, statement in enumerate(node.statements):
-                if not state.falls_through:
-                    break
-                state = _walk(statement, state, context=f"{context}.stmt{index}")
-            return state
-        if isinstance(node, CAssignment):
-            if os.environ.get("INERTIA_DEBUG_DEF_USE", "").strip().lower() in {
-                "1",
-                "true",
-                "yes",
-                "on",
-            }:
-                lhs_variable = node.lhs.variable if isinstance(node.lhs, CVariable) else None
-                lhs_name = lhs_variable.name if isinstance(lhs_variable, SimStackVariable) else None
-                lhs_offset = lhs_variable.offset if isinstance(lhs_variable, SimStackVariable) else None
-                rhs_op = node.rhs.op if isinstance(node.rhs, CUnaryOp) else None
-                logging.getLogger(__name__).warning(
-                    "def-use assignment context=%s lhs=%s lhs_type=%s lhs_variable=%r "
-                    "offset=%s rhs=%s rhs_op=%s tags=%r",
-                    context,
-                    lhs_name,
-                    type(node.lhs).__name__,
-                    lhs_variable,
-                    lhs_offset,
-                    type(node.rhs).__name__,
-                    rhs_op,
-                    node.tags,
-                )
-            preservation_offsets: frozenset[int] = frozenset()
-            if packed_status_flag_preservation is not None and packed_status_flag_preservation.covers_instruction(
-                node.tags.get("ins_addr")
-            ):
-                preservation_offsets = frozenset({packed_status_flag_preservation.register_offset})
-            _check_reads(
-                node.rhs,
-                state.defined,
-                context=f"{context}.rhs",
-                architectural_live_in_register_offsets=preservation_offsets,
-            )
-            _apply_call_output_definitions(node.rhs, state, context=f"{context}.rhs")
-            predicate_lhs_key = _predicate_storage_key_8616(
-                node.lhs,
-                segment_register_offsets,
-                stack_variable_offset_resolver=stack_variable_offset_resolver,
-            )
-            if predicate_lhs_key is None:
-                predicate_lhs_key = _semantic_partial_lvalue_storage_key_8616(
-                    node.lhs,
-                    segment_register_offsets,
-                    include_stack_arguments=True,
-                    stack_variable_offset_resolver=stack_variable_offset_resolver,
-                )
-            if predicate_lhs_key is not None:
-                _invalidate_guarded_definitions_8616(
-                    state,
-                    _storage_bytes_8616(predicate_lhs_key),
-                )
-            lhs_key = _storage_key_8616(
-                node.lhs,
-                segment_register_offsets,
-                include_virtual_carriers=include_virtual_carriers,
-                include_stack_arguments=True,
-                stack_variable_offset_resolver=stack_variable_offset_resolver,
-            )
-            if lhs_key is None:
-                lhs_key = _semantic_partial_lvalue_storage_key_8616(
-                    node.lhs,
-                    segment_register_offsets,
-                    include_stack_arguments=True,
-                    stack_variable_offset_resolver=stack_variable_offset_resolver,
-                )
-            if lhs_key is None:
-                _check_lvalue_reads(node.lhs, state.defined, context=f"{context}.lhs")
-            elif lhs_key.definition_trackable:
-                _debug_def_use_event_8616("define", lhs_key, state.defined, context=context)
-                state.defined.update(_storage_bytes_8616(lhs_key))
-            return state
-        if isinstance(node, CExpressionStatement):
-            _check_reads(node.expr, state.defined, context=f"{context}.expr")
-            _apply_call_output_definitions(node.expr, state, context=f"{context}.expr")
-            return state
-        if isinstance(node, CReturn):
-            _check_reads(node, state.defined, context=context)
-            _apply_call_output_definitions(node, state, context=context)
-            state.falls_through = False
-            return state
-        if isinstance(node, CBreak):
-            if break_exit_scopes and break_exit_scopes[-1] is not None:
-                break_exit_scopes[-1].append(state.copy())
-            return state
-        if isinstance(node, CIfElse):
-            branch_states: list[_DefUseFlowState8616] = []
-            branch_predicates: list[_DefUsePredicate8616 | None] = []
-            for index, (condition, branch) in enumerate(node.condition_and_nodes):
-                _check_reads(condition, state.defined, context=f"{context}.if{index}.condition")
-                predicate = _predicate_fact_8616(
-                    condition,
-                    segment_register_offsets,
-                    stack_variable_offset_resolver=stack_variable_offset_resolver,
-                )
-                branch_predicates.append(predicate)
-                branch_incoming = state.copy()
-                _activate_guarded_definitions_8616(branch_incoming, predicate)
-                branch_states.append(
-                    _walk(
-                        branch,
-                        branch_incoming,
-                        context=f"{context}.if{index}.body",
-                    )
-                )
-            if node.else_node is None:
-                branch_states.append(state.copy())
-            else:
-                else_incoming = state.copy()
-                if len(branch_predicates) == 1:
-                    _activate_guarded_definitions_8616(
-                        else_incoming,
-                        _inverted_predicate_fact_8616(branch_predicates[0]),
-                    )
-                branch_states.append(
-                    _walk(node.else_node, else_incoming, context=f"{context}.else")
-                )
-            merged = _intersect_flow_states_8616(branch_states, state)
-            if (
-                node.else_node is None
-                and len(branch_states) == 2
-                and len(branch_predicates) == 1
-                and branch_predicates[0] is not None
-            ):
-                guarded_definitions = branch_states[0].defined - state.defined
-                if guarded_definitions:
-                    merged.guarded.setdefault(branch_predicates[0], set()).update(
-                        guarded_definitions
-                    )
-            return merged
-        if isinstance(node, CForLoop):
-            initialized = _walk(node.initializer, state, context=f"{context}.for.init")
-            _check_reads(node.condition, initialized.defined, context=f"{context}.for.condition")
-            body_incoming = initialized.copy()
-            _activate_guarded_definitions_8616(
-                body_incoming,
-                _predicate_fact_8616(
-                    node.condition,
-                    segment_register_offsets,
-                    stack_variable_offset_resolver=stack_variable_offset_resolver,
-                ),
-            )
-            break_exit_scopes.append([])
-            try:
-                body_state = _walk(node.body, body_incoming, context=f"{context}.for.body")
-            finally:
-                break_exit_scopes.pop()
-            iterated = _walk(node.iterator, body_state, context=f"{context}.for.iterator")
-            initialized.guarded = _intersect_guarded_8616(
-                [initialized.guarded, iterated.guarded],
-                initialized.guarded,
-            )
-            return initialized
-        if isinstance(node, CWhileLoop):
-            _check_reads(node.condition, state.defined, context=f"{context}.while.condition")
-            body_incoming = state.copy()
-            _activate_guarded_definitions_8616(
-                body_incoming,
-                _predicate_fact_8616(
-                    node.condition,
-                    segment_register_offsets,
-                    stack_variable_offset_resolver=stack_variable_offset_resolver,
-                ),
-            )
-            break_exit_states: list[_DefUseFlowState8616] = []
-            break_exit_scopes.append(break_exit_states)
-            try:
-                body_state = _walk(node.body, body_incoming, context=f"{context}.while.body")
-            finally:
-                break_exit_scopes.pop()
-            state.guarded = _intersect_guarded_8616(
-                [state.guarded, body_state.guarded],
-                state.guarded,
-            )
-            if (
-                isinstance(node.condition, CConstant)
-                and isinstance(node.condition.value, (bool, int))
-                and bool(node.condition.value)
-                and break_exit_states
-            ):
-                return _intersect_flow_states_8616(break_exit_states, state)
-            return state
-        if isinstance(node, CDoWhileLoop):
-            break_exit_scopes.append([])
-            try:
-                body_state = _walk(node.body, state, context=f"{context}.do.body")
-            finally:
-                break_exit_scopes.pop()
-            _check_reads(node.condition, body_state.defined, context=f"{context}.do.condition")
-            return body_state
-        if isinstance(node, CSwitchCase):
-            _check_reads(node.switch, state.defined, context=f"{context}.switch.selector")
-            break_exit_scopes.append(None)
-            try:
-                branch_states = [
-                    _walk(branch, state, context=f"{context}.switch.case")
-                    for branch in _switch_case_bodies_8616(node.cases)
-                ]
-            finally:
-                break_exit_scopes.pop()
-            if node.default is None:
-                branch_states.append(state.copy())
-            else:
-                break_exit_scopes.append(None)
-                try:
-                    branch_states.append(_walk(node.default, state, context=f"{context}.switch.default"))
-                finally:
-                    break_exit_scopes.pop()
-            return _intersect_flow_states_8616(branch_states, state)
-        _check_reads(node, state.defined, context=context)
-        _apply_call_output_definitions(node, state, context=context)
-        return state
-
+    walker = _DefUseWalker8616(
+        report=report,
+        definitions_by_call=call_output_definitions or {},
+        proofs_by_read=indexed_stack_read_proofs or {},
+        segment_register_offsets=segment_register_offsets,
+        entry_defined_segment_register_offsets=entry_defined_segment_register_offsets,
+        packed_status_flag_preservation=packed_status_flag_preservation,
+        include_virtual_carriers=include_virtual_carriers,
+        stack_variable_offset_resolver=stack_variable_offset_resolver,
+    )
     entry_defined: set[_DefUseStorageByte8616] = set()
     for stack_range in entry_defined_stack_ranges:
         entry_defined.update(_storage_bytes_8616(stack_range.storage_key()))
@@ -1358,7 +1542,7 @@ def validate_structured_def_use_8616(
         key = _register_storage_key_8616(register_node, segment_register_offsets)
         if key is not None and key.definition_trackable:
             entry_defined.update(_storage_bytes_8616(key))
-    _walk(
+    walker.walk(
         root,
         _DefUseFlowState8616(defined=entry_defined, guarded={}),
         context="root",

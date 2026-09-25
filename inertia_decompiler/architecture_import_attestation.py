@@ -205,12 +205,7 @@ def _load_runtime_import_attestations(
         return {}
     if not isinstance(payload, dict):
         return {}
-    if (
-        payload.get("schema") != ARCHITECTURE_GUARD_CACHE_SCHEMA
-        or payload.get("checker_fingerprint") != checker_fingerprint
-        or payload.get("root") != str(root.resolve())
-        or payload.get("cli") != str(cli_path.resolve())
-    ):
+    if not _compatible_guard_payload(payload, root, cli_path, checker_fingerprint):
         return {}
     files = payload.get("files")
     if not isinstance(files, dict):
@@ -219,24 +214,43 @@ def _load_runtime_import_attestations(
     for path, encoded in files.items():
         if not isinstance(path, str) or not isinstance(encoded, dict):
             continue
-        digest = encoded.get("digest")
-        encoded_violations = encoded.get("violations")
-        if not isinstance(digest, str) or not isinstance(encoded_violations, list):
-            continue
-        violations: list[ArchitectureViolation] = []
-        valid = True
-        for encoded_violation in encoded_violations:
-            violation = _decode_cached_violation(encoded_violation)
-            if violation is None:
-                valid = False
-                break
-            violations.append(violation)
-        if valid:
-            attestations[path] = _RuntimeImportFileAttestation(
-                digest=digest,
-                violations=tuple(violations),
-            )
+        attestation = _decode_cached_file_attestation(encoded)
+        if attestation is not None:
+            attestations[path] = attestation
     return attestations
+
+
+def _compatible_guard_payload(
+    payload: dict[str, object],
+    root: Path,
+    cli_path: Path,
+    checker_fingerprint: str,
+) -> bool:
+    """Return True when the persisted guard cache matches this environment."""
+    return (
+        payload.get("schema") == ARCHITECTURE_GUARD_CACHE_SCHEMA
+        and payload.get("checker_fingerprint") == checker_fingerprint
+        and payload.get("root") == str(root.resolve())
+        and payload.get("cli") == str(cli_path.resolve())
+    )
+
+
+def _decode_cached_file_attestation(encoded: dict[object, object]) -> _RuntimeImportFileAttestation | None:
+    """Decode one cached per-file attestation, or None when malformed."""
+    digest = encoded.get("digest")
+    encoded_violations = encoded.get("violations")
+    if not isinstance(digest, str) or not isinstance(encoded_violations, list):
+        return None
+    violations: list[ArchitectureViolation] = []
+    for encoded_violation in encoded_violations:
+        violation = _decode_cached_violation(encoded_violation)
+        if violation is None:
+            return None
+        violations.append(violation)
+    return _RuntimeImportFileAttestation(
+        digest=digest,
+        violations=tuple(violations),
+    )
 
 
 def _evaluate_runtime_import_path(

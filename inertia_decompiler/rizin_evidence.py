@@ -132,21 +132,145 @@ def _run_json(binary_path: Path, command: str, *, timeout_sec: int) -> object:
         return None
 
 
+def _empty_evidence(status: RizinEvidenceStatus, elapsed_ms: float, detail: str) -> RizinEvidence:
+    """Return an evidence record carrying only a status and detail."""
+    return RizinEvidence(
+        status=status,
+        elapsed_ms=elapsed_ms,
+        detail=detail,
+        functions=(),
+        xrefs=(),
+        strings=(),
+        symbols=(),
+        stack_vars=(),
+        calling_conventions=(),
+    )
+
+
+def _optional_int(raw: object) -> int | None:
+    """Decode an optional integer field without failing the fact."""
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except Exception:
+        return None
+
+
+def _function_facts(payload: object) -> tuple[RizinFunctionFact, ...]:
+    """Decode function facts from the aflj payload."""
+    facts: list[RizinFunctionFact] = []
+    if isinstance(payload, list):
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            try:
+                addr = int(item.get("offset", 0) or 0)
+            except Exception:
+                continue
+            if addr <= 0:
+                continue
+            facts.append(
+                RizinFunctionFact(
+                    addr=addr,
+                    size=int(item.get("size", 0) or 0),
+                    name=str(item.get("name", "") or ""),
+                    n_blocks=int(item.get("nbbs", 0) or 0),
+                    n_callrefs=int(item.get("ncallrefs", 0) or 0),
+                )
+            )
+    return tuple(facts)
+
+
+def _xref_facts(payload: object) -> tuple[RizinXrefFact, ...]:
+    """Decode cross-reference facts from the axtj payload."""
+    facts: list[RizinXrefFact] = []
+    if isinstance(payload, list):
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            src = int(item.get("from", 0) or 0)
+            dst = int(item.get("to", 0) or 0)
+            if src > 0 and dst > 0:
+                facts.append(RizinXrefFact(src=src, dst=dst, kind=str(item.get("type", "") or "")))
+    return tuple(facts)
+
+
+def _string_facts(payload: object) -> tuple[RizinStringFact, ...]:
+    """Decode string facts from the izj payload."""
+    facts: list[RizinStringFact] = []
+    if isinstance(payload, list):
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            vaddr = int(item.get("vaddr", 0) or 0)
+            value = str(item.get("string", "") or "")
+            if vaddr > 0 and value:
+                facts.append(RizinStringFact(vaddr=vaddr, value=value))
+    return tuple(facts)
+
+
+def _symbol_facts(payload: object) -> tuple[RizinSymbolFact, ...]:
+    """Decode symbol facts from the isj payload."""
+    facts: list[RizinSymbolFact] = []
+    if isinstance(payload, list):
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            vaddr = int(item.get("vaddr", 0) or 0)
+            name = str(item.get("name", "") or "")
+            if vaddr > 0 and name:
+                facts.append(RizinSymbolFact(vaddr=vaddr, name=name, kind=str(item.get("type", "") or "")))
+    return tuple(facts)
+
+
+def _stack_var_facts(payload: object) -> tuple[RizinStackVarFact, ...]:
+    """Decode stack-variable facts from the afvrj payload."""
+    facts: list[RizinStackVarFact] = []
+    if isinstance(payload, list):
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            fn = int(item.get("fcn_addr", 0) or 0)
+            name = str(item.get("name", "") or "")
+            if fn <= 0 or not name:
+                continue
+            facts.append(
+                RizinStackVarFact(
+                    function_addr=fn,
+                    name=name,
+                    kind=str(item.get("kind", "") or ""),
+                    offset=_optional_int(item.get("delta", None)),
+                )
+            )
+    return tuple(facts)
+
+
+def _cc_facts(payload: object) -> tuple[RizinCcFact, ...]:
+    """Decode calling-convention facts from the afcfj payload."""
+    facts: list[RizinCcFact] = []
+    if isinstance(payload, list):
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            fn = int(item.get("addr", 0) or 0)
+            if fn <= 0:
+                continue
+            facts.append(
+                RizinCcFact(
+                    function_addr=fn,
+                    cc=str(item.get("cc", "") or ""),
+                    nargs=_optional_int(item.get("nargs", None)),
+                )
+            )
+    return tuple(facts)
+
+
 def collect_rizin_evidence(binary_path: Path, *, timeout_sec: int = 8) -> RizinEvidence:
     """Collect optional rizin facts for diagnostics and candidate ranking."""
     started = time.perf_counter()
     if not _rizin_available():
-        return RizinEvidence(
-            status=RizinEvidenceStatus.UNAVAILABLE,
-            elapsed_ms=0.0,
-            detail="rizin not found",
-            functions=(),
-            xrefs=(),
-            strings=(),
-            symbols=(),
-            stack_vars=(),
-            calling_conventions=(),
-        )
+        return _empty_evidence(RizinEvidenceStatus.UNAVAILABLE, 0.0, "rizin not found")
     try:
         # Aggressive Rizin analysis is not segment-safe for DOS MZ binaries.
         # Collect conservative function facts; they remain optional evidence.
@@ -158,135 +282,26 @@ def collect_rizin_evidence(binary_path: Path, *, timeout_sec: int = 8) -> RizinE
         stack_payload = _run_json(binary_path, "afvrj", timeout_sec=timeout_sec)
         cc_payload = _run_json(binary_path, "afcfj", timeout_sec=timeout_sec)
     except subprocess.TimeoutExpired:
-        return RizinEvidence(
-            status=RizinEvidenceStatus.TIMEOUT,
-            elapsed_ms=(time.perf_counter() - started) * 1000.0,
-            detail="subprocess timeout",
-            functions=(),
-            xrefs=(),
-            strings=(),
-            symbols=(),
-            stack_vars=(),
-            calling_conventions=(),
+        return _empty_evidence(
+            RizinEvidenceStatus.TIMEOUT,
+            (time.perf_counter() - started) * 1000.0,
+            "subprocess timeout",
         )
     except Exception as ex:
-        return RizinEvidence(
-            status=RizinEvidenceStatus.ERROR,
-            elapsed_ms=(time.perf_counter() - started) * 1000.0,
-            detail=str(ex),
-            functions=(),
-            xrefs=(),
-            strings=(),
-            symbols=(),
-            stack_vars=(),
-            calling_conventions=(),
+        return _empty_evidence(
+            RizinEvidenceStatus.ERROR,
+            (time.perf_counter() - started) * 1000.0,
+            str(ex),
         )
-
-    fn_facts: list[RizinFunctionFact] = []
-    if isinstance(fn_payload, list):
-        for item in fn_payload:
-            if not isinstance(item, dict):
-                continue
-            try:
-                addr = int(item.get("offset", 0) or 0)
-            except Exception:
-                continue
-            if addr <= 0:
-                continue
-            fn_facts.append(
-                RizinFunctionFact(
-                    addr=addr,
-                    size=int(item.get("size", 0) or 0),
-                    name=str(item.get("name", "") or ""),
-                    n_blocks=int(item.get("nbbs", 0) or 0),
-                    n_callrefs=int(item.get("ncallrefs", 0) or 0),
-                )
-            )
-
-    xref_facts: list[RizinXrefFact] = []
-    if isinstance(xref_payload, list):
-        for item in xref_payload:
-            if not isinstance(item, dict):
-                continue
-            src = int(item.get("from", 0) or 0)
-            dst = int(item.get("to", 0) or 0)
-            if src > 0 and dst > 0:
-                xref_facts.append(RizinXrefFact(src=src, dst=dst, kind=str(item.get("type", "") or "")))
-
-    str_facts: list[RizinStringFact] = []
-    if isinstance(str_payload, list):
-        for item in str_payload:
-            if not isinstance(item, dict):
-                continue
-            vaddr = int(item.get("vaddr", 0) or 0)
-            value = str(item.get("string", "") or "")
-            if vaddr > 0 and value:
-                str_facts.append(RizinStringFact(vaddr=vaddr, value=value))
-
-    sym_facts: list[RizinSymbolFact] = []
-    if isinstance(sym_payload, list):
-        for item in sym_payload:
-            if not isinstance(item, dict):
-                continue
-            vaddr = int(item.get("vaddr", 0) or 0)
-            name = str(item.get("name", "") or "")
-            if vaddr > 0 and name:
-                sym_facts.append(RizinSymbolFact(vaddr=vaddr, name=name, kind=str(item.get("type", "") or "")))
-
-    stack_facts: list[RizinStackVarFact] = []
-    if isinstance(stack_payload, list):
-        for item in stack_payload:
-            if not isinstance(item, dict):
-                continue
-            fn = int(item.get("fcn_addr", 0) or 0)
-            name = str(item.get("name", "") or "")
-            if fn <= 0 or not name:
-                continue
-            raw_delta = item.get("delta", None)
-            offset: int | None
-            try:
-                offset = int(raw_delta) if raw_delta is not None else None
-            except Exception:
-                offset = None
-            stack_facts.append(
-                RizinStackVarFact(
-                    function_addr=fn,
-                    name=name,
-                    kind=str(item.get("kind", "") or ""),
-                    offset=offset,
-                )
-            )
-
-    cc_facts: list[RizinCcFact] = []
-    if isinstance(cc_payload, list):
-        for item in cc_payload:
-            if not isinstance(item, dict):
-                continue
-            fn = int(item.get("addr", 0) or 0)
-            if fn <= 0:
-                continue
-            raw_nargs = item.get("nargs", None)
-            nargs: int | None
-            try:
-                nargs = int(raw_nargs) if raw_nargs is not None else None
-            except Exception:
-                nargs = None
-            cc_facts.append(
-                RizinCcFact(
-                    function_addr=fn,
-                    cc=str(item.get("cc", "") or ""),
-                    nargs=nargs,
-                )
-            )
 
     return RizinEvidence(
         status=RizinEvidenceStatus.OK,
         elapsed_ms=(time.perf_counter() - started) * 1000.0,
         detail="ok",
-        functions=tuple(fn_facts),
-        xrefs=tuple(xref_facts),
-        strings=tuple(str_facts),
-        symbols=tuple(sym_facts),
-        stack_vars=tuple(stack_facts),
-        calling_conventions=tuple(cc_facts),
+        functions=_function_facts(fn_payload),
+        xrefs=_xref_facts(xref_payload),
+        strings=_string_facts(str_payload),
+        symbols=_symbol_facts(sym_payload),
+        stack_vars=_stack_var_facts(stack_payload),
+        calling_conventions=_cc_facts(cc_payload),
     )

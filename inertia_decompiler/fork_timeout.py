@@ -169,6 +169,76 @@ def _run_child[ResultT](func: Callable[[], ResultT], write_fd: int, read_fd: int
         os._exit(0)
 
 
+def _fail_incomplete_child_8616(
+    pid: int,
+    owns_process_group: bool,
+    deadline: float,
+    timeout: int,
+    render_error: Callable[[int], str],
+) -> typing.NoReturn:
+    """Terminate a child that produced a truncated frame and raise its failure."""
+    timed_out = time.monotonic() >= deadline
+    _terminate_child(pid, owns_process_group=owns_process_group)
+    _waited_pid, child_status = os.waitpid(pid, 0)
+    if timed_out:
+        raise TimeoutError(f"Timed out after {timeout}s (child {_child_exit_detail(child_status)}).")
+    raise RuntimeError(render_error(child_status))
+
+
+def _read_result_frame_8616(
+    read_fd: int,
+    pid: int,
+    owns_process_group: bool,
+    deadline: float,
+    timeout: int,
+) -> tuple[bytes, int]:
+    """Read the child's framed result payload and reap it."""
+    header = _read_exact(read_fd, 8, deadline=deadline)
+    if len(header) != 8:
+        _fail_incomplete_child_8616(
+            pid,
+            owns_process_group,
+            deadline,
+            timeout,
+            lambda status: f"fork child exited without result ({_child_exit_detail(status)})",
+        )
+    expected = int.from_bytes(header, "little")
+    framed_data = _read_exact(read_fd, expected, deadline=deadline)
+    if len(framed_data) != expected:
+        _fail_incomplete_child_8616(
+            pid,
+            owns_process_group,
+            deadline,
+            timeout,
+            lambda status: (
+                "fork child returned incomplete result "
+                f"(expected={expected}B got={len(framed_data)}B {_child_exit_detail(status)})"
+            ),
+        )
+    _waited_pid, child_status = os.waitpid(pid, 0)
+    return framed_data, child_status
+
+
+def _decode_fork_result_8616[ResultT](
+    framed_data: bytes,
+    child_status: int,
+    timeout: int,
+) -> ResultT:
+    """Decode the child's framed result, re-raising its typed failure."""
+    result = pickle.loads(framed_data)
+    if not isinstance(result, _ForkResult):
+        raise RuntimeError(
+            f"fork child returned invalid payload ({_child_exit_detail(child_status)})"
+        )
+    if result.kind is _ForkResultKind.OK:
+        return typing.cast(ResultT, result.value)
+    if result.error_type in {"TimeoutError", "AnalysisTimeout"}:
+        raise TimeoutError(result.error_detail or f"Timed out after {timeout}s.")
+    raise RuntimeError(
+        f"{result.error_type}: {result.error_detail} ({_child_exit_detail(child_status)})"
+    )
+
+
 def run_with_timeout_in_fork[ResultT](
     func: Callable[[], ResultT],
     *,
@@ -195,46 +265,10 @@ def run_with_timeout_in_fork[ResultT](
     child_status: int | None = None
     deadline = time.monotonic() + max(1, timeout)
     try:
-        header = _read_exact(read_fd, 8, deadline=deadline)
-        if len(header) != 8:
-            timed_out = time.monotonic() >= deadline
-            _terminate_child(pid, owns_process_group=owns_process_group)
-            _waited_pid, child_status = os.waitpid(pid, 0)
-            if timed_out:
-                raise TimeoutError(
-                    f"Timed out after {timeout}s (child {_child_exit_detail(child_status)})."
-                )
-            raise RuntimeError(
-                f"fork child exited without result ({_child_exit_detail(child_status)})"
-            )
-
-        expected = int.from_bytes(header, "little")
-        framed_data = _read_exact(read_fd, expected, deadline=deadline)
-        if len(framed_data) != expected:
-            timed_out = time.monotonic() >= deadline
-            _terminate_child(pid, owns_process_group=owns_process_group)
-            _waited_pid, child_status = os.waitpid(pid, 0)
-            if timed_out:
-                raise TimeoutError(
-                    f"Timed out after {timeout}s (child {_child_exit_detail(child_status)})."
-                )
-            raise RuntimeError(
-                "fork child returned incomplete result "
-                f"(expected={expected}B got={len(framed_data)}B {_child_exit_detail(child_status)})"
-            )
-        _waited_pid, child_status = os.waitpid(pid, 0)
-        result = pickle.loads(framed_data)
-        if not isinstance(result, _ForkResult):
-            raise RuntimeError(
-                f"fork child returned invalid payload ({_child_exit_detail(child_status)})"
-            )
-        if result.kind is _ForkResultKind.OK:
-            return typing.cast(ResultT, result.value)
-        if result.error_type in {"TimeoutError", "AnalysisTimeout"}:
-            raise TimeoutError(result.error_detail or f"Timed out after {timeout}s.")
-        raise RuntimeError(
-            f"{result.error_type}: {result.error_detail} ({_child_exit_detail(child_status)})"
+        framed_data, child_status = _read_result_frame_8616(
+            read_fd, pid, owns_process_group, deadline, timeout
         )
+        return _decode_fork_result_8616(framed_data, child_status, timeout)
     finally:
         with contextlib.suppress(OSError):
             os.close(read_fd)

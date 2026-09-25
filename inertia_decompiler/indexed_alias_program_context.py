@@ -158,6 +158,124 @@ def _discover_direct_indexed_alias_program_context_8616(
     )
 
 
+def _transported_widening_bundle_8616(
+    target_surface: _ProjectProgramSurface8616,
+) -> tuple[GlobalObjectLayoutEvidence8616, ProjectBoundedGlobalObjectRangeEvidence8616] | None:
+    """Return a coherent transported Widening bundle, or None when absent."""
+    try:
+        transported_layout = target_surface._inertia_project_global_object_layout_evidence_8616
+    except AttributeError:
+        transported_layout = None
+    try:
+        transported_ranges = target_surface._inertia_project_bounded_global_object_ranges_8616
+    except AttributeError:
+        transported_ranges = None
+    if (transported_layout is None) != (transported_ranges is None):
+        raise ValueError("transported indexed-global Widening bundle is incomplete")
+    if transported_layout is None or transported_ranges is None:
+        return None
+    if not isinstance(transported_layout, GlobalObjectLayoutEvidence8616):
+        raise TypeError("transported indexed-global Widening artifact has a wrong type")
+    if not isinstance(transported_ranges, ProjectBoundedGlobalObjectRangeEvidence8616):
+        raise TypeError("transported bounded-global Widening artifact has a wrong type")
+    if not transported_layout.closed:
+        raise ValueError("transported indexed-global Widening artifact is open")
+    if not transported_ranges.closed or transported_ranges.layouts != transported_layout:
+        raise ValueError("transported indexed-global Widening bundle is incoherent")
+    return transported_layout, transported_ranges
+
+
+def _reused_persisted_context_8616(
+    source_project: object,
+    target_project: object,
+    requirement: GlobalObjectProgramRequirementEvidence8616,
+    *,
+    persisted: PersistedIndexedGlobalObjectEvidence8616 | None,
+    timeout: int,
+    window: int,
+    callsite_cache_key: object,
+    direct_cache_key: object,
+    direct_evidence_ready: bool,
+    program_callsites_ready: bool,
+) -> IndexedAliasProgramContextResult8616 | None:
+    """Reuse a persisted Widening bundle when callsite evidence allows."""
+    if persisted is None:
+        return None
+    if program_callsites_ready and direct_evidence_ready:
+        attach_project_global_object_layout_evidence_8616(
+            target_project,
+            persisted.layouts,
+        )
+        attach_project_bounded_global_object_ranges_8616(
+            target_project,
+            persisted.ranges,
+        )
+        return IndexedAliasProgramContextResult8616(
+            IndexedAliasProgramContextStatus8616.REUSED_PERSISTED_WIDENING,
+            None,
+            requirement,
+        )
+    catalog = recover_direct_indexed_alias_catalog_8616(
+        source_project,
+        timeout=timeout,
+        window=window,
+    )
+    if catalog is None:
+        if program_callsites_ready:
+            attach_project_global_object_layout_evidence_8616(
+                target_project,
+                persisted.layouts,
+            )
+            attach_project_bounded_global_object_ranges_8616(
+                target_project,
+                persisted.ranges,
+            )
+            return IndexedAliasProgramContextResult8616(
+                IndexedAliasProgramContextStatus8616.REUSED_PERSISTED_WIDENING,
+                None,
+                requirement,
+            )
+        return IndexedAliasProgramContextResult8616(
+            IndexedAliasProgramContextStatus8616.DISCOVERY_INCOMPLETE,
+            None,
+            requirement,
+        )
+    if not direct_evidence_ready:
+        publish_recovered_direct_global_object_evidence_8616(
+            catalog.evidence_project,
+            catalog.functions,
+            target_project,
+            cache_key=direct_cache_key,
+        )
+    if not program_callsites_ready:
+        callsites_published = publish_recovered_program_callsites_8616(
+            catalog,
+            target_project,
+            source_project,
+            cache_key=callsite_cache_key,
+            already_ready=False,
+        )
+        if not callsites_published:
+            return IndexedAliasProgramContextResult8616(
+                IndexedAliasProgramContextStatus8616.DISCOVERY_INCOMPLETE,
+                None,
+                requirement,
+            )
+    attach_project_global_object_layout_evidence_8616(
+        target_project,
+        persisted.layouts,
+    )
+    attach_project_bounded_global_object_ranges_8616(
+        target_project,
+        persisted.ranges,
+    )
+    return IndexedAliasProgramContextResult8616(
+        IndexedAliasProgramContextStatus8616.REUSED_PERSISTED_WIDENING,
+        None,
+        requirement,
+    )
+
+
 def prepare_direct_indexed_alias_program_context_8616(
     source_project: object,
     target_project: object,
@@ -198,34 +316,19 @@ def prepare_direct_indexed_alias_program_context_8616(
         source_project,
         binary_path,
     )
-    try:
-        transported_layout = target_surface._inertia_project_global_object_layout_evidence_8616
-    except AttributeError:
-        transported_layout = None
-    try:
-        transported_ranges = target_surface._inertia_project_bounded_global_object_ranges_8616
-    except AttributeError:
-        transported_ranges = None
-    if (transported_layout is None) != (transported_ranges is None):
-        raise ValueError("transported indexed-global Widening bundle is incomplete")
-    if transported_layout is not None and transported_ranges is not None:
-        if not isinstance(transported_layout, GlobalObjectLayoutEvidence8616):
-            raise TypeError("transported indexed-global Widening artifact has a wrong type")
-        if not isinstance(transported_ranges, ProjectBoundedGlobalObjectRangeEvidence8616):
-            raise TypeError("transported bounded-global Widening artifact has a wrong type")
-        if not transported_layout.closed:
-            raise ValueError("transported indexed-global Widening artifact is open")
-        if not transported_ranges.closed or transported_ranges.layouts != transported_layout:
-            raise ValueError("transported indexed-global Widening bundle is incoherent")
-        if not program_callsites_required or attach_available_program_callsite_evidence_8616(
+    transported = _transported_widening_bundle_8616(target_surface)
+    if transported is not None and (
+        not program_callsites_required
+        or attach_available_program_callsite_evidence_8616(
             target_project,
             callsite_cache_key,
-        ):
-            return IndexedAliasProgramContextResult8616(
-                IndexedAliasProgramContextStatus8616.REUSED_WIDENING,
-                None,
-                requirement,
-            )
+        )
+    ):
+        return IndexedAliasProgramContextResult8616(
+            IndexedAliasProgramContextStatus8616.REUSED_WIDENING,
+            None,
+            requirement,
+        )
     cache_key = indexed_global_object_cache_key_8616(source_project, binary_path)
     if cache_key is None:
         return _discover_direct_indexed_alias_program_context_8616(
@@ -253,80 +356,20 @@ def prepare_direct_indexed_alias_program_context_8616(
             )
         )
         persisted = load_indexed_global_object_cache_8616(cache_key)
-        if persisted is not None:
-            if program_callsites_ready and direct_evidence_ready:
-                attach_project_global_object_layout_evidence_8616(
-                    target_project,
-                    persisted.layouts,
-                )
-                attach_project_bounded_global_object_ranges_8616(
-                    target_project,
-                    persisted.ranges,
-                )
-                return IndexedAliasProgramContextResult8616(
-                    IndexedAliasProgramContextStatus8616.REUSED_PERSISTED_WIDENING,
-                    None,
-                    requirement,
-                )
-            catalog = recover_direct_indexed_alias_catalog_8616(
-                source_project,
-                timeout=timeout,
-                window=window,
-            )
-            if catalog is None:
-                if program_callsites_ready:
-                    attach_project_global_object_layout_evidence_8616(
-                        target_project,
-                        persisted.layouts,
-                    )
-                    attach_project_bounded_global_object_ranges_8616(
-                        target_project,
-                        persisted.ranges,
-                    )
-                    return IndexedAliasProgramContextResult8616(
-                        IndexedAliasProgramContextStatus8616.REUSED_PERSISTED_WIDENING,
-                        None,
-                        requirement,
-                    )
-                return IndexedAliasProgramContextResult8616(
-                    IndexedAliasProgramContextStatus8616.DISCOVERY_INCOMPLETE,
-                    None,
-                    requirement,
-                )
-            if not direct_evidence_ready:
-                publish_recovered_direct_global_object_evidence_8616(
-                    catalog.evidence_project,
-                    catalog.functions,
-                    target_project,
-                    cache_key=direct_cache_key,
-                )
-            if not program_callsites_ready:
-                callsites_published = publish_recovered_program_callsites_8616(
-                    catalog,
-                    target_project,
-                    source_project,
-                    cache_key=callsite_cache_key,
-                    already_ready=False,
-                )
-                if not callsites_published:
-                    return IndexedAliasProgramContextResult8616(
-                        IndexedAliasProgramContextStatus8616.DISCOVERY_INCOMPLETE,
-                        None,
-                        requirement,
-                    )
-            attach_project_global_object_layout_evidence_8616(
-                target_project,
-                persisted.layouts,
-            )
-            attach_project_bounded_global_object_ranges_8616(
-                target_project,
-                persisted.ranges,
-            )
-            return IndexedAliasProgramContextResult8616(
-                IndexedAliasProgramContextStatus8616.REUSED_PERSISTED_WIDENING,
-                None,
-                requirement,
-            )
+        reused = _reused_persisted_context_8616(
+            source_project,
+            target_project,
+            requirement,
+            persisted=persisted,
+            timeout=timeout,
+            window=window,
+            callsite_cache_key=callsite_cache_key,
+            direct_cache_key=direct_cache_key,
+            direct_evidence_ready=direct_evidence_ready,
+            program_callsites_ready=program_callsites_ready,
+        )
+        if reused is not None:
+            return reused
         return _discover_direct_indexed_alias_program_context_8616(
             source_project,
             target_project,

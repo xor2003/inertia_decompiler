@@ -170,21 +170,8 @@ def _write_serial_clean_worker_evidence_8616(
     return len(evidence_by_addr)
 
 
-def _read_serial_clean_worker_evidence_8616(
-    evidence_path: Path,
-    *,
-    project: object | None = None,
-) -> _SerialCleanWorkerEvidence8616:
-    """Read and validate discovery evidence transported to a clean worker."""
-    try:
-        payload = json.loads(evidence_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"invalid serial clean-worker evidence: {exc}") from exc
-    if not isinstance(payload, dict) or payload.get("schema") != _SERIAL_CLEAN_WORKER_EVIDENCE_SCHEMA_8616:
-        raise ValueError("serial clean-worker evidence has an unsupported schema")
-    records = payload.get("caller_return_use")
-    if not isinstance(records, list):
-        raise ValueError("serial clean-worker caller-return evidence must be a list")
+def _caller_return_evidence_map_8616(records: list[object]) -> dict[int, CallerReturnUseEvidence8616]:
+    """Decode validated caller-return records keyed by exact function address."""
     evidence_by_addr: dict[int, CallerReturnUseEvidence8616] = {}
     for record in records:
         if not isinstance(record, dict):
@@ -197,6 +184,11 @@ def _read_serial_clean_worker_evidence_8616(
         evidence_by_addr[function_addr] = caller_return_use_evidence_from_record_8616(
             record.get("evidence")
         )
+    return evidence_by_addr
+
+
+def _decode_layout_ranges_8616(payload: dict[object, object]) -> tuple[object, object]:
+    """Decode bounded-range/layout artifacts and enforce their coherence."""
     raw_layout = payload.get("global_object_layout")
     raw_ranges = payload.get("bounded_global_ranges")
     layouts = None if raw_layout is None else global_object_layout_evidence_from_record_8616(raw_layout)
@@ -205,9 +197,15 @@ def _read_serial_clean_worker_evidence_8616(
         raise ValueError("serial clean-worker bounded ranges have no layout dependency")
     if ranges is not None and layouts is not None and ranges.layouts != layouts:
         raise ValueError("serial clean-worker Widening artifacts are incoherent")
-    pointer_evidence = callee_pointer_argument_evidence_map_from_record_8616(
-        payload.get("callee_pointer_evidence")
-    )
+    return layouts, ranges
+
+
+def _decode_source_evidence_8616(
+    payload: dict[object, object],
+    layouts: object,
+    pointer_evidence: dict[int, object],
+) -> object:
+    """Decode global object sources and check them against pointer evidence."""
     raw_sources = payload.get("global_object_sources")
     source_evidence = (
         None
@@ -226,6 +224,30 @@ def _read_serial_clean_worker_evidence_8616(
             raise ValueError("serial clean-worker global sources have a mismatched layout")
         if source_evidence.pointer_target_addrs != proven_targets:
             raise ValueError("serial clean-worker global sources have a mismatched pointer census")
+    return source_evidence
+
+
+def _read_serial_clean_worker_evidence_8616(
+    evidence_path: Path,
+    *,
+    project: object | None = None,
+) -> _SerialCleanWorkerEvidence8616:
+    """Read and validate discovery evidence transported to a clean worker."""
+    try:
+        payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid serial clean-worker evidence: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("schema") != _SERIAL_CLEAN_WORKER_EVIDENCE_SCHEMA_8616:
+        raise ValueError("serial clean-worker evidence has an unsupported schema")
+    records = payload.get("caller_return_use")
+    if not isinstance(records, list):
+        raise ValueError("serial clean-worker caller-return evidence must be a list")
+    evidence_by_addr = _caller_return_evidence_map_8616(records)
+    layouts, ranges = _decode_layout_ranges_8616(payload)
+    pointer_evidence = callee_pointer_argument_evidence_map_from_record_8616(
+        payload.get("callee_pointer_evidence")
+    )
+    source_evidence = _decode_source_evidence_8616(payload, layouts, pointer_evidence)
     callsite_censuses = callee_callsite_census_map_from_record_8616(
         (
             _SERIAL_CLEAN_WORKER_DECODE_OWNER_8616

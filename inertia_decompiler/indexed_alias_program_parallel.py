@@ -11,6 +11,7 @@ does not classify Alias facts or infer semantic evidence.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 from collections.abc import Sequence
@@ -142,6 +143,72 @@ def _publish_parent_artifacts_8616(
         raise ValueError("parallel IR-stage SSA publication conflicted on parent project")
 
 
+def _indexed_alias_worker_8616(
+    project: object,
+    by_addr: dict[int, IndexedAliasFunctionSelection8616],
+    payload: object,
+) -> object:
+    """Build one function using the fork-inherited immutable project view."""
+    if not isinstance(payload, int):
+        raise TypeError("parallel Alias worker payload must be an address")
+    selection = by_addr[payload]
+    result = build_indexed_alias_function_evidence_8616(project, selection)
+    if isinstance(result, IndexedAliasFunctionRefusal8616):
+        return _IndexedAliasFunctionBundle8616(result, None)
+    raw = registered_function_ir_artifact_8616(project, payload)
+    ssa = registered_function_ssa_artifact_8616(project, payload)
+    if (
+        raw.verdict is not FunctionIRArtifactVerdict8616.PROVEN
+        or raw.artifact is None
+        or ssa.verdict is not FunctionSSAArtifactVerdict8616.PROVEN
+        or ssa.stage is not FunctionSSAArtifactStage8616.IR
+        or ssa.artifact is None
+    ):
+        raise ValueError("parallel Alias worker did not retain exact raw IR/SSA")
+    return _IndexedAliasFunctionBundle8616(result, raw.artifact)
+
+
+def _run_parallel_bundles_8616(
+    project: object,
+    ordered: tuple[IndexedAliasFunctionSelection8616, ...],
+    worker_count: int,
+    by_addr: dict[int, IndexedAliasFunctionSelection8616],
+) -> dict[int, _IndexedAliasFunctionBundle8616] | None:
+    """Run the bounded worker pool; return per-address bundles or None."""
+    jobs = [
+        (selection.function_addr, selection.function_addr)
+        for selection in sorted(
+            ordered,
+            key=lambda item: (-_selection_cost_8616(item), item.function_addr),
+        )
+    ]
+    pool: PreforkJobPool | None = None
+    try:
+        pool = PreforkJobPool(
+            max_workers=worker_count,
+            worker_func=functools.partial(_indexed_alias_worker_8616, project, by_addr),
+            name_prefix="indexed_alias",
+        )
+        bundles_by_addr: dict[int, _IndexedAliasFunctionBundle8616] = {}
+        for job_id, payload in pool.run_unordered(jobs):
+            if not isinstance(job_id, int) or not isinstance(
+                payload, _IndexedAliasFunctionBundle8616
+            ):
+                raise RuntimeError(f"parallel Alias worker failed: {payload}")
+            bundles_by_addr[job_id] = payload
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        log.warning("parallel indexed Alias census unavailable: %s", error)
+        return None
+    finally:
+        if pool is not None:
+            pool.shutdown()
+
+    if set(bundles_by_addr) != set(by_addr):
+        log.warning("parallel indexed Alias census returned an incomplete job set")
+        return None
+    return bundles_by_addr
+
+
 def build_indexed_alias_program_evidence_bounded_8616(
     project: object,
     selections: Sequence[IndexedAliasFunctionSelection8616],
@@ -160,56 +227,8 @@ def build_indexed_alias_program_evidence_bounded_8616(
     if len(by_addr) != len(ordered):
         return build_indexed_alias_program_evidence_8616(project, ordered)
 
-    def _worker(payload: object) -> object:
-        """Build one function using the fork-inherited immutable project view."""
-        if not isinstance(payload, int):
-            raise TypeError("parallel Alias worker payload must be an address")
-        selection = by_addr[payload]
-        result = build_indexed_alias_function_evidence_8616(project, selection)
-        if isinstance(result, IndexedAliasFunctionRefusal8616):
-            return _IndexedAliasFunctionBundle8616(result, None)
-        raw = registered_function_ir_artifact_8616(project, payload)
-        ssa = registered_function_ssa_artifact_8616(project, payload)
-        if (
-            raw.verdict is not FunctionIRArtifactVerdict8616.PROVEN
-            or raw.artifact is None
-            or ssa.verdict is not FunctionSSAArtifactVerdict8616.PROVEN
-            or ssa.stage is not FunctionSSAArtifactStage8616.IR
-            or ssa.artifact is None
-        ):
-            raise ValueError("parallel Alias worker did not retain exact raw IR/SSA")
-        return _IndexedAliasFunctionBundle8616(result, raw.artifact)
-
-    jobs = [
-        (selection.function_addr, selection.function_addr)
-        for selection in sorted(
-            ordered,
-            key=lambda item: (-_selection_cost_8616(item), item.function_addr),
-        )
-    ]
-    pool: PreforkJobPool | None = None
-    try:
-        pool = PreforkJobPool(
-            max_workers=worker_count,
-            worker_func=_worker,
-            name_prefix="indexed_alias",
-        )
-        bundles_by_addr: dict[int, _IndexedAliasFunctionBundle8616] = {}
-        for job_id, payload in pool.run_unordered(jobs):
-            if not isinstance(job_id, int) or not isinstance(
-                payload, _IndexedAliasFunctionBundle8616
-            ):
-                raise RuntimeError(f"parallel Alias worker failed: {payload}")
-            bundles_by_addr[job_id] = payload
-    except (OSError, RuntimeError, TypeError, ValueError) as error:
-        log.warning("parallel indexed Alias census unavailable: %s", error)
-        return build_indexed_alias_program_evidence_8616(project, ordered)
-    finally:
-        if pool is not None:
-            pool.shutdown()
-
-    if set(bundles_by_addr) != set(by_addr):
-        log.warning("parallel indexed Alias census returned an incomplete job set")
+    bundles_by_addr = _run_parallel_bundles_8616(project, ordered, worker_count, by_addr)
+    if bundles_by_addr is None:
         return build_indexed_alias_program_evidence_8616(project, ordered)
     bundles = tuple(bundles_by_addr[selection.function_addr] for selection in ordered)
     try:

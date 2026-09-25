@@ -449,6 +449,31 @@ def project_from_bytes(code: bytes) -> angr.Project:
     )
 
 
+def _stage_failure_class_8616(stage: str) -> str:
+    """Map a pipeline stage name onto its stable failure class."""
+    stage_failure_classes = {
+        "load": "load_failure",
+        "lift": "lift_failure",
+        "cfg": "cfg_failure",
+        "decompile": "decompiler_crash",
+    }
+    return stage_failure_classes.get(stage, "analysis_failure")
+
+
+def _failure_class_from_message_8616(stage: str, message: str) -> tuple[str, str]:
+    """Classify a failure by its exception message text."""
+    lowered = message.lower()
+    if "recursion" in lowered or "maximum recursion depth" in lowered:
+        return "recursion_or_explosion", message
+    if "unsupported" in lowered or "unknown opcode" in lowered or "not implemented" in lowered:
+        return "unsupported_semantic", message
+    if "render" in lowered or "codegen" in lowered:
+        return "renderer_failure", message
+    if "postprocess" in lowered or "simplify" in lowered:
+        return "postprocess_failure", message
+    return _stage_failure_class_8616(stage), message
+
+
 def classify_failure(
     stage: str,
     exc: Exception | None,
@@ -458,52 +483,24 @@ def classify_failure(
     regeneration_failed: bool = False,
 ) -> tuple[str, str]:
     """Classify a scan failure into stable reporting buckets."""
-
-    def _impl() -> tuple[str, str]:
-        if empty_codegen:
-            if rewrite_failed:
-                return "rewrite_failure", "Decompiler postprocess rewrite failed."
-            if regeneration_failed:
-                return "regeneration_failure", "Decompiler text regeneration failed."
-            return "no_code_produced", "Decompiler did not produce code."
-        if isinstance(exc, ScanTimeout):
-            return "timeout", "timed out"
-        if isinstance(exc, AssertionError):
-            message = str(exc)
-            return "analysis_assertion", message or "assertion failure"
+    if empty_codegen:
         if rewrite_failed:
             return "rewrite_failure", "Decompiler postprocess rewrite failed."
         if regeneration_failed:
             return "regeneration_failure", "Decompiler text regeneration failed."
-        if exc is None:
-            stage_failure_classes = {
-                "load": "load_failure",
-                "lift": "lift_failure",
-                "cfg": "cfg_failure",
-                "decompile": "decompiler_crash",
-            }
-            return stage_failure_classes.get(stage, "analysis_failure"), "missing exception details"
-
+        return "no_code_produced", "Decompiler did not produce code."
+    if isinstance(exc, ScanTimeout):
+        return "timeout", "timed out"
+    if isinstance(exc, AssertionError):
         message = str(exc)
-        lowered = message.lower()
-
-        if "recursion" in lowered or "maximum recursion depth" in lowered:
-            return "recursion_or_explosion", message
-        if "unsupported" in lowered or "unknown opcode" in lowered or "not implemented" in lowered:
-            return "unsupported_semantic", message
-        if "render" in lowered or "codegen" in lowered:
-            return "renderer_failure", message
-        if "postprocess" in lowered or "simplify" in lowered:
-            return "postprocess_failure", message
-        stage_failure_classes = {
-            "load": "load_failure",
-            "lift": "lift_failure",
-            "cfg": "cfg_failure",
-            "decompile": "decompiler_crash",
-        }
-        return stage_failure_classes.get(stage, "analysis_failure"), message
-
-    return _impl()
+        return "analysis_assertion", message or "assertion failure"
+    if rewrite_failed:
+        return "rewrite_failure", "Decompiler postprocess rewrite failed."
+    if regeneration_failed:
+        return "regeneration_failure", "Decompiler text regeneration failed."
+    if exc is None:
+        return _stage_failure_class_8616(stage), "missing exception details"
+    return _failure_class_from_message_8616(stage, str(exc))
 
 
 def _mark_stage(
@@ -513,44 +510,56 @@ def _mark_stage(
     result.stage_reached = stage
 
 
+def _ugly_cluster_from_details_8616(details: str) -> str | None:
+    """Match the aggregated failure details onto a stable cluster name."""
+    if "empty codegen" in details or "no_code_produced" in details:
+        return "empty_codegen"
+    if "recursion" in details or "maximum recursion depth" in details:
+        return "recursion_or_explosion"
+    if "unsupported" in details or "unknown opcode" in details or "not implemented" in details:
+        return "unsupported_semantics"
+    if "oversized function" in details:
+        return "oversized_function"
+    if "complex cfg" in details or "pathological cfg" in details:
+        return "control_flow_explosion"
+    if "loop-heavy" in details:
+        return "loop_heavy_helper"
+    return None
+
+
+def _ugly_cluster_from_fallback_8616(fallback_kind: str | None) -> str | None:
+    """Map a fallback kind onto its recovery cluster name."""
+    fallback_clusters = {
+        "cfg_only": "cfg_only_recovery",
+        "lift_only": "lift_only_recovery",
+        "block_lift": "block_lift_recovery",
+    }
+    return fallback_clusters.get(fallback_kind)
+
+
 def _classify_ugly_cluster(result: FunctionScanResult) -> str | None:
-    def _impl() -> str | None:
-        parts: list[str] = []
-        if result.reason:
-            parts.append(result.reason)
-        if result.failure_class:
-            parts.append(result.failure_class)
-        parts.extend(stage.reason for stage in result.stages if stage.reason)
-        parts.extend(stage.detail for stage in result.stages if stage.detail)
-        details = " ".join(part.lower() for part in parts)
+    parts: list[str] = []
+    if result.reason:
+        parts.append(result.reason)
+    if result.failure_class:
+        parts.append(result.failure_class)
+    parts.extend(stage.reason for stage in result.stages if stage.reason)
+    parts.extend(stage.detail for stage in result.stages if stage.detail)
+    details = " ".join(part.lower() for part in parts)
 
-        if result.failure_class == "timeout":
-            return "timeout_hotspot"
-        if result.failure_class == "skipped_relocation":
-            return "call_relocation_rescue"
-        if "empty codegen" in details or "no_code_produced" in details:
-            return "empty_codegen"
-        if "recursion" in details or "maximum recursion depth" in details:
-            return "recursion_or_explosion"
-        if "unsupported" in details or "unknown opcode" in details or "not implemented" in details:
-            return "unsupported_semantics"
-        if "oversized function" in details:
-            return "oversized_function"
-        if "complex cfg" in details or "pathological cfg" in details:
-            return "control_flow_explosion"
-        if "loop-heavy" in details:
-            return "loop_heavy_helper"
-        if result.fallback_kind == "cfg_only":
-            return "cfg_only_recovery"
-        if result.fallback_kind == "lift_only":
-            return "lift_only_recovery"
-        if result.fallback_kind == "block_lift":
-            return "block_lift_recovery"
-        if not result.ok:
-            return "analysis_failure"
-        return None
-
-    return _impl()
+    if result.failure_class == "timeout":
+        return "timeout_hotspot"
+    if result.failure_class == "skipped_relocation":
+        return "call_relocation_rescue"
+    cluster = _ugly_cluster_from_details_8616(details)
+    if cluster is not None:
+        return cluster
+    cluster = _ugly_cluster_from_fallback_8616(result.fallback_kind)
+    if cluster is not None:
+        return cluster
+    if not result.ok:
+        return "analysis_failure"
+    return None
 
 
 def _classify_readability_cluster(result: FunctionScanResult, text: str | None) -> tuple[str | None, str | None]:
@@ -660,50 +669,59 @@ def _should_skip_scan_safe_call_chain_from_insns(
     return False
 
 
+def _tiny_guard_pre_call_ok_8616(
+    insns: Sequence[object], call_idx: int, conditional_jump_idx: int
+) -> bool:
+    """Check that pre-call instructions stay within the allowed guard set."""
+    allowed_pre_call = {"cmp", "test", "push", "mov", "lea", "xor", "or", "and", "sub"}
+    for idx, insn in enumerate(insns[:call_idx]):
+        if idx == conditional_jump_idx:
+            continue
+        if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower() not in allowed_pre_call:
+            return False
+    return True
+
+
+def _tiny_guard_post_call_ok_8616(insns: Sequence[object], call_idx: int) -> bool:
+    """Check that post-call instructions are nops or sp-restoring adds."""
+    for insn in insns[call_idx + 1 : -1]:
+        mnemonic = _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower()
+        if mnemonic == "nop":
+            continue
+        if mnemonic != "add" or not _dynamic_corpus_scan_getattr_8616(insn, "op_str", "").replace(" ", "").startswith("sp,"):
+            return False
+    return True
+
+
 def _should_skip_scan_safe_tiny_guard_call_helper(
     insns: Sequence[object], mode: str, max_cfg_bytes: int, max_insns: int = 8
 ) -> bool:
-    def _impl() -> bool:
-        if mode != "scan-safe" or max_cfg_bytes <= 0 or not insns:
-            return False
+    if mode != "scan-safe" or max_cfg_bytes <= 0 or not insns:
+        return False
 
-        local_insns = tuple(insns)
-        if len(local_insns) > max_insns:
-            return False
+    local_insns = tuple(insns)
+    if len(local_insns) > max_insns:
+        return False
 
-        total_bytes = sum(len(_dynamic_corpus_scan_getattr_8616(insn, "bytes", b"")) or 1 for insn in local_insns)
-        if total_bytes > max_cfg_bytes:
-            return False
+    total_bytes = sum(len(_dynamic_corpus_scan_getattr_8616(insn, "bytes", b"")) or 1 for insn in local_insns)
+    if total_bytes > max_cfg_bytes:
+        return False
 
-        calls = [idx for idx, insn in enumerate(local_insns) if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower() == "call"]
-        if len(calls) != 1:
-            return False
-        call_idx = calls[0]
+    calls = [idx for idx, insn in enumerate(local_insns) if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower() == "call"]
+    if len(calls) != 1:
+        return False
+    call_idx = calls[0]
 
-        rets = [idx for idx, insn in enumerate(insns) if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower().startswith("ret")]
-        if len(rets) != 1 or rets[0] != len(insns) - 1:
-            return False
-        conditional_jump_idx = _tiny_guard_conditional_jump_index_8616(insns, call_idx)
-        if conditional_jump_idx is None:
-            return False
+    rets = [idx for idx, insn in enumerate(insns) if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower().startswith("ret")]
+    if len(rets) != 1 or rets[0] != len(insns) - 1:
+        return False
+    conditional_jump_idx = _tiny_guard_conditional_jump_index_8616(insns, call_idx)
+    if conditional_jump_idx is None:
+        return False
 
-        allowed_pre_call = {"cmp", "test", "push", "mov", "lea", "xor", "or", "and", "sub"}
-        for idx, insn in enumerate(insns[:call_idx]):
-            if idx == conditional_jump_idx:
-                continue
-            if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower() not in allowed_pre_call:
-                return False
-
-        for insn in insns[call_idx + 1 : -1]:
-            mnemonic = _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower()
-            if mnemonic == "nop":
-                continue
-            if mnemonic != "add" or not _dynamic_corpus_scan_getattr_8616(insn, "op_str", "").replace(" ", "").startswith("sp,"):
-                return False
-
-        return True
-
-    return _impl()
+    if not _tiny_guard_pre_call_ok_8616(insns, call_idx, conditional_jump_idx):
+        return False
+    return _tiny_guard_post_call_ok_8616(insns, call_idx)
 
 
 def _tiny_guard_conditional_jump_index_8616(insns: Sequence[object], call_idx: int) -> int | None:
@@ -1203,6 +1221,309 @@ def _scan_safe_prefix_skip_result_8616(
     return _impl()
 
 
+def _lift_block_scan_stage_8616(
+    result: FunctionScanResult,
+    project: angr.Project,
+    code: bytes,
+) -> FunctionScanResult | None:
+    """Lift the whole blob to VEX; return a failure result or None."""
+    try:
+        project.factory.block(0x1000, len(code)).vex  # noqa: B018
+        _mark_stage(result, "lift", True)
+    except Exception as exc:
+        failure_class, reason = classify_failure("lift", exc)
+        return _fail_scan_stage(result, stage="lift", failure_class=failure_class, reason=reason)
+    return None
+
+
+def _scan_safe_probe_lift_8616(
+    result: FunctionScanResult,
+    code: bytes,
+    mode: str,
+    max_cfg_bytes: int,
+) -> FunctionScanResult | None:
+    """Run the bounded scan-safe lift probe; return a failure result or None."""
+    if mode != "scan-safe" or max_cfg_bytes <= 0:
+        return None
+    try:
+        _probe_scan_safe_lift(code, mode, max_cfg_bytes)
+    except Exception as exc:
+        failure_class, reason = classify_failure("lift", exc)
+        return _fail_scan_stage(result, stage="lift", failure_class=failure_class, reason=reason)
+    return None
+
+
+def _scan_safe_cfg_preflight_8616(
+    result: FunctionScanResult,
+    project: angr.Project,
+    code: bytes,
+    mode: str,
+    max_cfg_bytes: int,
+    max_loop_bytes: int,
+) -> FunctionScanResult | None:
+    """Return an early skip result for relocation/loop/call-heavy helpers."""
+    if mode == "decompile-reloc-free" and (result.has_near_call_reloc or result.has_far_call_reloc):
+        return _fail_scan_stage(
+            result,
+            stage="cfg",
+            failure_class="skipped_relocation",
+            reason="contains unresolved call relocation pattern",
+            fallback_kind="block_lift",
+            classify_family=True,
+        )
+
+    loop_block = None
+    if mode == "scan-safe" and max_loop_bytes > 0:
+        loop_block = project.factory.block(0x1000, len(code))
+        if _should_skip_scan_safe_back_edge(loop_block.capstone, mode, max_loop_bytes):
+            return _finish_scan_safe_skip(
+                result,
+                fallback_kind="cfg_only",
+                family="stack_control",
+                family_reason="loop-heavy helper path",
+                stage="cfg",
+                detail=(
+                    f"skipped cfg/decompile for short loop-heavy function ({len(code)} bytes <= {max_loop_bytes}); "
+                    "lift ok"
+                ),
+                mark_lift_decode=False,
+            )
+
+    if mode == "scan-safe" and loop_block is None:
+        loop_block = project.factory.block(0x1000, len(code))
+
+    if loop_block is not None and _should_skip_scan_safe_call_chain(loop_block.capstone, mode, max_cfg_bytes):
+        call_count = sum(
+            1
+            for insn in _dynamic_corpus_scan_getattr_8616(loop_block.capstone, "insns", ())
+            if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower() == "call"
+        )
+        return _finish_scan_safe_skip(
+            result,
+            fallback_kind="cfg_only",
+            family="stack_control",
+            family_reason="call-heavy helper path",
+            stage="cfg",
+            detail=f"skipped cfg/decompile for call-heavy helper path ({call_count} calls in {len(code)} bytes); lift ok",
+            mark_lift_decode=False,
+        )
+    return None
+
+
+def _cfg_shape_scan_skip_8616(
+    result: FunctionScanResult,
+    cfg: object,
+    code: bytes,
+    mode: str,
+    max_cfg_blocks: int,
+    max_cfg_insns: int,
+    max_decompile_bytes: int,
+) -> FunctionScanResult | None:
+    """Return a cfg_only result when CFG shape or size blocks decompile."""
+    if _should_skip_scan_safe_decompile_for_cfg_shape(cfg, mode, max_cfg_blocks, max_cfg_insns):
+        result.ok = True
+        result.fallback_kind = "cfg_only"
+        result.semantic_family, result.semantic_family_reason = (
+            "stack_control",
+            "complex CFG skipped before decompile",
+        )
+        _mark_stage(
+            result,
+            "decompile",
+            True,
+            detail=(
+                f"skipped decompile for complex CFG (blocks>{max_cfg_blocks} or insns>{max_cfg_insns}); cfg ok"
+            ),
+        )
+        return _finish_scan(result)
+
+    if _should_skip_scan_safe_decompile(len(code), mode, max_decompile_bytes):
+        result.ok = True
+        result.fallback_kind = "cfg_only"
+        result.semantic_family, result.semantic_family_reason = (
+            "addressing",
+            "oversized function skipped before decompile",
+        )
+        _mark_stage(
+            result,
+            "decompile",
+            True,
+            detail=f"skipped decompile for oversized function ({len(code)} bytes > {max_decompile_bytes}); cfg ok",
+        )
+        return _finish_scan(result)
+    return None
+
+
+def _record_codegen_diagnostics_8616(result: FunctionScanResult, codegen: object) -> None:
+    """Copy structuring/rewrite/regeneration failure diagnostics off codegen."""
+    if codegen is None:
+        return
+    result.last_postprocess_pass = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_last_postprocess_pass", None)
+    result.last_structuring_pass = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_last_structuring_pass", None)
+    result.rewrite_failed = bool(_dynamic_corpus_scan_getattr_8616(codegen, "_inertia_rewrite_failed", False))
+    result.rewrite_failure_pass = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_rewrite_failure_pass", None)
+    result.rewrite_failure_reason = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_rewrite_failure_error", None)
+    result.structuring_failed = bool(_dynamic_corpus_scan_getattr_8616(codegen, "_inertia_structuring_failed", False))
+    result.structuring_failure_pass = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_structuring_failure_pass", None)
+    result.structuring_failure_reason = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_structuring_failure_error", None)
+    result.regeneration_failed = bool(_dynamic_corpus_scan_getattr_8616(codegen, "_inertia_regeneration_failed", False))
+    result.regeneration_failure_pass = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_regeneration_last_pass", None)
+    result.regeneration_failure_reason = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_regeneration_error", None)
+
+
+def _empty_codegen_scan_result_8616(result: FunctionScanResult, mode: str) -> FunctionScanResult:
+    """Resolve the decompile stage when codegen produced no text."""
+    failure_class, reason = classify_failure(
+        "decompile",
+        None,
+        empty_codegen=True,
+        rewrite_failed=result.rewrite_failed,
+        regeneration_failed=result.regeneration_failed,
+    )
+    result.reason = reason
+    if mode == "scan-safe":
+        result.ok = True
+        result.fallback_kind = "cfg_only"
+        if result.regeneration_failed and result.regeneration_failure_reason:
+            result.reason = result.regeneration_failure_reason
+            reason = result.reason
+        _mark_stage(result, "decompile", True, detail=reason)
+        return _finish_scan(result)
+    result.failure_class = failure_class
+    result.fallback_kind = "block_lift"
+    _mark_stage(result, "decompile", False, reason=failure_class, detail=reason)
+    return _finish_scan(result)
+
+
+def _decompile_scan_result_8616(
+    result: FunctionScanResult,
+    project: angr.Project,
+    func: object,
+    cfg: object,
+    mode: str,
+) -> FunctionScanResult:
+    """Run the decompile stage and record its evidence on the result."""
+    dec = project.analyses.Decompiler(func, cfg=cast(Any, cfg))
+    codegen = _dynamic_corpus_scan_getattr_8616(dec, "codegen", None)
+    func_info = _dynamic_corpus_scan_getattr_8616(func, "info", None)
+    result.tail_validation = extract_x86_16_tail_validation_snapshot(func_info)
+    if not result.tail_validation and codegen is not None:
+        result.tail_validation = dict(_dynamic_corpus_scan_getattr_8616(codegen, "_inertia_tail_validation_snapshot", {}) or {})
+    _record_codegen_diagnostics_8616(result, codegen)
+    if codegen is None or not _dynamic_corpus_scan_getattr_8616(codegen, "text", ""):
+        return _empty_codegen_scan_result_8616(result, mode)
+    text = codegen.text
+    result.interrupt_dos_helper_count = _count_named_helper_calls(text, _INTERRUPT_DOS_HELPER_NAMES)
+    result.interrupt_bios_helper_count = _count_named_helper_calls(text, _INTERRUPT_BIOS_HELPER_NAMES)
+    result.interrupt_wrapper_call_count = _count_interrupt_wrapper_calls(text)
+    result.interrupt_unresolved_wrapper_count = result.interrupt_wrapper_call_count
+    result.semantic_family, result.semantic_family_reason = _classify_semantic_family_from_text(
+        text, result
+    )
+    result.readability_cluster, result.readability_cluster_reason = _classify_readability_cluster(
+        result, text
+    )
+    result.decompiled_count = 1
+    result.ok = True
+    _mark_stage(result, "decompile", True)
+    return _finish_scan(result)
+
+
+def _scan_function_stages_8616(
+    result: FunctionScanResult,
+    cod_file: Path,
+    code: bytes,
+    mode: str,
+    max_cfg_bytes: int,
+    max_cfg_blocks: int,
+    max_cfg_insns: int,
+    max_decompile_bytes: int,
+    max_loop_bytes: int,
+) -> FunctionScanResult:
+    """Run load/lift/cfg/decompile stages under the scan alarm window."""
+    try:
+        project = project_from_bytes(code)
+        _mark_stage(result, "load", True)
+    except Exception as exc:
+        failure_class, reason = classify_failure("load", exc)
+        return _fail_scan_stage(result, stage="load", failure_class=failure_class, reason=reason)
+
+    _mark_stage(result, "normalize", True, detail="bounded blob pipeline")
+
+    probe_skip = _scan_safe_probe_lift_8616(result, code, mode, max_cfg_bytes)
+    if probe_skip is not None:
+        return probe_skip
+
+    # Decode prefix instructions BEFORE checking oversized to allow classification
+    prefix_insns = _decode_scan_safe_prefix_insns(code, mode, max_cfg_bytes)
+
+    prefix_skip = _scan_safe_prefix_skip_result_8616(
+        result,
+        code_len=len(code),
+        mode=mode,
+        max_cfg_bytes=max_cfg_bytes,
+        prefix_insns=prefix_insns,
+        cod_file=cod_file,
+    )
+    if prefix_skip is not None:
+        return prefix_skip
+
+    lift_failure = _lift_block_scan_stage_8616(result, project, code)
+    if lift_failure is not None:
+        return lift_failure
+
+    result.function_count = 1
+    if mode == "lift":
+        result.ok = True
+        return _finish_scan(result)
+
+    scan_safe_skip = _scan_safe_cfg_preflight_8616(
+        result, project, code, mode, max_cfg_bytes, max_loop_bytes
+    )
+    if scan_safe_skip is not None:
+        return scan_safe_skip
+
+    try:
+        cfg = _scan_cfg(project, len(code))
+        seed_calling_conventions(cfg)
+        func = cast(Any, cfg).functions[0x1000]
+        _mark_stage(result, "cfg", True)
+    except Exception as exc:
+        failure_class, reason = classify_failure("cfg", exc)
+        return _fail_scan_stage(
+            result,
+            stage="cfg",
+            failure_class=failure_class,
+            reason=reason,
+            fallback_kind="block_lift",
+            classify_family=True,
+        )
+
+    _mark_stage(result, "cleanup", True, detail="scan-safe conservative cleanup")
+
+    cfg_skip = _cfg_shape_scan_skip_8616(
+        result, cfg, code, mode, max_cfg_blocks, max_cfg_insns, max_decompile_bytes
+    )
+    if cfg_skip is not None:
+        return cfg_skip
+
+    try:
+        return _decompile_scan_result_8616(result, project, func, cfg, mode)
+    except Exception as exc:
+        failure_class, reason = classify_failure(
+            "decompile",
+            exc,
+            rewrite_failed=result.rewrite_failed,
+            regeneration_failed=result.regeneration_failed,
+        )
+        result.failure_class = failure_class
+        result.reason = reason
+        result.fallback_kind = "block_lift"
+        result.semantic_family, result.semantic_family_reason = _classify_semantic_family_from_failure(result)
+        _mark_stage(result, "decompile", False, reason=failure_class, detail=reason)
+        return _finish_scan(result)
+
+
 def scan_function(
     cod_file: Path,
     proc_name: str,
@@ -1217,234 +1538,35 @@ def scan_function(
     max_loop_bytes: int = 128,
 ) -> FunctionScanResult:
     """Scan a single COD procedure and return structured recovery/reporting status."""
+    global _SCAN_ACTIVE
+    result = FunctionScanResult(
+        cod_file=cod_file.name,
+        proc_name=proc_name,
+        proc_kind=proc_kind,
+        byte_len=len(code),
+        has_near_call_reloc=b"\xe8\x00\x00" in code,
+        has_far_call_reloc=b"\x9a\x00\x00\x00\x00" in code,
+    )
 
-    def _impl() -> FunctionScanResult:
-        global _SCAN_ACTIVE
-        result = FunctionScanResult(
-            cod_file=cod_file.name,
-            proc_name=proc_name,
-            proc_kind=proc_kind,
-            byte_len=len(code),
-            has_near_call_reloc=b"\xe8\x00\x00" in code,
-            has_far_call_reloc=b"\x9a\x00\x00\x00\x00" in code,
+    old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
+    _SCAN_ACTIVE = True
+    signal.alarm(timeout_sec)
+    try:
+        return _scan_function_stages_8616(
+            result,
+            cod_file,
+            code,
+            mode,
+            max_cfg_bytes,
+            max_cfg_blocks,
+            max_cfg_insns,
+            max_decompile_bytes,
+            max_loop_bytes,
         )
-
-        old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
-        _SCAN_ACTIVE = True
-        signal.alarm(timeout_sec)
-        try:
-            try:
-                project = project_from_bytes(code)
-                _mark_stage(result, "load", True)
-            except Exception as exc:
-                failure_class, reason = classify_failure("load", exc)
-                return _fail_scan_stage(result, stage="load", failure_class=failure_class, reason=reason)
-
-            _mark_stage(result, "normalize", True, detail="bounded blob pipeline")
-
-            if mode == "scan-safe" and max_cfg_bytes > 0:
-                try:
-                    _probe_scan_safe_lift(code, mode, max_cfg_bytes)
-                except Exception as exc:
-                    failure_class, reason = classify_failure("lift", exc)
-                    return _fail_scan_stage(result, stage="lift", failure_class=failure_class, reason=reason)
-
-            # Decode prefix instructions BEFORE checking oversized to allow classification
-            prefix_insns = _decode_scan_safe_prefix_insns(code, mode, max_cfg_bytes)
-
-            prefix_skip = _scan_safe_prefix_skip_result_8616(
-                result,
-                code_len=len(code),
-                mode=mode,
-                max_cfg_bytes=max_cfg_bytes,
-                prefix_insns=prefix_insns,
-                cod_file=cod_file,
-            )
-            if prefix_skip is not None:
-                return prefix_skip
-
-            try:
-                project.factory.block(0x1000, len(code)).vex  # noqa: B018
-                _mark_stage(result, "lift", True)
-            except Exception as exc:
-                failure_class, reason = classify_failure("lift", exc)
-                return _fail_scan_stage(result, stage="lift", failure_class=failure_class, reason=reason)
-
-            result.function_count = 1
-            if mode == "lift":
-                result.ok = True
-                return _finish_scan(result)
-
-            loop_block = None
-            if mode == "decompile-reloc-free" and (result.has_near_call_reloc or result.has_far_call_reloc):
-                return _fail_scan_stage(
-                    result,
-                    stage="cfg",
-                    failure_class="skipped_relocation",
-                    reason="contains unresolved call relocation pattern",
-                    fallback_kind="block_lift",
-                    classify_family=True,
-                )
-
-            if mode == "scan-safe" and max_loop_bytes > 0:
-                loop_block = project.factory.block(0x1000, len(code))
-                if _should_skip_scan_safe_back_edge(loop_block.capstone, mode, max_loop_bytes):
-                    return _finish_scan_safe_skip(
-                        result,
-                        fallback_kind="cfg_only",
-                        family="stack_control",
-                        family_reason="loop-heavy helper path",
-                        stage="cfg",
-                        detail=(
-                            f"skipped cfg/decompile for short loop-heavy function ({len(code)} bytes <= {max_loop_bytes}); "
-                            "lift ok"
-                        ),
-                        mark_lift_decode=False,
-                    )
-
-            if mode == "scan-safe" and loop_block is None:
-                loop_block = project.factory.block(0x1000, len(code))
-
-            if loop_block is not None and _should_skip_scan_safe_call_chain(loop_block.capstone, mode, max_cfg_bytes):
-                call_count = sum(
-                    1
-                    for insn in _dynamic_corpus_scan_getattr_8616(loop_block.capstone, "insns", ())
-                    if _dynamic_corpus_scan_getattr_8616(insn, "mnemonic", "").lower() == "call"
-                )
-                return _finish_scan_safe_skip(
-                    result,
-                    fallback_kind="cfg_only",
-                    family="stack_control",
-                    family_reason="call-heavy helper path",
-                    stage="cfg",
-                    detail=f"skipped cfg/decompile for call-heavy helper path ({call_count} calls in {len(code)} bytes); lift ok",
-                    mark_lift_decode=False,
-                )
-
-            try:
-                cfg = _scan_cfg(project, len(code))
-                seed_calling_conventions(cfg)
-                func = cast(Any, cfg).functions[0x1000]
-                _mark_stage(result, "cfg", True)
-            except Exception as exc:
-                failure_class, reason = classify_failure("cfg", exc)
-                return _fail_scan_stage(
-                    result,
-                    stage="cfg",
-                    failure_class=failure_class,
-                    reason=reason,
-                    fallback_kind="block_lift",
-                    classify_family=True,
-                )
-
-            _mark_stage(result, "cleanup", True, detail="scan-safe conservative cleanup")
-
-            if _should_skip_scan_safe_decompile_for_cfg_shape(cfg, mode, max_cfg_blocks, max_cfg_insns):
-                result.ok = True
-                result.fallback_kind = "cfg_only"
-                result.semantic_family, result.semantic_family_reason = (
-                    "stack_control",
-                    "complex CFG skipped before decompile",
-                )
-                _mark_stage(
-                    result,
-                    "decompile",
-                    True,
-                    detail=(
-                        f"skipped decompile for complex CFG (blocks>{max_cfg_blocks} or insns>{max_cfg_insns}); cfg ok"
-                    ),
-                )
-                return _finish_scan(result)
-
-            if _should_skip_scan_safe_decompile(len(code), mode, max_decompile_bytes):
-                result.ok = True
-                result.fallback_kind = "cfg_only"
-                result.semantic_family, result.semantic_family_reason = (
-                    "addressing",
-                    "oversized function skipped before decompile",
-                )
-                _mark_stage(
-                    result,
-                    "decompile",
-                    True,
-                    detail=f"skipped decompile for oversized function ({len(code)} bytes > {max_decompile_bytes}); cfg ok",
-                )
-                return _finish_scan(result)
-
-            try:
-                dec = project.analyses.Decompiler(func, cfg=cast(Any, cfg))
-                codegen = _dynamic_corpus_scan_getattr_8616(dec, "codegen", None)
-                func_info = _dynamic_corpus_scan_getattr_8616(func, "info", None)
-                result.tail_validation = extract_x86_16_tail_validation_snapshot(func_info)
-                if not result.tail_validation and codegen is not None:
-                    result.tail_validation = dict(_dynamic_corpus_scan_getattr_8616(codegen, "_inertia_tail_validation_snapshot", {}) or {})
-                if codegen is not None:
-                    result.last_postprocess_pass = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_last_postprocess_pass", None)
-                    result.last_structuring_pass = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_last_structuring_pass", None)
-                    result.rewrite_failed = bool(_dynamic_corpus_scan_getattr_8616(codegen, "_inertia_rewrite_failed", False))
-                    result.rewrite_failure_pass = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_rewrite_failure_pass", None)
-                    result.rewrite_failure_reason = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_rewrite_failure_error", None)
-                    result.structuring_failed = bool(_dynamic_corpus_scan_getattr_8616(codegen, "_inertia_structuring_failed", False))
-                    result.structuring_failure_pass = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_structuring_failure_pass", None)
-                    result.structuring_failure_reason = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_structuring_failure_error", None)
-                    result.regeneration_failed = bool(_dynamic_corpus_scan_getattr_8616(codegen, "_inertia_regeneration_failed", False))
-                    result.regeneration_failure_pass = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_regeneration_last_pass", None)
-                    result.regeneration_failure_reason = _dynamic_corpus_scan_getattr_8616(codegen, "_inertia_regeneration_error", None)
-                if codegen is None or not _dynamic_corpus_scan_getattr_8616(codegen, "text", ""):
-                    failure_class, reason = classify_failure(
-                        "decompile",
-                        None,
-                        empty_codegen=True,
-                        rewrite_failed=result.rewrite_failed,
-                        regeneration_failed=result.regeneration_failed,
-                    )
-                    result.reason = reason
-                    if mode == "scan-safe":
-                        result.ok = True
-                        result.fallback_kind = "cfg_only"
-                        if result.regeneration_failed and result.regeneration_failure_reason:
-                            result.reason = result.regeneration_failure_reason
-                            reason = result.reason
-                        _mark_stage(result, "decompile", True, detail=reason)
-                        return _finish_scan(result)
-                    result.failure_class = failure_class
-                    result.fallback_kind = "block_lift"
-                    _mark_stage(result, "decompile", False, reason=failure_class, detail=reason)
-                    return _finish_scan(result)
-                text = codegen.text
-                result.interrupt_dos_helper_count = _count_named_helper_calls(text, _INTERRUPT_DOS_HELPER_NAMES)
-                result.interrupt_bios_helper_count = _count_named_helper_calls(text, _INTERRUPT_BIOS_HELPER_NAMES)
-                result.interrupt_wrapper_call_count = _count_interrupt_wrapper_calls(text)
-                result.interrupt_unresolved_wrapper_count = result.interrupt_wrapper_call_count
-                result.semantic_family, result.semantic_family_reason = _classify_semantic_family_from_text(
-                    text, result
-                )
-                result.readability_cluster, result.readability_cluster_reason = _classify_readability_cluster(
-                    result, text
-                )
-                result.decompiled_count = 1
-                result.ok = True
-                _mark_stage(result, "decompile", True)
-                return _finish_scan(result)
-            except Exception as exc:
-                failure_class, reason = classify_failure(
-                    "decompile",
-                    exc,
-                    rewrite_failed=result.rewrite_failed,
-                    regeneration_failed=result.regeneration_failed,
-                )
-                result.failure_class = failure_class
-                result.reason = reason
-                result.fallback_kind = "block_lift"
-                result.semantic_family, result.semantic_family_reason = _classify_semantic_family_from_failure(result)
-                _mark_stage(result, "decompile", False, reason=failure_class, detail=reason)
-                return _finish_scan(result)
-        finally:
-            _SCAN_ACTIVE = False
-            _clear_alarm()
-            signal.signal(signal.SIGALRM, old_handler)
-
-    return _impl()
+    finally:
+        _SCAN_ACTIVE = False
+        _clear_alarm()
+        signal.signal(signal.SIGALRM, old_handler)
 
 
 def summarize_results(results: list[FunctionScanResult], mode: str) -> dict[str, object]:

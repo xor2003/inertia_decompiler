@@ -515,36 +515,56 @@ def main(argv: list[str] | None = None) -> int:
         truncated = False
 
     if args.json:
-        payload = {
-            "plans": [plan.to_dict() for plan in plans],
-            "selected_tests": [entry.test for entry in selected_tests_with_reasons],
-            "selected_tests_with_reasons": [
-                {
-                    "test": entry.test,
-                    "layer": entry.layer,
-                    "reason": entry.reason,
-                }
-                for entry in selected_tests_with_reasons
-            ],
-            "truncated": truncated,
-            "max_tests": args.max_tests,
-            "layer_filter": args.layer,
-            "include_shared": not args.no_shared,
-            "requested_files": files,
-        }
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(_selection_payload(args, plans, selected_tests_with_reasons, files, truncated), indent=2))
 
     if not args.json_only:
-        print("Agent trust-focused test plan:")
-        for plan in plans:
-            _print_focus(plan)
-        if selected_tests_with_reasons:
-            print(f"Selected {len(selected_tests_with_reasons)} tests:")
-            for entry in selected_tests_with_reasons:
-                print(f"  - {entry.test}")
-                print(f"    reason={entry.reason}")
-                print(f"    layer={entry.layer}")
+        _print_plan(plans, selected_tests_with_reasons)
 
+    return _run_selection(args, selected_tests, truncated)
+
+
+def _selection_payload(
+    args: argparse.Namespace,
+    plans: tuple[LayerPlan, ...],
+    selected_tests_with_reasons: tuple[SelectedTest, ...],
+    files: tuple[str, ...],
+    truncated: bool,
+) -> dict[str, object]:
+    """Build the machine-readable plan payload."""
+    return {
+        "plans": [plan.to_dict() for plan in plans],
+        "selected_tests": [entry.test for entry in selected_tests_with_reasons],
+        "selected_tests_with_reasons": [
+            {
+                "test": entry.test,
+                "layer": entry.layer,
+                "reason": entry.reason,
+            }
+            for entry in selected_tests_with_reasons
+        ],
+        "truncated": truncated,
+        "max_tests": args.max_tests,
+        "layer_filter": args.layer,
+        "include_shared": not args.no_shared,
+        "requested_files": files,
+    }
+
+
+def _print_plan(plans: tuple[LayerPlan, ...], selected_tests_with_reasons: tuple[SelectedTest, ...]) -> None:
+    """Print the human-readable plan and selected tests."""
+    print("Agent trust-focused test plan:")
+    for plan in plans:
+        _print_focus(plan)
+    if selected_tests_with_reasons:
+        print(f"Selected {len(selected_tests_with_reasons)} tests:")
+        for entry in selected_tests_with_reasons:
+            print(f"  - {entry.test}")
+            print(f"    reason={entry.reason}")
+            print(f"    layer={entry.layer}")
+
+
+def _run_selection(args: argparse.Namespace, selected_tests: list[str], truncated: bool) -> int:
+    """Execute the selected pytest targets, or report why nothing ran."""
     if not args.run:
         if not args.json_only:
             print("\nNo run requested. Add --run to execute selected tests.")

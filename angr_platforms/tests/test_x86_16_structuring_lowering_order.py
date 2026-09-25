@@ -111,6 +111,18 @@ def test_call_return_conditions_are_rebound_after_all_lowering(monkeypatch) -> N
     assert events == ["call-return", "direct-stack", "call-return"]
 
 
+def _is_named_span_call(expression: ast.expr) -> bool:
+    """Return whether a with-item calls ``span("<str>")``."""
+    return (
+        isinstance(expression, ast.Call)
+        and isinstance(expression.func, ast.Name)
+        and expression.func.id == "span"
+        and bool(expression.args)
+        and isinstance(expression.args[0], ast.Constant)
+        and isinstance(expression.args[0].value, str)
+    )
+
+
 def test_shared_tail_ownership_closes_the_final_structuring_ast() -> None:
     """Keep shared-tail ownership after every pass that can rebuild call nodes."""
     source = textwrap.dedent(inspect.getsource(stage._decompile_structuring_8616))
@@ -120,14 +132,7 @@ def test_shared_tail_ownership_closes_the_final_structuring_ast() -> None:
             continue
         for item in node.items:
             expression = item.context_expr
-            if (
-                isinstance(expression, ast.Call)
-                and isinstance(expression.func, ast.Name)
-                and expression.func.id == "span"
-                and expression.args
-                and isinstance(expression.args[0], ast.Constant)
-                and isinstance(expression.args[0].value, str)
-            ):
+            if _is_named_span_call(expression):
                 span_lines[expression.args[0].value] = node.lineno
 
     final_shared_tail = span_lines["x86_16.structuring.final_shared_call_ownership"]

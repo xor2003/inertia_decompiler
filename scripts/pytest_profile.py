@@ -138,20 +138,31 @@ class PytestProfilePlugin:
         record = self.records.get(report.nodeid)
         if record is None:
             return
+        self._record_rss_sample(record, report)
         duration = float(report.duration)
-        rss_kib = current_rss_kib()
-        if rss_kib is not None:
-            if record.rss_start_kib is None:
-                record.rss_start_kib = rss_kib
-            record.rss_peak_kib = max(record.rss_peak_kib or 0, rss_kib)
-            if report.when == "teardown":
-                record.rss_finish_kib = rss_kib
         if report.when == "setup":
             record.setup_seconds += duration
         elif report.when == "call":
             record.call_seconds += duration
         elif report.when == "teardown":
             record.teardown_seconds += duration
+        self._record_outcome(record, report)
+
+    @staticmethod
+    def _record_rss_sample(record: TestRecord, report: pytest.TestReport) -> None:
+        """Track start/peak/finish RSS evidence for one phase report."""
+        rss_kib = current_rss_kib()
+        if rss_kib is None:
+            return
+        if record.rss_start_kib is None:
+            record.rss_start_kib = rss_kib
+        record.rss_peak_kib = max(record.rss_peak_kib or 0, rss_kib)
+        if report.when == "teardown":
+            record.rss_finish_kib = rss_kib
+
+    @staticmethod
+    def _record_outcome(record: TestRecord, report: pytest.TestReport) -> None:
+        """Accumulate terminal outcome flags for one phase report."""
         if report.failed:
             record.failure_count += 1
         if report.skipped:

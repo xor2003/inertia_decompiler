@@ -199,6 +199,13 @@ def _build_job_argv(raw_job: dict[str, object]) -> list[str]:
     if raw_job.get("brief") is True:
         argv.append("--brief")
     argv.extend(["--timeout", str(timeout)])
+    _extend_optional_flag_args(argv, raw_job)
+    argv.append(str(binary))
+    return argv
+
+
+def _extend_optional_flag_args(argv: list[str], raw_job: dict[str, object]) -> None:
+    """Append job-specific CLI flags for each populated optional field."""
     function_discovery_backend = _optional_str(raw_job, "function_discovery_backend")
     if function_discovery_backend is not None:
         argv.extend(["--function-discovery-backend", function_discovery_backend])
@@ -223,8 +230,6 @@ def _build_job_argv(raw_job: dict[str, object]) -> list[str]:
     signature_catalog = _optional_str(raw_job, "signature_catalog")
     if signature_catalog is not None:
         argv.extend(["--signature-catalog", signature_catalog])
-    argv.append(str(binary))
-    return argv
 
 
 def _load_jobs(job_file: Path) -> list[BatchDecompileJob]:

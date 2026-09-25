@@ -166,6 +166,32 @@ def _update_identity_file(digest: _DigestWriter, *, label: str, path: Path) -> N
     digest.update(_content_digest(path))
 
 
+def _update_package_identity_files(
+    digest: _DigestWriter,
+    *,
+    package_name: str,
+    source_root: Path,
+    artifact_root: Path,
+) -> None:
+    """Add one package's source and copied files to an import identity."""
+    for path in sorted(candidate for candidate in source_root.rglob("*") if candidate.is_file()):
+        if _is_copied_package_file(path, source_root):
+            _update_identity_file(
+                digest,
+                label=f"source:{package_name}/{path.relative_to(source_root).as_posix()}",
+                path=path,
+            )
+    copied_root = artifact_root / package_name
+    if copied_root.is_dir():
+        for path in sorted(candidate for candidate in copied_root.rglob("*") if candidate.is_file()):
+            if _is_copied_package_file(path, copied_root):
+                _update_identity_file(
+                    digest,
+                    label=f"copy:{package_name}/{path.relative_to(copied_root).as_posix()}",
+                    path=path,
+                )
+
+
 def build_mypyc_import_smoke_identity(
     *,
     modules: Iterable[str],
@@ -181,22 +207,9 @@ def build_mypyc_import_smoke_identity(
         digest.update(len(encoded).to_bytes(8, "big"))
         digest.update(encoded)
     for package_name, source_root in sorted(package_sources.items()):
-        for path in sorted(candidate for candidate in source_root.rglob("*") if candidate.is_file()):
-            if _is_copied_package_file(path, source_root):
-                _update_identity_file(
-                    digest,
-                    label=f"source:{package_name}/{path.relative_to(source_root).as_posix()}",
-                    path=path,
-                )
-        copied_root = artifact_root / package_name
-        if copied_root.is_dir():
-            for path in sorted(candidate for candidate in copied_root.rglob("*") if candidate.is_file()):
-                if _is_copied_package_file(path, copied_root):
-                    _update_identity_file(
-                        digest,
-                        label=f"copy:{package_name}/{path.relative_to(copied_root).as_posix()}",
-                        path=path,
-                    )
+        _update_package_identity_files(
+            digest, package_name=package_name, source_root=source_root, artifact_root=artifact_root
+        )
     extension_suffixes = tuple(importlib.machinery.EXTENSION_SUFFIXES)
     for path in sorted(candidate for candidate in artifact_root.rglob("*") if candidate.is_file()):
         if path.name.endswith(extension_suffixes):

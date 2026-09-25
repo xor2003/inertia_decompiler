@@ -315,3 +315,138 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Owning tests: 238 passed (16 stack-prototype test files).
 - Layer boundaries: 493 passed; architecture-contract failure is
   pre-existing (145 violations, none in this file).
+
+### Single-finding sweep + scripts/tests cleanup batch
+
+- `generated_external_function_contracts.py`: `_type_contract` →
+  `_named_type_contract` tag-dispatch split.
+- `generated_translation_unit_assembly.py`: `assemble_generated_translation_unit`
+  → `_collect_declaration_sets` + `_canonicalize_declaration_sets`.
+- `cli_mkfp_simplify.py` / `cli_cod_globals.py`: nested transform closures →
+  `_MkFpFold8616` / `_CodGlobalLoadFold8616` dataclass folds +
+  `_storage_object_artifact_for`.
+- `function_ir_ssa_cache.py`: `_hydrated_hit_matches_8616` predicate.
+- `function_ir_ssa_cache_key_8616`: node-hash + edge-collection splits.
+- `function_graph_extent_repair.py`: `repair_undercovered_transition_sources_8616`
+  → `_out_of_block_ins_addrs_8616` + `_extent_repair_plan_8616`; raw_fact_count
+  derived from normalized sets.
+- `rizin_evidence.py`: `collect_rizin_evidence` → typed fact collectors
+  (`_function_facts`, `_xref_facts`, `_string_facts`, `_symbol_facts`,
+  `_stack_var_facts`, `_cc_facts`, `_empty_evidence`, `_optional_int`).
+- `indexed_alias_program_context.py`: `_transported_widening_bundle_8616` +
+  `_reused_persisted_context_8616`.
+- `indexed_alias_program_parallel.py`: worker hoisted + pool-lifecycle split.
+- `direct_stack_move_pretest_body_evidence.py`: `Any` → `nx.DiGraph`.
+- `direct_request_cache.py`, `serial_clean_worker_evidence.py`,
+  `fork_timeout.py`, `batch_decompile_procs.py`,
+  `generated_c_indexed_argument_contract.py`, `mypyc_build_cache.py`,
+  `pytest_inventory_check.py`, `pytest_profile.py` (`_record_rss_sample` +
+  `_record_outcome`), `pytest_dynamic_schedule.py` (`_WaveScheduler8616`),
+  `agent_test_focus.py` (`_selection_payload`/`_print_plan`/`_run_selection`).
+- Test files: `test_x86_16_structuring_lowering_order.py`
+  (`_is_named_span_call`), `test_x86_16_cod_regressions.py`
+  (`_DerefSubtreeCodegen` + `_build_deref_subtree_statements`),
+  `test_x86_16_consumed_stack_address_setup.py` (`_SETUP_FAILURE_MUTATORS`
+  dispatch table), `test_x86_16_indexed_stack_ranges.py`
+  (`_TwoLoopOptions` + 9 fixture-construction helpers).
+- Owning tests: 47 + 1 passed; `agent_test_focus --help` ok.
+- Promoted inventory: 1212 findings across ~106 files (was 1238/~130).
+
+### inertia_decompiler/runtime_support.py — promoted Ruff clean (15 → 0)
+
+- `install_angr_peephole_expr_bitwidth_guard`/`_guarded_handle_expr` → module
+  helpers `_normalize_replacement_bits_8616`, `_clinic_skip_complex_expr_gate_8616`,
+  `_peephole_rewrite_loop_8616`, `_guarded_peephole_handle_expr_8616` + thin
+  installed closure.
+- `_seqnode_children_8616` → `_seqnode_attr_children_8616` +
+  `_seqnode_cases_children_8616`.
+- `_loop_exit_default_relation_8616` → `_collect_loop_exit_nodes_8616` +
+  `_loop_exit_default_status_8616`.
+- `_seqnode_map_region_id_8616` → `_seqnode_candidate_payload_8616`,
+  `_preferred_exact_region_summary_8616`, `_region_missing_result_8616`,
+  `_region_containing_summaries_8616`, `_exact_region_match_8616` +
+  `_SEQNODE_PREFERRED_TYPES_8616`.
+- `_seqnode_switch_artifact_mappings_8616` (37) → shared helpers
+  `_common_int_path_8616`, `_switch_mapping_status_8616`,
+  `_expanded_path_samples_8616`, `_expanded_region_mappings_8616`,
+  `_expanded_root_geometry_8616`, `_expanded_root_verdict_8616`,
+  `_expanded_root_switch_fields_8616` + per-artifact
+  `_seqnode_switch_artifact_mapping_8616`. Nested
+  `_expanded_root_normalized_body_8616`/`_path_tuple` deduped to existing
+  module functions.
+- `_graphregion_switch_artifact_mappings_8616` (33) → same shared helpers +
+  hoisted `_common_prefix_len_8616`,
+  `_default_case_region_ids_by_default_8616`,
+  `_resolve_ambiguous_default_mapping_8616`,
+  `_disambiguated_default_mappings_8616`, `_ambiguous_mapping_samples_8616` +
+  per-artifact `_graphregion_switch_artifact_mapping_8616`.
+- `_expanded_root_normalized_body_from_summary_8616` → `_append_int_values_8616`
+  + `_accumulate_branch_subtree_ids_8616` + `_accumulate_branch_split_ids_8616`.
+- `install_angr_pre_codegen_seqnode_probe_guard`/`_guarded_init` →
+  `_record_pre_codegen_seqnode_probe_8616` with
+  `_pre_codegen_condition_evidence_8616`,
+  `_pre_codegen_grouped_switch_artifacts_8616`,
+  `_pre_codegen_stage_mappings_8616`,
+  `_pre_codegen_switch_replacement_probe_8616`; `_guarded_init` now a thin
+  wrapper.
+- `guard_angr_clinic_stage_markers` (46) + `_peephole_optimize` (21) →
+  `_ClinicGuardState8616` dataclass (stage clock + counters + stats), wrapper
+  factory `_clinic_stage_guard_8616`, module bodies
+  `_guarded_simplify_block_8616`, `_guarded_peephole_optimize_8616`,
+  `_debug_clinic_flags_8616`, `_clinic_peephole_capped_8616`,
+  `_fast_block_peephole_8616`, `_debug_skip_complex_block_8616`,
+  `_guarded_peephole_optimize_exprs_8616`, `_guarded_compute_propagation_8616`,
+  `_NoPropagationResult8616`. Shared stage-marker wrappers now produced by the
+  factory; peephole stmt/multistmt pair deduped.
+- `run_with_timeout_in_daemon_thread` → `_enable_thread_stack_dump_8616` +
+  `_daemon_thread_result_8616`.
+- `guard_angr_structuring_codegen_internal_timing` (19) →
+  `_timed_stage_guard_8616` factory + `_bounded_stage_guard_8616` +
+  `_install_bounded_lowering_guards_8616`; ss-linear patch intentionally stays
+  installed (documented).
+- Owning tests: 7 + 30 passed (timing guards, msc6 runtime state, runtime
+  support traces, clinic recovery contracts, clinic semantic stages).
+
+### structuring_analysis.py — 7 promoted complexity findings → 0
+
+- `_branch_split_partition_evidence_8616` (14) — earlier split into
+  partition-stat helpers.
+- `_collect_edge_guard_decision_tree_cases_8616` (43) →
+  `_DecisionTreeScan8616` state dataclass with `record_case`,
+  `record_empty_region`, `record_branch_split`, `_affine_step`,
+  `continuation_step`, `_normalization_status`, `summary`; plus
+  `_branch_split_child_summary_8616` and `_attach_expanded_root_summary_8616`.
+  BFS order, affine-offset propagation, duplicate/mismatch counters, and all
+  summary keys preserved.
+- `_execute` (11) → flattened nested `_impl`; iteration body extracted to
+  `_structure_iteration_8616`.
+- `_try_edge_guard_switch_cascade` (22) → `_CascadeScan8616` dataclass +
+  `_cascade_step_8616` + `_publish_edge_guard_cascade_8616`; module collector
+  `_cascade_guarded_successors_8616`.
+- `_find_next_edge_guard_switch_head_8616` (14) → `_next_head_walk_step_8616`
+  returning (candidates, pushes).
+- `_try_if_then_else` (11) → flattened nested `_impl`; merge tail extracted
+  to `_merge_if_then_else_8616`.
+- Owning tests: 99 passed (structuring switch/cyclic/grouped/codegen/
+  integration).
+
+### stack_c_ast_matching.py / validation_dataflow.py / corpus_scan.py / codeview_nb02_nb04.py — 30 findings → 0
+
+- `stack_c_ast_matching.py` (7): hoisted AST walkers to module scope
+  (`_iter_statement_nodes_8616`, `_push_statement_node_children_8616`), deduped
+  scaled-segment matching into `_scaled_segment_name_8616`, converted
+  `_stack_bp_displacement_8616`'s nested `collect` into the
+  `_StackBpDisplacement8616` accumulator with per-term helpers.
+- `validation_dataflow.py` (8): `_DefUseWalker8616` dataclass hoists the
+  nested `_check_reads`/`_walk` closures; `walk` split into per-node-kind
+  transfer methods. `_predicate_fact_8616` → `_predicate_node_token_8616`/
+  leaf/op helpers; `_indexed_stack_storage_key_8616` → base/element/untrackable
+  helpers; PLR0916 Shr gate → `_shr_rhs_byte_offset_8616`.
+- `corpus_scan.py` (8): flattened all nested `_impl`s; `classify_failure` →
+  `_stage_failure_class_8616`/`_failure_class_from_message_8616`;
+  `scan_function` stages → `_scan_function_stages_8616` plus
+  probe/prefix/cfg-preflight/cfg-shape/decompile helpers.
+- `codeview_nb02_nb04.py` (7): `_NB0204Collections8616` sink + label/legacy
+  subsection dispatch split; shared directory-entry walker; record/type
+  helpers for symbol parsing and source-module line tables.
+- Owning tests: 75 + 82 + 38 + 14 passed.

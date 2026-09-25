@@ -168,139 +168,193 @@ def parse_codeview_nb0204(binary_path: Path, *, load_base_linear: int = 0) -> Co
         return None
 
 
+@dataclass(slots=True)
+class _NB0204Collections8616:
+    """Accumulating collections for NB02/NB04 subsection parsing."""
+
+    code_labels: dict[int, str] = field(default_factory=dict)
+    data_labels: dict[int, str] = field(default_factory=dict)
+    procedures: list[CodeViewSymbol] = field(default_factory=list)
+    stack_variables: dict[str, list[CodeViewSymbol]] = field(default_factory=dict)
+    modules: list[str] = field(default_factory=list)
+    source_files: list[str] = field(default_factory=list)
+    line_map: dict[int, tuple[int, int]] = field(default_factory=dict)
+    type_record_names: list[str] = field(default_factory=list)
+    type_members: list[_nb00.CodeViewNB00TypeMember] = field(default_factory=list)
+    debug_identifiers: list[str] = field(default_factory=list)
+    legacy_modules: dict[int, _nb00.CodeViewNB00Module] = field(default_factory=dict)
+    legacy_publics: list[_nb00.CodeViewNB00PublicSymbol] = field(default_factory=list)
+
+
+def _parse_label_subsection_8616(
+    sink: _NB0204Collections8616,
+    subsection_type: int,
+    blob: bytes,
+    load_base_linear: int,
+) -> bool:
+    """Parse label/symbol producing subsections; return False if not handled."""
+    if subsection_type in _PUBLIC_SUBSECTIONS:
+        _parse_public_symbols(blob, sink.code_labels, sink.data_labels, load_base_linear)
+        return True
+    if subsection_type in _HASHED_PUBLIC_SUBSECTIONS:
+        sink.debug_identifiers.extend(_parse_legacy_symbol_names(blob))
+        return True
+    if subsection_type in _SYMBOL_SUBSECTIONS:
+        syms = _parse_symbol_records(blob)
+        _materialize_symbol_records(
+            syms, sink.code_labels, sink.data_labels, sink.procedures, sink.stack_variables, load_base_linear
+        )
+        sink.debug_identifiers.extend(_parse_legacy_symbol_names(blob))
+        return True
+    if subsection_type == CodeViewSubsectionType.SST_MODULE:
+        # Extract module name
+        sink.modules.extend(_parse_module_names(blob))
+        return True
+    if subsection_type == CodeViewSubsectionType.SST_SRCMODULE:
+        parsed_source_files, parsed_line_map = _parse_source_module_lines(
+            blob, load_base_linear=load_base_linear
+        )
+        sink.source_files.extend(parsed_source_files)
+        sink.line_map.update(parsed_line_map)
+        return True
+    return False
+
+
+def _parse_legacy_subsection_8616(
+    sink: _NB0204Collections8616,
+    entry: dict[str, Any],
+    subsection_type: int,
+    blob: bytes,
+    load_base_linear: int,
+) -> None:
+    """Parse legacy NB00-format subsections into the sink."""
+    if subsection_type == _nb00.CodeViewSubsectionType.MODULES:
+        module = _nb00._parse_module_subsection(entry["module"], blob)
+        sink.legacy_modules[module.module_index] = module
+        if module.name:
+            sink.modules.append(module.name)
+    elif subsection_type == _nb00.CodeViewSubsectionType.PUBLICS:
+        sink.legacy_publics.extend(_nb00._parse_publics_subsection(entry["module"], blob))
+    elif subsection_type == _nb00.CodeViewSubsectionType.TYPE:
+        definitions = _nb00._parse_type_subsection(blob)
+        sink.type_record_names.extend(_nb00._collect_type_record_names(definitions))
+        sink.type_members.extend(_nb00._collect_type_members(definitions))
+    elif subsection_type in _CV4_TYPE_SUBSECTIONS:
+        sink.type_record_names.extend(_parse_legacy_symbol_names(blob))
+        sink.type_members.extend(_collect_cv4_type_members(blob))
+    elif subsection_type in {_nb00.CodeViewSubsectionType.SRCLINES, _nb00.CodeViewSubsectionType.SRCLNSEG}:
+        parsed_source_files, parsed_line_map = _parse_legacy_source_lines(
+            blob,
+            sink.legacy_modules.get(entry["module"]),
+            load_base_linear=load_base_linear,
+        )
+        sink.source_files.extend(parsed_source_files)
+        sink.line_map.update(parsed_line_map)
+    elif subsection_type == _nb00.CodeViewSubsectionType.SYMBOLS:
+        sink.debug_identifiers.extend(_parse_legacy_symbol_names(blob))
+
+
+def _apply_legacy_publics_8616(sink: _NB0204Collections8616, load_base_linear: int) -> None:
+    """Fold legacy public symbols into code/data label maps."""
+    if not sink.legacy_publics:
+        return
+    module_ranges = tuple(
+        (module.linear_range(load_base_linear=load_base_linear), module.module_index)
+        for module in sink.legacy_modules.values()
+    )
+    for symbol in sink.legacy_publics:
+        linear = symbol.linear_addr(load_base_linear=load_base_linear)
+        name = symbol.name.lstrip("_")
+        if _nb00._public_is_code_symbol(symbol, linear=linear, module_ranges=module_ranges):
+            sink.code_labels.setdefault(linear, name)
+        else:
+            sink.data_labels.setdefault(linear, symbol.name)
+
+
 def parse_codeview_nb0204_bytes(data: bytes, *, load_base_linear: int = 0) -> CodeViewNB0204Info | None:
     """Parse optional NB02/NB04 CodeView debug metadata from executable bytes."""
+    located = find_codeview_nb0204(data)
+    if located is None:
+        return None
 
-    def _impl() -> CodeViewNB0204Info | None:
-        located = find_codeview_nb0204(data)
-        if located is None:
+    version, debug_base = located
+
+    try:
+        # Read header at debug_base
+        # struct CVHeader { char sig[4]; uint32_t subdir_offset; }
+        if debug_base + 8 > len(data):
             return None
 
-        version, debug_base = located
+        _sig, subdir_offset = struct.unpack_from("<4sI", data, debug_base)
+        debug_offset = debug_base + subdir_offset
 
-        try:
-            # Read header at debug_base
-            # struct CVHeader { char sig[4]; uint32_t subdir_offset; }
-            if debug_base + 8 > len(data):
-                return None
+        if not (0 <= debug_offset < len(data)):
+            return None
 
-            _sig, subdir_offset = struct.unpack_from("<4sI", data, debug_base)
-            debug_offset = debug_base + subdir_offset
+        sink = _NB0204Collections8616()
 
-            if not (0 <= debug_offset < len(data)):
-                return None
+        # Parse subsection directory
+        directory_entries = _parse_subsection_directory(data, debug_base, debug_offset)
 
-            code_labels: dict[int, str] = {}
-            data_labels: dict[int, str] = {}
-            procedures: list[CodeViewSymbol] = []
-            stack_variables: dict[str, list[CodeViewSymbol]] = {}
-            modules: list[str] = []
-            source_files: list[str] = []
-            line_map: dict[int, tuple[int, int]] = {}
-            type_record_names: list[str] = []
-            type_members: list[_nb00.CodeViewNB00TypeMember] = []
-            debug_identifiers: list[str] = []
-            legacy_modules: dict[int, _nb00.CodeViewNB00Module] = {}
-            legacy_publics: list[_nb00.CodeViewNB00PublicSymbol] = []
+        for entry in directory_entries:
+            offset = entry["offset"]
+            size = entry["size"]
 
-            # Parse subsection directory
-            directory_entries = _parse_subsection_directory(data, debug_base, debug_offset)
+            if offset + size > len(data):
+                continue
 
-            for entry in directory_entries:
-                subsection_type = entry["type"]
-                offset = entry["offset"]
-                size = entry["size"]
+            blob = data[offset : offset + size]
+            subsection_type = entry["type"]
+            if not _parse_label_subsection_8616(sink, subsection_type, blob, load_base_linear):
+                _parse_legacy_subsection_8616(sink, entry, subsection_type, blob, load_base_linear)
 
-                if offset + size > len(data):
-                    continue
+        _apply_legacy_publics_8616(sink, load_base_linear)
 
-                blob = data[offset : offset + size]
+        return CodeViewNB0204Info(
+            version=version,
+            debug_base=debug_base,
+            code_labels=sink.code_labels,
+            data_labels=sink.data_labels,
+            procedures=tuple(sink.procedures),
+            stack_variables=sink.stack_variables,
+            line_map=sink.line_map,
+            modules=tuple(sink.modules),
+            source_files=tuple(sink.source_files),
+            type_record_names=tuple(dict.fromkeys(sink.type_record_names)),
+            type_members=tuple(sink.type_members),
+            debug_identifiers=tuple(dict.fromkeys(sink.debug_identifiers)),
+        )
 
-                if subsection_type in _PUBLIC_SUBSECTIONS:
-                    _parse_public_symbols(blob, code_labels, data_labels, load_base_linear)
+    except (struct.error, ValueError, IndexError):
+        return None
 
-                elif subsection_type in _HASHED_PUBLIC_SUBSECTIONS:
-                    debug_identifiers.extend(_parse_legacy_symbol_names(blob))
 
-                elif subsection_type in _SYMBOL_SUBSECTIONS:
-                    syms = _parse_symbol_records(blob)
-                    _materialize_symbol_records(syms, code_labels, data_labels, procedures, stack_variables, load_base_linear)
-                    debug_identifiers.extend(_parse_legacy_symbol_names(blob))
-
-                elif subsection_type == CodeViewSubsectionType.SST_MODULE:
-                    # Extract module name
-                    names = _parse_module_names(blob)
-                    modules.extend(names)
-
-                elif subsection_type == CodeViewSubsectionType.SST_SRCMODULE:
-                    parsed_source_files, parsed_line_map = _parse_source_module_lines(
-                        blob, load_base_linear=load_base_linear
-                    )
-                    source_files.extend(parsed_source_files)
-                    line_map.update(parsed_line_map)
-
-                elif subsection_type == _nb00.CodeViewSubsectionType.MODULES:
-                    module = _nb00._parse_module_subsection(entry["module"], blob)
-                    legacy_modules[module.module_index] = module
-                    if module.name:
-                        modules.append(module.name)
-
-                elif subsection_type == _nb00.CodeViewSubsectionType.PUBLICS:
-                    legacy_publics.extend(_nb00._parse_publics_subsection(entry["module"], blob))
-
-                elif subsection_type == _nb00.CodeViewSubsectionType.TYPE:
-                    definitions = _nb00._parse_type_subsection(blob)
-                    type_record_names.extend(_nb00._collect_type_record_names(definitions))
-                    type_members.extend(_nb00._collect_type_members(definitions))
-
-                elif subsection_type in _CV4_TYPE_SUBSECTIONS:
-                    type_record_names.extend(_parse_legacy_symbol_names(blob))
-                    type_members.extend(_collect_cv4_type_members(blob))
-
-                elif subsection_type in {_nb00.CodeViewSubsectionType.SRCLINES, _nb00.CodeViewSubsectionType.SRCLNSEG}:
-                    parsed_source_files, parsed_line_map = _parse_legacy_source_lines(
-                        blob,
-                        legacy_modules.get(entry["module"]),
-                        load_base_linear=load_base_linear,
-                    )
-                    source_files.extend(parsed_source_files)
-                    line_map.update(parsed_line_map)
-
-                elif subsection_type == _nb00.CodeViewSubsectionType.SYMBOLS:
-                    debug_identifiers.extend(_parse_legacy_symbol_names(blob))
-
-            if legacy_publics:
-                module_ranges = tuple(
-                    (module.linear_range(load_base_linear=load_base_linear), module.module_index)
-                    for module in legacy_modules.values()
-                )
-                for symbol in legacy_publics:
-                    linear = symbol.linear_addr(load_base_linear=load_base_linear)
-                    name = symbol.name.lstrip("_")
-                    if _nb00._public_is_code_symbol(symbol, linear=linear, module_ranges=module_ranges):
-                        code_labels.setdefault(linear, name)
-                    else:
-                        data_labels.setdefault(linear, symbol.name)
-
-            return CodeViewNB0204Info(
-                version=version,
-                debug_base=debug_base,
-                code_labels=code_labels,
-                data_labels=data_labels,
-                procedures=tuple(procedures),
-                stack_variables=stack_variables,
-                line_map=line_map,
-                modules=tuple(modules),
-                source_files=tuple(source_files),
-                type_record_names=tuple(dict.fromkeys(type_record_names)),
-                type_members=tuple(type_members),
-                debug_identifiers=tuple(dict.fromkeys(debug_identifiers)),
+def _parse_directory_entries_8616(
+    data: bytes,
+    debug_base: int,
+    offset: int,
+    count: int,
+    entry_fmt: str,
+    entry_stride: int,
+) -> list[dict[str, Any]]:
+    """Parse a fixed-stride run of subsection directory entries."""
+    entries: list[dict[str, Any]] = []
+    for _ in range(count):
+        entry_type, entry_module, entry_offset, subsection_size = struct.unpack_from(
+            entry_fmt, data, offset
+        )
+        abs_offset = debug_base + entry_offset
+        if 0 <= abs_offset <= len(data) and subsection_size > 0:
+            entries.append(
+                {
+                    "type": entry_type,
+                    "module": entry_module,
+                    "offset": abs_offset,
+                    "size": subsection_size,
+                }
             )
-
-        except (struct.error, ValueError, IndexError):
-            return None
-
-    return _impl()
+        offset += entry_stride
+    return entries
 
 
 def _parse_subsection_directory(
@@ -309,7 +363,7 @@ def _parse_subsection_directory(
     directory_offset: int,
 ) -> list[dict[str, Any]]:
     """Parse subsection directory entries."""
-    entries = []
+    entries: list[dict[str, Any]] = []
 
     try:
         if directory_offset + 16 <= len(data):
@@ -317,41 +371,16 @@ def _parse_subsection_directory(
             if header_size >= 16 and entry_size >= 12 and 0 < count < 0x10000:
                 offset = directory_offset + header_size
                 if offset + count * entry_size <= len(data):
-                    for _ in range(count):
-                        entry_type, entry_module, entry_offset, subsection_size = struct.unpack_from(
-                            "<HHII", data, offset
-                        )
-                        abs_offset = debug_base + entry_offset
-                        if 0 <= abs_offset <= len(data) and subsection_size > 0:
-                            entries.append(
-                                {
-                                    "type": entry_type,
-                                    "module": entry_module,
-                                    "offset": abs_offset,
-                                    "size": subsection_size,
-                                }
-                            )
-                        offset += entry_size
-                    return entries
+                    return _parse_directory_entries_8616(
+                        data, debug_base, offset, count, "<HHII", entry_size
+                    )
 
         if directory_offset + 2 > len(data):
             return entries
         count = struct.unpack_from("<H", data, directory_offset)[0]
         offset = directory_offset + 2
         if count and offset + count * 10 <= len(data):
-            for _ in range(count):
-                entry_type, entry_module, entry_offset, entry_size = struct.unpack_from("<HHIH", data, offset)
-                abs_offset = debug_base + entry_offset
-                if 0 <= abs_offset <= len(data) and entry_size > 0:
-                    entries.append(
-                        {
-                            "type": entry_type,
-                            "module": entry_module,
-                            "offset": abs_offset,
-                            "size": entry_size,
-                        }
-                    )
-                offset += 10
+            entries = _parse_directory_entries_8616(data, debug_base, offset, count, "<HHIH", 10)
 
     except (struct.error, ValueError):
         pass
@@ -396,86 +425,149 @@ def _parse_symbol_records(blob: bytes) -> list[CodeViewSymbol]:
     return symbols
 
 
+def _parse_bprel_symbol_8616(
+    record_type: int, blob: bytes, data_offset: int, record_end: int, current_procedure: str | None
+) -> CodeViewSymbol | None:
+    """Parse one S_BPREL16 BP-relative stack variable record."""
+    if data_offset + 4 > record_end:
+        return None
+    bp_offset, data_type = struct.unpack_from("<hH", blob, data_offset)
+    name = _read_pascal_string(blob, data_offset + 4, record_end)
+    if not name:
+        return None
+    return CodeViewSymbol(
+        type_code=record_type,
+        name=name,
+        offset=bp_offset,
+        segment=None,
+        data_type=data_type,
+        extra={"bp_relative": True, "procedure": current_procedure},
+    )
+
+
+def _parse_data_symbol_8616(
+    record_type: int, blob: bytes, data_offset: int, record_end: int
+) -> CodeViewSymbol | None:
+    """Parse one S_LDATA16/S_PUB16 segmented data symbol record."""
+    if data_offset + 6 > record_end:
+        return None
+    symbol_offset, segment, data_type = struct.unpack_from("<HHH", blob, data_offset)
+    name = _read_pascal_string(blob, data_offset + 6, record_end)
+    if not name:
+        return None
+    return CodeViewSymbol(
+        type_code=record_type,
+        name=name,
+        offset=symbol_offset,
+        segment=segment,
+        data_type=data_type,
+    )
+
+
+def _skip_record_padding_8616(blob: bytes, offset: int) -> int:
+    """Skip 4-byte alignment padding after a record."""
+    while offset < len(blob) and offset % 4:
+        if blob[offset] != 0:
+            break
+        offset += 1
+    return offset
+
+
+def _parse_symbol_record_8616(
+    record_type: int,
+    blob: bytes,
+    data_offset: int,
+    record_end: int,
+    current_procedure: str | None,
+) -> tuple[CodeViewSymbol | None, str | None]:
+    """Parse one symbol record; return it plus the updated procedure context."""
+    if record_type in _PROC16_TYPES:
+        symbol = _parse_proc16_symbol(record_type, blob, data_offset, record_end)
+        if symbol is not None:
+            return symbol, symbol.name or current_procedure
+        return None, current_procedure
+    if record_type == CodeViewSymbolType.S_END:
+        return None, None
+    if record_type == CodeViewSymbolType.S_BPREL16:
+        return (
+            _parse_bprel_symbol_8616(record_type, blob, data_offset, record_end, current_procedure),
+            current_procedure,
+        )
+    if record_type in _DATA16_TYPES or record_type == CodeViewSymbolType.S_PUB16:
+        return _parse_data_symbol_8616(record_type, blob, data_offset, record_end), current_procedure
+    return None, current_procedure
+
+
 def _parse_symbol_records_from_offset(blob: bytes, initial_offset: int) -> list[CodeViewSymbol]:
-    def _impl() -> list[CodeViewSymbol]:
-        """Parse symbol records from SST_SYMBOLS subsection."""
-        symbols: list[CodeViewSymbol] = []
-        offset = initial_offset
-        current_procedure: str | None = None
+    """Parse symbol records from SST_SYMBOLS subsection."""
+    symbols: list[CodeViewSymbol] = []
+    offset = initial_offset
+    current_procedure: str | None = None
 
-        while offset < len(blob):
-            try:
-                # Each record: length (2), type (2), data...
-                if offset + 4 > len(blob):
-                    break
-
-                length = struct.unpack_from("<H", blob, offset)[0]
-                offset += 2
-
-                if length < 2 or offset + length > len(blob):
-                    break
-
-                record_type = struct.unpack_from("<H", blob, offset)[0]
-                offset += 2
-                data_offset = offset
-                record_end = data_offset + length - 2
-
-                # Record-specific parsing
-                if record_type in _PROC16_TYPES:
-                    symbol = _parse_proc16_symbol(record_type, blob, data_offset, record_end)
-                    if symbol is not None:
-                        symbols.append(symbol)
-                        current_procedure = symbol.name or current_procedure
-
-                elif record_type == CodeViewSymbolType.S_END:
-                    current_procedure = None
-
-                elif record_type == CodeViewSymbolType.S_BPREL16:
-                    # struct S_BPREL16 { int16_t offset; uint16_t type; ... char name[]; }
-                    if data_offset + 4 <= record_end:
-                        bp_offset, data_type = struct.unpack_from("<hH", blob, data_offset)
-                        name = _read_pascal_string(blob, data_offset + 4, record_end)
-                        if name:
-                            symbols.append(
-                                CodeViewSymbol(
-                                    type_code=record_type,
-                                    name=name,
-                                    offset=bp_offset,
-                                    segment=None,
-                                    data_type=data_type,
-                                    extra={"bp_relative": True, "procedure": current_procedure},
-                                )
-                            )
-
-                elif record_type in _DATA16_TYPES or record_type == CodeViewSymbolType.S_PUB16:
-                    # struct S_LDATA16 { uint16_t offset; uint16_t segment; uint16_t type; ... char name[]; }
-                    if data_offset + 6 <= record_end:
-                        symbol_offset, segment, data_type = struct.unpack_from("<HHH", blob, data_offset)
-                        name = _read_pascal_string(blob, data_offset + 6, record_end)
-                        if name:
-                            symbols.append(
-                                CodeViewSymbol(
-                                    type_code=record_type,
-                                    name=name,
-                                    offset=symbol_offset,
-                                    segment=segment,
-                                    data_type=data_type,
-                                )
-                            )
-
-                # Skip to next record
-                offset = record_end
-                while offset < len(blob) and offset % 4:
-                    if blob[offset] != 0:
-                        break
-                    offset += 1
-
-            except (struct.error, ValueError, IndexError):
+    while offset < len(blob):
+        try:
+            # Each record: length (2), type (2), data...
+            if offset + 4 > len(blob):
                 break
 
-        return symbols
+            length = struct.unpack_from("<H", blob, offset)[0]
+            offset += 2
 
-    return _impl()
+            if length < 2 or offset + length > len(blob):
+                break
+
+            record_type = struct.unpack_from("<H", blob, offset)[0]
+            offset += 2
+            data_offset = offset
+            record_end = data_offset + length - 2
+
+            # Record-specific parsing
+            symbol, current_procedure = _parse_symbol_record_8616(
+                record_type, blob, data_offset, record_end, current_procedure
+            )
+            if symbol is not None:
+                symbols.append(symbol)
+
+            # Skip to next record
+            offset = _skip_record_padding_8616(blob, record_end)
+
+        except (struct.error, ValueError, IndexError):
+            break
+
+    return symbols
+
+
+def _materialize_symbol_record_8616(
+    sym: CodeViewSymbol,
+    code_labels: dict[int, str],
+    data_labels: dict[int, str],
+    procedures: list[CodeViewSymbol],
+    stack_variables: dict[str, list[CodeViewSymbol]],
+    load_base_linear: int,
+) -> None:
+    """Route one parsed symbol into its label/procedure/stack bucket."""
+    linear = _symbol_linear_addr(sym, load_base_linear=load_base_linear)
+    if sym.is_procedure():
+        procedures.append(sym)
+        if sym.name and linear is not None:
+            code_labels[linear] = sym.name
+        return
+    if sym.is_stack_var():
+        procedure_name = sym.extra.get("procedure") if isinstance(sym.extra, dict) else None
+        if not procedure_name:
+            procedure_name = "<global>"
+        stack_variables.setdefault(procedure_name, []).append(sym)
+        return
+    if sym.is_data_symbol():
+        if sym.name and linear is not None:
+            data_labels[linear] = sym.name
+        return
+    if sym.type_code != CodeViewSymbolType.S_PUB16 or not (sym.name and linear is not None):
+        return
+    if _public_name_looks_like_data(sym.name):
+        data_labels.setdefault(linear, sym.name)
+    else:
+        code_labels.setdefault(linear, sym.name.lstrip("_"))
 
 
 def _materialize_symbol_records(
@@ -487,27 +579,9 @@ def _materialize_symbol_records(
     load_base_linear: int,
 ) -> None:
     for sym in syms:
-        if sym.is_procedure():
-            procedures.append(sym)
-            linear = _symbol_linear_addr(sym, load_base_linear=load_base_linear)
-            if sym.name and linear is not None:
-                code_labels[linear] = sym.name
-        elif sym.is_stack_var():
-            procedure_name = sym.extra.get("procedure") if isinstance(sym.extra, dict) else None
-            if not procedure_name:
-                procedure_name = "<global>"
-            stack_variables.setdefault(procedure_name, []).append(sym)
-        elif sym.is_data_symbol():
-            linear = _symbol_linear_addr(sym, load_base_linear=load_base_linear)
-            if sym.name and linear is not None:
-                data_labels[linear] = sym.name
-        elif sym.type_code == CodeViewSymbolType.S_PUB16:
-            linear = _symbol_linear_addr(sym, load_base_linear=load_base_linear)
-            if sym.name and linear is not None:
-                if _public_name_looks_like_data(sym.name):
-                    data_labels.setdefault(linear, sym.name)
-                else:
-                    code_labels.setdefault(linear, sym.name.lstrip("_"))
+        _materialize_symbol_record_8616(
+            sym, code_labels, data_labels, procedures, stack_variables, load_base_linear
+        )
 
 
 def _parse_proc16_symbol(record_type: int, blob: bytes, data_offset: int, record_end: int) -> CodeViewSymbol | None:
@@ -566,6 +640,57 @@ def _public_name_looks_like_data(name: str) -> bool:
     return lowered.startswith(("dgroup@", "byte_", "word_", "dword_", "off_", "stru_", "seg_", "data_"))
 
 
+def _collect_source_line_pairs_8616(
+    blob: bytes,
+    line_base: int,
+    line_map: dict[int, tuple[int, int]],
+    load_base_linear: int,
+) -> None:
+    """Collect offset/line pairs from one segment's line table."""
+    if line_base + 4 > len(blob):
+        return
+    segment, pair_count = struct.unpack_from("<HH", blob, line_base)
+    pair_offset = line_base + 4
+    if pair_count > 0x10000 or pair_offset + pair_count * 6 > len(blob):
+        return
+    offsets = struct.unpack_from(f"<{pair_count}I", blob, pair_offset) if pair_count else ()
+    pair_offset += pair_count * 4
+    lines = struct.unpack_from(f"<{pair_count}H", blob, pair_offset) if pair_count else ()
+    for code_offset, source_line in zip(offsets, lines, strict=False):
+        linear = load_base_linear + (segment << 4) + code_offset
+        line_map[linear] = (source_line, 0)
+
+
+def _parse_source_file_record_8616(
+    blob: bytes,
+    file_base: int,
+    source_files: list[str],
+    line_map: dict[int, tuple[int, int]],
+    load_base_linear: int,
+) -> None:
+    """Parse one source file record's name and per-segment line tables."""
+    if file_base + 6 > len(blob):
+        return
+    file_segment_count = struct.unpack_from("<H", blob, file_base)[0]
+    if file_segment_count > 512:
+        return
+    file_offset = _source_file_record_table_offset(blob, file_base, file_segment_count)
+    if file_offset is None:
+        return
+    line_bases = struct.unpack_from(f"<{file_segment_count}I", blob, file_offset) if file_segment_count else ()
+    file_offset += file_segment_count * 4
+    file_offset += file_segment_count * 8
+    if file_offset < len(blob):
+        name_length = blob[file_offset]
+        name_start = file_offset + 1
+        name_end = name_start + name_length
+        if name_length and name_end <= len(blob):
+            source_files.append(blob[name_start:name_end].decode("ascii", errors="ignore"))
+
+    for line_base in line_bases:
+        _collect_source_line_pairs_8616(blob, line_base, line_map, load_base_linear)
+
+
 def _parse_source_module_lines(
     blob: bytes,
     *,
@@ -590,37 +715,7 @@ def _parse_source_module_lines(
             offset += 2
 
         for file_base in file_bases:
-            if file_base + 6 > len(blob):
-                continue
-            file_segment_count = struct.unpack_from("<H", blob, file_base)[0]
-            if file_segment_count > 512:
-                continue
-            file_offset = _source_file_record_table_offset(blob, file_base, file_segment_count)
-            if file_offset is None:
-                continue
-            line_bases = struct.unpack_from(f"<{file_segment_count}I", blob, file_offset) if file_segment_count else ()
-            file_offset += file_segment_count * 4
-            file_offset += file_segment_count * 8
-            if file_offset < len(blob):
-                name_length = blob[file_offset]
-                name_start = file_offset + 1
-                name_end = name_start + name_length
-                if name_length and name_end <= len(blob):
-                    source_files.append(blob[name_start:name_end].decode("ascii", errors="ignore"))
-
-            for line_base in line_bases:
-                if line_base + 4 > len(blob):
-                    continue
-                segment, pair_count = struct.unpack_from("<HH", blob, line_base)
-                pair_offset = line_base + 4
-                if pair_count > 0x10000 or pair_offset + pair_count * 6 > len(blob):
-                    continue
-                offsets = struct.unpack_from(f"<{pair_count}I", blob, pair_offset) if pair_count else ()
-                pair_offset += pair_count * 4
-                lines = struct.unpack_from(f"<{pair_count}H", blob, pair_offset) if pair_count else ()
-                for code_offset, source_line in zip(offsets, lines, strict=False):
-                    linear = load_base_linear + (segment << 4) + code_offset
-                    line_map[linear] = (source_line, 0)
+            _parse_source_file_record_8616(blob, file_base, source_files, line_map, load_base_linear)
     except (struct.error, ValueError):
         return source_files, line_map
     return source_files, line_map

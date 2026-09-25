@@ -74,6 +74,43 @@ def _nonempty_string_list(record: dict[str, object], key: str) -> bool:
     return isinstance(value, list) and bool(value) and all(isinstance(item, str) and item for item in value)
 
 
+def _audit_record(
+    record: dict[str, object],
+    index: int,
+    seen: set[str],
+    statuses: dict[str, int],
+) -> list[str]:
+    """Audit one inventory record, updating seen nodeids and status counts."""
+    errors: list[str] = []
+    missing = sorted(REQUIRED_FIELDS - record.keys())
+    if missing:
+        errors.append(f"record[{index}] missing fields: {', '.join(missing)}")
+    nodeid = record.get("nodeid")
+    if not isinstance(nodeid, str) or not nodeid:
+        errors.append(f"record[{index}] has invalid nodeid")
+        node_label = f"record[{index}]"
+    else:
+        node_label = nodeid
+        if nodeid in seen:
+            errors.append(f"{nodeid}: duplicate nodeid")
+        seen.add(nodeid)
+    if not _nonempty_string_list(record, "owner_layers"):
+        errors.append(f"{node_label}: missing owner layers")
+    if not _nonempty_string_list(record, "required_pipeline_evidence"):
+        errors.append(f"{node_label}: missing required evidence")
+    purpose = record.get("purpose")
+    if not isinstance(purpose, str) or not purpose or purpose == "unclassified":
+        errors.append(f"{node_label}: unclassified purpose")
+    status = record.get("inventory_status")
+    if not isinstance(status, str) or not status:
+        errors.append(f"{node_label}: invalid inventory status")
+    else:
+        statuses[status] = statuses.get(status, 0) + 1
+        if status == "review-needed":
+            errors.append(f"{node_label}: inventory review is unresolved")
+    return errors
+
+
 def validate_inventory_payload(payload: object) -> InventoryAudit:
     """Validate one decoded profile payload without relying on text output."""
 
@@ -92,33 +129,7 @@ def validate_inventory_payload(payload: object) -> InventoryAudit:
         if not isinstance(raw_record, dict):
             errors.append(f"record[{index}] is not an object")
             continue
-        record: dict[str, object] = raw_record
-        missing = sorted(REQUIRED_FIELDS - record.keys())
-        if missing:
-            errors.append(f"record[{index}] missing fields: {', '.join(missing)}")
-        nodeid = record.get("nodeid")
-        if not isinstance(nodeid, str) or not nodeid:
-            errors.append(f"record[{index}] has invalid nodeid")
-            node_label = f"record[{index}]"
-        else:
-            node_label = nodeid
-            if nodeid in seen:
-                errors.append(f"{nodeid}: duplicate nodeid")
-            seen.add(nodeid)
-        if not _nonempty_string_list(record, "owner_layers"):
-            errors.append(f"{node_label}: missing owner layers")
-        if not _nonempty_string_list(record, "required_pipeline_evidence"):
-            errors.append(f"{node_label}: missing required evidence")
-        purpose = record.get("purpose")
-        if not isinstance(purpose, str) or not purpose or purpose == "unclassified":
-            errors.append(f"{node_label}: unclassified purpose")
-        status = record.get("inventory_status")
-        if not isinstance(status, str) or not status:
-            errors.append(f"{node_label}: invalid inventory status")
-        else:
-            statuses[status] = statuses.get(status, 0) + 1
-            if status == "review-needed":
-                errors.append(f"{node_label}: inventory review is unresolved")
+        errors.extend(_audit_record(raw_record, index, seen, statuses))
     collected_count = payload.get("collected_count")
     if collected_count != len(raw_records):
         errors.append(f"collected_count={collected_count!r} does not match records={len(raw_records)}")

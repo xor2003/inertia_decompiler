@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Protocol, cast
 
 import networkx as nx
 
@@ -132,7 +132,7 @@ def _snapshot_nodes_8616(
 def _snapshot_graph_8616(
     block_set: frozenset[int],
     node_by_addr: dict[int, object],
-    source_graph: Any,
+    source_graph: nx.DiGraph,
     project: object,
     reference_addr: int,
 ) -> nx.DiGraph | None:

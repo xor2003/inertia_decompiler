@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
@@ -236,6 +236,63 @@ def _single_typed_edge_condition_8616(region: Region) -> ConditionIR | None:
     return typed_guards[0]
 
 
+def _split_predicate_roles_8616(
+    successor_regions: tuple[Region, ...],
+) -> tuple[list[tuple[Region, ConditionIR]], list[Region]]:
+    """Classify successors into explicit-predicate and implicit-complement arms."""
+    explicit: list[tuple[Region, ConditionIR]] = []
+    implicit: list[Region] = []
+    for region in successor_regions:
+        condition = _single_typed_edge_condition_8616(region)
+        if condition is not None and condition.op in _COMPLEMENT_CONDITION_OPS_8616:
+            explicit.append((region, condition))
+        elif condition is None:
+            implicit.append(region)
+    return explicit, implicit
+
+
+def _partitioned_successor_8616(
+    item: dict[str, object],
+    explicit_region_id: int | None,
+    explicit_op: str,
+    implicit_op: str,
+    predicate_rhs: int | None,
+) -> dict[str, object]:
+    """Partition one successor's normalized case values by the edge predicate."""
+    region_id = item.get("region_id")
+    raw_values = item.get("normalized_case_values", ())
+    raw_region_ids = item.get("normalized_case_region_ids", ())
+    normalized_values = [value for value in raw_values if isinstance(value, int)] if isinstance(raw_values, (tuple, list)) else []
+    normalized_region_ids = [
+        region_id for region_id in raw_region_ids if isinstance(region_id, int)
+    ] if isinstance(raw_region_ids, (tuple, list)) else [
+    ]
+    predicate_op = explicit_op if region_id == explicit_region_id else implicit_op
+    matching_values: list[int] = []
+    mismatching_values: list[int] = []
+    matching_region_ids: list[int] = []
+    mismatching_region_ids: list[int] = []
+    if predicate_rhs is not None:
+        for index, value in enumerate(normalized_values):
+            value_region_id = normalized_region_ids[index] if index < len(normalized_region_ids) else None
+            if _condition_op_matches_value_8616(predicate_op, value, predicate_rhs):
+                matching_values.append(value)
+                if value_region_id is not None:
+                    matching_region_ids.append(value_region_id)
+            else:
+                mismatching_values.append(value)
+                if value_region_id is not None:
+                    mismatching_region_ids.append(value_region_id)
+    return {
+        **item,
+        "partition_predicate_op": predicate_op,
+        "predicate_matching_normalized_case_region_ids": matching_region_ids,
+        "predicate_matching_normalized_case_values": matching_values,
+        "predicate_mismatching_normalized_case_region_ids": mismatching_region_ids,
+        "predicate_mismatching_normalized_case_values": mismatching_values,
+    }
+
+
 def _branch_split_partition_evidence_8616(
     successor_regions: tuple[Region, ...],
     subtree_summaries: list[dict[str, object]],
@@ -278,14 +335,7 @@ def _branch_split_partition_evidence_8616(
     if len(successor_regions) != 2:
         return base
 
-    explicit: list[tuple[Region, ConditionIR]] = []
-    implicit: list[Region] = []
-    for region in successor_regions:
-        condition = _single_typed_edge_condition_8616(region)
-        if condition is not None and condition.op in _COMPLEMENT_CONDITION_OPS_8616:
-            explicit.append((region, condition))
-        elif condition is None:
-            implicit.append(region)
+    explicit, implicit = _split_predicate_roles_8616(successor_regions)
 
     if len(explicit) != 1:
         base["status"] = BranchSplitPartitionStatus8616.ExplicitPredicateNotUnique.value
@@ -301,42 +351,10 @@ def _branch_split_partition_evidence_8616(
     predicate_rhs = _condition_const_value_8616(explicit_condition.rhs)
     explicit_op = explicit_condition.op
     implicit_op = _COMPLEMENT_CONDITION_OPS_8616[explicit_condition.op]
-    partitioned_successors: list[dict[str, object]] = []
-    for item in base_successors:
-        region_id = item.get("region_id")
-        raw_values = item.get("normalized_case_values", ())
-        raw_region_ids = item.get("normalized_case_region_ids", ())
-        normalized_values = [value for value in raw_values if isinstance(value, int)] if isinstance(raw_values, (tuple, list)) else []
-        normalized_region_ids = [
-            region_id for region_id in raw_region_ids if isinstance(region_id, int)
-        ] if isinstance(raw_region_ids, (tuple, list)) else [
-        ]
-        predicate_op = explicit_op if region_id == explicit_region_id else implicit_op
-        matching_values: list[int] = []
-        mismatching_values: list[int] = []
-        matching_region_ids: list[int] = []
-        mismatching_region_ids: list[int] = []
-        if predicate_rhs is not None:
-            for index, value in enumerate(normalized_values):
-                value_region_id = normalized_region_ids[index] if index < len(normalized_region_ids) else None
-                if _condition_op_matches_value_8616(predicate_op, value, predicate_rhs):
-                    matching_values.append(value)
-                    if value_region_id is not None:
-                        matching_region_ids.append(value_region_id)
-                else:
-                    mismatching_values.append(value)
-                    if value_region_id is not None:
-                        mismatching_region_ids.append(value_region_id)
-        partitioned_successors.append(
-            {
-                **item,
-                "partition_predicate_op": predicate_op,
-                "predicate_matching_normalized_case_region_ids": matching_region_ids,
-                "predicate_matching_normalized_case_values": matching_values,
-                "predicate_mismatching_normalized_case_region_ids": mismatching_region_ids,
-                "predicate_mismatching_normalized_case_values": mismatching_values,
-            }
-        )
+    partitioned_successors = [
+        _partitioned_successor_8616(item, explicit_region_id, explicit_op, implicit_op, predicate_rhs)
+        for item in base_successors
+    ]
     subtree_partition_statuses = [
         subtree_by_region_id.get(region.region_id if isinstance(region.region_id, int) else None, {}).get(
             "partition_status"
@@ -616,6 +634,434 @@ def _same_lhs_8616(lhs: object | None, guard: ConditionIR) -> object | None:
     return lhs if guard.lhs == lhs else None
 
 
+@dataclass(slots=True)
+class _DecisionTreeScan8616:
+    """Accumulating scan state for edge-guard decision-tree case collection."""
+
+    graph: RegionGraph
+    include_branch_split_subtrees: bool
+    stop_region_set: set[Region]
+    loopback_target: Region
+    visited: set[Region] = field(default_factory=set)
+    lhs_key: object | None = None
+    cases: list[tuple[Region, int]] = field(default_factory=list)
+    normalized_cases: list[tuple[Region, int]] = field(default_factory=list)
+    case_values: set[int] = field(default_factory=set)
+    normalized_case_values: set[int] = field(default_factory=set)
+    producer_semantics: list[tuple[object, ...]] = field(default_factory=list)
+    normalized_duplicate_value_count: int = 0
+    normalization_branch_split_count: int = 0
+    normalization_branch_splits: list[dict[str, object]] = field(default_factory=list)
+    normalization_branch_subtrees: list[dict[str, object]] = field(default_factory=list)
+    range_split_count: int = 0
+    duplicate_value_count: int = 0
+    lhs_mismatch_count: int = 0
+    default_candidates: list[Region] = field(default_factory=list)
+    loopback_default_candidates: list[Region] = field(default_factory=list)
+    nondefault_empty_regions: list[Region] = field(default_factory=list)
+    unresolved_continuation_count: int = 0
+
+    def record_case(
+        self,
+        case_region: Region,
+        guard: ConditionIR,
+        value: int,
+        affine_offset: int,
+        last_affine_semantics: tuple[object, ...] | None,
+    ) -> None:
+        """Record one equality-guarded case successor and its normalized value."""
+        if case_region in self.stop_region_set:
+            return
+        next_lhs = _same_lhs_8616(self.lhs_key, guard)
+        if next_lhs is None:
+            self.lhs_mismatch_count += 1
+            return
+        self.lhs_key = next_lhs
+        if value not in self.case_values:
+            self.case_values.add(value)
+            self.cases.append((case_region, value))
+        else:
+            self.duplicate_value_count += 1
+        case_semantics = _region_edge_producer_semantics_8616(case_region)
+        self.producer_semantics.extend(case_semantics)
+        normalized_value = None
+        for semantics in case_semantics:
+            cmp_value = _edge_guard_cmp_value_8616(semantics)
+            if cmp_value is not None:
+                normalized_value = cmp_value
+                break
+            delta = _edge_guard_affine_delta_8616(semantics)
+            if delta is not None:
+                normalized_value = affine_offset if semantics == last_affine_semantics else affine_offset + delta
+                break
+        if normalized_value is not None:
+            if normalized_value in self.normalized_case_values:
+                self.normalized_duplicate_value_count += 1
+            else:
+                self.normalized_case_values.add(normalized_value)
+                self.normalized_cases.append((case_region, normalized_value))
+
+    def record_empty_region(self, current: Region, default_eligible_path: bool) -> bool:
+        """Classify a case-less region; return True when the succ walk is skipped."""
+        if not _region_reaches_eq_switch_head_8616(self.graph, current):
+            self.default_candidates.append(current)
+            return True
+        if (
+            default_eligible_path
+            and len(self.graph.successors(current)) == 1
+            and _region_reaches_region_through_continuation_8616(self.graph, current, self.loopback_target)
+        ):
+            self.loopback_default_candidates.append(current)
+            return True
+        self.nondefault_empty_regions.append(current)
+        return False
+
+    def record_branch_split(
+        self,
+        current: Region,
+        succ: Region,
+        current_cases: tuple[tuple[Region, ConditionIR, int], ...],
+        depth: int,
+        affine_offset: int,
+        max_depth: int,
+    ) -> None:
+        """Record a normalization branch split under a non-case successor."""
+        if not (
+            current_cases
+            and len(self.graph.successors(succ)) > 1
+            and not _region_is_eq_switch_head_8616(self.graph, succ)
+        ):
+            return
+        self.normalization_branch_split_count += 1
+        successor_regions = tuple(self.graph.successors(succ))
+        current_case_region_ids = [
+            case_region.region_id
+            for case_region, _guard, _value in current_cases
+            if isinstance(case_region.region_id, int)
+        ]
+        current_case_values = [value for _case_region, _guard, value in current_cases]
+        split_record: dict[str, object] = {
+            "from_region_id": current.region_id if isinstance(current.region_id, int) else None,
+            "split_region_id": succ.region_id if isinstance(succ.region_id, int) else None,
+            "current_case_region_ids": current_case_region_ids,
+            "current_case_values": current_case_values,
+            "successor_region_ids": [
+                child.region_id
+                for child in successor_regions
+                if isinstance(child.region_id, int)
+            ],
+            "split_condition": _region_typed_condition_summary_8616(succ),
+            "successor_conditions": _region_typed_condition_summaries_8616(successor_regions),
+            "affine_offset": affine_offset,
+        }
+        subtree_summaries: list[dict[str, object]] = []
+        if self.include_branch_split_subtrees:
+            prior_case_regions = tuple(case_region for case_region, _value in self.cases)
+            for child in successor_regions:
+                sibling_stop_regions = (
+                    *(sibling for sibling in successor_regions if sibling is not child),
+                    *prior_case_regions,
+                )
+                child_summary = _collect_edge_guard_decision_tree_cases_8616(
+                    self.graph,
+                    child,
+                    include_expanded_root=False,
+                    include_branch_split_subtrees=False,
+                    initial_affine_offset=affine_offset,
+                    loopback_region=current,
+                    max_depth=max(0, max_depth - depth - 1),
+                    stop_regions=sibling_stop_regions,
+                )
+                subtree_summaries.append(_branch_split_child_summary_8616(child, child_summary))
+        branch_partition = _branch_split_partition_evidence_8616(successor_regions, subtree_summaries)
+        split_record["branch_partition"] = branch_partition
+        self.normalization_branch_splits.append(split_record)
+        if self.include_branch_split_subtrees:
+            self.normalization_branch_subtrees.append(
+                {
+                    "from_region_id": current.region_id if isinstance(current.region_id, int) else None,
+                    "split_region_id": succ.region_id if isinstance(succ.region_id, int) else None,
+                    "current_case_region_ids": current_case_region_ids,
+                    "current_case_values": current_case_values,
+                    "affine_offset": affine_offset,
+                    "split_condition": _region_typed_condition_summary_8616(succ),
+                    "successor_conditions": _region_typed_condition_summaries_8616(successor_regions),
+                    "branch_partition": branch_partition,
+                    "subtrees": subtree_summaries,
+                }
+            )
+
+    def _affine_step(
+        self,
+        current: Region,
+        succ: Region,
+        current_cases: tuple[tuple[Region, ConditionIR, int], ...],
+        affine_offset: int,
+        last_affine_semantics: tuple[object, ...] | None,
+    ) -> tuple[int, tuple[object, ...] | None]:
+        """Advance the affine offset carried into the ``succ`` continuation."""
+        next_affine_offset = affine_offset
+        next_last_affine_semantics = last_affine_semantics
+        if current_cases:
+            case_region = current_cases[0][0]
+            for semantics in _region_edge_producer_semantics_8616(case_region):
+                delta = _edge_guard_affine_delta_8616(semantics)
+                if delta is not None:
+                    if semantics != next_last_affine_semantics:
+                        next_affine_offset += delta
+                    next_last_affine_semantics = semantics
+                    break
+        else:
+            for semantics in _region_edge_producer_semantics_8616(current):
+                delta = _edge_guard_affine_delta_8616(semantics)
+                if delta is not None:
+                    next_affine_offset += delta
+                    next_last_affine_semantics = semantics
+                    break
+            sibling_delta = _continuation_sibling_affine_delta_8616(self.graph, current, succ)
+            if sibling_delta is not None:
+                next_affine_offset += sibling_delta
+                next_last_affine_semantics = None
+            for semantics in _region_edge_producer_semantics_8616(succ):
+                delta = _edge_guard_affine_delta_8616(semantics)
+                if delta is not None:
+                    next_affine_offset += delta
+                    next_last_affine_semantics = semantics
+                    break
+        return next_affine_offset, next_last_affine_semantics
+
+    def continuation_step(
+        self,
+        current: Region,
+        succ: Region,
+        current_cases: tuple[tuple[Region, ConditionIR, int], ...],
+        affine_offset: int,
+        last_affine_semantics: tuple[object, ...] | None,
+        default_eligible_path: bool,
+    ) -> tuple[int, tuple[object, ...] | None, bool] | None:
+        """Advance the affine/default-eligible scan state across ``succ``."""
+        next_affine_offset = affine_offset
+        next_last_affine_semantics = last_affine_semantics
+        if _region_has_typed_edge_guard_8616(succ):
+            guards = _metadata_sequence_8616(succ, "typed_condition_edge_guards")
+            has_non_eq_guard = any(isinstance(guard, ConditionIR) and guard.op != "eq" for guard in guards)
+            if has_non_eq_guard:
+                self.range_split_count += 1
+                if _region_reaches_eq_switch_head_8616(self.graph, succ):
+                    return (next_affine_offset, next_last_affine_semantics, default_eligible_path)
+                self.unresolved_continuation_count += 1
+                return None
+            self.unresolved_continuation_count += 1
+            return None
+        next_affine_offset, next_last_affine_semantics = self._affine_step(
+            current, succ, current_cases, next_affine_offset, next_last_affine_semantics
+        )
+        next_default_eligible = default_eligible_path
+        if current_cases:
+            next_default_eligible = True
+        elif _region_reaches_eq_switch_head_8616(self.graph, succ):
+            next_default_eligible = False
+        return (next_affine_offset, next_last_affine_semantics, next_default_eligible)
+
+    def _normalization_status(self) -> str:
+        """Classify the normalization outcome for the collected cases."""
+        first_producer_kind = (
+            str(self.producer_semantics[0][0])
+            if self.producer_semantics and self.producer_semantics[0]
+            else None
+        )
+        if self.normalized_duplicate_value_count:
+            return "duplicate_normalized_values"
+        if len(self.normalized_cases) < len(self.cases):
+            return "partial"
+        if self.normalization_branch_split_count:
+            return "branch_split_unmodeled"
+        if first_producer_kind not in {"cmp_reg_imm16", "normalized_cmp_reg_imm16"}:
+            return "root_seed_missing"
+        return "complete"
+
+    def summary(self, region: Region) -> dict[str, object]:
+        """Render the collected scan state as the decision-tree record."""
+        default_candidate_ids = list(
+            dict.fromkeys(candidate.region_id for candidate in self.default_candidates)
+        )
+        loopback_default_candidate_ids = list(
+            dict.fromkeys(candidate.region_id for candidate in self.loopback_default_candidates)
+        )
+        effective_default_candidate_ids = default_candidate_ids or loopback_default_candidate_ids
+        default_candidate_successors = {
+            candidate.region_id: [
+                succ.region_id for succ in self.graph.successors(candidate) if isinstance(succ.region_id, int)
+            ]
+            for candidate in self.default_candidates
+            if isinstance(candidate.region_id, int)
+        }
+        effective_duplicate_value_count = self.duplicate_value_count
+        if len(self.normalized_cases) >= len(self.cases) and self.normalized_duplicate_value_count == 0:
+            effective_duplicate_value_count = 0
+        partition_status = _edge_guard_partition_status_8616(
+            case_count=len(self.cases),
+            default_candidate_count=len(effective_default_candidate_ids),
+            duplicate_value_count=effective_duplicate_value_count,
+            lhs_mismatch_count=self.lhs_mismatch_count,
+            unresolved_continuation_count=self.unresolved_continuation_count,
+        )
+        producer_kinds = tuple(sorted({str(item[0]) for item in self.producer_semantics if item}))
+        producer_registers = tuple(
+            sorted(
+                {
+                    str(item[1]).lower()
+                    for item in self.producer_semantics
+                    if len(item) >= 3 and str(item[0]) in {"cmp_reg_imm16", "normalized_cmp_reg_imm16", "sub_reg_imm16"}
+                }
+            )
+        )
+        affine_reg_imm_case_count = sum(
+            1
+            for item in self.producer_semantics
+            if len(item) >= 3 and str(item[0]) in {"cmp_reg_imm16", "sub_reg_imm16"} and isinstance(item[2], int)
+        )
+        result = {
+            "affine_reg_imm_case_count": affine_reg_imm_case_count,
+            "case_count": len(self.cases),
+            "case_region_ids": [case.region_id for case, _value in self.cases],
+            "case_values": [value for _case, value in self.cases],
+            "default_candidate_count": len(effective_default_candidate_ids),
+            "default_candidate_region_ids": effective_default_candidate_ids,
+            "default_candidate_successor_region_ids": default_candidate_successors,
+            "duplicate_value_count": self.duplicate_value_count,
+            "lhs": self.lhs_key,
+            "lhs_mismatch_count": self.lhs_mismatch_count,
+            "loopback_default_candidate_region_ids": loopback_default_candidate_ids,
+            "loopback_default_successor_region_ids": {
+                candidate.region_id: [
+                    succ.region_id for succ in self.graph.successors(candidate) if isinstance(succ.region_id, int)
+                ]
+                for candidate in self.loopback_default_candidates
+                if isinstance(candidate.region_id, int)
+            },
+            "normalized_case_count": len(self.normalized_cases),
+            "normalized_case_region_ids": [case.region_id for case, _value in self.normalized_cases],
+            "normalized_case_values": [value for _case, value in self.normalized_cases],
+            "normalized_duplicate_value_count": self.normalized_duplicate_value_count,
+            "nondefault_empty_region_ids": [
+                item.region_id for item in self.nondefault_empty_regions if isinstance(item.region_id, int)
+            ],
+            "nondefault_empty_successor_region_ids": {
+                item.region_id: [succ.region_id for succ in self.graph.successors(item) if isinstance(succ.region_id, int)]
+                for item in self.nondefault_empty_regions
+                if isinstance(item.region_id, int)
+            },
+            "normalization_branch_split_count": self.normalization_branch_split_count,
+            "normalization_branch_splits": self.normalization_branch_splits,
+            "normalization_branch_subtrees": self.normalization_branch_subtrees,
+            "normalization_status": self._normalization_status(),
+            "partition_status": partition_status,
+            "predecessor_region_ids": [
+                pred.region_id for pred in self.graph.predecessors(region) if isinstance(pred.region_id, int)
+            ],
+            "producer_semantics_case_count": len(self.producer_semantics),
+            "producer_semantics_kinds": list(producer_kinds),
+            "producer_semantics_registers": list(producer_registers),
+            "range_split_count": self.range_split_count,
+            "unresolved_continuation_count": self.unresolved_continuation_count,
+            "visited_count": len(self.visited),
+            "visited_region_ids": [
+                item.region_id
+                for item in sorted(self.visited, key=lambda region_item: region_item.region_id or 0)
+                if isinstance(item.region_id, int)
+            ],
+        }
+        result["normalization_readiness"] = _edge_guard_normalization_readiness_8616(result)
+        return result
+
+
+def _branch_split_child_summary_8616(child: Region, child_summary: dict[str, object]) -> dict[str, object]:
+    """Render one branch-split subtree scan as a normalized summary record."""
+    return {
+        "child_region_id": child.region_id if isinstance(child.region_id, int) else None,
+        "case_count": child_summary.get("case_count", 0),
+        "case_region_ids": list(_summary_sequence_8616(child_summary, "case_region_ids")),
+        "case_values": list(_summary_sequence_8616(child_summary, "case_values")),
+        "default_candidate_count": child_summary.get("default_candidate_count", 0),
+        "default_candidate_region_ids": list(
+            _summary_sequence_8616(child_summary, "default_candidate_region_ids")
+        ),
+        "default_candidate_successor_region_ids": _summary_mapping_8616(
+            child_summary, "default_candidate_successor_region_ids"
+        ),
+        "normalized_case_count": child_summary.get("normalized_case_count", 0),
+        "normalized_case_region_ids": list(
+            _summary_sequence_8616(child_summary, "normalized_case_region_ids")
+        ),
+        "normalized_case_values": list(
+            _summary_sequence_8616(child_summary, "normalized_case_values")
+        ),
+        "loopback_default_candidate_region_ids": list(
+            _summary_sequence_8616(child_summary, "loopback_default_candidate_region_ids")
+        ),
+        "loopback_default_successor_region_ids": _summary_mapping_8616(
+            child_summary, "loopback_default_successor_region_ids"
+        ),
+        "nondefault_empty_region_ids": list(
+            _summary_sequence_8616(child_summary, "nondefault_empty_region_ids")
+        ),
+        "nondefault_empty_successor_region_ids": _summary_mapping_8616(
+            child_summary, "nondefault_empty_successor_region_ids"
+        ),
+        "normalization_status": child_summary.get("normalization_status"),
+        "partition_status": child_summary.get("partition_status"),
+        "range_split_count": child_summary.get("range_split_count", 0),
+        "unresolved_continuation_count": child_summary.get(
+            "unresolved_continuation_count",
+            0,
+        ),
+        "visited_count": child_summary.get("visited_count", 0),
+        "visited_region_ids": list(_summary_sequence_8616(child_summary, "visited_region_ids")),
+    }
+
+
+def _attach_expanded_root_summary_8616(
+    graph: RegionGraph,
+    region: Region,
+    summary: dict[str, object],
+    max_depth: int,
+) -> None:
+    """Attach expanded-root scan fields when the root is a descendant head."""
+    expanded_root, expanded_root_status, expanded_chain = _expanded_edge_guard_switch_root_8616(graph, region)
+    summary["expanded_root_region_id"] = expanded_root.region_id if isinstance(expanded_root.region_id, int) else None
+    summary["expanded_root_status"] = expanded_root_status
+    summary["expanded_root_chain"] = list(expanded_chain)
+    if expanded_root is not region:
+        expanded_summary = _collect_edge_guard_decision_tree_cases_8616(
+            graph,
+            expanded_root,
+            include_expanded_root=False,
+            include_branch_split_subtrees=True,
+            max_depth=max_depth,
+        )
+        summary["expanded_root_case_count"] = expanded_summary.get("case_count", 0)
+        summary["expanded_root_case_values"] = list(_summary_sequence_8616(expanded_summary, "case_values"))
+        summary["expanded_root_normalization_status"] = expanded_summary.get("normalization_status")
+        summary["expanded_root_normalization_branch_split_count"] = expanded_summary.get(
+            "normalization_branch_split_count",
+            0,
+        )
+        summary["expanded_root_normalization_branch_splits"] = list(
+            _summary_sequence_8616(expanded_summary, "normalization_branch_splits")
+        )
+        summary["expanded_root_normalization_branch_subtrees"] = list(
+            _summary_sequence_8616(expanded_summary, "normalization_branch_subtrees")
+        )
+        summary["expanded_root_normalized_case_values"] = list(
+            _summary_sequence_8616(expanded_summary, "normalized_case_values")
+        )
+        summary["expanded_root_partition_status"] = expanded_summary.get("partition_status")
+        summary["expanded_root_normalization_readiness"] = _summary_mapping_8616(
+            expanded_summary, "normalization_readiness"
+        )
+
+
 def _collect_edge_guard_decision_tree_cases_8616(
     graph: RegionGraph,
     region: Region,
@@ -632,373 +1078,48 @@ def _collect_edge_guard_decision_tree_cases_8616(
     This is diagnostic-only until all branch predicates in the tree can be
     proven to partition the same switch expression.
     """
+    scan = _DecisionTreeScan8616(
+        graph,
+        include_branch_split_subtrees=include_branch_split_subtrees,
+        stop_region_set=set(stop_regions),
+        loopback_target=loopback_region or region,
+    )
     pending: list[tuple[Region, int, int, bool, tuple[object, ...] | None]] = [
         (region, 0, initial_affine_offset, True, None)
     ]
-    visited: set[Region] = set()
-    lhs_key: object | None = None
-    cases: list[tuple[Region, int]] = []
-    normalized_cases: list[tuple[Region, int]] = []
-    case_values: set[int] = set()
-    normalized_case_values: set[int] = set()
-    producer_semantics: list[tuple[object, ...]] = []
-    normalized_value_count = 0
-    normalized_duplicate_value_count = 0
-    normalization_branch_split_count = 0
-    normalization_branch_splits: list[dict[str, object]] = []
-    normalization_branch_subtrees: list[dict[str, object]] = []
-    range_split_count = 0
-    duplicate_value_count = 0
-    lhs_mismatch_count = 0
-    default_candidates: list[Region] = []
-    loopback_default_candidates: list[Region] = []
-    nondefault_empty_regions: list[Region] = []
-    unresolved_continuation_count = 0
-    stop_region_set = set(stop_regions)
-    loopback_target = loopback_region or region
 
     while pending:
         current, depth, affine_offset, default_eligible_path, last_affine_semantics = pending.pop(0)
-        if current in stop_region_set or current in visited or current not in graph.nodes:
+        if current in scan.stop_region_set or current in scan.visited or current not in graph.nodes:
             continue
-        visited.add(current)
+        scan.visited.add(current)
         if depth > max_depth:
             continue
 
         current_cases = _region_edge_guard_cases_8616(graph, current)
         for case_region, guard, value in current_cases:
-            if case_region in stop_region_set:
-                continue
-            next_lhs = _same_lhs_8616(lhs_key, guard)
-            if next_lhs is None:
-                lhs_mismatch_count += 1
-                continue
-            lhs_key = next_lhs
-            if value not in case_values:
-                case_values.add(value)
-                cases.append((case_region, value))
-            else:
-                duplicate_value_count += 1
-            case_semantics = _region_edge_producer_semantics_8616(case_region)
-            producer_semantics.extend(case_semantics)
-            normalized_value = None
-            for semantics in case_semantics:
-                cmp_value = _edge_guard_cmp_value_8616(semantics)
-                if cmp_value is not None:
-                    normalized_value = cmp_value
-                    break
-                delta = _edge_guard_affine_delta_8616(semantics)
-                if delta is not None:
-                    normalized_value = affine_offset if semantics == last_affine_semantics else affine_offset + delta
-                    break
-            if normalized_value is not None:
-                if normalized_value in normalized_case_values:
-                    normalized_duplicate_value_count += 1
-                else:
-                    normalized_case_values.add(normalized_value)
-                    normalized_cases.append((case_region, normalized_value))
+            scan.record_case(case_region, guard, value, affine_offset, last_affine_semantics)
 
-        if not current_cases:
-            if not _region_reaches_eq_switch_head_8616(graph, current):
-                default_candidates.append(current)
-                continue
-            if (
-                default_eligible_path
-                and len(graph.successors(current)) == 1
-                and _region_reaches_region_through_continuation_8616(graph, current, loopback_target)
-            ):
-                loopback_default_candidates.append(current)
-                continue
-            nondefault_empty_regions.append(current)
+        if not current_cases and scan.record_empty_region(current, default_eligible_path):
+            continue
 
         for succ in graph.successors(current):
             if any(succ is case_region for case_region, _guard, _value in current_cases):
                 continue
-            if current_cases and len(graph.successors(succ)) > 1 and not _region_is_eq_switch_head_8616(graph, succ):
-                normalization_branch_split_count += 1
-                successor_regions = tuple(graph.successors(succ))
-                split_record: dict[str, object] = {
-                    "from_region_id": current.region_id if isinstance(current.region_id, int) else None,
-                    "split_region_id": succ.region_id if isinstance(succ.region_id, int) else None,
-                    "current_case_region_ids": [
-                        case_region.region_id
-                        for case_region, _guard, _value in current_cases
-                        if isinstance(case_region.region_id, int)
-                    ],
-                    "current_case_values": [value for _case_region, _guard, value in current_cases],
-                    "successor_region_ids": [
-                        child.region_id
-                        for child in successor_regions
-                        if isinstance(child.region_id, int)
-                    ],
-                    "split_condition": _region_typed_condition_summary_8616(succ),
-                    "successor_conditions": _region_typed_condition_summaries_8616(successor_regions),
-                    "affine_offset": affine_offset,
-                }
-                subtree_summaries: list[dict[str, object]] = []
-                if include_branch_split_subtrees:
-                    prior_case_regions = tuple(case_region for case_region, _value in cases)
-                    for child in successor_regions:
-                        sibling_stop_regions = (
-                            *(sibling for sibling in successor_regions if sibling is not child),
-                            *prior_case_regions,
-                        )
-                        child_summary = _collect_edge_guard_decision_tree_cases_8616(
-                            graph,
-                            child,
-                            include_expanded_root=False,
-                            include_branch_split_subtrees=False,
-                            initial_affine_offset=affine_offset,
-                            loopback_region=current,
-                            max_depth=max(0, max_depth - depth - 1),
-                            stop_regions=sibling_stop_regions,
-                        )
-                        subtree_summaries.append(
-                            {
-                                "child_region_id": child.region_id if isinstance(child.region_id, int) else None,
-                                "case_count": child_summary.get("case_count", 0),
-                                "case_region_ids": list(_summary_sequence_8616(child_summary, "case_region_ids")),
-                                "case_values": list(_summary_sequence_8616(child_summary, "case_values")),
-                                "default_candidate_count": child_summary.get("default_candidate_count", 0),
-                                "default_candidate_region_ids": list(
-                                    _summary_sequence_8616(child_summary, "default_candidate_region_ids")
-                                ),
-                                "default_candidate_successor_region_ids": _summary_mapping_8616(
-                                    child_summary, "default_candidate_successor_region_ids"
-                                ),
-                                "normalized_case_count": child_summary.get("normalized_case_count", 0),
-                                "normalized_case_region_ids": list(
-                                    _summary_sequence_8616(child_summary, "normalized_case_region_ids")
-                                ),
-                                "normalized_case_values": list(
-                                    _summary_sequence_8616(child_summary, "normalized_case_values")
-                                ),
-                                "loopback_default_candidate_region_ids": list(
-                                    _summary_sequence_8616(child_summary, "loopback_default_candidate_region_ids")
-                                ),
-                                "loopback_default_successor_region_ids": _summary_mapping_8616(
-                                    child_summary, "loopback_default_successor_region_ids"
-                                ),
-                                "nondefault_empty_region_ids": list(
-                                    _summary_sequence_8616(child_summary, "nondefault_empty_region_ids")
-                                ),
-                                "nondefault_empty_successor_region_ids": _summary_mapping_8616(
-                                    child_summary, "nondefault_empty_successor_region_ids"
-                                ),
-                                "normalization_status": child_summary.get("normalization_status"),
-                                "partition_status": child_summary.get("partition_status"),
-                                "range_split_count": child_summary.get("range_split_count", 0),
-                                "unresolved_continuation_count": child_summary.get(
-                                    "unresolved_continuation_count",
-                                    0,
-                                ),
-                                "visited_count": child_summary.get("visited_count", 0),
-                                "visited_region_ids": list(_summary_sequence_8616(child_summary, "visited_region_ids")),
-                            }
-                        )
-                branch_partition = _branch_split_partition_evidence_8616(successor_regions, subtree_summaries)
-                split_record["branch_partition"] = branch_partition
-                normalization_branch_splits.append(split_record)
-                if include_branch_split_subtrees:
-                    normalization_branch_subtrees.append(
-                        {
-                            "from_region_id": current.region_id if isinstance(current.region_id, int) else None,
-                            "split_region_id": succ.region_id if isinstance(succ.region_id, int) else None,
-                            "current_case_region_ids": [
-                                case_region.region_id
-                                for case_region, _guard, _value in current_cases
-                                if isinstance(case_region.region_id, int)
-                            ],
-                            "current_case_values": [value for _case_region, _guard, value in current_cases],
-                            "affine_offset": affine_offset,
-                            "split_condition": _region_typed_condition_summary_8616(succ),
-                            "successor_conditions": _region_typed_condition_summaries_8616(successor_regions),
-                            "branch_partition": branch_partition,
-                            "subtrees": subtree_summaries,
-                        }
-                    )
-            next_affine_offset = affine_offset
-            next_last_affine_semantics = last_affine_semantics
-            if _region_has_typed_edge_guard_8616(succ):
-                guards = _metadata_sequence_8616(succ, "typed_condition_edge_guards")
-                has_non_eq_guard = any(isinstance(guard, ConditionIR) and guard.op != "eq" for guard in guards)
-                if has_non_eq_guard:
-                    range_split_count += 1
-                    if _region_reaches_eq_switch_head_8616(graph, succ):
-                        pending.append(
-                            (succ, depth + 1, next_affine_offset, default_eligible_path, next_last_affine_semantics)
-                        )
-                    else:
-                        unresolved_continuation_count += 1
-                    continue
-                unresolved_continuation_count += 1
+            scan.record_branch_split(current, succ, current_cases, depth, affine_offset, max_depth)
+            step = scan.continuation_step(
+                current, succ, current_cases, affine_offset, last_affine_semantics, default_eligible_path
+            )
+            if step is None:
                 continue
-            if current_cases:
-                case_region = current_cases[0][0]
-                for semantics in _region_edge_producer_semantics_8616(case_region):
-                    delta = _edge_guard_affine_delta_8616(semantics)
-                    if delta is not None:
-                        if semantics != next_last_affine_semantics:
-                            next_affine_offset += delta
-                        next_last_affine_semantics = semantics
-                        break
-            else:
-                for semantics in _region_edge_producer_semantics_8616(current):
-                    delta = _edge_guard_affine_delta_8616(semantics)
-                    if delta is not None:
-                        next_affine_offset += delta
-                        next_last_affine_semantics = semantics
-                        break
-                sibling_delta = _continuation_sibling_affine_delta_8616(graph, current, succ)
-                if sibling_delta is not None:
-                    next_affine_offset += sibling_delta
-                    next_last_affine_semantics = None
-                for semantics in _region_edge_producer_semantics_8616(succ):
-                    delta = _edge_guard_affine_delta_8616(semantics)
-                    if delta is not None:
-                        next_affine_offset += delta
-                        next_last_affine_semantics = semantics
-                        break
-            next_default_eligible = default_eligible_path
-            if current_cases:
-                next_default_eligible = True
-            elif _region_reaches_eq_switch_head_8616(graph, succ):
-                next_default_eligible = False
-            pending.append((succ, depth + 1, next_affine_offset, next_default_eligible, next_last_affine_semantics))
+            next_affine_offset, next_last_affine_semantics, next_default_eligible = step
+            pending.append(
+                (succ, depth + 1, next_affine_offset, next_default_eligible, next_last_affine_semantics)
+            )
 
-    default_candidate_ids = list(dict.fromkeys(candidate.region_id for candidate in default_candidates))
-    loopback_default_candidate_ids = list(
-        dict.fromkeys(candidate.region_id for candidate in loopback_default_candidates)
-    )
-    effective_default_candidate_ids = default_candidate_ids or loopback_default_candidate_ids
-    default_candidate_successors = {
-        candidate.region_id: [succ.region_id for succ in graph.successors(candidate) if isinstance(succ.region_id, int)]
-        for candidate in default_candidates
-        if isinstance(candidate.region_id, int)
-    }
-    effective_duplicate_value_count = duplicate_value_count
-    if len(normalized_cases) >= len(cases) and normalized_duplicate_value_count == 0:
-        effective_duplicate_value_count = 0
-    partition_status = _edge_guard_partition_status_8616(
-        case_count=len(cases),
-        default_candidate_count=len(effective_default_candidate_ids),
-        duplicate_value_count=effective_duplicate_value_count,
-        lhs_mismatch_count=lhs_mismatch_count,
-        unresolved_continuation_count=unresolved_continuation_count,
-    )
-    producer_kinds = tuple(sorted({str(item[0]) for item in producer_semantics if item}))
-    producer_registers = tuple(
-        sorted(
-            {
-                str(item[1]).lower()
-                for item in producer_semantics
-                if len(item) >= 3 and str(item[0]) in {"cmp_reg_imm16", "normalized_cmp_reg_imm16", "sub_reg_imm16"}
-            }
-        )
-    )
-    affine_reg_imm_case_count = sum(
-        1
-        for item in producer_semantics
-        if len(item) >= 3 and str(item[0]) in {"cmp_reg_imm16", "sub_reg_imm16"} and isinstance(item[2], int)
-    )
-    normalized_value_count = len(normalized_cases)
-    first_producer_kind = str(producer_semantics[0][0]) if producer_semantics and producer_semantics[0] else None
-    if normalized_duplicate_value_count:
-        normalization_status = "duplicate_normalized_values"
-    elif normalized_value_count < len(cases):
-        normalization_status = "partial"
-    elif normalization_branch_split_count:
-        normalization_status = "branch_split_unmodeled"
-    elif first_producer_kind not in {"cmp_reg_imm16", "normalized_cmp_reg_imm16"}:
-        normalization_status = "root_seed_missing"
-    else:
-        normalization_status = "complete"
-
-    summary = {
-        "affine_reg_imm_case_count": affine_reg_imm_case_count,
-        "case_count": len(cases),
-        "case_region_ids": [case.region_id for case, _value in cases],
-        "case_values": [value for _case, value in cases],
-        "default_candidate_count": len(effective_default_candidate_ids),
-        "default_candidate_region_ids": effective_default_candidate_ids,
-        "default_candidate_successor_region_ids": default_candidate_successors,
-        "duplicate_value_count": duplicate_value_count,
-        "lhs": lhs_key,
-        "lhs_mismatch_count": lhs_mismatch_count,
-        "loopback_default_candidate_region_ids": loopback_default_candidate_ids,
-        "loopback_default_successor_region_ids": {
-            candidate.region_id: [
-                succ.region_id for succ in graph.successors(candidate) if isinstance(succ.region_id, int)
-            ]
-            for candidate in loopback_default_candidates
-            if isinstance(candidate.region_id, int)
-        },
-        "normalized_case_count": normalized_value_count,
-        "normalized_case_region_ids": [case.region_id for case, _value in normalized_cases],
-        "normalized_case_values": [value for _case, value in normalized_cases],
-        "normalized_duplicate_value_count": normalized_duplicate_value_count,
-        "nondefault_empty_region_ids": [
-            item.region_id for item in nondefault_empty_regions if isinstance(item.region_id, int)
-        ],
-        "nondefault_empty_successor_region_ids": {
-            item.region_id: [succ.region_id for succ in graph.successors(item) if isinstance(succ.region_id, int)]
-            for item in nondefault_empty_regions
-            if isinstance(item.region_id, int)
-        },
-        "normalization_branch_split_count": normalization_branch_split_count,
-        "normalization_branch_splits": normalization_branch_splits,
-        "normalization_branch_subtrees": normalization_branch_subtrees,
-        "normalization_status": normalization_status,
-        "partition_status": partition_status,
-        "predecessor_region_ids": [
-            pred.region_id for pred in graph.predecessors(region) if isinstance(pred.region_id, int)
-        ],
-        "producer_semantics_case_count": len(producer_semantics),
-        "producer_semantics_kinds": list(producer_kinds),
-        "producer_semantics_registers": list(producer_registers),
-        "range_split_count": range_split_count,
-        "unresolved_continuation_count": unresolved_continuation_count,
-        "visited_count": len(visited),
-        "visited_region_ids": [
-            item.region_id
-            for item in sorted(visited, key=lambda region_item: region_item.region_id or 0)
-            if isinstance(item.region_id, int)
-        ],
-    }
-    summary["normalization_readiness"] = _edge_guard_normalization_readiness_8616(summary)
+    summary = scan.summary(region)
     if include_expanded_root:
-        expanded_root, expanded_root_status, expanded_chain = _expanded_edge_guard_switch_root_8616(graph, region)
-        summary["expanded_root_region_id"] = expanded_root.region_id if isinstance(expanded_root.region_id, int) else None
-        summary["expanded_root_status"] = expanded_root_status
-        summary["expanded_root_chain"] = list(expanded_chain)
-        if expanded_root is not region:
-            expanded_summary = _collect_edge_guard_decision_tree_cases_8616(
-                graph,
-                expanded_root,
-                include_expanded_root=False,
-                include_branch_split_subtrees=True,
-                max_depth=max_depth,
-            )
-            summary["expanded_root_case_count"] = expanded_summary.get("case_count", 0)
-            summary["expanded_root_case_values"] = list(_summary_sequence_8616(expanded_summary, "case_values"))
-            summary["expanded_root_normalization_status"] = expanded_summary.get("normalization_status")
-            summary["expanded_root_normalization_branch_split_count"] = expanded_summary.get(
-                "normalization_branch_split_count",
-                0,
-            )
-            summary["expanded_root_normalization_branch_splits"] = list(
-                _summary_sequence_8616(expanded_summary, "normalization_branch_splits")
-            )
-            summary["expanded_root_normalization_branch_subtrees"] = list(
-                _summary_sequence_8616(expanded_summary, "normalization_branch_subtrees")
-            )
-            summary["expanded_root_normalized_case_values"] = list(
-                _summary_sequence_8616(expanded_summary, "normalized_case_values")
-            )
-            summary["expanded_root_partition_status"] = expanded_summary.get("partition_status")
-            summary["expanded_root_normalization_readiness"] = _summary_mapping_8616(
-                expanded_summary, "normalization_readiness"
-            )
+        _attach_expanded_root_summary_8616(graph, region, summary, max_depth)
     return summary
 
 
@@ -1099,6 +1220,52 @@ class StructuringStats:
     edge_guard_switches_detected: int = 0
 
 
+def _cascade_guarded_successors_8616(succs: list[Region]) -> list[tuple[Region, ConditionIR, int]]:
+    """Collect successors carrying a single constant equality edge guard."""
+    guarded_successors: list[tuple[Region, ConditionIR, int]] = []
+    for succ in succs:
+        guard = _single_eq_edge_guard_8616(succ)
+        if guard is None:
+            continue
+        value = _condition_const_value_8616(guard.rhs)
+        if value is None:
+            continue
+        guarded_successors.append((succ, guard, value))
+    return guarded_successors
+
+
+@dataclass(slots=True)
+class _CascadeScan8616:
+    """Accumulating state for the edge-guard cascade scan."""
+
+    cases: list[Region] = field(default_factory=list)
+    case_values: list[int] = field(default_factory=list)
+    guard_statement_addrs: list[int] = field(default_factory=list)
+    guard_statement_keys: list[tuple[str, int, int]] = field(default_factory=list)
+    guard_span_complete: bool = True
+    lhs_key: object | None = None
+
+    def record_case_guard(self, guard: ConditionIR, value: int) -> bool:
+        """Accept a same-LHS unique-valued case guard; return False to stop."""
+        if self.lhs_key is None:
+            self.lhs_key = guard.lhs
+        elif guard.lhs != self.lhs_key:
+            return False
+        return value not in self.case_values
+
+    def record_guard_span(
+        self,
+        addrs: list[int],
+        keys: list[tuple[str, int, int]],
+    ) -> None:
+        """Record one condition region's guard statement span."""
+        if addrs:
+            self.guard_statement_addrs.extend(addrs)
+        else:
+            self.guard_span_complete = False
+        if keys:
+            self.guard_statement_keys.extend(keys)
+
 class StructureAnalysis:
     """Main control-flow structuring algorithm.
 
@@ -1139,83 +1306,84 @@ class StructureAnalysis:
         return self._execute()
 
     def _execute(self) -> RegionGraph:
-        def _impl() -> RegionGraph:
-            """Core structuring algorithm.
+        """Core structuring algorithm.
 
-            Iteratively:
-            1. Recompute dominators
-            2. Visit regions in post-order
-            3. Try to match acyclic patterns
-            4. Try to match cyclic patterns
-            5. If no progress, apply refinement strategies
-            6. Repeat until graph converges to a single region or max iterations
-            """
-            iterations = 0
+        Iteratively:
+        1. Recompute dominators
+        2. Visit regions in post-order
+        3. Try to match acyclic patterns
+        4. Try to match cyclic patterns
+        5. If no progress, apply refinement strategies
+        6. Repeat until graph converges to a single region or max iterations
+        """
+        iterations = 0
 
-            while True:
-                iterations += 1
-                self.stats.iterations = iterations
+        while True:
+            iterations += 1
+            self.stats.iterations = iterations
 
-                # Check cancellation
-                self.event_listener(f"Structuring iteration {iterations}")
+            # Check cancellation
+            self.event_listener(f"Structuring iteration {iterations}")
 
-                # Check iteration limit
-                if iterations > self.max_iterations:
-                    logger.warning(
-                        "Structure analysis stopped due to iteration limit (%d). Control flow may not be fully structured.",
-                        self.max_iterations,
-                    )
-                    self.stats.max_iterations_reached = True
-                    break
+            # Check iteration limit
+            if iterations > self.max_iterations:
+                logger.warning(
+                    "Structure analysis stopped due to iteration limit (%d). Control flow may not be fully structured.",
+                    self.max_iterations,
+                )
+                self.stats.max_iterations_reached = True
+                break
 
-                # Recompute dominators for this iteration
-                self.dominators = compute_dominators(self.graph)
+            if self._structure_iteration_8616():
+                break
 
-                # Track progress
-                old_node_count = len(self.graph.nodes)
+        return self.graph
 
-                # Reset evidence and unresolved switches for this iteration
-                self.natural_loop_topologies.clear()
-                self.unresolved_switches.clear()
+    def _structure_iteration_8616(self) -> bool:
+        """Run one structuring pass; return True when the pass converged."""
+        # Recompute dominators for this iteration
+        self.dominators = compute_dominators(self.graph)
 
-                for region in sorted(self.graph.nodes, key=lambda item: item.region_id or 0):
-                    if self._try_edge_guard_switch_cascade(region):
-                        self.stats.regions_reduced += 1
+        # Track progress
+        old_node_count = len(self.graph.nodes)
 
-                # Visit regions in post-order
-                post_order = self.graph.iter_postorder()
+        # Reset evidence and unresolved switches for this iteration
+        self.natural_loop_topologies.clear()
+        self.unresolved_switches.clear()
 
-                for region in post_order:
-                    # Try to reduce acyclic regions
-                    reduced = self._reduce_acyclic(region)
+        for region in sorted(self.graph.nodes, key=lambda item: item.region_id or 0):
+            if self._try_edge_guard_switch_cascade(region):
+                self.stats.regions_reduced += 1
 
-                    # If no acyclic reduction, try cyclic patterns
-                    if not reduced and self._is_cyclic(region):
-                        reduced = self._reduce_cyclic(region)
+        # Visit regions in post-order
+        post_order = self.graph.iter_postorder()
 
-                # Check for progress
-                new_node_count = len(self.graph.nodes)
-                if new_node_count == old_node_count and new_node_count > 1:
-                    # No progress this round - try refinement strategies
-                    # But only if there are unresolved regions to process
-                    if self.unresolved_switches:
-                        self._process_unresolved_regions()
-                    else:
-                        # No unresolved regions and no progress - we're stuck
-                        # This is normal for well-structured CFGs that can't be fully reduced
-                        logger.debug(
-                            "No progress and no unresolved regions, stopping at %d nodes",
-                            new_node_count,
-                        )
-                        break
+        for region in post_order:
+            # Try to reduce acyclic regions
+            reduced = self._reduce_acyclic(region)
 
-                # Check convergence
-                if len(self.graph.nodes) <= 1:
-                    break
+            # If no acyclic reduction, try cyclic patterns
+            if not reduced and self._is_cyclic(region):
+                reduced = self._reduce_cyclic(region)
 
-            return self.graph
+        # Check for progress
+        new_node_count = len(self.graph.nodes)
+        if new_node_count == old_node_count and new_node_count > 1:
+            # No progress this round - try refinement strategies
+            # But only if there are unresolved regions to process
+            if self.unresolved_switches:
+                self._process_unresolved_regions()
+            else:
+                # No unresolved regions and no progress - we're stuck
+                # This is normal for well-structured CFGs that can't be fully reduced
+                logger.debug(
+                    "No progress and no unresolved regions, stopping at %d nodes",
+                    new_node_count,
+                )
+                return True
 
-        return _impl()
+        # Check convergence
+        return len(self.graph.nodes) <= 1
 
     def _reduce_acyclic(self, region: Region) -> bool:
         """Try to match and reduce acyclic patterns.
@@ -1355,87 +1523,86 @@ class StructureAnalysis:
         if region.region_type == RegionType.IncSwitch:
             return False
 
-        cases: list[Region] = []
-        case_values: list[int] = []
-        guard_statement_addrs: list[int] = []
-        guard_statement_keys: list[tuple[str, int, int]] = []
-        guard_span_complete = True
-        lhs_key: object | None = None
+        scan = _CascadeScan8616()
         current = region
         visited: set[Region] = set()
 
         while current in self.graph.nodes and current not in visited:
             visited.add(current)
-            succs = self.graph.successors(current)
-            if len(succs) != 2:
+            next_region = self._cascade_step_8616(current, visited, scan)
+            if next_region is None:
                 break
-
-            guarded_successors: list[tuple[Region, ConditionIR, int]] = []
-            for succ in succs:
-                guard = _single_eq_edge_guard_8616(succ)
-                if guard is None:
-                    continue
-                value = _condition_const_value_8616(guard.rhs)
-                if value is None:
-                    continue
-                guarded_successors.append((succ, guard, value))
-
-            if len(guarded_successors) != 1:
-                break
-
-            case_region, guard, value = guarded_successors[0]
-            if lhs_key is None:
-                lhs_key = guard.lhs
-            elif guard.lhs != lhs_key:
-                break
-            if value in case_values:
-                break
-            cases.append(case_region)
-            case_values.append(value)
-            current_guard_addrs = _region_statement_ins_addrs_8616(current)
-            current_guard_keys = _region_statement_provenance_keys_8616(current)
-            if current_guard_addrs:
-                guard_statement_addrs.extend(current_guard_addrs)
-            else:
-                guard_span_complete = False
-            if current_guard_keys:
-                guard_statement_keys.extend(current_guard_keys)
-
-            next_regions = [succ for succ in succs if succ is not case_region]
-            if len(next_regions) != 1:
-                break
-            next_region, skipped_addrs, skipped_keys, skipped_complete = self._find_next_edge_guard_switch_head_8616(
-                next_regions[0],
-                visited,
-            )
-            if skipped_addrs:
-                guard_statement_addrs.extend(skipped_addrs)
-            if skipped_keys:
-                guard_statement_keys.extend(skipped_keys)
-            if not skipped_complete:
-                guard_span_complete = False
             current = next_region
 
-        if len(cases) < 3:
+        if len(scan.cases) < 3:
             return False
 
+        self._publish_edge_guard_cascade_8616(region, scan, current)
+        return True
+
+    def _cascade_step_8616(
+        self,
+        current: Region,
+        visited: set[Region],
+        scan: _CascadeScan8616,
+    ) -> Region | None:
+        """Advance the edge-guard cascade one condition region."""
+        succs = self.graph.successors(current)
+        if len(succs) != 2:
+            return None
+
+        guarded_successors = _cascade_guarded_successors_8616(succs)
+        if len(guarded_successors) != 1:
+            return None
+
+        case_region, guard, value = guarded_successors[0]
+        if not scan.record_case_guard(guard, value):
+            return None
+        scan.cases.append(case_region)
+        scan.case_values.append(value)
+        scan.record_guard_span(_region_statement_ins_addrs_8616(current), _region_statement_provenance_keys_8616(current))
+
+        next_regions = [succ for succ in succs if succ is not case_region]
+        if len(next_regions) != 1:
+            return None
+        next_region, skipped_addrs, skipped_keys, skipped_complete = self._find_next_edge_guard_switch_head_8616(
+            next_regions[0],
+            visited,
+        )
+        if skipped_addrs:
+            scan.guard_statement_addrs.extend(skipped_addrs)
+        if skipped_keys:
+            scan.guard_statement_keys.extend(skipped_keys)
+        if not skipped_complete:
+            scan.guard_span_complete = False
+        return next_region
+
+    def _publish_edge_guard_cascade_8616(
+        self,
+        region: Region,
+        scan: _CascadeScan8616,
+        current: Region,
+    ) -> None:
+        """Publish the accumulated cascade as a typed edge-guard switch."""
         region.region_type = RegionType.IncSwitch
-        region.metadata["switch_candidates"] = cases
-        region.metadata["switch_case_values"] = tuple(case_values)
-        region.metadata["switch_condition_lhs"] = lhs_key
+        region.metadata["switch_candidates"] = scan.cases
+        region.metadata["switch_case_values"] = tuple(scan.case_values)
+        region.metadata["switch_condition_lhs"] = scan.lhs_key
         region.metadata["switch_detection"] = "typed_condition_edge_cascade"
-        if guard_span_complete:
-            region.metadata["switch_guard_statement_ins_addrs"] = tuple(dict.fromkeys(guard_statement_addrs))
+        if scan.guard_span_complete:
+            region.metadata["switch_guard_statement_ins_addrs"] = tuple(dict.fromkeys(scan.guard_statement_addrs))
             region.metadata["switch_guard_statement_span_source"] = "condition_region_statement_ins_addrs"
-        if guard_statement_keys:
-            region.metadata["switch_guard_statement_provenance_keys"] = tuple(dict.fromkeys(guard_statement_keys))
-        default_target = current if current in self.graph.nodes and current not in cases else None
+        if scan.guard_statement_keys:
+            region.metadata["switch_guard_statement_provenance_keys"] = tuple(
+                dict.fromkeys(scan.guard_statement_keys)
+            )
+        default_target = current if current in self.graph.nodes and current not in scan.cases else None
         if default_target is not None:
             region.metadata["switch_default_target"] = current
         remaining_edge_guard_count = _reachable_edge_guarded_successor_count_8616(
             self.graph,
             default_target,
-            excluded=tuple(cases),
+            excluded=tuple(scan.cases),
         )
         decision_tree_summary = _collect_edge_guard_decision_tree_cases_8616(self.graph, region)
         artifact_status = (
@@ -1446,16 +1613,16 @@ class StructureAnalysis:
         region.metadata["typed_edge_switch_region_status"] = artifact_status.value
         region.metadata["typed_edge_switch_region_artifact"] = _typed_edge_switch_region_artifact_8616(
             region,
-            cases=tuple(cases),
-            case_values=tuple(case_values),
+            cases=tuple(scan.cases),
+            case_values=tuple(scan.case_values),
             default_target=default_target,
-            guard_statement_addrs=tuple(dict.fromkeys(guard_statement_addrs)),
-            guard_statement_keys=tuple(dict.fromkeys(guard_statement_keys)),
-            guard_span_complete=guard_span_complete,
+            guard_statement_addrs=tuple(dict.fromkeys(scan.guard_statement_addrs)),
+            guard_statement_keys=tuple(dict.fromkeys(scan.guard_statement_keys)),
+            guard_span_complete=scan.guard_span_complete,
             decision_tree_summary={key: value for key, value in decision_tree_summary.items() if key != "lhs"},
             remaining_edge_guard_count=remaining_edge_guard_count,
             status=artifact_status,
-            switch_condition_lhs=lhs_key,
+            switch_condition_lhs=scan.lhs_key,
         )
         region.metadata["typed_edge_switch_decision_tree_summary"] = {
             key: value for key, value in decision_tree_summary.items() if key != "lhs"
@@ -1465,9 +1632,8 @@ class StructureAnalysis:
         logger.debug(
             "Marked region %s as typed edge-guard switch candidate with %d cases",
             region,
-            len(cases),
+            len(scan.cases),
         )
-        return True
 
     def _find_next_edge_guard_switch_head_8616(
         self,
@@ -1487,28 +1653,11 @@ class StructureAnalysis:
         seen: set[Region] = set()
         while worklist:
             current, path_addrs, path_keys, path_complete, depth = worklist.pop(0)
-            if current in seen or current in visited or current not in self.graph.nodes:
-                continue
-            seen.add(current)
-            if _region_has_typed_edge_guard_8616(current):
-                continue
-            current_addrs = _region_statement_ins_addrs_8616(current)
-            current_keys = _region_statement_provenance_keys_8616(current)
-            next_path_addrs = (*path_addrs, *current_addrs)
-            next_path_keys = (*path_keys, *current_keys)
-            next_path_complete = path_complete and bool(current_addrs)
-            if _region_is_eq_switch_head_8616(self.graph, current):
-                candidates.append((current, path_addrs, path_keys, path_complete))
-                continue
-            if depth >= 8:
-                continue
-            for succ in sorted(self.graph.successors(current), key=lambda item: item.region_id or 0):
-                if _single_eq_edge_guard_8616(succ) is not None:
-                    continue
-                if _region_is_eq_switch_head_8616(self.graph, succ):
-                    candidates.append((succ, next_path_addrs, next_path_keys, next_path_complete))
-                    continue
-                worklist.append((succ, next_path_addrs, next_path_keys, next_path_complete, depth + 1))
+            found, pushes = self._next_head_walk_step_8616(
+                current, path_addrs, path_keys, path_complete, depth, seen, visited
+            )
+            candidates.extend(found)
+            worklist.extend(pushes)
 
         unique: dict[int, tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool]] = {}
         for candidate, path_addrs, path_keys, path_complete in candidates:
@@ -1519,6 +1668,45 @@ class StructureAnalysis:
         if len(unique) == 1:
             return next(iter(unique.values()))
         return region, (), (), True
+
+    def _next_head_walk_step_8616(
+        self,
+        current: Region,
+        path_addrs: tuple[int, ...],
+        path_keys: tuple[tuple[str, int, int], ...],
+        path_complete: bool,
+        depth: int,
+        seen: set[Region],
+        visited: set[Region],
+    ) -> tuple[
+        list[tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool]],
+        list[tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool, int]],
+    ]:
+        """Process one walk item; return (found head candidates, worklist pushes)."""
+        if current in seen or current in visited or current not in self.graph.nodes:
+            return [], []
+        seen.add(current)
+        if _region_has_typed_edge_guard_8616(current):
+            return [], []
+        current_addrs = _region_statement_ins_addrs_8616(current)
+        current_keys = _region_statement_provenance_keys_8616(current)
+        next_path_addrs = (*path_addrs, *current_addrs)
+        next_path_keys = (*path_keys, *current_keys)
+        next_path_complete = path_complete and bool(current_addrs)
+        if _region_is_eq_switch_head_8616(self.graph, current):
+            return [(current, path_addrs, path_keys, path_complete)], []
+        if depth >= 8:
+            return [], []
+        found: list[tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool]] = []
+        pushes: list[tuple[Region, tuple[int, ...], tuple[tuple[str, int, int], ...], bool, int]] = []
+        for succ in sorted(self.graph.successors(current), key=lambda item: item.region_id or 0):
+            if _single_eq_edge_guard_8616(succ) is not None:
+                continue
+            if _region_is_eq_switch_head_8616(self.graph, succ):
+                found.append((succ, next_path_addrs, next_path_keys, next_path_complete))
+                continue
+            pushes.append((succ, next_path_addrs, next_path_keys, next_path_complete, depth + 1))
+        return found, pushes
 
     def _try_if_then(self, region: Region) -> bool:
         """Try to form an if-then pattern.
@@ -1563,63 +1751,63 @@ class StructureAnalysis:
         return False
 
     def _try_if_then_else(self, region: Region) -> bool:
-        def _impl() -> bool:
-            """Try to form an if-then-else pattern.
+        """Try to form an if-then-else pattern.
 
-            If-then-else is: a condition region with exactly two branches that
-            can be merged together as a complete if-then-else structure.
+        If-then-else is: a condition region with exactly two branches that
+        can be merged together as a complete if-then-else structure.
 
-            Conservative: don't merge if the region itself is cyclic (has back-edges),
-            to preserve loop detection.
+        Conservative: don't merge if the region itself is cyclic (has back-edges),
+        to preserve loop detection.
 
-            Args:
-                region: Candidate condition region
+        Args:
+            region: Candidate condition region
 
-            Returns:
-                True if pattern found and merged, False otherwise
-            """
-            if region not in self.graph.nodes:
-                return False
+        Returns:
+            True if pattern found and merged, False otherwise
+        """
+        if region not in self.graph.nodes:
+            return False
 
-            # Don't process if already marked as switch candidate
-            if region.region_type == RegionType.IncSwitch:
-                return False
+        # Don't process if already marked as switch candidate
+        if region.region_type == RegionType.IncSwitch:
+            return False
 
-            succs = self.graph.successors(region)
-            if len(succs) != 2:
-                return False
+        succs = self.graph.successors(region)
+        if len(succs) != 2:
+            return False
 
-            # Don't merge if this region is cyclic (has back-edges to it)
-            # This preserves the ability to detect loops
-            if self._is_cyclic(region):
-                return False
+        # Don't merge if this region is cyclic (has back-edges to it)
+        # This preserves the ability to detect loops
+        if self._is_cyclic(region):
+            return False
 
-            # Try to merge both branches into the condition region
-            # This creates a complete if-then-else structure
-            branch1, branch2 = succs
-            if merge_would_hide_cycle(self.graph, self.dominators, region, branch1):
-                return False
-            if merge_would_hide_cycle(self.graph, self.dominators, region, branch2):
-                return False
+        # Try to merge both branches into the condition region
+        # This creates a complete if-then-else structure
+        branch1, branch2 = succs
+        if merge_would_hide_cycle(self.graph, self.dominators, region, branch1):
+            return False
+        if merge_would_hide_cycle(self.graph, self.dominators, region, branch2):
+            return False
 
-            # Merge both branches into region
-            try:
-                # Merge first branch
-                if branch1 in self.graph.nodes:
-                    self.graph.merge_regions(branch1, region, transfer_edges="succ")
+        return self._merge_if_then_else_8616(region, branch1, branch2)
 
-                # Merge second branch (if still present after first merge)
-                if branch2 in self.graph.nodes and branch2 != region:
-                    self.graph.merge_regions(branch2, region, transfer_edges="succ")
+    def _merge_if_then_else_8616(self, region: Region, branch1: Region, branch2: Region) -> bool:
+        """Merge both branches into the condition region."""
+        try:
+            # Merge first branch
+            if branch1 in self.graph.nodes:
+                self.graph.merge_regions(branch1, region, transfer_edges="succ")
 
-                # Mark region as a condition structure
-                region.region_type = RegionType.Condition
-                return True
-            except Exception as e:
-                logger.debug(f"Failed to merge if-then-else branches: {e}")
-                return False
+            # Merge second branch (if still present after first merge)
+            if branch2 in self.graph.nodes and branch2 != region:
+                self.graph.merge_regions(branch2, region, transfer_edges="succ")
 
-        return _impl()
+            # Mark region as a condition structure
+            region.region_type = RegionType.Condition
+            return True
+        except Exception as e:
+            logger.debug(f"Failed to merge if-then-else branches: {e}")
+            return False
 
     def _is_cyclic(self, region: Region) -> bool:
         """Check if a region is part of a cycle (back edge exists).

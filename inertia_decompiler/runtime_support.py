@@ -26,6 +26,7 @@ from collections.abc import Callable, Iterator, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as _FuturesTimeoutError
 from concurrent.futures.thread import _threads_queues, _worker
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from .analysis_timeout import AnalysisTimeout as AnalysisTimeout
@@ -166,46 +167,182 @@ def default_exe_showcase_cap(total_functions: int, timeout: int) -> int:
     return min(24, max(8, timeout))
 
 
+def _normalize_replacement_bits_8616(expr: object, replacement: object) -> object:
+    """Re-wrap a peephole replacement at the original expression's bit width."""
+    expr_bits = getattr(expr, "bits", None)
+    replacement_bits = getattr(replacement, "bits", None)
+    if expr_bits is None or replacement_bits is None or expr_bits == replacement_bits:
+        return replacement
+
+    try:
+        from angr.ailment.expression import BasePointerOffset, Const
+    except ImportError:
+        return replacement
+
+    if isinstance(replacement, BasePointerOffset):
+        return BasePointerOffset(
+            replacement.idx,
+            expr_bits,
+            replacement.base,
+            replacement.offset,
+            variable=getattr(replacement, "variable", None),
+            variable_offset=getattr(replacement, "variable_offset", None),
+            **getattr(replacement, "tags", {}),
+        )
+
+    if isinstance(replacement, Const) and isinstance(replacement.value, int):
+        mask = (1 << expr_bits) - 1
+        return Const(
+            replacement.idx,
+            getattr(replacement, "variable", None),
+            replacement.value & mask,
+            expr_bits,
+            **getattr(replacement, "tags", {}),
+        )
+
+    return replacement
+
+
+def _clinic_skip_complex_expr_gate_8616(
+    self: AngrPatchSurface,
+    expr: object,
+    stmt_idx: object,
+    expr_idx: object,
+    block: object,
+    project: AngrProjectSurface | None,
+) -> bool:
+    """Return whether the peephole rewrite must be skipped for a huge expr."""
+    if getattr(project, "_inertia_disable_complex_expr_scan", False):
+        return False
+    expr_node_cache = getattr(self, "_inertia_expr_node_cache", None)
+    if not isinstance(expr_node_cache, dict):
+        expr_node_cache = {}
+        self._inertia_expr_node_cache = expr_node_cache
+    expr_node_count = _expr_tree_node_count(expr, expr_node_cache)
+    if expr_node_count <= PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT:
+        return False
+    complex_seen = getattr(self, "_inertia_complex_expr_skip_seen", None)
+    if not isinstance(complex_seen, set):
+        complex_seen = set()
+        self._inertia_complex_expr_skip_seen = complex_seen
+    block_addr = getattr(block, "addr", None)
+    skip_key = (block_addr, stmt_idx, expr_idx, type(expr).__name__)
+    if skip_key in complex_seen:
+        return True
+    complex_seen.add(skip_key)
+    if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
+        print(
+            "[dbg] clinic:skip-peephole-complex-expr "
+            f"block={block_addr:#x} "
+            f"stmt_idx={stmt_idx} "
+            f"expr_idx={expr_idx} "
+            f"expr_type={type(expr).__name__} "
+            f"node_count={expr_node_count}",
+            file=sys.stderr,
+        )
+        sys.stderr.flush()
+    return True
+
+
+def _peephole_rewrite_loop_8616(
+    self: AngrPatchSurface,
+    expr: object,
+    stmt_idx: object,
+    expr_idx: object,
+    block: object,
+) -> object:
+    """Iterate peephole expr_opts rewrites until a stable shape is reached."""
+    redo = True
+    rewrite_iter = 0
+    seen_shapes: set[tuple[str, int | None]] = set()
+    while redo:
+        redo = False
+        rewrite_iter += 1
+        expr_shape = (type(expr).__name__, getattr(expr, "bits", None))
+        if expr_shape in seen_shapes or rewrite_iter > 32:
+            if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
+                block_addr = getattr(block, "addr", None)
+                print(
+                    "[dbg] clinic:stop-peephole-rewrite-loop "
+                    f"block={block_addr:#x} "
+                    f"stmt_idx={stmt_idx} expr_idx={expr_idx} "
+                    f"iter={rewrite_iter} shape={expr_shape!r}",
+                    file=sys.stderr,
+                )
+                sys.stderr.flush()
+            break
+        seen_shapes.add(expr_shape)
+        for expr_opt in self.expr_opts:
+            if not isinstance(expr, expr_opt.expr_classes):
+                continue
+            try:
+                replacement = expr_opt.optimize(expr, stmt_idx=stmt_idx, block=block)
+            except AssertionError:
+                continue
+            if replacement is None or replacement is expr:
+                continue
+            replacement = _normalize_replacement_bits_8616(expr, replacement)
+            if getattr(expr, "bits", None) == getattr(replacement, "bits", None):
+                expr = replacement
+                redo = True
+                break
+            block_addr = getattr(block, "addr", None)
+            if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
+                print(
+                    "[dbg] clinic:peephole-bits-mismatch "
+                    f"opt={type(expr_opt).__name__} "
+                    f"block={block_addr:#x} "
+                    f"stmt_idx={stmt_idx} "
+                    f"expr_bits={getattr(expr, 'bits', None)} "
+                    f"replacement_bits={getattr(replacement, 'bits', None)} "
+                    f"expr={expr!s} replacement={replacement!s}",
+                    file=sys.stderr,
+                )
+                sys.stderr.flush()
+    return expr
+
+
+def _guarded_peephole_handle_expr_8616(
+    walker_cls: AngrPatchSurface,
+    project: AngrProjectSurface | None,
+    self: AngrPatchSurface,
+    expr_idx: object,
+    expr: object,
+    stmt_idx: object,
+    stmt: object,
+    block: object,
+) -> object:
+    """Peephole ``_handle_expr`` body preserving bit widths and complexity gates."""
+    if getattr(project, "_inertia_skip_clinic_simplify_block", False):
+        return expr
+    try:
+        expr = super(walker_cls, self)._handle_expr(expr_idx, expr, stmt_idx, stmt, block)
+    except AssertionError:
+        if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
+            block_addr = getattr(block, "addr", None)
+            print(
+                "[dbg] clinic:skip-expr-assertion "
+                f"block={block_addr:#x} stmt_idx={stmt_idx} expr_idx={expr_idx}"
+                f"{_project_current_function_context_suffix(project)}",
+                file=sys.stderr,
+            )
+            sys.stderr.flush()
+        return expr
+    old_expr = expr
+    if _clinic_skip_complex_expr_gate_8616(self, expr, stmt_idx, expr_idx, block, project):
+        return expr
+    expr = _peephole_rewrite_loop_8616(self, expr, stmt_idx, expr_idx, block)
+    if expr is not old_expr:
+        self.any_update = True
+    return expr
+
+
 def install_angr_peephole_expr_bitwidth_guard(
     walker_cls: AngrPatchSurface,
     project: AngrProjectSurface | None = None,
 ) -> object:
     """Patch angr's peephole walker to preserve expression bit widths."""
     original_handle_expr = walker_cls._handle_expr
-
-    def _normalize_replacement_bits(expr: object, replacement: object) -> object:
-        expr_bits = getattr(expr, "bits", None)
-        replacement_bits = getattr(replacement, "bits", None)
-        if expr_bits is None or replacement_bits is None or expr_bits == replacement_bits:
-            return replacement
-
-        try:
-            from angr.ailment.expression import BasePointerOffset, Const
-        except ImportError:
-            return replacement
-
-        if isinstance(replacement, BasePointerOffset):
-            return BasePointerOffset(
-                replacement.idx,
-                expr_bits,
-                replacement.base,
-                replacement.offset,
-                variable=getattr(replacement, "variable", None),
-                variable_offset=getattr(replacement, "variable_offset", None),
-                **getattr(replacement, "tags", {}),
-            )
-
-        if isinstance(replacement, Const) and isinstance(replacement.value, int):
-            mask = (1 << expr_bits) - 1
-            return Const(
-                replacement.idx,
-                getattr(replacement, "variable", None),
-                replacement.value & mask,
-                expr_bits,
-                **getattr(replacement, "tags", {}),
-            )
-
-        return replacement
 
     def _guarded_handle_expr(
         self: AngrPatchSurface,
@@ -215,98 +352,9 @@ def install_angr_peephole_expr_bitwidth_guard(
         stmt: object,
         block: object,
     ) -> object:
-        if getattr(project, "_inertia_skip_clinic_simplify_block", False):
-            return expr
-        try:
-            expr = super(walker_cls, self)._handle_expr(expr_idx, expr, stmt_idx, stmt, block)
-        except AssertionError:
-            if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
-                block_addr = getattr(block, "addr", None)
-                print(
-                    "[dbg] clinic:skip-expr-assertion "
-                    f"block={block_addr:#x} stmt_idx={stmt_idx} expr_idx={expr_idx}"
-                    f"{_project_current_function_context_suffix(project)}",
-                    file=sys.stderr,
-                )
-                sys.stderr.flush()
-            return expr
-        old_expr = expr
-        if not getattr(project, "_inertia_disable_complex_expr_scan", False):
-            expr_node_cache = getattr(self, "_inertia_expr_node_cache", None)
-            if not isinstance(expr_node_cache, dict):
-                expr_node_cache = {}
-                self._inertia_expr_node_cache = expr_node_cache
-            expr_node_count = _expr_tree_node_count(expr, expr_node_cache)
-            if expr_node_count > PEEPHOLE_COMPLEX_EXPR_NODE_LIMIT:
-                complex_seen = getattr(self, "_inertia_complex_expr_skip_seen", None)
-                if not isinstance(complex_seen, set):
-                    complex_seen = set()
-                    self._inertia_complex_expr_skip_seen = complex_seen
-                block_addr = getattr(block, "addr", None)
-                skip_key = (block_addr, stmt_idx, expr_idx, type(expr).__name__)
-                if skip_key not in complex_seen:
-                    complex_seen.add(skip_key)
-                    if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
-                        print(
-                            "[dbg] clinic:skip-peephole-complex-expr "
-                            f"block={block_addr:#x} "
-                            f"stmt_idx={stmt_idx} "
-                            f"expr_idx={expr_idx} "
-                            f"expr_type={type(expr).__name__} "
-                            f"node_count={expr_node_count}",
-                            file=sys.stderr,
-                        )
-                        sys.stderr.flush()
-                return expr
-        redo = True
-        rewrite_iter = 0
-        seen_shapes: set[tuple[str, int | None]] = set()
-        while redo:
-            redo = False
-            rewrite_iter += 1
-            expr_shape = (type(expr).__name__, getattr(expr, "bits", None))
-            if expr_shape in seen_shapes or rewrite_iter > 32:
-                if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
-                    block_addr = getattr(block, "addr", None)
-                    print(
-                        "[dbg] clinic:stop-peephole-rewrite-loop "
-                        f"block={block_addr:#x} "
-                        f"stmt_idx={stmt_idx} expr_idx={expr_idx} "
-                        f"iter={rewrite_iter} shape={expr_shape!r}",
-                        file=sys.stderr,
-                    )
-                    sys.stderr.flush()
-                break
-            seen_shapes.add(expr_shape)
-            for expr_opt in self.expr_opts:
-                if isinstance(expr, expr_opt.expr_classes):
-                    try:
-                        replacement = expr_opt.optimize(expr, stmt_idx=stmt_idx, block=block)
-                    except AssertionError:
-                        continue
-                    if replacement is not None and replacement is not expr:
-                        replacement = _normalize_replacement_bits(expr, replacement)
-                        if getattr(expr, "bits", None) != getattr(replacement, "bits", None):
-                            block_addr = getattr(block, "addr", None)
-                            if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
-                                print(
-                                    "[dbg] clinic:peephole-bits-mismatch "
-                                    f"opt={type(expr_opt).__name__} "
-                                    f"block={block_addr:#x} "
-                                    f"stmt_idx={stmt_idx} "
-                                    f"expr_bits={getattr(expr, 'bits', None)} "
-                                    f"replacement_bits={getattr(replacement, 'bits', None)} "
-                                    f"expr={expr!s} replacement={replacement!s}",
-                                    file=sys.stderr,
-                                )
-                                sys.stderr.flush()
-                            continue
-                        expr = replacement
-                        redo = True
-                        break
-        if expr is not old_expr:
-            self.any_update = True
-        return expr
+        return _guarded_peephole_handle_expr_8616(
+            walker_cls, project, self, expr_idx, expr, stmt_idx, stmt, block
+        )
 
     walker_cls._handle_expr = _guarded_handle_expr
     return original_handle_expr
@@ -406,7 +454,8 @@ def install_angr_basepointeroffset_codegen_guard(codegen_cls: AngrPatchSurface) 
     return original_handle
 
 
-def _seqnode_children_8616(node: object) -> tuple[object, ...]:
+def _seqnode_attr_children_8616(node: object) -> list[object]:
+    """Collect direct child nodes carried by named sequence-node attributes."""
     children: list[object] = []
     for attr in ("node", "nodes", "sequence_node", "true_node", "false_node", "else_node", "default_node", "head"):
         value = getattr(node, attr, None)
@@ -418,9 +467,12 @@ def _seqnode_children_8616(node: object) -> tuple[object, ...]:
             children.extend(child for child in value if child is not None)
         else:
             children.append(value)
-    condition_and_nodes = getattr(node, "condition_and_nodes", None)
-    if isinstance(condition_and_nodes, list | tuple):
-        children.extend(child for _condition, child in condition_and_nodes if child is not None)
+    return children
+
+
+def _seqnode_cases_children_8616(node: object) -> list[object]:
+    """Collect child nodes carried by ``cases`` dict/list payloads."""
+    children: list[object] = []
     cases = getattr(node, "cases", None)
     if isinstance(cases, dict):
         children.extend(child for child in cases.values() if child is not None)
@@ -432,6 +484,15 @@ def _seqnode_children_8616(node: object) -> tuple[object, ...]:
                     children.append(child)
             elif item is not None:
                 children.append(item)
+    return children
+
+
+def _seqnode_children_8616(node: object) -> tuple[object, ...]:
+    children = _seqnode_attr_children_8616(node)
+    condition_and_nodes = getattr(node, "condition_and_nodes", None)
+    if isinstance(condition_and_nodes, list | tuple):
+        children.extend(child for _condition, child in condition_and_nodes if child is not None)
+    children.extend(_seqnode_cases_children_8616(node))
     return tuple(children)
 
 
@@ -524,6 +585,56 @@ def _seqnode_target_addr_8616(target: object) -> int | None:
     return addr if isinstance(addr, int) else None
 
 
+def _collect_loop_exit_nodes_8616(
+    node: object,
+    path: tuple[int, ...],
+    break_targets: list[int],
+    conditional_break_targets: list[int],
+    continue_targets: list[int],
+    break_samples: list[DynamicRecord],
+) -> None:
+    """Record break/continue node targets inside a loop sequence subtree."""
+    node_type = type(node).__name__
+    target_addr = _seqnode_target_addr_8616(getattr(node, "target", None))
+    if node_type in {"BreakNode", "ConditionalBreakNode"}:
+        if isinstance(target_addr, int):
+            break_targets.append(target_addr)
+            if node_type == "ConditionalBreakNode":
+                conditional_break_targets.append(target_addr)
+        break_samples.append(
+            {
+                "addr": getattr(node, "addr", None),
+                "path": list(path),
+                "target_addr": target_addr,
+                "type": node_type,
+            }
+        )
+    elif node_type == "ContinueNode" and isinstance(target_addr, int):
+        continue_targets.append(target_addr)
+    for index, child in enumerate(_seqnode_children_8616(node)):
+        _collect_loop_exit_nodes_8616(
+            child, (*path, index), break_targets, conditional_break_targets, continue_targets, break_samples
+        )
+
+
+def _loop_exit_default_status_8616(
+    loop_sequence: object | None,
+    external_default_addr: object,
+    unique_break_targets: list[int],
+    external_default_is_break_target: bool,
+) -> str:
+    """Classify the external default node's relation to loop break targets."""
+    if loop_sequence is None:
+        return "missing_loop_sequence"
+    if not isinstance(external_default_addr, int):
+        return "missing_external_default_addr"
+    if external_default_is_break_target:
+        return "external_default_is_loop_break_target"
+    if unique_break_targets:
+        return "external_default_not_loop_break_target"
+    return "loop_has_no_break_target"
+
+
 def _loop_exit_default_relation_8616(loop_node: object, external_default_node: object | None) -> DynamicRecord:
     loop_sequence = getattr(loop_node, "sequence_node", None)
     external_default_addr = getattr(external_default_node, "addr", None)
@@ -532,45 +643,19 @@ def _loop_exit_default_relation_8616(loop_node: object, external_default_node: o
     continue_targets: list[int] = []
     break_samples: list[DynamicRecord] = []
 
-    def _collect(node: object, path: tuple[int, ...]) -> None:
-        node_type = type(node).__name__
-        target_addr = _seqnode_target_addr_8616(getattr(node, "target", None))
-        if node_type in {"BreakNode", "ConditionalBreakNode"}:
-            if isinstance(target_addr, int):
-                break_targets.append(target_addr)
-                if node_type == "ConditionalBreakNode":
-                    conditional_break_targets.append(target_addr)
-            break_samples.append(
-                {
-                    "addr": getattr(node, "addr", None),
-                    "path": list(path),
-                    "target_addr": target_addr,
-                    "type": node_type,
-                }
-            )
-        elif node_type == "ContinueNode" and isinstance(target_addr, int):
-            continue_targets.append(target_addr)
-        for index, child in enumerate(_seqnode_children_8616(node)):
-            _collect(child, (*path, index))
-
     if loop_sequence is not None:
-        _collect(loop_sequence, ())
+        _collect_loop_exit_nodes_8616(
+            loop_sequence, (), break_targets, conditional_break_targets, continue_targets, break_samples
+        )
     unique_break_targets = sorted(set(break_targets))
     unique_conditional_break_targets = sorted(set(conditional_break_targets))
     unique_continue_targets = sorted(set(continue_targets))
     external_default_is_break_target = (
         isinstance(external_default_addr, int) and external_default_addr in set(unique_break_targets)
     )
-    if loop_sequence is None:
-        status = "missing_loop_sequence"
-    elif not isinstance(external_default_addr, int):
-        status = "missing_external_default_addr"
-    elif external_default_is_break_target:
-        status = "external_default_is_loop_break_target"
-    elif unique_break_targets:
-        status = "external_default_not_loop_break_target"
-    else:
-        status = "loop_has_no_break_target"
+    status = _loop_exit_default_status_8616(
+        loop_sequence, external_default_addr, unique_break_targets, external_default_is_break_target
+    )
     return {
         "break_path_samples": break_samples[:8],
         "break_target_addrs": unique_break_targets,
@@ -809,115 +894,142 @@ def _graphregion_subtree_summaries_8616(region: object) -> tuple[DynamicRecord, 
     return tuple(sorted(summaries, key=lambda item: (len(item["path"]), item["path"], item["type"])))
 
 
+_SEQNODE_PREFERRED_TYPES_8616 = {
+    "SequenceNode": 0,
+    "MultiNode": 1,
+    "ConditionNode": 2,
+    "CascadingConditionNode": 2,
+    "LoopNode": 2,
+    "SwitchCaseNode": 2,
+    "CodeNode": 3,
+    "Block": 4,
+}
+
+
+def _seqnode_candidate_payload_8616(summary: DynamicRecord) -> DynamicRecord:
+    """Render a subtree summary as the region-mapping candidate record."""
+    children = tuple(summary.get("children", ()) or ())
+    return {
+        "addr": summary.get("addr"),
+        "addr_count": summary.get("addr_count"),
+        "child_count": len(children),
+        "children": list(children[:6]),
+        "path": list(summary.get("path", ()) or ()),
+        "type": summary.get("type"),
+    }
+
+
+def _preferred_exact_region_summary_8616(candidates: list[DynamicRecord]) -> DynamicRecord | None:
+    """Select the single preferred exact-addr subtree summary, if unambiguous."""
+    if not candidates:
+        return None
+    ordered = sorted(
+        candidates,
+        key=lambda item: (
+            _SEQNODE_PREFERRED_TYPES_8616.get(str(item.get("type")), 99),
+            -int(item.get("addr_count", 0) or 0),
+            len(item.get("path", ()) or ()),
+            item.get("path", ()) or (),
+        ),
+    )
+    best_key = (
+        _SEQNODE_PREFERRED_TYPES_8616.get(str(ordered[0].get("type")), 99),
+        -int(ordered[0].get("addr_count", 0) or 0),
+    )
+    tied = [
+        candidate
+        for candidate in ordered
+        if (
+            _SEQNODE_PREFERRED_TYPES_8616.get(str(candidate.get("type")), 99),
+            -int(candidate.get("addr_count", 0) or 0),
+        )
+        == best_key
+    ]
+    return ordered[0] if len(tied) == 1 else None
+
+
+def _region_missing_result_8616(region_id: object) -> DynamicRecord:
+    """Return the shared missing-region mapping record."""
+    return {
+        "addr_count": 0,
+        "candidate_count": 0,
+        "candidates": [],
+        "matched_addr": None,
+        "path": None,
+        "region_id": region_id,
+        "status": "missing",
+        "type": None,
+    }
+
+
+def _region_containing_summaries_8616(
+    region_id: int,
+    subtree_summaries: tuple[DynamicRecord, ...],
+) -> list[DynamicRecord]:
+    """Return subtree summaries whose addr sets contain ``region_id``."""
+    return [
+        summary
+        for summary in subtree_summaries
+        if isinstance(addrs := summary.get("addrs"), tuple) and region_id in addrs
+    ]
+
+
+def _exact_region_match_8616(
+    region_id: int,
+    subtree_summaries: tuple[DynamicRecord, ...],
+    selected: DynamicRecord,
+    exact: list[DynamicRecord],
+) -> DynamicRecord:
+    """Resolve the selected exact-addr summary against containing sequences."""
+    small_sequence_containing = [
+        summary
+        for summary in _region_containing_summaries_8616(region_id, subtree_summaries)
+        if summary is not selected
+        and summary.get("type") == "SequenceNode"
+        and 1 < int(summary.get("addr_count", 0) or 0) <= 8
+        and len(summary.get("path", ()) or ()) <= len(selected.get("path", ()) or ())
+    ]
+    if small_sequence_containing:
+        smallest_addr_count = min(int(summary.get("addr_count", 0) or 0) for summary in small_sequence_containing)
+        small_sequence_containing = [
+            summary
+            for summary in small_sequence_containing
+            if int(summary.get("addr_count", 0) or 0) == smallest_addr_count
+        ]
+    if (
+        selected.get("type") == "Block"
+        and int(selected.get("addr_count", 0) or 0) == 1
+        and len(small_sequence_containing) == 1
+    ):
+        selected = small_sequence_containing[0]
+    return {
+        "addr_count": selected["addr_count"],
+        "candidate_count": len(exact),
+        "candidates": [_seqnode_candidate_payload_8616(summary) for summary in exact[:4]],
+        "matched_addr": selected["addr"],
+        "path": list(selected["path"]),
+        "region_id": region_id,
+        "status": "exact" if selected in exact else "contained",
+        "type": selected["type"],
+    }
+
+
 def _seqnode_map_region_id_8616(
     region_id: object,
     subtree_summaries: tuple[DynamicRecord, ...],
 ) -> DynamicRecord:
-    preferred_types = {
-        "SequenceNode": 0,
-        "MultiNode": 1,
-        "ConditionNode": 2,
-        "CascadingConditionNode": 2,
-        "LoopNode": 2,
-        "SwitchCaseNode": 2,
-        "CodeNode": 3,
-        "Block": 4,
-    }
-
-    def _candidate_payload(summary: DynamicRecord) -> DynamicRecord:
-        children = tuple(summary.get("children", ()) or ())
-        return {
-            "addr": summary.get("addr"),
-            "addr_count": summary.get("addr_count"),
-            "child_count": len(children),
-            "children": list(children[:6]),
-            "path": list(summary.get("path", ()) or ()),
-            "type": summary.get("type"),
-        }
-
-    def _preferred_exact(candidates: list[DynamicRecord]) -> DynamicRecord | None:
-        if not candidates:
-            return None
-        ordered = sorted(
-            candidates,
-            key=lambda item: (
-                preferred_types.get(str(item.get("type")), 99),
-                -int(item.get("addr_count", 0) or 0),
-                len(item.get("path", ()) or ()),
-                item.get("path", ()) or (),
-            ),
-        )
-        best_key = (
-            preferred_types.get(str(ordered[0].get("type")), 99),
-            -int(ordered[0].get("addr_count", 0) or 0),
-        )
-        tied = [
-            candidate
-            for candidate in ordered
-            if (
-                preferred_types.get(str(candidate.get("type")), 99),
-                -int(candidate.get("addr_count", 0) or 0),
-            )
-            == best_key
-        ]
-        return ordered[0] if len(tied) == 1 else None
-
     if not isinstance(region_id, int):
-        return {
-            "addr_count": 0,
-            "candidate_count": 0,
-            "candidates": [],
-            "matched_addr": None,
-            "path": None,
-            "region_id": region_id,
-            "status": "missing",
-            "type": None,
-        }
+        return _region_missing_result_8616(region_id)
 
     exact = [summary for summary in subtree_summaries if summary.get("addr") == region_id]
-    selected = _preferred_exact(exact)
+    selected = _preferred_exact_region_summary_8616(exact)
     if selected is not None:
-        containing = [
-            summary
-            for summary in subtree_summaries
-            if isinstance(addrs := summary.get("addrs"), tuple) and region_id in addrs
-        ]
-        small_sequence_containing = [
-            summary
-            for summary in containing
-            if summary is not selected
-            and summary.get("type") == "SequenceNode"
-            and 1 < int(summary.get("addr_count", 0) or 0) <= 8
-            and len(summary.get("path", ()) or ()) <= len(selected.get("path", ()) or ())
-        ]
-        if small_sequence_containing:
-            smallest_addr_count = min(int(summary.get("addr_count", 0) or 0) for summary in small_sequence_containing)
-            small_sequence_containing = [
-                summary
-                for summary in small_sequence_containing
-                if int(summary.get("addr_count", 0) or 0) == smallest_addr_count
-            ]
-        if (
-            selected.get("type") == "Block"
-            and int(selected.get("addr_count", 0) or 0) == 1
-            and len(small_sequence_containing) == 1
-        ):
-            selected = small_sequence_containing[0]
-        return {
-            "addr_count": selected["addr_count"],
-            "candidate_count": len(exact),
-            "candidates": [_candidate_payload(summary) for summary in exact[:4]],
-            "matched_addr": selected["addr"],
-            "path": list(selected["path"]),
-            "region_id": region_id,
-            "status": "exact" if selected in exact else "contained",
-            "type": selected["type"],
-        }
+        return _exact_region_match_8616(region_id, subtree_summaries, selected, exact)
     if exact:
         return {
             "addr_count": 0,
             "candidate_count": len(exact),
-            "candidates": [_candidate_payload(summary) for summary in exact[:4]],
+            "candidates": [_seqnode_candidate_payload_8616(summary) for summary in exact[:4]],
             "matched_addr": region_id,
             "path": None,
             "region_id": region_id,
@@ -925,22 +1037,9 @@ def _seqnode_map_region_id_8616(
             "type": None,
         }
 
-    containing = [
-        summary
-        for summary in subtree_summaries
-        if isinstance(addrs := summary.get("addrs"), tuple) and region_id in addrs
-    ]
+    containing = _region_containing_summaries_8616(region_id, subtree_summaries)
     if not containing:
-        return {
-            "addr_count": 0,
-            "candidate_count": 0,
-            "candidates": [],
-            "matched_addr": None,
-            "path": None,
-            "region_id": region_id,
-            "status": "missing",
-            "type": None,
-        }
+        return _region_missing_result_8616(region_id)
     containing = sorted(containing, key=lambda item: (int(item["addr_count"]), len(item["path"]), item["path"]))
     smallest_count = containing[0]["addr_count"]
     smallest = [summary for summary in containing if summary["addr_count"] == smallest_count]
@@ -948,7 +1047,7 @@ def _seqnode_map_region_id_8616(
         return {
             "addr_count": smallest_count,
             "candidate_count": len(smallest),
-            "candidates": [_candidate_payload(summary) for summary in smallest[:4]],
+            "candidates": [_seqnode_candidate_payload_8616(summary) for summary in smallest[:4]],
             "matched_addr": None,
             "path": None,
             "region_id": region_id,
@@ -959,7 +1058,7 @@ def _seqnode_map_region_id_8616(
     return {
         "addr_count": selected["addr_count"],
         "candidate_count": 1,
-        "candidates": [_candidate_payload(selected)],
+        "candidates": [_seqnode_candidate_payload_8616(selected)],
         "matched_addr": selected["addr"],
         "path": list(selected["path"]),
         "region_id": region_id,
@@ -995,220 +1094,270 @@ def _expanded_root_body_shape_status_8616(
     return "non_sibling_subtrees"
 
 
+def _common_int_path_8616(paths: tuple[tuple[int, ...], ...]) -> tuple[int, ...]:
+    """Return the shared prefix path across mapped node paths."""
+    if not paths:
+        return ()
+    prefix: list[int] = []
+    for values in zip(*paths, strict=False):
+        if len(set(values)) != 1:
+            break
+        prefix.append(values[0])
+    return tuple(prefix)
+
+
+def _switch_mapping_status_8616(statuses: list[str]) -> str:
+    """Classify a case/default region-mapping status set."""
+    if any(status == "missing" for status in statuses):
+        return "blocked_missing_region"
+    if any(status == "ambiguous_exact" for status in statuses):
+        return "blocked_ambiguous_exact"
+    if any(status == "ambiguous_containing" for status in statuses):
+        return "blocked_ambiguous_containing"
+    if any(status == "contained" for status in statuses):
+        return "mapped_contained"
+    return "mapped_exact"
+
+
+def _expanded_path_samples_8616(mappings: tuple[DynamicRecord, ...], limit: int) -> list[DynamicRecord]:
+    """Render mapped region records as path samples, capped at ``limit``."""
+    return [
+        {
+            "path": list(path),
+            "region_id": mapping.get("region_id"),
+            "status": mapping.get("status"),
+            "type": mapping.get("type"),
+        }
+        for mapping in mappings
+        if (path := _int_path_tuple(mapping.get("path"))) is not None
+    ][:limit]
+
+
+def _expanded_region_mappings_8616(
+    expanded_root_body: DynamicRecord,
+    subtree_summaries: tuple[DynamicRecord, ...],
+) -> tuple[tuple[DynamicRecord, ...], tuple[DynamicRecord, ...]]:
+    """Map normalized expanded-root case/default region ids to subtree paths."""
+    case_mappings = tuple(
+        _seqnode_map_region_id_8616(region_id, subtree_summaries)
+        for region_id in expanded_root_body["normalized_case_region_ids"]
+        if isinstance(region_id, int)
+    )
+    default_mappings = tuple(
+        _seqnode_map_region_id_8616(region_id, subtree_summaries)
+        for region_id in expanded_root_body["default_region_ids"]
+        if isinstance(region_id, int)
+    )
+    return case_mappings, default_mappings
+
+
+def _expanded_root_geometry_8616(
+    expanded_case_mappings: tuple[DynamicRecord, ...],
+    expanded_default_mappings: tuple[DynamicRecord, ...],
+) -> DynamicRecord:
+    """Compute shared-path geometry for expanded-root case/default mappings."""
+    expanded_paths = _record_paths((*expanded_case_mappings, *expanded_default_mappings))
+    common_parent_path = _common_int_path_8616(expanded_paths)
+    direct_sibling_span = bool(expanded_paths) and all(
+        len(path) == len(common_parent_path) + 1 for path in expanded_paths
+    )
+    return {
+        "body_shape_status": _expanded_root_body_shape_status_8616(
+            case_paths=_record_paths(expanded_case_mappings),
+            common_parent_path=common_parent_path,
+            default_paths=_record_paths(expanded_default_mappings),
+            direct_sibling_span=direct_sibling_span,
+        ),
+        "common_parent_path": common_parent_path,
+        "direct_sibling_span": direct_sibling_span,
+    }
+
+
+def _expanded_root_verdict_8616(
+    expanded_root_body: DynamicRecord,
+    expanded_case_mappings: tuple[DynamicRecord, ...],
+    expanded_default_mappings: tuple[DynamicRecord, ...],
+    geometry: DynamicRecord,
+) -> tuple[str, bool, object]:
+    """Classify expanded-root body mapping status and transform readiness."""
+    expanded_statuses = [str(mapping["status"]) for mapping in expanded_case_mappings]
+    expanded_statuses.extend(str(mapping["status"]) for mapping in expanded_default_mappings)
+    transform_ready = bool(expanded_root_body["ready"]) and bool(expanded_case_mappings)
+    blocker_reason = None
+    if not expanded_root_body["ready"]:
+        body_mapping_status = "normalization_not_ready"
+        transform_ready = False
+        blocker_reason = "expanded_root_normalization_not_ready"
+    elif len(expanded_case_mappings) != len(expanded_root_body["normalized_case_values"]):
+        body_mapping_status = "case_value_count_mismatch"
+        transform_ready = False
+        blocker_reason = "case_value_count_mismatch"
+    elif any(status == "missing" for status in expanded_statuses):
+        body_mapping_status = "blocked_missing_region"
+        transform_ready = False
+        blocker_reason = "missing_expanded_root_region"
+    elif any(status.startswith("ambiguous") for status in expanded_statuses):
+        body_mapping_status = "blocked_ambiguous_region"
+        transform_ready = False
+        blocker_reason = "ambiguous_expanded_root_region"
+    elif any(status == "contained" for status in expanded_statuses):
+        body_mapping_status = "mapped_contained"
+    else:
+        body_mapping_status = "mapped_exact"
+    if transform_ready and not geometry["direct_sibling_span"]:
+        transform_ready = False
+        blocker_reason = (
+            "expanded_root_ladder_subtree_with_external_default_sibling"
+            if geometry["body_shape_status"] == "ladder_subtree_with_external_default_sibling"
+            else "expanded_root_non_sibling_subtrees"
+        )
+    return body_mapping_status, transform_ready, blocker_reason
+
+
+def _expanded_root_switch_fields_8616(
+    expanded_root_body: DynamicRecord,
+    expanded_case_mappings: tuple[DynamicRecord, ...],
+    expanded_default_mappings: tuple[DynamicRecord, ...],
+) -> DynamicRecord:
+    """Compute the shared ``expanded_root_*`` mapping record fields."""
+    geometry = _expanded_root_geometry_8616(expanded_case_mappings, expanded_default_mappings)
+    body_mapping_status, transform_ready, blocker_reason = _expanded_root_verdict_8616(
+        expanded_root_body, expanded_case_mappings, expanded_default_mappings, geometry
+    )
+    return {
+        "expanded_root_body_mapping_status": body_mapping_status,
+        "expanded_root_body_shape_status": geometry["body_shape_status"],
+        "expanded_root_case_path_samples": _expanded_path_samples_8616(expanded_case_mappings, 12),
+        "expanded_root_default_path_samples": _expanded_path_samples_8616(expanded_default_mappings, 6),
+        "expanded_root_default_region_ids": list(expanded_root_body["default_region_ids"]),
+        "expanded_root_direct_sibling_span": geometry["direct_sibling_span"],
+        "expanded_root_common_parent_path": list(geometry["common_parent_path"]),
+        "expanded_root_mapped_case_count": sum(
+            1 for mapping in expanded_case_mappings if mapping["status"] in {"exact", "contained"}
+        ),
+        "expanded_root_normalization_ready": bool(expanded_root_body["ready"]),
+        "expanded_root_normalization_status": expanded_root_body["status"],
+        "expanded_root_normalized_case_region_ids": list(expanded_root_body["normalized_case_region_ids"]),
+        "expanded_root_normalized_case_values": list(expanded_root_body["normalized_case_values"]),
+        "expanded_root_transform_blocker_reason": blocker_reason,
+        "expanded_root_transform_ready": transform_ready,
+        "expanded_root_unmapped_case_region_ids": [
+            mapping["region_id"]
+            for mapping in expanded_case_mappings
+            if mapping["status"] not in {"exact", "contained"}
+        ],
+    }
+
+
+def _seqnode_switch_artifact_mapping_8616(
+    artifact: DynamicRecord,
+    subtree_summaries: tuple[DynamicRecord, ...],
+) -> DynamicRecord:
+    """Map one switch artifact's case/default regions into seqnode paths."""
+    case_region_ids = tuple(value for value in artifact.get("case_region_ids", ()) if isinstance(value, int))
+    case_mappings = tuple(_seqnode_map_region_id_8616(region_id, subtree_summaries) for region_id in case_region_ids)
+    default_mapping = _seqnode_map_region_id_8616(artifact.get("default_region_id"), subtree_summaries)
+    statuses = [str(mapping["status"]) for mapping in case_mappings]
+    if artifact.get("default_region_id") is not None:
+        statuses.append(str(default_mapping["status"]))
+    status = _switch_mapping_status_8616(statuses)
+    case_paths = tuple(
+        path for mapping in case_mappings if (path := _int_path_tuple(mapping.get("path"))) is not None
+    )
+    default_path = _int_path_tuple(default_mapping.get("path"))
+    default_contains_case_count = 0
+    if default_path is not None:
+        default_contains_case_count = sum(
+            1 for case_path in case_paths if len(case_path) > len(default_path) and case_path[: len(default_path)] == default_path
+        )
+    transform_ready = status in {"mapped_exact", "mapped_contained"}
+    transform_blocker_reason = None
+    if transform_ready and default_contains_case_count:
+        status = "blocked_partial_switch_ladder"
+        transform_ready = False
+        transform_blocker_reason = "default_subtree_contains_more_switch_cases"
+    common_paths = (*case_paths, *((default_path,) if default_path is not None else ()))
+    decision_tree_summary = dict(artifact.get("decision_tree_summary") or {})
+    expanded_root_body = _expanded_root_normalized_body_from_summary_8616(decision_tree_summary)
+    expanded_case_mappings, expanded_default_mappings = _expanded_region_mappings_8616(
+        expanded_root_body, subtree_summaries
+    )
+    expanded_fields = _expanded_root_switch_fields_8616(
+        expanded_root_body, expanded_case_mappings, expanded_default_mappings
+    )
+    return {
+        "case_region_ids": list(case_region_ids),
+        "case_mappings": list(case_mappings),
+        "case_values": list(artifact.get("case_values", ()) or ()),
+        "common_parent_path": list(_common_int_path_8616(common_paths)),
+        "decision_tree_case_region_ids": list(artifact.get("decision_tree_case_region_ids", ()) or ()),
+        "decision_tree_case_values": list(artifact.get("decision_tree_case_values", ()) or ()),
+        "decision_tree_summary": decision_tree_summary,
+        "default_contains_case_count": default_contains_case_count,
+        "default_mapping": default_mapping,
+        "default_region_id": artifact.get("default_region_id"),
+        **expanded_fields,
+        "expanded_root_default_mappings": list(expanded_default_mappings),
+        "expanded_root_normalized_case_mappings": list(expanded_case_mappings),
+        "mapped_case_count": sum(1 for mapping in case_mappings if mapping["status"] in {"exact", "contained"}),
+        "region_id": artifact.get("region_id"),
+        "status": status,
+        "switch_condition_lhs": artifact.get("switch_condition_lhs"),
+        "transform_blocker_reason": transform_blocker_reason,
+        "transform_ready": transform_ready,
+        "unmapped_case_region_ids": [
+            mapping["region_id"]
+            for mapping in case_mappings
+            if mapping["status"] not in {"exact", "contained"}
+        ],
+    }
+
+
 def _seqnode_switch_artifact_mappings_8616(
     sequence: object, artifacts: tuple[DynamicRecord, ...]
 ) -> tuple[DynamicRecord, ...]:
-    def _common_path(paths: tuple[tuple[int, ...], ...]) -> tuple[int, ...]:
-        if not paths:
-            return ()
-        prefix: list[int] = []
-        for values in zip(*paths, strict=False):
-            if len(set(values)) != 1:
-                break
-            prefix.append(values[0])
-        return tuple(prefix)
-
-    def _path_tuple(mapping: DynamicRecord) -> tuple[int, ...] | None:
-        path = mapping.get("path")
-        if not isinstance(path, list | tuple) or not all(isinstance(value, int) for value in path):
-            return None
-        return tuple(path)
-
-    def _expanded_root_normalized_body_8616(summary: DynamicRecord) -> DynamicRecord:
-        readiness = summary.get("expanded_root_normalization_readiness")
-        ready = isinstance(readiness, dict) and readiness.get("ready") is True
-        branch_subtrees = summary.get("expanded_root_normalization_branch_subtrees")
-        case_region_ids: list[int] = []
-        case_values: list[int] = []
-        default_region_ids: list[int] = []
-        if isinstance(branch_subtrees, list):
-            for split in branch_subtrees:
-                if not isinstance(split, dict):
-                    continue
-                for region_id in split.get("current_case_region_ids", ()) or ():
-                    if isinstance(region_id, int):
-                        case_region_ids.append(region_id)
-                for value in split.get("current_case_values", ()) or ():
-                    if isinstance(value, int):
-                        case_values.append(value)
-                for subtree in split.get("subtrees", ()) or ():
-                    if not isinstance(subtree, dict):
-                        continue
-                    for region_id in subtree.get("normalized_case_region_ids", ()) or ():
-                        if isinstance(region_id, int):
-                            case_region_ids.append(region_id)
-                    for value in subtree.get("normalized_case_values", ()) or ():
-                        if isinstance(value, int):
-                            case_values.append(value)
-                    for region_id in subtree.get("default_candidate_region_ids", ()) or ():
-                        if isinstance(region_id, int):
-                            default_region_ids.append(region_id)
-        return {
-            "default_region_ids": list(dict.fromkeys(default_region_ids)),
-            "normalized_case_region_ids": list(dict.fromkeys(case_region_ids)),
-            "normalized_case_values": case_values,
-            "ready": ready,
-            "status": readiness.get("status") if isinstance(readiness, dict) else None,
-        }
-
     subtree_summaries = _seqnode_subtree_summaries_8616(sequence)
-    mappings: list[DynamicRecord] = []
-    for artifact in artifacts:
-        case_region_ids = tuple(value for value in artifact.get("case_region_ids", ()) if isinstance(value, int))
-        case_mappings = tuple(_seqnode_map_region_id_8616(region_id, subtree_summaries) for region_id in case_region_ids)
-        default_mapping = _seqnode_map_region_id_8616(artifact.get("default_region_id"), subtree_summaries)
-        statuses = [str(mapping["status"]) for mapping in case_mappings]
-        if artifact.get("default_region_id") is not None:
-            statuses.append(str(default_mapping["status"]))
-        if any(status == "missing" for status in statuses):
-            status = "blocked_missing_region"
-        elif any(status == "ambiguous_exact" for status in statuses):
-            status = "blocked_ambiguous_exact"
-        elif any(status == "ambiguous_containing" for status in statuses):
-            status = "blocked_ambiguous_containing"
-        elif any(status == "contained" for status in statuses):
-            status = "mapped_contained"
-        else:
-            status = "mapped_exact"
-        case_paths = tuple(path for mapping in case_mappings if (path := _path_tuple(mapping)) is not None)
-        default_path = _path_tuple(default_mapping)
-        default_contains_case_count = 0
-        if default_path is not None:
-            default_contains_case_count = sum(
-                1 for case_path in case_paths if len(case_path) > len(default_path) and case_path[: len(default_path)] == default_path
-            )
-        transform_ready = status in {"mapped_exact", "mapped_contained"}
-        transform_blocker_reason = None
-        if transform_ready and default_contains_case_count:
-            status = "blocked_partial_switch_ladder"
-            transform_ready = False
-            transform_blocker_reason = "default_subtree_contains_more_switch_cases"
-        common_paths = (*case_paths, *((default_path,) if default_path is not None else ()))
-        decision_tree_summary = dict(artifact.get("decision_tree_summary") or {})
-        expanded_root_body = _expanded_root_normalized_body_8616(decision_tree_summary)
-        expanded_case_mappings = tuple(
-            _seqnode_map_region_id_8616(region_id, subtree_summaries)
-            for region_id in expanded_root_body["normalized_case_region_ids"]
-            if isinstance(region_id, int)
-        )
-        expanded_default_mappings = tuple(
-            _seqnode_map_region_id_8616(region_id, subtree_summaries)
-            for region_id in expanded_root_body["default_region_ids"]
-            if isinstance(region_id, int)
-        )
-        expanded_statuses = [str(mapping["status"]) for mapping in expanded_case_mappings]
-        expanded_statuses.extend(str(mapping["status"]) for mapping in expanded_default_mappings)
-        expanded_paths = _record_paths((*expanded_case_mappings, *expanded_default_mappings))
-        expanded_case_paths = _record_paths(expanded_case_mappings)
-        expanded_default_paths = _record_paths(expanded_default_mappings)
-        expanded_case_path_samples = [
-            {
-                "path": list(path),
-                "region_id": mapping.get("region_id"),
-                "status": mapping.get("status"),
-                "type": mapping.get("type"),
-            }
-            for mapping in expanded_case_mappings
-            if (path := _path_tuple(mapping)) is not None
-        ][:12]
-        expanded_default_path_samples = [
-            {
-                "path": list(path),
-                "region_id": mapping.get("region_id"),
-                "status": mapping.get("status"),
-                "type": mapping.get("type"),
-            }
-            for mapping in expanded_default_mappings
-            if (path := _path_tuple(mapping)) is not None
-        ][:6]
-        expanded_common_parent_path = _common_path(expanded_paths)
-        expanded_direct_sibling_span = bool(expanded_paths) and all(
-            len(path) == len(expanded_common_parent_path) + 1 for path in expanded_paths
-        )
-        expanded_body_shape_status = _expanded_root_body_shape_status_8616(
-            case_paths=expanded_case_paths,
-            common_parent_path=expanded_common_parent_path,
-            default_paths=expanded_default_paths,
-            direct_sibling_span=expanded_direct_sibling_span,
-        )
-        expanded_transform_ready = bool(expanded_root_body["ready"]) and bool(expanded_case_mappings)
-        expanded_transform_blocker_reason = None
-        if not expanded_root_body["ready"]:
-            expanded_body_mapping_status = "normalization_not_ready"
-            expanded_transform_ready = False
-            expanded_transform_blocker_reason = "expanded_root_normalization_not_ready"
-        elif len(expanded_case_mappings) != len(expanded_root_body["normalized_case_values"]):
-            expanded_body_mapping_status = "case_value_count_mismatch"
-            expanded_transform_ready = False
-            expanded_transform_blocker_reason = "case_value_count_mismatch"
-        elif any(status == "missing" for status in expanded_statuses):
-            expanded_body_mapping_status = "blocked_missing_region"
-            expanded_transform_ready = False
-            expanded_transform_blocker_reason = "missing_expanded_root_region"
-        elif any(status.startswith("ambiguous") for status in expanded_statuses):
-            expanded_body_mapping_status = "blocked_ambiguous_region"
-            expanded_transform_ready = False
-            expanded_transform_blocker_reason = "ambiguous_expanded_root_region"
-        elif any(status == "contained" for status in expanded_statuses):
-            expanded_body_mapping_status = "mapped_contained"
-        else:
-            expanded_body_mapping_status = "mapped_exact"
-        if expanded_transform_ready and not expanded_direct_sibling_span:
-            expanded_transform_ready = False
-            expanded_transform_blocker_reason = (
-                "expanded_root_ladder_subtree_with_external_default_sibling"
-                if expanded_body_shape_status == "ladder_subtree_with_external_default_sibling"
-                else "expanded_root_non_sibling_subtrees"
-            )
-        mappings.append(
-            {
-                "case_region_ids": list(case_region_ids),
-                "case_mappings": list(case_mappings),
-                "case_values": list(artifact.get("case_values", ()) or ()),
-                "common_parent_path": list(_common_path(common_paths)),
-                "decision_tree_case_region_ids": list(artifact.get("decision_tree_case_region_ids", ()) or ()),
-                "decision_tree_case_values": list(artifact.get("decision_tree_case_values", ()) or ()),
-                "decision_tree_summary": decision_tree_summary,
-                "default_contains_case_count": default_contains_case_count,
-                "default_mapping": default_mapping,
-                "default_region_id": artifact.get("default_region_id"),
-                "expanded_root_body_mapping_status": expanded_body_mapping_status,
-                "expanded_root_body_shape_status": expanded_body_shape_status,
-                "expanded_root_case_path_samples": expanded_case_path_samples,
-                "expanded_root_default_mappings": list(expanded_default_mappings),
-                "expanded_root_default_path_samples": expanded_default_path_samples,
-                "expanded_root_default_region_ids": list(expanded_root_body["default_region_ids"]),
-                "expanded_root_direct_sibling_span": expanded_direct_sibling_span,
-                "expanded_root_common_parent_path": list(expanded_common_parent_path),
-                "expanded_root_mapped_case_count": sum(
-                    1 for mapping in expanded_case_mappings if mapping["status"] in {"exact", "contained"}
-                ),
-                "expanded_root_normalization_ready": bool(expanded_root_body["ready"]),
-                "expanded_root_normalization_status": expanded_root_body["status"],
-                "expanded_root_normalized_case_mappings": list(expanded_case_mappings),
-                "expanded_root_normalized_case_region_ids": list(expanded_root_body["normalized_case_region_ids"]),
-                "expanded_root_normalized_case_values": list(expanded_root_body["normalized_case_values"]),
-                "expanded_root_transform_blocker_reason": expanded_transform_blocker_reason,
-                "expanded_root_transform_ready": expanded_transform_ready,
-                "expanded_root_unmapped_case_region_ids": [
-                    mapping["region_id"]
-                    for mapping in expanded_case_mappings
-                    if mapping["status"] not in {"exact", "contained"}
-                ],
-                "mapped_case_count": sum(1 for mapping in case_mappings if mapping["status"] in {"exact", "contained"}),
-                "region_id": artifact.get("region_id"),
-                "status": status,
-                "switch_condition_lhs": artifact.get("switch_condition_lhs"),
-                "transform_blocker_reason": transform_blocker_reason,
-                "transform_ready": transform_ready,
-                "unmapped_case_region_ids": [
-                    mapping["region_id"]
-                    for mapping in case_mappings
-                    if mapping["status"] not in {"exact", "contained"}
-                ],
-            }
-        )
-    return tuple(mappings)
+    return tuple(
+        _seqnode_switch_artifact_mapping_8616(artifact, subtree_summaries) for artifact in artifacts
+    )
+
+
+def _append_int_values_8616(target: list[int], values: object) -> None:
+    """Append integer items from a heterogeneous record field."""
+    if not isinstance(values, list | tuple):
+        return
+    for value in values:
+        if isinstance(value, int):
+            target.append(value)
+
+
+def _accumulate_branch_subtree_ids_8616(
+    subtree: object,
+    case_region_ids: list[int],
+    case_values: list[int],
+    default_region_ids: list[int],
+) -> None:
+    """Accumulate normalized case/default ids from one branch subtree."""
+    if not isinstance(subtree, dict):
+        return
+    _append_int_values_8616(case_region_ids, subtree.get("normalized_case_region_ids"))
+    _append_int_values_8616(case_values, subtree.get("normalized_case_values"))
+    _append_int_values_8616(default_region_ids, subtree.get("default_candidate_region_ids"))
+
+
+def _accumulate_branch_split_ids_8616(
+    split: object,
+    case_region_ids: list[int],
+    case_values: list[int],
+    default_region_ids: list[int],
+) -> None:
+    """Accumulate normalized ids from one decision-tree branch split."""
+    if not isinstance(split, dict):
+        return
+    _append_int_values_8616(case_region_ids, split.get("current_case_region_ids"))
+    _append_int_values_8616(case_values, split.get("current_case_values"))
+    for subtree in split.get("subtrees", ()) or ():
+        _accumulate_branch_subtree_ids_8616(subtree, case_region_ids, case_values, default_region_ids)
 
 
 def _expanded_root_normalized_body_from_summary_8616(summary: DynamicRecord) -> DynamicRecord:
@@ -1220,26 +1369,7 @@ def _expanded_root_normalized_body_from_summary_8616(summary: DynamicRecord) -> 
     default_region_ids: list[int] = []
     if isinstance(branch_subtrees, list):
         for split in branch_subtrees:
-            if not isinstance(split, dict):
-                continue
-            for region_id in split.get("current_case_region_ids", ()) or ():
-                if isinstance(region_id, int):
-                    case_region_ids.append(region_id)
-            for value in split.get("current_case_values", ()) or ():
-                if isinstance(value, int):
-                    case_values.append(value)
-            for subtree in split.get("subtrees", ()) or ():
-                if not isinstance(subtree, dict):
-                    continue
-                for region_id in subtree.get("normalized_case_region_ids", ()) or ():
-                    if isinstance(region_id, int):
-                        case_region_ids.append(region_id)
-                for value in subtree.get("normalized_case_values", ()) or ():
-                    if isinstance(value, int):
-                        case_values.append(value)
-                for region_id in subtree.get("default_candidate_region_ids", ()) or ():
-                    if isinstance(region_id, int):
-                        default_region_ids.append(region_id)
+            _accumulate_branch_split_ids_8616(split, case_region_ids, case_values, default_region_ids)
     return {
         "default_region_ids": list(dict.fromkeys(default_region_ids)),
         "normalized_case_region_ids": list(dict.fromkeys(case_region_ids)),
@@ -1249,247 +1379,171 @@ def _expanded_root_normalized_body_from_summary_8616(summary: DynamicRecord) -> 
     }
 
 
-def _graphregion_switch_artifact_mappings_8616(
-    region: object, artifacts: tuple[DynamicRecord, ...]
-) -> tuple[DynamicRecord, ...]:
-    def _common_path(paths: tuple[tuple[int, ...], ...]) -> tuple[int, ...]:
-        if not paths:
-            return ()
-        prefix: list[int] = []
-        for values in zip(*paths, strict=False):
-            if len(set(values)) != 1:
-                break
-            prefix.append(values[0])
-        return tuple(prefix)
+def _common_prefix_len_8616(lhs: tuple[int, ...], rhs: tuple[int, ...]) -> int:
+    """Return the shared leading path length between two node paths."""
+    count = 0
+    for left_value, right_value in zip(lhs, rhs, strict=False):
+        if left_value != right_value:
+            break
+        count += 1
+    return count
 
-    def _path_tuple(mapping: DynamicRecord) -> tuple[int, ...] | None:
-        path = mapping.get("path")
-        if not isinstance(path, list | tuple) or not all(isinstance(value, int) for value in path):
-            return None
-        return tuple(path)
 
-    def _common_prefix_len(lhs: tuple[int, ...], rhs: tuple[int, ...]) -> int:
-        count = 0
-        for left_value, right_value in zip(lhs, rhs, strict=False):
-            if left_value != right_value:
-                break
-            count += 1
-        return count
-
-    def _default_case_region_ids_by_default_8616(summary: DynamicRecord) -> dict[int, tuple[int, ...]]:
-        result: dict[int, tuple[int, ...]] = {}
-        branch_subtrees = summary.get("expanded_root_normalization_branch_subtrees")
-        if not isinstance(branch_subtrees, list):
-            return result
-        for split in branch_subtrees:
-            if not isinstance(split, dict):
-                continue
-            for subtree in split.get("subtrees", ()) or ():
-                if not isinstance(subtree, dict):
-                    continue
-                case_ids = tuple(
-                    region_id
-                    for region_id in tuple(subtree.get("normalized_case_region_ids", ()) or ())
-                    if isinstance(region_id, int)
-                )
-                for default_id in tuple(subtree.get("default_candidate_region_ids", ()) or ()):
-                    if isinstance(default_id, int) and case_ids:
-                        result[default_id] = case_ids
+def _default_case_region_ids_by_default_8616(summary: DynamicRecord) -> dict[int, tuple[int, ...]]:
+    """Map each expanded default candidate region id to its sibling case ids."""
+    result: dict[int, tuple[int, ...]] = {}
+    branch_subtrees = summary.get("expanded_root_normalization_branch_subtrees")
+    if not isinstance(branch_subtrees, list):
         return result
-
-    def _resolve_ambiguous_default_mapping_8616(
-        mapping: DynamicRecord,
-        associated_case_region_ids: tuple[int, ...],
-        case_mappings_by_region_id: dict[int, DynamicRecord],
-    ) -> DynamicRecord:
-        if mapping.get("status") != "ambiguous_exact":
-            return mapping
-        case_paths = tuple(
-            path
-            for region_id in associated_case_region_ids
-            if (path := _path_tuple(case_mappings_by_region_id.get(region_id, {}))) is not None
-        )
-        if not case_paths:
-            return mapping
-        scored_candidates: list[tuple[int, int, tuple[int, ...], DynamicRecord]] = []
-        for candidate in tuple(mapping.get("candidates", ()) or ()):
-            if not isinstance(candidate, dict):
+    for split in branch_subtrees:
+        if not isinstance(split, dict):
+            continue
+        for subtree in split.get("subtrees", ()) or ():
+            if not isinstance(subtree, dict):
                 continue
-            candidate_path = candidate.get("path")
-            if (path_tuple := _int_path_tuple(candidate_path)) is None:
-                continue
-            score = sum(_common_prefix_len(path_tuple, case_path) for case_path in case_paths)
-            scored_candidates.append((score, len(path_tuple), path_tuple, candidate))
-        if not scored_candidates:
-            return mapping
-        scored_candidates.sort(reverse=True, key=lambda item: (item[0], item[1], item[2]))
-        if len(scored_candidates) > 1 and scored_candidates[0][:2] == scored_candidates[1][:2]:
-            return mapping
-        _score, _depth, _path, selected = scored_candidates[0]
-        resolved = dict(mapping)
-        resolved["addr_count"] = selected.get("addr_count")
-        resolved["candidate_count"] = int(mapping.get("candidate_count", 0) or 0)
-        resolved["matched_addr"] = selected.get("addr")
-        resolved["path"] = list(selected.get("path", ()) or ())
-        resolved["status"] = "exact"
-        resolved["type"] = selected.get("type")
-        resolved["disambiguation"] = {
-            "associated_case_region_ids": list(associated_case_region_ids),
-            "source": "expanded_root_branch_subtree_default",
-        }
-        return resolved
-
-    subtree_summaries = _graphregion_subtree_summaries_8616(region)
-    mappings: list[DynamicRecord] = []
-    for artifact in artifacts:
-        decision_tree_summary = dict(artifact.get("decision_tree_summary") or {})
-        expanded_root_body = _expanded_root_normalized_body_from_summary_8616(decision_tree_summary)
-        expanded_case_mappings = tuple(
-            _seqnode_map_region_id_8616(region_id, subtree_summaries)
-            for region_id in expanded_root_body["normalized_case_region_ids"]
-            if isinstance(region_id, int)
-        )
-        expanded_default_mappings = tuple(
-            _seqnode_map_region_id_8616(region_id, subtree_summaries)
-            for region_id in expanded_root_body["default_region_ids"]
-            if isinstance(region_id, int)
-        )
-        case_mappings_by_region_id = {
-            int(mapping["region_id"]): mapping
-            for mapping in expanded_case_mappings
-            if isinstance(mapping.get("region_id"), int)
-        }
-        default_case_region_ids_by_default = _default_case_region_ids_by_default_8616(decision_tree_summary)
-        expanded_default_mappings = tuple(
-            _resolve_ambiguous_default_mapping_8616(
-                mapping,
-                default_case_region_ids_by_default.get(int(mapping["region_id"]), ())
-                if isinstance(mapping.get("region_id"), int)
-                else (),
-                case_mappings_by_region_id,
+            case_ids = tuple(
+                region_id
+                for region_id in tuple(subtree.get("normalized_case_region_ids", ()) or ())
+                if isinstance(region_id, int)
             )
-            for mapping in expanded_default_mappings
+            for default_id in tuple(subtree.get("default_candidate_region_ids", ()) or ()):
+                if isinstance(default_id, int) and case_ids:
+                    result[default_id] = case_ids
+    return result
+
+
+def _resolve_ambiguous_default_mapping_8616(
+    mapping: DynamicRecord,
+    associated_case_region_ids: tuple[int, ...],
+    case_mappings_by_region_id: dict[int, DynamicRecord],
+) -> DynamicRecord:
+    """Resolve an ambiguous default candidate by shared-prefix proximity."""
+    if mapping.get("status") != "ambiguous_exact":
+        return mapping
+    case_paths = tuple(
+        path
+        for region_id in associated_case_region_ids
+        if (path := _int_path_tuple(case_mappings_by_region_id.get(region_id, {}).get("path"))) is not None
+    )
+    if not case_paths:
+        return mapping
+    scored_candidates: list[tuple[int, int, tuple[int, ...], DynamicRecord]] = []
+    for candidate in tuple(mapping.get("candidates", ()) or ()):
+        if not isinstance(candidate, dict):
+            continue
+        candidate_path = candidate.get("path")
+        if (path_tuple := _int_path_tuple(candidate_path)) is None:
+            continue
+        score = sum(_common_prefix_len_8616(path_tuple, case_path) for case_path in case_paths)
+        scored_candidates.append((score, len(path_tuple), path_tuple, candidate))
+    if not scored_candidates:
+        return mapping
+    scored_candidates.sort(reverse=True, key=lambda item: (item[0], item[1], item[2]))
+    if len(scored_candidates) > 1 and scored_candidates[0][:2] == scored_candidates[1][:2]:
+        return mapping
+    _score, _depth, _path, selected = scored_candidates[0]
+    resolved = dict(mapping)
+    resolved["addr_count"] = selected.get("addr_count")
+    resolved["candidate_count"] = int(mapping.get("candidate_count", 0) or 0)
+    resolved["matched_addr"] = selected.get("addr")
+    resolved["path"] = list(selected.get("path", ()) or ())
+    resolved["status"] = "exact"
+    resolved["type"] = selected.get("type")
+    resolved["disambiguation"] = {
+        "associated_case_region_ids": list(associated_case_region_ids),
+        "source": "expanded_root_branch_subtree_default",
+    }
+    return resolved
+
+
+def _disambiguated_default_mappings_8616(
+    expanded_default_mappings: tuple[DynamicRecord, ...],
+    expanded_case_mappings: tuple[DynamicRecord, ...],
+    decision_tree_summary: DynamicRecord,
+) -> tuple[DynamicRecord, ...]:
+    """Resolve ambiguous default candidates against sibling case mappings."""
+    case_mappings_by_region_id = {
+        int(mapping["region_id"]): mapping
+        for mapping in expanded_case_mappings
+        if isinstance(mapping.get("region_id"), int)
+    }
+    default_case_region_ids_by_default = _default_case_region_ids_by_default_8616(decision_tree_summary)
+    return tuple(
+        _resolve_ambiguous_default_mapping_8616(
+            mapping,
+            default_case_region_ids_by_default.get(int(mapping["region_id"]), ())
+            if isinstance(mapping.get("region_id"), int)
+            else (),
+            case_mappings_by_region_id,
         )
-        expanded_statuses = [str(mapping["status"]) for mapping in expanded_case_mappings]
-        expanded_statuses.extend(str(mapping["status"]) for mapping in expanded_default_mappings)
-        expanded_disambiguated_default_region_ids = [
+        for mapping in expanded_default_mappings
+    )
+
+
+def _ambiguous_mapping_samples_8616(
+    expanded_case_mappings: tuple[DynamicRecord, ...],
+    expanded_default_mappings: tuple[DynamicRecord, ...],
+) -> list[DynamicRecord]:
+    """Render ambiguous expanded-root mappings as diagnostic samples."""
+    return [
+        {
+            "candidate_count": mapping.get("candidate_count"),
+            "candidates": list(mapping.get("candidates", ()) or ())[:3],
+            "region_id": mapping.get("region_id"),
+            "status": mapping.get("status"),
+        }
+        for mapping in (*expanded_case_mappings, *expanded_default_mappings)
+        if str(mapping["status"]).startswith("ambiguous")
+    ][:6]
+
+
+def _graphregion_switch_artifact_mapping_8616(
+    artifact: DynamicRecord,
+    subtree_summaries: tuple[DynamicRecord, ...],
+) -> DynamicRecord:
+    """Map one switch artifact's expanded regions into graphregion paths."""
+    decision_tree_summary = dict(artifact.get("decision_tree_summary") or {})
+    expanded_root_body = _expanded_root_normalized_body_from_summary_8616(decision_tree_summary)
+    expanded_case_mappings, expanded_default_mappings = _expanded_region_mappings_8616(
+        expanded_root_body, subtree_summaries
+    )
+    expanded_default_mappings = _disambiguated_default_mappings_8616(
+        expanded_default_mappings, expanded_case_mappings, decision_tree_summary
+    )
+    expanded_fields = _expanded_root_switch_fields_8616(
+        expanded_root_body, expanded_case_mappings, expanded_default_mappings
+    )
+    return {
+        **expanded_fields,
+        "expanded_root_ambiguous_case_region_ids": [
+            mapping["region_id"]
+            for mapping in expanded_case_mappings
+            if str(mapping["status"]).startswith("ambiguous")
+        ],
+        "expanded_root_ambiguous_default_region_ids": [
+            mapping["region_id"]
+            for mapping in expanded_default_mappings
+            if str(mapping["status"]).startswith("ambiguous")
+        ],
+        "expanded_root_ambiguous_mapping_samples": _ambiguous_mapping_samples_8616(
+            expanded_case_mappings, expanded_default_mappings
+        ),
+        "expanded_root_disambiguated_default_region_ids": [
             mapping["region_id"]
             for mapping in expanded_default_mappings
             if isinstance(mapping.get("disambiguation"), dict)
-        ]
-        expanded_ambiguous_case_region_ids = [
-            mapping["region_id"]
-            for mapping in expanded_case_mappings
-            if str(mapping["status"]).startswith("ambiguous")
-        ]
-        expanded_ambiguous_default_region_ids = [
-            mapping["region_id"]
-            for mapping in expanded_default_mappings
-            if str(mapping["status"]).startswith("ambiguous")
-        ]
-        expanded_ambiguous_samples = [
-            {
-                "candidate_count": mapping.get("candidate_count"),
-                "candidates": list(mapping.get("candidates", ()) or ())[:3],
-                "region_id": mapping.get("region_id"),
-                "status": mapping.get("status"),
-            }
-            for mapping in (*expanded_case_mappings, *expanded_default_mappings)
-            if str(mapping["status"]).startswith("ambiguous")
-        ][:6]
-        expanded_paths = _record_paths((*expanded_case_mappings, *expanded_default_mappings))
-        expanded_case_paths = _record_paths(expanded_case_mappings)
-        expanded_default_paths = _record_paths(expanded_default_mappings)
-        expanded_case_path_samples = [
-            {
-                "path": list(path),
-                "region_id": mapping.get("region_id"),
-                "status": mapping.get("status"),
-                "type": mapping.get("type"),
-            }
-            for mapping in expanded_case_mappings
-            if (path := _path_tuple(mapping)) is not None
-        ][:12]
-        expanded_default_path_samples = [
-            {
-                "path": list(path),
-                "region_id": mapping.get("region_id"),
-                "status": mapping.get("status"),
-                "type": mapping.get("type"),
-            }
-            for mapping in expanded_default_mappings
-            if (path := _path_tuple(mapping)) is not None
-        ][:6]
-        expanded_common_parent_path = _common_path(expanded_paths)
-        expanded_direct_sibling_span = bool(expanded_paths) and all(
-            len(path) == len(expanded_common_parent_path) + 1 for path in expanded_paths
-        )
-        expanded_body_shape_status = _expanded_root_body_shape_status_8616(
-            case_paths=expanded_case_paths,
-            common_parent_path=expanded_common_parent_path,
-            default_paths=expanded_default_paths,
-            direct_sibling_span=expanded_direct_sibling_span,
-        )
-        expanded_transform_ready = bool(expanded_root_body["ready"]) and bool(expanded_case_mappings)
-        expanded_transform_blocker_reason = None
-        if not expanded_root_body["ready"]:
-            expanded_body_mapping_status = "normalization_not_ready"
-            expanded_transform_ready = False
-            expanded_transform_blocker_reason = "expanded_root_normalization_not_ready"
-        elif len(expanded_case_mappings) != len(expanded_root_body["normalized_case_values"]):
-            expanded_body_mapping_status = "case_value_count_mismatch"
-            expanded_transform_ready = False
-            expanded_transform_blocker_reason = "case_value_count_mismatch"
-        elif any(status == "missing" for status in expanded_statuses):
-            expanded_body_mapping_status = "blocked_missing_region"
-            expanded_transform_ready = False
-            expanded_transform_blocker_reason = "missing_expanded_root_region"
-        elif any(status.startswith("ambiguous") for status in expanded_statuses):
-            expanded_body_mapping_status = "blocked_ambiguous_region"
-            expanded_transform_ready = False
-            expanded_transform_blocker_reason = "ambiguous_expanded_root_region"
-        elif any(status == "contained" for status in expanded_statuses):
-            expanded_body_mapping_status = "mapped_contained"
-        else:
-            expanded_body_mapping_status = "mapped_exact"
-        if expanded_transform_ready and not expanded_direct_sibling_span:
-            expanded_transform_ready = False
-            expanded_transform_blocker_reason = (
-                "expanded_root_ladder_subtree_with_external_default_sibling"
-                if expanded_body_shape_status == "ladder_subtree_with_external_default_sibling"
-                else "expanded_root_non_sibling_subtrees"
-            )
-        mappings.append(
-            {
-                "expanded_root_body_mapping_status": expanded_body_mapping_status,
-                "expanded_root_body_shape_status": expanded_body_shape_status,
-                "expanded_root_case_path_samples": expanded_case_path_samples,
-                "expanded_root_common_parent_path": list(expanded_common_parent_path),
-                "expanded_root_default_path_samples": expanded_default_path_samples,
-                "expanded_root_default_region_ids": list(expanded_root_body["default_region_ids"]),
-                "expanded_root_direct_sibling_span": expanded_direct_sibling_span,
-                "expanded_root_ambiguous_case_region_ids": expanded_ambiguous_case_region_ids,
-                "expanded_root_ambiguous_default_region_ids": expanded_ambiguous_default_region_ids,
-                "expanded_root_ambiguous_mapping_samples": expanded_ambiguous_samples,
-                "expanded_root_disambiguated_default_region_ids": expanded_disambiguated_default_region_ids,
-                "expanded_root_mapped_case_count": sum(
-                    1 for mapping in expanded_case_mappings if mapping["status"] in {"exact", "contained"}
-                ),
-                "expanded_root_normalization_ready": bool(expanded_root_body["ready"]),
-                "expanded_root_normalization_status": expanded_root_body["status"],
-                "expanded_root_normalized_case_region_ids": list(expanded_root_body["normalized_case_region_ids"]),
-                "expanded_root_normalized_case_values": list(expanded_root_body["normalized_case_values"]),
-                "expanded_root_transform_blocker_reason": expanded_transform_blocker_reason,
-                "expanded_root_transform_ready": expanded_transform_ready,
-                "expanded_root_unmapped_case_region_ids": [
-                    mapping["region_id"]
-                    for mapping in expanded_case_mappings
-                    if mapping["status"] not in {"exact", "contained"}
-                ],
-                "region_id": artifact.get("region_id"),
-            }
-        )
-    return tuple(mappings)
+        ],
+        "region_id": artifact.get("region_id"),
+    }
+
+
+def _graphregion_switch_artifact_mappings_8616(
+    region: object, artifacts: tuple[DynamicRecord, ...]
+) -> tuple[DynamicRecord, ...]:
+    subtree_summaries = _graphregion_subtree_summaries_8616(region)
+    return tuple(
+        _graphregion_switch_artifact_mapping_8616(artifact, subtree_summaries) for artifact in artifacts
+    )
 
 
 def _condition_operand_payload_8616(value: object) -> object:
@@ -1987,6 +2041,208 @@ def _map_graphregion_stage_records_8616(
     return tuple(mapped_records)
 
 
+def _pre_codegen_condition_evidence_8616(
+    target_project: AngrProjectSurface,
+    func_addr: int,
+    summary: DynamicRecord,
+) -> object:
+    """Collect typed-condition artifacts for a pre-codegen seqnode probe."""
+    try:
+        from angr_platforms.X86_16.lowering.condition_transfer import (
+            collect_typed_condition_artifacts_8616,
+        )
+
+        conditions, edge_evidence = collect_typed_condition_artifacts_8616(target_project, func_addr)
+    except Exception:
+        conditions, edge_evidence = [], []
+    summary["condition_fact_count"] = len(conditions)
+    summary["condition_edge_evidence_count"] = len(edge_evidence)
+    summary["condition_edge_block_addrs"] = [
+        edge.edge_block_addr
+        for edge in edge_evidence[:16]
+        if isinstance(getattr(edge, "edge_block_addr", None), int)
+    ]
+    summary["condition_edge_summaries"] = [
+        {
+            "edge_block_addr": getattr(edge, "edge_block_addr", None),
+            "edge_kind": getattr(edge, "edge_kind", None),
+            "condition": _condition_ir_payload_8616(getattr(edge, "condition", None)),
+            "producer_semantics": list(getattr(edge, "producer_semantics", ()) or ()),
+            "source_jcc": getattr(edge, "source_jcc", None),
+        }
+        for edge in edge_evidence[:16]
+    ]
+    return edge_evidence
+
+
+def _pre_codegen_grouped_switch_artifacts_8616(
+    target_project: AngrProjectSurface,
+    func_addr: int,
+    func: object,
+    ail_graph: object,
+    edge_evidence: object,
+    summary: DynamicRecord,
+) -> tuple[DynamicRecord, ...]:
+    """Rebuild grouped-region switch artifacts for the probe summary."""
+    try:
+        from types import SimpleNamespace
+
+        from angr_platforms.X86_16.structuring.switch_artifact_identity import (
+            canonicalize_switch_artifacts_8616,
+        )
+        from angr_platforms.X86_16.structuring_abnormal_loops import (
+            AbnormalLoopStructureAnalysis,
+        )
+        from angr_platforms.X86_16.structuring_grouped_graph_builder import (
+            build_grouped_region_graph,
+        )
+
+        adapter = SimpleNamespace(
+            project=target_project,
+            cfunc=SimpleNamespace(addr=func_addr, name=getattr(func, "name", None)),
+            _clinic=SimpleNamespace(graph=ail_graph),
+            _inertia_condition_edge_evidence=tuple(edge_evidence),
+        )
+        graph_result = build_grouped_region_graph(adapter)
+        graph = graph_result.graph_result.graph
+        if graph is not None:
+            structured = AbnormalLoopStructureAnalysis(graph).structure()
+            raw_artifacts = tuple(
+                typing.cast(DynamicRecord, artifact)
+                for region in structured.nodes
+                if isinstance(
+                    artifact := region.metadata.get("typed_edge_switch_region_artifact"),
+                    dict,
+                )
+            )
+            canonicalization = canonicalize_switch_artifacts_8616(raw_artifacts)
+            artifacts = tuple(
+                typing.cast(DynamicRecord, artifact)
+                for artifact in canonicalization.artifacts
+            )
+            summary["pre_codegen_grouped_switch_raw_artifact_count"] = canonicalization.raw_fact_count
+            summary["pre_codegen_grouped_switch_normalized_artifact_count"] = (
+                canonicalization.normalized_fact_count
+            )
+            summary["pre_codegen_grouped_switch_classified_artifact_count"] = (
+                canonicalization.classified_fact_count
+            )
+            summary["pre_codegen_grouped_switch_materialized_artifact_count"] = (
+                canonicalization.materialized_count
+            )
+            summary["pre_codegen_grouped_switch_failure_count"] = canonicalization.failure_count
+            summary["pre_codegen_grouped_switch_duplicate_artifact_count"] = (
+                canonicalization.duplicate_fact_count
+            )
+            return artifacts
+    except Exception as ex:
+        summary["pre_codegen_grouped_switch_error"] = f"{type(ex).__name__}: {ex}"
+    return ()
+
+
+def _pre_codegen_stage_mappings_8616(
+    target_project: AngrProjectSurface,
+    func_addr: int,
+    artifacts: tuple[DynamicRecord, ...],
+    summary: DynamicRecord,
+) -> None:
+    """Attach recorded seqnode/graphregion stage mappings to the probe."""
+    stage_records = getattr(target_project, "_inertia_structuring_seqnode_stage_probe_8616", None)
+    if isinstance(stage_records, list):
+        func_stage_records = tuple(
+            record
+            for record in stage_records
+            if isinstance(record, dict) and record.get("function_addr") == func_addr
+        )
+        summary["pre_codegen_structuring_stage_mappings"] = _map_seqnode_stage_records_8616(
+            func_stage_records,
+            artifacts,
+        )
+    graph_region_stage_records = getattr(
+        target_project,
+        "_inertia_structuring_graphregion_stage_probe_8616",
+        None,
+    )
+    if isinstance(graph_region_stage_records, list):
+        func_graph_region_stage_records = tuple(
+            record
+            for record in graph_region_stage_records
+            if isinstance(record, dict) and record.get("function_addr") == func_addr
+        )
+        summary["pre_codegen_graphregion_stage_mappings"] = _map_graphregion_stage_records_8616(
+            func_graph_region_stage_records,
+            artifacts,
+        )
+
+
+def _pre_codegen_switch_replacement_probe_8616(
+    target_project: AngrProjectSurface,
+    sequence: object,
+    artifacts: tuple[DynamicRecord, ...],
+    func_addr: int,
+    func: object,
+    summary: DynamicRecord,
+) -> None:
+    """Attempt the pre-codegen typed-switch replacement and record verdicts."""
+    replacement_result = _maybe_materialize_pre_codegen_typed_switch_8616(
+        target_project,
+        sequence,
+        artifacts,
+    )
+    summary["typed_switch_seqnode_replacement"] = replacement_result
+    replacement_results = getattr(target_project, "_inertia_typed_switch_seqnode_replacement_8616", None)
+    if not isinstance(replacement_results, list):
+        replacement_results = []
+        target_project._inertia_typed_switch_seqnode_replacement_8616 = replacement_results
+    replacement_results.append(
+        {
+            "function_addr": func_addr,
+            "function_name": getattr(func, "name", None),
+            "stage": "pre_codegen",
+            **replacement_result,
+        }
+    )
+    if replacement_result.get("changed") is True:
+        summary.update(_seqnode_probe_summary_8616(sequence))
+    _pre_codegen_stage_mappings_8616(target_project, func_addr, artifacts, summary)
+
+
+def _record_pre_codegen_seqnode_probe_8616(
+    project: AngrProjectSurface | None,
+    self: object,
+    func: object,
+    sequence: object,
+    kwargs: dict[object, object],
+) -> None:
+    """Record the pre-codegen seqnode probe summary for ``func``."""
+    target_project = project if project is not None else getattr(self, "project", None)
+    if target_project is None:
+        return
+    records = getattr(target_project, "_inertia_pre_codegen_seqnode_probe_8616", None)
+    if not isinstance(records, list):
+        records = []
+        target_project._inertia_pre_codegen_seqnode_probe_8616 = records
+    summary = _seqnode_probe_summary_8616(sequence)
+    summary["function_addr"] = getattr(func, "addr", None)
+    summary["function_name"] = getattr(func, "name", None)
+    func_addr = getattr(func, "addr", None)
+    if isinstance(func_addr, int):
+        edge_evidence = _pre_codegen_condition_evidence_8616(target_project, func_addr, summary)
+        ail_graph = kwargs.get("ail_graph")
+        if edge_evidence and ail_graph is not None:
+            artifacts = _pre_codegen_grouped_switch_artifacts_8616(
+                target_project, func_addr, func, ail_graph, edge_evidence, summary
+            )
+            summary["pre_codegen_grouped_switch_artifact_count"] = len(artifacts)
+            summary["pre_codegen_grouped_switch_artifact_mappings"] = _seqnode_switch_artifact_mappings_8616(
+                sequence, artifacts
+            )
+            _pre_codegen_switch_replacement_probe_8616(
+                target_project, sequence, artifacts, func_addr, func, summary
+            )
+    records.append(summary)
+
+
 def install_angr_pre_codegen_seqnode_probe_guard(
     codegen_cls: AngrPatchSurface,
     project: AngrProjectSurface | None = None,
@@ -1995,154 +2251,7 @@ def install_angr_pre_codegen_seqnode_probe_guard(
     original_init = codegen_cls.__init__
 
     def _guarded_init(self: object, func: object, sequence: object, *args: object, **kwargs: object) -> object:
-        target_project = project if project is not None else getattr(self, "project", None)
-        if target_project is not None:
-            records = getattr(target_project, "_inertia_pre_codegen_seqnode_probe_8616", None)
-            if not isinstance(records, list):
-                records = []
-                target_project._inertia_pre_codegen_seqnode_probe_8616 = records
-            summary = _seqnode_probe_summary_8616(sequence)
-            summary["function_addr"] = getattr(func, "addr", None)
-            summary["function_name"] = getattr(func, "name", None)
-            func_addr = getattr(func, "addr", None)
-            if isinstance(func_addr, int):
-                try:
-                    from angr_platforms.X86_16.lowering.condition_transfer import (
-                        collect_typed_condition_artifacts_8616,
-                    )
-
-                    conditions, edge_evidence = collect_typed_condition_artifacts_8616(target_project, func_addr)
-                except Exception:
-                    conditions, edge_evidence = [], []
-                summary["condition_fact_count"] = len(conditions)
-                summary["condition_edge_evidence_count"] = len(edge_evidence)
-                summary["condition_edge_block_addrs"] = [
-                    edge.edge_block_addr
-                    for edge in edge_evidence[:16]
-                    if isinstance(getattr(edge, "edge_block_addr", None), int)
-                ]
-                summary["condition_edge_summaries"] = [
-                    {
-                        "edge_block_addr": getattr(edge, "edge_block_addr", None),
-                        "edge_kind": getattr(edge, "edge_kind", None),
-                        "condition": _condition_ir_payload_8616(getattr(edge, "condition", None)),
-                        "producer_semantics": list(getattr(edge, "producer_semantics", ()) or ()),
-                        "source_jcc": getattr(edge, "source_jcc", None),
-                    }
-                    for edge in edge_evidence[:16]
-                ]
-                ail_graph = kwargs.get("ail_graph")
-                if edge_evidence and ail_graph is not None:
-                    try:
-                        from types import SimpleNamespace
-
-                        from angr_platforms.X86_16.structuring.switch_artifact_identity import (
-                            canonicalize_switch_artifacts_8616,
-                        )
-                        from angr_platforms.X86_16.structuring_abnormal_loops import (
-                            AbnormalLoopStructureAnalysis,
-                        )
-                        from angr_platforms.X86_16.structuring_grouped_graph_builder import (
-                            build_grouped_region_graph,
-                        )
-
-                        adapter = SimpleNamespace(
-                            project=target_project,
-                            cfunc=SimpleNamespace(addr=func_addr, name=getattr(func, "name", None)),
-                            _clinic=SimpleNamespace(graph=ail_graph),
-                            _inertia_condition_edge_evidence=tuple(edge_evidence),
-                        )
-                        graph_result = build_grouped_region_graph(adapter)
-                        graph = graph_result.graph_result.graph
-                        if graph is not None:
-                            structured = AbnormalLoopStructureAnalysis(graph).structure()
-                            raw_artifacts = tuple(
-                                typing.cast(DynamicRecord, artifact)
-                                for region in structured.nodes
-                                if isinstance(
-                                    artifact := region.metadata.get("typed_edge_switch_region_artifact"),
-                                    dict,
-                                )
-                            )
-                            canonicalization = canonicalize_switch_artifacts_8616(raw_artifacts)
-                            artifacts = tuple(
-                                typing.cast(DynamicRecord, artifact)
-                                for artifact in canonicalization.artifacts
-                            )
-                            summary["pre_codegen_grouped_switch_raw_artifact_count"] = (
-                                canonicalization.raw_fact_count
-                            )
-                            summary["pre_codegen_grouped_switch_normalized_artifact_count"] = (
-                                canonicalization.normalized_fact_count
-                            )
-                            summary["pre_codegen_grouped_switch_classified_artifact_count"] = (
-                                canonicalization.classified_fact_count
-                            )
-                            summary["pre_codegen_grouped_switch_materialized_artifact_count"] = (
-                                canonicalization.materialized_count
-                            )
-                            summary["pre_codegen_grouped_switch_failure_count"] = (
-                                canonicalization.failure_count
-                            )
-                            summary["pre_codegen_grouped_switch_duplicate_artifact_count"] = (
-                                canonicalization.duplicate_fact_count
-                            )
-                        else:
-                            artifacts = ()
-                    except Exception as ex:
-                        summary["pre_codegen_grouped_switch_error"] = f"{type(ex).__name__}: {ex}"
-                        artifacts = ()
-                    summary["pre_codegen_grouped_switch_artifact_count"] = len(artifacts)
-                    summary["pre_codegen_grouped_switch_artifact_mappings"] = _seqnode_switch_artifact_mappings_8616(
-                        sequence, artifacts
-                    )
-                    replacement_result = _maybe_materialize_pre_codegen_typed_switch_8616(
-                        target_project,
-                        sequence,
-                        artifacts,
-                    )
-                    summary["typed_switch_seqnode_replacement"] = replacement_result
-                    replacement_results = getattr(target_project, "_inertia_typed_switch_seqnode_replacement_8616", None)
-                    if not isinstance(replacement_results, list):
-                        replacement_results = []
-                        target_project._inertia_typed_switch_seqnode_replacement_8616 = replacement_results
-                    replacement_results.append(
-                        {
-                            "function_addr": func_addr,
-                            "function_name": getattr(func, "name", None),
-                            "stage": "pre_codegen",
-                            **replacement_result,
-                        }
-                    )
-                    if replacement_result.get("changed") is True:
-                        summary.update(_seqnode_probe_summary_8616(sequence))
-                    stage_records = getattr(target_project, "_inertia_structuring_seqnode_stage_probe_8616", None)
-                    if isinstance(stage_records, list):
-                        func_stage_records = tuple(
-                            record
-                            for record in stage_records
-                            if isinstance(record, dict) and record.get("function_addr") == func_addr
-                        )
-                        summary["pre_codegen_structuring_stage_mappings"] = _map_seqnode_stage_records_8616(
-                            func_stage_records,
-                            artifacts,
-                        )
-                    graph_region_stage_records = getattr(
-                        target_project,
-                        "_inertia_structuring_graphregion_stage_probe_8616",
-                        None,
-                    )
-                    if isinstance(graph_region_stage_records, list):
-                        func_graph_region_stage_records = tuple(
-                            record
-                            for record in graph_region_stage_records
-                            if isinstance(record, dict) and record.get("function_addr") == func_addr
-                        )
-                        summary["pre_codegen_graphregion_stage_mappings"] = _map_graphregion_stage_records_8616(
-                            func_graph_region_stage_records,
-                            artifacts,
-                        )
-            records.append(summary)
+        _record_pre_codegen_seqnode_probe_8616(project, self, func, sequence, kwargs)
         return original_init(self, func, sequence, *args, **kwargs)
 
     codegen_cls.__init__ = _guarded_init
@@ -2329,11 +2438,305 @@ def guard_angr_variable_recovery_binop_sub_size_mismatch(
             engine_cls._handle_binop_Mul = original_handle_binop_mul
 
 
+@dataclass(slots=True)
+class _ClinicGuardState8616:
+    """Mutable counters and stage clock for the Clinic stage-marker guard."""
+
+    start: float = field(default_factory=time.perf_counter)
+    last_stage: str = "start"
+    stage_entry: float = 0.0
+    emit_logs: bool = False
+    simplify_count: int = 0
+    peephole_count: int = 0
+    simplify_total: float = 0.0
+    peephole_total: float = 0.0
+
+    def __post_init__(self) -> None:
+        self.stage_entry = self.start
+
+    def emit_stage_time(self, new_stage: str) -> None:
+        """Emit a stage-transition timing log and advance the clock."""
+        now = time.perf_counter()
+        elapsed_since_start = now - self.start
+        elapsed_in_prev = now - self.stage_entry
+        if self.emit_logs:
+            print(
+                f"[dbg] stage-time: {new_stage} elapsed={elapsed_since_start:.2f}s "
+                f"(prev={self.last_stage} took {elapsed_in_prev:.2f}s)",
+                file=sys.stderr,
+            )
+            sys.stderr.flush()
+        self.last_stage = new_stage
+        self.stage_entry = now
+
+    def record_peephole_stats(self, project: AngrProjectSurface, elapsed: float) -> None:
+        """Accumulate per-function peephole timing stats on the project."""
+        self.peephole_total += elapsed
+        if not os.environ.get("INERTIA_DEBUG_CLINIC_FLAGS"):
+            return
+        stats = getattr(project, "_inertia_debug_peephole_stats", None)
+        if not isinstance(stats, dict):
+            stats = {}
+            project._inertia_debug_peephole_stats = stats
+        addr, _name, slice_addr = _project_current_function_context(project)
+        stats_key = (addr if isinstance(addr, int) else -1, slice_addr if isinstance(slice_addr, int) else -1)
+        calls, total = stats.get(stats_key, (0, 0.0))
+        calls = int(calls) + 1
+        total = float(total) + float(elapsed)
+        stats[stats_key] = (calls, total)
+        if calls in (1, 10, 50, 100, 200, 500, 1000):
+            print(
+                "[dbg] clinic:peephole-stats "
+                f"calls={calls} total={total:.3f}s avg={(total / calls):.6f}s"
+                f"{_project_current_function_context_suffix(project)}",
+                file=sys.stderr,
+            )
+            sys.stderr.flush()
+
+
+def _clinic_stage_guard_8616(
+    state: _ClinicGuardState8616,
+    project: AngrProjectSurface,
+    orig: Callable[..., object],
+    label: str,
+    marker: str,
+) -> Callable[..., object]:
+    """Build a Clinic stage wrapper that records the stage marker."""
+
+    def _guarded(self: AngrPatchSurface, *args: typing.Any, **kwargs: typing.Any) -> object:
+        state.emit_stage_time(label)
+        project._inertia_decompiler_stage = marker
+        return orig(self, *args, **kwargs)
+
+    return _guarded
+
+
+def _guarded_simplify_block_8616(
+    state: _ClinicGuardState8616,
+    project: AngrProjectSurface,
+    orig_simplify_block: Callable[..., object],
+    self: AngrPatchSurface,
+    args: tuple[typing.Any, ...],
+    kwargs: dict[str, typing.Any],
+) -> object:
+    """Clinic ``_simplify_block`` wrapper with skip gates and stage timing."""
+    project._inertia_decompiler_stage = "core:clinic:simplify_block"
+    block = args[0] if args else kwargs.get("block")
+    if getattr(project, "_inertia_skip_clinic_simplify_block", False) and block is not None:
+        return block
+    if getattr(project, "_inertia_tiny_core_disable_peephole", False) and block is not None:
+        return block
+    state.simplify_count += 1
+    t_start = time.perf_counter()
+    try:
+        result = orig_simplify_block(self, *args, **kwargs)
+    except AssertionError:
+        if block is not None:
+            if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
+                print(
+                    "[dbg] clinic:skip-simplify-block-assertion "
+                    f"block={getattr(block, 'addr', None)!r}"
+                    f"{_project_current_function_context_suffix(project)}",
+                    file=sys.stderr,
+                )
+                sys.stderr.flush()
+            return block
+        raise
+    state.simplify_total += time.perf_counter() - t_start
+    if (timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR")) and (
+        state.simplify_count % 20 == 0
+    ):
+        print(
+            f"[dbg] stage-time: simplify_block x{state.simplify_count} cumulative={state.simplify_total:.2f}s "
+            f"(peephole x{state.peephole_count} cumulative={state.peephole_total:.2f}s)"
+        )
+        sys.stderr.flush()
+    return result
+
+
+def _debug_clinic_flags_8616(project: AngrProjectSurface, block: object) -> None:
+    """Emit the once-per-function clinic flag debug line."""
+    if not os.environ.get("INERTIA_DEBUG_CLINIC_FLAGS"):
+        return
+    seen = getattr(project, "_inertia_debug_clinic_flags_seen", None)
+    if not isinstance(seen, set):
+        seen = set()
+        project._inertia_debug_clinic_flags_seen = seen
+    addr, _name, slice_addr = _project_current_function_context(project)
+    key = (addr, slice_addr, "peephole")
+    if key in seen:
+        return
+    seen.add(key)
+    print(
+        "[dbg] clinic:flags "
+        f"skip_simplify={bool(getattr(project, '_inertia_skip_clinic_simplify_block', False))} "
+        f"tiny_disable_peephole={bool(getattr(project, '_inertia_tiny_core_disable_peephole', False))} "
+        f"disable_expr_guard={bool(getattr(project, '_inertia_disable_peephole_expr_guard', False))} "
+        f"block_is_none={block is None}"
+        f"{_project_current_function_context_suffix(project)}",
+        file=sys.stderr,
+    )
+    sys.stderr.flush()
+
+
+def _clinic_peephole_capped_8616(project: AngrProjectSurface, block: object) -> tuple[object, bool, bool]:
+    """Return the skipped peephole result while enforcing the per-function cap."""
+    cap = int(getattr(project, "_inertia_clinic_peephole_cap", 128) or 128)
+    key_addr = None
+    ctx = getattr(project, "_inertia_current_function_debug", None)
+    if isinstance(ctx, dict):
+        key_addr = ctx.get("slice_addr") or ctx.get("addr")
+    if not isinstance(key_addr, int):
+        key_addr = getattr(block, "addr", None)
+    counts = getattr(project, "_inertia_clinic_peephole_counts", None)
+    if not isinstance(counts, dict):
+        counts = {}
+        project._inertia_clinic_peephole_counts = counts
+    peephole_key = int(key_addr) if isinstance(key_addr, int) else -1
+    count = int(counts.get(peephole_key, 0)) + 1
+    counts[peephole_key] = count
+    if count > cap and os.environ.get("INERTIA_DEBUG_CLINIC_FLAGS"):
+        print(
+            "[dbg] clinic:peephole-cap-hit "
+            f"count={count} cap={cap}{_project_current_function_context_suffix(project)}",
+            file=sys.stderr,
+        )
+        sys.stderr.flush()
+    return block, False, False
+
+
+def _fast_block_peephole_8616(
+    self: AngrPatchSurface,
+    block: object,
+    peephole_optimize_stmts: Callable[..., object],
+    peephole_optimize_multistmts: Callable[..., object],
+) -> tuple[object, bool, bool]:
+    """Run the stmt/multistmt peephole passes on a block directly."""
+    statements, stmts_updated = peephole_optimize_stmts(block, self._stmt_peephole_opts)
+    new_block = block.copy(statements=statements) if stmts_updated else block
+    statements, multi_stmts_updated = peephole_optimize_multistmts(new_block, self._multistmt_peephole_opts)
+    if multi_stmts_updated:
+        new_block = new_block.copy(statements=statements)
+    return new_block, bool(stmts_updated or multi_stmts_updated), False
+
+
+def _debug_skip_complex_block_8616(project: AngrProjectSurface, block: object) -> None:
+    """Emit the once-per-block complex-expr peephole skip debug line."""
+    skipped = getattr(project, "_inertia_complex_block_skip_seen", None)
+    if not isinstance(skipped, set):
+        skipped = set()
+        project._inertia_complex_block_skip_seen = skipped
+    block_addr = getattr(block, "addr", None)
+    if block_addr in skipped:
+        return
+    skipped.add(block_addr)
+    if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
+        print(
+            "[dbg] clinic:skip-peephole-complex-block "
+            f"block={block_addr:#x}{_project_current_function_context_suffix(project)}",
+            file=sys.stderr,
+        )
+        sys.stderr.flush()
+
+
+def _guarded_peephole_optimize_8616(
+    state: _ClinicGuardState8616,
+    project: AngrProjectSurface,
+    orig_peephole_optimize: Callable[..., object],
+    peephole_optimize_stmts: Callable[..., object],
+    peephole_optimize_multistmts: Callable[..., object],
+    self: AngrPatchSurface,
+    args: tuple[typing.Any, ...],
+    kwargs: dict[str, typing.Any],
+) -> object:
+    """Block-simplifier ``_peephole_optimize`` wrapper with fast-path bounds."""
+    project._inertia_decompiler_stage = "core:clinic:peephole_optimize"
+    state.peephole_count += 1
+    t_start = time.perf_counter()
+    try:
+        block = args[0] if args else kwargs.get("block")
+        _debug_clinic_flags_8616(project, block)
+        if getattr(project, "_inertia_skip_clinic_simplify_block", False):
+            return _clinic_peephole_capped_8616(project, block)
+        if block is not None and getattr(project, "_inertia_tiny_core_disable_peephole", False):
+            return block, False, False
+        if block is not None and (
+            getattr(project, "_inertia_fast_block_peephole", False)
+            or getattr(getattr(project, "arch", None), "name", None) == "86_16"
+        ):
+            return _fast_block_peephole_8616(
+                self, block, peephole_optimize_stmts, peephole_optimize_multistmts
+            )
+        if block is not None and _block_has_pathologically_complex_expr(block):
+            _debug_skip_complex_block_8616(project, block)
+            return _fast_block_peephole_8616(
+                self, block, peephole_optimize_stmts, peephole_optimize_multistmts
+            )
+        return orig_peephole_optimize(self, *args, **kwargs)
+    finally:
+        state.record_peephole_stats(project, time.perf_counter() - t_start)
+
+
+def _guarded_peephole_optimize_exprs_8616(
+    project: AngrProjectSurface,
+    orig_peephole_optimize_exprs: Callable[..., object],
+    block: object,
+    expr_opts: object,
+    *args: typing.Any,
+    **kwargs: typing.Any,
+) -> object:
+    """decompiler-utils ``peephole_optimize_exprs`` wrapper honoring skip flags."""
+    if getattr(project, "_inertia_skip_clinic_simplify_block", False):
+        return False
+    return orig_peephole_optimize_exprs(block, expr_opts, *args, **kwargs)
+
+
+class _NoPropagationResult8616:
+    """Empty propagation result substituted when angr drops a Tmp definition."""
+
+    def __init__(self) -> None:
+        self.replacements: dict[object, object] = {}
+        self.dead_vvar_ids: set[object] = set()
+        self.model = self
+
+
+def _guarded_compute_propagation_8616(
+    project: AngrProjectSurface,
+    orig_compute_propagation: Callable[..., object],
+    refused_attr: str,
+    debug_label: str,
+    with_dead_vvar_ids: bool,
+    tmp_types: tuple[type, ...],
+    self: AngrPatchSurface,
+    args: tuple[typing.Any, ...],
+    kwargs: dict[str, typing.Any],
+) -> object:
+    """Refuse missing-Tmp propagation instead of raising through angr."""
+    try:
+        return orig_compute_propagation(self, *args, **kwargs)
+    except KeyError as exc:
+        missing = exc.args[0] if exc.args else None
+        if not isinstance(missing, tmp_types):
+            raise
+        count = int(getattr(project, refused_attr, 0) or 0) + 1
+        setattr(project, refused_attr, count)
+        if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
+            print(
+                f"[dbg] clinic:{debug_label} "
+                f"tmp={missing}{_project_current_function_context_suffix(project)}",
+                file=sys.stderr,
+            )
+            sys.stderr.flush()
+        result = _NoPropagationResult8616()
+        self._propagator = result
+        if with_dead_vvar_ids:
+            self._propagator_dead_vvar_ids = result.dead_vvar_ids
+        return result
+
+
 @contextlib.contextmanager
 def guard_angr_clinic_stage_markers(project: AngrProjectSurface) -> Iterator[None]:
     """Temporarily record and bound third-party angr Clinic stages."""
-    import time as _time
-
     from angr.ailment.expression import Tmp as AILTmp
     from angr.analyses.decompiler import utils as decompiler_utils
     from angr.analyses.decompiler.ail_simplifier import AILSimplifier
@@ -2355,217 +2758,32 @@ def guard_angr_clinic_stage_markers(project: AngrProjectSurface) -> Iterator[Non
     orig_compute_propagation = ail_simplifier_cls._compute_propagation
     orig_peephole_optimize = block_simplifier_cls._peephole_optimize
     orig_peephole_optimize_exprs = decompiler_utils_surface.peephole_optimize_exprs
-    _t0 = _time.perf_counter()
-    _last_stage: list[str] = ["start"]
-    _stage_entry: list[float] = [_t0]
-    _emit_stage_logs = bool(timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"))
-
-    def _emit_stage_time(new_stage: str) -> None:
-        now = _time.perf_counter()
-        elapsed_since_start = now - _t0
-        elapsed_in_prev = now - _stage_entry[0]
-        if _emit_stage_logs:
-            print(
-                f"[dbg] stage-time: {new_stage} elapsed={elapsed_since_start:.2f}s "
-                f"(prev={_last_stage[0]} took {elapsed_in_prev:.2f}s)",
-                file=sys.stderr,
-            )
-            sys.stderr.flush()
-        _last_stage[0] = new_stage
-        _stage_entry[0] = now
-
-    def _stage_pre_ssa_level1_simplifications(
-        self: AngrPatchSurface,
-        *args: typing.Any,
-        **kwargs: typing.Any,
-    ) -> object:
-        _emit_stage_time("clinic:pre_ssa_l1")
-        project._inertia_decompiler_stage = "core:clinic:pre_ssa_level1_simplifications"
-        return orig_stage_pre_ssa(self, *args, **kwargs)
-
-    def _stage_transform_to_ssa_level1(
-        self: AngrPatchSurface,
-        *args: typing.Any,
-        **kwargs: typing.Any,
-    ) -> object:
-        _emit_stage_time("clinic:ssa_level1")
-        project._inertia_decompiler_stage = "core:clinic:ssa_level1_transformation"
-        return orig_stage_ssa_level1(self, *args, **kwargs)
-
-    def _stage_post_ssa_level1_simplifications(
-        self: AngrPatchSurface,
-        *args: typing.Any,
-        **kwargs: typing.Any,
-    ) -> object:
-        _emit_stage_time("clinic:post_ssa_l1")
-        project._inertia_decompiler_stage = "core:clinic:post_ssa_level1_simplifications"
-        return orig_stage_post_ssa(self, *args, **kwargs)
-
-    def _stage_recover_variables(
-        self: AngrPatchSurface,
-        *args: typing.Any,
-        **kwargs: typing.Any,
-    ) -> object:
-        """Record the Clinic stage and always run third-party variable recovery."""
-        _emit_stage_time("clinic:recover_vars")
-        project._inertia_decompiler_stage = "core:clinic:recover_variables"
-        # Variable recovery is semantic materialization, not an optional
-        # optimization. Resource policies may bound simplification around it,
-        # but must never bypass it or invent empty recovery inputs.
-        return orig_stage_recover_vars(self, *args, **kwargs)
-
-    _simplify_count: list[int] = [0]
-    _peephole_count: list[int] = [0]
-    _simplify_total: list[float] = [0.0]
-    _peephole_total: list[float] = [0.0]
+    state = _ClinicGuardState8616(
+        emit_logs=bool(timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"))
+    )
 
     def _simplify_block(
         self: AngrPatchSurface,
         *args: typing.Any,
         **kwargs: typing.Any,
     ) -> object:
-        project._inertia_decompiler_stage = "core:clinic:simplify_block"
-        block = args[0] if args else kwargs.get("block")
-        if getattr(project, "_inertia_skip_clinic_simplify_block", False) and block is not None:
-            return block
-        if getattr(project, "_inertia_tiny_core_disable_peephole", False) and block is not None:
-            return block
-        _simplify_count[0] += 1
-        _t_start = _time.perf_counter()
-        try:
-            result = orig_simplify_block(self, *args, **kwargs)
-        except AssertionError:
-            if block is not None:
-                if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
-                    print(
-                        "[dbg] clinic:skip-simplify-block-assertion "
-                        f"block={getattr(block, 'addr', None)!r}"
-                        f"{_project_current_function_context_suffix(project)}",
-                        file=sys.stderr,
-                    )
-                    sys.stderr.flush()
-                return block
-            raise
-        _simplify_total[0] += _time.perf_counter() - _t_start
-        if (timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR")) and _simplify_count[
-            0
-        ] % 20 == 0:
-            print(
-                f"[dbg] stage-time: simplify_block x{_simplify_count[0]} cumulative={_simplify_total[0]:.2f}s (peephole x{_peephole_count[0]} cumulative={_peephole_total[0]:.2f}s)"
-            )
-            sys.stderr.flush()
-        return result
+        return _guarded_simplify_block_8616(state, project, orig_simplify_block, self, args, kwargs)
 
     def _peephole_optimize(
         self: AngrPatchSurface,
         *args: typing.Any,
         **kwargs: typing.Any,
     ) -> object:
-        project._inertia_decompiler_stage = "core:clinic:peephole_optimize"
-        _peephole_count[0] += 1
-        _t_start = _time.perf_counter()
-        try:
-            block = args[0] if args else kwargs.get("block")
-            if os.environ.get("INERTIA_DEBUG_CLINIC_FLAGS"):
-                seen = getattr(project, "_inertia_debug_clinic_flags_seen", None)
-                if not isinstance(seen, set):
-                    seen = set()
-                    project._inertia_debug_clinic_flags_seen = seen
-                addr, _name, slice_addr = _project_current_function_context(project)
-                key = (addr, slice_addr, "peephole")
-                if key not in seen:
-                    seen.add(key)
-                    print(
-                        "[dbg] clinic:flags "
-                        f"skip_simplify={bool(getattr(project, '_inertia_skip_clinic_simplify_block', False))} "
-                        f"tiny_disable_peephole={bool(getattr(project, '_inertia_tiny_core_disable_peephole', False))} "
-                        f"disable_expr_guard={bool(getattr(project, '_inertia_disable_peephole_expr_guard', False))} "
-                        f"block_is_none={block is None}"
-                        f"{_project_current_function_context_suffix(project)}",
-                        file=sys.stderr,
-                    )
-                    sys.stderr.flush()
-            if getattr(project, "_inertia_skip_clinic_simplify_block", False):
-                cap = int(getattr(project, "_inertia_clinic_peephole_cap", 128) or 128)
-                key_addr = None
-                ctx = getattr(project, "_inertia_current_function_debug", None)
-                if isinstance(ctx, dict):
-                    key_addr = ctx.get("slice_addr") or ctx.get("addr")
-                if not isinstance(key_addr, int):
-                    key_addr = getattr(block, "addr", None)
-                counts = getattr(project, "_inertia_clinic_peephole_counts", None)
-                if not isinstance(counts, dict):
-                    counts = {}
-                    project._inertia_clinic_peephole_counts = counts
-                peephole_key = int(key_addr) if isinstance(key_addr, int) else -1
-                count = int(counts.get(peephole_key, 0)) + 1
-                counts[peephole_key] = count
-                if count > cap:
-                    if os.environ.get("INERTIA_DEBUG_CLINIC_FLAGS"):
-                        print(
-                            "[dbg] clinic:peephole-cap-hit "
-                            f"count={count} cap={cap}{_project_current_function_context_suffix(project)}",
-                            file=sys.stderr,
-                        )
-                        sys.stderr.flush()
-                    return block, False, False
-                return block, False, False
-            if block is not None and getattr(project, "_inertia_tiny_core_disable_peephole", False):
-                return block, False, False
-            if block is not None and (
-                getattr(project, "_inertia_fast_block_peephole", False)
-                or getattr(getattr(project, "arch", None), "name", None) == "86_16"
-            ):
-                statements, stmts_updated = peephole_optimize_stmts(block, self._stmt_peephole_opts)
-                new_block = block.copy(statements=statements) if stmts_updated else block
-                statements, multi_stmts_updated = peephole_optimize_multistmts(new_block, self._multistmt_peephole_opts)
-                if multi_stmts_updated:
-                    new_block = new_block.copy(statements=statements)
-                return new_block, bool(stmts_updated or multi_stmts_updated), False
-            if block is not None and _block_has_pathologically_complex_expr(block):
-                skipped = getattr(project, "_inertia_complex_block_skip_seen", None)
-                if not isinstance(skipped, set):
-                    skipped = set()
-                    project._inertia_complex_block_skip_seen = skipped
-                block_addr = getattr(block, "addr", None)
-                if block_addr not in skipped:
-                    skipped.add(block_addr)
-                    if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
-                        print(
-                            "[dbg] clinic:skip-peephole-complex-block "
-                            f"block={block_addr:#x}{_project_current_function_context_suffix(project)}",
-                            file=sys.stderr,
-                        )
-                        sys.stderr.flush()
-                statements, stmts_updated = peephole_optimize_stmts(block, self._stmt_peephole_opts)
-                new_block = block.copy(statements=statements) if stmts_updated else block
-                statements, multi_stmts_updated = peephole_optimize_multistmts(new_block, self._multistmt_peephole_opts)
-                if multi_stmts_updated:
-                    new_block = new_block.copy(statements=statements)
-                return new_block, bool(stmts_updated or multi_stmts_updated), False
-            return orig_peephole_optimize(self, *args, **kwargs)
-        finally:
-            elapsed = _time.perf_counter() - _t_start
-            _peephole_total[0] += elapsed
-            if os.environ.get("INERTIA_DEBUG_CLINIC_FLAGS"):
-                stats = getattr(project, "_inertia_debug_peephole_stats", None)
-                if not isinstance(stats, dict):
-                    stats = {}
-                    project._inertia_debug_peephole_stats = stats
-                addr, _name, slice_addr = _project_current_function_context(project)
-                stats_key = (addr if isinstance(addr, int) else -1, slice_addr if isinstance(slice_addr, int) else -1)
-                calls, total = stats.get(stats_key, (0, 0.0))
-                calls = int(calls) + 1
-                total = float(total) + float(elapsed)
-                stats[stats_key] = (calls, total)
-                if calls in (1, 10, 50, 100, 200, 500, 1000):
-                    print(
-                        "[dbg] clinic:peephole-stats "
-                        f"calls={calls} total={total:.3f}s avg={(total / calls):.6f}s"
-                        f"{_project_current_function_context_suffix(project)}",
-                        file=sys.stderr,
-                    )
-                    sys.stderr.flush()
+        return _guarded_peephole_optimize_8616(
+            state,
+            project,
+            orig_peephole_optimize,
+            peephole_optimize_stmts,
+            peephole_optimize_multistmts,
+            self,
+            args,
+            kwargs,
+        )
 
     def _peephole_optimize_exprs_guarded(
         block: object,
@@ -2573,69 +2791,75 @@ def guard_angr_clinic_stage_markers(project: AngrProjectSurface) -> Iterator[Non
         *args: typing.Any,
         **kwargs: typing.Any,
     ) -> object:
-        if getattr(project, "_inertia_skip_clinic_simplify_block", False):
-            return False
-        return orig_peephole_optimize_exprs(block, expr_opts, *args, **kwargs)
-
-    class _NoPropagationResult:
-        def __init__(self) -> None:
-            self.replacements: dict[object, object] = {}
-            self.dead_vvar_ids: set[object] = set()
-            self.model = self
+        return _guarded_peephole_optimize_exprs_8616(
+            project, orig_peephole_optimize_exprs, block, expr_opts, *args, **kwargs
+        )
 
     def _compute_propagation_guarded(
         self: AngrPatchSurface,
         *args: typing.Any,
         **kwargs: typing.Any,
     ) -> object:
-        try:
-            return orig_compute_propagation(self, *args, **kwargs)
-        except KeyError as exc:
-            missing = exc.args[0] if exc.args else None
-            if not isinstance(missing, (AILTmp, AtomTmp)):
-                raise
-            count = int(getattr(project, "_inertia_clinic_missing_tmp_propagation_refused", 0) or 0) + 1
-            project._inertia_clinic_missing_tmp_propagation_refused = count
-            if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
-                print(
-                    "[dbg] clinic:refuse-missing-tmp-propagation "
-                    f"tmp={missing}{_project_current_function_context_suffix(project)}",
-                    file=sys.stderr,
-                )
-                sys.stderr.flush()
-            result = _NoPropagationResult()
-            self._propagator = result
-            self._propagator_dead_vvar_ids = result.dead_vvar_ids
-            return result
+        return _guarded_compute_propagation_8616(
+            project,
+            orig_compute_propagation,
+            "_inertia_clinic_missing_tmp_propagation_refused",
+            "refuse-missing-tmp-propagation",
+            True,
+            (AILTmp, AtomTmp),
+            self,
+            args,
+            kwargs,
+        )
 
     def _block_compute_propagation_guarded(
         self: AngrPatchSurface,
         *args: typing.Any,
         **kwargs: typing.Any,
     ) -> object:
-        try:
-            return orig_block_compute_propagation(self, *args, **kwargs)
-        except KeyError as exc:
-            missing = exc.args[0] if exc.args else None
-            if not isinstance(missing, (AILTmp, AtomTmp)):
-                raise
-            count = int(getattr(project, "_inertia_block_missing_tmp_propagation_refused", 0) or 0) + 1
-            project._inertia_block_missing_tmp_propagation_refused = count
-            if timing_output_enabled() or os.environ.get("INERTIA_DEBUG_CLINIC_COMPLEX_EXPR"):
-                print(
-                    "[dbg] clinic:refuse-block-missing-tmp-propagation "
-                    f"tmp={missing}{_project_current_function_context_suffix(project)}",
-                    file=sys.stderr,
-                )
-                sys.stderr.flush()
-            result = _NoPropagationResult()
-            self._propagator = result
-            return result
+        return _guarded_compute_propagation_8616(
+            project,
+            orig_block_compute_propagation,
+            "_inertia_block_missing_tmp_propagation_refused",
+            "refuse-block-missing-tmp-propagation",
+            False,
+            (AILTmp, AtomTmp),
+            self,
+            args,
+            kwargs,
+        )
 
-    clinic_cls._stage_pre_ssa_level1_simplifications = _stage_pre_ssa_level1_simplifications
-    clinic_cls._stage_transform_to_ssa_level1 = _stage_transform_to_ssa_level1
-    clinic_cls._stage_post_ssa_level1_simplifications = _stage_post_ssa_level1_simplifications
-    clinic_cls._stage_recover_variables = _stage_recover_variables
+    clinic_cls._stage_pre_ssa_level1_simplifications = _clinic_stage_guard_8616(
+        state,
+        project,
+        orig_stage_pre_ssa,
+        "clinic:pre_ssa_l1",
+        "core:clinic:pre_ssa_level1_simplifications",
+    )
+    clinic_cls._stage_transform_to_ssa_level1 = _clinic_stage_guard_8616(
+        state,
+        project,
+        orig_stage_ssa_level1,
+        "clinic:ssa_level1",
+        "core:clinic:ssa_level1_transformation",
+    )
+    clinic_cls._stage_post_ssa_level1_simplifications = _clinic_stage_guard_8616(
+        state,
+        project,
+        orig_stage_post_ssa,
+        "clinic:post_ssa_l1",
+        "core:clinic:post_ssa_level1_simplifications",
+    )
+    # Variable recovery is semantic materialization, not an optional
+    # optimization. Resource policies may bound simplification around it,
+    # but must never bypass it or invent empty recovery inputs.
+    clinic_cls._stage_recover_variables = _clinic_stage_guard_8616(
+        state,
+        project,
+        orig_stage_recover_vars,
+        "clinic:recover_vars",
+        "core:clinic:recover_variables",
+    )
     clinic_cls._simplify_block = _simplify_block
     block_simplifier_cls._compute_propagation = _block_compute_propagation_guarded
     ail_simplifier_cls._compute_propagation = _compute_propagation_guarded
@@ -2885,6 +3109,39 @@ def _faulthandler_output_file() -> typing.TextIO | None:
     return None
 
 
+def _enable_thread_stack_dump_8616() -> int | None:
+    """Enable periodic faulthandler stack dumps when configured via env."""
+    stack_dump_raw = os.environ.get("INERTIA_THREAD_STACK_DUMP_SEC", "").strip()
+    if not stack_dump_raw:
+        return None
+    stack_dump_sec: int | None = None
+    with contextlib.suppress(Exception):
+        stack_dump_sec = max(1, int(float(stack_dump_raw)))
+        stack_dump_file = _faulthandler_output_file()
+        if stack_dump_file is not None:
+            faulthandler.enable(file=stack_dump_file, all_threads=True)
+            faulthandler.dump_traceback_later(stack_dump_sec, repeat=True, file=stack_dump_file)
+    return stack_dump_sec
+
+
+def _daemon_thread_result_8616(
+    completed: threading.Event,
+    result_box: dict[str, object],
+    timeout_seconds: int,
+) -> object:
+    """Wait for the daemon thread and return or re-raise its outcome."""
+    if not completed.wait(timeout_seconds):
+        raise _FuturesTimeoutError(f"Timed out after {timeout_seconds}s.")
+    if result_box.get("kind") == "err":
+        error = result_box.get("error")
+        if isinstance(error, BaseException):
+            raise error
+        raise RuntimeError(f"daemon thread failed: {result_box.get('traceback')}")
+    if "result" not in result_box:
+        raise RuntimeError(f"daemon thread completed without result after {timeout_seconds}s")
+    return result_box["result"]
+
+
 def run_with_timeout_in_daemon_thread[TimeoutResultT](
     func: Callable[[], TimeoutResultT],
     *,
@@ -2917,26 +3174,9 @@ def run_with_timeout_in_daemon_thread[TimeoutResultT](
 
     thread = threading.Thread(target=_runner, daemon=True, name=thread_name_prefix)
     thread.start()
-    stack_dump_sec = None
-    stack_dump_raw = os.environ.get("INERTIA_THREAD_STACK_DUMP_SEC", "").strip()
-    if stack_dump_raw:
-        with contextlib.suppress(Exception):
-            stack_dump_sec = max(1, int(float(stack_dump_raw)))
-            stack_dump_file = _faulthandler_output_file()
-            if stack_dump_file is not None:
-                faulthandler.enable(file=stack_dump_file, all_threads=True)
-                faulthandler.dump_traceback_later(stack_dump_sec, repeat=True, file=stack_dump_file)
+    stack_dump_sec = _enable_thread_stack_dump_8616()
     try:
-        if not completed.wait(timeout_seconds):
-            raise _FuturesTimeoutError(f"Timed out after {timeout_seconds}s.")
-        if result_box.get("kind") == "err":
-            error = result_box.get("error")
-            if isinstance(error, BaseException):
-                raise error
-            raise RuntimeError(f"daemon thread failed: {result_box.get('traceback')}")
-        if "result" not in result_box:
-            raise RuntimeError(f"daemon thread completed without result after {timeout_seconds}s")
-        return typing.cast(TimeoutResultT, result_box["result"])
+        return typing.cast(TimeoutResultT, _daemon_thread_result_8616(completed, result_box, timeout_seconds))
     finally:
         if stack_dump_sec is not None:
             with contextlib.suppress(Exception):
@@ -3145,125 +3385,129 @@ def guard_angr_tail_validation_collection_timing() -> Iterator[None]:
         _ds_mod.collect_x86_16_tail_validation_summary = orig_collect
 
 
+def _timed_stage_guard_8616(
+    orig: Callable[..., object],
+    label: str,
+    emit_timing: bool,
+) -> Callable[..., object]:
+    """Build a stage wrapper that emits start/done timing lines."""
+
+    def _timed(codegen: object, *args: typing.Any, **kwargs: typing.Any) -> object:
+        t0 = time.perf_counter()
+        if emit_timing:
+            print(f"[dbg] stage-time: x86_16:{label} start")
+            sys.stderr.flush()
+        try:
+            return orig(codegen, *args, **kwargs)
+        finally:
+            if emit_timing:
+                elapsed = time.perf_counter() - t0
+                print(f"[dbg] stage-time: x86_16:{label} done elapsed={elapsed:.2f}s")
+                sys.stderr.flush()
+
+    return _timed
+
+
+def _bounded_stage_guard_8616(
+    orig: Callable[..., object],
+    budget_seconds: int,
+    label: str,
+    emit_timing: bool,
+) -> Callable[..., object]:
+    """Build a stage wrapper that refuses work after one analysis timeout."""
+    timed_out = False
+
+    def _timed(codegen: object, **kwargs: object) -> object:
+        nonlocal timed_out
+        if timed_out:
+            return False
+        t0 = time.perf_counter()
+        if emit_timing:
+            print(f"[dbg] stage-time: x86_16:{label} start")
+            sys.stderr.flush()
+        try:
+            with analysis_timeout(int(budget_seconds)):
+                return orig(codegen, **kwargs)
+        except AnalysisTimeout:
+            timed_out = True
+            if emit_timing:
+                elapsed = time.perf_counter() - t0
+                print(
+                    f"[dbg] stage-time: x86_16:{label} TIMEOUT elapsed={elapsed:.2f}s "
+                    f"budget={budget_seconds}s",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            return False
+        finally:
+            if emit_timing:
+                elapsed = time.perf_counter() - t0
+                print(f"[dbg] stage-time: x86_16:{label} done elapsed={elapsed:.2f}s")
+                sys.stderr.flush()
+
+    return _timed
+
+
+def _install_bounded_lowering_guards_8616(emit_timing: bool) -> tuple[object, object]:
+    """Patch stable-ss-linear lowering entry points with bounded-stage guards.
+
+    Returns the ``stack_lowering_from_facts`` module and its original symbol so
+    the caller can restore it; the ss-linear guard intentionally stays patched
+    for the remaining fork budget.
+    """
+    slf_mod: object = None
+    orig_slf: object = None
+    try:
+        import angr_platforms.X86_16.lowering.real_mode_linear as _rml_module
+
+        rml_mod = typing.cast(AngrPatchSurface, _rml_module)
+        timed_rml = _bounded_stage_guard_8616(
+            rml_mod.lower_stable_ss_linear_stack_dereferences_8616,
+            30,
+            "lower_ss_linear_stack",
+            emit_timing,
+        )
+        rml_mod.lower_stable_ss_linear_stack_dereferences_8616 = timed_rml
+        # Also patch the import-time reference in stack_lowering.py that
+        # bypasses the module-level monkey-patch (see issue with
+        # "from .real_mode_linear import lower_stable_ss..." at module load).
+        import angr_platforms.X86_16.lowering.stack_lowering as _sl_module
+
+        sl_mod = typing.cast(AngrPatchSurface, _sl_module)
+        sl_mod.lower_stable_ss_linear_stack_dereferences_8616 = timed_rml
+    except Exception:
+        pass
+    try:
+        import angr_platforms.X86_16.lowering.stack_lowering_from_facts as _slf_module
+
+        slf_mod = typing.cast(AngrPatchSurface, _slf_module)
+        orig_slf = slf_mod.lower_stack_accesses_from_alias_facts_8616
+        slf_mod.lower_stack_accesses_from_alias_facts_8616 = _timed_stage_guard_8616(
+            orig_slf, "lower_stack_from_facts", emit_timing
+        )
+    except Exception:
+        pass
+    return slf_mod, orig_slf
+
+
 @contextlib.contextmanager
 def guard_angr_structuring_codegen_internal_timing() -> Iterator[None]:
     """Emit timing for internal steps of _structuring_codegen_8616 before the pass loop."""
     emit_timing = timing_output_enabled()
-    import time as _time
 
     import angr_platforms.X86_16.decompiler_structuring_stage as _ds_mod
     import angr_platforms.X86_16.pipeline.contracts as _contracts_mod
 
     orig_alias = _ds_mod._assert_alias_complete_8616
     orig_contracts = _contracts_mod.assert_pipeline_contracts_8616
+    _ds_mod._assert_alias_complete_8616 = _timed_stage_guard_8616(
+        orig_alias, "_assert_alias_complete", emit_timing
+    )
+    _contracts_mod.assert_pipeline_contracts_8616 = _timed_stage_guard_8616(
+        orig_contracts, "assert_pipeline_contracts", emit_timing
+    )
 
-    def _timed_alias_complete(codegen: object) -> object:
-        _t0 = _time.perf_counter()
-        if emit_timing:
-            print("[dbg] stage-time: x86_16:_assert_alias_complete start")
-            sys.stderr.flush()
-        try:
-            return orig_alias(codegen)
-        finally:
-            if emit_timing:
-                _elapsed = _time.perf_counter() - _t0
-                print(f"[dbg] stage-time: x86_16:_assert_alias_complete done elapsed={_elapsed:.2f}s")
-                sys.stderr.flush()
-
-    def _timed_contracts(codegen: object) -> object:
-        _t0 = _time.perf_counter()
-        if emit_timing:
-            print("[dbg] stage-time: x86_16:assert_pipeline_contracts start")
-            sys.stderr.flush()
-        try:
-            return orig_contracts(codegen)
-        finally:
-            if emit_timing:
-                _elapsed = _time.perf_counter() - _t0
-                print(f"[dbg] stage-time: x86_16:assert_pipeline_contracts done elapsed={_elapsed:.2f}s")
-                sys.stderr.flush()
-
-    _ds_mod._assert_alias_complete_8616 = _timed_alias_complete
-    _contracts_mod.assert_pipeline_contracts_8616 = _timed_contracts
-
-    # Patch lowering functions at source
-    _orig_rml = None
-    _orig_slf = None
-    _rml_mod = None
-    _slf_mod = None
-    _sl_mod = None
-    _orig_rml_sl = None
-    _rml_timed_out = [False]  # mutable cell so _timed_rml closure can write
-    try:
-        import angr_platforms.X86_16.lowering.real_mode_linear as _rml_module
-
-        _rml_mod = typing.cast(AngrPatchSurface, _rml_module)
-        _orig_rml = _rml_mod.lower_stable_ss_linear_stack_dereferences_8616
-        _BOUNDED_STAGE_SECONDS = 30
-
-        def _timed_rml(codegen: object, **kwargs: object) -> object:
-            if _rml_timed_out[0]:
-                return False
-            _t0 = _time.perf_counter()
-            if emit_timing:
-                print("[dbg] stage-time: x86_16:lower_ss_linear_stack start")
-                sys.stderr.flush()
-            try:
-                with analysis_timeout(int(_BOUNDED_STAGE_SECONDS)):
-                    return _orig_rml(codegen, **kwargs)
-            except AnalysisTimeout:
-                _rml_timed_out[0] = True
-                if emit_timing:
-                    _elapsed = _time.perf_counter() - _t0
-                    print(
-                        f"[dbg] stage-time: x86_16:lower_ss_linear_stack TIMEOUT elapsed={_elapsed:.2f}s budget={_BOUNDED_STAGE_SECONDS}s",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                return False
-            finally:
-                if emit_timing:
-                    _elapsed = _time.perf_counter() - _t0
-                    print(f"[dbg] stage-time: x86_16:lower_ss_linear_stack done elapsed={_elapsed:.2f}s")
-                    sys.stderr.flush()
-
-        _rml_mod.lower_stable_ss_linear_stack_dereferences_8616 = _timed_rml
-        # Also patch the import-time reference in stack_lowering.py that
-        # bypasses the module-level monkey-patch (see issue with
-        # "from .real_mode_linear import lower_stable_ss..." at module load).
-        import angr_platforms.X86_16.lowering.stack_lowering as _sl_module
-
-        _sl_mod = typing.cast(AngrPatchSurface, _sl_module)
-        _orig_rml_sl = _sl_mod.lower_stable_ss_linear_stack_dereferences_8616
-        _sl_mod.lower_stable_ss_linear_stack_dereferences_8616 = _timed_rml
-    except Exception:
-        pass
-    try:
-        import angr_platforms.X86_16.lowering.stack_lowering_from_facts as _slf_module
-
-        _slf_mod = typing.cast(AngrPatchSurface, _slf_module)
-        _orig_slf = _slf_mod.lower_stack_accesses_from_alias_facts_8616
-
-        def _timed_slf(
-            codegen: object,
-            *args: typing.Any,
-            **kwargs: typing.Any,
-        ) -> object:
-            _t0 = _time.perf_counter()
-            if emit_timing:
-                print("[dbg] stage-time: x86_16:lower_stack_from_facts start")
-                sys.stderr.flush()
-            try:
-                return _orig_slf(codegen, *args, **kwargs)
-            finally:
-                if emit_timing:
-                    _elapsed = _time.perf_counter() - _t0
-                    print(f"[dbg] stage-time: x86_16:lower_stack_from_facts done elapsed={_elapsed:.2f}s")
-                    sys.stderr.flush()
-
-        _slf_mod.lower_stack_accesses_from_alias_facts_8616 = _timed_slf
-    except Exception:
-        pass
+    slf_mod, orig_slf = _install_bounded_lowering_guards_8616(emit_timing)
 
     try:
         yield
@@ -3275,8 +3519,8 @@ def guard_angr_structuring_codegen_internal_timing() -> Iterator[None]:
         # passes (tail_validation snapshots, recompilable storage, etc.) can
         # re-enter unconstrained lower_ss_linear walks that consume the entire
         # remaining fork budget.
-        if _orig_slf is not None and _slf_mod is not None:
-            _slf_mod.lower_stack_accesses_from_alias_facts_8616 = _orig_slf
+        if orig_slf is not None and slf_mod is not None:
+            slf_mod.lower_stack_accesses_from_alias_facts_8616 = orig_slf
 
 
 def should_force_serial_supplemental_decompilation(function_count: int) -> bool:

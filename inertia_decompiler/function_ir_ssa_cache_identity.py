@@ -79,24 +79,12 @@ def function_addr_from_boundary_8616(function: object) -> int:
     return addr if isinstance(addr, int) and addr >= 0 else -1
 
 
-def function_ir_ssa_cache_key_8616(
-    project: object,
-    function: object,
-) -> dict[str, object] | None:
-    """Build exact function-byte and CFG identity without lifting VEX."""
-    if not cache_runtime_contract_8616().allows_semantic_cache:
-        return None
-    function_addr = function_addr_from_boundary_8616(function)
-    if function_addr < 0:
-        return None
-    project_surface = cast(_ProjectSurface8616, project)
-    function_surface = cast(_FunctionSurface8616, function)
-    try:
-        expected_addrs = tuple(sorted(function_surface.block_addrs_set))
-        raw_nodes = tuple(function_surface.graph.nodes)
-        raw_edges = tuple(function_surface.graph.edges)
-    except (AttributeError, TypeError):
-        return None
+def _block_byte_identities_8616(
+    project_surface: _ProjectSurface8616,
+    raw_nodes: tuple[object, ...],
+    expected_addrs: tuple[int, ...],
+) -> dict[int, tuple[int, str]] | None:
+    """Return per-block size+byte digests, or None on incomplete evidence."""
     nodes: dict[int, tuple[int, str]] = {}
     for raw_node in raw_nodes:
         node = cast(_BlockNode8616, raw_node)
@@ -115,6 +103,14 @@ def function_ir_ssa_cache_key_8616(
         nodes[addr] = (size, hashlib.sha256(block_bytes).hexdigest())
     if tuple(sorted(nodes)) != expected_addrs:
         return None
+    return nodes
+
+
+def _block_edge_identities_8616(
+    raw_edges: tuple[object, ...],
+    nodes: dict[int, tuple[int, str]],
+) -> set[tuple[int, int]]:
+    """Return exact CFG edges whose endpoints both materialized blocks."""
     edges: set[tuple[int, int]] = set()
     for raw_source, raw_target in raw_edges:
         source = cast(_BlockNode8616, raw_source)
@@ -125,6 +121,31 @@ def function_ir_ssa_cache_key_8616(
             continue
         if edge[0] in nodes and edge[1] in nodes:
             edges.add(edge)
+    return edges
+
+
+def function_ir_ssa_cache_key_8616(
+    project: object,
+    function: object,
+) -> dict[str, object] | None:
+    """Build exact function-byte and CFG identity without lifting VEX."""
+    if not cache_runtime_contract_8616().allows_semantic_cache:
+        return None
+    function_addr = function_addr_from_boundary_8616(function)
+    if function_addr < 0:
+        return None
+    project_surface = cast(_ProjectSurface8616, project)
+    function_surface = cast(_FunctionSurface8616, function)
+    try:
+        expected_addrs = tuple(sorted(function_surface.block_addrs_set))
+        raw_nodes = tuple(function_surface.graph.nodes)
+        raw_edges = tuple(function_surface.graph.edges)
+    except (AttributeError, TypeError):
+        return None
+    nodes = _block_byte_identities_8616(project_surface, raw_nodes, expected_addrs)
+    if nodes is None:
+        return None
+    edges = _block_edge_identities_8616(raw_edges, nodes)
     try:
         arch = project_surface.arch
         arch_identity = {

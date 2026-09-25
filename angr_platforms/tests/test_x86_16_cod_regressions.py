@@ -3611,32 +3611,32 @@ def test_structured_simplifier_keeps_dereference_backed_temp_widening_honest():
     assert rewritten_store.rhs.rhs.value == 1
 
 
-def test_structured_simplifier_does_not_rewrite_inside_dereference_address_subtrees():
-    class _FakeCodegen:
-        def __init__(self):
-            self._idx = 0
-            self.project = SimpleNamespace(arch=Arch86_16())
-            self.cstyle_null_cmp = False
-            self.stmt_comments = {}
-            self.expr_comments = {}
-            self.display_vvar_ids = False
-            self.cfunc = SimpleNamespace(
-                addr=0x10808,
-                arg_list=(),
-                sort_local_vars=lambda: None,
-                unified_local_vars={},
-                variables_in_use={},
-            )
+class _DerefSubtreeCodegen:
+    def __init__(self):
+        self._idx = 0
+        self.project = SimpleNamespace(arch=Arch86_16())
+        self.cstyle_null_cmp = False
+        self.stmt_comments = {}
+        self.expr_comments = {}
+        self.display_vvar_ids = False
+        self.cfunc = SimpleNamespace(
+            addr=0x10808,
+            arg_list=(),
+            sort_local_vars=lambda: None,
+            unified_local_vars={},
+            variables_in_use={},
+        )
 
-        def next_idx(self, _name):
-            self._idx += 1
-            return self._idx
-        def next_node_idx(self) -> int:
-            return self.next_idx("")
-        def next_ident(self, name: str) -> str:
-            return name
+    def next_idx(self, _name):
+        self._idx += 1
+        return self._idx
+    def next_node_idx(self) -> int:
+        return self.next_idx("")
+    def next_ident(self, name: str) -> str:
+        return name
 
-    codegen = _FakeCodegen()
+
+def _build_deref_subtree_statements(codegen) -> None:
     ds_offset, ds_size = codegen.project.arch.registers["ds"]
     ds_var = SimRegisterVariable(ds_offset, ds_size, name="ds")
     row_var = SimStackVariable(2, 2, base="bp", name="s_2", region=0x10808)
@@ -3714,6 +3714,11 @@ def test_structured_simplifier_does_not_rewrite_inside_dereference_address_subtr
         codegen=codegen,
     )
     codegen.cfunc.statements = structured_c.CStatements([ax_load, bx_assign, word_store], addr=0x10808, codegen=codegen)
+
+
+def test_structured_simplifier_does_not_rewrite_inside_dereference_address_subtrees():
+    codegen = _DerefSubtreeCodegen()
+    _build_deref_subtree_statements(codegen)
 
     changed = decompile._simplify_structured_c_expressions(codegen)
 

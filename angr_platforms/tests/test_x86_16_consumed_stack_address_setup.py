@@ -106,36 +106,84 @@ def test_scalar_stack_value_is_not_an_array_address():
     assert len(root.statements) == 2
 
 
+def _fail_synthetic(ctx):
+    record_synthetic_call_stubs_8616(ctx.project, frozenset({0x1020}))
+
+
+def _fail_storage(ctx):
+    ctx.codegen._inertia_stack_variable_coordinate_registry_8616 = StackVariableCoordinateRegistry8616()
+
+
+def _fail_offset(ctx):
+    ctx.summary = replace(ctx.summary, push_arg_sources=(("seg", "ss"), ("bp_addr", -14)))
+
+
+def _fail_push(ctx):
+    ctx.summary = replace(ctx.summary, push_arg_instruction_addrs=(0x1003, 0x1005))
+
+
+def _fail_mask(ctx):
+    ctx.assignment.rhs.lhs.rhs.value = 0
+
+
+def _fail_extra_use(ctx):
+    ctx.root.statements.insert(1, c.CAssignment(ctx.assignment.lhs, ctx.assignment.lhs, codegen=ctx.codegen))
+
+
+def _fail_dirty(ctx):
+    ctx.assignment.rhs.rhs.lhs = c.CDirtyExpression(object(), codegen=ctx.codegen)
+
+
+def _fail_target(ctx):
+    ctx.call.tags["inertia_target_addr_8616"] = 0x1021
+
+
+def _fail_argument_use(ctx):
+    ctx.call.args[1] = ctx.assignment.lhs
+
+
+def _fail_missing_arguments(ctx):
+    ctx.call.args = None
+
+
+def _fail_outside_image(ctx):
+    ctx.call.tags["inertia_target_addr_8616"] = 0x5000
+    ctx.summary = replace(ctx.summary, target_addr=0x5000)
+
+
+_SETUP_FAILURE_MUTATORS = {
+    "synthetic": _fail_synthetic,
+    "storage": _fail_storage,
+    "offset": _fail_offset,
+    "push": _fail_push,
+    "mask": _fail_mask,
+    "extra_use": _fail_extra_use,
+    "dirty": _fail_dirty,
+    "target": _fail_target,
+    "argument_use": _fail_argument_use,
+    "missing_arguments": _fail_missing_arguments,
+    "outside_image": _fail_outside_image,
+}
+
+
 @pytest.mark.parametrize("failure", [
     "input", "synthetic", "storage", "offset", "push", "mask", "extra_use", "dirty", "target",
     "argument_use", "missing_arguments", "outside_image",
 ])
 def test_unproven_or_unmatched_setup_is_kept(failure):
     project, codegen, root, summary, call = setup_fixture("89 c3 31 c0 c3" if failure == "input" else "31 c0 c3")
-    assignment = root.statements[0]
-    if failure == "synthetic":
-        record_synthetic_call_stubs_8616(project, frozenset({0x1020}))
-    elif failure == "storage":
-        codegen._inertia_stack_variable_coordinate_registry_8616 = StackVariableCoordinateRegistry8616()
-    elif failure == "offset":
-        summary = replace(summary, push_arg_sources=(("seg", "ss"), ("bp_addr", -14)))
-    elif failure == "push":
-        summary = replace(summary, push_arg_instruction_addrs=(0x1003, 0x1005))
-    elif failure == "mask":
-        assignment.rhs.lhs.rhs.value = 0
-    elif failure == "extra_use":
-        root.statements.insert(1, c.CAssignment(assignment.lhs, assignment.lhs, codegen=codegen))
-    elif failure == "dirty":
-        assignment.rhs.rhs.lhs = c.CDirtyExpression(object(), codegen=codegen)
-    elif failure == "target":
-        call.tags["inertia_target_addr_8616"] = 0x1021
-    elif failure == "argument_use":
-        call.args[1] = assignment.lhs
-    elif failure == "missing_arguments":
-        call.args = None
-    elif failure == "outside_image":
-        call.tags["inertia_target_addr_8616"] = 0x5000
-        summary = replace(summary, target_addr=0x5000)
+    ctx = SimpleNamespace(
+        project=project,
+        codegen=codegen,
+        root=root,
+        summary=summary,
+        call=call,
+        assignment=root.statements[0],
+    )
+    mutator = _SETUP_FAILURE_MUTATORS.get(failure)
+    if mutator is not None:
+        mutator(ctx)
+        summary = ctx.summary
     before = tuple(root.statements)
     assert not prune_consumed_stack_address_setup_8616(project, codegen, root, {0x1006: summary})
     assert tuple(root.statements) == before

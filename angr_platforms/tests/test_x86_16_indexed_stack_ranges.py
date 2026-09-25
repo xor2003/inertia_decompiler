@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 
 from angr.analyses.decompiler.structured_codegen.c import (
@@ -245,45 +245,46 @@ def _signed_remainder_fact_with_write(
     )
 
 
-def _two_loop_fixture(
-    *,
-    conditional_decrement: bool = False,
-    control_before_prefix_write: bool = False,
-    nested_straight_line: bool = False,
-    unknown_call_contract: bool = False,
-    read_high_after_decrement: bool = False,
-    while_shape: bool = False,
-    while_boolified_guard: bool = False,
-    while_guard_after_body: bool = False,
-    while_tagged_segment_bound: bool = False,
-    mixed_stack_regions: bool = False,
-    predecessor_uses_segment_load: bool = False,
-    duplicate_call_carrier: bool = False,
-    insert_intrinsic_carrier: bool = False,
-    duplicate_prefix_guard: bool = False,
-    direct_while_shape: bool = False,
-    conditional_while_increment: bool = False,
-) -> tuple[CStatements, CIndexedVariable, CIndexedVariable]:
-    codegen = _Codegen()
-    array = _array(codegen)
-    count = _global(0x2000, codegen, "count")
-    loop_bound: object = count
-    if while_tagged_segment_bound:
-        loop_bound = CFunctionCall(
-            "opaque_segment_load",
-            None,
-            [],
-            codegen=codegen,
-            tags=segmented_load_tags_8616(
-                SegmentedLoadIdentity8616(
-                    space=MemSpace.DS,
-                    offset=0x2000,
-                    width=2,
-                    region=0x4010,
-                )
-            ),
-        )
-    first_index = _stack(-10, codegen, "first_index")
+@dataclass(frozen=True, slots=True)
+class _TwoLoopOptions:
+    conditional_decrement: bool = False
+    control_before_prefix_write: bool = False
+    nested_straight_line: bool = False
+    unknown_call_contract: bool = False
+    read_high_after_decrement: bool = False
+    while_shape: bool = False
+    while_boolified_guard: bool = False
+    while_guard_after_body: bool = False
+    while_tagged_segment_bound: bool = False
+    mixed_stack_regions: bool = False
+    predecessor_uses_segment_load: bool = False
+    duplicate_call_carrier: bool = False
+    insert_intrinsic_carrier: bool = False
+    duplicate_prefix_guard: bool = False
+    direct_while_shape: bool = False
+    conditional_while_increment: bool = False
+
+
+def _fixture_loop_bound(codegen, count, options: _TwoLoopOptions):
+    if not options.while_tagged_segment_bound:
+        return count
+    return CFunctionCall(
+        "opaque_segment_load",
+        None,
+        [],
+        codegen=codegen,
+        tags=segmented_load_tags_8616(
+            SegmentedLoadIdentity8616(
+                space=MemSpace.DS,
+                offset=0x2000,
+                width=2,
+                region=0x4010,
+            )
+        ),
+    )
+
+
+def _fixture_prefix_statements(codegen, array, first_index, options: _TwoLoopOptions):
     prefix_assignment = CAssignment(
         CIndexedVariable(
             array,
@@ -295,7 +296,7 @@ def _two_loop_fixture(
         codegen=codegen,
     )
     prefix_statements: list[object] = [prefix_assignment]
-    if control_before_prefix_write:
+    if options.control_before_prefix_write:
         prefix_statements.insert(
             0,
             CIfElse(
@@ -315,53 +316,225 @@ def _two_loop_fixture(
                 codegen=codegen,
             ),
         )
-    if nested_straight_line:
+    if options.nested_straight_line:
         prefix_statements = [
             CStatements(prefix_statements, codegen=codegen),
             CStatements([], codegen=codegen),
         ]
-    prefix_body = CStatements(prefix_statements, codegen=codegen)
-    if while_shape or direct_while_shape:
-        prefix_nodes: tuple[object, ...] = _while_loop(
+    return prefix_statements
+
+
+def _guard_induction_clone(codegen, offset, name, options: _TwoLoopOptions):
+    if not options.mixed_stack_regions:
+        return None
+    return _stack(offset, codegen, name, region=None)
+
+
+def _shaped_loop_nodes(
+    codegen,
+    induction,
+    guard_induction,
+    loop_bound,
+    count,
+    body,
+    options: _TwoLoopOptions,
+    *,
+    guard_after_body: bool = False,
+    duplicate_guard: bool = False,
+) -> tuple[object, ...]:
+    if options.while_shape or options.direct_while_shape:
+        return _while_loop(
             codegen,
-            first_index,
+            induction,
             loop_bound,
-            prefix_body,
-            boolified_guard=while_boolified_guard,
-            guard_after_body=while_guard_after_body,
-            guard_induction=(
-                _stack(-10, codegen, "first_index_clone", region=None)
-                if mixed_stack_regions
-                else None
-            ),
-            duplicate_guard=duplicate_prefix_guard,
-            direct_condition=direct_while_shape,
-            conditional_increment=conditional_while_increment,
+            body,
+            boolified_guard=options.while_boolified_guard,
+            guard_after_body=guard_after_body,
+            guard_induction=guard_induction,
+            duplicate_guard=duplicate_guard,
+            direct_condition=options.direct_while_shape,
+            conditional_increment=options.conditional_while_increment,
         )
-    else:
-        prefix_nodes = (
-            _loop(
-                codegen,
-                first_index,
-                count,
-                prefix_body,
-            ),
-        )
-    high = _stack(-12, codegen, "high")
-    random_index = _stack(-14, codegen, "random_index")
-    second_index = _stack(-16, codegen, "second_index")
-    random_call = CFunctionCall(
-        "rand" if not unknown_call_contract else "unknown",
+    return (
+        _loop(
+            codegen,
+            induction,
+            count,
+            body,
+        ),
+    )
+
+
+def _random_call(codegen, options: _TwoLoopOptions):
+    return CFunctionCall(
+        "rand" if not options.unknown_call_contract else "unknown",
         None,
         [],
         codegen=codegen,
         tags={"ins_addr": 0x4010},
     )
+
+
+def _decrement_statement(codegen, high, second_index, options: _TwoLoopOptions):
+    decrement = CAssignment(
+        high,
+        CBinaryOp("Sub", high, _const(1, codegen), codegen=codegen),
+        codegen=codegen,
+    )
+    if not options.conditional_decrement:
+        return decrement
+    return CIfElse(
+        [
+            (
+                CBinaryOp(
+                    "CmpEQ",
+                    second_index,
+                    _const(0, codegen),
+                    codegen=codegen,
+                ),
+                CStatements([decrement], codegen=codegen),
+            )
+        ],
+        else_node=None,
+        cstyle_ifs=True,
+        codegen=codegen,
+    )
+
+
+def _carrier_statements(codegen, options: _TwoLoopOptions) -> list[object]:
+    carrier_statements: list[object] = []
+    if options.duplicate_call_carrier:
+        carrier_statements.append(
+            CExpressionStatement(
+                CFunctionCall(
+                    "rand",
+                    None,
+                    [],
+                    codegen=codegen,
+                    tags={"ins_addr": 0x4010},
+                ),
+                codegen=codegen,
+            )
+        )
+    if options.insert_intrinsic_carrier:
+        carrier_statements.append(
+            CExpressionStatement(
+                CFunctionCall(
+                    "_INSERT",
+                    None,
+                    [
+                        _const(0, codegen),
+                        _const(0, codegen),
+                        _const(1, codegen),
+                    ],
+                    codegen=codegen,
+                ),
+                codegen=codegen,
+            )
+        )
+    return carrier_statements
+
+
+def _ordered_reads(
+    carrier_statements,
+    random_assignment,
+    random_read,
+    decrement_statement,
+    high_read,
+    options: _TwoLoopOptions,
+):
+    reads = [*carrier_statements, random_assignment, random_read]
+    if options.read_high_after_decrement:
+        reads.extend([decrement_statement, high_read])
+    else:
+        reads.extend([high_read, decrement_statement])
+    return reads
+
+
+def _second_body(codegen, reads, options: _TwoLoopOptions):
+    if options.nested_straight_line:
+        return [
+            CStatements(reads[:2], codegen=codegen),
+            CStatements(reads[2:], codegen=codegen),
+        ]
+    return reads
+
+
+def _high_init(codegen, high, loop_bound, count, options: _TwoLoopOptions):
+    return CAssignment(
+        high,
+        CBinaryOp(
+            "Sub",
+            loop_bound if options.predecessor_uses_segment_load else count,
+            _const(1, codegen),
+            codegen=codegen,
+        ),
+        codegen=codegen,
+    )
+
+
+def _two_loop_fixture(
+    *,
+    conditional_decrement: bool = False,
+    control_before_prefix_write: bool = False,
+    nested_straight_line: bool = False,
+    unknown_call_contract: bool = False,
+    read_high_after_decrement: bool = False,
+    while_shape: bool = False,
+    while_boolified_guard: bool = False,
+    while_guard_after_body: bool = False,
+    while_tagged_segment_bound: bool = False,
+    mixed_stack_regions: bool = False,
+    predecessor_uses_segment_load: bool = False,
+    duplicate_call_carrier: bool = False,
+    insert_intrinsic_carrier: bool = False,
+    duplicate_prefix_guard: bool = False,
+    direct_while_shape: bool = False,
+    conditional_while_increment: bool = False,
+) -> tuple[CStatements, CIndexedVariable, CIndexedVariable]:
+    options = _TwoLoopOptions(
+        conditional_decrement=conditional_decrement,
+        control_before_prefix_write=control_before_prefix_write,
+        nested_straight_line=nested_straight_line,
+        unknown_call_contract=unknown_call_contract,
+        read_high_after_decrement=read_high_after_decrement,
+        while_shape=while_shape,
+        while_boolified_guard=while_boolified_guard,
+        while_guard_after_body=while_guard_after_body,
+        while_tagged_segment_bound=while_tagged_segment_bound,
+        mixed_stack_regions=mixed_stack_regions,
+        predecessor_uses_segment_load=predecessor_uses_segment_load,
+        duplicate_call_carrier=duplicate_call_carrier,
+        insert_intrinsic_carrier=insert_intrinsic_carrier,
+        duplicate_prefix_guard=duplicate_prefix_guard,
+        direct_while_shape=direct_while_shape,
+        conditional_while_increment=conditional_while_increment,
+    )
+    codegen = _Codegen()
+    array = _array(codegen)
+    count = _global(0x2000, codegen, "count")
+    loop_bound = _fixture_loop_bound(codegen, count, options)
+    first_index = _stack(-10, codegen, "first_index")
+    prefix_body = CStatements(_fixture_prefix_statements(codegen, array, first_index, options), codegen=codegen)
+    prefix_nodes = _shaped_loop_nodes(
+        codegen,
+        first_index,
+        _guard_induction_clone(codegen, -10, "first_index_clone", options),
+        loop_bound,
+        count,
+        prefix_body,
+        options,
+        guard_after_body=options.while_guard_after_body,
+        duplicate_guard=options.duplicate_prefix_guard,
+    )
+    high = _stack(-12, codegen, "high")
+    random_index = _stack(-14, codegen, "random_index")
+    second_index = _stack(-16, codegen, "second_index")
     random_assignment = CAssignment(
         random_index,
         CBinaryOp(
             "Mod",
-            random_call,
+            _random_call(codegen, options),
             CBinaryOp("Add", high, _const(1, codegen), codegen=codegen),
             codegen=codegen,
         ),
@@ -380,110 +553,29 @@ def _two_loop_fixture(
         variable_type=SimTypeShort(False),
         codegen=codegen,
     )
-    decrement = CAssignment(
-        high,
-        CBinaryOp("Sub", high, _const(1, codegen), codegen=codegen),
-        codegen=codegen,
+    decrement_statement = _decrement_statement(codegen, high, second_index, options)
+    reads = _ordered_reads(
+        _carrier_statements(codegen, options),
+        random_assignment,
+        random_read,
+        decrement_statement,
+        high_read,
+        options,
     )
-    decrement_statement: object = decrement
-    if conditional_decrement:
-        decrement_statement = CIfElse(
-            [
-                (
-                    CBinaryOp(
-                        "CmpEQ",
-                        second_index,
-                        _const(0, codegen),
-                        codegen=codegen,
-                    ),
-                    CStatements([decrement], codegen=codegen),
-                )
-            ],
-            else_node=None,
-            cstyle_ifs=True,
-            codegen=codegen,
-        )
-    carrier_statements: list[object] = []
-    if duplicate_call_carrier:
-        carrier_statements.append(
-            CExpressionStatement(
-                CFunctionCall(
-                    "rand",
-                    None,
-                    [],
-                    codegen=codegen,
-                    tags={"ins_addr": 0x4010},
-                ),
-                codegen=codegen,
-            )
-        )
-    if insert_intrinsic_carrier:
-        carrier_statements.append(
-            CExpressionStatement(
-                CFunctionCall(
-                    "_INSERT",
-                    None,
-                    [
-                        _const(0, codegen),
-                        _const(0, codegen),
-                        _const(1, codegen),
-                    ],
-                    codegen=codegen,
-                ),
-                codegen=codegen,
-            )
-        )
-    reads = [*carrier_statements, random_assignment, random_read]
-    if read_high_after_decrement:
-        reads.extend([decrement_statement, high_read])
-    else:
-        reads.extend([high_read, decrement_statement])
-    second_body: list[object]
-    if nested_straight_line:
-        second_body = [
-            CStatements(reads[:2], codegen=codegen),
-            CStatements(reads[2:], codegen=codegen),
-        ]
-    else:
-        second_body = reads
-    second_loop_body = CStatements(second_body, codegen=codegen)
-    if while_shape or direct_while_shape:
-        second_nodes: tuple[object, ...] = _while_loop(
-            codegen,
-            second_index,
-            loop_bound,
-            second_loop_body,
-            boolified_guard=while_boolified_guard,
-            guard_induction=(
-                _stack(-16, codegen, "second_index_clone", region=None)
-                if mixed_stack_regions
-                else None
-            ),
-            direct_condition=direct_while_shape,
-            conditional_increment=conditional_while_increment,
-        )
-    else:
-        second_nodes = (
-            _loop(
-                codegen,
-                second_index,
-                count,
-                second_loop_body,
-            ),
-        )
+    second_loop_body = CStatements(_second_body(codegen, reads, options), codegen=codegen)
+    second_nodes = _shaped_loop_nodes(
+        codegen,
+        second_index,
+        _guard_induction_clone(codegen, -16, "second_index_clone", options),
+        loop_bound,
+        count,
+        second_loop_body,
+        options,
+    )
     root = CStatements(
         [
             *prefix_nodes,
-            CAssignment(
-                high,
-                CBinaryOp(
-                    "Sub",
-                    loop_bound if predecessor_uses_segment_load else count,
-                    _const(1, codegen),
-                    codegen=codegen,
-                ),
-                codegen=codegen,
-            ),
+            _high_init(codegen, high, loop_bound, count, options),
             *second_nodes,
         ],
         codegen=codegen,

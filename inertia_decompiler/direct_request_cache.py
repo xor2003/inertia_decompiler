@@ -146,10 +146,10 @@ def _tail_validation_record_passed_8616(snapshot: object) -> bool:
     return True
 
 
-def _artifact_from_record_8616(record: dict[str, object]) -> DirectRequestCacheArtifact8616 | None:
-    """Decode only a record whose complete acceptance proof remains valid."""
-    if record.get("schema") != DIRECT_REQUEST_CACHE_SCHEMA_8616 or record.get("status") != "ok":
-        return None
+def _validated_scalar_fields_8616(
+    record: dict[str, object],
+) -> tuple[int, str, str, int, str, list[object], str, str, str, object] | None:
+    """Validate the record's scalar/header fields and return them in order."""
     function_addr = record.get("function_addr")
     function_name = record.get("function_name")
     arch_name = record.get("arch_name")
@@ -178,18 +178,61 @@ def _artifact_from_record_8616(record: dict[str, object]) -> DirectRequestCacheA
         return None
     if not isinstance(validated_hash, str) or not isinstance(gcc_hash, str):
         return None
+    return (
+        function_addr,
+        function_name,
+        arch_name,
+        entry_point,
+        runtime_header,
+        startup_diagnostic_lines,
+        payload,
+        validated_hash,
+        gcc_hash,
+        raw_tail_validation,
+    )
+
+
+def _payload_proof_ok_8616(
+    payload: str,
+    validated_hash: str,
+    gcc_hash: str,
+    raw_tail_validation: object,
+) -> bool:
+    """Return True when integrity, tail validation, and text review all pass."""
     integrity = verify_accepted_payload_integrity_8616(
         payload,
         validated_payload_hash=validated_hash,
         gcc_checked_payload_hash=gcc_hash,
     )
     if not integrity.passed:
-        return None
+        return False
     if not isinstance(raw_tail_validation, dict) or not _tail_validation_record_passed_8616(
         raw_tail_validation
     ):
+        return False
+    return not assess_final_generated_c_text(payload).reject_as_decompiled
+
+
+def _artifact_from_record_8616(record: dict[str, object]) -> DirectRequestCacheArtifact8616 | None:
+    """Decode only a record whose complete acceptance proof remains valid."""
+    if record.get("schema") != DIRECT_REQUEST_CACHE_SCHEMA_8616 or record.get("status") != "ok":
         return None
-    if assess_final_generated_c_text(payload).reject_as_decompiled:
+    fields = _validated_scalar_fields_8616(record)
+    if fields is None:
+        return None
+    (
+        function_addr,
+        function_name,
+        arch_name,
+        entry_point,
+        runtime_header,
+        startup_diagnostic_lines,
+        payload,
+        validated_hash,
+        gcc_hash,
+        raw_tail_validation,
+    ) = fields
+    if not _payload_proof_ok_8616(payload, validated_hash, gcc_hash, raw_tail_validation):
         return None
     failure_snapshot = FailureFamilySnapshot.from_record(record.get("failure_family_snapshot"))
     if failure_snapshot is None:
