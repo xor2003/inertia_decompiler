@@ -47,6 +47,20 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   needs `PYTHONHASHSEED=0` (make exports it); without it 8
   cache-surface tests fail on `allows_semantic_cache` refusal.
 
+- lowering/segmented_global_loads.py driven to zero ruff findings (was ~70
+  promoted sites at batch start): indexed/direct-global materializers,
+  store-evidence collectors, stride/byte-address matchers, aggregate
+  type/promotion/reconcile paths, and capstone-window classifiers split into
+  typed module helpers and run-state dataclasses. Two splice regressions
+  found and repaired during review: `_seg_global_debug_log_8616` restored to
+  its env-gated `log.warning` body, and
+  `_materialize_indexed_global_store_assignments_from_instruction_evidence_8616`
+  rebuilt with its three extracted phases (facts-by-insn, assignment index,
+  per-instruction materialization) preserving exact stats/decision counters.
+  Owning suites: 181+187+15 passed; `test_synthesized_dword_return_call_
+  keeps_exact_callsite_identity` confirmed failing identically on clean HEAD
+  (pre-existing).
+
 - decompiler_postprocess_stage.py driven to zero ruff findings (was 81
   complexity sites at batch start): materialization-loop matchers,
   instruction-window helpers, validation-delta classifiers, clone walkers,
