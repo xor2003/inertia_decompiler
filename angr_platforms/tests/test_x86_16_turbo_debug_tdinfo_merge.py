@@ -3,7 +3,13 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
-from angr_platforms.X86_16.turbo_debug_tdinfo import TDInfoNameKind, TDInfoSymbolClass, parse_tdinfo_exe_bytes
+from angr_platforms.X86_16.turbo_debug_tdinfo import (
+    TDInfoNameKind,
+    TDInfoSymbolClass,
+    _parse_tdinfo_coverage_map,
+    _parse_tdinfo_coverage_offsets,
+    parse_tdinfo_exe_bytes,
+)
 
 from dump_debug_info import dump_debug_info
 
@@ -151,7 +157,10 @@ def test_tdinfo_decodes_payload_extra_symbols_and_type_members():
         + struct.pack("<HHHHB", 6, 0x19, 0, 0, TDInfoSymbolClass.STRUCT_UNION_OR_ENUM)
     )
     descriptors = bytes.fromhex("15000002000019001e06000400000000")
-    members = bytes([0, 1, 0, 4, 0, 0x80, 2, 0, 4, 0])
+    # Real TD32 member records are name-first 5-byte records
+    # (name_idx u16, type_idx u16, attr u8); attr&0x80 ends the list and a
+    # u32 object-size trailer follows.
+    members = bytes([1, 0, 4, 0, 0, 2, 0, 4, 0, 0x80, 4, 0, 0, 0])
     parsed = parse_tdinfo_exe_bytes(_build_tdinfo_image_with_payload(extra_symbols + descriptors + members, names))
 
     assert parsed is not None
@@ -178,7 +187,7 @@ def test_tdinfo_decodes_enum_member_payload_sequences():
         + struct.pack("<HHHHB", 5, 0x18, 0, 0, TDInfoSymbolClass.STRUCT_UNION_OR_ENUM)
     )
     descriptors = bytes.fromhex("22050002000000000080ff7f01000000")
-    enum_members = bytes([0, 1, 0, 1, 0, 0, 2, 0, 2, 0, 0x80, 3, 0, 4, 0])
+    enum_members = bytes([1, 0, 1, 0, 0, 2, 0, 2, 0, 0, 3, 0, 4, 0, 0x80, 2, 0, 0, 0])
     parsed = parse_tdinfo_exe_bytes(_build_tdinfo_image_with_payload(extra_symbols + descriptors + enum_members, names))
 
     assert parsed is not None
@@ -277,3 +286,21 @@ def test_tdinfo_version_identification_unknown_version():
     assert parsed is not None
     assert parsed.tds_version_str == "9.99"
     assert parsed.tlink_version_str == "unknown"
+
+
+def test_tdinfo_coverage_offsets_attribute_to_their_segment():
+    """Coverage-map boundaries are 1-based start indexes into the offsets
+    table (observed RIPTIDE.EXE values: map starts 1,1164,... and offsets
+    3,6,28,... — the first offsets belong to segment 1)."""
+    map_data = struct.pack("<3H", 1, 1164, 2415)
+    coverage_map = _parse_tdinfo_coverage_map(map_data, 0, 3)
+    assert [entry.offset_index for entry in coverage_map] == [1, 1164, 2415]
+
+    # Ordinals 1..1163 -> segment 1, 1164..2414 -> segment 2, 2415+ -> 3.
+    offsets_data = struct.pack("<4H", 3, 6, 28, 35)
+    padded = offsets_data + b"\x00" * (2415 * 2 - len(offsets_data))
+    offsets = _parse_tdinfo_coverage_offsets(padded, 0, 2415, coverage_map)
+    assert offsets[0].segment_index == 1
+    assert offsets[1162].segment_index == 1
+    assert offsets[1163].segment_index == 2
+    assert offsets[2414].segment_index == 3

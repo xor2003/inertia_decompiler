@@ -57,6 +57,17 @@ def _empty_tdinfo_info() -> SimpleNamespace:
         symbols_count=0,
         globals_count=0,
         extension_size=0,
+        source_modules_count=0,
+        local_symbols_count=0,
+        scopes_count=0,
+        line_entries_count=0,
+        include_files_count=0,
+        segments_count=0,
+        correlations_count=0,
+        class_entries_count=0,
+        parent_entries_count=0,
+        module_class_entries_count=0,
+        coverage_offsets_count=0,
     )
     return SimpleNamespace(
         header=header,
@@ -79,6 +90,19 @@ def _empty_tdinfo_info() -> SimpleNamespace:
         type_references=(),
         type_members=(),
         enum_members=(),
+        member_lists=(),
+        class_entries=(),
+        parent_class_table=(),
+        module_class_entries=(),
+        line_entries=(),
+        scopes=(),
+        correlations=(),
+        modules=(),
+        source_file_entries=(),
+        segments=(),
+        coverage_map=(),
+        coverage_offsets=(),
+        module_flags=(),
         raw_table_spans=(),
         code_labels={},
         data_labels={},
@@ -108,7 +132,15 @@ def test_dump_debug_info_tdinfo_schema_matches_parser_result_fields():
     expected = {field.name for field in fields(TDInfoEXEInfo)}
     expected.remove("tds_version_str")
     expected.remove("tlink_version_str")
-    expected.update({"tds_version", "tlink_version"})
+    expected.update(
+        {
+            "tds_version",
+            "tlink_version",
+            "demangled_names",
+            "struct_declarations",
+            "function_signatures",
+        }
+    )
 
     assert payload is not None
     assert set(payload) == expected

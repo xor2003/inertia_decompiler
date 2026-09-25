@@ -1065,6 +1065,82 @@ def _prototype_arg_type_for_bp_offset_8616(codegen: StructuredCodegenValue, offs
     return None
 
 
+def _canonical_arg_offset_8616(codegen: StructuredAstValue, arg: StructuredAstValue) -> int | None:
+    """Return a canonical BP offset for an arg's backing stack variable."""
+    arg_var = getattr(arg, "variable", None)
+    if not isinstance(arg_var, SimStackVariable):
+        return None
+    return _canonical_stack_offset_8616(
+        machine_bp_offset_for_stack_variable_8616(codegen, arg_var)
+    )
+
+
+def _bp_arg_offset_map_8616(codegen: StructuredAstValue, cfunc: StructuredAstValue) -> dict[int, StructuredAstValue]:
+    """Map positive BP argument offsets to their arg cvars."""
+    arg_by_offset: dict[int, StructuredAstValue] = {}
+    for arg in _boundary_tuple_8616(getattr(cfunc, "arg_list", ()) or ()):
+        arg_var = getattr(arg, "variable", None)
+        arg_offset = _canonical_arg_offset_8616(codegen, arg)
+        if isinstance(arg_var, SimStackVariable) and isinstance(arg_offset, int) and arg_offset > 2:
+            arg_by_offset[arg_offset] = arg
+    return arg_by_offset
+
+
+def _prune_unified_stack_vars_at_offset_8616(
+    codegen: StructuredAstValue, cfunc: StructuredAstValue, offset: int
+) -> None:
+    """Drop stale unified-local entries aliasing the proven BP offset."""
+    unified = getattr(cfunc, "unified_local_vars", None)
+    if not isinstance(unified, dict):
+        return
+    for existing in tuple(unified.keys()):
+        existing_offset = (
+            _canonical_stack_offset_8616(
+                machine_bp_offset_for_stack_variable_8616(codegen, existing)
+            )
+            if isinstance(existing, SimStackVariable)
+            else None
+        )
+        if isinstance(existing, SimStackVariable) and existing_offset == offset:
+            del unified[existing]
+
+
+def _rebuild_cfunc_prototype_8616(codegen: StructuredAstValue, cfunc: StructuredAstValue) -> None:
+    """Rebuild the function prototype from the reconciled arg list."""
+    prototype = getattr(cfunc, "functy", None) or getattr(cfunc, "prototype", None)
+    return_type = getattr(prototype, "returnty", None) if prototype is not None else SimTypeShort(False)
+    arg_types = []
+    for arg in cfunc.arg_list:
+        arg_var = getattr(arg, "variable", None)
+        arg_offset = _canonical_arg_offset_8616(codegen, arg)
+        proto_arg_type = (
+            _prototype_arg_type_for_bp_offset_8616(codegen, arg_offset) if isinstance(arg_offset, int) else None
+        )
+        arg_storage_width = arg_var.size if isinstance(arg_var, SimStackVariable) else 0
+        if (
+            proto_arg_type is not None
+            and isinstance(arg_storage_width, int)
+            and _type_size_bytes_8616(proto_arg_type, default=0) < arg_storage_width
+        ):
+            proto_arg_type = None
+        arg_type = proto_arg_type or getattr(arg, "variable_type", None) or SimTypeShort(False)
+        if proto_arg_type is not None and getattr(arg, "variable_type", None) != proto_arg_type:
+            arg.variable_type = proto_arg_type
+        arg_types.append(arg_type)
+    arg_names = [
+        getattr(getattr(arg, "variable", None), "name", None) or getattr(arg, "name", None) or f"arg_{idx}"
+        for idx, arg in enumerate(cfunc.arg_list)
+    ]
+    new_proto = SimTypeFunction(arg_types, return_type, arg_names=arg_names)
+    arch = getattr(getattr(codegen, "project", None), "arch", None)
+    if arch is not None:
+        new_proto = new_proto.with_arch(arch)
+    with contextlib.suppress(Exception):
+        cfunc.functy = new_proto
+    with contextlib.suppress(Exception):
+        cfunc.prototype = new_proto
+
+
 def _ensure_positive_bp_stack_arg_8616(
     codegen: StructuredAstValue, cvar: StructuredAstValue, target_type: StructuredAstValue
 ) -> None:
@@ -1095,18 +1171,7 @@ def _ensure_positive_bp_stack_arg_8616(
                 int(getattr(codegen, "_inertia_stack_arg_source_prototype_type_materialized_8616", 0) or 0) + 1
             )
 
-    arg_by_offset: dict[int, StructuredAstValue] = {}
-    for arg in _boundary_tuple_8616(getattr(cfunc, "arg_list", ()) or ()):
-        arg_var = getattr(arg, "variable", None)
-        arg_offset = (
-            _canonical_stack_offset_8616(
-                machine_bp_offset_for_stack_variable_8616(codegen, arg_var)
-            )
-            if isinstance(arg_var, SimStackVariable)
-            else None
-        )
-        if isinstance(arg_var, SimStackVariable) and isinstance(arg_offset, int) and arg_offset > 2:
-            arg_by_offset[arg_offset] = arg
+    arg_by_offset = _bp_arg_offset_map_8616(codegen, cfunc)
     existing_arg = arg_by_offset.get(offset)
     if existing_arg is not None:
         _copy_existing_arg_surface_to_stack_cvar_8616(existing_arg, cvar)
@@ -1118,57 +1183,206 @@ def _ensure_positive_bp_stack_arg_8616(
     variables_in_use = getattr(cfunc, "variables_in_use", None)
     if isinstance(variables_in_use, dict):
         variables_in_use[variable] = cvar
-    unified = getattr(cfunc, "unified_local_vars", None)
-    if isinstance(unified, dict):
-        for existing in tuple(unified.keys()):
-            existing_offset = (
-                _canonical_stack_offset_8616(
-                    machine_bp_offset_for_stack_variable_8616(codegen, existing)
-                )
-                if isinstance(existing, SimStackVariable)
-                else None
-            )
-            if isinstance(existing, SimStackVariable) and existing_offset == offset:
-                del unified[existing]
+    _prune_unified_stack_vars_at_offset_8616(codegen, cfunc, offset)
+    _rebuild_cfunc_prototype_8616(codegen, cfunc)
 
-    prototype = getattr(cfunc, "functy", None) or getattr(cfunc, "prototype", None)
-    return_type = getattr(prototype, "returnty", None) if prototype is not None else SimTypeShort(False)
-    arg_types = []
-    for arg in cfunc.arg_list:
-        arg_var = getattr(arg, "variable", None)
-        arg_offset = (
-            _canonical_stack_offset_8616(
-                machine_bp_offset_for_stack_variable_8616(codegen, arg_var)
+
+def _projected_materialized_owner_8616(
+    projected_value: StructuredAstValue,
+    owner_projection: StructuredAstValue,
+    projected_owner: StructuredAstValue,
+    target_type: StructuredAstValue,
+    variables_in_use: StructuredAstValue,
+    codegen: StructuredAstValue,
+) -> StructuredAstValue:
+    """Accept the already-materialized owner cvar from the value projection."""
+    if projected_owner.variable_type is None:
+        projected_owner.variable_type = target_type
+    owner_offset = owner_projection.bp_offset
+    _apply_preferred_stack_cvar_name_8616(projected_owner, owner_offset, codegen)
+    variable = projected_owner.variable
+    if isinstance(variables_in_use, dict) and isinstance(variable, SimStackVariable):
+        variables_in_use.setdefault(variable, projected_owner)
+    _ensure_positive_bp_stack_arg_8616(codegen, projected_owner, target_type)
+    return projected_value.expression
+
+
+_NO_STACK_PROJECTION_8616 = object()
+
+
+def _projected_stack_cvar_8616(
+    projected_value: StructuredAstValue,
+    target_type: StructuredAstValue,
+    variables_in_use: StructuredAstValue,
+    codegen: StructuredAstValue,
+) -> StructuredAstValue:
+    """Resolve the projection outcome: owner cvar, refusal, or no projection."""
+    if projected_value is None:
+        return _NO_STACK_PROJECTION_8616
+    owner_projection = projected_value.owner
+    projected_owner = owner_projection.cvar if owner_projection is not None else None
+    if (
+        projected_value.materialized
+        and owner_projection is not None
+        and isinstance(projected_owner, structured_c.CVariable)
+    ):
+        return _projected_materialized_owner_8616(
+            projected_value, owner_projection, projected_owner, target_type, variables_in_use, codegen
+        )
+    if projected_value.status in {
+        StackValueProjectionStatus8616.AMBIGUOUS_OWNER,
+        StackValueProjectionStatus8616.OUTSIDE_VALUE,
+        StackValueProjectionStatus8616.OWNER_NOT_EXPRESSION,
+        StackValueProjectionStatus8616.UNSUPPORTED_WRITE_VIEW,
+    }:
+        return None
+    return _NO_STACK_PROJECTION_8616
+
+
+def _existing_stack_cvar_8616(
+    codegen: StructuredAstValue,
+    cfunc: StructuredAstValue,
+    displacement: int,
+    requested_size: int | None,
+    require_lvalue: bool,
+    target_type: StructuredAstValue,
+    variables_in_use: StructuredAstValue,
+) -> StructuredAstValue:
+    """Reuse an existing arg-list or variables_in_use cvar for the displacement."""
+    existing = _existing_arg_stack_cvar_8616(
+        codegen, cfunc, displacement, requested_size, require_lvalue, target_type, variables_in_use
+    )
+    if existing is not None:
+        return existing
+    if isinstance(variables_in_use, dict):
+        return _existing_variables_in_use_stack_cvar_8616(
+            codegen, displacement, requested_size, require_lvalue, target_type, variables_in_use
+        )
+    return None
+
+
+def _existing_stack_cvar_size_ok_8616(
+    existing_size: int | None,
+    requested_size: int | None,
+    require_lvalue: bool,
+    displacement: int,
+) -> bool:
+    """Check the stored size of an existing cvar against the request."""
+    return not (
+        (requested_size is not None and isinstance(existing_size, int) and existing_size < requested_size)
+        or (require_lvalue and requested_size is not None and existing_size != requested_size)
+        or (
+            displacement < 0
+            and requested_size is not None
+            and isinstance(existing_size, int)
+            and existing_size != requested_size
+        )
+    )
+
+
+def _existing_arg_stack_cvar_8616(
+    codegen: StructuredAstValue,
+    cfunc: StructuredAstValue,
+    displacement: int,
+    requested_size: int | None,
+    require_lvalue: bool,
+    target_type: StructuredAstValue,
+    variables_in_use: StructuredAstValue,
+) -> StructuredAstValue:
+    """Reuse an argument-list cvar already bound to the stack displacement."""
+    for arg in getattr(cfunc, "arg_list", ()) or ():
+        variable = getattr(arg, "variable", None)
+        if not (
+            isinstance(arg, structured_c.CVariable)
+            and isinstance(variable, SimStackVariable)
+            and _canonical_stack_offset_8616(
+                machine_bp_offset_for_stack_variable_8616(codegen, variable)
             )
-            if isinstance(arg_var, SimStackVariable)
-            else None
-        )
-        proto_arg_type = (
-            _prototype_arg_type_for_bp_offset_8616(codegen, arg_offset) if isinstance(arg_offset, int) else None
-        )
-        arg_storage_width = arg_var.size if isinstance(arg_var, SimStackVariable) else 0
-        if (
-            proto_arg_type is not None
-            and isinstance(arg_storage_width, int)
-            and _type_size_bytes_8616(proto_arg_type, default=0) < arg_storage_width
+            == displacement
         ):
-            proto_arg_type = None
-        arg_type = proto_arg_type or getattr(arg, "variable_type", None) or SimTypeShort(False)
-        if proto_arg_type is not None and getattr(arg, "variable_type", None) != proto_arg_type:
-            arg.variable_type = proto_arg_type
-        arg_types.append(arg_type)
-    arg_names = [
-        getattr(getattr(arg, "variable", None), "name", None) or getattr(arg, "name", None) or f"arg_{idx}"
-        for idx, arg in enumerate(cfunc.arg_list)
-    ]
-    new_proto = SimTypeFunction(arg_types, return_type, arg_names=arg_names)
-    arch = getattr(getattr(codegen, "project", None), "arch", None)
-    if arch is not None:
-        new_proto = new_proto.with_arch(arch)
-    with contextlib.suppress(Exception):
-        cfunc.functy = new_proto
-    with contextlib.suppress(Exception):
-        cfunc.prototype = new_proto
+            continue
+        existing_size = _cvar_storage_size_bytes_8616(arg, variable)
+        if not _existing_stack_cvar_size_ok_8616(
+            existing_size, requested_size, require_lvalue, displacement
+        ):
+            continue
+        if arg.variable_type is None:
+            arg.variable_type = target_type
+        _apply_preferred_stack_cvar_name_8616(arg, displacement, codegen)
+        if isinstance(variables_in_use, dict):
+            variables_in_use.setdefault(variable, arg)
+        _ensure_positive_bp_stack_arg_8616(codegen, arg, target_type)
+        publish_selected_stack_cvar_projection_8616(
+            codegen, arg, bp_offset=displacement, size=variable.size,
+            entry_sp_offset=entry_sp_offset_for_machine_bp_range_8616(
+                codegen, displacement, variable.size,
+            ),
+        )
+        return arg
+    return None
+
+
+def _existing_variables_in_use_stack_cvar_8616(
+    codegen: StructuredAstValue,
+    displacement: int,
+    requested_size: int | None,
+    require_lvalue: bool,
+    target_type: StructuredAstValue,
+    variables_in_use: dict[StructuredAstValue, StructuredAstValue],
+) -> StructuredAstValue:
+    """Reuse a variables_in_use cvar already bound to the stack displacement."""
+    for variable, cvar in variables_in_use.items():
+        if not (
+            isinstance(variable, SimStackVariable)
+            and _canonical_stack_offset_8616(
+                machine_bp_offset_for_stack_variable_8616(codegen, variable)
+            )
+            == displacement
+        ):
+            continue
+        existing_size = _cvar_storage_size_bytes_8616(cvar, variable)
+        if not _existing_stack_cvar_size_ok_8616(
+            existing_size, requested_size, require_lvalue, displacement
+        ):
+            continue
+        if getattr(cvar, "variable_type", None) is None:
+            cvar.variable_type = target_type
+        _apply_preferred_stack_cvar_name_8616(cvar, displacement, codegen)
+        _ensure_positive_bp_stack_arg_8616(codegen, cvar, target_type)
+        publish_selected_stack_cvar_projection_8616(
+            codegen, cvar, bp_offset=displacement, size=variable.size,
+            entry_sp_offset=entry_sp_offset_for_machine_bp_range_8616(
+                codegen, displacement, variable.size,
+            ),
+        )
+        return cvar
+    return None
+
+
+def _entry_sp_fallback_cvar_8616(
+    codegen: StructuredAstValue,
+    displacement: int,
+    storage_size: int,
+    instruction_access: InstructionBpStackAccess8616 | None,
+    target_type: StructuredAstValue,
+) -> StructuredAstValue:
+    """Materialize from instruction evidence when entry-SP mapping fails."""
+    if (
+        instruction_access is None
+        or instruction_access.displacement != displacement
+        or instruction_access.size != storage_size
+    ):
+        return None
+    cvar = _resolve_direct_stack_update_cvar_8616(
+        codegen,
+        displacement,
+        storage_size,
+    )
+    if not isinstance(cvar, structured_c.CVariable):
+        return None
+    _ensure_stack_cvar_min_width_8616(codegen, cvar, storage_size)
+    _ensure_positive_bp_stack_arg_8616(codegen, cvar, target_type)
+    return cvar
 
 
 def stack_cvar_for_stable_ss_linear_access_8616(
@@ -1211,103 +1425,29 @@ def stack_cvar_for_stable_ss_linear_access_8616(
         if requested_size is not None
         else None
     )
-    owner_projection = projected_value.owner if projected_value is not None else None
-    projected_owner = owner_projection.cvar if owner_projection is not None else None
-    if (
-        projected_value is not None
-        and projected_value.materialized
-        and owner_projection is not None
-        and isinstance(projected_owner, structured_c.CVariable)
-    ):
-        if projected_owner.variable_type is None:
-            projected_owner.variable_type = target_type
-        owner_offset = owner_projection.bp_offset
-        _apply_preferred_stack_cvar_name_8616(projected_owner, owner_offset, codegen)
-        variable = projected_owner.variable
-        if isinstance(variables_in_use, dict) and isinstance(variable, SimStackVariable):
-            variables_in_use.setdefault(variable, projected_owner)
-        _ensure_positive_bp_stack_arg_8616(codegen, projected_owner, target_type)
-        if require_lvalue:
-            return projected_value.expression
-        return projected_value.expression
-    if (
-        projected_value is not None
-        and projected_value.status
-        in {
-            StackValueProjectionStatus8616.AMBIGUOUS_OWNER,
-            StackValueProjectionStatus8616.OUTSIDE_VALUE,
-            StackValueProjectionStatus8616.OWNER_NOT_EXPRESSION,
-            StackValueProjectionStatus8616.UNSUPPORTED_WRITE_VIEW,
-        }
-    ):
-        return None
-    for arg in getattr(cfunc, "arg_list", ()) or ():
-        variable = getattr(arg, "variable", None)
-        if (
-            isinstance(arg, structured_c.CVariable)
-            and isinstance(variable, SimStackVariable)
-            and _canonical_stack_offset_8616(
-                machine_bp_offset_for_stack_variable_8616(codegen, variable)
-            )
-            == displacement
-        ):
-            existing_size = _cvar_storage_size_bytes_8616(arg, variable)
-            if requested_size is not None and isinstance(existing_size, int) and existing_size < requested_size:
-                continue
-            if require_lvalue and requested_size is not None and existing_size != requested_size:
-                continue
-            if (
-                displacement < 0
-                and requested_size is not None
-                and isinstance(existing_size, int)
-                and existing_size != requested_size
-            ):
-                continue
-            if arg.variable_type is None:
-                arg.variable_type = target_type
-            _apply_preferred_stack_cvar_name_8616(arg, displacement, codegen)
-            if isinstance(variables_in_use, dict):
-                variables_in_use.setdefault(variable, arg)
-            _ensure_positive_bp_stack_arg_8616(codegen, arg, target_type)
-            publish_selected_stack_cvar_projection_8616(
-                codegen, arg, bp_offset=displacement, size=variable.size,
-                entry_sp_offset=entry_sp_offset_for_machine_bp_range_8616(
-                    codegen, displacement, variable.size,
-                ),
-            )
-            return arg
-    if isinstance(variables_in_use, dict):
-        for variable, cvar in variables_in_use.items():
-            if (
-                isinstance(variable, SimStackVariable)
-                and _canonical_stack_offset_8616(
-                    machine_bp_offset_for_stack_variable_8616(codegen, variable)
-                )
-                == displacement
-            ):
-                existing_size = _cvar_storage_size_bytes_8616(cvar, variable)
-                if requested_size is not None and isinstance(existing_size, int) and existing_size < requested_size:
-                    continue
-                if require_lvalue and requested_size is not None and existing_size != requested_size:
-                    continue
-                if (
-                    displacement < 0
-                    and requested_size is not None
-                    and isinstance(existing_size, int)
-                    and existing_size != requested_size
-                ):
-                    continue
-                if getattr(cvar, "variable_type", None) is None:
-                    cvar.variable_type = target_type
-                _apply_preferred_stack_cvar_name_8616(cvar, displacement, codegen)
-                _ensure_positive_bp_stack_arg_8616(codegen, cvar, target_type)
-                publish_selected_stack_cvar_projection_8616(
-                    codegen, cvar, bp_offset=displacement, size=variable.size,
-                    entry_sp_offset=entry_sp_offset_for_machine_bp_range_8616(
-                        codegen, displacement, variable.size,
-                    ),
-                )
-                return cvar
+    projected = _projected_stack_cvar_8616(
+        projected_value, target_type, variables_in_use, codegen
+    )
+    if projected is not _NO_STACK_PROJECTION_8616:
+        return projected
+    existing = _existing_stack_cvar_8616(
+        codegen, cfunc, displacement, requested_size, require_lvalue, target_type, variables_in_use
+    )
+    if existing is not None:
+        return existing
+    return _materialize_ss_access_cvar_8616(
+        codegen, displacement, requested_size, instruction_access, target_type
+    )
+
+
+def _materialize_ss_access_cvar_8616(
+    codegen: StructuredAstValue,
+    displacement: int,
+    requested_size: int | None,
+    instruction_access: InstructionBpStackAccess8616 | None,
+    target_type: StructuredAstValue,
+) -> StructuredAstValue | None:
+    """Materialize the access cvar from facts or the entry-SP fallback."""
     storage_size = requested_size or 1
     entry_sp_offset = entry_sp_offset_for_machine_bp_range_8616(
         codegen,
@@ -1315,22 +1455,9 @@ def stack_cvar_for_stable_ss_linear_access_8616(
         storage_size,
     )
     if entry_sp_offset is None:
-        if (
-            instruction_access is None
-            or instruction_access.displacement != displacement
-            or instruction_access.size != storage_size
-        ):
-            return None
-        cvar = _resolve_direct_stack_update_cvar_8616(
-            codegen,
-            displacement,
-            storage_size,
+        return _entry_sp_fallback_cvar_8616(
+            codegen, displacement, storage_size, instruction_access, target_type
         )
-        if not isinstance(cvar, structured_c.CVariable):
-            return None
-        _ensure_stack_cvar_min_width_8616(codegen, cvar, storage_size)
-        _ensure_positive_bp_stack_arg_8616(codegen, cvar, target_type)
-        return cvar
     cvar = materialize_stack_cvar_at_offset_from_facts_8616(
         codegen,
         entry_sp_offset,
@@ -1362,16 +1489,8 @@ def _positive_stack_spec_lookup_bias_8616(stack_specs: dict[StructuredAstValue, 
     return 0
 
 
-def _preferred_stack_object_name_8616(
-    offset: int,
-    codegen: StructuredCodegenValue = None,
-    *,
-    byte_size: int | None = None,
-    known_bindings: tuple[StackVariableBinding, ...] | None = None,
-) -> str:
-    """Return an annotation name only for the matching proven stack object."""
-    default_name = machine_bp_stack_object_name_8616(offset, codegen=codegen)
-    cfunc = codegen.cfunc if codegen is not None else None
+def _stack_object_func_8616(codegen: StructuredCodegenValue, cfunc: StructuredAstValue) -> StructuredAstValue:
+    """Resolve the angr function backing the active cfunc."""
     try:
         func = codegen._func if codegen is not None else None
     except AttributeError:
@@ -1388,14 +1507,15 @@ def _preferred_stack_object_name_8616(
         if funcs is not None and isinstance(func_addr, int):
             with contextlib.suppress(Exception):
                 func = funcs.function(addr=func_addr, create=False)
-    try:
-        info = func.info if func is not None else None
-    except AttributeError:
-        info = None
-    annotations = info.get("x86_16_annotations") if isinstance(info, dict) else None
-    stack_specs = annotations.get("stack_vars") if isinstance(annotations, dict) else None
-    if not isinstance(stack_specs, dict):
-        return default_name
+    return func
+
+
+def _stack_spec_candidate_offsets_8616(
+    offset: int,
+    codegen: StructuredCodegenValue,
+    stack_specs: dict[StructuredAstValue, StructuredAstValue],
+) -> list[int]:
+    """Build the ordered BP-offset candidates including stack-base biases."""
     candidate_offsets = [offset]
     stack_base_bias = None
     if isinstance(offset, int):
@@ -1414,14 +1534,48 @@ def _preferred_stack_object_name_8616(
         bias = _positive_stack_spec_lookup_bias_8616(stack_specs)
         if bias != 0:
             candidate_offsets.insert(0, offset + bias)
-    bindings = known_bindings if known_bindings is not None else (
-        _stack_bindings_from_codegen_8616(codegen) if codegen is not None else ()
-    )
+    return candidate_offsets
+
+
+def _resolved_stack_spec_size_8616(
+    offset: int,
+    byte_size: int | None,
+    bindings: tuple[StackVariableBinding, ...],
+) -> int:
+    """Pick the size for the stack annotation binding."""
     resolved_size = byte_size
     if not isinstance(resolved_size, int) or resolved_size <= 0:
         matching_sizes = [binding.size for binding in bindings if binding.bp_offset == offset]
         resolved_size = max(matching_sizes, default=1)
-    binding = StackVariableBinding(offset, resolved_size, var_name=default_name)
+    return resolved_size
+
+
+def _preferred_stack_object_name_8616(
+    offset: int,
+    codegen: StructuredCodegenValue = None,
+    *,
+    byte_size: int | None = None,
+    known_bindings: tuple[StackVariableBinding, ...] | None = None,
+) -> str:
+    """Return an annotation name only for the matching proven stack object."""
+    default_name = machine_bp_stack_object_name_8616(offset, codegen=codegen)
+    cfunc = codegen.cfunc if codegen is not None else None
+    func = _stack_object_func_8616(codegen, cfunc)
+    try:
+        info = func.info if func is not None else None
+    except AttributeError:
+        info = None
+    annotations = info.get("x86_16_annotations") if isinstance(info, dict) else None
+    stack_specs = annotations.get("stack_vars") if isinstance(annotations, dict) else None
+    if not isinstance(stack_specs, dict):
+        return default_name
+    candidate_offsets = _stack_spec_candidate_offsets_8616(offset, codegen, stack_specs)
+    bindings = known_bindings if known_bindings is not None else (
+        _stack_bindings_from_codegen_8616(codegen) if codegen is not None else ()
+    )
+    binding = StackVariableBinding(
+        offset, _resolved_stack_spec_size_8616(offset, byte_size, bindings), var_name=default_name
+    )
     selected = select_stack_annotation_spec_8616(
         binding,
         stack_specs=stack_specs,
@@ -1583,56 +1737,68 @@ def _has_bp_stack_alias_evidence_8616(codegen: StructuredAstValue) -> bool:
     return False
 
 
+def _bp_offsets_from_alias_facts_8616(facts: StructuredAstValue) -> set[int]:
+    """Collect canonical BP offsets from stack-alias storage facts."""
+    offsets: set[int] = set()
+    if not isinstance(facts, list):
+        return offsets
+    for fact in facts:
+        if not isinstance(fact, AliasStorageFacts):
+            continue
+        identity = fact.identity
+        if not (isinstance(identity, tuple) and len(identity) >= 2 and identity[0] == "stack"):
+            continue
+        slot = identity[1]
+        if not isinstance(slot, _StackSlotIdentity) or slot.base != "bp":
+            continue
+        offset = _canonical_stack_offset_8616(slot.offset)
+        if isinstance(offset, int):
+            offsets.add(offset)
+    return offsets
+
+
+def _bp_offsets_from_bindings_8616(bindings: StructuredAstValue) -> set[int]:
+    """Collect canonical BP offsets from stack-variable bindings."""
+    offsets: set[int] = set()
+    if not isinstance(bindings, tuple):
+        return offsets
+    for binding in bindings:
+        if not isinstance(binding, StackVariableBinding):
+            continue
+        offset = _canonical_stack_offset_8616(binding.bp_offset)
+        if isinstance(offset, int):
+            offsets.add(offset)
+    return offsets
+
+
+def _bp_offset_of_stack_variable_8616(
+    codegen: StructuredAstValue, variable: StructuredAstValue
+) -> int | None:
+    """Resolve a canonical BP offset for a SimStackVariable, or None."""
+    if not isinstance(variable, SimStackVariable) or getattr(variable, "base", None) != "bp":
+        return None
+    return _canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, variable))
+
+
 def _known_bp_stack_offsets_8616(codegen: StructuredAstValue) -> set[int]:
     cfunc = getattr(codegen, "cfunc", None)
-    facts = getattr(codegen, "_inertia_semantic_alias_facts", None)
-    bindings = getattr(codegen, "_inertia_stack_variable_bindings", None)
     variables_in_use = getattr(cfunc, "variables_in_use", None)
     arg_list = getattr(cfunc, "arg_list", ()) or ()
 
     offsets: set[int] = set()
-
-    if isinstance(facts, list):
-        for fact in facts:
-            if not isinstance(fact, AliasStorageFacts):
-                continue
-            identity = fact.identity
-            if not (isinstance(identity, tuple) and len(identity) >= 2 and identity[0] == "stack"):
-                continue
-            slot = identity[1]
-            if not isinstance(slot, _StackSlotIdentity) or slot.base != "bp":
-                continue
-            offset = _canonical_stack_offset_8616(slot.offset)
-            if isinstance(offset, int):
-                offsets.add(offset)
-
-    if isinstance(bindings, tuple):
-        for binding in bindings:
-            if not isinstance(binding, StackVariableBinding):
-                continue
-            offset = _canonical_stack_offset_8616(binding.bp_offset)
-            if isinstance(offset, int):
-                offsets.add(offset)
+    offsets.update(_bp_offsets_from_alias_facts_8616(getattr(codegen, "_inertia_semantic_alias_facts", None)))
+    offsets.update(_bp_offsets_from_bindings_8616(getattr(codegen, "_inertia_stack_variable_bindings", None)))
 
     if isinstance(variables_in_use, dict):
         for variable in variables_in_use:
-            if not isinstance(variable, SimStackVariable) or getattr(variable, "base", None) != "bp":
-                continue
-            candidate_offset = _canonical_stack_offset_8616(
-                machine_bp_offset_for_stack_variable_8616(codegen, variable)
-            )
-            if isinstance(candidate_offset, int):
-                offsets.add(candidate_offset)
+            offset = _bp_offset_of_stack_variable_8616(codegen, variable)
+            if isinstance(offset, int):
+                offsets.add(offset)
 
     for arg in arg_list:
-        variable = getattr(arg, "variable", None)
-        if not isinstance(variable, SimStackVariable) or getattr(variable, "base", None) != "bp":
-            continue
-        candidate_offset = _canonical_stack_offset_8616(
-            machine_bp_offset_for_stack_variable_8616(codegen, variable)
-        )
-        if isinstance(candidate_offset, int):
-            offsets.add(candidate_offset)
+        offset = _bp_offset_of_stack_variable_8616(codegen, getattr(arg, "variable", None))
+        if isinstance(offset, int):
+            offsets.add(offset)
 
     offsets.update(_prototype_bp_stack_offsets_8616(codegen))
     offsets.update(_bp_memory_operand_offsets_from_function_blocks_8616(codegen))
@@ -1705,9 +1871,12 @@ def _type_size_bytes_8616(type_: StructuredAstValue, *, default: int = 2) -> int
     return default
 
 
-def _candidate_function_prototypes_8616(codegen: StructuredCodegenValue) -> tuple[StructuredAstValue, ...]:
-    prototypes: list[StructuredAstValue] = []
-    cfunc = getattr(codegen, "cfunc", None)
+def _owner_candidate_prototypes_8616(
+    codegen: StructuredAstValue, cfunc: StructuredAstValue
+) -> tuple[list[StructuredAstValue], list[StructuredAstValue]]:
+    """Return (proven, deferred) prototypes collected from function owners."""
+    proven: list[StructuredAstValue] = []
+    deferred: list[StructuredAstValue] = []
     project = getattr(codegen, "project", None)
     func_addr = getattr(cfunc, "addr", None)
     owner_candidates = [
@@ -1720,22 +1889,26 @@ def _candidate_function_prototypes_8616(codegen: StructuredCodegenValue) -> tupl
         with contextlib.suppress(Exception):
             owner_candidates.append(kb.functions.function(addr=func_addr, create=False))
 
-    deferred_owner_prototypes: list[StructuredAstValue] = []
     for owner in owner_candidates:
         info = getattr(owner, "info", None) if owner is not None else None
         annotations = info.get(ANNOTATION_KEY) if isinstance(info, Mapping) else None
         annotated_prototype = annotations.get("prototype") if isinstance(annotations, Mapping) else None
-        if isinstance(annotated_prototype, SimTypeFunction) and annotated_prototype not in prototypes:
-            prototypes.append(annotated_prototype)
+        if isinstance(annotated_prototype, SimTypeFunction) and annotated_prototype not in proven:
+            proven.append(annotated_prototype)
         proto = getattr(owner, "prototype", None) if owner is not None else None
         if proto is None:
             continue
         if getattr(owner, "is_prototype_guessed", True) is False:
-            if proto not in prototypes:
-                prototypes.append(proto)
-        elif proto not in deferred_owner_prototypes:
-            deferred_owner_prototypes.append(proto)
+            if proto not in proven:
+                proven.append(proto)
+        elif proto not in deferred:
+            deferred.append(proto)
+    return proven, deferred
 
+
+def _candidate_function_prototypes_8616(codegen: StructuredCodegenValue) -> tuple[StructuredAstValue, ...]:
+    cfunc = getattr(codegen, "cfunc", None)
+    prototypes, deferred_owner_prototypes = _owner_candidate_prototypes_8616(codegen, cfunc)
     for attr in ("functy", "prototype"):
         proto = getattr(cfunc, attr, None)
         if proto is not None and proto not in prototypes:
@@ -1845,22 +2018,85 @@ def _bp_memory_operand_offsets_from_function_blocks_8616(codegen: StructuredCode
     return offsets
 
 
-def _iter_stack_base_displacements_8616(root: StructuredAstValue) -> tuple[int, ...]:
-    def stack_base_displacement(node: StructuredAstValue) -> int | None:
-        node = _strip_casts_8616(node)
-        if _is_stack_base_placeholder_8616(node):
-            return 0
-        if isinstance(node, structured_c.CBinaryOp) and node.op in {"Add", "Sub"}:
-            lhs = stack_base_displacement(node.lhs)
-            rhs = stack_base_displacement(node.rhs)
-            lhs_const = _constant_value_8616(node.lhs)
-            rhs_const = _constant_value_8616(node.rhs)
-            if lhs is not None and isinstance(rhs_const, int):
-                return lhs + (rhs_const if node.op == "Add" else -rhs_const)
-            if rhs is not None and isinstance(lhs_const, int) and node.op == "Add":
-                return rhs + lhs_const
-        return None
+def _stack_base_displacement_8616(node: StructuredAstValue) -> int | None:
+    """Fold a ``stack_base [+/- const]`` expression into a displacement."""
+    node = _strip_casts_8616(node)
+    if _is_stack_base_placeholder_8616(node):
+        return 0
+    if isinstance(node, structured_c.CBinaryOp) and node.op in {"Add", "Sub"}:
+        lhs = _stack_base_displacement_8616(node.lhs)
+        rhs = _stack_base_displacement_8616(node.rhs)
+        lhs_const = _constant_value_8616(node.lhs)
+        rhs_const = _constant_value_8616(node.rhs)
+        if lhs is not None and isinstance(rhs_const, int):
+            return lhs + (rhs_const if node.op == "Add" else -rhs_const)
+        if rhs is not None and isinstance(lhs_const, int) and node.op == "Add":
+            return rhs + lhs_const
+    return None
 
+
+_STACK_BASE_CHILD_ATTRS_8616 = (
+    "statements",
+    "condition_and_nodes",
+    "else_node",
+    "lhs",
+    "rhs",
+    "operand",
+    "variable",
+    "index",
+    "expr",
+    "stmts",
+    "init",
+    "initializer",
+    "iftrue",
+    "iffalse",
+    "iteration",
+    "iterator",
+    "body",
+    "args",
+    "operands",
+)
+
+
+def _push_stack_base_children_8616(node: StructuredAstValue, stack: list[StructuredAstValue]) -> None:
+    """Push all structured-codegen child nodes for the displacement walk."""
+    for attr in _STACK_BASE_CHILD_ATTRS_8616:
+        if not hasattr(node, attr):
+            continue
+        try:
+            value = getattr(node, attr)
+        except Exception:
+            continue
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple)):
+            for item in reversed(tuple(value)):
+                if isinstance(item, tuple):
+                    stack.extend(reversed(item))
+                else:
+                    stack.append(item)
+        else:
+            stack.append(value)
+
+
+def _record_stack_base_subexpr_displacements_8616(
+    node: StructuredAstValue, displacements: set[int]
+) -> None:
+    """Record displacements from indexed/dereferenced stack_base subexpressions."""
+    if isinstance(node, structured_c.CIndexedVariable):
+        base_disp = _stack_base_displacement_8616(node.variable)
+        index_value = _constant_value_8616(node.index)
+        if isinstance(base_disp, int) and isinstance(index_value, int):
+            displacements.add(base_disp + index_value)
+
+    if isinstance(node, structured_c.CUnaryOp) and node.op == "Dereference":
+        disp = _stack_base_displacement_8616(node.operand)
+        if isinstance(disp, int):
+            displacements.add(disp)
+
+
+def _iter_stack_base_displacements_8616(root: StructuredAstValue) -> tuple[int, ...]:
+    """Collect all ``stack_base`` displacement observations under a statement root."""
     stack = [root]
     seen: set[int] = set()
     displacements: set[int] = set()
@@ -1873,7 +2109,7 @@ def _iter_stack_base_displacements_8616(root: StructuredAstValue) -> tuple[int, 
             continue
         seen.add(node_id)
 
-        disp = stack_base_displacement(node)
+        disp = _stack_base_displacement_8616(node)
         if isinstance(disp, int):
             displacements.add(disp)
             # Consume the maximal stack_base expression. Recursing into its
@@ -1881,56 +2117,33 @@ def _iter_stack_base_displacements_8616(root: StructuredAstValue) -> tuple[int, 
             # observation and can make BP-bias evidence ambiguous.
             continue
 
-        if isinstance(node, structured_c.CIndexedVariable):
-            base_disp = stack_base_displacement(node.variable)
-            index_value = _constant_value_8616(node.index)
-            if isinstance(base_disp, int) and isinstance(index_value, int):
-                displacements.add(base_disp + index_value)
-
-        if isinstance(node, structured_c.CUnaryOp) and node.op == "Dereference":
-            disp = stack_base_displacement(node.operand)
-            if isinstance(disp, int):
-                displacements.add(disp)
-
-        for attr in (
-            "statements",
-            "condition_and_nodes",
-            "else_node",
-            "lhs",
-            "rhs",
-            "operand",
-            "variable",
-            "index",
-            "expr",
-            "stmts",
-            "init",
-            "initializer",
-            "iftrue",
-            "iffalse",
-            "iteration",
-            "iterator",
-            "body",
-            "args",
-            "operands",
-        ):
-            if not hasattr(node, attr):
-                continue
-            try:
-                value = getattr(node, attr)
-            except Exception:
-                continue
-            if value is None:
-                continue
-            if isinstance(value, (list, tuple)):
-                for item in reversed(tuple(value)):
-                    if isinstance(item, tuple):
-                        stack.extend(reversed(item))
-                    else:
-                        stack.append(item)
-            else:
-                stack.append(value)
+        _record_stack_base_subexpr_displacements_8616(node, displacements)
+        _push_stack_base_children_8616(node, stack)
 
     return tuple(sorted(displacements))
+
+
+
+def _infer_bp_bias_from_multi_displacements_8616(
+    displacements: tuple[int, ...], known_offsets: set[int]
+) -> int | None:
+    """Vote on one BP bias when two or more stack_base displacements exist."""
+    best_bias = None
+    best_score = 0
+    tied = False
+    for disp in displacements:
+        for offset in known_offsets:
+            bias = offset - disp
+            score = len({candidate + bias for candidate in displacements if candidate + bias in known_offsets})
+            if score > best_score:
+                best_bias = bias
+                best_score = score
+                tied = False
+            elif score == best_score and score > 0 and bias != best_bias:
+                tied = True
+    if isinstance(best_bias, int) and best_score >= 2 and not tied:
+        return best_bias
+    return None
 
 
 def _infer_stack_base_bp_bias_8616(codegen: StructuredCodegenValue) -> int | None:
@@ -1949,21 +2162,7 @@ def _infer_stack_base_bp_bias_8616(codegen: StructuredCodegenValue) -> int | Non
     inferred: int | None = None
 
     if len(displacements) >= 2 and known_offsets:
-        best_bias = None
-        best_score = 0
-        tied = False
-        for disp in displacements:
-            for offset in known_offsets:
-                bias = offset - disp
-                score = len({candidate + bias for candidate in displacements if candidate + bias in known_offsets})
-                if score > best_score:
-                    best_bias = bias
-                    best_score = score
-                    tied = False
-                elif score == best_score and score > 0 and bias != best_bias:
-                    tied = True
-        if isinstance(best_bias, int) and best_score >= 2 and not tied:
-            inferred = best_bias
+        inferred = _infer_bp_bias_from_multi_displacements_8616(displacements, known_offsets)
     elif len(displacements) == 1 and known_offsets:
         # Exact-entry BP-framed slices may expose only one stack_base-relative
         # argument load, e.g. entry-SP+2 == BP+4 after `push bp; mov bp, sp`.
@@ -1971,8 +2170,7 @@ def _infer_stack_base_bp_bias_8616(codegen: StructuredCodegenValue) -> int | Non
         # only the two proven BP-frame biases used elsewhere in this module.
         abi_offsets = _bp_stack_abi_argument_region_offsets_8616(known_offsets)
         if len(abi_offsets) == 1:
-            disp = displacements[0]
-            bias = next(iter(abi_offsets)) - disp
+            bias = next(iter(abi_offsets)) - displacements[0]
             if bias in {0, 2}:
                 inferred = bias
 
@@ -2025,64 +2223,71 @@ def _segment_base_name_8616(
     return _segment_base_name_8616_impl(node, project, codegen, set())
 
 
-def _segment_base_name_8616_impl(
+def _segment_base_name_from_dirty_8616(
+    dirty: StructuredAstValue,
+    project: AngrProjectValue,
+    codegen: StructuredCodegenValue,
+    seen: set[int],
+) -> str | None:
+    """Resolve a segment name from an angr dirty-temp leaf."""
+    reg = _dirty_reg_offset_8616(dirty)
+    if isinstance(reg, int):
+        reg_name = getattr(project.arch, "register_names", {}).get(reg)
+        if isinstance(reg_name, str) and reg_name in _SEGMENT_REGISTER_NAMES_8616:
+            return reg_name
+    dirty_name = getattr(dirty, "name", None)
+    varid = getattr(dirty, "varid", None)
+    if isinstance(varid, int):
+        dirty_name = f"vvar_{varid}"
+    if isinstance(dirty_name, str) and dirty_name.startswith(("vvar_", "tmp_", "ir_")) and codegen is not None:
+        rhs = _single_assignment_rhs_for_virtual_name_8616(codegen, dirty_name)
+        if rhs is not None:
+            return _segment_base_name_8616_impl(rhs, project, codegen, seen)
+    return None
+
+
+def _segment_base_name_from_leaf_8616(
     node: StructuredAstValue,
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
     seen: set[int],
 ) -> str | None:
-    node = _strip_casts_8616(node)
-    node_id = id(node)
-    if node_id in seen:
-        return None
-    seen.add(node_id)
+    """Resolve a segment name from a non-binary-op leaf node."""
+    dirty = getattr(node, "dirty", None)
+    if dirty is not None:
+        dirty_name = _segment_base_name_from_dirty_8616(dirty, project, codegen, seen)
+        if dirty_name is not None:
+            return dirty_name
+    if isinstance(node, structured_c.CVariable):
+        variable = node.variable
+        runtime_segment_name = runtime_segment_name_for_variable_8616(variable)
+        if isinstance(runtime_segment_name, str):
+            return runtime_segment_name
+        if isinstance(variable, SimRegisterVariable):
+            reg_name = getattr(project.arch, "register_names", {}).get(variable.reg)
+            if isinstance(reg_name, str) and reg_name in _SEGMENT_REGISTER_NAMES_8616:
+                return reg_name
 
-    if not isinstance(node, structured_c.CBinaryOp):
-        dirty = getattr(node, "dirty", None)
-        if dirty is not None:
-            reg = _dirty_reg_offset_8616(dirty)
-            if isinstance(reg, int):
-                reg_name = getattr(project.arch, "register_names", {}).get(reg)
-                if isinstance(reg_name, str) and reg_name in _SEGMENT_REGISTER_NAMES_8616:
-                    return reg_name
-            dirty_name = getattr(dirty, "name", None)
-            varid = getattr(dirty, "varid", None)
-            if isinstance(varid, int):
-                dirty_name = f"vvar_{varid}"
-            if isinstance(dirty_name, str) and dirty_name.startswith(("vvar_", "tmp_", "ir_")) and codegen is not None:
-                rhs = _single_assignment_rhs_for_virtual_name_8616(codegen, dirty_name)
-                if rhs is not None:
-                    return _segment_base_name_8616_impl(rhs, project, codegen, seen)
-        if isinstance(node, structured_c.CVariable):
-            variable = node.variable
-            runtime_segment_name = runtime_segment_name_for_variable_8616(variable)
-            if isinstance(runtime_segment_name, str):
-                return runtime_segment_name
-            if isinstance(variable, SimRegisterVariable):
-                reg_name = getattr(project.arch, "register_names", {}).get(variable.reg)
-                if isinstance(reg_name, str) and reg_name in _SEGMENT_REGISTER_NAMES_8616:
-                    return reg_name
+        variable_name = node.name or getattr(variable, "name", None)
+        if (
+            isinstance(variable_name, str)
+            and variable_name.startswith(("vvar_", "tmp_", "ir_"))
+            and codegen is not None
+        ):
+            rhs = _single_assignment_rhs_8616(codegen, node)
+            if rhs is not None:
+                return _segment_base_name_8616_impl(rhs, project, codegen, seen)
+    return None
 
-            variable_name = node.name or getattr(variable, "name", None)
-            if (
-                isinstance(variable_name, str)
-                and variable_name.startswith(("vvar_", "tmp_", "ir_"))
-                and codegen is not None
-            ):
-                rhs = _single_assignment_rhs_8616(codegen, node)
-                if rhs is not None:
-                    return _segment_base_name_8616_impl(rhs, project, codegen, seen)
-        return None
 
-    expected_scale = 4 if node.op == "Shl" else 16 if node.op == "Mul" else None
-    if expected_scale is None:
-        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-            log.warning(
-                "[ss-linear-lowering] segment-base non-scale op=%r expr=%s",
-                node.op,
-                _debug_c_repr_8616(node),
-            )
-        return None
+def _segment_base_name_from_scale_pairs_8616(
+    node: StructuredAstValue,
+    expected_scale: int,
+    project: AngrProjectValue,
+    codegen: StructuredCodegenValue,
+    seen: set[int],
+) -> str | None:
+    """Try both operand orders of ``seg << 4`` / ``seg * 16``."""
     for maybe_seg, maybe_scale in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
         scale_value = _constant_value_8616(maybe_scale)
         if scale_value != expected_scale:
@@ -2104,53 +2309,223 @@ def _segment_base_name_8616_impl(
     return None
 
 
+def _segment_base_name_8616_impl(
+    node: StructuredAstValue,
+    project: AngrProjectValue,
+    codegen: StructuredCodegenValue,
+    seen: set[int],
+) -> str | None:
+    node = _strip_casts_8616(node)
+    node_id = id(node)
+    if node_id in seen:
+        return None
+    seen.add(node_id)
+
+    if not isinstance(node, structured_c.CBinaryOp):
+        return _segment_base_name_from_leaf_8616(node, project, codegen, seen)
+
+    expected_scale = 4 if node.op == "Shl" else 16 if node.op == "Mul" else None
+    if expected_scale is None:
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[ss-linear-lowering] segment-base non-scale op=%r expr=%s",
+                node.op,
+                _debug_c_repr_8616(node),
+            )
+        return None
+    return _segment_base_name_from_scale_pairs_8616(node, expected_scale, project, codegen, seen)
+
+
+
 def _flatten_signed_terms_8616(
     node: StructuredAstValue,
     sign: int = 1,
 ) -> tuple[tuple[int, StructuredAstValue], ...] | None:
-    def _impl() -> StructuredAstValue:
-        terms: list[tuple[int, StructuredAstValue]] = []
-        # We use an explicit stack to avoid recursion depth crashes on very deep trees.
-        # active path markers prevent infinite loops from cyclic expressions.
-        pending: list[tuple[StructuredAstValue, int, bool]] = [(node, sign, False)]
-        active: set[int] = set()
+    return cast(tuple[tuple[int, Any], ...], _flatten_signed_terms_impl_8616(node, sign))
 
-        while pending:
-            current, current_sign, exiting = pending.pop()
-            current = _strip_casts_8616(current)
-            if current is None:
+
+def _flatten_signed_terms_impl_8616(
+    node: StructuredAstValue, sign: int
+) -> tuple[tuple[int, StructuredAstValue], ...] | None:
+    """Iteratively flatten Add/Sub trees into signed leaf terms."""
+    terms: list[tuple[int, StructuredAstValue]] = []
+    # We use an explicit stack to avoid recursion depth crashes on very deep trees.
+    # active path markers prevent infinite loops from cyclic expressions.
+    pending: list[tuple[StructuredAstValue, int, bool]] = [(node, sign, False)]
+    active: set[int] = set()
+
+    while pending:
+        current, current_sign, exiting = pending.pop()
+        current = _strip_casts_8616(current)
+        if current is None:
+            return None
+        if exiting:
+            if isinstance(current, int):
+                active.discard(current)
+            continue
+
+        node_id = id(current)
+        if node_id in active:
+            return None
+        if len(active) > 1024:
+            return None
+
+        if isinstance(current, structured_c.CBinaryOp) and current.op == "Add":
+            active.add(node_id)
+            pending.append((node_id, 0, True))
+            pending.append((current.rhs, current_sign, False))
+            pending.append((current.lhs, current_sign, False))
+            continue
+        if isinstance(current, structured_c.CBinaryOp) and current.op == "Sub":
+            active.add(node_id)
+            pending.append((node_id, 0, True))
+            pending.append((current.rhs, -current_sign, False))
+            pending.append((current.lhs, current_sign, False))
+            continue
+
+        terms.append((current_sign, current))
+        if len(terms) > 4096:
+            return None
+
+    return tuple(terms)
+
+
+def _linear_carrier_key_8616(term: StructuredAstValue) -> LinearGlobalCarrierKey8616 | None:
+    """Return the stable carrier key for a vvar/tmp/ir term."""
+    term = _strip_casts_8616(term)
+    dirty = getattr(term, "dirty", None)
+    if dirty is not None:
+        varid = getattr(dirty, "varid", None)
+        if isinstance(varid, int):
+            return "name", f"vvar_{varid}"
+        name = getattr(dirty, "name", None)
+        if isinstance(name, str) and name.startswith(("vvar_", "tmp_", "ir_")):
+            return "name", name
+    if not isinstance(term, structured_c.CVariable):
+        return None
+    variable = term.variable
+    name = term.name or getattr(variable, "name", None)
+    if isinstance(name, str) and name.startswith(("vvar_", "tmp_", "ir_")):
+        return "name", name
+    return None
+
+
+@dataclass
+class _LinearGlobalDecomposer8616:
+    """Decompose one signed-term expression into segment + displacement + residuals."""
+
+    project: AngrProjectValue
+    codegen: StructuredCodegenValue
+    seen_carriers: set[StructuredAstValue]
+    carrier_cache: LinearGlobalDecompositionCache8616 | None
+    segment_name: str | None = None
+    displacement: int = 0
+    residual_terms: list[tuple[int, StructuredAstValue]] = field(default_factory=list)
+
+    def _single_assignment_linear_carrier_rhs(self, term: StructuredAstValue) -> StructuredAstValue:
+        """Resolve a carrier term to its single assignment RHS."""
+        if self.codegen is None:
+            return None
+        key = _linear_carrier_key_8616(term)
+        if key is None or key in self.seen_carriers:
+            return None
+        self.seen_carriers.add(key)
+        term = _strip_casts_8616(term)
+        rhs = _single_assignment_rhs_8616(self.codegen, term) if isinstance(term, structured_c.CVariable) else None
+        if rhs is None and key[0] == "name" and isinstance(key[1], str):
+            rhs = _single_assignment_rhs_for_virtual_name_8616(self.codegen, key[1])
+        if rhs is not None:
+            self.codegen._inertia_real_mode_global_carrier_resolved_count_8616 = (
+                int(getattr(self.codegen, "_inertia_real_mode_global_carrier_resolved_count_8616", 0) or 0) + 1
+            )
+        return rhs
+
+    def _record_label_constants_8616(self, count: int) -> None:
+        """Bump the folded address-label constant counter."""
+        if count and self.codegen is not None:
+            self.codegen._inertia_real_mode_global_address_label_constants = (
+                int(getattr(self.codegen, "_inertia_real_mode_global_address_label_constants", 0) or 0) + count
+            )
+
+    def _carrier_decomposition_8616(
+        self, term: StructuredAstValue, carrier_key: LinearGlobalCarrierKey8616 | None
+    ) -> StructuredAstValue:
+        """Decompose a carrier term through its defining assignment, with caching."""
+        decomposed_carrier = None
+        if carrier_key is not None and carrier_key not in self.seen_carriers and self.carrier_cache is not None:
+            cached = self.carrier_cache.lookup(carrier_key)
+            if cached.found:
+                self.seen_carriers.add(carrier_key)
+                decomposed_carrier = cached.result
+        if decomposed_carrier is None and carrier_key not in self.seen_carriers:
+            carrier_rhs = self._single_assignment_linear_carrier_rhs(term)
+            if carrier_rhs is not None:
+                decomposed_carrier = _decompose_linear_global_terms_8616(
+                    carrier_rhs,
+                    self.project,
+                    codegen=self.codegen,
+                    _seen_carriers=self.seen_carriers,
+                    _carrier_cache=self.carrier_cache,
+                )
+            if carrier_key is not None and self.carrier_cache is not None:
+                self.carrier_cache.record(carrier_key, decomposed_carrier)
+        return decomposed_carrier
+
+    def _absorb_carrier_8616(self, sign: int, decomposed_carrier: StructuredAstValue) -> bool:
+        """Merge a decomposed carrier into this term list; False on conflict."""
+        carrier_segment, carrier_displacement, carrier_residual_terms = decomposed_carrier
+        if carrier_segment is not None:
+            if sign != 1 or self.segment_name is not None:
+                return False
+            self.segment_name = carrier_segment
+        self.displacement += sign * carrier_displacement
+        self.residual_terms.extend(
+            (sign * carrier_sign, carrier_term) for carrier_sign, carrier_term in carrier_residual_terms
+        )
+        return True
+
+    def _classify_term_8616(self, sign: int, term: StructuredAstValue, allow_sp_anchor: bool) -> bool:
+        """Fold one signed term into segment, displacement, or residuals."""
+        seg = _segment_base_name_8616(term, self.project, codegen=self.codegen)
+        if seg is not None:
+            if sign != 1 or self.segment_name is not None:
+                return False
+            self.segment_name = seg
+            return True
+        label_value = _address_label_value_8616(term, allow_sp_anchor=allow_sp_anchor)
+        if label_value is not None:
+            self.displacement += sign * label_value
+            self._record_label_constants_8616(1)
+            return True
+        term, folded_count = _normalize_address_label_terms_8616(
+            term,
+            codegen=self.codegen,
+            allow_sp_anchor=allow_sp_anchor,
+        )
+        self._record_label_constants_8616(folded_count)
+        const = _constant_value_8616(term)
+        if const is not None:
+            self.displacement += sign * const
+            return True
+        carrier_key = _linear_carrier_key_8616(term)
+        decomposed_carrier = self._carrier_decomposition_8616(term, carrier_key)
+        if decomposed_carrier is not None:
+            return self._absorb_carrier_8616(sign, decomposed_carrier)
+        if not _address_projection_term_is_safe_8616(term):
+            return False
+        self.residual_terms.append((sign, term))
+        return True
+
+    def decompose_8616(self, node: StructuredAstValue) -> tuple[str | None, int, tuple[tuple[int, StructuredAstValue], ...]] | None:
+        """Run the term classification; None when any term is unsafe."""
+        terms = _flatten_signed_terms_8616(node)
+        if terms is None:
+            return None
+        allow_sp_anchor = any(_term_contains_memory_address_label_8616(term) for _sign, term in terms)
+        for sign, term in terms:
+            if not self._classify_term_8616(sign, term, allow_sp_anchor):
                 return None
-            if exiting:
-                if isinstance(current, int):
-                    active.discard(current)
-                continue
-
-            node_id = id(current)
-            if node_id in active:
-                return None
-            if len(active) > 1024:
-                return None
-
-            if isinstance(current, structured_c.CBinaryOp) and current.op == "Add":
-                active.add(node_id)
-                pending.append((node_id, 0, True))
-                pending.append((current.rhs, current_sign, False))
-                pending.append((current.lhs, current_sign, False))
-                continue
-            if isinstance(current, structured_c.CBinaryOp) and current.op == "Sub":
-                active.add(node_id)
-                pending.append((node_id, 0, True))
-                pending.append((current.rhs, -current_sign, False))
-                pending.append((current.lhs, current_sign, False))
-                continue
-
-            terms.append((current_sign, current))
-            if len(terms) > 4096:
-                return None
-
-        return tuple(terms)
-
-    return cast(tuple[tuple[int, Any], ...], _impl())
+        return self.segment_name, self.displacement, tuple(self.residual_terms)
 
 
 def _decompose_linear_global_terms_8616(
@@ -2160,114 +2535,13 @@ def _decompose_linear_global_terms_8616(
     _seen_carriers: set[StructuredAstValue] | None = None,
     _carrier_cache: LinearGlobalDecompositionCache8616 | None = None,
 ) -> tuple[str | None, int, tuple[tuple[int, StructuredAstValue], ...]] | None:
-    segment_name: str | None = None
-    displacement = 0
-    residual_terms: list[tuple[int, StructuredAstValue]] = []
-    if _seen_carriers is None:
-        _seen_carriers = set()
-
-    def _linear_carrier_key(term: StructuredAstValue) -> LinearGlobalCarrierKey8616 | None:
-        term = _strip_casts_8616(term)
-        dirty = getattr(term, "dirty", None)
-        if dirty is not None:
-            varid = getattr(dirty, "varid", None)
-            if isinstance(varid, int):
-                return "name", f"vvar_{varid}"
-            name = getattr(dirty, "name", None)
-            if isinstance(name, str) and name.startswith(("vvar_", "tmp_", "ir_")):
-                return "name", name
-        if not isinstance(term, structured_c.CVariable):
-            return None
-        variable = term.variable
-        name = term.name or getattr(variable, "name", None)
-        if isinstance(name, str) and name.startswith(("vvar_", "tmp_", "ir_")):
-            return "name", name
-        return None
-
-    def _single_assignment_linear_carrier_rhs(term: StructuredAstValue) -> StructuredAstValue:
-        if codegen is None:
-            return None
-        key = _linear_carrier_key(term)
-        if key is None or key in _seen_carriers:
-            return None
-        _seen_carriers.add(key)
-        term = _strip_casts_8616(term)
-        rhs = _single_assignment_rhs_8616(codegen, term) if isinstance(term, structured_c.CVariable) else None
-        if rhs is None and key[0] == "name" and isinstance(key[1], str):
-            rhs = _single_assignment_rhs_for_virtual_name_8616(codegen, key[1])
-        if rhs is not None:
-            codegen._inertia_real_mode_global_carrier_resolved_count_8616 = (
-                int(getattr(codegen, "_inertia_real_mode_global_carrier_resolved_count_8616", 0) or 0) + 1
-            )
-        return rhs
-
-    terms = _flatten_signed_terms_8616(node)
-    if terms is None:
-        return None
-    allow_sp_anchor = any(_term_contains_memory_address_label_8616(term) for _sign, term in terms)
-    for sign, term in terms:
-        seg = _segment_base_name_8616(term, project, codegen=codegen)
-        if seg is not None:
-            if sign != 1 or segment_name is not None:
-                return None
-            segment_name = seg
-            continue
-        label_value = _address_label_value_8616(term, allow_sp_anchor=allow_sp_anchor)
-        if label_value is not None:
-            displacement += sign * label_value
-            if codegen is not None:
-                codegen._inertia_real_mode_global_address_label_constants = (
-                    int(getattr(codegen, "_inertia_real_mode_global_address_label_constants", 0) or 0) + 1
-                )
-            continue
-        term, folded_count = _normalize_address_label_terms_8616(
-            term,
-            codegen=codegen,
-            allow_sp_anchor=allow_sp_anchor,
-        )
-        if folded_count and codegen is not None:
-            codegen._inertia_real_mode_global_address_label_constants = (
-                int(getattr(codegen, "_inertia_real_mode_global_address_label_constants", 0) or 0) + folded_count
-            )
-        const = _constant_value_8616(term)
-        if const is not None:
-            displacement += sign * const
-            continue
-        carrier_key = _linear_carrier_key(term)
-        decomposed_carrier = None
-        if carrier_key is not None and carrier_key not in _seen_carriers and _carrier_cache is not None:
-            cached = _carrier_cache.lookup(carrier_key)
-            if cached.found:
-                _seen_carriers.add(carrier_key)
-                decomposed_carrier = cached.result
-        if decomposed_carrier is None and carrier_key not in _seen_carriers:
-            carrier_rhs = _single_assignment_linear_carrier_rhs(term)
-            if carrier_rhs is not None:
-                decomposed_carrier = _decompose_linear_global_terms_8616(
-                    carrier_rhs,
-                    project,
-                    codegen=codegen,
-                    _seen_carriers=_seen_carriers,
-                    _carrier_cache=_carrier_cache,
-                )
-            if carrier_key is not None and _carrier_cache is not None:
-                _carrier_cache.record(carrier_key, decomposed_carrier)
-        if decomposed_carrier is not None:
-            carrier_segment, carrier_displacement, carrier_residual_terms = decomposed_carrier
-            if carrier_segment is not None:
-                if sign != 1 or segment_name is not None:
-                    return None
-                segment_name = carrier_segment
-            displacement += sign * carrier_displacement
-            residual_terms.extend(
-                (sign * carrier_sign, carrier_term) for carrier_sign, carrier_term in carrier_residual_terms
-            )
-            continue
-        if not _address_projection_term_is_safe_8616(term):
-            return None
-        residual_terms.append((sign, term))
-
-    return segment_name, displacement, tuple(residual_terms)
+    """Decompose a signed-term expression into segment, displacement, residuals."""
+    return _LinearGlobalDecomposer8616(
+        project=project,
+        codegen=codegen,
+        seen_carriers=_seen_carriers if _seen_carriers is not None else set(),
+        carrier_cache=_carrier_cache,
+    ).decompose_8616(node)
 
 
 def _global_displacement_known_8616(codegen: StructuredCodegenValue, displacement: int) -> bool:
@@ -2365,98 +2639,113 @@ def _same_variable_storage_8616(lhs: StructuredAstValue, rhs: StructuredAstValue
 # ── Precomputed maps (built once per lowering pass) ──
 
 
+def _record_assignment_key_8616(
+    key_map: dict[StructuredAstValue, StructuredAstValue],
+    multi: set[StructuredAstValue],
+    first_map: dict[StructuredAstValue, StructuredAstValue] | None,
+    key: StructuredAstValue,
+    rhs: StructuredAstValue,
+) -> None:
+    """Record one key→rhs binding, marking repeats in the multi set."""
+    if first_map is not None and key not in first_map:
+        first_map[key] = rhs
+    if key in key_map:
+        multi.add(key)
+        key_map[key] = None
+    elif key not in multi:
+        key_map[key] = rhs
+
+
+def _record_dirty_lhs_8616(
+    lhs: StructuredAstValue,
+    rhs: StructuredAstValue,
+    name_map: dict[str, StructuredAstValue],
+    multi_name: set[str],
+    first_name_map: dict[str, StructuredAstValue],
+) -> None:
+    """Record a CDirtyExpression lhs through name and vvar keys."""
+    dirty_lhs = getattr(lhs, "dirty", None) if lhs is not None else None
+    if dirty_lhs is not None and os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+        log.warning(
+            "[ss-linear-lowering] assignment-map dirty lhs text=%s varid=%r tmp_idx=%r "
+            "reg_offset=%r variable_offset=%r category=%r was_reg=%r was_tmp=%r rhs=%s",
+            _debug_c_repr_8616(lhs),
+            _safe_debug_attr_8616(dirty_lhs, "varid"),
+            _safe_debug_attr_8616(dirty_lhs, "tmp_idx"),
+            _safe_debug_attr_8616(dirty_lhs, "reg_offset"),
+            _safe_debug_attr_8616(dirty_lhs, "variable_offset"),
+            _safe_debug_attr_8616(dirty_lhs, "category"),
+            _safe_debug_attr_8616(dirty_lhs, "was_reg"),
+            _safe_debug_attr_8616(dirty_lhs, "was_tmp"),
+            _debug_c_repr_8616(rhs),
+        )
+    dirty_name = getattr(dirty_lhs, "name", None)
+    dirty_varid = getattr(dirty_lhs, "varid", None)
+    dirty_keys: set[str] = set()
+    if isinstance(dirty_name, str):
+        dirty_keys.add(dirty_name)
+    if isinstance(dirty_varid, int):
+        dirty_keys.add(f"vvar_{dirty_varid}")
+    for dirty_key in dirty_keys:
+        _record_assignment_key_8616(name_map, multi_name, first_name_map, dirty_key, rhs)
+
+
+def _record_cvar_lhs_8616(
+    lhs: structured_c.CVariable,
+    rhs: StructuredAstValue,
+    var_id_map: dict[int, StructuredAstValue],
+    name_map: dict[str, StructuredAstValue],
+    reg_map: dict[tuple[Any, ...], StructuredAstValue],
+    multi_var: set[int],
+    multi_name: set[str],
+    multi_reg: set[tuple[Any, ...]],
+    first_name_map: dict[str, StructuredAstValue],
+    first_reg_map: dict[tuple[Any, ...], StructuredAstValue],
+) -> None:
+    """Record a CVariable lhs under its variable id, name, and register keys."""
+    var = lhs.variable
+    var_id = id(var) if var is not None else None
+    if var_id is not None:
+        _record_assignment_key_8616(var_id_map, multi_var, None, var_id, rhs)
+    name = lhs.name or getattr(var, "name", None)
+    if isinstance(name, str) and name:
+        _record_assignment_key_8616(name_map, multi_name, first_name_map, name, rhs)
+    if isinstance(var, SimRegisterVariable):
+        reg = var.reg
+        size = var.size
+        if isinstance(reg, int) and isinstance(size, int):
+            _record_assignment_key_8616(reg_map, multi_reg, first_reg_map, (reg, size), rhs)
+
+
 def _build_assignment_maps_8616(codegen: StructuredCodegenValue) -> StructuredAstValue:
-    def _impl() -> StructuredAstValue:
-        """Precompute assignment maps used by lowering and validation fingerprinting."""
-        root = getattr(getattr(codegen, "cfunc", None), "statements", None)
-        if root is None:
-            return ({}, {}, {}, set(), set(), set(), {}, {})
+    """Precompute assignment maps used by lowering and validation fingerprinting."""
+    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
+    if root is None:
+        return ({}, {}, {}, set(), set(), set(), {}, {})
 
-        var_id_map: dict[int, StructuredAstValue] = {}
-        name_map: dict[str, StructuredAstValue] = {}
-        reg_map: dict[tuple[Any, ...], StructuredAstValue] = {}
-        multi_var: set[int] = set()
-        multi_name: set[str] = set()
-        multi_reg: set[tuple[Any, ...]] = set()
-        first_name_map: dict[str, StructuredAstValue] = {}
-        first_reg_map: dict[tuple[Any, ...], StructuredAstValue] = {}
+    var_id_map: dict[int, StructuredAstValue] = {}
+    name_map: dict[str, StructuredAstValue] = {}
+    reg_map: dict[tuple[Any, ...], StructuredAstValue] = {}
+    multi_var: set[int] = set()
+    multi_name: set[str] = set()
+    multi_reg: set[tuple[Any, ...]] = set()
+    first_name_map: dict[str, StructuredAstValue] = {}
+    first_reg_map: dict[tuple[Any, ...], StructuredAstValue] = {}
 
-        for stmt in _iter_c_statement_nodes_8616(root):
-            if not isinstance(stmt, structured_c.CAssignment):
-                continue
-            lhs = stmt.lhs
-            rhs = stmt.rhs
+    for stmt in _iter_c_statement_nodes_8616(root):
+        if not isinstance(stmt, structured_c.CAssignment):
+            continue
+        lhs = stmt.lhs
+        rhs = stmt.rhs
+        if not isinstance(lhs, structured_c.CVariable):
+            _record_dirty_lhs_8616(lhs, rhs, name_map, multi_name, first_name_map)
+            continue
+        _record_cvar_lhs_8616(
+            lhs, rhs, var_id_map, name_map, reg_map,
+            multi_var, multi_name, multi_reg, first_name_map, first_reg_map,
+        )
 
-            if not isinstance(lhs, structured_c.CVariable):
-                # CDirtyExpression lhs — record via dirty.name / dirty.varid
-                dirty_lhs = getattr(lhs, "dirty", None) if lhs is not None else None
-                if dirty_lhs is not None and os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                    log.warning(
-                        "[ss-linear-lowering] assignment-map dirty lhs text=%s varid=%r tmp_idx=%r "
-                        "reg_offset=%r variable_offset=%r category=%r was_reg=%r was_tmp=%r rhs=%s",
-                        _debug_c_repr_8616(lhs),
-                        _safe_debug_attr_8616(dirty_lhs, "varid"),
-                        _safe_debug_attr_8616(dirty_lhs, "tmp_idx"),
-                        _safe_debug_attr_8616(dirty_lhs, "reg_offset"),
-                        _safe_debug_attr_8616(dirty_lhs, "variable_offset"),
-                        _safe_debug_attr_8616(dirty_lhs, "category"),
-                        _safe_debug_attr_8616(dirty_lhs, "was_reg"),
-                        _safe_debug_attr_8616(dirty_lhs, "was_tmp"),
-                        _debug_c_repr_8616(rhs),
-                    )
-                dirty_name = getattr(dirty_lhs, "name", None)
-                dirty_varid = getattr(dirty_lhs, "varid", None)
-                dirty_keys: set[str] = set()
-                if isinstance(dirty_name, str):
-                    dirty_keys.add(dirty_name)
-                if isinstance(dirty_varid, int):
-                    dirty_keys.add(f"vvar_{dirty_varid}")
-                for dirty_key in dirty_keys:
-                    if dirty_key not in first_name_map:
-                        first_name_map[dirty_key] = rhs
-                    if dirty_key in name_map:
-                        multi_name.add(dirty_key)
-                        name_map[dirty_key] = None
-                    elif dirty_key not in multi_name:
-                        name_map[dirty_key] = rhs
-                continue
-
-            var = lhs.variable
-
-            var_id = id(var) if var is not None else None
-            if var_id is not None:
-                if var_id in var_id_map:
-                    multi_var.add(var_id)
-                    var_id_map[var_id] = None
-                elif var_id not in multi_var:
-                    var_id_map[var_id] = rhs
-
-            name = lhs.name or getattr(var, "name", None)
-            if isinstance(name, str) and name:
-                if name not in first_name_map:
-                    first_name_map[name] = rhs
-                if name in name_map:
-                    multi_name.add(name)
-                    name_map[name] = None
-                elif name not in multi_name:
-                    name_map[name] = rhs
-
-            if isinstance(var, SimRegisterVariable):
-                reg = var.reg
-                size = var.size
-                if isinstance(reg, int) and isinstance(size, int):
-                    reg_key = (reg, size)
-                    if reg_key not in first_reg_map:
-                        first_reg_map[reg_key] = rhs
-                    if reg_key in reg_map:
-                        multi_reg.add(reg_key)
-                        reg_map[reg_key] = None
-                    elif reg_key not in multi_reg:
-                        reg_map[reg_key] = rhs
-
-        return (var_id_map, name_map, reg_map, multi_var, multi_name, multi_reg, first_name_map, first_reg_map)
-
-    return _impl()
+    return (var_id_map, name_map, reg_map, multi_var, multi_name, multi_reg, first_name_map, first_reg_map)
 
 
 def _ensure_assignment_maps_8616(codegen: StructuredCodegenValue) -> tuple[Any, ...]:
@@ -2542,6 +2831,52 @@ def _ss_virtual_carrier_offset_observations_8616(
     return observations
 
 
+def _infer_carrier_delta_8616(constants: set[int], offsets: set[int]) -> int | None:
+    """Vote on one carrier delta that maps all constants onto known offsets."""
+    if len(constants) < 2 or len(offsets) < 2:
+        return None
+    best_delta: int | None = None
+    best_score = 0
+    tied = False
+    for const in constants:
+        for offset in offsets:
+            delta = offset - const
+            score = len({candidate for candidate in constants if candidate + delta in offsets})
+            if score > best_score:
+                best_delta = delta
+                best_score = score
+                tied = False
+            elif score == best_score and score > 0 and delta != best_delta:
+                tied = True
+    if isinstance(best_delta, int) and best_score == len(constants) and best_score >= 2 and not tied:
+        return best_delta
+    return None
+
+
+def _infer_varid_carrier_delta_8616(
+    codegen: StructuredCodegenValue,
+    constants: set[int],
+    strong_arg_offsets: set[int],
+    abi_arg_region_offsets: set[int],
+    known_offsets: set[int],
+) -> int | None:
+    """Infer one vvar's carrier delta, preferring stronger offset evidence."""
+    strong_delta = _infer_carrier_delta_8616(constants, strong_arg_offsets)
+    if isinstance(strong_delta, int):
+        codegen._inertia_stack_carrier_delta_inferred_from_arg_offsets_count_8616 = (
+            int(getattr(codegen, "_inertia_stack_carrier_delta_inferred_from_arg_offsets_count_8616", 0) or 0) + 1
+        )
+        return strong_delta
+    abi_arg_region_delta = _infer_carrier_delta_8616(constants, abi_arg_region_offsets)
+    if isinstance(abi_arg_region_delta, int):
+        codegen._inertia_stack_carrier_delta_inferred_from_abi_arg_region_count_8616 = (
+            int(getattr(codegen, "_inertia_stack_carrier_delta_inferred_from_abi_arg_region_count_8616", 0) or 0)
+            + 1
+        )
+        return abi_arg_region_delta
+    return _infer_carrier_delta_8616(constants, known_offsets)
+
+
 def _infer_vvar_carrier_deltas_from_ss_alias_observations_8616(
     root: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue
 ) -> dict[int, int]:
@@ -2553,43 +2888,10 @@ def _infer_vvar_carrier_deltas_from_ss_alias_observations_8616(
     observations = _ss_virtual_carrier_offset_observations_8616(root, project, codegen)
     inferred: dict[int, int] = {}
 
-    def infer_delta(constants: set[int], offsets: set[int]) -> int | None:
-        if len(constants) < 2 or len(offsets) < 2:
-            return None
-        best_delta: int | None = None
-        best_score = 0
-        tied = False
-        for const in constants:
-            for offset in offsets:
-                delta = offset - const
-                score = len({candidate for candidate in constants if candidate + delta in offsets})
-                if score > best_score:
-                    best_delta = delta
-                    best_score = score
-                    tied = False
-                elif score == best_score and score > 0 and delta != best_delta:
-                    tied = True
-        if isinstance(best_delta, int) and best_score == len(constants) and best_score >= 2 and not tied:
-            return best_delta
-        return None
-
     for varid, constants in observations.items():
-        strong_delta = infer_delta(constants, strong_arg_offsets)
-        if isinstance(strong_delta, int):
-            inferred[varid] = strong_delta
-            codegen._inertia_stack_carrier_delta_inferred_from_arg_offsets_count_8616 = (
-                int(getattr(codegen, "_inertia_stack_carrier_delta_inferred_from_arg_offsets_count_8616", 0) or 0) + 1
-            )
-            continue
-        abi_arg_region_delta = infer_delta(constants, abi_arg_region_offsets)
-        if isinstance(abi_arg_region_delta, int):
-            inferred[varid] = abi_arg_region_delta
-            codegen._inertia_stack_carrier_delta_inferred_from_abi_arg_region_count_8616 = (
-                int(getattr(codegen, "_inertia_stack_carrier_delta_inferred_from_abi_arg_region_count_8616", 0) or 0)
-                + 1
-            )
-            continue
-        delta = infer_delta(constants, known_offsets)
+        delta = _infer_varid_carrier_delta_8616(
+            codegen, constants, strong_arg_offsets, abi_arg_region_offsets, known_offsets
+        )
         if isinstance(delta, int):
             inferred[varid] = delta
     if inferred:
@@ -2599,141 +2901,197 @@ def _infer_vvar_carrier_deltas_from_ss_alias_observations_8616(
     return inferred
 
 
-def _build_vvar_carrier_delta_map_8616(codegen: StructuredAstValue) -> dict[int, int]:
-    def _impl() -> dict[int, int]:
-        """Precompute vvar_id → carrier_delta in a single pass, caching on codegen."""
-        project = getattr(codegen, "project", None)
-        sp_reg, _sp_size = getattr(getattr(project, "arch", None), "registers", {}).get("sp", (None, None))
-        has_ss_facts = any(fact.segment_space == "ss" for fact in _typed_stack_probe_return_facts_8616(codegen))
-        deltas: dict[int, int] = {}
-        delta_sources: dict[int, StackCarrierDeltaSource8616] = {}
-        root = getattr(getattr(codegen, "cfunc", None), "statements", None)
-        if root is None:
-            return deltas
+@dataclass
+class _VvarCarrierDeltaRun8616:
+    """Precompute vvar_id → carrier_delta in a single pass."""
 
-        def _delta_source_priority(source: StackCarrierDeltaSource8616) -> int:
-            return _STACK_CARRIER_DELTA_SOURCE_PRIORITY_8616[source]
+    codegen: StructuredAstValue
+    project: StructuredAstValue
+    sp_reg: StructuredAstValue
+    has_ss_facts: bool
+    root: StructuredAstValue
+    deltas: dict[int, int] = field(default_factory=dict)
+    delta_sources: dict[int, StackCarrierDeltaSource8616] = field(default_factory=dict)
 
-        def _record_delta(lhs_id: int, delta: int, source: StackCarrierDeltaSource8616) -> bool:
-            old_delta = deltas.get(lhs_id)
-            old_source = delta_sources.get(lhs_id)
-            if old_source is None:
-                deltas[lhs_id] = delta
-                delta_sources[lhs_id] = source
-                return True
-            if old_delta == delta:
-                if _delta_source_priority(source) > _delta_source_priority(old_source):
-                    delta_sources[lhs_id] = source
-                return False
-            if _delta_source_priority(source) <= _delta_source_priority(old_source):
-                return False
-            deltas[lhs_id] = delta
-            delta_sources[lhs_id] = source
-            codegen._inertia_stack_carrier_delta_alias_override_count_8616 = (
-                int(getattr(codegen, "_inertia_stack_carrier_delta_alias_override_count_8616", 0) or 0) + 1
-            )
+    @staticmethod
+    def _delta_source_priority(source: StackCarrierDeltaSource8616) -> int:
+        return _STACK_CARRIER_DELTA_SOURCE_PRIORITY_8616[source]
+
+    def _record_delta(self, lhs_id: int, delta: int, source: StackCarrierDeltaSource8616) -> bool:
+        old_delta = self.deltas.get(lhs_id)
+        old_source = self.delta_sources.get(lhs_id)
+        if old_source is None:
+            self.deltas[lhs_id] = delta
+            self.delta_sources[lhs_id] = source
             return True
+        if old_delta == delta:
+            if self._delta_source_priority(source) > self._delta_source_priority(old_source):
+                self.delta_sources[lhs_id] = source
+            return False
+        if self._delta_source_priority(source) <= self._delta_source_priority(old_source):
+            return False
+        self.deltas[lhs_id] = delta
+        self.delta_sources[lhs_id] = source
+        self.codegen._inertia_stack_carrier_delta_alias_override_count_8616 = (
+            int(getattr(self.codegen, "_inertia_stack_carrier_delta_alias_override_count_8616", 0) or 0) + 1
+        )
+        return True
 
-        def _seed_from_init(expr: StructuredAstValue, lhs_id: StructuredAstValue) -> StructuredAstValue:
-            if expr is None:
-                return None
-            rhs_stripped = _strip_casts_8616(expr)
-            ref_node: StructuredAstValue = None
-            const_delta: int = 0
-            if isinstance(rhs_stripped, structured_c.CUnaryOp) and rhs_stripped.op == "Reference":
-                ref_node = rhs_stripped.operand
-            elif isinstance(rhs_stripped, structured_c.CBinaryOp) and rhs_stripped.op in {"Add", "Sub"}:
-                if isinstance(_strip_casts_8616(rhs_stripped.lhs), structured_c.CUnaryOp):
-                    lhs_u = _strip_casts_8616(rhs_stripped.lhs)
-                    if lhs_u.op == "Reference":
-                        ref_node = lhs_u.operand
-                        rhs_const = _constant_value_8616(rhs_stripped.rhs)
-                        if rhs_const is not None:
-                            const_delta = rhs_const if rhs_stripped.op == "Add" else -rhs_const
-                if ref_node is None and isinstance(_strip_casts_8616(rhs_stripped.rhs), structured_c.CUnaryOp):
-                    rhs_u = _strip_casts_8616(rhs_stripped.rhs)
-                    if rhs_u.op == "Reference" and rhs_stripped.op == "Add":
-                        ref_node = rhs_u.operand
-                        lhs_const = _constant_value_8616(rhs_stripped.lhs)
-                        if lhs_const is not None:
-                            const_delta = lhs_const
-            if ref_node is not None:
-                operand = _strip_casts_8616(ref_node)
-                if isinstance(operand, structured_c.CVariable):
-                    var = operand.variable
-                    if isinstance(var, SimStackVariable):
-                        offset = var.offset
-                        if isinstance(offset, int):
-                            _record_delta(
-                                lhs_id,
-                                offset + const_delta,
-                                StackCarrierDeltaSource8616.STACK_REFERENCE_SEED,
-                            )
-                            return True
-            if isinstance(rhs_stripped, structured_c.CVariable):
-                var = rhs_stripped.variable
-                if isinstance(var, SimRegisterVariable) and getattr(var, "reg", None) == sp_reg and has_ss_facts:
-                    _record_delta(lhs_id, 0, StackCarrierDeltaSource8616.SP_REGISTER_SEED)
-                    return True
+    def _seed_ref_operands_8616(
+        self, rhs_stripped: structured_c.CBinaryOp
+    ) -> tuple[StructuredAstValue, int]:
+        """Find the Reference operand and constant delta inside an Add/Sub."""
+        ref_node: StructuredAstValue = None
+        const_delta = 0
+        if isinstance(_strip_casts_8616(rhs_stripped.lhs), structured_c.CUnaryOp):
+            lhs_u = _strip_casts_8616(rhs_stripped.lhs)
+            if lhs_u.op == "Reference":
+                ref_node = lhs_u.operand
+                rhs_const = _constant_value_8616(rhs_stripped.rhs)
+                if rhs_const is not None:
+                    const_delta = rhs_const if rhs_stripped.op == "Add" else -rhs_const
+        if ref_node is None and isinstance(_strip_casts_8616(rhs_stripped.rhs), structured_c.CUnaryOp):
+            rhs_u = _strip_casts_8616(rhs_stripped.rhs)
+            if rhs_u.op == "Reference" and rhs_stripped.op == "Add":
+                ref_node = rhs_u.operand
+                lhs_const = _constant_value_8616(rhs_stripped.lhs)
+                if lhs_const is not None:
+                    const_delta = lhs_const
+        return ref_node, const_delta
+
+    def _record_stack_ref_seed_8616(
+        self, ref_node: StructuredAstValue, const_delta: int, lhs_id: StructuredAstValue
+    ) -> bool:
+        """Record the seed delta when the Reference targets a stack variable."""
+        if ref_node is None:
+            return False
+        operand = _strip_casts_8616(ref_node)
+        if not isinstance(operand, structured_c.CVariable):
+            return False
+        var = operand.variable
+        if not isinstance(var, SimStackVariable):
+            return False
+        offset = var.offset
+        if not isinstance(offset, int):
+            return False
+        self._record_delta(
+            lhs_id,
+            offset + const_delta,
+            StackCarrierDeltaSource8616.STACK_REFERENCE_SEED,
+        )
+        return True
+
+    def _seed_from_init(self, expr: StructuredAstValue, lhs_id: StructuredAstValue) -> StructuredAstValue:
+        if expr is None:
             return None
+        rhs_stripped = _strip_casts_8616(expr)
+        if isinstance(rhs_stripped, structured_c.CUnaryOp) and rhs_stripped.op == "Reference":
+            if self._record_stack_ref_seed_8616(rhs_stripped.operand, 0, lhs_id):
+                return True
+        elif isinstance(rhs_stripped, structured_c.CBinaryOp) and rhs_stripped.op in {"Add", "Sub"}:
+            ref_node, const_delta = self._seed_ref_operands_8616(rhs_stripped)
+            if self._record_stack_ref_seed_8616(ref_node, const_delta, lhs_id):
+                return True
+        if isinstance(rhs_stripped, structured_c.CVariable):
+            var = rhs_stripped.variable
+            if isinstance(var, SimRegisterVariable) and getattr(var, "reg", None) == self.sp_reg and self.has_ss_facts:
+                self._record_delta(lhs_id, 0, StackCarrierDeltaSource8616.SP_REGISTER_SEED)
+                return True
+        return None
 
-        for stmt in _iter_c_statement_nodes_8616(root):
+    def _seed_pass_8616(self) -> None:
+        """Seed carrier deltas from direct stack-reference initializers."""
+        for stmt in _iter_c_statement_nodes_8616(self.root):
             if not isinstance(stmt, structured_c.CAssignment):
                 continue
             lhs_id = _extract_vvar_id_8616(stmt.lhs)
             if not isinstance(lhs_id, int):
                 continue
-            _seed_from_init(stmt.rhs, lhs_id)
+            self._seed_from_init(stmt.rhs, lhs_id)
 
-        if project is not None:
-            for lhs_id, delta in _infer_vvar_carrier_deltas_from_ss_alias_observations_8616(
-                root, project, codegen
-            ).items():
-                _record_delta(lhs_id, delta, StackCarrierDeltaSource8616.ALIAS_OBSERVATION)
+    def _alias_observation_pass_8616(self) -> None:
+        """Record deltas proven by SS-alias observations."""
+        if self.project is None:
+            return
+        for lhs_id, delta in _infer_vvar_carrier_deltas_from_ss_alias_observations_8616(
+            self.root, self.project, self.codegen
+        ).items():
+            self._record_delta(lhs_id, delta, StackCarrierDeltaSource8616.ALIAS_OBSERVATION)
 
+    def _propagate_stmt_8616(self, stmt: StructuredAstValue) -> bool:
+        """Record a derived delta for one assignment, returning whether it changed."""
+        if not isinstance(stmt, structured_c.CAssignment):
+            return False
+        lhs_id = _extract_vvar_id_8616(stmt.lhs)
+        if not isinstance(lhs_id, int) or lhs_id in self.deltas:
+            return False
+        base_ids: list[tuple[int, int]] = []
+        const_total = 0
+        unknown = False
+        terms = _flatten_signed_terms_8616(stmt.rhs)
+        if terms is None:
+            return False
+        for sign, term in terms:
+            base_id = _extract_vvar_id_8616(term)
+            if isinstance(base_id, int):
+                base_ids.append((sign, base_id))
+                continue
+            const = _constant_value_8616(term)
+            if const is not None:
+                const_total += sign * const
+                continue
+            unknown = True
+        if unknown or len(base_ids) != 1:
+            return False
+        sign, base_id = base_ids[0]
+        if sign != 1 or base_id not in self.deltas:
+            return False
+        return self._record_delta(lhs_id, self.deltas[base_id] + const_total, self.delta_sources[base_id])
+
+    def _propagate_pass_8616(self) -> None:
+        """Propagate deltas through single-base copy expressions to fixpoint."""
         changed = True
         while changed:
             changed = False
-            for stmt in _iter_c_statement_nodes_8616(root):
-                if not isinstance(stmt, structured_c.CAssignment):
-                    continue
-                lhs_id = _extract_vvar_id_8616(stmt.lhs)
-                if not isinstance(lhs_id, int) or lhs_id in deltas:
-                    continue
-                base_ids: list[tuple[int, int]] = []
-                const_total = 0
-                unknown = False
-                terms = _flatten_signed_terms_8616(stmt.rhs)
-                if terms is None:
-                    continue
-                for sign, term in terms:
-                    base_id = _extract_vvar_id_8616(term)
-                    if isinstance(base_id, int):
-                        base_ids.append((sign, base_id))
-                        continue
-                    const = _constant_value_8616(term)
-                    if const is not None:
-                        const_total += sign * const
-                        continue
-                    unknown = True
-                if unknown or len(base_ids) != 1:
-                    continue
-                sign, base_id = base_ids[0]
-                if sign != 1 or base_id not in deltas:
-                    continue
-                if _record_delta(lhs_id, deltas[base_id] + const_total, delta_sources[base_id]):
+            for stmt in _iter_c_statement_nodes_8616(self.root):
+                if self._propagate_stmt_8616(stmt):
                     changed = True
-        codegen._inertia_stack_carrier_delta_sources_8616 = dict(delta_sources)
+
+    def _report_8616(self) -> None:
+        """Publish delta sources and emit the optional debug summary."""
+        self.codegen._inertia_stack_carrier_delta_sources_8616 = dict(self.delta_sources)
         if os.environ.get("INERTIA_DEBUG_STACK_CARRIER_DELTAS"):
             log.warning(
                 "[stack-carrier-deltas] function=%r deltas=%r sources=%r",
-                getattr(getattr(codegen, "cfunc", None), "addr", None),
-                deltas,
-                delta_sources,
+                getattr(getattr(self.codegen, "cfunc", None), "addr", None),
+                self.deltas,
+                self.delta_sources,
             )
-        return deltas
 
-    return _impl()
+    def run_8616(self) -> dict[int, int]:
+        """Run seed, alias-observation, and propagation passes."""
+        self._seed_pass_8616()
+        self._alias_observation_pass_8616()
+        self._propagate_pass_8616()
+        self._report_8616()
+        return self.deltas
+
+
+def _build_vvar_carrier_delta_map_8616(codegen: StructuredAstValue) -> dict[int, int]:
+    """Precompute vvar_id → carrier_delta in a single pass, caching on codegen."""
+    project = getattr(codegen, "project", None)
+    sp_reg, _sp_size = getattr(getattr(project, "arch", None), "registers", {}).get("sp", (None, None))
+    has_ss_facts = any(fact.segment_space == "ss" for fact in _typed_stack_probe_return_facts_8616(codegen))
+    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
+    if root is None:
+        return {}
+    return _VvarCarrierDeltaRun8616(
+        codegen=codegen,
+        project=project,
+        sp_reg=sp_reg,
+        has_ss_facts=has_ss_facts,
+        root=root,
+    ).run_8616()
 
 
 def _ensure_vvar_carrier_delta_map_8616(codegen: StructuredCodegenValue) -> dict[int, int]:
@@ -2778,6 +3136,64 @@ def _single_assignment_rhs_8616(codegen: StructuredCodegenValue, target: Structu
     return _impl()
 
 
+def _carrier_reg_and_early_offset_8616(
+    node: StructuredAstValue,
+    codegen: StructuredAstValue,
+    project: StructuredAstValue,
+    seen: set[int],
+) -> tuple[StructuredAstValue, StructuredAstValue, tuple[bool, int | None]]:
+    """Identify the carrier register/size; resolve vvar indirections eagerly.
+
+    The third element is (handled, offset): when handled is True the caller
+    must return offset (which may legitimately be None) immediately.
+    """
+    variable = getattr(node, "variable", None) if isinstance(node, structured_c.CVariable) else None
+    dirty = getattr(node, "dirty", None)
+    if isinstance(variable, SimRegisterVariable):
+        return variable.reg, variable.size, (False, None)
+    reg = _dirty_reg_offset_8616(dirty)
+    bits = getattr(dirty, "bits", None)
+    size = (bits // 8) if isinstance(bits, int) else None
+    varid = getattr(dirty, "varid", None)
+    if isinstance(reg, int) or not isinstance(varid, int):
+        return reg, size, (False, None)
+    resolved = _single_assignment_rhs_for_virtual_name_8616(codegen, f"vvar_{varid}")
+    if resolved is not None:
+        return reg, size, (True, _stack_offset_from_expr_8616(resolved, project, codegen, seen))
+    delta = _stack_probe_carrier_delta_8616(node, codegen)
+    if delta is not None:
+        return reg, size, (True, delta)
+    return reg, size, (False, None)
+
+
+def _sp_carrier_offset_8616(
+    codegen: StructuredAstValue,
+    project: StructuredAstValue,
+    reg: StructuredAstValue,
+    size: StructuredAstValue,
+) -> int | None:
+    """Accept an SP carrier only under proven SS-fact evidence."""
+    sp_reg, sp_size = getattr(getattr(project, "arch", None), "registers", {}).get("sp", (None, None))
+    if not (isinstance(sp_reg, int) and reg == sp_reg and (size is None or size == sp_size)):
+        return None
+    if getattr(codegen, "_inertia_allow_runtime_helper_sp_segment_proof_8616", False):
+        codegen._inertia_runtime_helper_sp_segment_proof_count_8616 = (
+            int(getattr(codegen, "_inertia_runtime_helper_sp_segment_proof_count_8616", 0) or 0) + 1
+        )
+        return 0
+    if getattr(codegen, "_inertia_allow_direct_sp_for_callee_save_spill", False):
+        return 0
+    facts = _typed_stack_probe_return_facts_8616(codegen)
+    if not facts:
+        return None
+    for fact in facts:
+        if fact.segment_space != "ss":
+            continue
+        if fact.width > 0:
+            return 0
+    return None
+
+
 def _stack_pointer_carrier_offset_8616(
     node: StructuredAstValue,
     project: StructuredAstValue,
@@ -2785,56 +3201,16 @@ def _stack_pointer_carrier_offset_8616(
     seen: set[int] | None = None,
 ) -> int | None:
     """Recover the BP-relative offset represented by a stack-pointer carrier."""
+    if seen is None:
+        seen = set()
+    reg, size, early = _carrier_reg_and_early_offset_8616(node, codegen, project, seen)
+    if early[0]:
+        return early[1]
 
-    def _impl() -> int | None:
-        nonlocal seen
-
-        if seen is None:
-            seen = set()
-
-        variable = getattr(node, "variable", None) if isinstance(node, structured_c.CVariable) else None
-        dirty = getattr(node, "dirty", None)
-        if isinstance(variable, SimRegisterVariable):
-            reg = variable.reg
-            size = variable.size
-        else:
-            reg = _dirty_reg_offset_8616(dirty)
-            bits = getattr(dirty, "bits", None)
-            size = (bits // 8) if isinstance(bits, int) else None
-            varid = getattr(dirty, "varid", None)
-            if not isinstance(reg, int) and isinstance(varid, int):
-                target_name = f"vvar_{varid}"
-                resolved = _single_assignment_rhs_for_virtual_name_8616(codegen, target_name)
-                if resolved is not None:
-                    return _stack_offset_from_expr_8616(resolved, project, codegen, seen)
-                delta = _stack_probe_carrier_delta_8616(node, codegen)
-                if delta is not None:
-                    return delta
-        bp_reg, bp_size = getattr(getattr(project, "arch", None), "registers", {}).get("bp", (None, None))
-        if isinstance(bp_reg, int) and reg == bp_reg and (size is None or size == bp_size):
-            return 0
-
-        sp_reg, sp_size = getattr(getattr(project, "arch", None), "registers", {}).get("sp", (None, None))
-        if not (isinstance(sp_reg, int) and reg == sp_reg and (size is None or size == sp_size)):
-            return None
-        if getattr(codegen, "_inertia_allow_runtime_helper_sp_segment_proof_8616", False):
-            codegen._inertia_runtime_helper_sp_segment_proof_count_8616 = (
-                int(getattr(codegen, "_inertia_runtime_helper_sp_segment_proof_count_8616", 0) or 0) + 1
-            )
-            return 0
-        if getattr(codegen, "_inertia_allow_direct_sp_for_callee_save_spill", False):
-            return 0
-        facts = _typed_stack_probe_return_facts_8616(codegen)
-        if not facts:
-            return None
-        for fact in facts:
-            if fact.segment_space != "ss":
-                continue
-            if fact.width > 0:
-                return 0
-        return None
-
-    return _impl()
+    bp_reg, bp_size = getattr(getattr(project, "arch", None), "registers", {}).get("bp", (None, None))
+    if isinstance(bp_reg, int) and reg == bp_reg and (size is None or size == bp_size):
+        return 0
+    return _sp_carrier_offset_8616(codegen, project, reg, size)
 
 
 def _lhs_name_8616(lhs: StructuredAstValue) -> str | None:
@@ -3178,6 +3554,23 @@ def _ss_probe_enabled_8616(codegen: StructuredAstValue) -> bool:
     return any(fact.segment_space == "ss" for fact in _typed_stack_probe_return_facts_8616(codegen))
 
 
+def _slot_range_contains_access_8616(
+    slot_offset: StructuredAstValue,
+    slot_width: StructuredAstValue,
+    displacement: int,
+    width: int | None,
+) -> bool:
+    """Check whether a proven stack slot fully contains the access range."""
+    return (
+        isinstance(width, int)
+        and width > 0
+        and isinstance(slot_width, int)
+        and slot_width > 0
+        and slot_offset < displacement
+        and displacement + width <= slot_offset + slot_width
+    )
+
+
 def _has_stack_storage_evidence_for_displacement_8616(
     codegen: StructuredAstValue, displacement: int, width: int | None
 ) -> bool:
@@ -3207,14 +3600,7 @@ def _has_stack_storage_evidence_for_displacement_8616(
             not isinstance(width, int) or width <= 0 or not isinstance(slot_width, int) or slot_width >= width
         ):
             return True
-        if (
-            isinstance(width, int)
-            and width > 0
-            and isinstance(slot_width, int)
-            and slot_width > 0
-            and slot_offset < displacement
-            and displacement + width <= slot_offset + slot_width
-        ):
+        if _slot_range_contains_access_8616(slot_offset, slot_width, displacement, width):
             return True
     return False
 
@@ -3258,90 +3644,116 @@ def _resolve_stack_offset_from_binary_8616(
     return cast(int | None, _impl())
 
 
+def _stack_offset_cache_entry_8616(
+    codegen: StructuredCodegenValue,
+    node_id: int,
+    seen: set[int],
+    offset_cache: dict[int, StructuredAstValue],
+) -> tuple[bool, int | None]:
+    """Return (True, cached) on a cache/seen hit, else record the visit and continue."""
+    if node_id in offset_cache:
+        cached = offset_cache.get(node_id)
+        if cached is _UNRESOLVED_STACK_OFFSET_8616:
+            return True, None
+        return True, cached
+    if node_id in seen or len(seen) > 8192:
+        offset_cache[node_id] = _UNRESOLVED_STACK_OFFSET_8616
+        return True, None
+    seen.add(node_id)
+    return False, None
+
+
+def _stack_offset_cache_record_8616(
+    offset_cache: dict[int, StructuredAstValue], node_id: int, resolved: int | None
+) -> int | None:
+    """Cache a resolution result, marking unresolvable nodes explicitly."""
+    offset_cache[node_id] = resolved if resolved is not None else _UNRESOLVED_STACK_OFFSET_8616
+    return resolved
+
+
+def _stack_offset_leaf_value_8616(
+    codegen: StructuredCodegenValue, node: StructuredAstValue
+) -> int | None:
+    """Resolve trivial leaf offsets: native anchor, constant, BP/stack_base bases."""
+    native_anchor = machine_bp_offset_for_native_anchor_8616(codegen, node)
+    if native_anchor is not None:
+        return native_anchor
+    const = _constant_value_8616(node)
+    if const is not None:
+        return const
+    runtime_gp_view = runtime_gp_expression_view_8616(node)
+    if runtime_gp_view is not None and runtime_gp_view.register_name == "bp":
+        return 0
+    return _stack_base_bp_bias_8616(node, codegen)
+
+
+def _stack_offset_reference_value_8616(
+    codegen: StructuredCodegenValue,
+    node: StructuredAstValue,
+    offset_cache: dict[int, StructuredAstValue],
+    node_id: int,
+) -> tuple[bool, int | None]:
+    """Handle the ``Reference`` arm; returns (handled, offset)."""
+    if not (isinstance(node, structured_c.CUnaryOp) and node.op == "Reference"):
+        return False, None
+    operand = _strip_casts_8616(node.operand)
+    variable = getattr(operand, "variable", None) if isinstance(operand, structured_c.CVariable) else None
+    if isinstance(variable, SimStackVariable):
+        variable_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
+        if isinstance(variable_offset, int):
+            offset_cache[node_id] = variable_offset
+            return True, variable_offset
+    offset_cache[node_id] = _UNRESOLVED_STACK_OFFSET_8616
+    return True, None
+
+
+def _stack_offset_nonleaf_value_8616(
+    node: StructuredAstValue,
+    project: AngrProjectValue,
+    codegen: StructuredCodegenValue,
+    seen: set[int],
+) -> int | None:
+    """Resolve an offset from variable/dirty/binary nodes; None when unsupported."""
+    if isinstance(node, structured_c.CVariable):
+        return _resolve_stack_offset_from_variable_8616(node, project, codegen, seen)
+    resolved = _resolve_stack_offset_from_dirty_8616(node, project, codegen, seen)
+    if resolved is not None:
+        return resolved
+    resolved = _stack_pointer_carrier_offset_8616(node, project, codegen, seen)
+    if resolved is not None:
+        return resolved
+    if isinstance(node, structured_c.CBinaryOp) and node.op in {"Add", "Sub"}:
+        return _resolve_stack_offset_from_binary_8616(node, project, codegen, seen)
+    return None
+
+
 def _stack_offset_from_expr_8616(
     node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue, seen: set[int] | None = None
 ) -> int | None:
     """Resolve stack-address expressions using their proven coordinate domain."""
-    def _impl() -> StructuredAstValue:
-        nonlocal node, seen
-        if seen is None:
-            seen = set()
-        node = _strip_casts_8616(node)
-        node_id = id(node)
-        offset_cache = getattr(codegen, "_inertia_stack_offset_cache", None)
-        if not isinstance(offset_cache, dict):
-            offset_cache = {}
-            codegen._inertia_stack_offset_cache = offset_cache
+    if seen is None:
+        seen = set()
+    node = _strip_casts_8616(node)
+    offset_cache = getattr(codegen, "_inertia_stack_offset_cache", None)
+    if not isinstance(offset_cache, dict):
+        offset_cache = {}
+        codegen._inertia_stack_offset_cache = offset_cache
+    node_id = id(node)
+    hit, cached = _stack_offset_cache_entry_8616(codegen, node_id, seen, offset_cache)
+    if hit:
+        return cached
 
-        if node_id in offset_cache:
-            cached = offset_cache.get(node_id)
-            if cached is _UNRESOLVED_STACK_OFFSET_8616:
-                return None
-            return cached
+    leaf = _stack_offset_leaf_value_8616(codegen, node)
+    if leaf is not None:
+        offset_cache[node_id] = leaf
+        return leaf
 
-        if node_id in seen:
-            offset_cache[node_id] = _UNRESOLVED_STACK_OFFSET_8616
-            return None
-        if len(seen) > 8192:
-            offset_cache[node_id] = _UNRESOLVED_STACK_OFFSET_8616
-            return None
-        seen.add(node_id)
+    handled, ref_value = _stack_offset_reference_value_8616(codegen, node, offset_cache, node_id)
+    if handled:
+        return ref_value
 
-        native_anchor = machine_bp_offset_for_native_anchor_8616(codegen, node)
-        if native_anchor is not None:
-            offset_cache[node_id] = native_anchor
-            return native_anchor
-
-        const = _constant_value_8616(node)
-        if const is not None:
-            offset_cache[node_id] = const
-            return const
-
-        runtime_gp_view = runtime_gp_expression_view_8616(node)
-        if runtime_gp_view is not None and runtime_gp_view.register_name == "bp":
-            offset_cache[node_id] = 0
-            return 0
-
-        stack_base_bias = _stack_base_bp_bias_8616(node, codegen)
-        if stack_base_bias is not None:
-            offset_cache[node_id] = stack_base_bias
-            return stack_base_bias
-
-        if isinstance(node, structured_c.CUnaryOp) and node.op == "Reference":
-            operand = _strip_casts_8616(node.operand)
-            variable = getattr(operand, "variable", None) if isinstance(operand, structured_c.CVariable) else None
-            if isinstance(variable, SimStackVariable):
-                variable_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
-                if isinstance(variable_offset, int):
-                    offset_cache[node_id] = variable_offset
-                    return variable_offset
-            offset_cache[node_id] = _UNRESOLVED_STACK_OFFSET_8616
-            return None
-
-        if isinstance(node, structured_c.CVariable):
-            resolved = _resolve_stack_offset_from_variable_8616(node, project, codegen, seen)
-            offset_cache[node_id] = resolved if resolved is not None else _UNRESOLVED_STACK_OFFSET_8616
-            return resolved
-
-        dirty_resolved = _resolve_stack_offset_from_dirty_8616(node, project, codegen, seen)
-        if dirty_resolved is not None:
-            offset_cache[node_id] = dirty_resolved
-            return dirty_resolved
-
-        dirty_carrier_offset = _stack_pointer_carrier_offset_8616(node, project, codegen, seen)
-        if dirty_carrier_offset is not None:
-            offset_cache[node_id] = dirty_carrier_offset
-            return dirty_carrier_offset
-
-        if isinstance(node, structured_c.CBinaryOp) and node.op in {"Add", "Sub"}:
-            resolved = _resolve_stack_offset_from_binary_8616(node, project, codegen, seen)
-            offset_cache[node_id] = resolved if resolved is not None else _UNRESOLVED_STACK_OFFSET_8616
-            return resolved
-
-        offset_cache[node_id] = _UNRESOLVED_STACK_OFFSET_8616
-        return None
-
-    return cast(int | None, _impl())
+    resolved = _stack_offset_nonleaf_value_8616(node, project, codegen, seen)
+    return cast(int | None, _stack_offset_cache_record_8616(offset_cache, node_id, resolved))
 
 
 def _log_refusal_8616(codegen: StructuredCodegenValue, kind: str, /, **details: StructuredAstValue) -> None:
@@ -3368,197 +3780,254 @@ def _safe_debug_attr_8616(obj: StructuredAstValue, attr: str) -> StructuredAstVa
         return None
 
 
-def match_stable_ss_linear_stack_access_8616(
-    node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue
-) -> RealModeLinearStackAccess8616 | None:
+@dataclass
+class _SsLinearMatch8616:
     """Match a dereference of ``(ss << 4) + stack_offset`` with stack proof."""
 
-    def _impl() -> StructuredAstValue:
-        nonlocal node
-        if not hasattr(codegen, "_inertia_ss_segment_inferred_from_stack_offset_count"):
-            codegen._inertia_ss_segment_inferred_from_stack_offset_count = 0
+    node: StructuredAstValue
+    project: AngrProjectValue
+    codegen: StructuredCodegenValue
+    segment_name: str | None = None
+    offset_total: int = 0
+    offset_terms: list[StructuredAstValue] = field(default_factory=list)
+    unresolved_segment_terms: list[StructuredAstValue] = field(default_factory=list)
+    inferred_ss_from_stack_fact: bool = False
+    base_offset: int | None = None
+    width: StructuredAstValue = None
+    displacement: int = 0
+    known_offsets: StructuredAstValue = ()
 
-        node = _strip_casts_8616(node)
-        if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
-            return None
-        access_width = _dereference_access_width_bytes_8616(node)
-
-        segment_name: str | None = None
-        offset_total = 0
-        offset_terms: list[StructuredAstValue] = []
-        unresolved_segment_terms: list[StructuredAstValue] = []
-        terms = _flatten_signed_terms_8616(node.operand)
-        if terms is None:
-            return None
-        terms = _expand_virtual_linear_address_carrier_terms_8616(terms, project, codegen)
+    def _classify_terms_8616(self, terms: StructuredAstValue) -> bool:
+        """Fold each signed term into segment, const, or offset evidence."""
         for sign, term in terms:
-            seg = _segment_base_name_8616(term, project, codegen=codegen)
+            seg = _segment_base_name_8616(term, self.project, codegen=self.codegen)
             if seg is not None:
-                if sign != 1 or segment_name is not None:
-                    return None
-                segment_name = seg
+                if sign != 1 or self.segment_name is not None:
+                    return False
+                self.segment_name = seg
                 continue
             const = _constant_value_8616(term)
             if const is not None:
-                offset_total += sign * const
+                self.offset_total += sign * const
                 continue
             if sign == 1 and _is_unresolved_segment_scale_candidate_8616(term):
-                unresolved_segment_terms.append(term)
+                self.unresolved_segment_terms.append(term)
                 continue
-            offset_terms.append(
+            self.offset_terms.append(
                 term
                 if sign == 1
                 else structured_c.CBinaryOp(
                     "Sub",
-                    structured_c.CConstant(0, SimTypeInt(signed=False), codegen=codegen),
+                    structured_c.CConstant(0, SimTypeInt(signed=False), codegen=self.codegen),
                     term,
-                    codegen=codegen,
+                    codegen=self.codegen,
                 )
             )
+        return True
 
-        inferred_ss_from_stack_fact = False
-        base_offset: int | None = None
-        width = access_width
-
-        if segment_name is None and len(unresolved_segment_terms) == 1 and len(offset_terms) == 1:
-            candidate_base_offset = _stack_offset_from_expr_8616(offset_terms[0], project, codegen)
+    def _infer_ss_segment_8616(self) -> None:
+        """Infer an SS segment when one stack-offset term carries proof."""
+        if self.segment_name is None and len(self.unresolved_segment_terms) == 1 and len(self.offset_terms) == 1:
+            candidate_base_offset = _stack_offset_from_expr_8616(self.offset_terms[0], self.project, self.codegen)
             if candidate_base_offset is not None:
-                candidate_displacement = candidate_base_offset + offset_total
-                if _has_stack_storage_evidence_for_displacement_8616(codegen, candidate_displacement, width):
-                    segment_name = "ss"
-                    base_offset = candidate_base_offset
-                    inferred_ss_from_stack_fact = True
-                    codegen._inertia_ss_segment_inferred_from_stack_offset_count = (
-                        int(getattr(codegen, "_inertia_ss_segment_inferred_from_stack_offset_count", 0) or 0) + 1
+                candidate_displacement = candidate_base_offset + self.offset_total
+                if _has_stack_storage_evidence_for_displacement_8616(self.codegen, candidate_displacement, self.width):
+                    self.segment_name = "ss"
+                    self.base_offset = candidate_base_offset
+                    self.inferred_ss_from_stack_fact = True
+                    self.codegen._inertia_ss_segment_inferred_from_stack_offset_count = (
+                        int(getattr(self.codegen, "_inertia_ss_segment_inferred_from_stack_offset_count", 0) or 0) + 1
                     )
 
-        if (
-            segment_name != "ss"
-            or (unresolved_segment_terms and not inferred_ss_from_stack_fact)
-            or len(offset_terms) > 1
+    def _refused_on_segment_shape_8616(self) -> bool:
+        """Refuse when the segment or term shape is not a proven stack access."""
+        if not (
+            self.segment_name != "ss"
+            or (self.unresolved_segment_terms and not self.inferred_ss_from_stack_fact)
+            or len(self.offset_terms) > 1
         ):
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                _log_refusal_8616(
-                    codegen,
-                    "segment_or_terms",
-                    segment=segment_name,
-                    terms=len(offset_terms),
-                    unresolved_segments=len(unresolved_segment_terms),
-                    operand=repr(node.operand),
-                    offset_term_types=tuple(type(term).__name__ for term in offset_terms),
-                    offset_terms=tuple(_debug_c_repr_8616(term) for term in offset_terms),
-                )
-            else:
-                _log_refusal_8616(codegen, "segment_or_terms", segment=segment_name, terms=len(offset_terms))
-            return None
-
-        known_offsets = _known_bp_stack_offsets_8616(codegen)
-        if base_offset is None and len(offset_terms) == 0:
-            base_offset = 0
-        elif base_offset is None:
-            base_offset = _stack_offset_from_expr_8616(offset_terms[0], project, codegen)
-        if base_offset is None and len(offset_terms) == 1 and offset_total in known_offsets:
-            base_offset = 0
-
-        if base_offset is None:
+            return False
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
             _log_refusal_8616(
-                codegen,
-                "offset_unresolved",
-                segment=segment_name,
-                offset_expr_type=type(offset_terms[0]).__name__ if offset_terms else "None",
-                const_offset=offset_total,
+                self.codegen,
+                "segment_or_terms",
+                segment=self.segment_name,
+                terms=len(self.offset_terms),
+                unresolved_segments=len(self.unresolved_segment_terms),
+                operand=repr(self.node.operand),
+                offset_term_types=tuple(type(term).__name__ for term in self.offset_terms),
+                offset_terms=tuple(_debug_c_repr_8616(term) for term in self.offset_terms),
             )
-            return None
+        else:
+            _log_refusal_8616(self.codegen, "segment_or_terms", segment=self.segment_name, terms=len(self.offset_terms))
+        return True
 
+    def _resolve_base_offset_8616(self) -> bool:
+        """Resolve the base BP offset; False when unresolvable."""
+        self.known_offsets = _known_bp_stack_offsets_8616(self.codegen)
+        if self.base_offset is None and len(self.offset_terms) == 0:
+            self.base_offset = 0
+        elif self.base_offset is None:
+            self.base_offset = _stack_offset_from_expr_8616(self.offset_terms[0], self.project, self.codegen)
+        if self.base_offset is None and len(self.offset_terms) == 1 and self.offset_total in self.known_offsets:
+            self.base_offset = 0
+        if self.base_offset is None:
+            _log_refusal_8616(
+                self.codegen,
+                "offset_unresolved",
+                segment=self.segment_name,
+                offset_expr_type=type(self.offset_terms[0]).__name__ if self.offset_terms else "None",
+                const_offset=self.offset_total,
+            )
+            return False
+        return True
+
+    def _rebase_absolute_anchor_8616(self) -> None:
+        """Rebase onto the wrapped anchor when the computed offset lacks proof."""
         absolute_displacement = (
             absolute_machine_bp_offset_from_wrapped_anchor_8616(
-                offset_terms[0],
-                offset_total,
-                known_offsets,
+                self.offset_terms[0],
+                self.offset_total,
+                self.known_offsets,
             )
-            if len(offset_terms) == 1
+            if len(self.offset_terms) == 1
             else None
         )
         if (
             isinstance(absolute_displacement, int)
             and not _has_stack_storage_evidence_for_displacement_8616(
-                codegen,
-                base_offset + offset_total,
-                width,
+                self.codegen,
+                self.base_offset + self.offset_total,
+                self.width,
             )
         ):
-            base_offset = 0
-            offset_total = absolute_displacement
+            self.base_offset = 0
+            self.offset_total = absolute_displacement
 
-        if segment_name == "ss" and not all(_is_stack_offset_term_direct_8616(term) for term in offset_terms):
-            if _has_stack_storage_evidence_for_displacement_8616(codegen, base_offset + offset_total, width) or all(_stack_offset_term_stackish_8616(term, project, codegen) for term in offset_terms) or base_offset + offset_total in known_offsets or (_ss_probe_enabled_8616(codegen) and all(
-                _stack_offset_term_stackish_8616(term, project, codegen) for term in offset_terms
-            )):
-                codegen._inertia_ss_segment_inferred_from_stack_offset_count += 1
-            else:
-                _log_refusal_8616(
-                    codegen,
-                    "no_stack_alias_fact_for_ss_offset",
-                    segment=segment_name,
-                    displacement=base_offset + offset_total,
-                    width=width,
-                )
-                return None
+    def _ss_offset_alias_ok_8616(self) -> bool:
+        """Require stack-alias evidence for non-direct SS offset terms."""
+        if self.segment_name != "ss" or all(
+            _is_stack_offset_term_direct_8616(term) for term in self.offset_terms
+        ):
+            return True
+        if _has_stack_storage_evidence_for_displacement_8616(
+            self.codegen, self.base_offset + self.offset_total, self.width
+        ) or all(
+            _stack_offset_term_stackish_8616(term, self.project, self.codegen) for term in self.offset_terms
+        ) or self.base_offset + self.offset_total in self.known_offsets or (
+            _ss_probe_enabled_8616(self.codegen)
+            and all(
+                _stack_offset_term_stackish_8616(term, self.project, self.codegen) for term in self.offset_terms
+            )
+        ):
+            self.codegen._inertia_ss_segment_inferred_from_stack_offset_count += 1
+            return True
+        _log_refusal_8616(
+            self.codegen,
+            "no_stack_alias_fact_for_ss_offset",
+            segment=self.segment_name,
+            displacement=self.base_offset + self.offset_total,
+            width=self.width,
+        )
+        return False
 
-        displacement = base_offset + offset_total
-        if not _has_stack_storage_evidence_for_displacement_8616(codegen, displacement, width):
+    def _resolve_displacement_8616(self) -> None:
+        """Resolve displacement, rebasing through the entry-SP anchor if needed."""
+        self.displacement = self.base_offset + self.offset_total
+        if not _has_stack_storage_evidence_for_displacement_8616(self.codegen, self.displacement, self.width):
             entry_sp_anchor = (
-                machine_bp_offset_for_entry_sp_anchor_8616(codegen, offset_terms[0])
-                if len(offset_terms) == 1
+                machine_bp_offset_for_entry_sp_anchor_8616(self.codegen, self.offset_terms[0])
+                if len(self.offset_terms) == 1
                 else None
             )
             rebased_displacement = (
-                entry_sp_anchor + offset_total
+                entry_sp_anchor + self.offset_total
                 if isinstance(entry_sp_anchor, int)
                 else None
             )
             if (
                 isinstance(rebased_displacement, int)
                 and _has_stack_storage_evidence_for_displacement_8616(
-                    codegen,
+                    self.codegen,
                     rebased_displacement,
-                    width,
+                    self.width,
                 )
             ):
-                displacement = rebased_displacement
-                codegen._inertia_entry_sp_stack_anchor_rebased_count_8616 = (
-                    int(getattr(codegen, "_inertia_entry_sp_stack_anchor_rebased_count_8616", 0) or 0)
+                self.displacement = rebased_displacement
+                self.codegen._inertia_entry_sp_stack_anchor_rebased_count_8616 = (
+                    int(getattr(self.codegen, "_inertia_entry_sp_stack_anchor_rebased_count_8616", 0) or 0)
                     + 1
                 )
-        region = getattr(getattr(codegen, "cfunc", None), "addr", None)
-        facts = _stack_storage_facts_for_segmented_address_8616("ss", displacement, width, region=region)
+
+    def _final_gate_8616(self) -> bool:
+        """Refuse when no stack fact or inferred alias evidence backs the access."""
+        region = getattr(getattr(self.codegen, "cfunc", None), "addr", None)
+        facts = _stack_storage_facts_for_segmented_address_8616("ss", self.displacement, self.width, region=region)
         try:
-            direct_sp_frame_carrier = bool(codegen._inertia_allow_direct_sp_for_callee_save_spill)
+            direct_sp_frame_carrier = bool(self.codegen._inertia_allow_direct_sp_for_callee_save_spill)
         except AttributeError:
             direct_sp_frame_carrier = False
         direct_sp_frame_carrier = bool(
             direct_sp_frame_carrier
-            and len(offset_terms) == 1
-            and _expr_register_name_8616(offset_terms[0], project) == "sp"
+            and len(self.offset_terms) == 1
+            and _expr_register_name_8616(self.offset_terms[0], self.project) == "sp"
         )
         if (facts is None or facts.identity is None) and not direct_sp_frame_carrier:
-            _log_refusal_8616(codegen, "no_stack_facts", displacement=displacement, width=width, region=region)
-            return None
-        if inferred_ss_from_stack_fact and not _has_stack_storage_evidence_for_displacement_8616(
-            codegen, displacement, width
+            _log_refusal_8616(self.codegen, "no_stack_facts", displacement=self.displacement, width=self.width, region=region)
+            return False
+        if self.inferred_ss_from_stack_fact and not _has_stack_storage_evidence_for_displacement_8616(
+            self.codegen, self.displacement, self.width
         ):
-            _log_refusal_8616(codegen, "no_inferred_ss_stack_alias_fact", displacement=displacement, width=width)
+            _log_refusal_8616(self.codegen, "no_inferred_ss_stack_alias_fact", displacement=self.displacement, width=self.width)
+            return False
+        return True
+
+    def match_8616(self) -> RealModeLinearStackAccess8616 | None:
+        """Run the SS-linear access match, refusing without proof."""
+        if not hasattr(self.codegen, "_inertia_ss_segment_inferred_from_stack_offset_count"):
+            self.codegen._inertia_ss_segment_inferred_from_stack_offset_count = 0
+
+        self.node = _strip_casts_8616(self.node)
+        if not isinstance(self.node, structured_c.CUnaryOp) or self.node.op != "Dereference":
+            return None
+        access_width = _dereference_access_width_bytes_8616(self.node)
+        self.width = access_width
+
+        terms = _flatten_signed_terms_8616(self.node.operand)
+        if terms is None:
+            return None
+        terms = _expand_virtual_linear_address_carrier_terms_8616(terms, self.project, self.codegen)
+        if not self._classify_terms_8616(terms):
+            return None
+        self._infer_ss_segment_8616()
+        if self._refused_on_segment_shape_8616():
+            return None
+        if not self._resolve_base_offset_8616():
+            return None
+        self._rebase_absolute_anchor_8616()
+        if not self._ss_offset_alias_ok_8616():
+            return None
+        self._resolve_displacement_8616()
+        if not self._final_gate_8616():
             return None
         native_offset = (
-            native_entry_sp_offset_for_anchor_8616(offset_terms[0])
-            if len(offset_terms) == 1 and proven_bp_entry_sp_delta_8616(codegen) is None else None
+            native_entry_sp_offset_for_anchor_8616(self.offset_terms[0])
+            if len(self.offset_terms) == 1 and proven_bp_entry_sp_delta_8616(self.codegen) is None else None
         )
         entry_sp_offset = (
-            _canonical_stack_offset_8616(native_offset + offset_total) if native_offset is not None else None
+            _canonical_stack_offset_8616(native_offset + self.offset_total) if native_offset is not None else None
         )
-        return RealModeLinearStackAccess8616(displacement, width, entry_sp_offset=entry_sp_offset)
+        return RealModeLinearStackAccess8616(self.displacement, self.width, entry_sp_offset=entry_sp_offset)
 
-    return cast(RealModeLinearStackAccess8616 | None, _impl())
+
+def match_stable_ss_linear_stack_access_8616(
+    node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue
+) -> RealModeLinearStackAccess8616 | None:
+    """Match a dereference of ``(ss << 4) + stack_offset`` with stack proof."""
+    return cast(
+        RealModeLinearStackAccess8616 | None,
+        _SsLinearMatch8616(node=node, project=project, codegen=codegen).match_8616(),
+    )
 
 
 def match_stable_ds_es_linear_global_access_8616(
@@ -3678,19 +4147,9 @@ def _return_register_virtual_name_8616(node: StructuredAstValue, project: AngrPr
         if current_id in seen:
             continue
         seen.add(current_id)
-        dirty = getattr(current, "dirty", None)
-        if dirty is not None:
-            reg = _dirty_reg_offset_8616(dirty)
-            varid = getattr(dirty, "varid", None)
-            if isinstance(ax_reg, int) and reg == ax_reg and isinstance(varid, int):
-                return f"vvar_{varid}"
-        if isinstance(current, structured_c.CVariable):
-            variable = current.variable
-            if isinstance(variable, SimRegisterVariable):
-                reg = variable.reg
-                name = current.name or variable.name
-                if isinstance(ax_reg, int) and reg == ax_reg and isinstance(name, str) and name.startswith("vvar_"):
-                    return name
+        name = _return_ax_name_8616(current, ax_reg)
+        if name is not None:
+            return name
         for attr in ("lhs", "rhs", "operand", "expr", "cond", "iftrue", "iffalse"):
             child = getattr(current, attr, None)
             if child is not None:
@@ -3699,6 +4158,24 @@ def _return_register_virtual_name_8616(node: StructuredAstValue, project: AngrPr
             seq = getattr(current, attr, None)
             if seq:
                 pending.extend(item for item in seq if item is not None)
+    return None
+
+
+def _return_ax_name_8616(current: StructuredAstValue, ax_reg: StructuredAstValue) -> str | None:
+    """Return the vvar name for an ax-carrier node, else None."""
+    dirty = getattr(current, "dirty", None)
+    if dirty is not None:
+        reg = _dirty_reg_offset_8616(dirty)
+        varid = getattr(dirty, "varid", None)
+        if isinstance(ax_reg, int) and reg == ax_reg and isinstance(varid, int):
+            return f"vvar_{varid}"
+    if isinstance(current, structured_c.CVariable):
+        variable = current.variable
+        if isinstance(variable, SimRegisterVariable):
+            reg = variable.reg
+            name = current.name or variable.name
+            if isinstance(ax_reg, int) and reg == ax_reg and isinstance(name, str) and name.startswith("vvar_"):
+                return name
     return None
 
 
@@ -3713,6 +4190,23 @@ def _return_rhs_is_safe_8616(expr: StructuredAstValue) -> bool:
     if isinstance(expr, structured_c.CBinaryOp):
         return _return_rhs_is_safe_8616(expr.lhs) and _return_rhs_is_safe_8616(expr.rhs)
     return False
+
+
+def _materialize_return_retval_8616(
+    node: structured_c.CReturn, codegen: StructuredCodegenValue, project: AngrProjectValue
+) -> bool:
+    """Substitute a proven ax-carrier return value with its safe assignment RHS."""
+    virtual_name = _return_register_virtual_name_8616(node.retval, project)
+    if virtual_name is None:
+        return False
+    rhs = _single_assignment_rhs_for_virtual_name_8616(codegen, virtual_name)
+    if rhs is None or not _return_rhs_is_safe_8616(rhs):
+        return False
+    node.retval = rhs
+    codegen._inertia_return_register_materialized_count = (
+        int(getattr(codegen, "_inertia_return_register_materialized_count", 0) or 0) + 1
+    )
+    return True
 
 
 def _materialize_return_register_assignments_8616(codegen: StructuredCodegenValue, project: AngrProjectValue) -> bool:
@@ -3730,31 +4224,32 @@ def _materialize_return_register_assignments_8616(codegen: StructuredCodegenValu
         if node_id in seen:
             continue
         seen.add(node_id)
-        if isinstance(node, structured_c.CReturn):
-            retval = node.retval
-            virtual_name = _return_register_virtual_name_8616(retval, project)
-            if virtual_name is not None:
-                rhs = _single_assignment_rhs_for_virtual_name_8616(codegen, virtual_name)
-                if rhs is not None and _return_rhs_is_safe_8616(rhs):
-                    node.retval = rhs
-                    changed = True
-                    codegen._inertia_return_register_materialized_count = (
-                        int(getattr(codegen, "_inertia_return_register_materialized_count", 0) or 0) + 1
-                    )
-                    continue
-        for attr in ("statements", "body", "else_node", "condition_and_nodes", "condition", "init", "iteration"):
-            value = getattr(node, attr, None)
-            if value is None:
-                continue
-            if isinstance(value, list | tuple):
-                for item in reversed(tuple(value)):
-                    if isinstance(item, tuple):
-                        stack.extend(reversed(item))
-                    else:
-                        stack.append(item)
-            else:
-                stack.append(value)
+        if isinstance(node, structured_c.CReturn) and _materialize_return_retval_8616(
+            node, codegen, project
+        ):
+            changed = True
+            continue
+        _push_return_walk_children_8616(node, stack)
     return changed
+
+
+_RETURN_WALK_CHILD_ATTRS_8616 = ("statements", "body", "else_node", "condition_and_nodes", "condition", "init", "iteration")
+
+
+def _push_return_walk_children_8616(node: StructuredAstValue, stack: list[StructuredAstValue]) -> None:
+    """Push statement/child nodes for the return-assignment walk."""
+    for attr in _RETURN_WALK_CHILD_ATTRS_8616:
+        value = getattr(node, attr, None)
+        if value is None:
+            continue
+        if isinstance(value, list | tuple):
+            for item in reversed(tuple(value)):
+                if isinstance(item, tuple):
+                    stack.extend(reversed(item))
+                else:
+                    stack.append(item)
+        else:
+            stack.append(value)
 
 
 def _op_reg_id_8616(insn: StructuredAstValue, index: int) -> int | None:
@@ -3782,15 +4277,10 @@ def _is_function_return_instruction_8616(insn: StructuredAstValue) -> bool:
     )
 
 
-def _decode_function_insns_at_8616(
-    project: AngrProjectValue,
-    function_addr: int,
-    *,
-    limit: int = 0x100,
-    function: StructuredAstValue | None = None,
-) -> tuple[StructuredAstValue, ...]:
-    """Return a complete function decode, caching only RET-terminated evidence."""
-    debug = os.environ.get("INERTIA_DEBUG_CALLEE_SAVE_PRUNE") == "1"
+def _decode_insn_cache_entry_8616(
+    project: AngrProjectValue, function_addr: int, limit: int, function: StructuredAstValue | None
+) -> tuple[dict[StructuredAstValue, StructuredAstValue], StructuredAstValue, StructuredAstValue]:
+    """Return (cache, key, hit) for the RET-terminated decode cache."""
     cache = getattr(project, "_inertia_decode_function_insns_cache_8616", None)
     if not isinstance(cache, dict):
         cache = {}
@@ -3802,21 +4292,31 @@ def _decode_function_insns_at_8616(
         else (int(function_addr), int(limit))
     )
     cached = cache.get(key)
-    if isinstance(cached, tuple):
-        return cached
+    return cache, key, cached if isinstance(cached, tuple) else None
 
+
+def _resolve_decode_function_8616(
+    project: AngrProjectValue, function_addr: int, function: StructuredAstValue | None
+) -> StructuredAstValue | None:
+    """Resolve function metadata from the knowledge base when absent."""
     if function is None:
         funcs = getattr(getattr(project, "kb", None), "functions", None)
         if funcs is not None:
             with contextlib.suppress(Exception):
                 function = funcs.function(addr=function_addr, create=False)
     if function is None:
-        if debug:
+        if os.environ.get("INERTIA_DEBUG_CALLEE_SAVE_PRUNE") == "1":
             log.warning("[callee-save-prune] no function metadata at %#x", function_addr)
-        return ()
+        return None
+    return function
 
-    insns = []
+
+def _ordered_ret_terminated_insns_8616(
+    project: AngrProjectValue, function: StructuredAstValue
+) -> tuple[tuple[StructuredAstValue, ...], list[StructuredAstValue]]:
+    """Return (all decoded insns, insns through the first RET)."""
     blocks = _direct_global_update_blocks_8616(project, function)
+    insns = []
     for block in blocks:
         for wrapper in _capstone_insns_for_direct_global_update_8616(project, block):
             insn = getattr(wrapper, "insn", wrapper)
@@ -3827,13 +4327,34 @@ def _decode_function_insns_at_8616(
         ordered.append(insn)
         if _is_function_return_instruction_8616(insn):
             break
+    return tuple(blocks), ordered
+
+
+def _decode_function_insns_at_8616(
+    project: AngrProjectValue,
+    function_addr: int,
+    *,
+    limit: int = 0x100,
+    function: StructuredAstValue | None = None,
+) -> tuple[StructuredAstValue, ...]:
+    """Return a complete function decode, caching only RET-terminated evidence."""
+    debug = os.environ.get("INERTIA_DEBUG_CALLEE_SAVE_PRUNE") == "1"
+    cache, key, cached = _decode_insn_cache_entry_8616(project, function_addr, limit, function)
+    if cached is not None:
+        return cached
+
+    function = _resolve_decode_function_8616(project, function_addr, function)
+    if function is None:
+        return ()
+
+    blocks, ordered = _ordered_ret_terminated_insns_8616(project, function)
     if not any(_is_function_return_instruction_8616(insn) for insn in ordered):
         if debug:
             log.warning(
                 "[callee-save-prune] incomplete decode addr=%#x blocks=%d insns=%d first=%r last=%r",
                 function_addr,
                 len(blocks),
-                len(insns),
+                len(ordered),
                 getattr(ordered[0], "address", None) if ordered else None,
                 getattr(ordered[-1], "address", None) if ordered else None,
             )
@@ -3869,32 +4390,20 @@ def _decode_function_insns_8616(
     return ()
 
 
-def _callee_saved_register_names_from_frame_evidence_8616(
-    project: AngrProjectValue,
-    function_addr: int,
-    *,
-    function: StructuredAstValue | None = None,
-) -> frozenset[str]:
-    """Return exact push/pop-proven explicitly preserved general registers.
-
-    Negative results remain uncached because function discovery may still be
-    extending the CFG and instruction extent during Structuring retries.
-    """
-    debug = os.environ.get("INERTIA_DEBUG_CALLEE_SAVE_PRUNE") == "1"
+def _callee_save_cache_8616(project: AngrProjectValue) -> dict[StructuredAstValue, frozenset[str]]:
+    """Return the project-owned callee-save name cache, creating it once."""
     cache = getattr(project, "_inertia_callee_saved_register_names_cache_8616", None)
     if not isinstance(cache, dict):
         cache = {}
         with contextlib.suppress(Exception):
             project._inertia_callee_saved_register_names_cache_8616 = cache
-    cache_key = (int(function_addr), id(function)) if function is not None else int(function_addr)
-    cached = cache.get(cache_key)
-    if isinstance(cached, frozenset):
-        return cached
-    decoded_insns = _decode_function_insns_8616(
-        project,
-        function_addr,
-        function=function,
-    )
+    return cache
+
+
+def _normalized_function_insns_8616(
+    decoded_insns: StructuredAstValue,
+) -> tuple[StructuredAstValue, ...]:
+    """Dedup decoded instructions by (address, id), preserving order."""
     normalized_insns: list[StructuredAstValue] = []
     seen_instruction_keys: set[tuple[int, int]] = set()
     for insn in decoded_insns:
@@ -3907,18 +4416,13 @@ def _callee_saved_register_names_from_frame_evidence_8616(
             continue
         seen_instruction_keys.add(key)
         normalized_insns.append(insn)
-    insns = tuple(normalized_insns)
-    if debug:
-        log.warning(
-            "[callee-save-prune] decoded func=%#x count=%d first=%r last=%r",
-            function_addr,
-            len(insns),
-            getattr(insns[0], "address", None) if insns else None,
-            getattr(insns[-1], "address", None) if insns else None,
-        )
-    if not insns:
-        return frozenset()
-    preservable = frozenset({"ax", "bx", "cx", "dx", "si", "di", "ds", "es"})
+    return tuple(normalized_insns)
+
+
+def _callee_save_pushes_8616(
+    insns: tuple[StructuredAstValue, ...], preservable: frozenset[str]
+) -> list[str]:
+    """Collect pushed preservable registers before the first return."""
     pushed: list[str] = []
     for insn in insns:
         if getattr(insn, "id", None) == X86_INS_PUSH:
@@ -3929,23 +4433,15 @@ def _callee_saved_register_names_from_frame_evidence_8616(
                     pushed.append(reg_name)
         if _is_function_return_instruction_8616(insn):
             break
-    if debug:
-        log.warning("[callee-save-prune] decoded pushes=%r", tuple(pushed))
-    if not pushed:
-        return frozenset()
+    return pushed
 
-    ret_index = next(
-        (
-            idx
-            for idx, insn in enumerate(insns)
-            if _is_function_return_instruction_8616(insn)
-        ),
-        None,
-    )
-    if ret_index is None:
-        return frozenset()
-    restored: list[str] = []
-    registers_written_after: set[str] = set()
+
+def _callee_save_restores_8616(
+    insns: tuple[StructuredAstValue, ...],
+    ret_index: int,
+    preservable: frozenset[str],
+) -> list[str]:
+    """Collect restored registers whose values stay live until the return."""
     canonical_register_names = {
         "al": "ax",
         "ah": "ax",
@@ -3956,6 +4452,8 @@ def _callee_saved_register_names_from_frame_evidence_8616(
         "dl": "dx",
         "dh": "dx",
     }
+    restored: list[str] = []
+    registers_written_after: set[str] = set()
     for insn in reversed(insns[:ret_index]):
         insn_id = getattr(insn, "id", None)
         if insn_id == X86_INS_POP:
@@ -3979,6 +4477,60 @@ def _callee_saved_register_names_from_frame_evidence_8616(
             canonical_name = canonical_register_names.get(written_name, written_name)
             if canonical_name in preservable:
                 registers_written_after.add(canonical_name)
+    return restored
+
+
+def _callee_saved_register_names_from_frame_evidence_8616(
+    project: AngrProjectValue,
+    function_addr: int,
+    *,
+    function: StructuredAstValue | None = None,
+) -> frozenset[str]:
+    """Return exact push/pop-proven explicitly preserved general registers.
+
+    Negative results remain uncached because function discovery may still be
+    extending the CFG and instruction extent during Structuring retries.
+    """
+    debug = os.environ.get("INERTIA_DEBUG_CALLEE_SAVE_PRUNE") == "1"
+    cache = _callee_save_cache_8616(project)
+    cache_key = (int(function_addr), id(function)) if function is not None else int(function_addr)
+    cached = cache.get(cache_key)
+    if isinstance(cached, frozenset):
+        return cached
+    decoded_insns = _decode_function_insns_8616(
+        project,
+        function_addr,
+        function=function,
+    )
+    insns = _normalized_function_insns_8616(decoded_insns)
+    if debug:
+        log.warning(
+            "[callee-save-prune] decoded func=%#x count=%d first=%r last=%r",
+            function_addr,
+            len(insns),
+            getattr(insns[0], "address", None) if insns else None,
+            getattr(insns[-1], "address", None) if insns else None,
+        )
+    if not insns:
+        return frozenset()
+    preservable = frozenset({"ax", "bx", "cx", "dx", "si", "di", "ds", "es"})
+    pushed = _callee_save_pushes_8616(insns, preservable)
+    if debug:
+        log.warning("[callee-save-prune] decoded pushes=%r", tuple(pushed))
+    if not pushed:
+        return frozenset()
+
+    ret_index = next(
+        (
+            idx
+            for idx, insn in enumerate(insns)
+            if _is_function_return_instruction_8616(insn)
+        ),
+        None,
+    )
+    if ret_index is None:
+        return frozenset()
+    restored = _callee_save_restores_8616(insns, ret_index, preservable)
     if debug:
         log.warning("[callee-save-prune] decoded restores=%r ret_index=%r", tuple(restored), ret_index)
     if not restored:
@@ -4005,6 +4557,193 @@ def _statement_ins_addr_8616(stmt: StructuredAstValue) -> int | None:
     return ins_addr if isinstance(ins_addr, int) else None
 
 
+def _round_trip_callee_saved_regs_8616(decoded_insns: StructuredAstValue) -> frozenset[str]:
+    """Return registers with both a PUSH and a POP in the function prologue."""
+    preservable = frozenset({"ax", "bx", "cx", "dx", "si", "di", "ds", "es"})
+    pushed: set[str] = set()
+    popped: set[str] = set()
+    for insn in decoded_insns:
+        instruction_id = getattr(insn, "id", None)
+        if instruction_id not in {X86_INS_PUSH, X86_INS_POP}:
+            continue
+        reg_id = _op_reg_id_8616(insn, 0)
+        if not isinstance(reg_id, int):
+            continue
+        register_name = insn.reg_name(reg_id)
+        if register_name not in preservable:
+            continue
+        (pushed if instruction_id == X86_INS_PUSH else popped).add(register_name)
+    return frozenset(pushed & popped)
+
+
+def _frame_instruction_roles_8616(
+    frame_pairs: StructuredAstValue,
+    runtime_gp_names: StructuredAstValue,
+) -> dict[int, tuple[CalleeSavedFramePair8616, CalleeSavedFrameInstructionRole8616]]:
+    """Map frame push/pop instruction addresses to their owning pairs."""
+    roles: dict[int, tuple[CalleeSavedFramePair8616, CalleeSavedFrameInstructionRole8616]] = {}
+    for pair in frame_pairs:
+        runtime_owned = (
+            pair.register_name in {"ds", "es"}
+            or runtime_gp_live_in_name_8616(pair.register_name) in runtime_gp_names
+        )
+        if runtime_owned:
+            continue
+        roles[pair.push_addr] = (
+            pair,
+            CalleeSavedFrameInstructionRole8616.PUSH,
+        )
+        roles[pair.pop_addr] = (
+            pair,
+            CalleeSavedFrameInstructionRole8616.POP,
+        )
+    return roles
+
+
+def _callee_saved_prune_stats_8616(codegen: StructuredCodegenValue) -> dict[str, int]:
+    """Return the codegen-owned spill-prune stats bucket, creating it once."""
+    stats = getattr(codegen, "_inertia_callee_saved_spill_prune_stats", None)
+    if not isinstance(stats, dict):
+        stats = {
+            "candidates": 0,
+            "pruned": 0,
+            "refused": 0,
+            "raw_fact_count": 0,
+            "normalized_fact_count": 0,
+            "classified_fact_count": 0,
+            "materialized_count": 0,
+            "failure_count": 0,
+        }
+        codegen._inertia_callee_saved_spill_prune_stats = stats
+    return stats
+
+
+@dataclass
+class _CalleeSavedSpillPrune8616:
+    """Remove exact push/pop-proven callee-save spill assignments."""
+
+    codegen: StructuredCodegenValue
+    project: AngrProjectValue
+    saved_regs: StructuredAstValue
+    frame_instruction_roles: dict[
+        int, tuple[CalleeSavedFramePair8616, CalleeSavedFrameInstructionRole8616]
+    ]
+    stats: dict[str, int]
+    pruned_facts: list[CalleeSavedFramePruneFact8616]
+    prior_facts: StructuredAstValue
+    function_addr: int
+    changed: bool = False
+
+    def carrier_storage(
+        self,
+        stmt: StructuredAstValue,
+        pair: CalleeSavedFramePair8616,
+        role: CalleeSavedFrameInstructionRole8616,
+    ) -> tuple[CalleeSavedFrameCarrierKind8616, int | None, int | None]:
+        """Classify the observable storage carried by one frame assignment."""
+        if role is not CalleeSavedFrameInstructionRole8616.PUSH:
+            return CalleeSavedFrameCarrierKind8616.FRAME_BOOKKEEPING, None, None
+        lhs = _strip_casts_8616(stmt.lhs)
+        if _expr_register_name_8616(stmt.rhs, self.project) != pair.register_name:
+            return CalleeSavedFrameCarrierKind8616.FRAME_BOOKKEEPING, None, None
+        if isinstance(lhs, structured_c.CVariable):
+            variable = lhs.variable
+            if isinstance(variable, SimStackVariable) and variable.base == "bp":
+                return (
+                    CalleeSavedFrameCarrierKind8616.STACK_SLOT_WRITE,
+                    machine_bp_offset_for_stack_variable_8616(self.codegen, variable),
+                    variable.size,
+                )
+            return CalleeSavedFrameCarrierKind8616.FRAME_BOOKKEEPING, None, None
+        if not isinstance(lhs, structured_c.CUnaryOp) or lhs.op != "Dereference":
+            return CalleeSavedFrameCarrierKind8616.FRAME_BOOKKEEPING, None, None
+        previous_allow_sp = getattr(self.codegen, "_inertia_allow_direct_sp_for_callee_save_spill", False)
+        previous_offset_cache = getattr(self.codegen, "_inertia_stack_offset_cache", None)
+        self.codegen._inertia_allow_direct_sp_for_callee_save_spill = True
+        self.codegen._inertia_stack_offset_cache = None
+        try:
+            access = match_stable_ss_linear_stack_access_8616(lhs, self.project, self.codegen)
+        finally:
+            self.codegen._inertia_allow_direct_sp_for_callee_save_spill = previous_allow_sp
+            self.codegen._inertia_stack_offset_cache = previous_offset_cache
+        if access is None:
+            return CalleeSavedFrameCarrierKind8616.FRAME_BOOKKEEPING, None, None
+        return (
+            CalleeSavedFrameCarrierKind8616.SEGMENTED_STACK_WRITE,
+            access.displacement,
+            access.width,
+        )
+
+    def is_prunable(self, stmt: StructuredAstValue) -> bool:
+        """Check whether a statement is a proven frame spill to drop."""
+        if not isinstance(stmt, structured_c.CAssignment):
+            return False
+        ins_addr = _statement_ins_addr_8616(stmt)
+        if not isinstance(ins_addr, int):
+            return False
+        frame_owner = self.frame_instruction_roles.get(ins_addr)
+        if frame_owner is not None:
+            pair, role = frame_owner
+            pair_semantics = (
+                CalleeSavedFramePairSemantics8616.PRESERVED
+                if pair.register_name in self.saved_regs
+                else CalleeSavedFramePairSemantics8616.RESTORED_BEFORE_UPDATE
+            )
+            carrier_kind, displacement, access_width = self.carrier_storage(stmt, pair, role)
+            self.stats["raw_fact_count"] = int(self.stats.get("raw_fact_count", 0) or 0) + 1
+            self.stats["normalized_fact_count"] = int(self.stats.get("normalized_fact_count", 0) or 0) + 1
+            self.stats["classified_fact_count"] = int(self.stats.get("classified_fact_count", 0) or 0) + 1
+            self.stats["candidates"] = int(self.stats.get("candidates", 0) or 0) + 1
+            self.pruned_facts.append(
+                CalleeSavedFramePruneFact8616(
+                    function_addr=self.function_addr,
+                    register_name=pair.register_name,
+                    push_addr=pair.push_addr,
+                    pop_addr=pair.pop_addr,
+                    instruction_addr=ins_addr,
+                    carrier_ordinal=len(self.prior_facts) + len(self.pruned_facts),
+                    instruction_role=role,
+                    carrier_kind=carrier_kind,
+                    stack_displacement=displacement,
+                    access_width=access_width,
+                    pair_semantics=pair_semantics,
+                )
+            )
+            return True
+        return False
+
+    def rewrite_statement_list(self, statements: list[Any]) -> None:
+        """Drop prunable assignments and recurse into statement containers."""
+        kept = []
+        for stmt in statements:
+            if self.is_prunable(stmt):
+                self.stats["pruned"] = int(self.stats.get("pruned", 0) or 0) + 1
+                self.stats["materialized_count"] = int(self.stats.get("materialized_count", 0) or 0) + 1
+                self.changed = True
+                continue
+            kept.append(stmt)
+        if len(kept) != len(statements):
+            statements[:] = kept
+        for stmt in tuple(kept):
+            self._rewrite_stmt_children_8616(stmt)
+
+    def _rewrite_stmt_children_8616(self, stmt: StructuredAstValue) -> None:
+        """Recurse the rewrite into a statement's child containers."""
+        for attr in ("statements", "body", "else_node"):
+            value = getattr(stmt, attr, None)
+            if isinstance(value, structured_c.CStatements):
+                self.rewrite_statement_list(value.statements)
+            elif isinstance(value, list):
+                self.rewrite_statement_list(value)
+        condition_nodes = getattr(stmt, "condition_and_nodes", None)
+        if isinstance(condition_nodes, list | tuple):
+            for item in condition_nodes:
+                if isinstance(item, tuple) and len(item) >= 2:
+                    body = item[1]
+                    if isinstance(body, structured_c.CStatements):
+                        self.rewrite_statement_list(body.statements)
+
+
 def _remove_callee_saved_stack_spills_8616(
     codegen: StructuredCodegenValue,
     project: AngrProjectValue,
@@ -4025,21 +4764,7 @@ def _remove_callee_saved_stack_spills_8616(
         function_addr,
         function=function,
     )
-    preservable = frozenset({"ax", "bx", "cx", "dx", "si", "di", "ds", "es"})
-    pushed: set[str] = set()
-    popped: set[str] = set()
-    for insn in decoded_insns:
-        instruction_id = getattr(insn, "id", None)
-        if instruction_id not in {X86_INS_PUSH, X86_INS_POP}:
-            continue
-        reg_id = _op_reg_id_8616(insn, 0)
-        if not isinstance(reg_id, int):
-            continue
-        register_name = insn.reg_name(reg_id)
-        if register_name not in preservable:
-            continue
-        (pushed if instruction_id == X86_INS_PUSH else popped).add(register_name)
-    round_trip_regs = frozenset(pushed & popped)
+    round_trip_regs = _round_trip_callee_saved_regs_8616(decoded_insns)
     if os.environ.get("INERTIA_DEBUG_CALLEE_SAVE_PRUNE"):
         log.warning(
             "[callee-save-prune] func=%#x saved_regs=%r round_trip_regs=%r",
@@ -4051,38 +4776,8 @@ def _remove_callee_saved_stack_spills_8616(
         return False
     frame_pairs = callee_saved_frame_pairs_8616(decoded_insns, round_trip_regs)
     runtime_gp_names = runtime_gp_state_names_8616(codegen)
-    frame_instruction_roles: dict[
-        int,
-        tuple[CalleeSavedFramePair8616, CalleeSavedFrameInstructionRole8616],
-    ] = {}
-    for pair in frame_pairs:
-        runtime_owned = (
-            pair.register_name in {"ds", "es"}
-            or runtime_gp_live_in_name_8616(pair.register_name) in runtime_gp_names
-        )
-        if runtime_owned:
-            continue
-        frame_instruction_roles[pair.push_addr] = (
-            pair,
-            CalleeSavedFrameInstructionRole8616.PUSH,
-        )
-        frame_instruction_roles[pair.pop_addr] = (
-            pair,
-            CalleeSavedFrameInstructionRole8616.POP,
-        )
-    stats = getattr(codegen, "_inertia_callee_saved_spill_prune_stats", None)
-    if not isinstance(stats, dict):
-        stats = {
-            "candidates": 0,
-            "pruned": 0,
-            "refused": 0,
-            "raw_fact_count": 0,
-            "normalized_fact_count": 0,
-            "classified_fact_count": 0,
-            "materialized_count": 0,
-            "failure_count": 0,
-        }
-        codegen._inertia_callee_saved_spill_prune_stats = stats
+    frame_instruction_roles = _frame_instruction_roles_8616(frame_pairs, runtime_gp_names)
+    stats = _callee_saved_prune_stats_8616(codegen)
 
     try:
         prior_record = codegen._inertia_callee_saved_frame_prune_record_8616
@@ -4094,122 +4789,27 @@ def _remove_callee_saved_stack_spills_8616(
         else ()
     )
     pruned_facts: list[CalleeSavedFramePruneFact8616] = []
-
-    def carrier_storage(
-        stmt: StructuredAstValue,
-        pair: CalleeSavedFramePair8616,
-        role: CalleeSavedFrameInstructionRole8616,
-    ) -> tuple[CalleeSavedFrameCarrierKind8616, int | None, int | None]:
-        """Classify the observable storage carried by one frame assignment."""
-        if role is not CalleeSavedFrameInstructionRole8616.PUSH:
-            return CalleeSavedFrameCarrierKind8616.FRAME_BOOKKEEPING, None, None
-        lhs = _strip_casts_8616(stmt.lhs)
-        if _expr_register_name_8616(stmt.rhs, project) != pair.register_name:
-            return CalleeSavedFrameCarrierKind8616.FRAME_BOOKKEEPING, None, None
-        if isinstance(lhs, structured_c.CVariable):
-            variable = lhs.variable
-            if isinstance(variable, SimStackVariable) and variable.base == "bp":
-                return (
-                    CalleeSavedFrameCarrierKind8616.STACK_SLOT_WRITE,
-                    machine_bp_offset_for_stack_variable_8616(codegen, variable),
-                    variable.size,
-                )
-            return CalleeSavedFrameCarrierKind8616.FRAME_BOOKKEEPING, None, None
-        if not isinstance(lhs, structured_c.CUnaryOp) or lhs.op != "Dereference":
-            return CalleeSavedFrameCarrierKind8616.FRAME_BOOKKEEPING, None, None
-        previous_allow_sp = getattr(codegen, "_inertia_allow_direct_sp_for_callee_save_spill", False)
-        previous_offset_cache = getattr(codegen, "_inertia_stack_offset_cache", None)
-        codegen._inertia_allow_direct_sp_for_callee_save_spill = True
-        codegen._inertia_stack_offset_cache = None
-        try:
-            access = match_stable_ss_linear_stack_access_8616(lhs, project, codegen)
-        finally:
-            codegen._inertia_allow_direct_sp_for_callee_save_spill = previous_allow_sp
-            codegen._inertia_stack_offset_cache = previous_offset_cache
-        if access is None:
-            return CalleeSavedFrameCarrierKind8616.FRAME_BOOKKEEPING, None, None
-        return (
-            CalleeSavedFrameCarrierKind8616.SEGMENTED_STACK_WRITE,
-            access.displacement,
-            access.width,
-        )
-
-    def is_prunable(stmt: StructuredAstValue) -> bool:
-        if not isinstance(stmt, structured_c.CAssignment):
-            return False
-        ins_addr = _statement_ins_addr_8616(stmt)
-        if not isinstance(ins_addr, int):
-            return False
-        frame_owner = frame_instruction_roles.get(ins_addr)
-        if frame_owner is not None:
-            pair, role = frame_owner
-            pair_semantics = (
-                CalleeSavedFramePairSemantics8616.PRESERVED
-                if pair.register_name in saved_regs
-                else CalleeSavedFramePairSemantics8616.RESTORED_BEFORE_UPDATE
-            )
-            carrier_kind, displacement, access_width = carrier_storage(stmt, pair, role)
-            stats["raw_fact_count"] = int(stats.get("raw_fact_count", 0) or 0) + 1
-            stats["normalized_fact_count"] = int(stats.get("normalized_fact_count", 0) or 0) + 1
-            stats["classified_fact_count"] = int(stats.get("classified_fact_count", 0) or 0) + 1
-            stats["candidates"] = int(stats.get("candidates", 0) or 0) + 1
-            pruned_facts.append(
-                CalleeSavedFramePruneFact8616(
-                    function_addr=function_addr,
-                    register_name=pair.register_name,
-                    push_addr=pair.push_addr,
-                    pop_addr=pair.pop_addr,
-                    instruction_addr=ins_addr,
-                    carrier_ordinal=len(prior_facts) + len(pruned_facts),
-                    instruction_role=role,
-                    carrier_kind=carrier_kind,
-                    stack_displacement=displacement,
-                    access_width=access_width,
-                    pair_semantics=pair_semantics,
-                )
-            )
-            return True
-        return False
-
-    changed = False
-
-    def rewrite_statement_list(statements: list[Any]) -> None:
-        nonlocal changed
-        kept = []
-        for stmt in statements:
-            if is_prunable(stmt):
-                stats["pruned"] = int(stats.get("pruned", 0) or 0) + 1
-                stats["materialized_count"] = int(stats.get("materialized_count", 0) or 0) + 1
-                changed = True
-                continue
-            kept.append(stmt)
-        if len(kept) != len(statements):
-            statements[:] = kept
-        for stmt in tuple(kept):
-            for attr in ("statements", "body", "else_node"):
-                value = getattr(stmt, attr, None)
-                if isinstance(value, structured_c.CStatements):
-                    rewrite_statement_list(value.statements)
-                elif isinstance(value, list):
-                    rewrite_statement_list(value)
-            condition_nodes = getattr(stmt, "condition_and_nodes", None)
-            if isinstance(condition_nodes, list | tuple):
-                for item in condition_nodes:
-                    if isinstance(item, tuple) and len(item) >= 2:
-                        body = item[1]
-                        if isinstance(body, structured_c.CStatements):
-                            rewrite_statement_list(body.statements)
+    prune = _CalleeSavedSpillPrune8616(
+        codegen=codegen,
+        project=project,
+        saved_regs=saved_regs,
+        frame_instruction_roles=frame_instruction_roles,
+        stats=stats,
+        pruned_facts=pruned_facts,
+        prior_facts=prior_facts,
+        function_addr=function_addr,
+    )
 
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     if isinstance(root, structured_c.CStatements):
-        rewrite_statement_list(root.statements)
+        prune.rewrite_statement_list(root.statements)
     elif isinstance(root, list):
-        rewrite_statement_list(root)
+        prune.rewrite_statement_list(root)
     if pruned_facts:
         codegen._inertia_callee_saved_frame_prune_record_8616 = (
             CalleeSavedFramePruneRecord8616.closed((*prior_facts, *pruned_facts))
         )
-    return changed
+    return prune.changed
 
 
 def prune_callee_saved_stack_spills_8616(
@@ -4280,6 +4880,130 @@ def match_stable_ds_es_linear_global_address_8616(
     )
 
 
+def _walk_dses_list_children_8616(
+    value: list[StructuredAstValue],
+    node_stack: list[StructuredAstValue],
+    transform: Callable[[StructuredAstValue], StructuredAstValue],
+) -> bool:
+    """Transform each element of a child list in place."""
+    local_changed = False
+    for index, item in enumerate(tuple(value)):
+        if not type(item).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+            continue
+        replacement = transform(item)
+        if replacement is not item:
+            value[index] = replacement
+            local_changed = True
+            continue
+        candidate = value[index]
+        if type(candidate).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+            node_stack.append(candidate)
+    return local_changed
+
+
+def _walk_dses_attr_children_8616(
+    node: StructuredAstValue,
+    node_stack: list[StructuredAstValue],
+    transform: Callable[[StructuredAstValue], StructuredAstValue],
+) -> bool:
+    """Transform each child-bearing attribute of one node in place."""
+    local_changed = False
+    for attr in (
+        "statements",
+        "lhs",
+        "rhs",
+        "operand",
+        "expr",
+        "init",
+        "condition",
+        "iteration",
+        "body",
+        "else_node",
+    ):
+        if not hasattr(node, attr):
+            continue
+        try:
+            value = getattr(node, attr)
+        except Exception:
+            continue
+        if isinstance(value, list):
+            if _walk_dses_list_children_8616(value, node_stack, transform):
+                local_changed = True
+        elif value is not None:
+            replacement = transform(value)
+            if replacement is not value:
+                setattr(node, attr, replacement)
+                local_changed = True
+                continue
+            node_stack.append(value)
+    return local_changed
+
+
+def _walk_dses_pair_children_8616(
+    node: StructuredAstValue,
+    node_stack: list[StructuredAstValue],
+    transform: Callable[[StructuredAstValue], StructuredAstValue],
+) -> bool:
+    """Transform condition/body pairs of one node in place."""
+    condition_and_nodes = getattr(node, "condition_and_nodes", None)
+    if not condition_and_nodes:
+        return False
+    local_changed = False
+    new_pairs = []
+    for cond, body in condition_and_nodes:
+        new_cond = (
+            transform(cond)
+            if type(cond).__module__.startswith("angr.analyses.decompiler.structured_codegen")
+            else cond
+        )
+        if new_cond is not cond:
+            local_changed = True
+        new_body = (
+            transform(body)
+            if type(body).__module__.startswith("angr.analyses.decompiler.structured_codegen")
+            else body
+        )
+        if new_body is not body:
+            local_changed = True
+        if new_cond is cond and type(new_cond).__module__.startswith(
+            "angr.analyses.decompiler.structured_codegen"
+        ):
+            node_stack.append(new_cond)
+        if new_body is body and type(new_body).__module__.startswith(
+            "angr.analyses.decompiler.structured_codegen"
+        ):
+            node_stack.append(new_body)
+        new_pairs.append((new_cond, new_body))
+    if local_changed:
+        node.condition_and_nodes = new_pairs
+    return local_changed
+
+
+def _replace_children_walk_8616(
+    root_node: StructuredAstValue,
+    seen: set[int],
+    transform: Callable[[StructuredAstValue], StructuredAstValue],
+) -> bool:
+    """Walk a structured tree once, transforming children in place."""
+    if root_node is None:
+        return False
+    node_stack: list[StructuredAstValue] = [root_node]
+    local_changed = False
+    while node_stack:
+        node = node_stack.pop()
+        if node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+            continue
+        node_id = id(node)
+        if node_id in seen:
+            continue
+        seen.add(node_id)
+        if _walk_dses_attr_children_8616(node, node_stack, transform):
+            local_changed = True
+        if _walk_dses_pair_children_8616(node, node_stack, transform):
+            local_changed = True
+    return local_changed
+
+
 @dataclass
 class _DsEsGlobalDerefRun8616:
     """One DS/ES-linear global dereference lowering walk over a structured tree."""
@@ -4289,6 +5013,90 @@ class _DsEsGlobalDerefRun8616:
     changed: bool = False
     seen: set[int] = field(default_factory=set)
 
+    def _rebind_stack_entry_to_global_8616(
+        self,
+        variables_in_use: dict[StructuredAstValue, StructuredAstValue],
+        variable: StructuredAstValue,
+        cvar: StructuredAstValue,
+        addr: int,
+        name: str,
+        scalar_width: int,
+        target_type: StructuredAstValue,
+    ) -> StructuredAstValue:
+        """Replace a same-displacement stack entry with a global memory cvar."""
+        replacement = SimMemoryVariable(
+            addr,
+            scalar_width,
+            name=name,
+            region=getattr(self.codegen.cfunc, "addr", None),
+        )
+        replacement_type = getattr(cvar, "variable_type", None) or target_type
+        replacement_cvar = structured_c.CVariable(
+            replacement, variable_type=replacement_type, codegen=self.codegen
+        )
+        variables_in_use.pop(variable, None)
+        variables_in_use[replacement] = replacement_cvar
+        unified = getattr(self.codegen.cfunc, "unified_local_vars", None)
+        if isinstance(unified, dict):
+            unified.pop(variable, None)
+            unified[replacement] = {(replacement_cvar, getattr(replacement_cvar, "variable_type", None))}
+        return replacement_cvar
+
+    def _reuse_one_global_cvar_8616(
+        self,
+        variables_in_use: dict[StructuredAstValue, StructuredAstValue],
+        access: RealModeLinearGlobalAddress8616,
+        variable: StructuredAstValue,
+        cvar: StructuredAstValue,
+        addr: int,
+        name: str,
+        scalar_width: int,
+        target_type: StructuredAstValue,
+    ) -> StructuredAstValue:
+        """Return a reusable cvar for one registry entry, or None."""
+        if isinstance(variable, SimMemoryVariable) and getattr(variable, "addr", None) == addr:
+            existing_size = variable.size
+            if _cvar_has_array_type_8616(cvar) or (isinstance(existing_size, int) and existing_size > 2):
+                return None
+            if variable.size != scalar_width:
+                variable.size = scalar_width
+            if getattr(cvar, "variable_type", None) is None:
+                cvar.variable_type = target_type
+            return cvar
+        if isinstance(variable, SimVariable) and getattr(variable, "name", None) == name:
+            if _cvar_has_array_type_8616(cvar):
+                return None
+            if getattr(cvar, "variable_type", None) is None:
+                cvar.variable_type = target_type
+            return cvar
+        if (
+            isinstance(variable, SimStackVariable)
+            and machine_bp_offset_for_stack_variable_8616(self.codegen, variable)
+            == access.displacement
+        ):
+            return self._rebind_stack_entry_to_global_8616(
+                variables_in_use, variable, cvar, addr, name, scalar_width, target_type
+            )
+        return None
+
+    def _reuse_global_cvar_8616(
+        self,
+        variables_in_use: dict[StructuredAstValue, StructuredAstValue],
+        access: RealModeLinearGlobalAddress8616,
+        addr: int,
+        name: str,
+        scalar_width: int,
+        target_type: StructuredAstValue,
+    ) -> StructuredAstValue:
+        """Reuse or rebind an existing cvar covering the global displacement."""
+        for variable, cvar in tuple(variables_in_use.items()):
+            reused = self._reuse_one_global_cvar_8616(
+                variables_in_use, access, variable, cvar, addr, name, scalar_width, target_type
+            )
+            if reused is not None:
+                return reused
+        return None
+
     def global_cvar_8616(self, access: RealModeLinearGlobalAddress8616) -> StructuredAstValue:
         addr = access.displacement & 0xFFFF
         name = f"g_{addr:04X}"
@@ -4296,44 +5104,11 @@ class _DsEsGlobalDerefRun8616:
         target_type = _type_for_access_width_8616(scalar_width)
         variables_in_use = getattr(self.codegen.cfunc, "variables_in_use", None)
         if isinstance(variables_in_use, dict):
-            for variable, cvar in tuple(variables_in_use.items()):
-                if isinstance(variable, SimMemoryVariable) and getattr(variable, "addr", None) == addr:
-                    existing_size = variable.size
-                    if _cvar_has_array_type_8616(cvar) or (isinstance(existing_size, int) and existing_size > 2):
-                        continue
-                    if variable.size != scalar_width:
-                        variable.size = scalar_width
-                    if getattr(cvar, "variable_type", None) is None:
-                        cvar.variable_type = target_type
-                    return cvar
-                if isinstance(variable, SimVariable) and getattr(variable, "name", None) == name:
-                    if _cvar_has_array_type_8616(cvar):
-                        continue
-                    if getattr(cvar, "variable_type", None) is None:
-                        cvar.variable_type = target_type
-                    return cvar
-                if (
-                    isinstance(variable, SimStackVariable)
-                    and machine_bp_offset_for_stack_variable_8616(self.codegen, variable)
-                    == access.displacement
-                ):
-                    replacement = SimMemoryVariable(
-                        addr,
-                        scalar_width,
-                        name=name,
-                        region=getattr(self.codegen.cfunc, "addr", None),
-                    )
-                    replacement_type = getattr(cvar, "variable_type", None) or target_type
-                    replacement_cvar = structured_c.CVariable(
-                        replacement, variable_type=replacement_type, codegen=self.codegen
-                    )
-                    variables_in_use.pop(variable, None)
-                    variables_in_use[replacement] = replacement_cvar
-                    unified = getattr(self.codegen.cfunc, "unified_local_vars", None)
-                    if isinstance(unified, dict):
-                        unified.pop(variable, None)
-                        unified[replacement] = {(replacement_cvar, getattr(replacement_cvar, "variable_type", None))}
-                    return replacement_cvar
+            reused = self._reuse_global_cvar_8616(
+                variables_in_use, access, addr, name, scalar_width, target_type
+            )
+            if reused is not None:
+                return reused
         variable = SimMemoryVariable(
             addr, scalar_width, name=f"mem_{addr:04X}", region=getattr(self.codegen.cfunc, "addr", None)
         )
@@ -4382,93 +5157,7 @@ class _DsEsGlobalDerefRun8616:
             return self.global_expr_8616(access)
         return node
     def replace_children(self, root_node: StructuredAstValue) -> bool:
-        if root_node is None:
-            return False
-        node_stack: list[StructuredAstValue] = [root_node]
-        local_changed = False
-        while node_stack:
-            node = node_stack.pop()
-            if node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-                continue
-            node_id = id(node)
-            if node_id in self.seen:
-                continue
-            self.seen.add(node_id)
-
-            for attr in (
-                "statements",
-                "lhs",
-                "rhs",
-                "operand",
-                "expr",
-                "init",
-                "condition",
-                "iteration",
-                "body",
-                "else_node",
-            ):
-                if not hasattr(node, attr):
-                    continue
-                try:
-                    value = getattr(node, attr)
-                except Exception:
-                    continue
-
-                if isinstance(value, list):
-                    for index, item in enumerate(tuple(value)):
-                        if not type(item).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-                            continue
-                        replacement = self.transform(item)
-                        if replacement is not item:
-                            value[index] = replacement
-                            local_changed = True
-                            continue
-                        candidate = value[index]
-                        if type(candidate).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-                            node_stack.append(candidate)
-                elif value is not None:
-                    replacement = self.transform(value)
-                    if replacement is not value:
-                        setattr(node, attr, replacement)
-                        local_changed = True
-                        continue
-                    node_stack.append(value)
-
-            condition_and_nodes = getattr(node, "condition_and_nodes", None)
-            if condition_and_nodes:
-                new_pairs = []
-                pair_changed = False
-                for cond, body in condition_and_nodes:
-                    new_cond = (
-                        self.transform(cond)
-                        if type(cond).__module__.startswith("angr.analyses.decompiler.structured_codegen")
-                        else cond
-                    )
-                    new_body = (
-                        self.transform(body)
-                        if type(body).__module__.startswith("angr.analyses.decompiler.structured_codegen")
-                        else body
-                    )
-                    if new_cond is not cond:
-                        pair_changed = True
-                        local_changed = True
-                    if new_body is not body:
-                        pair_changed = True
-                        local_changed = True
-                    if new_cond is cond and type(new_cond).__module__.startswith(
-                        "angr.analyses.decompiler.structured_codegen"
-                    ):
-                        node_stack.append(new_cond)
-                    if new_body is body and type(new_body).__module__.startswith(
-                        "angr.analyses.decompiler.structured_codegen"
-                    ):
-                        node_stack.append(new_body)
-                    new_pairs.append((new_cond, new_body))
-                if pair_changed:
-                    node.condition_and_nodes = new_pairs
-        return local_changed
-
-
+        return _replace_children_walk_8616(root_node, self.seen, self.transform)
 def lower_stable_ds_es_linear_global_dereferences_8616(
     codegen: StructuredAstValue, project: StructuredAstValue | None = None
 ) -> bool:
@@ -4583,92 +5272,7 @@ class _DsEsGlobalAddrRun8616:
         self.changed = True
         return structured_c.CTypeCast(ptr_type, ptr_type, rebuilt, codegen=self.codegen)
     def replace_children(self, root_node: StructuredAstValue) -> bool:
-        if root_node is None:
-            return False
-        node_stack: list[StructuredAstValue] = [root_node]
-        local_changed = False
-        while node_stack:
-            node = node_stack.pop()
-            if node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-                continue
-            node_id = id(node)
-            if node_id in self.seen:
-                continue
-            self.seen.add(node_id)
-
-            for attr in (
-                "statements",
-                "lhs",
-                "rhs",
-                "operand",
-                "expr",
-                "init",
-                "condition",
-                "iteration",
-                "body",
-                "else_node",
-            ):
-                if not hasattr(node, attr):
-                    continue
-                try:
-                    value = getattr(node, attr)
-                except Exception:
-                    continue
-                if isinstance(value, list):
-                    for index, item in enumerate(tuple(value)):
-                        if not type(item).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-                            continue
-                        replacement = self.transform(item)
-                        if replacement is not item:
-                            value[index] = replacement
-                            local_changed = True
-                            continue
-                        item_candidate = value[index]
-                        if type(item_candidate).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-                            node_stack.append(item_candidate)
-                elif value is not None:
-                    replacement = self.transform(value)
-                    if replacement is not value:
-                        setattr(node, attr, replacement)
-                        local_changed = True
-                        continue
-                    node_stack.append(value)
-
-            condition_and_nodes = getattr(node, "condition_and_nodes", None)
-            if condition_and_nodes:
-                new_pairs = []
-                pair_changed = False
-                for cond, body in condition_and_nodes:
-                    new_cond = (
-                        self.transform(cond)
-                        if type(cond).__module__.startswith("angr.analyses.decompiler.structured_codegen")
-                        else cond
-                    )
-                    if new_cond is not cond:
-                        pair_changed = True
-                        local_changed = True
-                    new_body = (
-                        self.transform(body)
-                        if type(body).__module__.startswith("angr.analyses.decompiler.structured_codegen")
-                        else body
-                    )
-                    if new_body is not body:
-                        pair_changed = True
-                        local_changed = True
-                    if new_cond is cond and type(new_cond).__module__.startswith(
-                        "angr.analyses.decompiler.structured_codegen"
-                    ):
-                        node_stack.append(new_cond)
-                    if new_body is body and type(new_body).__module__.startswith(
-                        "angr.analyses.decompiler.structured_codegen"
-                    ):
-                        node_stack.append(new_body)
-                    new_pairs.append((new_cond, new_body))
-                if pair_changed:
-                    node.condition_and_nodes = new_pairs
-        return local_changed
-
-
+        return _replace_children_walk_8616(root_node, self.seen, self.transform)
 def lower_stable_ds_es_linear_global_addresses_8616(
     codegen: StructuredCodegenValue, project: AngrProjectValue = None
 ) -> bool:
@@ -4703,41 +5307,56 @@ def _direct_global_update_name_8616(project: AngrProjectValue, func_addr: int | 
     return f"g_{displacement & 0xFFFF:04X}"
 
 
+def _linear_block_covered_8616(
+    blocks: tuple[StructuredAstValue, ...],
+    linear_addr: StructuredAstValue,
+    linear_size: StructuredAstValue,
+    linear_insns: StructuredAstValue,
+) -> bool:
+    """Check whether an existing block already covers the linear block."""
+    for block in blocks:
+        block_addr = getattr(block, "addr", None)
+        block_size = getattr(block, "size", None)
+        block_insns = _boundary_tuple_8616(getattr(getattr(block, "capstone", None), "insns", ()) or ())
+        if not all(isinstance(value, int) for value in (linear_addr, linear_size, block_addr, block_size)):
+            continue
+        if (
+            block_addr == linear_addr
+            and block_size >= linear_size
+            and block_insns
+            and len(block_insns) >= len(linear_insns)
+        ):
+            return True
+    return False
+
+
+def _append_linear_block_8616(
+    blocks: tuple[StructuredAstValue, ...],
+    project: StructuredAstValue,
+    function: StructuredAstValue,
+) -> tuple[StructuredAstValue, ...]:
+    """Append the fallback linear block unless an existing block covers it."""
+    linear = _linear_capstone_function_block_8616(project, function)
+    if not linear:
+        return blocks
+    linear_addr = getattr(linear[0], "addr", None)
+    linear_size = getattr(linear[0], "size", None)
+    linear_insns = _boundary_tuple_8616(getattr(getattr(linear[0], "capstone", None), "insns", ()) or ())
+    if _linear_block_covered_8616(blocks, linear_addr, linear_size, linear_insns):
+        return blocks
+    return blocks + linear
+
+
 def _direct_global_update_blocks_8616(
     project: StructuredAstValue, function: StructuredAstValue
 ) -> tuple[StructuredAstValue, ...]:
     """Return candidate blocks for direct stack/global instruction facts."""
-
-    def _append_linear_block(blocks: tuple[StructuredAstValue, ...]) -> tuple[StructuredAstValue, ...]:
-        linear = _linear_capstone_function_block_8616(project, function)
-        if not linear:
-            return blocks
-        linear_addr = getattr(linear[0], "addr", None)
-        linear_size = getattr(linear[0], "size", None)
-        linear_insns = _boundary_tuple_8616(getattr(getattr(linear[0], "capstone", None), "insns", ()) or ())
-        for block in blocks:
-            block_addr = getattr(block, "addr", None)
-            block_size = getattr(block, "size", None)
-            block_insns = _boundary_tuple_8616(getattr(getattr(block, "capstone", None), "insns", ()) or ())
-            if (
-                isinstance(linear_addr, int)
-                and isinstance(linear_size, int)
-                and isinstance(block_addr, int)
-                and isinstance(block_size, int)
-                and block_addr == linear_addr
-                and block_size >= linear_size
-                and block_insns
-                and len(block_insns) >= len(linear_insns)
-            ):
-                return blocks
-        return blocks + linear
-
     local_blocks = _boundary_tuple_8616((getattr(function, "_local_blocks", {}) or {}).values())
     if local_blocks:
-        return _append_linear_block(local_blocks)
+        return _append_linear_block_8616(local_blocks, project, function)
     blocks = _boundary_tuple_8616(getattr(function, "blocks", ()) or ())
     if blocks:
-        return _append_linear_block(blocks)
+        return _append_linear_block_8616(blocks, project, function)
     block_addrs = _boundary_tuple_8616(sorted(getattr(function, "block_addrs_set", ()) or ()))
     if project is None:
         return ()
@@ -4750,8 +5369,117 @@ def _direct_global_update_blocks_8616(
         except Exception:
             continue
     if decoded:
-        return _append_linear_block(tuple(decoded))
+        return _append_linear_block_8616(tuple(decoded), project, function)
     return _linear_capstone_function_block_8616(project, function)
+
+
+def _capstone_candidate_code_8616(
+    candidate_project: StructuredAstValue,
+    load_addr: int,
+    size: int,
+    addr: int,
+    disasm_addr: int,
+    original_project: StructuredAstValue,
+) -> bytes | None:
+    """Load the candidate byte window, returning None on any boundary miss."""
+    loader = getattr(candidate_project, "loader", None)
+    memory = getattr(loader, "memory", None)
+    debug = bool(os.environ.get("INERTIA_DEBUG_STACK_NOISE"))
+    if memory is None:
+        if debug:
+            log.warning(
+                "[linear-capstone] skip no-memory function=%#x load=%#x disasm=%#x original=%s",
+                addr,
+                load_addr,
+                disasm_addr,
+                candidate_project is original_project,
+            )
+        return None
+    try:
+        code = bytes(memory.load(load_addr, size))
+    except Exception as exc:
+        if debug:
+            log.warning(
+                "[linear-capstone] load-failed function=%#x load=%#x disasm=%#x original=%s error=%s",
+                addr,
+                load_addr,
+                disasm_addr,
+                candidate_project is original_project,
+                exc.__class__.__name__,
+            )
+        return None
+    if not code:
+        if debug:
+            log.warning(
+                "[linear-capstone] empty-bytes function=%#x load=%#x disasm=%#x original=%s",
+                addr,
+                load_addr,
+                disasm_addr,
+                candidate_project is original_project,
+            )
+        return None
+    return code
+
+
+def _capstone_candidate_insns_8616(
+    candidate_project: StructuredAstValue,
+    code: bytes,
+    load_addr: int,
+    disasm_addr: int,
+    addr: int,
+    original_project: StructuredAstValue,
+) -> tuple[StructuredAstValue, ...] | None:
+    """Disassemble the candidate window, returning None on any boundary miss."""
+    capstone = getattr(getattr(candidate_project, "arch", None), "capstone", None)
+    if capstone is None:
+        return None
+    debug = bool(os.environ.get("INERTIA_DEBUG_STACK_NOISE"))
+    with contextlib.suppress(Exception):
+        capstone.detail = True
+    try:
+        insns = tuple(capstone.disasm(code, disasm_addr))
+    except Exception as exc:
+        if debug:
+            log.warning(
+                "[linear-capstone] disasm-failed function=%#x load=%#x disasm=%#x original=%s error=%s",
+                addr,
+                load_addr,
+                disasm_addr,
+                candidate_project is original_project,
+                exc.__class__.__name__,
+            )
+        return None
+    if not insns:
+        if debug:
+            log.warning(
+                "[linear-capstone] no-insns function=%#x load=%#x disasm=%#x original=%s bytes=%d",
+                addr,
+                load_addr,
+                disasm_addr,
+                candidate_project is original_project,
+                len(code),
+            )
+        return None
+    if debug:
+        preview = _boundary_tuple_8616(
+            (
+                getattr(insn, "address", None),
+                getattr(insn, "mnemonic", None),
+                getattr(insn, "op_str", None),
+            )
+            for insn in insns[:8]
+        )
+        log.warning(
+            "[linear-capstone] decoded function=%#x load=%#x disasm=%#x original=%s bytes=%d insns=%d preview=%r",
+            addr,
+            load_addr,
+            disasm_addr,
+            candidate_project is original_project,
+            len(code),
+            len(insns),
+            preview,
+        )
+    return insns
 
 
 def _linear_capstone_function_block_8616(
@@ -4784,89 +5512,16 @@ def _linear_capstone_function_block_8616(
         if key in seen:
             continue
         seen.add(key)
-        loader = getattr(candidate_project, "loader", None)
-        memory = getattr(loader, "memory", None)
-        if memory is None:
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                log.warning(
-                    "[linear-capstone] skip no-memory function=%#x load=%#x disasm=%#x original=%s",
-                    addr,
-                    load_addr,
-                    disasm_addr,
-                    candidate_project is original_project,
-                )
+        code = _capstone_candidate_code_8616(
+            candidate_project, load_addr, size, addr, disasm_addr, original_project
+        )
+        if code is None:
             continue
-        try:
-            code = bytes(memory.load(load_addr, size))
-        except Exception as exc:
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                log.warning(
-                    "[linear-capstone] load-failed function=%#x load=%#x disasm=%#x original=%s error=%s",
-                    addr,
-                    load_addr,
-                    disasm_addr,
-                    candidate_project is original_project,
-                    exc.__class__.__name__,
-                )
+        insns = _capstone_candidate_insns_8616(
+            candidate_project, code, load_addr, disasm_addr, addr, original_project
+        )
+        if insns is None:
             continue
-        if not code:
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                log.warning(
-                    "[linear-capstone] empty-bytes function=%#x load=%#x disasm=%#x original=%s",
-                    addr,
-                    load_addr,
-                    disasm_addr,
-                    candidate_project is original_project,
-                )
-            continue
-        capstone = getattr(getattr(candidate_project, "arch", None), "capstone", None)
-        if capstone is None:
-            continue
-        with contextlib.suppress(Exception):
-            capstone.detail = True
-        try:
-            insns = tuple(capstone.disasm(code, disasm_addr))
-        except Exception as exc:
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                log.warning(
-                    "[linear-capstone] disasm-failed function=%#x load=%#x disasm=%#x original=%s error=%s",
-                    addr,
-                    load_addr,
-                    disasm_addr,
-                    candidate_project is original_project,
-                    exc.__class__.__name__,
-                )
-            continue
-        if not insns:
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                log.warning(
-                    "[linear-capstone] no-insns function=%#x load=%#x disasm=%#x original=%s bytes=%d",
-                    addr,
-                    load_addr,
-                    disasm_addr,
-                    candidate_project is original_project,
-                    len(code),
-                )
-            continue
-        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-            preview = _boundary_tuple_8616(
-                (
-                    getattr(insn, "address", None),
-                    getattr(insn, "mnemonic", None),
-                    getattr(insn, "op_str", None),
-                )
-                for insn in insns[:8]
-            )
-            log.warning(
-                "[linear-capstone] decoded function=%#x load=%#x disasm=%#x original=%s bytes=%d insns=%d preview=%r",
-                addr,
-                load_addr,
-                disasm_addr,
-                candidate_project is original_project,
-                len(code),
-                len(insns),
-                preview,
-            )
         return (SimpleNamespace(addr=disasm_addr, size=size, capstone=SimpleNamespace(insns=insns)),)
     return ()
 
@@ -4921,6 +5576,55 @@ def _dedup_sorted_capstone_insns_by_addr_8616(wrappers: StructuredAstValue) -> t
     return tuple(deduped)
 
 
+def _global_update_insn_delta_8616(
+    insn: StructuredAstValue,
+) -> tuple[StructuredAstValue, int] | None:
+    """Decode INC/DEC/ADD/SUB update targets into (operand, signed delta)."""
+    insn_id = getattr(insn, "id", None)
+    operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
+    if insn_id in {X86_INS_INC, X86_INS_DEC}:
+        if len(operands) != 1:
+            return None
+        return operands[0], 1 if insn_id == X86_INS_INC else -1
+    if insn_id in {X86_INS_ADD, X86_INS_SUB}:
+        if len(operands) != 2 or getattr(operands[1], "type", None) != X86_OP_IMM:
+            return None
+        operand = operands[0]
+        width = getattr(operand, "size", None)
+        imm = int(getattr(operands[1], "imm", 0) or 0)
+        if width == 1:
+            imm &= 0xFF
+            if imm & 0x80:
+                imm -= 0x100
+        else:
+            imm &= 0xFFFF
+            if imm & 0x8000:
+                imm -= 0x10000
+        return operand, imm if insn_id == X86_INS_ADD else -imm
+    return None
+
+
+def _global_update_mem_target_8616(
+    operand: StructuredAstValue, insn: StructuredAstValue
+) -> tuple[int, int, int] | None:
+    """Validate a bare-displacement memory target and return (disp, width, addr)."""
+    width = getattr(operand, "size", None)
+    if getattr(operand, "type", None) != X86_OP_MEM or width not in {1, 2}:
+        return None
+    mem = getattr(operand, "mem", None)
+    if mem is None:
+        return None
+    base = getattr(mem, "base", X86_REG_INVALID)
+    index = getattr(mem, "index", X86_REG_INVALID)
+    if base not in {0, X86_REG_INVALID} or index not in {0, X86_REG_INVALID}:
+        return None
+    displacement = getattr(mem, "disp", None)
+    ins_addr = getattr(insn, "address", None)
+    if not isinstance(displacement, int) or not isinstance(ins_addr, int):
+        return None
+    return displacement, int(width), ins_addr
+
+
 def _direct_global_update_instruction_facts_8616(
     project: AngrProjectValue, function: StructuredAstValue
 ) -> tuple[DirectGlobalUpdateFact8616, ...]:
@@ -4931,45 +5635,14 @@ def _direct_global_update_instruction_facts_8616(
     for block in _direct_global_update_blocks_8616(project, function):
         for wrapper in _capstone_insns_for_direct_global_update_8616(project, block):
             insn = getattr(wrapper, "insn", wrapper)
-            insn_id = getattr(insn, "id", None)
-            operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
-            if insn_id in {X86_INS_INC, X86_INS_DEC}:
-                if len(operands) != 1:
-                    continue
-                operand = operands[0]
-                width = getattr(operand, "size", None)
-                delta = 1 if insn_id == X86_INS_INC else -1
-            elif insn_id in {X86_INS_ADD, X86_INS_SUB}:
-                if len(operands) != 2 or getattr(operands[1], "type", None) != X86_OP_IMM:
-                    continue
-                operand = operands[0]
-                width = getattr(operand, "size", None)
-                imm = int(getattr(operands[1], "imm", 0) or 0)
-                if width == 1:
-                    imm &= 0xFF
-                    if imm & 0x80:
-                        imm -= 0x100
-                else:
-                    imm &= 0xFFFF
-                    if imm & 0x8000:
-                        imm -= 0x10000
-                delta = imm if insn_id == X86_INS_ADD else -imm
-            else:
+            decoded = _global_update_insn_delta_8616(insn)
+            if decoded is None:
                 continue
-            width = getattr(operand, "size", None)
-            if getattr(operand, "type", None) != X86_OP_MEM or width not in {1, 2}:
+            operand, delta = decoded
+            mem_target = _global_update_mem_target_8616(operand, insn)
+            if mem_target is None:
                 continue
-            mem = getattr(operand, "mem", None)
-            if mem is None:
-                continue
-            base = getattr(mem, "base", X86_REG_INVALID)
-            index = getattr(mem, "index", X86_REG_INVALID)
-            if base not in {0, X86_REG_INVALID} or index not in {0, X86_REG_INVALID}:
-                continue
-            displacement = getattr(mem, "disp", None)
-            ins_addr = getattr(insn, "address", None)
-            if not isinstance(displacement, int) or not isinstance(ins_addr, int):
-                continue
+            displacement, width, ins_addr = mem_target
             facts.append(
                 DirectGlobalUpdateFact8616(
                     displacement & 0xFFFF,
@@ -4982,6 +5655,216 @@ def _direct_global_update_instruction_facts_8616(
     with contextlib.suppress(Exception):
         function._inertia_direct_global_update_instruction_facts_8616 = result
     return result
+
+
+def _mov_stack_update_fact_8616(
+    insns: StructuredAstValue, index: int, insn: StructuredAstValue, operands: StructuredAstValue
+) -> DirectStackUpdateFact8616 | None:
+    """Recover a read-modify-write update stored through a register MOV."""
+    if getattr(insn, "id", None) != X86_INS_MOV or len(operands) != 2:
+        return None
+    slot = _stack_mem_operand_offset_width_8616(operands[0])
+    if slot is None or getattr(operands[1], "type", None) != X86_OP_REG:
+        return None
+    offset, width = slot
+    reg_id = getattr(operands[1], "reg", None)
+    if not isinstance(reg_id, int):
+        return None
+    update = _previous_register_stack_update_8616(insns, index, reg_id, int(width))
+    if update is None:
+        return None
+    source_offset, delta = update
+    # This collector owns read-modify-write updates.  When the
+    # register was loaded from a different stack slot, the sequence
+    # is an assignment expression and is already represented by a
+    # DirectStackMoveFact8616.  Emitting both facts composes the
+    # destination into its own initializer during replay.
+    if source_offset != offset:
+        return None
+    ins_addr = getattr(insn, "address", None)
+    if not isinstance(ins_addr, int):
+        return None
+    return DirectStackUpdateFact8616(
+        offset,
+        int(width),
+        delta,
+        ins_addr,
+        DirectStackUpdateSourceKind8616.STACK_SLOT,
+        None,
+        source_offset,
+    )
+
+
+def _incdec_stack_update_fact_8616(
+    insn: StructuredAstValue, operands: StructuredAstValue
+) -> DirectStackUpdateFact8616 | None:
+    """Recover a direct stack INC/DEC update."""
+    insn_id = getattr(insn, "id", None)
+    if insn_id not in {X86_INS_INC, X86_INS_DEC}:
+        return None
+    if len(operands) != 1:
+        return None
+    slot = _stack_mem_operand_offset_width_8616(operands[0])
+    if slot is None:
+        return None
+    offset, width = slot
+    ins_addr = getattr(insn, "address", None)
+    if not isinstance(ins_addr, int):
+        return None
+    return DirectStackUpdateFact8616(offset, int(width), 1 if insn_id == X86_INS_INC else -1, ins_addr)
+
+
+def _arith_immediate_update_fact_8616(
+    source: StructuredAstValue,
+    offset: StructuredAstValue,
+    width: StructuredAstValue,
+    sign: int,
+    ins_addr: int,
+    operation: StructuredAstValue,
+) -> DirectStackUpdateFact8616 | None:
+    """Recover an immediate-operand stack arithmetic update."""
+    value = getattr(source, "imm", None)
+    if not isinstance(value, int):
+        return None
+    if operation in {
+        DirectStackUpdateOp8616.SHIFT_LEFT,
+        DirectStackUpdateOp8616.SHIFT_RIGHT,
+    }:
+        value = int(value) & 0x1F
+        if value == 0:
+            return None
+    return DirectStackUpdateFact8616(
+        offset,
+        int(width),
+        sign * abs(int(value)),
+        ins_addr,
+        DirectStackUpdateSourceKind8616.IMMEDIATE,
+        abs(int(value)),
+        None,
+        operation,
+    )
+
+
+def _arith_reg_update_fact_8616(
+    insns: StructuredAstValue,
+    index: int,
+    reg_id: int,
+    offset: StructuredAstValue,
+    width: StructuredAstValue,
+    sign: int,
+    ins_addr: int,
+    operation: StructuredAstValue,
+) -> DirectStackUpdateFact8616 | None:
+    """Recover a register-operand stack arithmetic update."""
+    if operation in {
+        DirectStackUpdateOp8616.SHIFT_LEFT,
+        DirectStackUpdateOp8616.SHIFT_RIGHT,
+    }:
+        immediate = _previous_register_immediate_8616(insns, index, reg_id)
+        if immediate is not None:
+            masked_immediate = immediate & 0x1F
+            if masked_immediate:
+                return DirectStackUpdateFact8616(
+                    offset,
+                    int(width),
+                    0,
+                    ins_addr,
+                    DirectStackUpdateSourceKind8616.IMMEDIATE,
+                    masked_immediate,
+                    None,
+                    operation,
+                )
+            return None
+    source_slot = _previous_stack_load_for_register_8616(insns, index, reg_id)
+    indexed_source = None
+    if source_slot is None:
+        indexed_source = _previous_indexed_pointer_load_for_register_8616(insns, index, reg_id)
+    if source_slot is None and indexed_source is None:
+        return None
+    if indexed_source is not None:
+        source_base_offset, source_index_offset, source_index_scale, source_width = indexed_source
+        if source_width != width:
+            return None
+        return DirectStackUpdateFact8616(
+            offset,
+            int(width),
+            sign,
+            ins_addr,
+            DirectStackUpdateSourceKind8616.INDEXED_POINTER,
+            None,
+            None,
+            operation,
+            source_base_offset,
+            source_index_offset,
+            source_index_scale,
+        )
+    assert source_slot is not None
+    source_offset, source_width = source_slot
+    if source_width != width:
+        return None
+    return DirectStackUpdateFact8616(
+        offset,
+        int(width),
+        sign,
+        ins_addr,
+        DirectStackUpdateSourceKind8616.STACK_SLOT,
+        None,
+        source_offset,
+        operation,
+    )
+
+
+def _arith_stack_update_fact_8616(
+    insns: StructuredAstValue, index: int, insn: StructuredAstValue, operands: StructuredAstValue
+) -> DirectStackUpdateFact8616 | None:
+    """Recover an ADD/SUB/OR/SAL/SHL/SHR stack arithmetic update."""
+    insn_id = getattr(insn, "id", None)
+    if insn_id not in {
+        X86_INS_ADD,
+        X86_INS_SUB,
+        X86_INS_OR,
+        X86_INS_SAL,
+        X86_INS_SHL,
+        X86_INS_SHR,
+    } or len(operands) != 2:
+        return None
+    slot = _stack_mem_operand_offset_width_8616(operands[0])
+    if slot is None:
+        return None
+    offset, width = slot
+    ins_addr = getattr(insn, "address", None)
+    if not isinstance(offset, int) or not isinstance(ins_addr, int):
+        return None
+    operation = {
+        X86_INS_OR: DirectStackUpdateOp8616.OR,
+        X86_INS_SAL: DirectStackUpdateOp8616.SHIFT_LEFT,
+        X86_INS_SHL: DirectStackUpdateOp8616.SHIFT_LEFT,
+        X86_INS_SHR: DirectStackUpdateOp8616.SHIFT_RIGHT,
+    }.get(insn_id, DirectStackUpdateOp8616.ARITHMETIC)
+    sign = -1 if insn_id == X86_INS_SUB else 1
+    source = operands[1]
+    source_type = getattr(source, "type", None)
+    if source_type == X86_OP_IMM:
+        return _arith_immediate_update_fact_8616(source, offset, width, sign, ins_addr, operation)
+    if source_type != X86_OP_REG:
+        return None
+    reg_id = getattr(source, "reg", None)
+    if not isinstance(reg_id, int):
+        return None
+    return _arith_reg_update_fact_8616(insns, index, reg_id, offset, width, sign, ins_addr, operation)
+
+
+def _stack_update_fact_at_8616(
+    insns: StructuredAstValue, index: int, insn: StructuredAstValue
+) -> DirectStackUpdateFact8616 | None:
+    """Collect the stack-update fact for one instruction, if any."""
+    operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
+    fact = _mov_stack_update_fact_8616(insns, index, insn, operands)
+    if fact is None:
+        fact = _incdec_stack_update_fact_8616(insn, operands)
+    if fact is None:
+        fact = _arith_stack_update_fact_8616(insns, index, insn, operands)
+    return fact
 
 
 def _direct_stack_update_instruction_facts_8616(
@@ -4997,174 +5880,9 @@ def _direct_stack_update_instruction_facts_8616(
         insns = _capstone_insns_for_direct_global_update_8616(project, block)
         for index, wrapper in enumerate(insns):
             insn = getattr(wrapper, "insn", wrapper)
-            insn_id = getattr(insn, "id", None)
-            operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
-            if insn_id == X86_INS_MOV and len(operands) == 2:
-                slot = _stack_mem_operand_offset_width_8616(operands[0])
-                if slot is None or getattr(operands[1], "type", None) != X86_OP_REG:
-                    continue
-                offset, width = slot
-                reg_id = getattr(operands[1], "reg", None)
-                if not isinstance(reg_id, int):
-                    continue
-                update = _previous_register_stack_update_8616(insns, index, reg_id, int(width))
-                if update is None:
-                    continue
-                source_offset, delta = update
-                # This collector owns read-modify-write updates.  When the
-                # register was loaded from a different stack slot, the sequence
-                # is an assignment expression and is already represented by a
-                # DirectStackMoveFact8616.  Emitting both facts composes the
-                # destination into its own initializer during replay.
-                if source_offset != offset:
-                    continue
-                ins_addr = getattr(insn, "address", None)
-                if not isinstance(ins_addr, int):
-                    continue
-                facts.append(
-                    DirectStackUpdateFact8616(
-                        offset,
-                        int(width),
-                        delta,
-                        ins_addr,
-                        DirectStackUpdateSourceKind8616.STACK_SLOT,
-                        None,
-                        source_offset,
-                    )
-                )
-                continue
-            if insn_id in {X86_INS_INC, X86_INS_DEC}:
-                if len(operands) != 1:
-                    continue
-                slot = _stack_mem_operand_offset_width_8616(operands[0])
-                if slot is None:
-                    continue
-                offset, width = slot
-                ins_addr = getattr(insn, "address", None)
-                if not isinstance(ins_addr, int):
-                    continue
-                facts.append(
-                    DirectStackUpdateFact8616(offset, int(width), 1 if insn_id == X86_INS_INC else -1, ins_addr)
-                )
-                continue
-
-            if insn_id not in {
-                X86_INS_ADD,
-                X86_INS_SUB,
-                X86_INS_OR,
-                X86_INS_SAL,
-                X86_INS_SHL,
-                X86_INS_SHR,
-            } or len(operands) != 2:
-                continue
-            slot = _stack_mem_operand_offset_width_8616(operands[0])
-            if slot is None:
-                continue
-            offset, width = slot
-            ins_addr = getattr(insn, "address", None)
-            if not isinstance(offset, int) or not isinstance(ins_addr, int):
-                continue
-            operation = {
-                X86_INS_OR: DirectStackUpdateOp8616.OR,
-                X86_INS_SAL: DirectStackUpdateOp8616.SHIFT_LEFT,
-                X86_INS_SHL: DirectStackUpdateOp8616.SHIFT_LEFT,
-                X86_INS_SHR: DirectStackUpdateOp8616.SHIFT_RIGHT,
-            }.get(insn_id, DirectStackUpdateOp8616.ARITHMETIC)
-            sign = -1 if insn_id == X86_INS_SUB else 1
-            source = operands[1]
-            source_type = getattr(source, "type", None)
-            if source_type == X86_OP_IMM:
-                value = getattr(source, "imm", None)
-                if not isinstance(value, int):
-                    continue
-                if operation in {
-                    DirectStackUpdateOp8616.SHIFT_LEFT,
-                    DirectStackUpdateOp8616.SHIFT_RIGHT,
-                }:
-                    value = int(value) & 0x1F
-                    if value == 0:
-                        continue
-                facts.append(
-                    DirectStackUpdateFact8616(
-                        offset,
-                        int(width),
-                        sign * abs(int(value)),
-                        ins_addr,
-                        DirectStackUpdateSourceKind8616.IMMEDIATE,
-                        abs(int(value)),
-                        None,
-                        operation,
-                    )
-                )
-                continue
-            if source_type != X86_OP_REG:
-                continue
-            reg_id = getattr(source, "reg", None)
-            if not isinstance(reg_id, int):
-                continue
-            if operation in {
-                DirectStackUpdateOp8616.SHIFT_LEFT,
-                DirectStackUpdateOp8616.SHIFT_RIGHT,
-            }:
-                immediate = _previous_register_immediate_8616(insns, index, reg_id)
-                if immediate is not None:
-                    masked_immediate = immediate & 0x1F
-                    if masked_immediate:
-                        facts.append(
-                            DirectStackUpdateFact8616(
-                                offset,
-                                int(width),
-                                0,
-                                ins_addr,
-                                DirectStackUpdateSourceKind8616.IMMEDIATE,
-                                masked_immediate,
-                                None,
-                                operation,
-                            )
-                        )
-                    continue
-            source_slot = _previous_stack_load_for_register_8616(insns, index, reg_id)
-            indexed_source = None
-            if source_slot is None:
-                indexed_source = _previous_indexed_pointer_load_for_register_8616(insns, index, reg_id)
-            if source_slot is None and indexed_source is None:
-                continue
-            if indexed_source is not None:
-                source_base_offset, source_index_offset, source_index_scale, source_width = indexed_source
-                if source_width != width:
-                    continue
-                facts.append(
-                    DirectStackUpdateFact8616(
-                        offset,
-                        int(width),
-                        sign,
-                        ins_addr,
-                        DirectStackUpdateSourceKind8616.INDEXED_POINTER,
-                        None,
-                        None,
-                        operation,
-                        source_base_offset,
-                        source_index_offset,
-                        source_index_scale,
-                    )
-                )
-                continue
-            assert source_slot is not None
-            source_offset, source_width = source_slot
-            if source_width != width:
-                continue
-            facts.append(
-                DirectStackUpdateFact8616(
-                    offset,
-                    int(width),
-                    sign,
-                    ins_addr,
-                    DirectStackUpdateSourceKind8616.STACK_SLOT,
-                    None,
-                    source_offset,
-                    operation,
-                )
-            )
+            fact = _stack_update_fact_at_8616(insns, index, insn)
+            if fact is not None:
+                facts.append(fact)
     result = tuple(dict.fromkeys(facts))
     with contextlib.suppress(Exception):
         function._inertia_direct_stack_update_instruction_facts_8616 = result
@@ -5191,6 +5909,29 @@ def _filter_direct_stack_update_facts_for_active_function_8616(
     return tuple(fact for fact in facts if fact.ins_addr >= active_addr)
 
 
+def _previous_incdec_stack_update_8616(
+    insns: tuple[StructuredAstValue, ...],
+    index: int,
+    reg_id: int,
+    width: int,
+    update_operands: StructuredAstValue,
+    update_id: StructuredAstValue,
+) -> tuple[int, int] | None:
+    """Recover the loaded-slot offset carried through a register INC/DEC."""
+    if len(update_operands) != 1:
+        return None
+    target = update_operands[0]
+    if getattr(target, "type", None) != X86_OP_REG or getattr(target, "reg", None) != reg_id:
+        return None
+    loaded = _previous_stack_load_for_register_8616(insns, index - 1, reg_id)
+    if loaded is None:
+        return None
+    source_offset, source_width = loaded
+    if source_width != width:
+        return None
+    return source_offset, 1 if update_id == X86_INS_INC else -1
+
+
 def _previous_register_stack_update_8616(
     insns: tuple[StructuredAstValue, ...],
     index: int,
@@ -5204,18 +5945,7 @@ def _previous_register_stack_update_8616(
     update_operands = _boundary_tuple_8616(getattr(update, "operands", ()) or ())
     update_id = getattr(update, "id", None)
     if update_id in {X86_INS_INC, X86_INS_DEC}:
-        if len(update_operands) != 1:
-            return None
-        target = update_operands[0]
-        if getattr(target, "type", None) != X86_OP_REG or getattr(target, "reg", None) != reg_id:
-            return None
-        loaded = _previous_stack_load_for_register_8616(insns, index - 1, reg_id)
-        if loaded is None:
-            return None
-        source_offset, source_width = loaded
-        if source_width != width:
-            return None
-        return source_offset, 1 if update_id == X86_INS_INC else -1
+        return _previous_incdec_stack_update_8616(insns, index, reg_id, width, update_operands, update_id)
     if update_id not in {X86_INS_ADD, X86_INS_SUB} or len(update_operands) != 2:
         return None
     target, source = update_operands
@@ -5332,6 +6062,24 @@ def _indexed_stack_mem_operand_8616(
     return offset, int(width), index, scale
 
 
+def _index_mem_source_kind_8616(src: StructuredAstValue) -> tuple[str, int] | None:
+    """Classify a MOV memory source as a BP-stack or bare-global load."""
+    if getattr(src, "type", None) != X86_OP_MEM or int(getattr(src, "size", 0) or 0) != 2:
+        return None
+    mem = getattr(src, "mem", None)
+    if mem is None or getattr(mem, "index", X86_REG_INVALID) not in {0, X86_REG_INVALID}:
+        return None
+    displacement = _canonical_stack_offset_8616(getattr(mem, "disp", None))
+    if not isinstance(displacement, int):
+        return None
+    base = getattr(mem, "base", X86_REG_INVALID)
+    if base == X86_REG_BP:
+        return "stack", displacement
+    if base in {0, X86_REG_INVALID}:
+        return "global", displacement & 0xFFFF
+    return None
+
+
 def _immediate_predecessor_index_source_8616(
     insns: tuple[StructuredAstValue, ...], index: int, reg_id: int
 ) -> tuple[str, int] | None:
@@ -5350,20 +6098,7 @@ def _immediate_predecessor_index_source_8616(
     if getattr(src, "type", None) == X86_OP_IMM:
         value = getattr(src, "imm", None)
         return ("immediate", int(value)) if isinstance(value, int) else None
-    if getattr(src, "type", None) != X86_OP_MEM or int(getattr(src, "size", 0) or 0) != 2:
-        return None
-    mem = getattr(src, "mem", None)
-    if mem is None or getattr(mem, "index", X86_REG_INVALID) not in {0, X86_REG_INVALID}:
-        return None
-    displacement = _canonical_stack_offset_8616(getattr(mem, "disp", None))
-    if not isinstance(displacement, int):
-        return None
-    base = getattr(mem, "base", X86_REG_INVALID)
-    if base == X86_REG_BP:
-        return "stack", displacement
-    if base in {0, X86_REG_INVALID}:
-        return "global", displacement & 0xFFFF
-    return None
+    return _index_mem_source_kind_8616(src)
 
 
 _DIRECT_STACK_MOVE_REGISTER_NAMES_8616 = {
@@ -5432,6 +6167,187 @@ def _direct_stack_move_forget_register_8616(
         reg_state.pop("al", None)
 
 
+@dataclass
+class _SegmentedRegTrace8616:
+    """Replay one block's register provenance for segmented-memory sources."""
+
+    insns: tuple[StructuredAstValue, ...]
+    index: int
+    reg_id: int
+    reg_state: dict[str, DirectStackRegisterValue8616] = field(default_factory=dict)
+    target_reg_name: str | None = None
+
+    def _mov_mem_base_value_8616(
+        self, insn: StructuredAstValue, src: StructuredAstValue, dst_name: str
+    ) -> tuple[StructuredAstValue, StructuredAstValue] | None:
+        """Resolve the index offset/shift proven by the memory base register."""
+        mem = getattr(src, "mem", None)
+        if mem is None:
+            return None
+        base_name = _direct_stack_move_register_name_8616(insn, getattr(mem, "base", None))
+        if base_name is None:
+            return None
+        base_value = self.reg_state.get(base_name)
+        if base_value is None:
+            return None
+        if base_value.kind is DirectStackRegisterValueKind8616.STACK_SLOT:
+            return base_value.stack_offset, 0
+        if (
+            base_value.kind is DirectStackRegisterValueKind8616.STACK_SLOT_EXPR
+            and base_value.source_op is DirectStackMoveExpressionOp8616.SHL
+        ):
+            if base_value.source_immediate is None:
+                return None
+            return base_value.stack_offset, base_value.source_immediate
+        return None
+
+    def _mov_mem_src_8616(
+        self, insn: StructuredAstValue, dst: StructuredAstValue, src: StructuredAstValue, dst_name: str
+    ) -> None:
+        """Track a memory load into a register: stack slot or segmented access."""
+        stack_slot = _stack_mem_operand_offset_width_8616(src)
+        if stack_slot is not None:
+            source_offset, source_width = stack_slot
+            self.reg_state[dst_name] = DirectStackRegisterValue8616(
+                DirectStackRegisterValueKind8616.STACK_SLOT,
+                stack_offset=source_offset,
+                width=source_width,
+            )
+            return
+        base_ref = self._mov_mem_base_value_8616(insn, src, dst_name)
+        if base_ref is None:
+            _direct_stack_move_forget_register_8616(self.reg_state, dst_name)
+            return
+        index_offset, index_shift = base_ref
+        mem = getattr(src, "mem", None)
+        segment_name = _direct_stack_move_segment_name_8616(insn, getattr(mem, "segment", None))
+        displacement = getattr(mem, "disp", None)
+        access_width = getattr(src, "size", None)
+        if (
+            segment_name is None
+            or not isinstance(displacement, int)
+            or not isinstance(index_offset, int)
+            or not isinstance(index_shift, int)
+            or access_width not in {1, 2}
+        ):
+            _direct_stack_move_forget_register_8616(self.reg_state, dst_name)
+            return
+        self.reg_state[dst_name] = DirectStackRegisterValue8616(
+            DirectStackRegisterValueKind8616.SEGMENTED_MEMORY,
+            width=int(getattr(dst, "size", 0) or access_width),
+            segment_name=segment_name,
+            displacement=int(displacement),
+            index_stack_offset=int(index_offset),
+            index_shift=int(index_shift),
+            access_width=int(access_width),
+        )
+
+    def _mov_insn_8616(self, pos: int, insn: StructuredAstValue, operands: StructuredAstValue) -> bool:
+        """Track one MOV's register destination; False when not a reg-dst MOV."""
+        if getattr(insn, "id", None) != X86_INS_MOV or len(operands) != 2:
+            return False
+        dst, src = operands
+        if getattr(dst, "type", None) != X86_OP_REG:
+            return True
+        dst_name = _direct_stack_move_register_name_8616(insn, getattr(dst, "reg", None))
+        if dst_name is None:
+            return True
+        if pos == self.index - 1 and getattr(dst, "reg", None) == self.reg_id:
+            self.target_reg_name = dst_name
+        if getattr(src, "type", None) == X86_OP_MEM:
+            self._mov_mem_src_8616(insn, dst, src, dst_name)
+            return True
+        if getattr(src, "type", None) == X86_OP_REG:
+            src_name = _direct_stack_move_register_name_8616(insn, getattr(src, "reg", None))
+            if src_name is None:
+                _direct_stack_move_forget_register_8616(self.reg_state, dst_name)
+                return True
+            src_value = self.reg_state.get(src_name)
+            if src_value is not None:
+                self.reg_state[dst_name] = src_value
+            else:
+                _direct_stack_move_forget_register_8616(self.reg_state, dst_name)
+            return True
+        _direct_stack_move_forget_register_8616(self.reg_state, dst_name)
+        return True
+
+    def _shift_insn_8616(self, insn: StructuredAstValue, operands: StructuredAstValue) -> bool:
+        """Track a SHL/SAL applied to a stack-slot-proven register."""
+        if getattr(insn, "id", None) not in {X86_INS_SHL, X86_INS_SAL} or len(operands) != 2:
+            return False
+        dst, amount = operands
+        if getattr(dst, "type", None) != X86_OP_REG or getattr(amount, "type", None) != X86_OP_IMM:
+            return True
+        reg_name = _direct_stack_move_register_name_8616(insn, getattr(dst, "reg", None))
+        if reg_name is None:
+            return True
+        immediate = getattr(amount, "imm", None)
+        previous = self.reg_state.get(reg_name)
+        if (
+            previous is not None
+            and previous.kind is DirectStackRegisterValueKind8616.STACK_SLOT
+            and isinstance(immediate, int)
+            and immediate >= 0
+        ):
+            self.reg_state[reg_name] = DirectStackRegisterValue8616(
+                DirectStackRegisterValueKind8616.STACK_SLOT_EXPR,
+                stack_offset=previous.stack_offset,
+                width=previous.width,
+                source_op=DirectStackMoveExpressionOp8616.SHL,
+                source_immediate=int(immediate),
+            )
+        else:
+            _direct_stack_move_forget_register_8616(self.reg_state, reg_name)
+        return True
+
+    def _cbw_insn_8616(self, insn: StructuredAstValue) -> bool:
+        """Promote a segmented al value through CBW/CWDE sign extension."""
+        if getattr(insn, "id", None) not in {X86_INS_CBW, X86_INS_CWDE}:
+            return False
+        al_value = self.reg_state.get("al")
+        if al_value is not None and al_value.kind is DirectStackRegisterValueKind8616.SEGMENTED_MEMORY:
+            promoted = DirectStackRegisterValue8616(
+                DirectStackRegisterValueKind8616.SEGMENTED_MEMORY,
+                width=2,
+                segment_name=al_value.segment_name,
+                displacement=al_value.displacement,
+                index_stack_offset=al_value.index_stack_offset,
+                index_shift=al_value.index_shift,
+                access_width=al_value.access_width,
+                sign_extend=True,
+            )
+            self.reg_state["ax"] = promoted
+            self.reg_state["eax"] = promoted
+        else:
+            self.reg_state.pop("ax", None)
+            self.reg_state.pop("eax", None)
+        return True
+
+    def scan_8616(self) -> DirectStackRegisterValue8616 | None:
+        """Replay the block prefix and return the segmented source value."""
+        for pos in range(self.index):
+            insn = getattr(self.insns[pos], "insn", self.insns[pos])
+            operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
+            if self._mov_insn_8616(pos, insn, operands):
+                continue
+            if self._shift_insn_8616(insn, operands):
+                continue
+            if self._cbw_insn_8616(insn):
+                continue
+            if operands and getattr(operands[0], "type", None) == X86_OP_REG:
+                reg_name = _direct_stack_move_register_name_8616(insn, getattr(operands[0], "reg", None))
+                _direct_stack_move_forget_register_8616(self.reg_state, reg_name)
+        if self.target_reg_name is None:
+            last = getattr(self.insns[self.index], "insn", self.insns[self.index])
+            self.target_reg_name = _direct_stack_move_register_name_8616(last, self.reg_id)
+        if self.target_reg_name is None:
+            return None
+        value = self.reg_state.get(self.target_reg_name)
+        if value is None or value.kind is not DirectStackRegisterValueKind8616.SEGMENTED_MEMORY:
+            return None
+        return value
+
+
 def _direct_stack_move_segmented_source_for_register_8616(
     insns: tuple[StructuredAstValue, ...],
     index: int,
@@ -5447,158 +6363,7 @@ def _direct_stack_move_segmented_source_for_register_8616(
     """
     if index <= 0:
         return None
-    reg_state: dict[str, DirectStackRegisterValue8616] = {}
-    target_reg_name: str | None = None
-    for pos in range(index):
-        insn = getattr(insns[pos], "insn", insns[pos])
-        operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
-        insn_id = getattr(insn, "id", None)
-
-        if insn_id == X86_INS_MOV and len(operands) == 2:
-            dst, src = operands
-            if getattr(dst, "type", None) != X86_OP_REG:
-                continue
-            dst_name = _direct_stack_move_register_name_8616(insn, getattr(dst, "reg", None))
-            if dst_name is None:
-                continue
-            if pos == index - 1 and getattr(dst, "reg", None) == reg_id:
-                target_reg_name = dst_name
-
-            if getattr(src, "type", None) == X86_OP_MEM:
-                stack_slot = _stack_mem_operand_offset_width_8616(src)
-                if stack_slot is not None:
-                    source_offset, source_width = stack_slot
-                    reg_state[dst_name] = DirectStackRegisterValue8616(
-                        DirectStackRegisterValueKind8616.STACK_SLOT,
-                        stack_offset=source_offset,
-                        width=source_width,
-                    )
-                    continue
-
-                mem = getattr(src, "mem", None)
-                if mem is None:
-                    _direct_stack_move_forget_register_8616(reg_state, dst_name)
-                    continue
-                base_name = _direct_stack_move_register_name_8616(insn, getattr(mem, "base", None))
-                if base_name is None:
-                    _direct_stack_move_forget_register_8616(reg_state, dst_name)
-                    continue
-                base_value = reg_state.get(base_name)
-                if base_value is None:
-                    _direct_stack_move_forget_register_8616(reg_state, dst_name)
-                    continue
-                if base_value.kind is DirectStackRegisterValueKind8616.STACK_SLOT:
-                    index_offset = base_value.stack_offset
-                    index_shift = 0
-                elif (
-                    base_value.kind is DirectStackRegisterValueKind8616.STACK_SLOT_EXPR
-                    and base_value.source_op is DirectStackMoveExpressionOp8616.SHL
-                ):
-                    index_offset = base_value.stack_offset
-                    if base_value.source_immediate is None:
-                        _direct_stack_move_forget_register_8616(reg_state, dst_name)
-                        continue
-                    index_shift = base_value.source_immediate
-                else:
-                    _direct_stack_move_forget_register_8616(reg_state, dst_name)
-                    continue
-                segment_name = _direct_stack_move_segment_name_8616(insn, getattr(mem, "segment", None))
-                displacement = getattr(mem, "disp", None)
-                access_width = getattr(src, "size", None)
-                if (
-                    segment_name is None
-                    or not isinstance(displacement, int)
-                    or not isinstance(index_offset, int)
-                    or not isinstance(index_shift, int)
-                    or access_width not in {1, 2}
-                ):
-                    _direct_stack_move_forget_register_8616(reg_state, dst_name)
-                    continue
-                reg_state[dst_name] = DirectStackRegisterValue8616(
-                    DirectStackRegisterValueKind8616.SEGMENTED_MEMORY,
-                    width=int(getattr(dst, "size", 0) or access_width),
-                    segment_name=segment_name,
-                    displacement=int(displacement),
-                    index_stack_offset=int(index_offset),
-                    index_shift=int(index_shift),
-                    access_width=int(access_width),
-                )
-                continue
-
-            if getattr(src, "type", None) == X86_OP_REG:
-                src_name = _direct_stack_move_register_name_8616(insn, getattr(src, "reg", None))
-                if src_name is None:
-                    _direct_stack_move_forget_register_8616(reg_state, dst_name)
-                    continue
-                src_value = reg_state.get(src_name)
-                if src_value is not None:
-                    reg_state[dst_name] = src_value
-                else:
-                    _direct_stack_move_forget_register_8616(reg_state, dst_name)
-                continue
-
-            _direct_stack_move_forget_register_8616(reg_state, dst_name)
-            continue
-
-        if insn_id in {X86_INS_SHL, X86_INS_SAL} and len(operands) == 2:
-            dst, amount = operands
-            if getattr(dst, "type", None) != X86_OP_REG or getattr(amount, "type", None) != X86_OP_IMM:
-                continue
-            reg_name = _direct_stack_move_register_name_8616(insn, getattr(dst, "reg", None))
-            if reg_name is None:
-                continue
-            immediate = getattr(amount, "imm", None)
-            previous = reg_state.get(reg_name)
-            if (
-                previous is not None
-                and previous.kind is DirectStackRegisterValueKind8616.STACK_SLOT
-                and isinstance(immediate, int)
-                and immediate >= 0
-            ):
-                reg_state[reg_name] = DirectStackRegisterValue8616(
-                    DirectStackRegisterValueKind8616.STACK_SLOT_EXPR,
-                    stack_offset=previous.stack_offset,
-                    width=previous.width,
-                    source_op=DirectStackMoveExpressionOp8616.SHL,
-                    source_immediate=int(immediate),
-                )
-            else:
-                _direct_stack_move_forget_register_8616(reg_state, reg_name)
-            continue
-
-        if insn_id in {X86_INS_CBW, X86_INS_CWDE}:
-            al_value = reg_state.get("al")
-            if al_value is not None and al_value.kind is DirectStackRegisterValueKind8616.SEGMENTED_MEMORY:
-                promoted = DirectStackRegisterValue8616(
-                    DirectStackRegisterValueKind8616.SEGMENTED_MEMORY,
-                    width=2,
-                    segment_name=al_value.segment_name,
-                    displacement=al_value.displacement,
-                    index_stack_offset=al_value.index_stack_offset,
-                    index_shift=al_value.index_shift,
-                    access_width=al_value.access_width,
-                    sign_extend=True,
-                )
-                reg_state["ax"] = promoted
-                reg_state["eax"] = promoted
-            else:
-                reg_state.pop("ax", None)
-                reg_state.pop("eax", None)
-            continue
-
-        if operands and getattr(operands[0], "type", None) == X86_OP_REG:
-            reg_name = _direct_stack_move_register_name_8616(insn, getattr(operands[0], "reg", None))
-            _direct_stack_move_forget_register_8616(reg_state, reg_name)
-
-    if target_reg_name is None:
-        last = getattr(insns[index], "insn", insns[index])
-        target_reg_name = _direct_stack_move_register_name_8616(last, reg_id)
-    if target_reg_name is None:
-        return None
-    value = reg_state.get(target_reg_name)
-    if value is None or value.kind is not DirectStackRegisterValueKind8616.SEGMENTED_MEMORY:
-        return None
-    return value
+    return _SegmentedRegTrace8616(insns=insns, index=index, reg_id=reg_id).scan_8616()
 
 
 def _direct_global_mem_operand_offset_width_8616(operand: StructuredAstValue) -> tuple[int, int] | None:
@@ -5619,22 +6384,10 @@ def _direct_global_mem_operand_offset_width_8616(operand: StructuredAstValue) ->
     return displacement & 0xFFFF, int(width)
 
 
-def _previous_global_minus_segmented_source_for_register_8616(
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
-    reg_id: int,
-) -> tuple[int, DirectStackRegisterValue8616] | None:
-    """Recover AX = global - signext(indexed byte global) before a BP store."""
-    if index < 4:
-        return None
-    store = getattr(insns[index], "insn", insns[index])
-    target_reg_name = _direct_stack_move_register_name_8616(store, reg_id)
-    if target_reg_name not in {"ax", "eax"}:
-        return None
-
-    neg_insn = getattr(insns[index - 1], "insn", insns[index - 1])
-    sub_insn = getattr(insns[index - 2], "insn", insns[index - 2])
-    cbw_insn = getattr(insns[index - 3], "insn", insns[index - 3])
+def _neg_sub_ax_global_displacement_8616(
+    neg_insn: StructuredAstValue, sub_insn: StructuredAstValue
+) -> int | None:
+    """Return the global displacement for a ``sub ax, [global]; neg ax`` pair."""
     if getattr(neg_insn, "id", None) != X86_INS_NEG:
         return None
     neg_operands = _boundary_tuple_8616(getattr(neg_insn, "operands", ()) or ())
@@ -5653,7 +6406,27 @@ def _previous_global_minus_segmented_source_for_register_8616(
     if global_slot is None:
         return None
     global_displacement, global_width = global_slot
-    if global_width != 2:
+    return global_displacement if global_width == 2 else None
+
+
+def _previous_global_minus_segmented_source_for_register_8616(
+    insns: tuple[StructuredAstValue, ...],
+    index: int,
+    reg_id: int,
+) -> tuple[int, DirectStackRegisterValue8616] | None:
+    """Recover AX = global - signext(indexed byte global) before a BP store."""
+    if index < 4:
+        return None
+    store = getattr(insns[index], "insn", insns[index])
+    target_reg_name = _direct_stack_move_register_name_8616(store, reg_id)
+    if target_reg_name not in {"ax", "eax"}:
+        return None
+
+    neg_insn = getattr(insns[index - 1], "insn", insns[index - 1])
+    sub_insn = getattr(insns[index - 2], "insn", insns[index - 2])
+    cbw_insn = getattr(insns[index - 3], "insn", insns[index - 3])
+    global_displacement = _neg_sub_ax_global_displacement_8616(neg_insn, sub_insn)
+    if global_displacement is None:
         return None
     if getattr(cbw_insn, "id", None) not in {X86_INS_CBW, X86_INS_CWDE}:
         return None
@@ -5827,6 +6600,87 @@ def _previous_indexed_stack_load_for_register_8616(
     return None
 
 
+def _signed_halving_insns_match_8616(
+    sign_extend: StructuredAstValue, subtract: StructuredAstValue, shift: StructuredAstValue
+) -> bool:
+    """Check the ``cwd; sub ax,dx; sar ax,1`` signed-halving idiom."""
+    if getattr(sign_extend, "id", None) not in {X86_INS_CWD, X86_INS_CDQ}:
+        return False
+    if getattr(subtract, "id", None) != X86_INS_SUB:
+        return False
+    sub_operands = _boundary_tuple_8616(getattr(subtract, "operands", ()) or ())
+    if len(sub_operands) != 2:
+        return False
+    if not _register_operand_is_8616(sub_operands[0], X86_REG_AX):
+        return False
+    if not _register_operand_is_8616(sub_operands[1], X86_REG_DX):
+        return False
+    if getattr(shift, "id", None) != X86_INS_SAR:
+        return False
+    shift_operands = _boundary_tuple_8616(getattr(shift, "operands", ()) or ())
+    if len(shift_operands) != 2:
+        return False
+    dst, amount = shift_operands
+    if not _register_operand_is_8616(dst, X86_REG_AX):
+        return False
+    return getattr(amount, "type", None) == X86_OP_IMM and getattr(amount, "imm", None) == 1
+
+
+def _indexed_mem_base_index_regs_8616(src: StructuredAstValue) -> tuple[int, int] | None:
+    """Return (base, index) register ids for a disp-less ``[base+index]`` operand."""
+    mem = getattr(src, "mem", None)
+    if mem is None:
+        return None
+    regs = _boundary_tuple_8616(
+        reg
+        for reg in (getattr(mem, "base", X86_REG_INVALID), getattr(mem, "index", X86_REG_INVALID))
+        if isinstance(reg, int) and reg not in {0, X86_REG_INVALID}
+    )
+    if len(regs) != 2 or getattr(mem, "disp", 0) not in {0, None}:
+        return None
+    return regs
+
+
+def _mov_cx_immediate_8616(insn: StructuredAstValue) -> int | None:
+    """Return the nonzero immediate loaded into CX, or None."""
+    if getattr(insn, "id", None) != X86_INS_MOV:
+        return None
+    operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
+    if len(operands) != 2 or not _register_operand_is_8616(operands[0], X86_REG_CX):
+        return None
+    if getattr(operands[1], "type", None) != X86_OP_IMM:
+        return None
+    imm = getattr(operands[1], "imm", None)
+    return imm if isinstance(imm, int) and imm != 0 else None
+
+
+def _mov_ax_stack_source_8616(insn: StructuredAstValue, width: int) -> int | None:
+    """Return the BP stack source offset for ``mov ax, [bp+off]``, or None."""
+    if getattr(insn, "id", None) != X86_INS_MOV:
+        return None
+    operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
+    if len(operands) != 2 or not _register_operand_is_8616(operands[0], X86_REG_AX):
+        return None
+    source = _stack_mem_operand_offset_width_8616(operands[1])
+    if source is None:
+        return None
+    source_offset, source_width = source
+    return source_offset if source_width == width else None
+
+
+def _indexed_pointer_reg_facts_8616(
+    insns: tuple[StructuredAstValue, ...], index: int, regs: StructuredAstValue
+) -> list[tuple[int, int, int, int]] | None:
+    """Resolve stack-index facts for both [base+index] registers."""
+    reg_facts: list[tuple[int, int, int, int]] = []
+    for mem_reg in regs:
+        fact = _previous_stack_index_for_register_8616(insns, index - 1, mem_reg)
+        if fact is None:
+            return None
+        reg_facts.append((mem_reg, fact.stack_offset, fact.width, fact.byte_scale))
+    return reg_facts
+
+
 def _previous_indexed_pointer_load_for_register_8616(
     insns: tuple[StructuredAstValue, ...],
     index: int,
@@ -5848,22 +6702,12 @@ def _previous_indexed_pointer_load_for_register_8616(
     access_width = getattr(src, "size", None)
     if access_width not in {1, 2}:
         return None
-    mem = getattr(src, "mem", None)
-    if mem is None:
+    regs = _indexed_mem_base_index_regs_8616(src)
+    if regs is None:
         return None
-    regs = _boundary_tuple_8616(
-        reg
-        for reg in (getattr(mem, "base", X86_REG_INVALID), getattr(mem, "index", X86_REG_INVALID))
-        if isinstance(reg, int) and reg not in {0, X86_REG_INVALID}
-    )
-    if len(regs) != 2 or getattr(mem, "disp", 0) not in {0, None}:
+    reg_facts = _indexed_pointer_reg_facts_8616(insns, index, regs)
+    if reg_facts is None:
         return None
-    reg_facts: list[tuple[int, int, int, int]] = []
-    for mem_reg in regs:
-        fact = _previous_stack_index_for_register_8616(insns, index - 1, mem_reg)
-        if fact is None:
-            return None
-        reg_facts.append((mem_reg, fact.stack_offset, fact.width, fact.byte_scale))
     pointer_candidates = [item for item in reg_facts if item[1] > 0 and item[3] == 1]
     index_candidates = [item for item in reg_facts if item[1] < 0 and item[3] == access_width]
     if len(pointer_candidates) != 1 or len(index_candidates) != 1:
@@ -5913,29 +6757,11 @@ def _previous_signed_half_stack_load_for_register_8616(
     """
     if reg_id != X86_REG_AX or width != 2 or index <= 3:
         return None
-    sign_extend = getattr(insns[index - 3], "insn", insns[index - 3])
-    subtract = getattr(insns[index - 2], "insn", insns[index - 2])
-    shift = getattr(insns[index - 1], "insn", insns[index - 1])
-    if getattr(sign_extend, "id", None) not in {X86_INS_CWD, X86_INS_CDQ}:
-        return None
-    if getattr(subtract, "id", None) != X86_INS_SUB:
-        return None
-    sub_operands = _boundary_tuple_8616(getattr(subtract, "operands", ()) or ())
-    if len(sub_operands) != 2:
-        return None
-    if not _register_operand_is_8616(sub_operands[0], X86_REG_AX):
-        return None
-    if not _register_operand_is_8616(sub_operands[1], X86_REG_DX):
-        return None
-    if getattr(shift, "id", None) != X86_INS_SAR:
-        return None
-    shift_operands = _boundary_tuple_8616(getattr(shift, "operands", ()) or ())
-    if len(shift_operands) != 2:
-        return None
-    dst, amount = shift_operands
-    if not _register_operand_is_8616(dst, X86_REG_AX):
-        return None
-    if getattr(amount, "type", None) != X86_OP_IMM or getattr(amount, "imm", None) != 1:
+    if not _signed_halving_insns_match_8616(
+        getattr(insns[index - 3], "insn", insns[index - 3]),
+        getattr(insns[index - 2], "insn", insns[index - 2]),
+        getattr(insns[index - 1], "insn", insns[index - 1]),
+    ):
         return None
     source = _previous_stack_load_for_register_8616(insns, index - 3, X86_REG_AX)
     if source is None:
@@ -5956,28 +6782,11 @@ def _previous_stack_signed_idiv_const_for_register_8616(
     stack_load = getattr(insns[index - 3], "insn", insns[index - 3])
     sign_extend = getattr(insns[index - 2], "insn", insns[index - 2])
     divide = getattr(insns[index - 1], "insn", insns[index - 1])
-    if getattr(const_load, "id", None) != X86_INS_MOV:
+    divisor = _mov_cx_immediate_8616(const_load)
+    if divisor is None:
         return None
-    const_operands = _boundary_tuple_8616(getattr(const_load, "operands", ()) or ())
-    if len(const_operands) != 2:
-        return None
-    if not _register_operand_is_8616(const_operands[0], X86_REG_CX):
-        return None
-    if getattr(const_operands[1], "type", None) != X86_OP_IMM:
-        return None
-    divisor = getattr(const_operands[1], "imm", None)
-    if not isinstance(divisor, int) or divisor == 0:
-        return None
-    if getattr(stack_load, "id", None) != X86_INS_MOV:
-        return None
-    stack_operands = _boundary_tuple_8616(getattr(stack_load, "operands", ()) or ())
-    if len(stack_operands) != 2 or not _register_operand_is_8616(stack_operands[0], X86_REG_AX):
-        return None
-    source = _stack_mem_operand_offset_width_8616(stack_operands[1])
-    if source is None:
-        return None
-    source_offset, source_width = source
-    if source_width != width:
+    source_offset = _mov_ax_stack_source_8616(stack_load, width)
+    if source_offset is None:
         return None
     if getattr(sign_extend, "id", None) not in {X86_INS_CWD, X86_INS_CDQ}:
         return None
@@ -6010,26 +6819,7 @@ def _previous_global_signed_half_for_register_8616(
     global_displacement, global_width = global_slot
     if global_width != width:
         return None
-    if getattr(sign_extend, "id", None) not in {X86_INS_CWD, X86_INS_CDQ}:
-        return None
-    if getattr(subtract, "id", None) != X86_INS_SUB:
-        return None
-    sub_operands = _boundary_tuple_8616(getattr(subtract, "operands", ()) or ())
-    if (
-        len(sub_operands) != 2
-        or not _register_operand_is_8616(sub_operands[0], X86_REG_AX)
-        or not _register_operand_is_8616(sub_operands[1], X86_REG_DX)
-    ):
-        return None
-    if getattr(shift, "id", None) != X86_INS_SAR:
-        return None
-    shift_operands = _boundary_tuple_8616(getattr(shift, "operands", ()) or ())
-    if (
-        len(shift_operands) != 2
-        or not _register_operand_is_8616(shift_operands[0], X86_REG_AX)
-        or getattr(shift_operands[1], "type", None) != X86_OP_IMM
-        or getattr(shift_operands[1], "imm", None) != 1
-    ):
+    if not _signed_halving_insns_match_8616(sign_extend, subtract, shift):
         return None
     return global_displacement, 2, DirectStackMoveExpressionOp8616.SIGNED_DIV2
 
@@ -6177,14 +6967,10 @@ def _project_main_object_min_addr_8616(project: StructuredAstValue) -> int | Non
     return int(min_addr) if isinstance(min_addr, int) else None
 
 
-def _direct_stack_move_call_target_candidates_8616(
-    project: StructuredAstValue,
-    target: int,
-    *,
-    include_padding_aliases: bool = True,
-) -> tuple[tuple[StructuredAstValue, int], ...]:
-    """Return coordinate-space candidates for a direct stack code offset."""
-    target = int(target)
+def _raw_call_target_candidates_8616(
+    project: StructuredAstValue, target: int
+) -> list[tuple[StructuredAstValue, int]]:
+    """Build raw (project, address) candidates across coordinate spaces."""
     candidates: list[tuple[StructuredAstValue, int]] = [(project, target)]
     delta = getattr(project, "_inertia_original_linear_delta", None)
     original_project = getattr(project, "_inertia_original_project", None)
@@ -6202,6 +6988,13 @@ def _direct_stack_move_call_target_candidates_8616(
             image_base = _project_main_object_min_addr_8616(candidate_project)
             if isinstance(image_base, int):
                 candidates.append((candidate_project, image_base + target))
+    return candidates
+
+
+def _dedup_call_target_candidates_8616(
+    candidates: list[tuple[StructuredAstValue, int]], include_padding_aliases: bool
+) -> tuple[tuple[StructuredAstValue, int], ...]:
+    """Canonicalize padding aliases and deduplicate by (project, address)."""
     canonicalized_candidates: list[tuple[StructuredAstValue, int]] = []
     for candidate_project, candidate_target in candidates:
         if include_padding_aliases:
@@ -6224,6 +7017,17 @@ def _direct_stack_move_call_target_candidates_8616(
         seen.add(key)
         deduped.append((candidate_project, int(candidate_target)))
     return tuple(deduped)
+
+
+def _direct_stack_move_call_target_candidates_8616(
+    project: StructuredAstValue,
+    target: int,
+    *,
+    include_padding_aliases: bool = True,
+) -> tuple[tuple[StructuredAstValue, int], ...]:
+    """Return coordinate-space candidates for a direct stack code offset."""
+    candidates = _raw_call_target_candidates_8616(project, int(target))
+    return _dedup_call_target_candidates_8616(candidates, include_padding_aliases)
 
 
 def _normalize_direct_stack_function_name_8616(raw_name: str | None) -> str | None:
@@ -6373,14 +7177,8 @@ def _direct_zero_arg_call_before_8616(
     return callee_name, resolved_call_target, call_addr
 
 
-def _signed_idiv_remainder_stack_store_fact_at_8616(
-    project: AngrProjectValue,
-    insns: tuple[StructuredAstValue, ...],
-    index: int,
-) -> DirectStackMoveFact8616 | None:
-    if index <= 3:
-        return None
-    store = getattr(insns[index], "insn", insns[index])
+def _dx_stack_store_offset_8616(store: StructuredAstValue) -> int | None:
+    """Return the destination offset of a ``mov [bp+dst], dx`` store."""
     store_operands = _boundary_tuple_8616(getattr(store, "operands", ()) or ())
     if len(store_operands) != 2:
         return None
@@ -6388,11 +7186,11 @@ def _signed_idiv_remainder_stack_store_fact_at_8616(
     if dst_slot is None or not _register_operand_is_8616(store_operands[1], X86_REG_DX):
         return None
     dst_offset, dst_width = dst_slot
-    if dst_width != 2:
-        return None
+    return dst_offset if dst_width == 2 else None
 
-    idiv_insn = getattr(insns[index - 1], "insn", insns[index - 1])
-    sign_extend = getattr(insns[index - 2], "insn", insns[index - 2])
+
+def _idiv_divisor_reg_8616(idiv_insn: StructuredAstValue, sign_extend: StructuredAstValue) -> int | None:
+    """Return the divisor register of a ``cwd; idiv r`` pair, or None."""
     if getattr(idiv_insn, "id", None) != X86_INS_IDIV or getattr(sign_extend, "id", None) not in {
         X86_INS_CWD,
         X86_INS_CDQ,
@@ -6402,7 +7200,26 @@ def _signed_idiv_remainder_stack_store_fact_at_8616(
     if len(idiv_operands) != 1 or getattr(idiv_operands[0], "type", None) != X86_OP_REG:
         return None
     divisor_reg = getattr(idiv_operands[0], "reg", None)
-    if not isinstance(divisor_reg, int):
+    return divisor_reg if isinstance(divisor_reg, int) else None
+
+
+def _signed_idiv_remainder_stack_store_fact_at_8616(
+    project: AngrProjectValue,
+    insns: tuple[StructuredAstValue, ...],
+    index: int,
+) -> DirectStackMoveFact8616 | None:
+    if index <= 3:
+        return None
+    store = getattr(insns[index], "insn", insns[index])
+    dst_offset = _dx_stack_store_offset_8616(store)
+    if dst_offset is None:
+        return None
+
+    divisor_reg = _idiv_divisor_reg_8616(
+        getattr(insns[index - 1], "insn", insns[index - 1]),
+        getattr(insns[index - 2], "insn", insns[index - 2]),
+    )
+    if divisor_reg is None:
         return None
     divisor = _previous_stack_load_with_adjust_for_register_8616(insns, index - 2, divisor_reg, 2)
     if divisor is None:
@@ -6436,6 +7253,108 @@ def _signed_idiv_remainder_stack_store_fact_at_8616(
     )
 
 
+def _callsite_proves_zero_args_8616(
+    callsite_inventory: Mapping[int, CallsiteSummary8616] | None,
+    call_ins_addr: StructuredAstValue,
+    resolved_call_target: StructuredAstValue,
+) -> bool:
+    """Check whether the callsite summary proves a zero-argument callee."""
+    callsite_summary = (
+        callsite_inventory.get(call_ins_addr)
+        if isinstance(call_ins_addr, int) and callsite_inventory is not None
+        else None
+    )
+    return (
+        isinstance(callsite_summary, CallsiteSummary8616)
+        and callsite_summary.callsite_addr == call_ins_addr
+        and callsite_summary.target_addr == resolved_call_target
+        and callsite_summary.arg_count == 0
+        and not callsite_summary.arg_widths
+        and callsite_summary.stack_cleanup == 0
+    )
+
+
+def _wide_call_arith_call_gate_8616(
+    project: StructuredAstValue,
+    insns: tuple[StructuredAstValue, ...],
+    index: int,
+    callsite_inventory: Mapping[int, CallsiteSummary8616] | None,
+) -> tuple[StructuredAstValue, ...] | str | None:
+    """Validate the call arm, returning (callee_name, call_target, call_addr) or a reason."""
+    if index + 4 >= len(insns):
+        return None
+    call_insn = getattr(insns[index], "insn", insns[index])
+    if getattr(call_insn, "id", None) not in {X86_INS_CALL, X86_INS_LCALL}:
+        return None
+    call_operands = _boundary_tuple_8616(getattr(call_insn, "operands", ()) or ())
+    if len(call_operands) != 1:
+        return "call_operand_count"
+    call_target = _direct_call_target_from_operand_8616(call_operands[0])
+    if call_target is None:
+        return "call_target"
+    callee_name, callee, resolved_call_target = _callee_name_for_direct_stack_move_8616(project, call_target)
+    call_ins_addr = getattr(call_insn, "address", None)
+    if not _callee_has_zero_args_8616(callee, callee_name) and not _callsite_proves_zero_args_8616(
+        callsite_inventory, call_ins_addr, resolved_call_target
+    ):
+        return f"callee_not_zero_args:{callee_name}"
+    return (callee_name, resolved_call_target, call_ins_addr)
+
+
+def _wide_call_arith_gate_8616(
+    insns: tuple[StructuredAstValue, ...], index: int
+) -> tuple[StructuredAstValue, ...] | str:
+    """Validate the ADD/ADC arm, returning (arg_offset, add_addr, adc_addr) or a reason."""
+    add_insn = getattr(insns[index + 1], "insn", insns[index + 1])
+    adc_insn = getattr(insns[index + 2], "insn", insns[index + 2])
+    if getattr(add_insn, "id", None) != X86_INS_ADD or getattr(adc_insn, "id", None) != X86_INS_ADC:
+        return "not_add_adc"
+    add_operands = _boundary_tuple_8616(getattr(add_insn, "operands", ()) or ())
+    adc_operands = _boundary_tuple_8616(getattr(adc_insn, "operands", ()) or ())
+    if len(add_operands) != 2 or len(adc_operands) != 2:
+        return "arith_operand_count"
+    if not _register_operand_is_8616(add_operands[0], X86_REG_AX):
+        return "add_dst_not_ax"
+    if not _register_operand_is_8616(adc_operands[0], X86_REG_DX):
+        return "adc_dst_not_dx"
+    arg_lo = _stack_mem_operand_offset_width_8616(add_operands[1])
+    arg_hi = _stack_mem_operand_offset_width_8616(adc_operands[1])
+    if arg_lo is None or arg_hi is None:
+        return "arg_not_stack"
+    arg_offset, arg_width = arg_lo
+    arg_hi_offset, arg_hi_width = arg_hi
+    if arg_width != 2 or arg_hi_width != 2 or arg_hi_offset != arg_offset + 2:
+        return "arg_not_wide_pair"
+    return (arg_offset, getattr(add_insn, "address", None), getattr(adc_insn, "address", None))
+
+
+def _wide_call_mov_gate_8616(
+    insns: tuple[StructuredAstValue, ...], index: int
+) -> tuple[StructuredAstValue, ...] | str:
+    """Validate the MOV pair arm, returning (dst_offset, lo_addr, hi_addr) or a reason."""
+    mov_lo = getattr(insns[index + 3], "insn", insns[index + 3])
+    mov_hi = getattr(insns[index + 4], "insn", insns[index + 4])
+    if getattr(mov_lo, "id", None) != X86_INS_MOV or getattr(mov_hi, "id", None) != X86_INS_MOV:
+        return "not_mov_pair"
+    mov_lo_operands = _boundary_tuple_8616(getattr(mov_lo, "operands", ()) or ())
+    mov_hi_operands = _boundary_tuple_8616(getattr(mov_hi, "operands", ()) or ())
+    if len(mov_lo_operands) != 2 or len(mov_hi_operands) != 2:
+        return "mov_operand_count"
+    if not _register_operand_is_8616(mov_lo_operands[1], X86_REG_AX):
+        return "mov_lo_src_not_ax"
+    if not _register_operand_is_8616(mov_hi_operands[1], X86_REG_DX):
+        return "mov_hi_src_not_dx"
+    dst_lo = _stack_mem_operand_offset_width_8616(mov_lo_operands[0])
+    dst_hi = _stack_mem_operand_offset_width_8616(mov_hi_operands[0])
+    if dst_lo is None or dst_hi is None:
+        return "dst_not_stack"
+    dst_offset, dst_width = dst_lo
+    dst_hi_offset, dst_hi_width = dst_hi
+    if dst_width != 2 or dst_hi_width != 2 or dst_hi_offset != dst_offset + 2:
+        return "dst_not_wide_pair"
+    return (dst_offset, getattr(mov_lo, "address", None), getattr(mov_hi, "address", None))
+
+
 def _wide_call_return_stack_arith_fact_at_8616(
     project: StructuredAstValue,
     insns: tuple[StructuredAstValue, ...],
@@ -6460,101 +7379,25 @@ def _wide_call_return_stack_arith_fact_at_8616(
             )
         log.warning("[wide-call-return-stack-arith] reject reason=%s index=%d window=%r", reason, index, tuple(window))
 
-    if index + 4 >= len(insns):
+    call_gate = _wide_call_arith_call_gate_8616(project, insns, index, callsite_inventory)
+    if not isinstance(call_gate, tuple):
+        if call_gate is not None:
+            _debug_reject(call_gate)
         return None
-    call_insn = getattr(insns[index], "insn", insns[index])
-    add_insn = getattr(insns[index + 1], "insn", insns[index + 1])
-    adc_insn = getattr(insns[index + 2], "insn", insns[index + 2])
-    mov_lo = getattr(insns[index + 3], "insn", insns[index + 3])
-    mov_hi = getattr(insns[index + 4], "insn", insns[index + 4])
-    if getattr(call_insn, "id", None) not in {X86_INS_CALL, X86_INS_LCALL}:
-        if debug_stack_noise and getattr(call_insn, "id", None) in {X86_INS_CALL, X86_INS_LCALL}:
-            _debug_reject("window_too_short")
+    callee_name, resolved_call_target, call_ins_addr = call_gate
+    arith = _wide_call_arith_gate_8616(insns, index)
+    if not isinstance(arith, tuple):
+        _debug_reject(arith)
         return None
-    call_operands = _boundary_tuple_8616(getattr(call_insn, "operands", ()) or ())
-    if len(call_operands) != 1:
-        _debug_reject("call_operand_count")
+    arg_offset, add_ins_addr, adc_ins_addr = arith
+    mov = _wide_call_mov_gate_8616(insns, index)
+    if not isinstance(mov, tuple):
+        _debug_reject(mov)
         return None
-    call_target = _direct_call_target_from_operand_8616(call_operands[0])
-    if call_target is None:
-        _debug_reject("call_target")
-        return None
-    callee_name, callee, resolved_call_target = _callee_name_for_direct_stack_move_8616(project, call_target)
-    call_ins_addr = getattr(call_insn, "address", None)
-    callsite_summary = (
-        callsite_inventory.get(call_ins_addr)
-        if isinstance(call_ins_addr, int) and callsite_inventory is not None
-        else None
-    )
-    summary_proves_zero_args = (
-        isinstance(callsite_summary, CallsiteSummary8616)
-        and callsite_summary.callsite_addr == call_ins_addr
-        and callsite_summary.target_addr == resolved_call_target
-        and callsite_summary.arg_count == 0
-        and not callsite_summary.arg_widths
-        and callsite_summary.stack_cleanup == 0
-    )
-    if not _callee_has_zero_args_8616(callee, callee_name) and not summary_proves_zero_args:
-        _debug_reject(f"callee_not_zero_args:{callee_name}")
-        return None
-    if getattr(add_insn, "id", None) != X86_INS_ADD or getattr(adc_insn, "id", None) != X86_INS_ADC:
-        _debug_reject("not_add_adc")
-        return None
-    add_operands = _boundary_tuple_8616(getattr(add_insn, "operands", ()) or ())
-    adc_operands = _boundary_tuple_8616(getattr(adc_insn, "operands", ()) or ())
-    if len(add_operands) != 2 or len(adc_operands) != 2:
-        _debug_reject("arith_operand_count")
-        return None
-    if not _register_operand_is_8616(add_operands[0], X86_REG_AX):
-        _debug_reject("add_dst_not_ax")
-        return None
-    if not _register_operand_is_8616(adc_operands[0], X86_REG_DX):
-        _debug_reject("adc_dst_not_dx")
-        return None
-    arg_lo = _stack_mem_operand_offset_width_8616(add_operands[1])
-    arg_hi = _stack_mem_operand_offset_width_8616(adc_operands[1])
-    if arg_lo is None or arg_hi is None:
-        _debug_reject("arg_not_stack")
-        return None
-    arg_offset, arg_width = arg_lo
-    arg_hi_offset, arg_hi_width = arg_hi
-    if arg_width != 2 or arg_hi_width != 2 or arg_hi_offset != arg_offset + 2:
-        _debug_reject("arg_not_wide_pair")
-        return None
-    if getattr(mov_lo, "id", None) != X86_INS_MOV or getattr(mov_hi, "id", None) != X86_INS_MOV:
-        _debug_reject("not_mov_pair")
-        return None
-    mov_lo_operands = _boundary_tuple_8616(getattr(mov_lo, "operands", ()) or ())
-    mov_hi_operands = _boundary_tuple_8616(getattr(mov_hi, "operands", ()) or ())
-    if len(mov_lo_operands) != 2 or len(mov_hi_operands) != 2:
-        _debug_reject("mov_operand_count")
-        return None
-    if not _register_operand_is_8616(mov_lo_operands[1], X86_REG_AX):
-        _debug_reject("mov_lo_src_not_ax")
-        return None
-    if not _register_operand_is_8616(mov_hi_operands[1], X86_REG_DX):
-        _debug_reject("mov_hi_src_not_dx")
-        return None
-    dst_lo = _stack_mem_operand_offset_width_8616(mov_lo_operands[0])
-    dst_hi = _stack_mem_operand_offset_width_8616(mov_hi_operands[0])
-    if dst_lo is None or dst_hi is None:
-        _debug_reject("dst_not_stack")
-        return None
-    dst_offset, dst_width = dst_lo
-    dst_hi_offset, dst_hi_width = dst_hi
-    if dst_width != 2 or dst_hi_width != 2 or dst_hi_offset != dst_offset + 2:
-        _debug_reject("dst_not_wide_pair")
-        return None
-    ins_addr = getattr(mov_lo, "address", None)
-    add_ins_addr = getattr(add_insn, "address", None)
-    adc_ins_addr = getattr(adc_insn, "address", None)
-    dst_high_ins_addr = getattr(mov_hi, "address", None)
-    if (
-        not isinstance(ins_addr, int)
-        or not isinstance(call_ins_addr, int)
-        or not isinstance(add_ins_addr, int)
-        or not isinstance(adc_ins_addr, int)
-        or not isinstance(dst_high_ins_addr, int)
+    dst_offset, ins_addr, dst_high_ins_addr = mov
+    if not all(
+        isinstance(value, int)
+        for value in (ins_addr, call_ins_addr, add_ins_addr, adc_ins_addr, dst_high_ins_addr)
     ):
         return None
     return DirectStackMoveFact8616(
@@ -6571,6 +7414,418 @@ def _wide_call_return_stack_arith_fact_at_8616(
         source_high_arith_ins_addr=adc_ins_addr,
         dst_high_ins_addr=dst_high_ins_addr,
     )
+
+
+
+
+@dataclass
+class _DirectStackMoveFactCollector8616:
+    """Classify one MOV-to-stack instruction into a typed source fact."""
+
+    project: StructuredAstValue
+    callsite_inventory: StructuredAstValue
+    insns: StructuredAstValue
+    index: int
+    insn: StructuredAstValue
+    operands: StructuredAstValue
+    facts: list[DirectStackMoveFact8616]
+    dst_offset: StructuredAstValue = None
+    width: StructuredAstValue = None
+    ins_addr: StructuredAstValue = None
+    dst_index_global_displacement: StructuredAstValue = None
+    dst_index_stack_offset: StructuredAstValue = None
+    dst_index_immediate: StructuredAstValue = None
+    dst_index_scale: int = 1
+    dst_index_byte_scale: int = 1
+    source_register_offset: int | None = None
+    reg_id: StructuredAstValue = None
+
+    def append_destination_fact(self, fact: DirectStackMoveFact8616) -> None:
+        """Attach the current MOV destination's typed index evidence."""
+        self.facts.append(
+            replace(
+                fact,
+                source_register_offset=self.source_register_offset,
+                dst_index_global_displacement=self.dst_index_global_displacement,
+                dst_index_stack_offset=self.dst_index_stack_offset,
+                dst_index_immediate=self.dst_index_immediate,
+                dst_index_scale=self.dst_index_scale,
+                dst_index_byte_scale=self.dst_index_byte_scale,
+            )
+        )
+
+    def classify_destination_8616(self) -> bool:
+        """Resolve the destination offset/width and typed index evidence."""
+        dst_slot = _stack_mem_operand_offset_width_8616(self.operands[0])
+        indexed_dst = _indexed_stack_mem_operand_8616(self.operands[0])
+        if dst_slot is None and indexed_dst is None:
+            return False
+        if indexed_dst is not None:
+            self.dst_offset, self.width, dst_index_reg, self.dst_index_scale = indexed_dst
+            index_source = _immediate_predecessor_index_source_8616(self.insns, self.index, dst_index_reg)
+            if index_source is None:
+                stack_index = _previous_stack_index_for_register_8616(self.insns, self.index, dst_index_reg)
+                if stack_index is None or stack_index.width != 2:
+                    return False
+                self.dst_index_stack_offset = stack_index.stack_offset
+                self.dst_index_byte_scale = stack_index.byte_scale * self.dst_index_scale
+            else:
+                index_kind, index_value = index_source
+                if index_kind == "global":
+                    self.dst_index_global_displacement = index_value
+                elif index_kind == "stack":
+                    self.dst_index_stack_offset = index_value
+                else:
+                    self.dst_index_immediate = index_value
+                self.dst_index_byte_scale = self.dst_index_scale
+        else:
+            assert dst_slot is not None
+            self.dst_offset, self.width = dst_slot
+        ins_addr = getattr(self.insn, "address", None)
+        if not isinstance(ins_addr, int):
+            return False
+        self.ins_addr = ins_addr
+        return True
+
+    def _emit_immediate_source_8616(self, src: StructuredAstValue) -> bool:
+        """Emit an IMMEDIATE fact for a constant source operand."""
+        value = getattr(src, "imm", None)
+        if not isinstance(value, int):
+            return True
+        self.append_destination_fact(
+            DirectStackMoveFact8616(
+                self.dst_offset,
+                self.width,
+                DirectStackMoveSourceKind8616.IMMEDIATE,
+                self.ins_addr,
+                source_value=value,
+            )
+        )
+        return True
+
+    def _try_call_return_store_8616(self, register_name: StructuredAstValue) -> bool:
+        """Emit a ZERO_ARG_CALL_RETURN fact when the source is a call result."""
+        call_return_store = recover_zero_arg_call_return_stack_store_8616(
+            self.callsite_inventory,
+            store_ins_addr=self.ins_addr,
+            dst_offset=self.dst_offset,
+            width=self.width,
+            source_register_name=register_name,
+        )
+        if call_return_store is None:
+            return False
+        callee_name, _callee, resolved_target = _callee_name_for_direct_stack_move_8616(
+            self.project,
+            call_return_store.target_addr,
+        )
+        self.append_destination_fact(
+            DirectStackMoveFact8616(
+                self.dst_offset,
+                self.width,
+                DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN,
+                self.ins_addr,
+                source_call_target=resolved_target,
+                source_call_name=callee_name,
+                source_call_ins_addr=call_return_store.callsite_addr,
+            )
+        )
+        return True
+
+    def _try_binary_stack_expr_8616(self) -> bool:
+        """Emit a STACK_SLOT_BINARY_EXPR fact for a proven register binop."""
+        binary_stack_expr = _previous_binary_stack_expr_for_register_8616(
+            self.insns, self.index, self.reg_id, self.width
+        )
+        if binary_stack_expr is None:
+            return False
+        source_offset, source_rhs_offset, source_op = binary_stack_expr
+        self.append_destination_fact(
+            DirectStackMoveFact8616(
+                self.dst_offset,
+                self.width,
+                DirectStackMoveSourceKind8616.STACK_SLOT_BINARY_EXPR,
+                self.ins_addr,
+                source_offset=source_offset,
+                source_rhs_offset=source_rhs_offset,
+                source_op=source_op,
+            )
+        )
+        return True
+
+    def _try_prev_load_8616(self) -> bool:
+        """Emit a STACK_SLOT fact for a same-width proven stack load."""
+        prev_load = _previous_stack_load_for_register_8616(self.insns, self.index, self.reg_id)
+        if prev_load is None:
+            return False
+        source_offset, source_width = prev_load
+        if source_width != self.width:
+            return True
+        self.append_destination_fact(
+            DirectStackMoveFact8616(
+                self.dst_offset,
+                self.width,
+                DirectStackMoveSourceKind8616.STACK_SLOT,
+                self.ins_addr,
+                source_offset=source_offset,
+            )
+        )
+        return True
+
+    def _try_signed_byte_load_8616(self) -> bool:
+        """Emit a sign-extended STACK_SLOT fact for a proven byte load."""
+        signed_byte_load = _previous_signed_byte_stack_load_for_register_8616(
+            self.insns, self.index, self.reg_id, self.width
+        )
+        if signed_byte_load is None:
+            return False
+        source_offset, source_width = signed_byte_load
+        self.append_destination_fact(
+            DirectStackMoveFact8616(
+                self.dst_offset,
+                self.width,
+                DirectStackMoveSourceKind8616.STACK_SLOT,
+                self.ins_addr,
+                source_offset=source_offset,
+                source_access_width=source_width,
+                source_sign_extend=True,
+            )
+        )
+        return True
+
+    def _try_indexed_stack_load_8616(self) -> bool:
+        """Emit a STACK_AGGREGATE_ELEMENT fact for a proven indexed load."""
+        indexed_stack_load = _previous_indexed_stack_load_for_register_8616(
+            self.insns, self.index, self.reg_id
+        )
+        if indexed_stack_load is None or indexed_stack_load.access_width != self.width:
+            return False
+        self.append_destination_fact(
+            DirectStackMoveFact8616(
+                self.dst_offset,
+                self.width,
+                DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
+                self.ins_addr,
+                source_aggregate_base_offset=indexed_stack_load.base_offset,
+                source_index_offset=indexed_stack_load.index.stack_offset,
+                source_index_byte_scale=indexed_stack_load.index.byte_scale,
+                source_access_width=indexed_stack_load.access_width,
+            )
+        )
+        return True
+
+    def _expr_load_8616(self) -> StructuredAstValue:
+        """Resolve the stack-derived expression load evidence for the register."""
+        expr_load = _previous_shifted_stack_load_for_register_8616(
+            self.insns, self.index, self.reg_id, self.width
+        )
+        if expr_load is None:
+            adjusted_load = _previous_stack_load_with_adjust_for_register_8616(
+                self.insns, self.index, self.reg_id, self.width
+            )
+            if adjusted_load is not None:
+                source_offset, adjustment, _load_index = adjusted_load
+                if adjustment != 0:
+                    expr_load = (source_offset, adjustment, DirectStackMoveExpressionOp8616.ADD)
+        if expr_load is None:
+            expr_load = _previous_signed_half_stack_load_for_register_8616(
+                self.insns, self.index, self.reg_id, self.width
+            )
+        if expr_load is None:
+            expr_load = _previous_stack_signed_idiv_const_for_register_8616(
+                self.insns, self.index, self.reg_id, self.width
+            )
+        return expr_load
+
+    def _try_global_adjusted_8616(self) -> bool:
+        """Emit a GLOBAL_EXPR fact for an adjusted proven global load."""
+        global_adjusted_load = _previous_global_load_with_adjust_for_register_8616(
+            self.insns,
+            self.index,
+            self.reg_id,
+            self.width,
+        )
+        if global_adjusted_load is not None:
+            global_displacement, adjustment = global_adjusted_load
+            self.append_destination_fact(
+                DirectStackMoveFact8616(
+                    self.dst_offset,
+                    self.width,
+                    DirectStackMoveSourceKind8616.GLOBAL_EXPR,
+                    self.ins_addr,
+                    source_global_displacement=global_displacement,
+                    source_op=DirectStackMoveExpressionOp8616.ADD,
+                    source_immediate=adjustment,
+                )
+            )
+            return True
+        global_expr_load = _previous_global_signed_half_for_register_8616(
+            self.insns, self.index, self.reg_id, self.width
+        )
+        if global_expr_load is None:
+            return False
+        global_displacement, immediate, source_op = global_expr_load
+        self.append_destination_fact(
+            DirectStackMoveFact8616(
+                self.dst_offset,
+                self.width,
+                DirectStackMoveSourceKind8616.GLOBAL_EXPR,
+                self.ins_addr,
+                source_global_displacement=global_displacement,
+                source_op=source_op,
+                source_immediate=immediate,
+            )
+        )
+        return True
+
+    def _try_global_minus_8616(self) -> bool:
+        """Emit GLOBAL_MINUS_* facts for proven difference loads."""
+        global_minus_stack = _previous_global_minus_stack_for_register_8616(
+            self.insns, self.index, self.reg_id, self.width
+        )
+        if global_minus_stack is not None:
+            global_displacement, source_offset = global_minus_stack
+            self.append_destination_fact(
+                DirectStackMoveFact8616(
+                    self.dst_offset,
+                    self.width,
+                    DirectStackMoveSourceKind8616.GLOBAL_MINUS_STACK_SLOT,
+                    self.ins_addr,
+                    source_global_displacement=global_displacement,
+                    source_offset=source_offset,
+                )
+            )
+            return True
+        global_minus_segmented = _previous_global_minus_segmented_source_for_register_8616(
+            self.insns,
+            self.index,
+            self.reg_id,
+        )
+        if global_minus_segmented is None:
+            return False
+        global_displacement, segmented_source = global_minus_segmented
+        self.append_destination_fact(
+            DirectStackMoveFact8616(
+                self.dst_offset,
+                self.width,
+                DirectStackMoveSourceKind8616.GLOBAL_MINUS_SEGMENTED_MEMORY,
+                self.ins_addr,
+                source_segment_name=segmented_source.segment_name,
+                source_global_displacement=global_displacement,
+                source_displacement=segmented_source.displacement,
+                source_index_offset=segmented_source.index_stack_offset,
+                source_index_shift=segmented_source.index_shift,
+                source_access_width=segmented_source.access_width,
+                source_sign_extend=segmented_source.sign_extend,
+            )
+        )
+        return True
+
+    def _try_segmented_source_8616(self) -> bool:
+        """Emit a SEGMENTED_MEMORY fact for a proven segmented register source."""
+        register_segmented_source = _direct_stack_move_segmented_source_for_register_8616(
+            self.insns, self.index, self.reg_id
+        )
+        if register_segmented_source is None:
+            return False
+        self.append_destination_fact(
+            DirectStackMoveFact8616(
+                self.dst_offset,
+                self.width,
+                DirectStackMoveSourceKind8616.SEGMENTED_MEMORY,
+                self.ins_addr,
+                source_segment_name=register_segmented_source.segment_name,
+                source_displacement=register_segmented_source.displacement,
+                source_index_offset=register_segmented_source.index_stack_offset,
+                source_index_shift=register_segmented_source.index_shift,
+                source_access_width=register_segmented_source.access_width,
+                source_sign_extend=register_segmented_source.sign_extend,
+            )
+        )
+        return True
+
+    def _try_register_source_arms_8616(self, register_name: StructuredAstValue) -> bool:
+        """Run the ordered register-source arm sequence."""
+        if self._try_call_return_store_8616(register_name):
+            return True
+        if self._try_binary_stack_expr_8616():
+            return True
+        if self._try_prev_load_8616():
+            return True
+        if self._try_signed_byte_load_8616():
+            return True
+        return self._try_indexed_stack_load_8616()
+
+    def collect_source_8616(self) -> None:
+        """Classify the register source and emit the first matching fact."""
+        src = self.operands[1]
+        src_type = getattr(src, "type", None)
+        if src_type == X86_OP_IMM:
+            self._emit_immediate_source_8616(src)
+            return
+        if src_type != X86_OP_REG:
+            return
+        reg_id = getattr(src, "reg", None)
+        if not isinstance(reg_id, int):
+            return
+        self.reg_id = reg_id
+        register_name = _direct_stack_move_register_name_8616(self.insn, reg_id)
+        register_info = self.project.arch.registers.get(register_name) if register_name is not None else None
+        if isinstance(register_info, tuple) and len(register_info) == 2 and isinstance(register_info[0], int):
+            self.source_register_offset = register_info[0]
+        if self._try_register_source_arms_8616(register_name):
+            return
+        expr_load = self._expr_load_8616()
+        if expr_load is None:
+            if self._try_global_adjusted_8616():
+                return
+            if self._try_global_minus_8616():
+                return
+            self._try_segmented_source_8616()
+            return
+        source_offset, immediate, source_op = expr_load
+        self.append_destination_fact(
+            DirectStackMoveFact8616(
+                self.dst_offset,
+                self.width,
+                DirectStackMoveSourceKind8616.STACK_SLOT_EXPR,
+                self.ins_addr,
+                source_offset=source_offset,
+                source_op=source_op,
+                source_immediate=immediate,
+            )
+        )
+
+
+def _collect_block_mov_facts_8616(
+    project: StructuredAstValue,
+    block: StructuredAstValue,
+    callsite_inventory: StructuredAstValue,
+    facts: list[DirectStackMoveFact8616],
+) -> None:
+    """Collect every MOV-to-stack fact in one block."""
+    insns = _capstone_insns_for_direct_global_update_8616(project, block)
+    for index, wrapper in enumerate(insns):
+        insn = getattr(wrapper, "insn", wrapper)
+        if getattr(insn, "id", None) != X86_INS_MOV:
+            continue
+        idiv_remainder_fact = _signed_idiv_remainder_stack_store_fact_at_8616(project, insns, index)
+        if idiv_remainder_fact is not None:
+            facts.append(idiv_remainder_fact)
+            continue
+        operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
+        if len(operands) != 2:
+            continue
+        collector = _DirectStackMoveFactCollector8616(
+            project=project,
+            callsite_inventory=callsite_inventory,
+            insns=insns,
+            index=index,
+            insn=insn,
+            operands=operands,
+            facts=facts,
+        )
+        if collector.classify_destination_8616():
+            collector.collect_source_8616()
 
 
 def _direct_stack_move_instruction_facts_8616(
@@ -6600,294 +7855,7 @@ def _direct_stack_move_instruction_facts_8616(
         if idiv_remainder_fact is not None:
             facts.append(idiv_remainder_fact)
     for block in blocks:
-        insns = _capstone_insns_for_direct_global_update_8616(project, block)
-        for index, wrapper in enumerate(insns):
-            insn = getattr(wrapper, "insn", wrapper)
-            if getattr(insn, "id", None) != X86_INS_MOV:
-                continue
-            idiv_remainder_fact = _signed_idiv_remainder_stack_store_fact_at_8616(project, insns, index)
-            if idiv_remainder_fact is not None:
-                facts.append(idiv_remainder_fact)
-                continue
-            operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
-            if len(operands) != 2:
-                continue
-            dst_slot = _stack_mem_operand_offset_width_8616(operands[0])
-            indexed_dst = _indexed_stack_mem_operand_8616(operands[0])
-            if dst_slot is None and indexed_dst is None:
-                continue
-            dst_index_global_displacement = None
-            dst_index_stack_offset = None
-            dst_index_immediate = None
-            dst_index_scale = 1
-            dst_index_byte_scale = 1
-            if indexed_dst is not None:
-                dst_offset, width, dst_index_reg, dst_index_scale = indexed_dst
-                index_source = _immediate_predecessor_index_source_8616(insns, index, dst_index_reg)
-                if index_source is None:
-                    stack_index = _previous_stack_index_for_register_8616(insns, index, dst_index_reg)
-                    if stack_index is None or stack_index.width != 2:
-                        continue
-                    dst_index_stack_offset = stack_index.stack_offset
-                    dst_index_byte_scale = stack_index.byte_scale * dst_index_scale
-                else:
-                    index_kind, index_value = index_source
-                    if index_kind == "global":
-                        dst_index_global_displacement = index_value
-                    elif index_kind == "stack":
-                        dst_index_stack_offset = index_value
-                    else:
-                        dst_index_immediate = index_value
-                    dst_index_byte_scale = dst_index_scale
-            else:
-                assert dst_slot is not None
-                dst_offset, width = dst_slot
-            ins_addr = getattr(insn, "address", None)
-            if not isinstance(ins_addr, int):
-                continue
-
-            source_register_offset: int | None = None
-
-            def append_destination_fact(fact: DirectStackMoveFact8616) -> None:
-                """Attach the current MOV destination's typed index evidence."""
-                facts.append(
-                    replace(
-                        fact,
-                        source_register_offset=source_register_offset,  # noqa: B023
-                        dst_index_global_displacement=dst_index_global_displacement,  # noqa: B023
-                        dst_index_stack_offset=dst_index_stack_offset,  # noqa: B023
-                        dst_index_immediate=dst_index_immediate,  # noqa: B023
-                        dst_index_scale=dst_index_scale,  # noqa: B023
-                        dst_index_byte_scale=dst_index_byte_scale,  # noqa: B023
-                    )
-                )
-
-            src = operands[1]
-            src_type = getattr(src, "type", None)
-            if src_type == X86_OP_IMM:
-                value = getattr(src, "imm", None)
-                if isinstance(value, int):
-                    append_destination_fact(
-                        DirectStackMoveFact8616(
-                            dst_offset,
-                            width,
-                            DirectStackMoveSourceKind8616.IMMEDIATE,
-                            ins_addr,
-                            source_value=value,
-                        )
-                    )
-                continue
-            if src_type != X86_OP_REG:
-                continue
-            reg_id = getattr(src, "reg", None)
-            if not isinstance(reg_id, int):
-                continue
-            register_name = _direct_stack_move_register_name_8616(insn, reg_id)
-            register_info = project.arch.registers.get(register_name) if register_name is not None else None
-            if isinstance(register_info, tuple) and len(register_info) == 2 and isinstance(register_info[0], int):
-                source_register_offset = register_info[0]
-            call_return_store = recover_zero_arg_call_return_stack_store_8616(
-                callsite_inventory,
-                store_ins_addr=ins_addr,
-                dst_offset=dst_offset,
-                width=width,
-                source_register_name=register_name,
-            )
-            if call_return_store is not None:
-                callee_name, _callee, resolved_target = _callee_name_for_direct_stack_move_8616(
-                    project,
-                    call_return_store.target_addr,
-                )
-                append_destination_fact(
-                    DirectStackMoveFact8616(
-                        dst_offset,
-                        width,
-                        DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN,
-                        ins_addr,
-                        source_call_target=resolved_target,
-                        source_call_name=callee_name,
-                        source_call_ins_addr=call_return_store.callsite_addr,
-                    )
-                )
-                continue
-            binary_stack_expr = _previous_binary_stack_expr_for_register_8616(insns, index, reg_id, width)
-            if binary_stack_expr is not None:
-                source_offset, source_rhs_offset, source_op = binary_stack_expr
-                append_destination_fact(
-                    DirectStackMoveFact8616(
-                        dst_offset,
-                        width,
-                        DirectStackMoveSourceKind8616.STACK_SLOT_BINARY_EXPR,
-                        ins_addr,
-                        source_offset=source_offset,
-                        source_rhs_offset=source_rhs_offset,
-                        source_op=source_op,
-                    )
-                )
-                continue
-            prev_load = _previous_stack_load_for_register_8616(insns, index, reg_id)
-            if prev_load is not None:
-                source_offset, source_width = prev_load
-                if source_width != width:
-                    continue
-                append_destination_fact(
-                    DirectStackMoveFact8616(
-                        dst_offset,
-                        width,
-                        DirectStackMoveSourceKind8616.STACK_SLOT,
-                        ins_addr,
-                        source_offset=source_offset,
-                    )
-                )
-                continue
-
-            signed_byte_load = _previous_signed_byte_stack_load_for_register_8616(insns, index, reg_id, width)
-            if signed_byte_load is not None:
-                source_offset, source_width = signed_byte_load
-                append_destination_fact(
-                    DirectStackMoveFact8616(
-                        dst_offset,
-                        width,
-                        DirectStackMoveSourceKind8616.STACK_SLOT,
-                        ins_addr,
-                        source_offset=source_offset,
-                        source_access_width=source_width,
-                        source_sign_extend=True,
-                    )
-                )
-                continue
-
-            indexed_stack_load = _previous_indexed_stack_load_for_register_8616(insns, index, reg_id)
-            if indexed_stack_load is not None and indexed_stack_load.access_width == width:
-                append_destination_fact(
-                    DirectStackMoveFact8616(
-                        dst_offset,
-                        width,
-                        DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
-                        ins_addr,
-                        source_aggregate_base_offset=indexed_stack_load.base_offset,
-                        source_index_offset=indexed_stack_load.index.stack_offset,
-                        source_index_byte_scale=indexed_stack_load.index.byte_scale,
-                        source_access_width=indexed_stack_load.access_width,
-                    )
-                )
-                continue
-
-            shifted_load = _previous_shifted_stack_load_for_register_8616(insns, index, reg_id, width)
-            expr_load = shifted_load
-            if expr_load is None:
-                adjusted_load = _previous_stack_load_with_adjust_for_register_8616(insns, index, reg_id, width)
-                if adjusted_load is not None:
-                    source_offset, adjustment, _load_index = adjusted_load
-                    if adjustment != 0:
-                        expr_load = (source_offset, adjustment, DirectStackMoveExpressionOp8616.ADD)
-            if expr_load is None:
-                expr_load = _previous_signed_half_stack_load_for_register_8616(insns, index, reg_id, width)
-            if expr_load is None:
-                expr_load = _previous_stack_signed_idiv_const_for_register_8616(insns, index, reg_id, width)
-            if expr_load is None:
-                global_adjusted_load = _previous_global_load_with_adjust_for_register_8616(
-                    insns,
-                    index,
-                    reg_id,
-                    width,
-                )
-                if global_adjusted_load is not None:
-                    global_displacement, adjustment = global_adjusted_load
-                    append_destination_fact(
-                        DirectStackMoveFact8616(
-                            dst_offset,
-                            width,
-                            DirectStackMoveSourceKind8616.GLOBAL_EXPR,
-                            ins_addr,
-                            source_global_displacement=global_displacement,
-                            source_op=DirectStackMoveExpressionOp8616.ADD,
-                            source_immediate=adjustment,
-                        )
-                    )
-                    continue
-                global_expr_load = _previous_global_signed_half_for_register_8616(insns, index, reg_id, width)
-                if global_expr_load is not None:
-                    global_displacement, immediate, source_op = global_expr_load
-                    append_destination_fact(
-                        DirectStackMoveFact8616(
-                            dst_offset,
-                            width,
-                            DirectStackMoveSourceKind8616.GLOBAL_EXPR,
-                            ins_addr,
-                            source_global_displacement=global_displacement,
-                            source_op=source_op,
-                            source_immediate=immediate,
-                        )
-                    )
-                    continue
-                global_minus_stack = _previous_global_minus_stack_for_register_8616(insns, index, reg_id, width)
-                if global_minus_stack is not None:
-                    global_displacement, source_offset = global_minus_stack
-                    append_destination_fact(
-                        DirectStackMoveFact8616(
-                            dst_offset,
-                            width,
-                            DirectStackMoveSourceKind8616.GLOBAL_MINUS_STACK_SLOT,
-                            ins_addr,
-                            source_global_displacement=global_displacement,
-                            source_offset=source_offset,
-                        )
-                    )
-                    continue
-                global_minus_segmented = _previous_global_minus_segmented_source_for_register_8616(
-                    insns,
-                    index,
-                    reg_id,
-                )
-                if global_minus_segmented is not None:
-                    global_displacement, segmented_source = global_minus_segmented
-                    append_destination_fact(
-                        DirectStackMoveFact8616(
-                            dst_offset,
-                            width,
-                            DirectStackMoveSourceKind8616.GLOBAL_MINUS_SEGMENTED_MEMORY,
-                            ins_addr,
-                            source_segment_name=segmented_source.segment_name,
-                            source_global_displacement=global_displacement,
-                            source_displacement=segmented_source.displacement,
-                            source_index_offset=segmented_source.index_stack_offset,
-                            source_index_shift=segmented_source.index_shift,
-                            source_access_width=segmented_source.access_width,
-                            source_sign_extend=segmented_source.sign_extend,
-                        )
-                    )
-                    continue
-                register_segmented_source = _direct_stack_move_segmented_source_for_register_8616(insns, index, reg_id)
-                if register_segmented_source is None:
-                    continue
-                append_destination_fact(
-                    DirectStackMoveFact8616(
-                        dst_offset,
-                        width,
-                        DirectStackMoveSourceKind8616.SEGMENTED_MEMORY,
-                        ins_addr,
-                        source_segment_name=register_segmented_source.segment_name,
-                        source_displacement=register_segmented_source.displacement,
-                        source_index_offset=register_segmented_source.index_stack_offset,
-                        source_index_shift=register_segmented_source.index_shift,
-                        source_access_width=register_segmented_source.access_width,
-                        source_sign_extend=register_segmented_source.sign_extend,
-                    )
-                )
-                continue
-            source_offset, immediate, source_op = expr_load
-            append_destination_fact(
-                DirectStackMoveFact8616(
-                    dst_offset,
-                    width,
-                    DirectStackMoveSourceKind8616.STACK_SLOT_EXPR,
-                    ins_addr,
-                    source_offset=source_offset,
-                    source_op=source_op,
-                    source_immediate=immediate,
-                )
-            )
+        _collect_block_mov_facts_8616(project, block, callsite_inventory, facts)
     result = tuple(dict.fromkeys(facts))
     if not callsite_inventory:
         with contextlib.suppress(Exception):
@@ -7029,6 +7997,49 @@ def _direct_stack_move_instruction_facts_for_codegen_8616(
     return merged_facts
 
 
+def _reload_fact_for_mov_insn_8616(
+    insn: StructuredAstValue,
+    source_by_slot: dict[tuple[int, int], list[DirectStackMoveFact8616]],
+) -> DirectStackReloadFact8616 | None:
+    """Classify one instruction as a register reload of a materialized slot."""
+    if getattr(insn, "id", None) != X86_INS_MOV:
+        return None
+    ins_addr = getattr(insn, "address", None)
+    if not isinstance(ins_addr, int):
+        return None
+    operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
+    if len(operands) != 2:
+        return None
+    dst, src = operands
+    if getattr(dst, "type", None) != X86_OP_REG:
+        return None
+    src_slot = _stack_mem_operand_offset_width_8616(src)
+    if src_slot is None:
+        return None
+    source_offset, width = src_slot
+    reg_id = getattr(dst, "reg", None)
+    if not isinstance(reg_id, int):
+        return None
+    reg_name = _capstone_register_name_8616(reg_id)
+    if reg_name is None:
+        return None
+    prior_sources = [
+        fact for fact in source_by_slot.get((source_offset, width), ()) if int(fact.ins_addr) < int(ins_addr)
+    ]
+    if not prior_sources:
+        return None
+    source_fact = prior_sources[-1]
+    return DirectStackReloadFact8616(
+        source_offset,
+        width,
+        reg_id,
+        reg_name,
+        ins_addr,
+        source_fact.ins_addr,
+        source_fact.source_kind,
+    )
+
+
 def _direct_stack_reload_instruction_facts_8616(
     project: StructuredAstValue,
     function: StructuredAstValue,
@@ -7051,45 +8062,9 @@ def _direct_stack_reload_instruction_facts_8616(
 
     reload_facts: list[DirectStackReloadFact8616] = []
     for wrapper in merged_insns:
-        insn = getattr(wrapper, "insn", wrapper)
-        if getattr(insn, "id", None) != X86_INS_MOV:
-            continue
-        ins_addr = getattr(insn, "address", None)
-        if not isinstance(ins_addr, int):
-            continue
-        operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
-        if len(operands) != 2:
-            continue
-        dst, src = operands
-        if getattr(dst, "type", None) != X86_OP_REG:
-            continue
-        src_slot = _stack_mem_operand_offset_width_8616(src)
-        if src_slot is None:
-            continue
-        source_offset, width = src_slot
-        reg_id = getattr(dst, "reg", None)
-        if not isinstance(reg_id, int):
-            continue
-        reg_name = _capstone_register_name_8616(reg_id)
-        if reg_name is None:
-            continue
-        prior_sources = [
-            fact for fact in source_by_slot.get((source_offset, width), ()) if int(fact.ins_addr) < int(ins_addr)
-        ]
-        if not prior_sources:
-            continue
-        source_fact = prior_sources[-1]
-        reload_facts.append(
-            DirectStackReloadFact8616(
-                source_offset,
-                width,
-                reg_id,
-                reg_name,
-                ins_addr,
-                source_fact.ins_addr,
-                source_fact.source_kind,
-            )
-        )
+        fact = _reload_fact_for_mov_insn_8616(getattr(wrapper, "insn", wrapper), source_by_slot)
+        if fact is not None:
+            reload_facts.append(fact)
     return tuple(dict.fromkeys(reload_facts))
 
 
@@ -7435,76 +8410,81 @@ def _is_generated_stack_cvar_name_8616(name: StructuredAstValue) -> bool:
     return bool(re.fullmatch(r"(?:local|arg|stack|s)_[0-9a-fA-F]+", name))
 
 
+def _apply_annotation_name_to_stack_cvar_8616(
+    codegen: StructuredAstValue,
+    cvar: StructuredAstValue,
+    variable_hint: StructuredAstValue | None,
+    known_bindings: StructuredAstValue,
+) -> bool:
+    """Reconcile one stack cvar's name against proven storage identity."""
+    if not isinstance(cvar, structured_c.CVariable):
+        return False
+    variable = cvar.variable
+    if not isinstance(variable, SimStackVariable):
+        variable = variable_hint
+    if not isinstance(variable, SimStackVariable) or variable.base != "bp":
+        return False
+    offset = _canonical_stack_offset_8616(
+        machine_bp_offset_for_stack_variable_8616(codegen, variable)
+    )
+    if not isinstance(offset, int):
+        return False
+    preferred_name = _preferred_stack_object_name_8616(
+        offset,
+        codegen=codegen,
+        byte_size=variable.size,
+        known_bindings=known_bindings,
+    )
+    if not _valid_c_identifier_8616(preferred_name):
+        return False
+    default_name = _stack_object_name(offset, codegen=codegen)
+    unified = cvar.unified_variable
+    current_names = (
+        variable.name,
+        cvar.name,
+        unified.name if isinstance(unified, SimVariable) else None,
+    )
+    binding = StackVariableBinding(
+        bp_offset=offset,
+        size=variable.size,
+        var_name=variable.name,
+    )
+    inherited_container_name = any(
+        stack_binding_inherits_containing_name_8616(
+            binding,
+            current_name=name,
+            known_bindings=known_bindings,
+        )
+        and _valid_c_identifier_8616(name)
+        and not _is_generated_stack_cvar_name_8616(name)
+        for name in current_names
+    )
+    has_owned_name = any(
+        _valid_c_identifier_8616(name) and not _is_generated_stack_cvar_name_8616(name) for name in current_names
+    )
+    if has_owned_name and not inherited_container_name:
+        return False
+    if preferred_name == default_name and not inherited_container_name:
+        return False
+    before = current_names
+    if variable.name != preferred_name:
+        variable.name = preferred_name
+    if isinstance(unified, SimVariable) and unified.name != preferred_name:
+        unified.name = preferred_name
+    after = (
+        variable.name,
+        cvar.name,
+        unified.name if isinstance(unified, SimVariable) else None,
+    )
+    return after != before
+
+
 def _apply_annotation_names_to_existing_stack_cvars_8616(codegen: StructuredAstValue) -> bool:
     """Reconcile inert metadata names with proven stack storage identities."""
     cfunc = codegen.cfunc
     changed = False
     seen: set[int] = set()
     known_bindings = _stack_bindings_from_codegen_8616(codegen)
-
-    def _apply(cvar: StructuredAstValue, variable_hint: StructuredAstValue | None = None) -> None:
-        nonlocal changed
-        if not isinstance(cvar, structured_c.CVariable):
-            return
-        variable = cvar.variable
-        if not isinstance(variable, SimStackVariable):
-            variable = variable_hint
-        if not isinstance(variable, SimStackVariable) or variable.base != "bp":
-            return
-        offset = _canonical_stack_offset_8616(
-            machine_bp_offset_for_stack_variable_8616(codegen, variable)
-        )
-        if not isinstance(offset, int):
-            return
-        preferred_name = _preferred_stack_object_name_8616(
-            offset,
-            codegen=codegen,
-            byte_size=variable.size,
-            known_bindings=known_bindings,
-        )
-        if not _valid_c_identifier_8616(preferred_name):
-            return
-        default_name = _stack_object_name(offset, codegen=codegen)
-        unified = cvar.unified_variable
-        current_names = (
-            variable.name,
-            cvar.name,
-            unified.name if isinstance(unified, SimVariable) else None,
-        )
-        binding = StackVariableBinding(
-            bp_offset=offset,
-            size=variable.size,
-            var_name=variable.name,
-        )
-        inherited_container_name = any(
-            stack_binding_inherits_containing_name_8616(
-                binding,
-                current_name=name,
-                known_bindings=known_bindings,
-            )
-            and _valid_c_identifier_8616(name)
-            and not _is_generated_stack_cvar_name_8616(name)
-            for name in current_names
-        )
-        has_owned_name = any(
-            _valid_c_identifier_8616(name) and not _is_generated_stack_cvar_name_8616(name) for name in current_names
-        )
-        if has_owned_name and not inherited_container_name:
-            return
-        if preferred_name == default_name and not inherited_container_name:
-            return
-        before = current_names
-        if variable.name != preferred_name:
-            variable.name = preferred_name
-        if isinstance(unified, SimVariable) and unified.name != preferred_name:
-            unified.name = preferred_name
-        after = (
-            variable.name,
-            cvar.name,
-            unified.name if isinstance(unified, SimVariable) else None,
-        )
-        if after != before:
-            changed = True
 
     try:
         variables_in_use = cfunc.variables_in_use
@@ -7517,15 +8497,27 @@ def _apply_annotation_names_to_existing_stack_cvars_8616(codegen: StructuredAstV
             if id(cvar) in seen:
                 continue
             seen.add(id(cvar))
-            _apply(cvar, variable)
+            if _apply_annotation_name_to_stack_cvar_8616(codegen, cvar, variable, known_bindings):
+                changed = True
     root = cfunc.statements
     if root is not None:
         for node in _iter_structured_c_nodes_8616(root):
             if not isinstance(node, structured_c.CVariable) or id(node) in seen:
                 continue
             seen.add(id(node))
-            _apply(node)
+            if _apply_annotation_name_to_stack_cvar_8616(codegen, node, None, known_bindings):
+                changed = True
     return changed
+
+
+def _stack_cvar_size_matches_8616(node_size: StructuredAstValue, target_size: StructuredAstValue) -> bool:
+    """Check size compatibility for stack-cvar usage counting."""
+    return (
+        target_size is None
+        or node_size is None
+        or node_size == target_size
+        or (isinstance(node_size, int) and isinstance(target_size, int) and node_size >= target_size)
+    )
 
 
 def _stack_cvar_ast_usage_count_8616(codegen: StructuredAstValue, cvar: StructuredAstValue) -> int:
@@ -7554,12 +8546,7 @@ def _stack_cvar_ast_usage_count_8616(codegen: StructuredAstValue, cvar: Structur
         if node_id is None:
             continue
         node_offset, node_size = node_id
-        if node_offset == target_offset and (
-            target_size is None
-            or node_size is None
-            or node_size == target_size
-            or (isinstance(node_size, int) and isinstance(target_size, int) and node_size >= target_size)
-        ):
+        if node_offset == target_offset and _stack_cvar_size_matches_8616(node_size, target_size):
             count += 1
     cache[cache_key] = count
     return count
@@ -7575,6 +8562,45 @@ def _stack_cvar_matches_offset_width_8616(cvar: StructuredAstValue, offset: int,
     return not isinstance(stack_size, int) or stack_size <= 0 or stack_size >= width
 
 
+def _stack_variable_min_width_ok_8616(
+    codegen: StructuredAstValue,
+    cvar: StructuredAstValue,
+    variable: StructuredAstValue,
+    offset: StructuredAstValue,
+    width: int,
+) -> bool:
+    """Fix the backing SimStackVariable size and prototype type; True when done."""
+    size = variable.size
+    if not isinstance(size, int) or size < width:
+        with contextlib.suppress(Exception):
+            variable.size = width
+    prototype_type = _prototype_arg_type_for_bp_offset_8616(codegen, offset) if isinstance(offset, int) else None
+    if prototype_type is None or _type_size_bytes_8616(prototype_type, default=0) < width:
+        return False
+    bound_type = _bind_type_to_codegen_arch_8616(codegen, prototype_type)
+    if getattr(cvar, "variable_type", None) != bound_type:
+        cvar.variable_type = bound_type
+    return True
+
+
+def _prune_bp_alias_keys_8616(
+    codegen: StructuredAstValue,
+    mapping: StructuredAstValue,
+    keep_variable: StructuredAstValue,
+    offset: StructuredAstValue,
+) -> None:
+    """Remove stale same-offset BP stack variables from a cvar mapping."""
+    if not isinstance(mapping, dict) or not isinstance(offset, int):
+        return
+    for existing in tuple(mapping):
+        if existing is keep_variable or not isinstance(existing, SimStackVariable):
+            continue
+        if getattr(existing, "base", None) != "bp":
+            continue
+        if _canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, existing)) == offset:
+            del mapping[existing]
+
+
 def _ensure_stack_cvar_min_width_8616(codegen: StructuredAstValue, cvar: StructuredAstValue, width: int) -> None:
     """Ensure a stack C variable is wide enough for a materialized fact."""
     if not isinstance(cvar, structured_c.CVariable) or width <= 0:
@@ -7587,117 +8613,85 @@ def _ensure_stack_cvar_min_width_8616(codegen: StructuredAstValue, cvar: Structu
         if isinstance(variable, SimStackVariable)
         else None
     )
-    if isinstance(variable, SimStackVariable):
-        size = variable.size
-        if not isinstance(size, int) or size < width:
-            with contextlib.suppress(Exception):
-                variable.size = width
-        prototype_type = _prototype_arg_type_for_bp_offset_8616(codegen, offset) if isinstance(offset, int) else None
-        if prototype_type is not None and _type_size_bytes_8616(prototype_type, default=0) >= width:
-            bound_type = _bind_type_to_codegen_arch_8616(codegen, prototype_type)
-            if getattr(cvar, "variable_type", None) != bound_type:
-                cvar.variable_type = bound_type
-            return
+    if isinstance(variable, SimStackVariable) and _stack_variable_min_width_ok_8616(
+        codegen, cvar, variable, offset, width
+    ):
+        return
     current_width = _type_size_bytes_8616(getattr(cvar, "variable_type", None), default=0)
     if current_width < width:
         cvar.variable_type = _bind_type_to_codegen_arch_8616(codegen, _type_for_access_width_8616(width))
     cfunc = getattr(codegen, "cfunc", None)
     variables_in_use = getattr(cfunc, "variables_in_use", None)
-    if isinstance(variables_in_use, dict) and isinstance(offset, int):
-        for existing in tuple(variables_in_use):
-            if existing is variable or not isinstance(existing, SimStackVariable):
-                continue
-            if getattr(existing, "base", None) != "bp":
-                continue
-            if (
-                _canonical_stack_offset_8616(
-                    machine_bp_offset_for_stack_variable_8616(codegen, existing)
-                )
-                == offset
-            ):
-                del variables_in_use[existing]
-        if isinstance(variable, SimStackVariable):
-            variables_in_use[variable] = cvar
+    _prune_bp_alias_keys_8616(codegen, variables_in_use, variable, offset)
+    if isinstance(variables_in_use, dict) and isinstance(offset, int) and isinstance(variable, SimStackVariable):
+        variables_in_use[variable] = cvar
     unified = getattr(cfunc, "unified_local_vars", None)
-    if isinstance(unified, dict) and isinstance(offset, int):
-        for existing in tuple(unified):
-            if existing is variable or not isinstance(existing, SimStackVariable):
-                continue
-            if getattr(existing, "base", None) != "bp":
-                continue
-            if (
-                _canonical_stack_offset_8616(
-                    machine_bp_offset_for_stack_variable_8616(codegen, existing)
-                )
-                == offset
-            ):
-                del unified[existing]
-        if isinstance(variable, SimStackVariable):
-            unified[variable] = {(cvar, getattr(cvar, "variable_type", None))}
+    _prune_bp_alias_keys_8616(codegen, unified, variable, offset)
+    if isinstance(unified, dict) and isinstance(offset, int) and isinstance(variable, SimStackVariable):
+        unified[variable] = {(cvar, getattr(cvar, "variable_type", None))}
 
 
-def _resolve_direct_stack_update_cvar_8616(
+def _stack_update_cvar_candidates_from_registry_8616(
+    codegen: StructuredAstValue,
+    offset: int,
+    width: int,
+    seen_candidate_ids: set[int],
+    candidates: list[tuple[int, int, StructuredAstValue]],
+) -> None:
+    """Collect same-offset/width cvar candidates from variables_in_use."""
+    variables_in_use = getattr(getattr(codegen, "cfunc", None), "variables_in_use", None)
+    if not isinstance(variables_in_use, dict):
+        return
+    for variable, cvar in tuple(variables_in_use.items()):
+        if not isinstance(variable, SimStackVariable) or getattr(variable, "base", None) != "bp":
+            continue
+        if _canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, variable)) != offset:
+            continue
+        size = getattr(variable, "size", None)
+        if not isinstance(size, int) or size != width:
+            continue
+        if isinstance(cvar, structured_c.CVariable):
+            _apply_preferred_stack_cvar_name_8616(cvar, offset, codegen)
+            _ensure_stack_cvar_has_identifier_8616(codegen, cvar, offset)
+            usage_count = _stack_cvar_ast_usage_count_8616(codegen, cvar)
+            exact_size = int(isinstance(size, int) and size == width)
+            seen_candidate_ids.add(id(cvar))
+            candidates.append((usage_count, exact_size, cvar))
+
+
+def _stack_update_cvar_candidates_from_ast_8616(
+    codegen: StructuredAstValue,
+    offset: int,
+    width: int,
+    seen_candidate_ids: set[int],
+    candidates: list[tuple[int, int, StructuredAstValue]],
+) -> None:
+    """Collect same-offset/width cvar candidates still present in the AST."""
+    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
+    if root is None:
+        return
+    for node in _iter_structured_c_nodes_8616(root):
+        if not isinstance(node, structured_c.CVariable) or id(node) in seen_candidate_ids:
+            continue
+        variable = node.variable
+        if not isinstance(variable, SimStackVariable) or variable.base != "bp":
+            continue
+        stack_size = variable.size
+        bp_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
+        if _canonical_stack_offset_8616(bp_offset) != offset or stack_size != width:
+            continue
+        _apply_preferred_stack_cvar_name_8616(node, offset, codegen)
+        _ensure_stack_cvar_has_identifier_8616(codegen, node, offset)
+        usage_count = _stack_cvar_ast_usage_count_8616(codegen, node)
+        exact_size = int(isinstance(stack_size, int) and stack_size == width)
+        seen_candidate_ids.add(id(node))
+        candidates.append((usage_count, exact_size, node))
+
+
+def _materialize_stack_update_cvar_8616(
     codegen: StructuredAstValue, offset: int, width: int
 ) -> StructuredAstValue | None:
-    """Resolve a stack update through the active registry, including old AST clones."""
-    projected = stack_cvar_for_machine_bp_range_8616(codegen, offset, width)
-    if isinstance(projected, structured_c.CVariable):
-        _apply_preferred_stack_cvar_name_8616(projected, offset, codegen)
-        _ensure_stack_cvar_has_identifier_8616(codegen, projected, offset)
-        _ensure_stack_cvar_min_width_8616(codegen, projected, width)
-        return projected
-    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
-    candidates = []
-    seen_candidate_ids: set[int] = set()
-    variables_in_use = getattr(getattr(codegen, "cfunc", None), "variables_in_use", None)
-    if isinstance(variables_in_use, dict):
-        for variable, cvar in tuple(variables_in_use.items()):
-            if not isinstance(variable, SimStackVariable) or getattr(variable, "base", None) != "bp":
-                continue
-            if (
-                _canonical_stack_offset_8616(
-                    machine_bp_offset_for_stack_variable_8616(codegen, variable)
-                )
-                != offset
-            ):
-                continue
-            size = getattr(variable, "size", None)
-            if not isinstance(size, int) or size != width:
-                continue
-            if isinstance(cvar, structured_c.CVariable):
-                _apply_preferred_stack_cvar_name_8616(cvar, offset, codegen)
-                _ensure_stack_cvar_has_identifier_8616(codegen, cvar, offset)
-                usage_count = _stack_cvar_ast_usage_count_8616(codegen, cvar)
-                exact_size = int(isinstance(size, int) and size == width)
-                seen_candidate_ids.add(id(cvar))
-                candidates.append((usage_count, exact_size, cvar))
-    if root is not None:
-        for node in _iter_structured_c_nodes_8616(root):
-            if not isinstance(node, structured_c.CVariable) or id(node) in seen_candidate_ids:
-                continue
-            variable = node.variable
-            if not isinstance(variable, SimStackVariable) or variable.base != "bp":
-                continue
-            stack_size = variable.size
-            bp_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
-            if _canonical_stack_offset_8616(bp_offset) != offset or stack_size != width:
-                continue
-            _apply_preferred_stack_cvar_name_8616(node, offset, codegen)
-            _ensure_stack_cvar_has_identifier_8616(codegen, node, offset)
-            usage_count = _stack_cvar_ast_usage_count_8616(codegen, node)
-            exact_size = int(isinstance(stack_size, int) and stack_size == width)
-            seen_candidate_ids.add(id(node))
-            candidates.append((usage_count, exact_size, node))
-    if candidates:
-        candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        selected = candidates[0][2]
-        _ensure_stack_cvar_min_width_8616(codegen, selected, width)
-        publish_selected_stack_cvar_projection_8616(
-            codegen, selected, bp_offset=offset, size=width,
-            entry_sp_offset=entry_sp_offset_for_machine_bp_range_8616(codegen, offset, width),
-        )
-        return selected
-
+    """Materialize a stack cvar from facts when no live candidate exists."""
     entry_sp_offset = entry_sp_offset_for_machine_bp_range_8616(
         codegen,
         offset,
@@ -7719,6 +8713,36 @@ def _resolve_direct_stack_update_cvar_8616(
             _ensure_stack_cvar_has_identifier_8616(codegen, materialized, offset)
             _ensure_stack_cvar_min_width_8616(codegen, materialized, width)
             return materialized
+    return None
+
+
+def _resolve_direct_stack_update_cvar_8616(
+    codegen: StructuredAstValue, offset: int, width: int
+) -> StructuredAstValue | None:
+    """Resolve a stack update through the active registry, including old AST clones."""
+    projected = stack_cvar_for_machine_bp_range_8616(codegen, offset, width)
+    if isinstance(projected, structured_c.CVariable):
+        _apply_preferred_stack_cvar_name_8616(projected, offset, codegen)
+        _ensure_stack_cvar_has_identifier_8616(codegen, projected, offset)
+        _ensure_stack_cvar_min_width_8616(codegen, projected, width)
+        return projected
+    candidates: list[tuple[int, int, StructuredAstValue]] = []
+    seen_candidate_ids: set[int] = set()
+    _stack_update_cvar_candidates_from_registry_8616(codegen, offset, width, seen_candidate_ids, candidates)
+    _stack_update_cvar_candidates_from_ast_8616(codegen, offset, width, seen_candidate_ids, candidates)
+    if candidates:
+        candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        selected = candidates[0][2]
+        _ensure_stack_cvar_min_width_8616(codegen, selected, width)
+        publish_selected_stack_cvar_projection_8616(
+            codegen, selected, bp_offset=offset, size=width,
+            entry_sp_offset=entry_sp_offset_for_machine_bp_range_8616(codegen, offset, width),
+        )
+        return selected
+
+    materialized = _materialize_stack_update_cvar_8616(codegen, offset, width)
+    if isinstance(materialized, structured_c.CVariable):
+        return materialized
 
     target_type = _prototype_arg_type_for_bp_offset_8616(codegen, offset) or _type_for_access_width_8616(width)
     variable = SimStackVariable(
@@ -7729,6 +8753,7 @@ def _resolve_direct_stack_update_cvar_8616(
         region=getattr(getattr(codegen, "cfunc", None), "addr", None),
     )
     cvar = structured_c.CVariable(variable, variable_type=target_type, codegen=codegen)
+    variables_in_use = getattr(getattr(codegen, "cfunc", None), "variables_in_use", None)
     if isinstance(variables_in_use, dict):
         variables_in_use[variable] = cvar
     unified = getattr(getattr(codegen, "cfunc", None), "unified_local_vars", None)
@@ -7741,35 +8766,45 @@ def _resolve_direct_stack_update_cvar_8616(
     return cvar
 
 
-def _resolve_existing_direct_stack_owner_cvar_8616(
+def _record_stack_owner_candidate_8616(
     codegen: StructuredAstValue,
     offset: int,
     width: int,
-    *,
-    require_wider_owner: bool = False,
-) -> StructuredAstValue | None:
-    """Resolve an existing stack object that owns a same-base access range."""
+    require_wider_owner: bool,
+    candidate: StructuredAstValue,
+    stack_size: StructuredAstValue,
+    seen_candidate_ids: set[int],
+    candidates: list[tuple[int, int, int, StructuredAstValue]],
+) -> None:
+    """Score and record one same-base owner cvar candidate."""
+    if not isinstance(candidate, structured_c.CVariable) or not isinstance(stack_size, int):
+        return
+    if stack_size < width or (require_wider_owner and stack_size == width):
+        return
+    if id(candidate) in seen_candidate_ids:
+        return
+    seen_candidate_ids.add(id(candidate))
+    _apply_preferred_stack_cvar_name_8616(candidate, offset, codegen)
+    _ensure_stack_cvar_has_identifier_8616(codegen, candidate, offset)
+    candidates.append(
+        (
+            int(stack_size == width),
+            _stack_cvar_ast_usage_count_8616(codegen, candidate),
+            stack_size,
+            candidate,
+        )
+    )
+
+
+def _stack_owner_candidates_8616(
+    codegen: StructuredAstValue,
+    offset: int,
+    width: int,
+    require_wider_owner: bool,
+) -> list[tuple[int, int, int, StructuredAstValue]]:
+    """Collect ranked owner candidates from the registry and the live AST."""
     candidates: list[tuple[int, int, int, StructuredAstValue]] = []
     seen_candidate_ids: set[int] = set()
-
-    def _record(candidate: StructuredAstValue, stack_size: int | None) -> None:
-        if not isinstance(candidate, structured_c.CVariable) or not isinstance(stack_size, int):
-            return
-        if stack_size < width or (require_wider_owner and stack_size == width):
-            return
-        if id(candidate) in seen_candidate_ids:
-            return
-        seen_candidate_ids.add(id(candidate))
-        _apply_preferred_stack_cvar_name_8616(candidate, offset, codegen)
-        _ensure_stack_cvar_has_identifier_8616(codegen, candidate, offset)
-        candidates.append(
-            (
-                int(stack_size == width),
-                _stack_cvar_ast_usage_count_8616(codegen, candidate),
-                stack_size,
-                candidate,
-            )
-        )
 
     variables_in_use = getattr(getattr(codegen, "cfunc", None), "variables_in_use", None)
     if isinstance(variables_in_use, dict):
@@ -7778,7 +8813,10 @@ def _resolve_existing_direct_stack_owner_cvar_8616(
                 continue
             if _canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, variable)) != offset:
                 continue
-            _record(cvar, variable.size)
+            _record_stack_owner_candidate_8616(
+                codegen, offset, width, require_wider_owner,
+                cvar, variable.size, seen_candidate_ids, candidates,
+            )
 
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     if root is not None:
@@ -7788,8 +8826,22 @@ def _resolve_existing_direct_stack_owner_cvar_8616(
             stack_identity = _stack_cvar_identity_8616(node)
             if stack_identity is None or stack_identity[0] != offset:
                 continue
-            _record(node, stack_identity[1])
+            _record_stack_owner_candidate_8616(
+                codegen, offset, width, require_wider_owner,
+                node, stack_identity[1], seen_candidate_ids, candidates,
+            )
+    return candidates
 
+
+def _resolve_existing_direct_stack_owner_cvar_8616(
+    codegen: StructuredAstValue,
+    offset: int,
+    width: int,
+    *,
+    require_wider_owner: bool = False,
+) -> StructuredAstValue | None:
+    """Resolve an existing stack object that owns a same-base access range."""
+    candidates = _stack_owner_candidates_8616(codegen, offset, width, require_wider_owner)
     if not candidates:
         return None
     candidates.sort(key=lambda item: item[:3], reverse=True)
@@ -8085,6 +9137,88 @@ def _rhs_is_signed_idiv_remainder_artifact_8616(rhs: StructuredAstValue) -> bool
     )
 
 
+_CALL_RESULT_CHILD_ATTRS_8616 = (
+    "statements",
+    "lhs",
+    "rhs",
+    "operand",
+    "expr",
+    "stmts",
+    "init",
+    "initializer",
+    "iftrue",
+    "iffalse",
+    "iteration",
+    "iterator",
+    "body",
+    "else_node",
+    "switch",
+    "default",
+)
+
+
+@dataclass
+class _CallResultCvarFinder8616:
+    """Find the cvar receiving AX at a tagged call instruction."""
+
+    project: AngrProjectValue
+    call_ins_addr: int
+    normalized_call_name: str | None
+    found: StructuredAstValue = None
+    seen: set[int] = field(default_factory=set)
+
+    def _visit_child_value_8616(self, value: StructuredAstValue) -> None:
+        """Visit one child attribute value (scalar or sequence)."""
+        if isinstance(value, (list, tuple)):
+            for item in tuple(value):
+                self.visit(item)
+                if self.found is not None:
+                    return
+        elif value is not None:
+            self.visit(value)
+
+    def _visit_children_8616(self, node: StructuredAstValue) -> None:
+        """Recursively visit child attributes until a match is found."""
+        for attr in _CALL_RESULT_CHILD_ATTRS_8616:
+            if not hasattr(node, attr):
+                continue
+            with contextlib.suppress(Exception):
+                value = getattr(node, attr)
+            self._visit_child_value_8616(value)
+            if self.found is not None:
+                return
+        condition_and_nodes = getattr(node, "condition_and_nodes", None)
+        if condition_and_nodes:
+            for condition, body in tuple(condition_and_nodes):
+                self.visit(condition)
+                if self.found is not None:
+                    return
+                self.visit(body)
+                if self.found is not None:
+                    return
+
+    def visit(self, node: StructuredAstValue) -> None:
+        """Visit one node, recording the first AX-writing call assignment."""
+        if self.found is not None or node is None or id(node) in self.seen:
+            return
+        self.seen.add(id(node))
+        if isinstance(node, structured_c.CAssignment) and _node_has_instruction_address_8616(
+            node,
+            self.project,
+            self.call_ins_addr,
+        ):
+            callee_name = _function_call_name_8616(node.rhs)
+            lhs = _strip_casts_8616(node.lhs)
+            if (
+                isinstance(lhs, structured_c.CVariable)
+                and _cvar_register_name_8616(lhs) == "ax"
+                and (self.normalized_call_name is None or callee_name == self.normalized_call_name)
+            ):
+                self.found = lhs
+                return
+        self._visit_children_8616(node)
+
+
 def _call_result_cvar_at_instruction_8616(
     codegen: StructuredCodegenValue, project: AngrProjectValue, call_ins_addr: int | None, call_name: str | None
 ) -> StructuredAstValue:
@@ -8094,71 +9228,9 @@ def _call_result_cvar_at_instruction_8616(
     root = getattr(getattr(codegen, "cfunc", None), "statements", None)
     if root is None:
         return None
-    found = None
-    seen: set[int] = set()
-
-    def visit(node: StructuredAstValue) -> None:
-        nonlocal found
-        if found is not None or node is None or id(node) in seen:
-            return
-        seen.add(id(node))
-        if isinstance(node, structured_c.CAssignment) and _node_has_instruction_address_8616(
-            node,
-            project,
-            call_ins_addr,
-        ):
-            callee_name = _function_call_name_8616(node.rhs)
-            lhs = _strip_casts_8616(node.lhs)
-            if (
-                isinstance(lhs, structured_c.CVariable)
-                and _cvar_register_name_8616(lhs) == "ax"
-                and (normalized_call_name is None or callee_name == normalized_call_name)
-            ):
-                found = lhs
-                return
-        for attr in (
-            "statements",
-            "lhs",
-            "rhs",
-            "operand",
-            "expr",
-            "stmts",
-            "init",
-            "initializer",
-            "iftrue",
-            "iffalse",
-            "iteration",
-            "iterator",
-            "body",
-            "else_node",
-            "switch",
-            "default",
-        ):
-            if not hasattr(node, attr):
-                continue
-            with contextlib.suppress(Exception):
-                value = getattr(node, attr)
-            if isinstance(value, (list, tuple)):
-                for item in tuple(value):
-                    visit(item)
-                    if found is not None:
-                        return
-            elif value is not None:
-                visit(value)
-                if found is not None:
-                    return
-        condition_and_nodes = getattr(node, "condition_and_nodes", None)
-        if condition_and_nodes:
-            for condition, body in tuple(condition_and_nodes):
-                visit(condition)
-                if found is not None:
-                    return
-                visit(body)
-                if found is not None:
-                    return
-
-    visit(root)
-    return found
+    finder = _CallResultCvarFinder8616(project, call_ins_addr, normalized_call_name)
+    finder.visit(root)
+    return finder.found
 
 
 def _function_pointer_stack_slot_type_8616(cvar: StructuredAstValue) -> SimTypePointer | None:
@@ -8916,55 +9988,77 @@ def _stack_aggregate_destination_8616(
     return structured_c.CIndexedVariable(aggregate_cvar, index_expr, codegen=codegen)
 
 
+def _direct_stack_move_index_expr_8616(
+    codegen: StructuredCodegenValue, fact: DirectStackMoveFact8616
+) -> tuple[StructuredAstValue, bool]:
+    """Resolve the destination index expression; (expr, supported)."""
+    if isinstance(fact.dst_index_global_displacement, int):
+        return _direct_stack_move_global_index_cvar_8616(codegen, fact.dst_index_global_displacement), True
+    if isinstance(fact.dst_index_stack_offset, int):
+        return _resolve_direct_stack_update_cvar_8616(codegen, fact.dst_index_stack_offset, 2), True
+    if isinstance(fact.dst_index_immediate, int):
+        return structured_c.CConstant(
+            fact.dst_index_immediate & 0xFFFF,
+            _type_for_access_width_8616(2),
+            codegen=codegen,
+        ), True
+    if fact.dst_index_scale != 1:
+        return None, False
+    return None, True
+
+
+def _stack_aggregate_covers_fact_8616(codegen: StructuredCodegenValue, fact: DirectStackMoveFact8616) -> bool:
+    """Check whether proven aggregate facts already cover this destination."""
+    raw_aggregate_facts = getattr(codegen, "_inertia_stack_aggregate_object_facts_8616", ()) or ()
+    return any(
+        isinstance(aggregate, StackAggregateObjectFact8616)
+        and fact.width == aggregate.element_width
+        and fact.dst_offset in aggregate.indexed_offsets
+        for aggregate in raw_aggregate_facts
+    )
+
+
+def _promote_dst_cvar_to_array_8616(
+    codegen: StructuredCodegenValue, dst_cvar: StructuredAstValue, width: StructuredAstValue
+) -> None:
+    """Give a scalar destination cvar a fixed-size array type for indexed writes."""
+    if not isinstance(dst_cvar, structured_c.CVariable) or _cvar_has_array_type_8616(dst_cvar):
+        return
+    element_type = _bind_type_to_codegen_arch_8616(codegen, _type_for_access_width_8616(width))
+    element_width = max(int(width or 1), 1)
+    stack_variable = dst_cvar.variable
+    storage_size = stack_variable.size if isinstance(stack_variable, SimStackVariable) else None
+    array_len = (
+        storage_size // element_width
+        if isinstance(storage_size, int) and storage_size >= element_width and storage_size % element_width == 0
+        else 1
+    )
+    dst_cvar.variable_type = _bind_type_to_codegen_arch_8616(
+        codegen,
+        SimTypeFixedSizeArray(element_type, array_len),
+    )
+    codegen._inertia_codegen_decl_refresh_required_8616 = True
+
+
 def _direct_stack_move_destination_expr_8616(
     codegen: StructuredCodegenValue,
     fact: DirectStackMoveFact8616,
     dst_cvar: StructuredAstValue,
 ) -> StructuredAstValue | None:
     """Build a scalar or binary-proven indexed BP stack destination."""
-    index_expr = None
-    if isinstance(fact.dst_index_global_displacement, int):
-        index_expr = _direct_stack_move_global_index_cvar_8616(codegen, fact.dst_index_global_displacement)
-    elif isinstance(fact.dst_index_stack_offset, int):
-        index_expr = _resolve_direct_stack_update_cvar_8616(codegen, fact.dst_index_stack_offset, 2)
-    elif isinstance(fact.dst_index_immediate, int):
-        index_expr = structured_c.CConstant(
-            fact.dst_index_immediate & 0xFFFF,
-            _type_for_access_width_8616(2),
-            codegen=codegen,
-        )
-    elif fact.dst_index_scale != 1:
+    index_expr, index_supported = _direct_stack_move_index_expr_8616(codegen, fact)
+    if not index_supported:
         return None
     aggregate_destination = _stack_aggregate_destination_8616(codegen, fact, index_expr)
     if aggregate_destination is not None:
         return aggregate_destination
-    raw_aggregate_facts = getattr(codegen, "_inertia_stack_aggregate_object_facts_8616", ()) or ()
-    if any(
-        isinstance(aggregate, StackAggregateObjectFact8616)
-        and fact.width == aggregate.element_width
-        and fact.dst_offset in aggregate.indexed_offsets
-        for aggregate in raw_aggregate_facts
-    ):
+    if _stack_aggregate_covers_fact_8616(codegen, fact):
         return None
     if fact.dst_index_byte_scale != 1:
         return None
     if index_expr is None:
         return dst_cvar
-    if isinstance(dst_cvar, structured_c.CVariable) and not _cvar_has_array_type_8616(dst_cvar):
-        element_type = _bind_type_to_codegen_arch_8616(codegen, _type_for_access_width_8616(fact.width))
-        element_width = max(int(fact.width or 1), 1)
-        stack_variable = dst_cvar.variable
-        storage_size = stack_variable.size if isinstance(stack_variable, SimStackVariable) else None
-        array_len = (
-            storage_size // element_width
-            if isinstance(storage_size, int) and storage_size >= element_width and storage_size % element_width == 0
-            else 1
-        )
-        dst_cvar.variable_type = _bind_type_to_codegen_arch_8616(
-            codegen,
-            SimTypeFixedSizeArray(element_type, array_len),
-        )
-        codegen._inertia_codegen_decl_refresh_required_8616 = True
+    _promote_dst_cvar_to_array_8616(codegen, dst_cvar, fact.width)
     if fact.dst_index_scale != 1:
         index_expr = structured_c.CBinaryOp(
             "Mul",
@@ -8977,6 +10071,180 @@ def _direct_stack_move_destination_expr_8616(
             codegen=codegen,
         )
     return structured_c.CIndexedVariable(dst_cvar, index_expr, codegen=codegen)
+
+
+@dataclass
+class _TaggedAssignmentReplacer8616:
+    """Replace tagged fragments only when their execution scopes can agree."""
+
+    root: StructuredAstValue
+    project: AngrProjectValue
+    ins_addr: int
+    replacement_factory: StructuredAstValue
+    allow_tagged_iterator_expression: bool
+    replace_all_matches: bool
+    remove_duplicate_tagged_assignments: bool
+    already_materialized_predicate: StructuredAstValue
+    already_materialized_attr: str | None
+    candidate_position_predicate: Callable[[StructuredAstValue], bool] | None
+    seen: set[int] = field(default_factory=set)
+    changed: bool = False
+    materialized: bool = False
+
+    def _already_materialized_8616(self, node: StructuredAstValue) -> bool:
+        """Record an already-materialized match without replacing it."""
+        if callable(self.already_materialized_predicate) and self.already_materialized_predicate(node):
+            if self.already_materialized_attr:
+                setattr(self.root, self.already_materialized_attr, True)
+            self.materialized = True
+            return True
+        return False
+
+    def _replace_matching_8616(self, node: StructuredAstValue, tags: StructuredAstValue) -> StructuredAstValue:
+        """Apply the factory to a matched tagged node."""
+        if self.materialized and not self.replace_all_matches:
+            return node
+        replacement = self.replacement_factory(tags)
+        if _is_same_stack_move_assignment_8616(
+            node,
+            getattr(replacement, "lhs", None),
+            getattr(replacement, "rhs", None),
+        ):
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            return node
+        self.materialized = True
+        self.changed = True
+        return replacement
+
+    def transform(self, node: StructuredAstValue) -> StructuredAstValue:
+        """Replace a tagged CAssignment via the factory."""
+        if isinstance(node, structured_c.CAssignment) and _node_has_instruction_address_8616(
+            node, self.project, self.ins_addr
+        ):
+            if self.candidate_position_predicate is not None and not self.candidate_position_predicate(node):
+                return node
+            if self._already_materialized_8616(node):
+                return node
+            return self._replace_matching_8616(node, node.tags)
+        return node
+
+    def transform_iterator(self, node: StructuredAstValue) -> StructuredAstValue:
+        """Replace a tagged iterator expression when the pass allows it."""
+        if not self.allow_tagged_iterator_expression:
+            return node
+        if isinstance(node, structured_c.CAssignment):
+            return self.transform(node)
+        if node is not None and _node_has_instruction_address_8616(node, self.project, self.ins_addr):
+            if self._already_materialized_8616(node):
+                return node
+            return self._replace_matching_8616(node, getattr(node, "tags", None))
+        return node
+
+    def is_duplicate_tagged_assignment(self, node: StructuredAstValue) -> bool:
+        return (
+            self.remove_duplicate_tagged_assignments
+            and self.materialized
+            and not self.replace_all_matches
+            and isinstance(node, structured_c.CAssignment)
+            and _node_has_instruction_address_8616(node, self.project, self.ins_addr)
+            and (self.candidate_position_predicate is None or self.candidate_position_predicate(node))
+        )
+
+    def replace_children(self, node: StructuredAstValue) -> None:
+        """Apply the transform to every child of a structured node."""
+        if node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+            return
+        node_id = id(node)
+        if node_id in self.seen:
+            return
+        self.seen.add(node_id)
+        self._replace_attr_children_8616(node)
+        self._replace_case_children_8616(node)
+        self._replace_pair_children_8616(node)
+
+    def _replace_list_items_8616(self, value: list[StructuredAstValue]) -> None:
+        """Transform list children, dropping duplicate tagged assignments."""
+        new_items = []
+        list_changed = False
+        for item in tuple(value):
+            if self.is_duplicate_tagged_assignment(item):
+                self.changed = True
+                list_changed = True
+                continue
+            replacement = self.transform(item)
+            if replacement is not item:
+                list_changed = True
+            self.replace_children(replacement)
+            new_items.append(replacement)
+        if list_changed:
+            value[:] = new_items
+
+    def _replace_attr_children_8616(self, node: StructuredAstValue) -> None:
+        """Transform each child-bearing attribute in place."""
+        for attr in (
+            "statements",
+            "lhs",
+            "rhs",
+            "operand",
+            "expr",
+            "stmts",
+            "init",
+            "initializer",
+            "iftrue",
+            "iffalse",
+            "iteration",
+            "iterator",
+            "body",
+            "else_node",
+        ):
+            if not hasattr(node, attr):
+                continue
+            with contextlib.suppress(Exception):
+                value = getattr(node, attr)
+                if isinstance(value, list):
+                    self._replace_list_items_8616(value)
+                elif value is not None:
+                    replacement = self.transform_iterator(value) if attr in {"iteration", "iterator"} else self.transform(value)
+                    if replacement is not value:
+                        setattr(node, attr, replacement)
+                        value = replacement
+                    self.replace_children(value)
+
+    def _replace_case_children_8616(self, node: StructuredAstValue) -> None:
+        """Transform switch-case bodies in place."""
+        cases = getattr(node, "cases", None)
+        if isinstance(cases, (list, tuple)):
+            new_cases = []
+            cases_changed = False
+            for item in tuple(cases):
+                if not isinstance(item, tuple) or len(item) != 2:
+                    new_cases.append(item)
+                    continue
+                case_value, case_body = item
+                replacement_body = self.transform(case_body)
+                if replacement_body is not case_body:
+                    cases_changed = True
+                self.replace_children(replacement_body)
+                new_cases.append((case_value, replacement_body))
+            if cases_changed:
+                node.cases = new_cases
+
+    def _replace_pair_children_8616(self, node: StructuredAstValue) -> None:
+        """Transform condition/body pair bodies in place."""
+        condition_and_nodes = getattr(node, "condition_and_nodes", None)
+        if condition_and_nodes:
+            new_pairs = []
+            pair_changed = False
+            for condition, body in tuple(condition_and_nodes):
+                new_condition = condition
+                new_body = self.transform(body)
+                if new_body is not body:
+                    pair_changed = True
+                self.replace_children(new_body)
+                new_pairs.append((new_condition, new_body))
+            if pair_changed:
+                with contextlib.suppress(Exception):
+                    node.condition_and_nodes = new_pairs
 
 
 def _replace_tagged_assignment_8616(
@@ -9000,159 +10268,125 @@ def _replace_tagged_assignment_8616(
             root, ins_addr,
             lambda node: _node_has_instruction_address_8616(node, project, ins_addr),
         )
-    changed = False
-    materialized = False
-    seen: set[int] = set()
-
-    def transform(node: StructuredAstValue) -> StructuredAstValue:
-        nonlocal changed, materialized
-        if isinstance(node, structured_c.CAssignment) and _node_has_instruction_address_8616(node, project, ins_addr):
-            if candidate_position_predicate is not None and not candidate_position_predicate(node):
-                return node
-            if callable(already_materialized_predicate) and already_materialized_predicate(node):
-                if already_materialized_attr:
-                    setattr(root, already_materialized_attr, True)
-                materialized = True
-                return node
-            if materialized and not replace_all_matches:
-                return node
-            replacement = replacement_factory(node.tags)
-            if _is_same_stack_move_assignment_8616(
-                node,
-                getattr(replacement, "lhs", None),
-                getattr(replacement, "rhs", None),
-            ):
-                root._inertia_stack_mov_assignment_already_present_8616 = True
-                return node
-            materialized = True
-            changed = True
-            return replacement
-        return node
-
-    def transform_iterator(node: StructuredAstValue) -> StructuredAstValue:
-        nonlocal changed, materialized
-        if not allow_tagged_iterator_expression:
-            return node
-        if isinstance(node, structured_c.CAssignment):
-            return transform(node)
-        if node is not None and _node_has_instruction_address_8616(node, project, ins_addr):
-            if callable(already_materialized_predicate) and already_materialized_predicate(node):
-                if already_materialized_attr:
-                    setattr(root, already_materialized_attr, True)
-                materialized = True
-                return node
-            if materialized and not replace_all_matches:
-                return node
-            replacement = replacement_factory(getattr(node, "tags", None))
-            if _is_same_stack_move_assignment_8616(
-                node,
-                getattr(replacement, "lhs", None),
-                getattr(replacement, "rhs", None),
-            ):
-                root._inertia_stack_mov_assignment_already_present_8616 = True
-                return node
-            materialized = True
-            changed = True
-            return replacement
-        return node
-
-    def is_duplicate_tagged_assignment(node: StructuredAstValue) -> bool:
-        return (
-            remove_duplicate_tagged_assignments
-            and materialized
-            and not replace_all_matches
-            and isinstance(node, structured_c.CAssignment)
-            and _node_has_instruction_address_8616(node, project, ins_addr)
-            and (candidate_position_predicate is None or candidate_position_predicate(node))
-        )
-
-    def replace_children(node: StructuredAstValue) -> None:
-        nonlocal changed
-        if node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-            return
-        node_id = id(node)
-        if node_id in seen:
-            return
-        seen.add(node_id)
-        for attr in (
-            "statements",
-            "lhs",
-            "rhs",
-            "operand",
-            "expr",
-            "stmts",
-            "init",
-            "initializer",
-            "iftrue",
-            "iffalse",
-            "iteration",
-            "iterator",
-            "body",
-            "else_node",
-        ):
-            if not hasattr(node, attr):
-                continue
-            with contextlib.suppress(Exception):
-                value = getattr(node, attr)
-                if isinstance(value, list):
-                    new_items = []
-                    list_changed = False
-                    for item in tuple(value):
-                        if is_duplicate_tagged_assignment(item):
-                            changed = True
-                            list_changed = True
-                            continue
-                        replacement = transform(item)
-                        if replacement is not item:
-                            list_changed = True
-                        replace_children(replacement)
-                        new_items.append(replacement)
-                    if list_changed:
-                        value[:] = new_items
-                elif value is not None:
-                    replacement = transform_iterator(value) if attr in {"iteration", "iterator"} else transform(value)
-                    if replacement is not value:
-                        setattr(node, attr, replacement)
-                        value = replacement
-                    replace_children(value)
-
-        cases = getattr(node, "cases", None)
-        if isinstance(cases, (list, tuple)):
-            new_cases = []
-            cases_changed = False
-            for item in tuple(cases):
-                if not isinstance(item, tuple) or len(item) != 2:
-                    new_cases.append(item)
-                    continue
-                case_value, case_body = item
-                replacement_body = transform(case_body)
-                if replacement_body is not case_body:
-                    cases_changed = True
-                replace_children(replacement_body)
-                new_cases.append((case_value, replacement_body))
-            if cases_changed:
-                node.cases = new_cases
-
-        condition_and_nodes = getattr(node, "condition_and_nodes", None)
-        if condition_and_nodes:
-            new_pairs = []
-            pair_changed = False
-            for condition, body in tuple(condition_and_nodes):
-                new_condition = condition
-                new_body = transform(body)
-                if new_body is not body:
-                    pair_changed = True
-                replace_children(new_body)
-                new_pairs.append((new_condition, new_body))
-            if pair_changed:
-                with contextlib.suppress(Exception):
-                    node.condition_and_nodes = new_pairs
-
-    replacement_root = transform(root)
+    replacer = _TaggedAssignmentReplacer8616(
+        root=root,
+        project=project,
+        ins_addr=ins_addr,
+        replacement_factory=replacement_factory,
+        allow_tagged_iterator_expression=allow_tagged_iterator_expression,
+        replace_all_matches=replace_all_matches,
+        remove_duplicate_tagged_assignments=remove_duplicate_tagged_assignments,
+        already_materialized_predicate=already_materialized_predicate,
+        already_materialized_attr=already_materialized_attr,
+        candidate_position_predicate=candidate_position_predicate,
+    )
+    replacement_root = replacer.transform(root)
     if replacement_root is not root:
         return True
-    replace_children(root)
-    return changed
+    replacer.replace_children(root)
+    return replacer.changed
+
+
+@dataclass
+class _TaggedStatementReplacer8616:
+    """Replace a machine-tagged assignment in lists or control attributes."""
+
+    project: StructuredAstValue
+    ins_addr: int
+    replacement_factory: StructuredAstValue
+    remove_duplicate_tagged_assignments: bool = False
+    changed: bool = False
+    materialized: bool = False
+    seen: set[int] = field(default_factory=set)
+
+    def _visit_statement_list_8616(self, statements: list[StructuredAstValue]) -> None:
+        """Replace or drop tagged assignments inside a statement list."""
+        new_statements = []
+        list_changed = False
+        for stmt in tuple(statements):
+            if (
+                self.materialized
+                and self.remove_duplicate_tagged_assignments
+                and isinstance(stmt, structured_c.CAssignment)
+                and _node_has_instruction_address_8616(stmt, self.project, self.ins_addr)
+            ):
+                self.changed = True
+                list_changed = True
+                continue
+            if (
+                not self.materialized
+                and isinstance(stmt, structured_c.CAssignment)
+                and _node_has_instruction_address_8616(stmt, self.project, self.ins_addr)
+            ):
+                replacement = self.replacement_factory(stmt.tags)
+                self.materialized = True
+                if _is_same_stack_move_assignment_surface_8616(stmt, replacement):
+                    new_statements.append(stmt)
+                    self.visit(stmt)
+                else:
+                    self.changed = True
+                    list_changed = True
+                    new_statements.append(replacement)
+                    self.visit(replacement)
+                continue
+            self.visit(stmt)
+            new_statements.append(stmt)
+        if list_changed:
+            statements[:] = new_statements
+
+    def _visit_control_attr_8616(self, node: StructuredAstValue, attr: str) -> None:
+        """Replace or drop a tagged assignment held in a control attribute."""
+        child = None
+        with contextlib.suppress(Exception):
+            child = getattr(node, attr, None)
+        if child is None:
+            return
+        if (
+            not self.materialized
+            and isinstance(child, structured_c.CAssignment)
+            and _node_has_instruction_address_8616(child, self.project, self.ins_addr)
+        ):
+            replacement = self.replacement_factory(child.tags)
+            if _is_same_stack_move_assignment_surface_8616(child, replacement):
+                self.materialized = True
+                self.visit(child)
+                return
+            setattr(node, attr, replacement)
+            child = replacement
+            self.materialized = True
+            self.changed = True
+        elif (
+            self.materialized
+            and self.remove_duplicate_tagged_assignments
+            and isinstance(child, structured_c.CAssignment)
+            and _node_has_instruction_address_8616(child, self.project, self.ins_addr)
+        ):
+            setattr(node, attr, None)
+            self.changed = True
+            return
+        self.visit(child)
+
+    def visit(self, node: StructuredAstValue) -> None:
+        """Replace the first assignment carrying the requested instruction tag."""
+        if node is None or id(node) in self.seen:
+            return
+        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+            return
+        self.seen.add(id(node))
+
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            self._visit_statement_list_8616(statements)
+
+        for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator"):
+            self._visit_control_attr_8616(node, attr)
+
+        pairs = None
+        with contextlib.suppress(Exception):
+            pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for _condition, body in tuple(pairs):
+                self.visit(body)
 
 
 def _replace_tagged_statement_assignment_8616(
@@ -9164,112 +10398,24 @@ def _replace_tagged_statement_assignment_8616(
     remove_duplicate_tagged_assignments: bool = False,
 ) -> bool:
     """Replace a machine-tagged assignment in statement lists or structured control attributes."""
-    changed = False
-    materialized = False
-    seen: set[int] = set()
-
-    def visit(node: StructuredAstValue) -> None:
-        """Replace the first assignment carrying the requested instruction tag."""
-        nonlocal changed, materialized
-        if node is None or id(node) in seen:
-            return
-        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-            return
-        seen.add(id(node))
-
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            new_statements = []
-            list_changed = False
-            for stmt in tuple(statements):
-                if (
-                    materialized
-                    and remove_duplicate_tagged_assignments
-                    and isinstance(stmt, structured_c.CAssignment)
-                    and _node_has_instruction_address_8616(stmt, project, ins_addr)
-                ):
-                    changed = True
-                    list_changed = True
-                    continue
-                if (
-                    not materialized
-                    and isinstance(stmt, structured_c.CAssignment)
-                    and _node_has_instruction_address_8616(stmt, project, ins_addr)
-                ):
-                    replacement = replacement_factory(stmt.tags)
-                    materialized = True
-                    if _is_same_stack_move_assignment_surface_8616(stmt, replacement):
-                        new_statements.append(stmt)
-                        visit(stmt)
-                    else:
-                        changed = True
-                        list_changed = True
-                        new_statements.append(replacement)
-                        visit(replacement)
-                    continue
-                visit(stmt)
-                new_statements.append(stmt)
-            if list_changed:
-                statements[:] = new_statements
-
-        for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator"):
-            child = None
-            with contextlib.suppress(Exception):
-                child = getattr(node, attr, None)
-            if child is not None:
-                if (
-                    not materialized
-                    and isinstance(child, structured_c.CAssignment)
-                    and _node_has_instruction_address_8616(child, project, ins_addr)
-                ):
-                    replacement = replacement_factory(child.tags)
-                    if _is_same_stack_move_assignment_surface_8616(child, replacement):
-                        materialized = True
-                        visit(child)
-                        continue
-                    setattr(node, attr, replacement)
-                    child = replacement
-                    materialized = True
-                    changed = True
-                elif (
-                    materialized
-                    and remove_duplicate_tagged_assignments
-                    and isinstance(child, structured_c.CAssignment)
-                    and _node_has_instruction_address_8616(child, project, ins_addr)
-                ):
-                    setattr(node, attr, None)
-                    changed = True
-                    continue
-                visit(child)
-
-        pairs = None
-        with contextlib.suppress(Exception):
-            pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                visit(body)
-
-    visit(root)
-    return changed
+    replacer = _TaggedStatementReplacer8616(
+        project,
+        ins_addr,
+        replacement_factory,
+        remove_duplicate_tagged_assignments=remove_duplicate_tagged_assignments,
+    )
+    replacer.visit(root)
+    return replacer.changed
 
 
-def _replace_unique_tagged_dirty_stack_update_8616(
+def _dirty_stack_update_candidates_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
     fact: DirectStackUpdateFact8616,
     cvar: StructuredAstValue,
-    replacement_factory: Callable[[StructuredAstValue], StructuredAstValue],
-    *,
-    query_index: StructuredAstQueryIndex8616 | None = None,
-) -> bool:
-    """Replace one rendered dirty RHS carrying an exact stack-update tag.
-
-    angr may preserve a direct BP-relative update as ``stack_slot = dirty``
-    while attaching the machine instruction address only to the dirty RHS.
-    The ordinary tagged-assignment path cannot see that nested tag.  Consume
-    it only when one rendered assignment has both the proven stack identity
-    and the exact instruction tag; duplicate candidates remain untouched.
-    """
+    query_index: StructuredAstQueryIndex8616 | None,
+) -> tuple[list[tuple[list[StructuredAstValue], int, StructuredAstValue, StructuredAstValue]], list[tuple[object, object, object, object]]]:
+    """Collect exact dirty-RHS stack-update candidates and observed diagnostics."""
     if query_index is not None:
         query_index.require_root(root)
     candidates: list[
@@ -9304,6 +10450,27 @@ def _replace_unique_tagged_dirty_stack_update_8616(
             ):
                 continue
             candidates.append((owner.statements, index, statement, dirty_rhs))
+    return candidates, observed
+
+
+def _replace_unique_tagged_dirty_stack_update_8616(
+    root: StructuredAstValue,
+    project: AngrProjectValue,
+    fact: DirectStackUpdateFact8616,
+    cvar: StructuredAstValue,
+    replacement_factory: Callable[[StructuredAstValue], StructuredAstValue],
+    *,
+    query_index: StructuredAstQueryIndex8616 | None = None,
+) -> bool:
+    """Replace one rendered dirty RHS carrying an exact stack-update tag.
+
+    angr may preserve a direct BP-relative update as ``stack_slot = dirty``
+    while attaching the machine instruction address only to the dirty RHS.
+    The ordinary tagged-assignment path cannot see that nested tag.  Consume
+    it only when one rendered assignment has both the proven stack identity
+    and the exact instruction tag; duplicate candidates remain untouched.
+    """
+    candidates, observed = _dirty_stack_update_candidates_8616(root, project, fact, cvar, query_index)
     if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
         log.warning(
             "[direct-stack-update-dirty] ins=%#x offset=%d observed=%r exact_candidates=%d",
@@ -9322,6 +10489,255 @@ def _replace_unique_tagged_dirty_stack_update_8616(
     )
     statements[index] = replacement_factory(tags)
     return True
+
+
+@dataclass
+class _TaggedCallReplacer8616:
+    """Project an owned call result to stack storage while retaining word carriers."""
+
+    root: StructuredAstValue
+    project: StructuredAstValue
+    call_ins_addr: StructuredAstValue
+    call_target: StructuredAstValue
+    accepted_call_names: StructuredAstValue
+    replacement_factory: StructuredAstValue
+    seen: set[int] = field(default_factory=set)
+    materialized_assignment: StructuredAstValue = None
+    untagged_candidates: list[tuple[list[StructuredAstValue], int]] = field(default_factory=list)
+    call_stmt_summaries: list[StructuredAstValue] = field(default_factory=list)
+
+    def call_statement_identity_8616(
+        self,
+        stmt: StructuredAstValue,
+    ) -> tuple[str | None, bool, bool, bool]:
+        """Return name, target match, tag state, and direct-call shape."""
+        tagged = _node_has_instruction_address_8616(stmt, self.project, self.call_ins_addr)
+        observed_name = _function_call_name_8616(stmt)
+        call_expr: StructuredAstValue = None
+        if isinstance(stmt, structured_c.CAssignment):
+            rhs = stmt.rhs
+            if (
+                _function_call_name_8616(rhs) is not None
+                or _function_call_target_addr_8616(rhs) is not None
+            ):
+                call_expr = rhs
+        elif isinstance(stmt, structured_c.CExpressionStatement):
+            call_expr = stmt.expr
+        elif isinstance(stmt, structured_c.CReturn):
+            call_expr = stmt.retval
+        elif isinstance(stmt, structured_c.CFunctionCall):
+            call_expr = stmt
+        if call_expr is not None:
+            tagged = tagged or _node_has_instruction_address_8616(
+                call_expr, self.project, self.call_ins_addr
+            )
+        if observed_name is None and call_expr is not None:
+            observed_name = _function_call_name_8616(call_expr)
+        target_matches = _function_call_target_matches_8616(
+            call_expr,
+            self.project,
+            self.call_target,
+        )
+        return observed_name, target_matches, tagged, call_expr is not None
+
+    def is_target_call_statement(self, stmt: StructuredAstValue) -> bool:
+        """Check whether a tagged statement is the call being materialized."""
+        if (
+            isinstance(stmt, structured_c.CAssignment)
+            and isinstance(_c_expr_stack_offset_8616(stmt.lhs), int)
+        ):
+            # A stack-local low-half assignment is a carrier, not the
+            # full-width destination. Materialize the wide assignment first,
+            # then consume the exact carrier below. Word SSA/register carriers
+            # retain their definitions through the call-result bridge below.
+            return False
+        observed_name, target_matches, tagged, has_direct_call = (
+            self.call_statement_identity_8616(stmt)
+        )
+        if not tagged or not has_direct_call:
+            return False
+        name_matches = observed_name is not None and (
+            not self.accepted_call_names or observed_name in self.accepted_call_names
+        )
+        return target_matches or name_matches or isinstance(self.call_target, int)
+
+    def is_unique_untagged_target_call_statement(self, stmt: StructuredAstValue) -> bool:
+        """Check whether an untagged call statement uniquely matches the requested call."""
+        if (
+            isinstance(stmt, structured_c.CAssignment)
+            and _cvar_register_name_8616(_strip_casts_8616(stmt.lhs)) != "ax"
+        ):
+            return False
+        observed_name, target_matches, tagged, has_direct_call = (
+            self.call_statement_identity_8616(stmt)
+        )
+        if tagged or not has_direct_call:
+            return False
+        name_matches = observed_name is not None and (
+            not self.accepted_call_names or observed_name in self.accepted_call_names
+        )
+        return target_matches or name_matches
+
+    def visit(self, node: StructuredAstValue) -> None:
+        """Replace the tagged call statement with the stack assignment."""
+        if node is None or id(node) in self.seen:
+            return
+        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+            return
+        self.seen.add(id(node))
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            self._visit_statements_8616(statements)
+        self._visit_child_links_8616(node)
+
+    def _visit_statements_8616(self, statements: list[StructuredAstValue]) -> None:
+        """Replace the matching tagged call in one statement list."""
+        for index, stmt in enumerate(tuple(statements)):
+            prefer_later_non_assignment = isinstance(stmt, structured_c.CAssignment) and any(
+                not isinstance(candidate_stmt, structured_c.CAssignment)
+                and self.is_target_call_statement(candidate_stmt)
+                for candidate_stmt in tuple(statements)[index + 1 :]
+            )
+            if (
+                self.materialized_assignment is None
+                and not prefer_later_non_assignment
+                and self.is_target_call_statement(stmt)
+            ):
+                replacement = self.replacement_factory({"ins_addr": self.call_ins_addr})
+                if not isinstance(replacement, structured_c.CAssignment):
+                    continue
+                statements[index] = preserve_word_call_carrier_8616(stmt, replacement)
+                self.materialized_assignment = replacement
+                self.visit(replacement)
+                continue
+            self.visit(stmt)
+
+    def _visit_child_links_8616(self, node: StructuredAstValue) -> None:
+        """Recurse into loop fields and condition/body pairs."""
+        for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator"):
+            child = None
+            with contextlib.suppress(Exception):
+                child = getattr(node, attr, None)
+            if child is not None:
+                self.visit(child)
+        pairs = None
+        with contextlib.suppress(Exception):
+            pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for _condition, body in tuple(pairs):
+                self.visit(body)
+
+    def collect_untagged(self, node: StructuredAstValue) -> None:
+        """Collect fallback untagged call statements matching the same call name."""
+        if node is None or id(node) in self.seen:
+            return
+        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+            return
+        self.seen.add(id(node))
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            for index, stmt in enumerate(tuple(statements)):
+                if self.is_unique_untagged_target_call_statement(stmt):
+                    self.untagged_candidates.append((statements, index))
+                self.collect_untagged(stmt)
+        self._collect_untagged_children_8616(node)
+
+    def _collect_untagged_children_8616(self, node: StructuredAstValue) -> None:
+        """Recurse the untagged collector into child links and pairs."""
+        for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator"):
+            child = None
+            with contextlib.suppress(Exception):
+                child = getattr(node, attr, None)
+            if child is not None:
+                self.collect_untagged(child)
+        pairs = None
+        with contextlib.suppress(Exception):
+            pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for _condition, body in tuple(pairs):
+                self.collect_untagged(body)
+
+    def collect_call_stmt_summaries(self, node: StructuredAstValue) -> None:
+        """Collect debug summaries for call statements when no fallback matched."""
+        if node is None or id(node) in self.seen:
+            return
+        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+            return
+        self.seen.add(id(node))
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            for stmt in tuple(statements):
+                self._collect_stmt_summary_8616(stmt)
+        self._collect_summary_children_8616(node)
+
+    def _collect_stmt_summary_8616(self, stmt: StructuredAstValue) -> None:
+        """Record one statement's call names and shape for the debug dump."""
+        call_names = tuple(
+            name
+            for name in (
+                _function_call_name_8616(call_node)
+                for call_node in _iter_structured_c_nodes_8616(stmt)
+                if isinstance(call_node, structured_c.CFunctionCall)
+            )
+            if isinstance(name, str)
+        )
+        if call_names:
+            self.call_stmt_summaries.append(
+                (
+                    type(stmt).__name__,
+                    call_names,
+                    getattr(stmt, "tags", None),
+                    tuple(
+                        attr
+                        for attr in ("expr", "retval", "body", "statements", "stmts", "condition")
+                        if hasattr(stmt, attr)
+                    ),
+                )
+            )
+        self.collect_call_stmt_summaries(stmt)
+
+    def _collect_summary_children_8616(self, node: StructuredAstValue) -> None:
+        """Recurse the summary collector into child links and pairs."""
+        for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator", "stmts"):
+            with contextlib.suppress(Exception):
+                child = getattr(node, attr, None)
+            if child is not None:
+                self.collect_call_stmt_summaries(child)
+        pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for _condition, body in tuple(pairs):
+                self.collect_call_stmt_summaries(body)
+
+    def _debug_untagged_mismatch_8616(self) -> None:
+        """Emit call-statement summaries when the untagged fallback is ambiguous."""
+        if not (
+            os.environ.get("INERTIA_DEBUG_STACK_NOISE") and len(self.untagged_candidates) != 1
+        ):
+            return
+        self.seen.clear()
+        self.collect_call_stmt_summaries(self.root)
+        log.warning(
+            "[direct-stack-mov-idiv-call] candidate-count=%d ins=%s target=%s accepted=%r summaries=%r",
+            len(self.untagged_candidates),
+            self.call_ins_addr,
+            self.call_target,
+            tuple(sorted(self.accepted_call_names)),
+            tuple(self.call_stmt_summaries[:16]),
+        )
+
+    def _untagged_fallback_8616(self, exact_callsite_present: bool) -> None:
+        """Replace the unique untagged matching call statement if present."""
+        if self.materialized_assignment is not None or exact_callsite_present:
+            return
+        self.seen.clear()
+        self.collect_untagged(self.root)
+        self._debug_untagged_mismatch_8616()
+        if len(self.untagged_candidates) == 1:
+            statements, index = self.untagged_candidates[0]
+            replacement = self.replacement_factory({"ins_addr": self.call_ins_addr})
+            if isinstance(replacement, structured_c.CAssignment):
+                statements[index] = replacement
+                self.materialized_assignment = replacement
 
 
 def _replace_tagged_call_statement_with_stack_assignment_8616(
@@ -9344,288 +10760,72 @@ def _replace_tagged_call_statement_with_stack_assignment_8616(
             resolved_name, _callee, _resolved_target = _callee_name_for_direct_stack_move_8616(project, call_target)
             if isinstance(resolved_name, str) and resolved_name:
                 accepted_call_names.add(resolved_name.lstrip("_"))
-    materialized_assignment: structured_c.CAssignment | None = None
-    seen: set[int] = set()
-
-    def call_statement_identity_8616(
-        stmt: StructuredAstValue,
-    ) -> tuple[str | None, bool, bool, bool]:
-        """Return name, target match, tag state, and direct-call shape."""
-        tagged = _node_has_instruction_address_8616(stmt, project, call_ins_addr)
-        observed_name = _function_call_name_8616(stmt)
-        call_expr: StructuredAstValue = None
-        if isinstance(stmt, structured_c.CAssignment):
-            rhs = stmt.rhs
-            if (
-                _function_call_name_8616(rhs) is not None
-                or _function_call_target_addr_8616(rhs) is not None
-            ):
-                call_expr = rhs
-        elif isinstance(stmt, structured_c.CExpressionStatement):
-            call_expr = stmt.expr
-        elif isinstance(stmt, structured_c.CReturn):
-            call_expr = stmt.retval
-        elif isinstance(stmt, structured_c.CFunctionCall):
-            call_expr = stmt
-        if call_expr is not None:
-            tagged = tagged or _node_has_instruction_address_8616(call_expr, project, call_ins_addr)
-        if observed_name is None and call_expr is not None:
-            observed_name = _function_call_name_8616(call_expr)
-        target_matches = _function_call_target_matches_8616(
-            call_expr,
-            project,
-            call_target,
-        )
-        return observed_name, target_matches, tagged, call_expr is not None
-
-    def is_target_call_statement(stmt: StructuredAstValue) -> bool:
-        """Check whether a tagged statement is the call being materialized."""
-        if (
-            isinstance(stmt, structured_c.CAssignment)
-            and isinstance(_c_expr_stack_offset_8616(stmt.lhs), int)
-        ):
-            # A stack-local low-half assignment is a carrier, not the
-            # full-width destination. Materialize the wide assignment first,
-            # then consume the exact carrier below. Word SSA/register carriers
-            # retain their definitions through the call-result bridge below.
-            return False
-        observed_name, target_matches, tagged, has_direct_call = (
-            call_statement_identity_8616(stmt)
-        )
-        if not tagged or not has_direct_call:
-            return False
-        name_matches = observed_name is not None and (
-            not accepted_call_names or observed_name in accepted_call_names
-        )
-        return target_matches or name_matches or isinstance(call_target, int)
-
-    def is_unique_untagged_target_call_statement(stmt: StructuredAstValue) -> bool:
-        """Check whether an untagged call statement uniquely matches the requested call."""
-        if (
-            isinstance(stmt, structured_c.CAssignment)
-            and _cvar_register_name_8616(_strip_casts_8616(stmt.lhs)) != "ax"
-        ):
-            return False
-        observed_name, target_matches, tagged, has_direct_call = (
-            call_statement_identity_8616(stmt)
-        )
-        if tagged or not has_direct_call:
-            return False
-        name_matches = observed_name is not None and (
-            not accepted_call_names or observed_name in accepted_call_names
-        )
-        return target_matches or name_matches
-
-    def visit(node: StructuredAstValue) -> None:
-        """Replace the tagged call statement with the stack assignment."""
-        nonlocal materialized_assignment
-        if node is None or id(node) in seen:
-            return
-        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-            return
-        seen.add(id(node))
-
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            for index, stmt in enumerate(tuple(statements)):
-                prefer_later_non_assignment = isinstance(stmt, structured_c.CAssignment) and any(
-                    not isinstance(candidate_stmt, structured_c.CAssignment)
-                    and is_target_call_statement(candidate_stmt)
-                    for candidate_stmt in tuple(statements)[index + 1 :]
-                )
-                if (
-                    materialized_assignment is None
-                    and not prefer_later_non_assignment
-                    and is_target_call_statement(stmt)
-                ):
-                    replacement = replacement_factory({"ins_addr": call_ins_addr})
-                    if not isinstance(replacement, structured_c.CAssignment):
-                        continue
-                    statements[index] = preserve_word_call_carrier_8616(stmt, replacement)
-                    materialized_assignment = replacement
-                    visit(replacement)
-                    continue
-                visit(stmt)
-
-        for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator"):
-            child = None
-            with contextlib.suppress(Exception):
-                child = getattr(node, attr, None)
-            if child is not None:
-                visit(child)
-
-        pairs = None
-        with contextlib.suppress(Exception):
-            pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                visit(body)
-
-    visit(root)
+    replacer = _TaggedCallReplacer8616(
+        root=root,
+        project=project,
+        call_ins_addr=call_ins_addr,
+        call_target=call_target,
+        accepted_call_names=accepted_call_names,
+        replacement_factory=replacement_factory,
+    )
+    replacer.visit(root)
     exact_callsite_present = any(
         isinstance(node, structured_c.CFunctionCall)
         and _node_has_instruction_address_8616(node, project, call_ins_addr)
         for node in _iter_structured_c_nodes_8616(root)
     )
-    if materialized_assignment is None and not exact_callsite_present:
-        untagged_candidates: list[tuple[list[StructuredAstValue], int]] = []
-        seen.clear()
-
-        def collect_untagged(node: StructuredAstValue) -> None:
-            """Collect fallback untagged call statements matching the same call name."""
-            if node is None or id(node) in seen:
-                return
-            if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-                return
-            seen.add(id(node))
-
-            statements = getattr(node, "statements", None)
-            if isinstance(statements, list):
-                for index, stmt in enumerate(tuple(statements)):
-                    if is_unique_untagged_target_call_statement(stmt):
-                        untagged_candidates.append((statements, index))
-                    collect_untagged(stmt)
-
-            for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator"):
-                child = None
-                with contextlib.suppress(Exception):
-                    child = getattr(node, attr, None)
-                if child is not None:
-                    collect_untagged(child)
-
-            pairs = None
-            with contextlib.suppress(Exception):
-                pairs = getattr(node, "condition_and_nodes", None)
-            if pairs:
-                for _condition, body in tuple(pairs):
-                    collect_untagged(body)
-
-        collect_untagged(root)
-        if os.environ.get("INERTIA_DEBUG_STACK_NOISE") and len(untagged_candidates) != 1:
-            call_stmt_summaries: list[tuple[str, tuple[str, ...], StructuredAstValue, tuple[str, ...]]] = []
-
-            def collect_call_stmt_summaries(node: StructuredAstValue) -> None:
-                """Collect debug summaries for call statements when no fallback matched."""
-                if node is None or id(node) in seen:
-                    return
-                if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-                    return
-                seen.add(id(node))
-                statements = getattr(node, "statements", None)
-                if isinstance(statements, list):
-                    for stmt in tuple(statements):
-                        call_names = tuple(
-                            name
-                            for name in (
-                                _function_call_name_8616(call_node)
-                                for call_node in _iter_structured_c_nodes_8616(stmt)
-                                if isinstance(call_node, structured_c.CFunctionCall)
-                            )
-                            if isinstance(name, str)
-                        )
-                        if call_names:
-                            call_stmt_summaries.append(
-                                (
-                                    type(stmt).__name__,
-                                    call_names,
-                                    getattr(stmt, "tags", None),
-                                    tuple(
-                                        attr
-                                        for attr in ("expr", "retval", "body", "statements", "stmts", "condition")
-                                        if hasattr(stmt, attr)
-                                    ),
-                                )
-                            )
-                        collect_call_stmt_summaries(stmt)
-                for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator", "stmts"):
-                    with contextlib.suppress(Exception):
-                        child = getattr(node, attr, None)
-                    if child is not None:
-                        collect_call_stmt_summaries(child)
-                pairs = getattr(node, "condition_and_nodes", None)
-                if pairs:
-                    for _condition, body in tuple(pairs):
-                        collect_call_stmt_summaries(body)
-
-            seen.clear()
-            collect_call_stmt_summaries(root)
-            log.warning(
-                "[direct-stack-mov-idiv-call] candidate-count=%d ins=%s target=%s accepted=%r summaries=%r",
-                len(untagged_candidates),
-                call_ins_addr,
-                call_target,
-                tuple(sorted(accepted_call_names)),
-                tuple(call_stmt_summaries[:16]),
-            )
-        if len(untagged_candidates) == 1:
-            statements, index = untagged_candidates[0]
-            replacement = replacement_factory({"ins_addr": call_ins_addr})
-            if isinstance(replacement, structured_c.CAssignment):
-                statements[index] = replacement
-                materialized_assignment = replacement
-    return materialized_assignment
+    replacer._untagged_fallback_8616(exact_callsite_present)
+    return replacer.materialized_assignment
 
 
-def _replace_tagged_register_reload_assignment_8616(
-    root: StructuredAstValue,
-    project: StructuredAstValue,
-    fact: DirectStackReloadFact8616,
-    source_cvar: StructuredAstValue,
-    *,
-    candidate_index: TaggedAssignmentAddressIndex8616 | None = None,
-) -> _DirectStackReloadPlacement8616:
+@dataclass
+class _TaggedReloadReplacer8616:
     """Replace one tagged reload, distinguishing an idempotent existing value."""
-    candidate_addresses = _candidate_ins_addrs_8616(project, fact.ins_addr)
-    if candidate_index is not None:
-        indexed_candidates = candidate_index.candidate_assignments(candidate_addresses)
-        if indexed_candidates is not None:
-            for candidate in indexed_candidates:
-                if not _node_has_instruction_address_8616(
-                    candidate,
-                    project,
-                    fact.ins_addr,
-                ):
-                    continue
-                lhs = _strip_casts_8616(candidate.lhs)
-                if _cvar_register_name_8616(lhs) != fact.dst_reg_name:
-                    continue
-                if _same_stack_cvar_8616(candidate.rhs, source_cvar):
-                    return _DirectStackReloadPlacement8616.ALREADY_PRESENT
-                candidate.rhs = source_cvar
-                return _DirectStackReloadPlacement8616.MATERIALIZED
-            return _DirectStackReloadPlacement8616.NO_MATCH
-    placement = _DirectStackReloadPlacement8616.NO_MATCH
-    seen: set[int] = set()
 
-    def transform(node: StructuredAstValue) -> StructuredAstValue:
-        nonlocal placement
+    project: StructuredAstValue
+    ins_addr: StructuredAstValue
+    dst_reg_name: StructuredAstValue
+    source_cvar: StructuredAstValue
+    seen: set[int]
+    placement: StructuredAstValue = _DirectStackReloadPlacement8616.NO_MATCH
+
+    def transform(self, node: StructuredAstValue) -> StructuredAstValue:
+        """Replace the matching tagged reload's RHS with the stack source."""
         if not isinstance(node, structured_c.CAssignment):
             return node
-        if not _node_has_instruction_address_8616(node, project, fact.ins_addr):
+        if not _node_has_instruction_address_8616(node, self.project, self.ins_addr):
             return node
         lhs = _strip_casts_8616(node.lhs)
-        if _cvar_register_name_8616(lhs) != fact.dst_reg_name:
+        if _cvar_register_name_8616(lhs) != self.dst_reg_name:
             return node
-        if placement.present:
+        if self.placement.present:
             return node
-        if _same_stack_cvar_8616(node.rhs, source_cvar):
-            placement = _DirectStackReloadPlacement8616.ALREADY_PRESENT
+        if _same_stack_cvar_8616(node.rhs, self.source_cvar):
+            self.placement = _DirectStackReloadPlacement8616.ALREADY_PRESENT
             return node
-        placement = _DirectStackReloadPlacement8616.MATERIALIZED
+        self.placement = _DirectStackReloadPlacement8616.MATERIALIZED
         return structured_c.CAssignment(
             node.lhs,
-            source_cvar,
-            codegen=getattr(source_cvar, "codegen", None),
+            self.source_cvar,
+            codegen=getattr(self.source_cvar, "codegen", None),
             tags=node.tags,
         )
 
-    def replace_children(node: StructuredAstValue) -> None:
-        if placement.present or node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+    def replace_children(self, node: StructuredAstValue) -> None:
+        """Apply the transform to every child, stopping once placed."""
+        if self.placement.present or node is None or not type(node).__module__.startswith(
+            "angr.analyses.decompiler.structured_codegen"
+        ):
             return
         node_id = id(node)
-        if node_id in seen:
+        if node_id in self.seen:
             return
-        seen.add(node_id)
+        self.seen.add(node_id)
+        self._replace_attr_children_8616(node)
+        self._replace_pair_children_8616(node)
+
+    def _replace_attr_children_8616(self, node: StructuredAstValue) -> None:
+        """Transform each child-bearing attribute in place."""
         for attr in (
             "statements",
             "lhs",
@@ -9651,40 +10851,90 @@ def _replace_tagged_register_reload_assignment_8616(
                 value = getattr(node, attr)
                 if isinstance(value, list):
                     for index, item in enumerate(tuple(value)):
-                        if placement.present:
+                        if self.placement.present:
                             return
-                        replacement = transform(item)
+                        replacement = self.transform(item)
                         if replacement is not item:
                             value[index] = replacement
-                        replace_children(value[index])
+                        self.replace_children(value[index])
                 elif value is not None:
-                    replacement = transform(value)
+                    replacement = self.transform(value)
                     if replacement is not value:
                         setattr(node, attr, replacement)
                         value = replacement
-                    replace_children(value)
+                    self.replace_children(value)
 
+    def _replace_pair_children_8616(self, node: StructuredAstValue) -> None:
+        """Transform condition/body pairs in place."""
         condition_and_nodes = getattr(node, "condition_and_nodes", None)
         if condition_and_nodes:
             new_pairs = []
             pair_changed = False
             for condition, body in tuple(condition_and_nodes):
-                new_condition = transform(condition)
-                new_body = transform(body)
+                new_condition = self.transform(condition)
+                new_body = self.transform(body)
                 if new_condition is not condition or new_body is not body:
                     pair_changed = True
-                replace_children(new_condition)
-                replace_children(new_body)
+                self.replace_children(new_condition)
+                self.replace_children(new_body)
                 new_pairs.append((new_condition, new_body))
             if pair_changed:
                 with contextlib.suppress(Exception):
                     node.condition_and_nodes = new_pairs
 
-    replacement_root = transform(root)
+
+def _indexed_reload_candidate_8616(
+    indexed_candidates: StructuredAstValue,
+    project: StructuredAstValue,
+    fact: DirectStackReloadFact8616,
+    source_cvar: StructuredAstValue,
+) -> _DirectStackReloadPlacement8616:
+    """Match or replace a reload through the tagged-assignment index."""
+    for candidate in indexed_candidates:
+        if not _node_has_instruction_address_8616(
+            candidate,
+            project,
+            fact.ins_addr,
+        ):
+            continue
+        lhs = _strip_casts_8616(candidate.lhs)
+        if _cvar_register_name_8616(lhs) != fact.dst_reg_name:
+            continue
+        if _same_stack_cvar_8616(candidate.rhs, source_cvar):
+            return _DirectStackReloadPlacement8616.ALREADY_PRESENT
+        candidate.rhs = source_cvar
+        return _DirectStackReloadPlacement8616.MATERIALIZED
+    return _DirectStackReloadPlacement8616.NO_MATCH
+
+
+def _replace_tagged_register_reload_assignment_8616(
+    root: StructuredAstValue,
+    project: StructuredAstValue,
+    fact: DirectStackReloadFact8616,
+    source_cvar: StructuredAstValue,
+    *,
+    candidate_index: TaggedAssignmentAddressIndex8616 | None = None,
+) -> _DirectStackReloadPlacement8616:
+    """Replace one tagged reload, distinguishing an idempotent existing value."""
+    candidate_addresses = _candidate_ins_addrs_8616(project, fact.ins_addr)
+    if candidate_index is not None:
+        indexed_candidates = candidate_index.candidate_assignments(candidate_addresses)
+        if indexed_candidates is not None:
+            return _indexed_reload_candidate_8616(
+                indexed_candidates, project, fact, source_cvar
+            )
+    replacer = _TaggedReloadReplacer8616(
+        project=project,
+        ins_addr=fact.ins_addr,
+        dst_reg_name=fact.dst_reg_name,
+        source_cvar=source_cvar,
+        seen=set(),
+    )
+    replacement_root = replacer.transform(root)
     if replacement_root is not root:
-        return placement
-    replace_children(root)
-    return placement
+        return replacer.placement
+    replacer.replace_children(root)
+    return replacer.placement
 
 
 def _c_expr_stack_offset_8616(node: StructuredAstValue) -> int | None:
@@ -9841,6 +11091,48 @@ def _transparent_statement_slots_8616(
     return tuple(slots)
 
 
+def _while_loop_update_candidates_8616(
+    loop: StructuredAstValue,
+    project: AngrProjectValue,
+    guard_addr: int,
+    cvar: StructuredAstValue,
+) -> list[tuple[list[StructuredAstValue], int, StructuredAstValue]]:
+    """Return the unique post-guard dirty update inside one while loop."""
+    slots = _transparent_statement_slots_8616(loop.body)
+    guard_indexes = tuple(
+        index
+        for index, (_owner, _slot, statement) in enumerate(slots)
+        if _node_contains_instruction_address_8616(
+            statement,
+            project,
+            guard_addr,
+        )
+    )
+    if len(guard_indexes) != 1:
+        return []
+    guard_index = guard_indexes[0]
+    loop_candidates: list[
+        tuple[list[StructuredAstValue], int, structured_c.CAssignment]
+    ] = []
+    for index, (owner, slot, statement) in enumerate(slots):
+        if index <= guard_index or not isinstance(
+            statement,
+            structured_c.CAssignment,
+        ):
+            continue
+        if not _same_stack_cvar_8616(statement.lhs, cvar):
+            continue
+        if not isinstance(
+            _strip_casts_8616(statement.rhs),
+            structured_c.CDirtyExpression,
+        ):
+            continue
+        loop_candidates.append((owner, slot, statement))
+    if len(loop_candidates) == 1:
+        return loop_candidates
+    return []
+
+
 def _replace_proven_while_stack_update_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
@@ -9866,40 +11158,10 @@ def _replace_proven_while_stack_update_8616(
     ] = []
     nodes = query_index.nodes if query_index is not None else _iter_structured_c_nodes_8616(root)
     for loop in nodes:
-        if not isinstance(loop, structured_c.CWhileLoop):
-            continue
-        slots = _transparent_statement_slots_8616(loop.body)
-        guard_indexes = tuple(
-            index
-            for index, (_owner, _slot, statement) in enumerate(slots)
-            if _node_contains_instruction_address_8616(
-                statement,
-                project,
-                guard_addr,
+        if isinstance(loop, structured_c.CWhileLoop):
+            candidates.extend(
+                _while_loop_update_candidates_8616(loop, project, guard_addr, cvar)
             )
-        )
-        if len(guard_indexes) != 1:
-            continue
-        guard_index = guard_indexes[0]
-        loop_candidates: list[
-            tuple[list[StructuredAstValue], int, structured_c.CAssignment]
-        ] = []
-        for index, (owner, slot, statement) in enumerate(slots):
-            if index <= guard_index or not isinstance(
-                statement,
-                structured_c.CAssignment,
-            ):
-                continue
-            if not _same_stack_cvar_8616(statement.lhs, cvar):
-                continue
-            if not isinstance(
-                _strip_casts_8616(statement.rhs),
-                structured_c.CDirtyExpression,
-            ):
-                continue
-            loop_candidates.append((owner, slot, statement))
-        if len(loop_candidates) == 1:
-            candidates.extend(loop_candidates)
     if len(candidates) != 1:
         return False
     owner, slot, statement = candidates[0]
@@ -10004,6 +11266,114 @@ def _remove_conflicting_tagged_stack_update_assignments_8616(
     return removed_count
 
 
+def _loop_initializer_8616(loop: StructuredAstValue) -> StructuredAstValue:
+    """Return the first present loop initializer field."""
+    for attr in ("initializer", "init"):
+        if hasattr(loop, attr):
+            with contextlib.suppress(Exception):
+                value = getattr(loop, attr)
+                if value is not None:
+                    return value
+    return None
+
+
+def _loop_iterator_8616(
+    loop: StructuredAstValue,
+) -> tuple[str | None, StructuredAstValue]:
+    """Return the first present loop iterator field and its attribute name."""
+    for attr in ("iterator", "iteration"):
+        if hasattr(loop, attr):
+            with contextlib.suppress(Exception):
+                value = getattr(loop, attr)
+                if value is not None:
+                    return attr, value
+    return None, None
+
+
+@dataclass
+class _LoopIteratorRewriter8616:
+    """Rewrite placeholder loop iterators for a proven stack update."""
+
+    root: StructuredAstValue
+    cvar: StructuredAstValue
+    target_offset: StructuredAstValue
+    delta: StructuredAstValue
+    replacement_factory: StructuredAstValue
+    source_expr: StructuredAstValue
+    seen: set[int]
+    changed: bool = False
+
+    def _is_placeholder_iterator_8616(self, iterator: StructuredAstValue) -> bool:
+        """Return whether the iterator does not own the target stack offset."""
+        if iterator is None:
+            return False
+        if isinstance(iterator, structured_c.CAssignment):
+            return _assignment_lhs_stack_offset_8616(iterator) != self.target_offset
+        return True
+
+    def maybe_rewrite_loop(self, loop: StructuredAstValue) -> None:
+        """Rewrite the loop iterator when it is a placeholder for this update."""
+        initializer = _loop_initializer_8616(loop)
+        if _assignment_lhs_stack_offset_8616(initializer) != self.target_offset:
+            return
+        condition = getattr(loop, "condition", None) or getattr(loop, "cond", None)
+        if condition is not None and not _expr_reads_stack_offset_8616(
+            condition, self.target_offset
+        ):
+            return
+        iterator_attr, iterator = _loop_iterator_8616(loop)
+        if iterator_attr is None:
+            return
+        if self.source_expr is not None and _is_same_stack_update_assignment_8616(
+            iterator, self.cvar, self.delta, self.source_expr
+        ):
+            self.root._inertia_stack_update_assignment_already_present_8616 = True
+            return
+        if not self._is_placeholder_iterator_8616(iterator):
+            return
+        replacement = self.replacement_factory(getattr(iterator, "tags", None))
+        setattr(loop, iterator_attr, replacement)
+        self.changed = True
+
+    def walk(self, node: StructuredAstValue) -> None:
+        """Walk the structured-C tree and rewrite matching loop iterators."""
+        if node is None:
+            return
+        if isinstance(node, (list, tuple)):
+            for item in tuple(node):
+                self.walk(item)
+            return
+        marker = id(node)
+        if marker in self.seen:
+            return
+        self.seen.add(marker)
+        if isinstance(node, structured_c.CForLoop):
+            self.maybe_rewrite_loop(node)
+        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+            return
+        self._walk_children_8616(node)
+
+    def _walk_children_8616(self, node: StructuredAstValue) -> None:
+        """Recurse into loop-bearing attributes and condition/body pairs."""
+        for attr in (
+            "statements",
+            "body",
+            "else_node",
+            "iftrue",
+            "iffalse",
+            "initializer",
+            "init",
+        ):
+            if hasattr(node, attr):
+                with contextlib.suppress(Exception):
+                    self.walk(getattr(node, attr))
+        condition_and_nodes = getattr(node, "condition_and_nodes", None)
+        if condition_and_nodes:
+            for condition, body in tuple(condition_and_nodes):
+                self.walk(condition)
+                self.walk(body)
+
+
 def _replace_stack_update_loop_iterator_8616(
     root: StructuredAstValue,
     cvar: StructuredAstValue,
@@ -10017,95 +11387,23 @@ def _replace_stack_update_loop_iterator_8616(
     target_offset = _c_expr_stack_offset_8616(cvar)
     if not isinstance(target_offset, int):
         return False
-    changed = False
-    seen: set[int] = set()
-
-    def loop_initializer(loop: StructuredAstValue) -> StructuredAstValue:
-        for attr in ("initializer", "init"):
-            if hasattr(loop, attr):
-                with contextlib.suppress(Exception):
-                    value = getattr(loop, attr)
-                    if value is not None:
-                        return value
-        return None
-
-    def loop_iterator(loop: StructuredAstValue) -> StructuredAstValue:
-        for attr in ("iterator", "iteration"):
-            if hasattr(loop, attr):
-                with contextlib.suppress(Exception):
-                    value = getattr(loop, attr)
-                    if value is not None:
-                        return attr, value
-        return None, None
-
-    def is_placeholder_iterator(iterator: StructuredAstValue) -> bool:
-        if iterator is None:
-            return False
-        if isinstance(iterator, structured_c.CAssignment):
-            return _assignment_lhs_stack_offset_8616(iterator) != target_offset
-        return True
-
-    def maybe_rewrite_loop(loop: StructuredAstValue) -> None:
-        nonlocal changed
-        initializer = loop_initializer(loop)
-        if _assignment_lhs_stack_offset_8616(initializer) != target_offset:
-            return
-        condition = getattr(loop, "condition", None) or getattr(loop, "cond", None)
-        if condition is not None and not _expr_reads_stack_offset_8616(condition, target_offset):
-            return
-        iterator_attr, iterator = loop_iterator(loop)
-        if iterator_attr is None:
-            return
-        if source_expr is not None and _is_same_stack_update_assignment_8616(iterator, cvar, delta, source_expr):
-            root._inertia_stack_update_assignment_already_present_8616 = True
-            return
-        if not is_placeholder_iterator(iterator):
-            return
-        replacement = replacement_factory(getattr(iterator, "tags", None))
-        setattr(loop, iterator_attr, replacement)
-        changed = True
-
-    def walk(node: StructuredAstValue) -> None:
-        if node is None:
-            return
-        if isinstance(node, (list, tuple)):
-            for item in tuple(node):
-                walk(item)
-            return
-        marker = id(node)
-        if marker in seen:
-            return
-        seen.add(marker)
-        if isinstance(node, structured_c.CForLoop):
-            maybe_rewrite_loop(node)
-        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-            return
-        for attr in (
-            "statements",
-            "body",
-            "else_node",
-            "iftrue",
-            "iffalse",
-            "initializer",
-            "init",
-        ):
-            if hasattr(node, attr):
-                with contextlib.suppress(Exception):
-                    walk(getattr(node, attr))
-        condition_and_nodes = getattr(node, "condition_and_nodes", None)
-        if condition_and_nodes:
-            for condition, body in tuple(condition_and_nodes):
-                walk(condition)
-                walk(body)
-
+    rewriter = _LoopIteratorRewriter8616(
+        root=root,
+        cvar=cvar,
+        target_offset=target_offset,
+        delta=delta,
+        replacement_factory=replacement_factory,
+        source_expr=source_expr,
+        seen=set(),
+    )
     if query_index is None:
-        walk(root)
+        rewriter.walk(root)
     else:
         query_index.require_root(root)
         for node in query_index.nodes:
             if isinstance(node, structured_c.CForLoop):
-                maybe_rewrite_loop(node)
-    return changed
+                rewriter.maybe_rewrite_loop(node)
+    return rewriter.changed
 
 
 def _stack_cvar_identity_8616(cvar: StructuredAstValue) -> tuple[int, int | None] | None:
@@ -10193,42 +11491,51 @@ def _same_stack_low_half_cvar_8616(lhs: StructuredAstValue, rhs: StructuredAstVa
     )
 
 
-def _rebind_low_half_stack_reads_to_wide_cvar_8616(root: StructuredAstValue, wide_cvar: StructuredAstValue) -> int:
+@dataclass
+class _LowHalfRebinder8616:
     """Rebind proven low-half reads of a widened stack object to the wide object."""
-    if root is None or wide_cvar is None:
-        return 0
-    changed_count = 0
-    seen: set[int] = set()
 
-    def transform(node: StructuredAstValue) -> StructuredAstValue:
+    wide_cvar: StructuredAstValue
+    seen: set[int]
+    changed_count: int = 0
+
+    def transform(self, node: StructuredAstValue) -> StructuredAstValue:
         """Replace matching low-half reads with a typed wide-owner projection."""
-        nonlocal changed_count
-        if node is wide_cvar:
+        if node is self.wide_cvar:
             return node
-        if isinstance(node, structured_c.CVariable) and _same_stack_low_half_cvar_8616(node, wide_cvar):
+        if isinstance(node, structured_c.CVariable) and _same_stack_low_half_cvar_8616(
+            node, self.wide_cvar
+        ):
             projected = materialize_typed_condition_stack_operand_8616(
-                getattr(wide_cvar, "codegen", None),
+                getattr(self.wide_cvar, "codegen", None),
                 base="bp",
                 offset=int(getattr(node.variable, "offset", 0)),
                 size=2,
                 storage_size=4,
-                name=str(getattr(wide_cvar, "name", "stack")),
+                name=str(getattr(self.wide_cvar, "name", "stack")),
                 signed=False,
-                preferred=wide_cvar,
+                preferred=self.wide_cvar,
             )
             if projected is not None:
-                changed_count += 1
+                self.changed_count += 1
                 return projected
         return node
 
-    def visit(node: StructuredAstValue) -> None:
+    def visit(self, node: StructuredAstValue) -> None:
         """Walk structured-C nodes and apply low-half rebinding."""
-        if node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+        if node is None or not type(node).__module__.startswith(
+            "angr.analyses.decompiler.structured_codegen"
+        ):
             return
         node_id = id(node)
-        if node_id in seen:
+        if node_id in self.seen:
             return
-        seen.add(node_id)
+        self.seen.add(node_id)
+        self._visit_attr_children_8616(node)
+        self._visit_condition_pairs_8616(node)
+
+    def _visit_attr_children_8616(self, node: StructuredAstValue) -> None:
+        """Transform and recurse into each child-bearing attribute."""
         for attr in (
             "statements",
             "rhs",
@@ -10253,71 +11560,59 @@ def _rebind_low_half_stack_reads_to_wide_cvar_8616(root: StructuredAstValue, wid
                 value = getattr(node, attr)
                 if isinstance(value, list):
                     for index, item in enumerate(tuple(value)):
-                        replacement = transform(item)
+                        replacement = self.transform(item)
                         if replacement is not item:
                             value[index] = replacement
-                        visit(value[index])
+                        self.visit(value[index])
                 elif value is not None:
-                    replacement = transform(value)
+                    replacement = self.transform(value)
                     if replacement is not value:
                         setattr(node, attr, replacement)
                         value = replacement
-                    visit(value)
+                    self.visit(value)
 
+    def _visit_condition_pairs_8616(self, node: StructuredAstValue) -> None:
+        """Transform and recurse into condition/body pairs."""
         condition_and_nodes = getattr(node, "condition_and_nodes", None)
         if condition_and_nodes:
             new_pairs = []
             pair_changed = False
             for condition, body in tuple(condition_and_nodes):
-                new_condition = transform(condition)
-                new_body = transform(body)
+                new_condition = self.transform(condition)
+                new_body = self.transform(body)
                 if new_condition is not condition or new_body is not body:
                     pair_changed = True
-                visit(new_condition)
-                visit(new_body)
+                self.visit(new_condition)
+                self.visit(new_body)
                 new_pairs.append((new_condition, new_body))
             if pair_changed:
                 with contextlib.suppress(Exception):
                     node.condition_and_nodes = new_pairs
 
-    replacement_root = transform(root)
+
+def _rebind_low_half_stack_reads_to_wide_cvar_8616(root: StructuredAstValue, wide_cvar: StructuredAstValue) -> int:
+    """Rebind proven low-half reads of a widened stack object to the wide object."""
+    if root is None or wide_cvar is None:
+        return 0
+    rebinder = _LowHalfRebinder8616(wide_cvar=wide_cvar, seen=set())
+    replacement_root = rebinder.transform(root)
     if replacement_root is not root:
-        return changed_count
-    visit(root)
-    return changed_count
+        return rebinder.changed_count
+    rebinder.visit(root)
+    return rebinder.changed_count
 
 
-def _semantic_cvar_identity_8616(node: StructuredAstValue) -> tuple[str, StructuredAstValue] | None:
-    node = _strip_casts_8616(node)
-    if isinstance(node, SimMemoryVariable):
-        addr = node.addr
-        if isinstance(addr, int):
-            return ("mem", addr)
-    if isinstance(node, SimRegisterVariable):
-        reg = node.reg
-        size = node.size
-        name = node.name
-        if isinstance(reg, int) and isinstance(size, int):
-            return ("reg", (reg, size))
-        if isinstance(name, str) and name:
-            return ("reg-name", name)
-    if isinstance(node, SimStackVariable):
-        offset = node.offset
-        size = node.size
-        if isinstance(offset, int) and isinstance(size, int):
-            return ("stack", (_canonical_stack_offset_8616(offset), size))
-        name = node.name
-        if isinstance(name, str) and name and not name.startswith(("vvar_", "tmp_", "ir_")):
-            return ("name", name)
-    if not isinstance(node, structured_c.CVariable):
-        return None
-    variable = node.variable
-    if variable is None:
-        return None
+def _sim_memory_identity_8616(variable: StructuredAstValue) -> tuple[str, StructuredAstValue] | None:
+    """Return the memory-space identity for a SimMemoryVariable."""
     if isinstance(variable, SimMemoryVariable):
         addr = variable.addr
         if isinstance(addr, int):
             return ("mem", addr)
+    return None
+
+
+def _sim_register_identity_8616(variable: StructuredAstValue) -> tuple[str, StructuredAstValue] | None:
+    """Return the register-space identity for a SimRegisterVariable."""
     if isinstance(variable, SimRegisterVariable):
         reg = variable.reg
         size = variable.size
@@ -10326,10 +11621,80 @@ def _semantic_cvar_identity_8616(node: StructuredAstValue) -> tuple[str, Structu
             return ("reg", (reg, size))
         if isinstance(name, str) and name:
             return ("reg-name", name)
+    return None
+
+
+def _sim_stack_identity_8616(variable: StructuredAstValue) -> tuple[str, StructuredAstValue] | None:
+    """Return the stack-space identity for a SimStackVariable."""
+    if isinstance(variable, SimStackVariable):
+        offset = variable.offset
+        size = variable.size
+        if isinstance(offset, int) and isinstance(size, int):
+            return ("stack", (_canonical_stack_offset_8616(offset), size))
+        name = variable.name
+        if isinstance(name, str) and name and not name.startswith(("vvar_", "tmp_", "ir_")):
+            return ("name", name)
+    return None
+
+
+def _generic_name_identity_8616(
+    variable: StructuredAstValue, node: StructuredAstValue
+) -> tuple[str, StructuredAstValue] | None:
+    """Return the name identity for a variable or its carrier node."""
     name = getattr(variable, "name", None) or node.name
     if isinstance(name, str) and name and not name.startswith(("vvar_", "tmp_", "ir_")):
         return ("name", name)
     return None
+
+
+def _semantic_cvar_identity_8616(node: StructuredAstValue) -> tuple[str, StructuredAstValue] | None:
+    node = _strip_casts_8616(node)
+    identity = (
+        _sim_memory_identity_8616(node)
+        or _sim_register_identity_8616(node)
+        or _sim_stack_identity_8616(node)
+    )
+    if identity is not None:
+        return identity
+    if not isinstance(node, structured_c.CVariable):
+        return None
+    variable = node.variable
+    if variable is None:
+        return None
+    identity = _sim_memory_identity_8616(variable) or _sim_register_identity_8616(variable)
+    if identity is not None:
+        return identity
+    return _generic_name_identity_8616(variable, node)
+
+
+def _same_function_call_rhs_8616(
+    lhs: StructuredAstValue, rhs: StructuredAstValue
+) -> bool:
+    """Return whether two call expressions share callee and arguments."""
+    lhs_target = _function_call_target_addr_8616(lhs)
+    rhs_target = _function_call_target_addr_8616(rhs)
+    if lhs_target is not None or rhs_target is not None:
+        same_callee = (
+            lhs_target is not None
+            and rhs_target is not None
+            and lhs_target == rhs_target
+        )
+    else:
+        lhs_name = _function_call_name_8616(lhs)
+        rhs_name = _function_call_name_8616(rhs)
+        same_callee = (
+            lhs_name is not None
+            and rhs_name is not None
+            and lhs_name == rhs_name
+        )
+    return (
+        same_callee
+        and len(lhs.args) == len(rhs.args)
+        and all(
+            _same_stack_move_rhs_8616(lhs_arg, rhs_arg)
+            for lhs_arg, rhs_arg in zip(lhs.args, rhs.args, strict=True)
+        )
+    )
 
 
 def _same_stack_move_rhs_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
@@ -10357,30 +11722,7 @@ def _same_stack_move_rhs_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) 
         rhs,
         structured_c.CFunctionCall,
     ):
-        lhs_target = _function_call_target_addr_8616(lhs)
-        rhs_target = _function_call_target_addr_8616(rhs)
-        if lhs_target is not None or rhs_target is not None:
-            same_callee = (
-                lhs_target is not None
-                and rhs_target is not None
-                and lhs_target == rhs_target
-            )
-        else:
-            lhs_name = _function_call_name_8616(lhs)
-            rhs_name = _function_call_name_8616(rhs)
-            same_callee = (
-                lhs_name is not None
-                and rhs_name is not None
-                and lhs_name == rhs_name
-            )
-        return (
-            same_callee
-            and len(lhs.args) == len(rhs.args)
-            and all(
-                _same_stack_move_rhs_8616(lhs_arg, rhs_arg)
-                for lhs_arg, rhs_arg in zip(lhs.args, rhs.args, strict=True)
-            )
-        )
+        return _same_function_call_rhs_8616(lhs, rhs)
     if isinstance(lhs, structured_c.CIndexedVariable) and isinstance(rhs, structured_c.CIndexedVariable):
         return _same_stack_move_rhs_8616(lhs.variable, rhs.variable) and (
             _same_stack_move_rhs_8616(lhs.index, rhs.index)
@@ -10401,6 +11743,11 @@ def _same_stack_move_rhs_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) 
             and lhs.field.offset == rhs.field.offset
             and _same_stack_move_rhs_8616(lhs.variable, rhs.variable)
         )
+    return _same_scalar_move_rhs_8616(lhs, rhs)
+
+
+def _same_scalar_move_rhs_8616(lhs: StructuredAstValue, rhs: StructuredAstValue) -> bool:
+    """Return whether two leaf expressions carry the same scalar identity."""
     lhs_stack_id = _stack_cvar_identity_8616(lhs)
     rhs_stack_id = _stack_cvar_identity_8616(rhs)
     if lhs_stack_id is not None or rhs_stack_id is not None:
@@ -10492,6 +11839,95 @@ def _call_name_from_expr_8616(expr: StructuredAstValue) -> str | None:
     return name.lstrip("_") if isinstance(name, str) and name.strip() else None
 
 
+@dataclass
+class _PrecontrolReplacer8616:
+    """Replace the first proven pre-control assignment to one stack object."""
+
+    root: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    replacement: StructuredAstValue
+    allow_low_half_lhs: StructuredAstValue
+    insert_before_control_when_no_match: StructuredAstValue
+    refused: list[str] = field(default_factory=list)
+
+    def scan_container(self, container: StructuredAstValue, path: str) -> bool:
+        """Scan one statement container for the replaceable pre-control store."""
+        statements = getattr(container, "statements", None)
+        if not isinstance(statements, list):
+            self.refused.append(f"no-statements:path={path}:type={type(container).__name__}")
+            return False
+        for index, stmt in enumerate(tuple(statements)):
+            result = self._process_statement_8616(statements, index, stmt, f"{path}.{index}")
+            if result is not None:
+                return result
+        return False
+
+    def _process_statement_8616(
+        self,
+        statements: list[StructuredAstValue],
+        index: int,
+        stmt: StructuredAstValue,
+        item_path: str,
+    ) -> bool | None:
+        """Dispatch one statement; None means keep scanning this container."""
+        if _is_control_statement_8616(stmt):
+            return self._control_gate_8616(statements, index, stmt, item_path)
+        nested = getattr(stmt, "statements", None)
+        if isinstance(nested, list):
+            return True if self.scan_container(stmt, item_path) else None
+        if not isinstance(stmt, structured_c.CAssignment):
+            self.refused.append(
+                f"not-assignment:path={item_path}:type={type(stmt).__name__}"
+            )
+            return None
+        lhs = stmt.lhs
+        if not _same_stack_cvar_8616(lhs, self.dst_cvar) and not (
+            self.allow_low_half_lhs and _same_stack_low_half_cvar_8616(lhs, self.dst_cvar)
+        ):
+            self.refused.append(
+                "lhs-mismatch:"
+                f"path={item_path}:lhs={_stack_cvar_identity_8616(stmt.lhs)}:"
+                f"dst={_stack_cvar_identity_8616(self.dst_cvar)}"
+            )
+            return None
+        dst_offset = _c_expr_stack_offset_8616(self.dst_cvar)
+        if isinstance(dst_offset, int) and _expr_reads_stack_offset_8616(stmt.rhs, dst_offset):
+            self.refused.append(
+                f"rhs-reads-destination:path={item_path}:dst={_stack_cvar_identity_8616(self.dst_cvar)}"
+            )
+            return None
+        if _is_same_stack_move_assignment_8616(stmt, self.dst_cvar, self.replacement.rhs):
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            return False
+        statements[index] = self.replacement
+        return True
+
+    def _control_gate_8616(
+        self,
+        statements: list[StructuredAstValue],
+        index: int,
+        stmt: StructuredAstValue,
+        item_path: str,
+    ) -> bool:
+        """Stop at control flow, optionally inserting just before it."""
+        self.refused.append(
+            f"control-before-match:path={item_path}:type={type(stmt).__name__}"
+        )
+        self.root._inertia_stack_mov_refused_reasons_8616 = tuple(self.refused)
+        if (
+            self.insert_before_control_when_no_match
+            and not _insertion_point_has_stack_move_assignment_8616(
+                statements,
+                index,
+                self.dst_cvar,
+                self.replacement.rhs,
+            )
+        ):
+            statements.insert(index, self.replacement)
+            return True
+        return False
+
+
 def _replace_precontrol_stack_assignment_8616(
     root: StructuredAstValue,
     dst_cvar: StructuredAstValue,
@@ -10501,59 +11937,16 @@ def _replace_precontrol_stack_assignment_8616(
     insert_before_control_when_no_match: bool = False,
 ) -> bool:
     """Replace the first proven pre-control assignment to one stack object."""
-    refused: list[str] = []
-
-    def scan_container(container: StructuredAstValue, path: str) -> bool:
-        statements = getattr(container, "statements", None)
-        if not isinstance(statements, list):
-            refused.append(f"no-statements:path={path}:type={type(container).__name__}")
-            return False
-        for index, stmt in enumerate(tuple(statements)):
-            item_path = f"{path}.{index}"
-            if _is_control_statement_8616(stmt):
-                refused.append(f"control-before-match:path={item_path}:type={type(stmt).__name__}")
-                root._inertia_stack_mov_refused_reasons_8616 = tuple(refused)
-                if insert_before_control_when_no_match and not _insertion_point_has_stack_move_assignment_8616(
-                    statements,
-                    index,
-                    dst_cvar,
-                    replacement.rhs,
-                ):
-                    statements.insert(index, replacement)
-                    return True
-                return False
-            nested = getattr(stmt, "statements", None)
-            if isinstance(nested, list):
-                if scan_container(stmt, item_path):
-                    return True
-                continue
-            if not isinstance(stmt, structured_c.CAssignment):
-                refused.append(f"not-assignment:path={item_path}:type={type(stmt).__name__}")
-                continue
-            lhs = stmt.lhs
-            if not _same_stack_cvar_8616(lhs, dst_cvar) and not (
-                allow_low_half_lhs and _same_stack_low_half_cvar_8616(lhs, dst_cvar)
-            ):
-                refused.append(
-                    "lhs-mismatch:"
-                    f"path={item_path}:lhs={_stack_cvar_identity_8616(stmt.lhs)}:"
-                    f"dst={_stack_cvar_identity_8616(dst_cvar)}"
-                )
-                continue
-            dst_offset = _c_expr_stack_offset_8616(dst_cvar)
-            if isinstance(dst_offset, int) and _expr_reads_stack_offset_8616(stmt.rhs, dst_offset):
-                refused.append(f"rhs-reads-destination:path={item_path}:dst={_stack_cvar_identity_8616(dst_cvar)}")
-                continue
-            if _is_same_stack_move_assignment_8616(stmt, dst_cvar, replacement.rhs):
-                root._inertia_stack_mov_assignment_already_present_8616 = True
-                return False
-            statements[index] = replacement
-            return True
-        return False
-
-    if scan_container(root, "root"):
+    replacer = _PrecontrolReplacer8616(
+        root=root,
+        dst_cvar=dst_cvar,
+        replacement=replacement,
+        allow_low_half_lhs=allow_low_half_lhs,
+        insert_before_control_when_no_match=insert_before_control_when_no_match,
+    )
+    if replacer.scan_container(root, "root"):
         return True
-    root._inertia_stack_mov_refused_reasons_8616 = tuple(refused)
+    root._inertia_stack_mov_refused_reasons_8616 = tuple(replacer.refused)
     return False
 
 
@@ -10771,6 +12164,61 @@ def _tree_has_zero_arg_call_return_assignment_8616(
     )
 
 
+@dataclass
+class _WideCallReturnReconciler8616:
+    """Remove replay artifacts while retaining the proven wide assignment."""
+
+    project: AngrProjectValue
+    fact: DirectStackMoveFact8616
+    dst_cvar: StructuredAstValue
+    matching_assignment_ids: tuple[int, ...]
+    retained_assignment_id: int
+    removed: int = 0
+    seen: set[int] = field(default_factory=set)
+
+    def _is_replayed_call_carrier_8616(self, statement: StructuredAstValue) -> bool:
+        """Return whether one statement duplicates the consumed call result."""
+        if not _call_return_call_matches_fact_8616(statement, self.project, self.fact):
+            return False
+        if isinstance(statement, structured_c.CAssignment):
+            lhs = _strip_casts_8616(statement.lhs)
+            return (
+                _cvar_register_name_8616(lhs) == "ax"
+                or _same_stack_cvar_8616(lhs, self.dst_cvar)
+                or _same_stack_low_half_cvar_8616(lhs, self.dst_cvar)
+            )
+        return isinstance(
+            statement,
+            (structured_c.CExpressionStatement, structured_c.CFunctionCall),
+        )
+
+    def visit(self, node: StructuredAstValue) -> None:
+        """Remove replay artifacts from mutable structured statement lists."""
+        if node is None or id(node) in self.seen:
+            return
+        self.seen.add(id(node))
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            retained: list[StructuredAstValue] = []
+            for statement in tuple(statements):
+                duplicate_assignment = (
+                    id(statement) in self.matching_assignment_ids
+                    and id(statement) != self.retained_assignment_id
+                )
+                if duplicate_assignment or self._is_replayed_call_carrier_8616(statement):
+                    self.removed += 1
+                    continue
+                retained.append(statement)
+                self.visit(statement)
+            statements[:] = retained
+        for attr in ("body", "else_node"):
+            self.visit(getattr(node, attr, None))
+        pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for _condition, body in tuple(pairs):
+                self.visit(body)
+
+
 def _reconcile_materialized_wide_call_return_assignment_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
@@ -10792,55 +12240,15 @@ def _reconcile_materialized_wide_call_return_assignment_8616(
     )
     if not matching_assignment_ids:
         return False, 0
-    retained_assignment_id = matching_assignment_ids[0]
-    removed = 0
-    seen: set[int] = set()
-
-    def is_replayed_call_carrier(statement: StructuredAstValue) -> bool:
-        """Return whether one statement duplicates the consumed call result."""
-        if not _call_return_call_matches_fact_8616(statement, project, fact):
-            return False
-        if isinstance(statement, structured_c.CAssignment):
-            lhs = _strip_casts_8616(statement.lhs)
-            return (
-                _cvar_register_name_8616(lhs) == "ax"
-                or _same_stack_cvar_8616(lhs, dst_cvar)
-                or _same_stack_low_half_cvar_8616(lhs, dst_cvar)
-            )
-        return isinstance(
-            statement,
-            (structured_c.CExpressionStatement, structured_c.CFunctionCall),
-        )
-
-    def visit(node: StructuredAstValue) -> None:
-        """Remove replay artifacts from mutable structured statement lists."""
-        nonlocal removed
-        if node is None or id(node) in seen:
-            return
-        seen.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            retained: list[StructuredAstValue] = []
-            for statement in tuple(statements):
-                duplicate_assignment = (
-                    id(statement) in matching_assignment_ids
-                    and id(statement) != retained_assignment_id
-                )
-                if duplicate_assignment or is_replayed_call_carrier(statement):
-                    removed += 1
-                    continue
-                retained.append(statement)
-                visit(statement)
-            statements[:] = retained
-        for attr in ("body", "else_node"):
-            visit(getattr(node, attr, None))
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                visit(body)
-
-    visit(root)
-    return True, removed
+    reconciler = _WideCallReturnReconciler8616(
+        project,
+        fact,
+        dst_cvar,
+        matching_assignment_ids,
+        matching_assignment_ids[0],
+    )
+    reconciler.visit(root)
+    return True, reconciler.removed
 
 
 def _direct_stack_move_materialized_ins_addrs_8616(codegen: StructuredCodegenValue) -> frozenset[int]:
@@ -11048,6 +12456,58 @@ def _tree_has_materialized_signed_idiv_remainder_8616(
     return False
 
 
+@dataclass
+class _SignedIdivArtifactCollector8616:
+    """Collect exact signed-remainder artifact assignments with reject counters."""
+
+    root: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    candidate_stmt_ids: set[int] = field(default_factory=set)
+    candidates: list[tuple[StructuredAstValue, bool]] = field(default_factory=list)
+    artifact_seen_count: int = 0
+    artifact_reject_dst_read_count: int = 0
+    artifact_reject_memory_lhs_count: int = 0
+    artifact_reject_used_lhs_count: int = 0
+    artifact_reject_no_lhs_key_count: int = 0
+
+    def collect_candidate(self, stmt: StructuredAstValue) -> None:
+        """Collect one candidate when its artifact is provably dead."""
+        if not isinstance(stmt, structured_c.CAssignment):
+            return
+        stmt_id = id(stmt)
+        if stmt_id in self.candidate_stmt_ids:
+            return
+        if not _rhs_is_signed_idiv_remainder_artifact_8616(stmt.rhs):
+            return
+        self.artifact_seen_count += 1
+        if _node_reads_stack_cvar_8616(stmt.rhs, self.dst_cvar):
+            self.artifact_reject_dst_read_count += 1
+            return
+        exact = _same_stack_cvar_8616(stmt.lhs, self.dst_cvar)
+        if not exact and not self._nonexact_lhs_dead_8616(stmt, stmt_id):
+            return
+        self.candidate_stmt_ids.add(stmt_id)
+        self.candidates.append((stmt, exact))
+
+    def _nonexact_lhs_dead_8616(self, stmt: StructuredAstValue, stmt_id: int) -> bool:
+        """Return whether a non-exact LHS is provably unused elsewhere."""
+        lhs = _strip_casts_8616(stmt.lhs)
+        lhs_key = _c_lvalue_key_8616(lhs)
+        lhs_variable = lhs.variable if isinstance(lhs, structured_c.CVariable) else None
+        if lhs_key is None:
+            self.artifact_reject_no_lhs_key_count += 1
+            return False
+        if isinstance(lhs_variable, SimMemoryVariable) and not isinstance(
+            lhs_variable, SimStackVariable
+        ):
+            self.artifact_reject_memory_lhs_count += 1
+            return False
+        if _c_node_reads_lvalue_key_8616(self.root, lhs_key, exclude_node_id=stmt_id):
+            self.artifact_reject_used_lhs_count += 1
+            return False
+        return True
+
+
 def _replace_signed_idiv_remainder_artifact_assignment_8616(
     root: StructuredAstValue,
     dst_cvar: StructuredAstValue,
@@ -11055,58 +12515,28 @@ def _replace_signed_idiv_remainder_artifact_assignment_8616(
     *,
     allow_unique_stack_lhs_bridge: bool = False,
 ) -> DirectStackMoveArtifactReplacementKind8616 | None:
-    candidate_stmt_ids: set[int] = set()
-    candidates: list[tuple[StructuredAstValue, bool]] = []
-    artifact_seen_count = 0
-    artifact_reject_dst_read_count = 0
-    artifact_reject_memory_lhs_count = 0
-    artifact_reject_used_lhs_count = 0
-    artifact_reject_no_lhs_key_count = 0
-
-    def collect_candidate(stmt: StructuredAstValue) -> None:
-        nonlocal artifact_seen_count
-        nonlocal artifact_reject_dst_read_count
-        nonlocal artifact_reject_memory_lhs_count
-        nonlocal artifact_reject_used_lhs_count
-        nonlocal artifact_reject_no_lhs_key_count
-        if not isinstance(stmt, structured_c.CAssignment):
-            return
-        stmt_id = id(stmt)
-        if stmt_id in candidate_stmt_ids:
-            return
-        if not _rhs_is_signed_idiv_remainder_artifact_8616(stmt.rhs):
-            return
-        artifact_seen_count += 1
-        if _node_reads_stack_cvar_8616(stmt.rhs, dst_cvar):
-            artifact_reject_dst_read_count += 1
-            return
-        exact = _same_stack_cvar_8616(stmt.lhs, dst_cvar)
-        if not exact:
-            lhs = _strip_casts_8616(stmt.lhs)
-            lhs_key = _c_lvalue_key_8616(lhs)
-            lhs_variable = lhs.variable if isinstance(lhs, structured_c.CVariable) else None
-            if lhs_key is None:
-                artifact_reject_no_lhs_key_count += 1
-                return
-            if isinstance(lhs_variable, SimMemoryVariable) and not isinstance(lhs_variable, SimStackVariable):
-                artifact_reject_memory_lhs_count += 1
-                return
-            if _c_node_reads_lvalue_key_8616(root, lhs_key, exclude_node_id=stmt_id):
-                artifact_reject_used_lhs_count += 1
-                return
-        candidate_stmt_ids.add(stmt_id)
-        candidates.append((stmt, exact))
-
+    collector = _SignedIdivArtifactCollector8616(root=root, dst_cvar=dst_cvar)
     for node in _iter_structured_c_nodes_8616(root):
-        collect_candidate(node)
+        collector.collect_candidate(node)
 
-    root._inertia_signed_idiv_artifact_seen_count_8616 = artifact_seen_count
+    candidates = collector.candidates
+    root._inertia_signed_idiv_artifact_seen_count_8616 = collector.artifact_seen_count
     root._inertia_signed_idiv_artifact_candidate_count_8616 = len(candidates)
-    root._inertia_signed_idiv_artifact_exact_candidate_count_8616 = sum(1 for candidate in candidates if candidate[1])
-    root._inertia_signed_idiv_artifact_reject_dst_read_count_8616 = artifact_reject_dst_read_count
-    root._inertia_signed_idiv_artifact_reject_memory_lhs_count_8616 = artifact_reject_memory_lhs_count
-    root._inertia_signed_idiv_artifact_reject_used_lhs_count_8616 = artifact_reject_used_lhs_count
-    root._inertia_signed_idiv_artifact_reject_no_lhs_key_count_8616 = artifact_reject_no_lhs_key_count
+    root._inertia_signed_idiv_artifact_exact_candidate_count_8616 = sum(
+        1 for candidate in candidates if candidate[1]
+    )
+    root._inertia_signed_idiv_artifact_reject_dst_read_count_8616 = (
+        collector.artifact_reject_dst_read_count
+    )
+    root._inertia_signed_idiv_artifact_reject_memory_lhs_count_8616 = (
+        collector.artifact_reject_memory_lhs_count
+    )
+    root._inertia_signed_idiv_artifact_reject_used_lhs_count_8616 = (
+        collector.artifact_reject_used_lhs_count
+    )
+    root._inertia_signed_idiv_artifact_reject_no_lhs_key_count_8616 = (
+        collector.artifact_reject_no_lhs_key_count
+    )
     exact_candidates = [candidate for candidate in candidates if candidate[1]]
     if exact_candidates:
         selected = exact_candidates
@@ -11137,6 +12567,110 @@ def _replace_signed_idiv_remainder_artifact_assignment_8616(
     return decision if changed else None
 
 
+def _signed_idiv_insert_expression_8616(
+    stmt: StructuredAstValue,
+) -> tuple[StructuredAstValue | None, StructuredAstValue] | None:
+    """Return (assignment, expression) when the statement is an INSERT artifact."""
+    assignment = stmt if isinstance(stmt, structured_c.CAssignment) else None
+    if assignment is not None:
+        expression = assignment.rhs
+    elif isinstance(stmt, structured_c.CExpressionStatement):
+        expression = stmt.expr
+    elif isinstance(stmt, structured_c.CFunctionCall):
+        expression = stmt
+    else:
+        return None
+    if not _expr_has_structured_c_intrinsic_8616(
+        expression,
+        StructuredCIntrinsic8616.INSERT,
+    ):
+        return None
+    if _expr_has_binary_op_8616(
+        expression,
+        DirectStackMoveExpressionOp8616.MOD,
+    ):
+        return None
+    if assignment is None and any(
+        isinstance(candidate, structured_c.CFunctionCall)
+        and _structured_c_intrinsic_8616(candidate)
+        is not StructuredCIntrinsic8616.INSERT
+        for candidate in _iter_structured_c_nodes_8616(expression)
+    ):
+        return None
+    return assignment, expression
+
+
+def _signed_idiv_insert_statement_addr_8616(
+    stmt: StructuredAstValue,
+    project: AngrProjectValue,
+    fact: DirectStackMoveFact8616,
+    call_addr: int,
+) -> int | None:
+    """Resolve the statement address inside the call-to-remainder window."""
+    statement_addr = _statement_instruction_addr_8616(stmt, project, fact.ins_addr)
+    if not isinstance(statement_addr, int):
+        instruction_range = _instruction_addr_range_in_node_8616(
+            stmt,
+            project,
+            fact.ins_addr,
+        )
+        if (
+            instruction_range is not None
+            and call_addr < instruction_range[0]
+            and instruction_range[1] < fact.ins_addr
+        ):
+            statement_addr = instruction_range[0]
+    if (
+        not isinstance(statement_addr, int)
+        or not call_addr < statement_addr < fact.ins_addr
+    ):
+        return None
+    return statement_addr
+
+
+def _signed_idiv_aux_lhs_live_8616(
+    root: StructuredAstValue,
+    stmt: StructuredAstValue,
+    assignment: StructuredAstValue,
+) -> bool:
+    """Return whether the artifact assignment LHS is still live elsewhere."""
+    lhs = _strip_casts_8616(assignment.lhs)
+    lhs_key = _c_lvalue_key_8616(lhs)
+    if lhs_key is None:
+        return True
+    if isinstance(lhs, structured_c.CVariable):
+        lhs_variable = lhs.variable
+        if isinstance(lhs_variable, SimMemoryVariable) and not isinstance(
+            lhs_variable,
+            SimStackVariable,
+        ):
+            return True
+    return _c_node_reads_lvalue_key_8616(
+        root,
+        lhs_key,
+        exclude_node_id=id(stmt),
+    )
+
+
+def _signed_idiv_aux_is_candidate_8616(
+    root: StructuredAstValue,
+    stmt: StructuredAstValue,
+    project: AngrProjectValue,
+    fact: DirectStackMoveFact8616,
+    call_addr: int,
+) -> bool:
+    """Return whether a statement is a removable signed-IDIV INSERT artifact."""
+    pair = _signed_idiv_insert_expression_8616(stmt)
+    if pair is None:
+        return False
+    assignment, _expression = pair
+    if _signed_idiv_insert_statement_addr_8616(stmt, project, fact, call_addr) is None:
+        return False
+    if assignment is None:
+        return True
+    return not _signed_idiv_aux_lhs_live_8616(root, stmt, assignment)
+
+
 def _prune_signed_idiv_auxiliary_insert_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
@@ -11152,80 +12686,17 @@ def _prune_signed_idiv_auxiliary_insert_8616(
     if not isinstance(fact.source_call_ins_addr, int):
         return 0
     candidates: list[tuple[list[StructuredAstValue], int]] = []
+    call_addr = _comparable_instruction_addr_8616(
+        project,
+        fact.source_call_ins_addr,
+        fact.ins_addr,
+    )
     for node in _iter_structured_c_nodes_8616(root):
         if not isinstance(node, structured_c.CStatements):
             continue
         for index, stmt in enumerate(node.statements):
-            assignment = stmt if isinstance(stmt, structured_c.CAssignment) else None
-            if assignment is not None:
-                expression = assignment.rhs
-            elif isinstance(stmt, structured_c.CExpressionStatement):
-                expression = stmt.expr
-            elif isinstance(stmt, structured_c.CFunctionCall):
-                expression = stmt
-            else:
-                continue
-            if not _expr_has_structured_c_intrinsic_8616(
-                expression,
-                StructuredCIntrinsic8616.INSERT,
-            ):
-                continue
-            if _expr_has_binary_op_8616(
-                expression,
-                DirectStackMoveExpressionOp8616.MOD,
-            ):
-                continue
-            if assignment is None and any(
-                isinstance(candidate, structured_c.CFunctionCall)
-                and _structured_c_intrinsic_8616(candidate)
-                is not StructuredCIntrinsic8616.INSERT
-                for candidate in _iter_structured_c_nodes_8616(expression)
-            ):
-                continue
-            statement_addr = _statement_instruction_addr_8616(stmt, project, fact.ins_addr)
-            call_addr = _comparable_instruction_addr_8616(
-                project,
-                fact.source_call_ins_addr,
-                fact.ins_addr,
-            )
-            if not isinstance(statement_addr, int):
-                instruction_range = _instruction_addr_range_in_node_8616(
-                    stmt,
-                    project,
-                    fact.ins_addr,
-                )
-                if (
-                    instruction_range is not None
-                    and call_addr < instruction_range[0]
-                    and instruction_range[1] < fact.ins_addr
-                ):
-                    statement_addr = instruction_range[0]
-            if (
-                not isinstance(statement_addr, int)
-                or not call_addr < statement_addr < fact.ins_addr
-            ):
-                continue
-            if assignment is None:
+            if _signed_idiv_aux_is_candidate_8616(root, stmt, project, fact, call_addr):
                 candidates.append((node.statements, index))
-                continue
-            lhs = _strip_casts_8616(assignment.lhs)
-            lhs_key = _c_lvalue_key_8616(lhs)
-            if lhs_key is None:
-                continue
-            if isinstance(lhs, structured_c.CVariable):
-                lhs_variable = lhs.variable
-                if isinstance(lhs_variable, SimMemoryVariable) and not isinstance(
-                    lhs_variable,
-                    SimStackVariable,
-                ):
-                    continue
-            if _c_node_reads_lvalue_key_8616(
-                root,
-                lhs_key,
-                exclude_node_id=id(stmt),
-            ):
-                continue
-            candidates.append((node.statements, index))
     if len(candidates) != 1:
         return 0
     statements, index = candidates[0]
@@ -11316,6 +12787,47 @@ def _statement_instruction_addr_8616(stmt: StructuredAstValue, project: AngrProj
     return _comparable_instruction_addr_8616(project, tagged_addr, ins_addr)
 
 
+_NODE_RANGE_CHILD_ATTRS_8616 = (
+    "statements",
+    "lhs",
+    "rhs",
+    "operand",
+    "expr",
+    "args",
+    "operands",
+    "stmts",
+    "init",
+    "initializer",
+    "condition",
+    "cond",
+    "iftrue",
+    "iffalse",
+    "iteration",
+    "iterator",
+    "body",
+    "else_node",
+)
+
+
+def _extend_child_ranges_8616(
+    node: StructuredAstValue,
+    project: AngrProjectValue,
+    ins_addr: int,
+    seen: set[int],
+    candidates: list[int],
+) -> None:
+    """Extend candidates with instruction ranges from child attributes."""
+    for attr in _NODE_RANGE_CHILD_ATTRS_8616:
+        if not hasattr(node, attr):
+            continue
+        with contextlib.suppress(Exception):
+            child_range = _instruction_addr_range_in_node_8616(
+                getattr(node, attr), project, ins_addr, seen
+            )
+        if child_range is not None:
+            candidates.extend(child_range)
+
+
 def _instruction_addr_range_in_node_8616(
     node: StructuredAstValue, project: AngrProjectValue, ins_addr: int, seen: set[int] | None = None
 ) -> tuple[int, int] | None:
@@ -11344,39 +12856,32 @@ def _instruction_addr_range_in_node_8616(
     if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
         return (min(candidates), max(candidates)) if candidates else None
 
-    for attr in (
-        "statements",
-        "lhs",
-        "rhs",
-        "operand",
-        "expr",
-        "args",
-        "operands",
-        "stmts",
-        "init",
-        "initializer",
-        "condition",
-        "cond",
-        "iftrue",
-        "iffalse",
-        "iteration",
-        "iterator",
-        "body",
-        "else_node",
-    ):
-        if not hasattr(node, attr):
-            continue
-        with contextlib.suppress(Exception):
-            child_range = _instruction_addr_range_in_node_8616(getattr(node, attr), project, ins_addr, seen)
-        if child_range is not None:
-            candidates.extend(child_range)
-
+    _extend_child_ranges_8616(node, project, ins_addr, seen, candidates)
     condition_and_nodes = getattr(node, "condition_and_nodes", None)
     if condition_and_nodes:
         child_range = _instruction_addr_range_in_node_8616(tuple(condition_and_nodes), project, ins_addr, seen)
         if child_range is not None:
             candidates.extend(child_range)
     return (min(candidates), max(candidates)) if candidates else None
+
+
+def _extend_child_preceding_addrs_8616(
+    node: StructuredAstValue,
+    project: AngrProjectValue,
+    ins_addr: int,
+    seen: set[int],
+    candidates: list[int],
+) -> None:
+    """Extend candidates with preceding addresses from child attributes."""
+    for attr in _NODE_RANGE_CHILD_ATTRS_8616:
+        if not hasattr(node, attr):
+            continue
+        with contextlib.suppress(Exception):
+            candidate = _preceding_instruction_addr_in_node_8616(
+                getattr(node, attr), project, ins_addr, seen
+            )
+        if isinstance(candidate, int):
+            candidates.append(candidate)
 
 
 def _preceding_instruction_addr_in_node_8616(
@@ -11405,39 +12910,14 @@ def _preceding_instruction_addr_in_node_8616(
     if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
         return max(candidates) if candidates else None
 
-    for attr in (
-        "statements",
-        "lhs",
-        "rhs",
-        "operand",
-        "expr",
-        "args",
-        "operands",
-        "stmts",
-        "init",
-        "initializer",
-        "condition",
-        "cond",
-        "iftrue",
-        "iffalse",
-        "iteration",
-        "iterator",
-        "body",
-        "else_node",
-    ):
-        if not hasattr(node, attr):
-            continue
-        with contextlib.suppress(Exception):
-            candidate = _preceding_instruction_addr_in_node_8616(getattr(node, attr), project, ins_addr, seen)
-        if isinstance(candidate, int):
-            candidates.append(candidate)
-
+    _extend_child_preceding_addrs_8616(node, project, ins_addr, seen, candidates)
     condition_and_nodes = getattr(node, "condition_and_nodes", None)
     if condition_and_nodes:
         candidate = _preceding_instruction_addr_in_node_8616(tuple(condition_and_nodes), project, ins_addr, seen)
         if isinstance(candidate, int):
             candidates.append(candidate)
     return max(candidates) if candidates else None
+
 
 
 def _instruction_block_addr_map_8616(project: StructuredAstValue, function: StructuredAstValue) -> dict[int, int]:
@@ -11797,6 +13277,142 @@ def prune_materialized_call_push_stack_assignments_8616(
     return push_changed or execution_frame_changed
 
 
+@dataclass
+class _PushCarrierClassifier8616:
+    """Classify assignments against exact consumed PUSH evidence."""
+
+    project: StructuredAstValue
+    codegen: StructuredAstValue
+    root: StructuredAstValue
+    consumed_push_instruction_addrs: StructuredAstValue
+    materialized_args_by_push_instruction_addr: StructuredAstValue
+    insn_by_addr: StructuredAstValue
+    debug: StructuredAstValue
+    raw_count: int = 0
+    normalized_count: int = 0
+    classified_count: int = 0
+    preserved_live_definition_count: int = 0
+    liveness_refusal_count: int = 0
+
+    def is_false_push_carrier(self, statement: StructuredAstValue) -> bool:
+        """Classify one assignment against exact consumed PUSH evidence."""
+        if not isinstance(statement, structured_c.CAssignment):
+            return False
+        tags = copy_structured_tags_8616(statement.tags)
+        statement_ins_addr = tags.get("ins_addr") if tags is not None else None
+        lhs = statement.lhs
+        candidate_addrs = self._candidate_addrs_8616(statement, lhs, statement_ins_addr)
+        if not candidate_addrs:
+            return False
+        self.raw_count += 1
+        if len(candidate_addrs) != 1:
+            return False
+        self.normalized_count += 1
+        ins_addr = next(iter(candidate_addrs))
+        insn = _instruction_at_or_decode_8616(self.project, ins_addr, self.insn_by_addr)
+        if getattr(insn, "id", None) != X86_INS_PUSH:
+            return False
+        materialized_args = (
+            self.materialized_args_by_push_instruction_addr.get(ins_addr, ())
+            if self.materialized_args_by_push_instruction_addr is not None
+            else ()
+        )
+        if not self._carrier_lhs_gate_8616(statement, lhs, materialized_args):
+            return False
+        if not _pure_consumed_push_carrier_expression_8616(
+            statement.rhs
+        ) and not any(
+            _same_stack_move_rhs_8616(statement.rhs, argument)
+            for argument in materialized_args
+        ):
+            return False
+        self.classified_count += 1
+        return True
+
+    def _candidate_addrs_8616(
+        self,
+        statement: StructuredAstValue,
+        lhs: StructuredAstValue,
+        statement_ins_addr: StructuredAstValue,
+    ) -> StructuredAstValue:
+        """Return the consumed PUSH addresses this statement may carry."""
+        lhs_helper = (
+            _call_target_name_8616(lhs)
+            if isinstance(lhs, structured_c.CFunctionCall)
+            else None
+        )
+        candidate_addrs = (
+            instruction_addrs_from_node_8616(lhs) & self.consumed_push_instruction_addrs
+        )
+        if (
+            isinstance(statement_ins_addr, int)
+            and statement_ins_addr in self.consumed_push_instruction_addrs
+        ):
+            candidate_addrs |= frozenset({statement_ins_addr})
+        if self.debug and (candidate_addrs or lhs_helper in {"SEG_U8", "SEG_U16", "SEG_U32"}):
+            log.warning(
+                "[consumed-call-push] statement_ins_addr=%r candidate_addrs=%s lhs_type=%s "
+                "lhs_helper=%r rhs_type=%s rhs_pure=%s",
+                None if not isinstance(statement_ins_addr, int) else hex(statement_ins_addr),
+                tuple(hex(address) for address in sorted(candidate_addrs)),
+                type(lhs).__name__,
+                lhs_helper,
+                type(statement.rhs).__name__,
+                _pure_consumed_push_carrier_expression_8616(statement.rhs),
+            )
+        return candidate_addrs
+
+    def _carrier_lhs_gate_8616(
+        self,
+        statement: StructuredAstValue,
+        lhs: StructuredAstValue,
+        materialized_args: StructuredAstValue,
+    ) -> bool:
+        """Return whether the assignment's LHS is a proven consumed carrier."""
+        runtime_verdict = classify_runtime_push_carrier_8616(
+            self.root,
+            statement,
+            materialized_args,
+            sp_offset=self.project.arch.registers["sp"][0],
+        )
+        if runtime_verdict in {
+            RuntimePushCarrierVerdict8616.UNKNOWN_REFUSE,
+            RuntimePushCarrierVerdict8616.OBSERVED,
+        }:
+            self.liveness_refusal_count += 1
+            return False
+        if not (
+            runtime_verdict is RuntimePushCarrierVerdict8616.UNOBSERVED
+            or _is_consumed_push_stack_carrier_lhs_8616(self.project, lhs)
+            or _is_consumed_push_ss_store_lhs_8616(self.project, self.codegen, lhs)
+        ):
+            return False
+        dirty_verdict = self._dirty_carrier_liveness_8616(lhs, materialized_args)
+        return dirty_verdict if dirty_verdict is not None else True
+
+    def _dirty_carrier_liveness_8616(
+        self,
+        lhs: StructuredAstValue,
+        materialized_args: StructuredAstValue,
+    ) -> bool | None:
+        """Classify dirty-carrier liveness; None means keep checking."""
+        if not isinstance(
+            lhs, structured_c.CDirtyExpression
+        ) or self.materialized_args_by_push_instruction_addr is None:
+            return None
+        liveness = classify_call_argument_carrier_liveness_8616(
+            lhs,
+            materialized_args,
+        )
+        if liveness.verdict is CallArgumentCarrierLivenessVerdict8616.LIVE_ARGUMENT_DEFINITION:
+            self.preserved_live_definition_count += 1
+            return False
+        if liveness.verdict is CallArgumentCarrierLivenessVerdict8616.UNKNOWN_REFUSE:
+            self.liveness_refusal_count += 1
+            return False
+        return None
+
+
 def prune_consumed_call_push_stack_assignments_8616(
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
@@ -11825,109 +13441,26 @@ def prune_consumed_call_push_stack_assignments_8616(
             function = project.kb.functions.function(addr=func_addr, create=False)
     if function is None:
         return False
-    insn_by_addr = _instruction_by_addr_map_8616(project, function)
-    raw_count = 0
-    normalized_count = 0
-    classified_count = 0
-    materialized_count = 0
-    preserved_live_definition_count = 0
-    liveness_refusal_count = 0
-    def is_false_push_carrier(statement: StructuredAstValue) -> bool:
-        """Classify one assignment against exact consumed PUSH evidence."""
-        nonlocal classified_count, liveness_refusal_count, normalized_count
-        nonlocal preserved_live_definition_count, raw_count
-        if not isinstance(statement, structured_c.CAssignment):
-            return False
-        tags = copy_structured_tags_8616(statement.tags)
-        statement_ins_addr = tags.get("ins_addr") if tags is not None else None
-        lhs = statement.lhs
-        lhs_helper = (
-            _call_target_name_8616(lhs)
-            if isinstance(lhs, structured_c.CFunctionCall)
-            else None
-        )
-        candidate_addrs = instruction_addrs_from_node_8616(lhs) & consumed_push_instruction_addrs
-        if isinstance(statement_ins_addr, int) and statement_ins_addr in consumed_push_instruction_addrs:
-            candidate_addrs |= frozenset({statement_ins_addr})
-        if debug and (candidate_addrs or lhs_helper in {"SEG_U8", "SEG_U16", "SEG_U32"}):
-            log.warning(
-                "[consumed-call-push] statement_ins_addr=%r candidate_addrs=%s lhs_type=%s "
-                "lhs_helper=%r rhs_type=%s rhs_pure=%s",
-                None if not isinstance(statement_ins_addr, int) else hex(statement_ins_addr),
-                tuple(hex(address) for address in sorted(candidate_addrs)),
-                type(lhs).__name__,
-                lhs_helper,
-                type(statement.rhs).__name__,
-                _pure_consumed_push_carrier_expression_8616(statement.rhs),
-            )
-        if not candidate_addrs:
-            return False
-        raw_count += 1
-        if len(candidate_addrs) != 1:
-            return False
-        normalized_count += 1
-        ins_addr = next(iter(candidate_addrs))
-        insn = _instruction_at_or_decode_8616(project, ins_addr, insn_by_addr)
-        if getattr(insn, "id", None) != X86_INS_PUSH:
-            return False
-        materialized_args = (
-            materialized_args_by_push_instruction_addr.get(ins_addr, ())
-            if materialized_args_by_push_instruction_addr is not None else ()
-        )
-        runtime_verdict = classify_runtime_push_carrier_8616(
-            root, statement, materialized_args, sp_offset=project.arch.registers["sp"][0],
-        )
-        if runtime_verdict in {RuntimePushCarrierVerdict8616.UNKNOWN_REFUSE, RuntimePushCarrierVerdict8616.OBSERVED}:
-            liveness_refusal_count += 1
-            return False
-        if not (
-            runtime_verdict is RuntimePushCarrierVerdict8616.UNOBSERVED
-            or
-            _is_consumed_push_stack_carrier_lhs_8616(project, lhs)
-            or _is_consumed_push_ss_store_lhs_8616(project, codegen, lhs)
-        ):
-            return False
-        if isinstance(lhs, structured_c.CDirtyExpression) and materialized_args_by_push_instruction_addr is not None:
-            liveness = classify_call_argument_carrier_liveness_8616(
-                lhs,
-                materialized_args,
-            )
-            if liveness.verdict is CallArgumentCarrierLivenessVerdict8616.LIVE_ARGUMENT_DEFINITION:
-                preserved_live_definition_count += 1
-                return False
-            if liveness.verdict is CallArgumentCarrierLivenessVerdict8616.UNKNOWN_REFUSE:
-                liveness_refusal_count += 1
-                return False
-        if not _pure_consumed_push_carrier_expression_8616(
-            statement.rhs
-        ) and not any(
-            _same_stack_move_rhs_8616(statement.rhs, argument)
-            for argument in materialized_args
-        ):
-            return False
-        classified_count += 1
-        return True
-
-    for node in _iter_c_nodes_deep_8616(root):
-        if isinstance(node, structured_c.CStatements):
-            statements = node.statements
-            retained: list[StructuredAstValue] = []
-            for statement in tuple(statements):
-                if is_false_push_carrier(statement):
-                    materialized_count += 1
-                    continue
-                retained.append(statement)
-            statements[:] = retained
+    classifier = _PushCarrierClassifier8616(
+        project=project,
+        codegen=codegen,
+        root=root,
+        consumed_push_instruction_addrs=consumed_push_instruction_addrs,
+        materialized_args_by_push_instruction_addr=materialized_args_by_push_instruction_addr,
+        insn_by_addr=_instruction_by_addr_map_8616(project, function),
+        debug=debug,
+    )
+    materialized_count = _prune_c_statement_lists_8616(root, classifier.is_false_push_carrier)
 
     result = ConsumedCallPushCarrierPrune8616(
-        raw_fact_count=raw_count,
-        normalized_fact_count=normalized_count,
-        classified_fact_count=classified_count,
+        raw_fact_count=classifier.raw_count,
+        normalized_fact_count=classifier.normalized_count,
+        classified_fact_count=classifier.classified_count,
         materialized_count=materialized_count,
-        failure_count=max(raw_count - classified_count, 0)
-        + max(classified_count - materialized_count, 0),
-        preserved_live_definition_count=preserved_live_definition_count,
-        liveness_refusal_count=liveness_refusal_count,
+        failure_count=max(classifier.raw_count - classifier.classified_count, 0)
+        + max(classifier.classified_count - materialized_count, 0),
+        preserved_live_definition_count=classifier.preserved_live_definition_count,
+        liveness_refusal_count=classifier.liveness_refusal_count,
     )
     codegen._inertia_consumed_call_push_carrier_prune_8616 = result
     if debug:
@@ -11942,6 +13475,7 @@ def prune_consumed_call_push_stack_assignments_8616(
             result.failure_count,
         )
     return bool(materialized_count > 0)
+
 
 
 def _is_far_call_cs_frame_value_8616(
@@ -11987,6 +13521,189 @@ def _callsite_after_push_cs_8616(
     return callsite_addr
 
 
+def _prune_c_statement_lists_8616(
+    root: StructuredAstValue,
+    drop: Callable[[StructuredAstValue], bool],
+) -> int:
+    """Drop statements matching the predicate from every CStatements list."""
+    materialized_count = 0
+    for node in _iter_c_nodes_deep_8616(root):
+        if isinstance(node, structured_c.CStatements):
+            statements = node.statements
+            retained: list[StructuredAstValue] = []
+            for statement in tuple(statements):
+                if drop(statement):
+                    materialized_count += 1
+                    continue
+                retained.append(statement)
+            statements[:] = retained
+    return materialized_count
+
+
+@dataclass
+class _CallReturnFrameClassifier8616:
+    """Classify assignments against exact callsite return-frame evidence."""
+
+    project: StructuredAstValue
+    codegen: StructuredAstValue
+    return_addr_by_callsite: StructuredAstValue
+    insn_by_addr: StructuredAstValue
+    debug_return_frame: StructuredAstValue
+    raw_count: int = 0
+    normalized_count: int = 0
+    classified_count: int = 0
+
+    def is_call_return_frame_carrier(self, statement: StructuredAstValue) -> bool:
+        """Classify one assignment against exact callsite return-frame evidence."""
+        if not isinstance(statement, structured_c.CAssignment):
+            return False
+        lhs = statement.lhs
+        tags = copy_structured_tags_8616(statement.tags)
+        ins_addr = tags.get("ins_addr") if tags is not None else None
+        rhs = statement.rhs
+        self._debug_candidate_8616(ins_addr, lhs, rhs)
+        if not (
+            _is_consumed_push_stack_carrier_lhs_8616(self.project, lhs)
+            or _is_consumed_push_ss_store_lhs_8616(self.project, self.codegen, lhs)
+        ):
+            return False
+        if not isinstance(ins_addr, int):
+            return False
+        constant_return_value = (
+            isinstance(rhs, structured_c.CConstant)
+            and isinstance(rhs.value, int)
+        )
+        cs_frame_value = _is_far_call_cs_frame_value_8616(rhs, self.project)
+        return self._classify_callsite_evidence_8616(
+            rhs, ins_addr, constant_return_value, cs_frame_value
+        )
+
+    def _debug_candidate_8616(
+        self,
+        ins_addr: StructuredAstValue,
+        lhs: StructuredAstValue,
+        rhs: StructuredAstValue,
+    ) -> None:
+        """Emit optional debug noise for a callsite-adjacent candidate."""
+        if self.debug_return_frame and isinstance(ins_addr, int) and (
+            ins_addr in self.return_addr_by_callsite
+            or (ins_addr + 1) in self.return_addr_by_callsite
+        ):
+            log.warning(
+                "[call-return-frame] candidate ins_addr=%#x lhs_type=%s "
+                "rhs_type=%s indexed_ss_stack=%s",
+                ins_addr,
+                type(lhs).__name__,
+                type(rhs).__name__,
+                _is_indexed_ss_stack_store_lhs_8616(self.project, lhs),
+            )
+
+    def _debug_reject_8616(
+        self,
+        ins_addr: int,
+        constant_return_value: bool,
+        cs_frame_value: bool,
+    ) -> None:
+        """Emit optional debug noise for a rejected callsite."""
+        if self.debug_return_frame:
+            insn = _instruction_at_or_decode_8616(
+                self.project,
+                ins_addr,
+                self.insn_by_addr,
+            )
+            log.warning(
+                "[call-return-frame] reject ins_addr=%#x insn_id=%r "
+                "insn_size=%r op0_reg=%r constant=%s cs=%s",
+                ins_addr,
+                getattr(insn, "id", None),
+                getattr(insn, "size", None),
+                _op_reg_id_8616(insn, 0),
+                constant_return_value,
+                cs_frame_value,
+            )
+
+    def _classify_callsite_evidence_8616(
+        self,
+        rhs: StructuredAstValue,
+        ins_addr: int,
+        constant_return_value: bool,
+        cs_frame_value: bool,
+    ) -> bool:
+        """Resolve the callsite and check the RHS against its return frame."""
+        exact_callsite_addr = (
+            ins_addr if ins_addr in self.return_addr_by_callsite else None
+        )
+        prefixed_callsite_addr = _callsite_after_push_cs_8616(
+            self.project,
+            ins_addr,
+            self.insn_by_addr,
+            self.return_addr_by_callsite,
+        )
+        if (
+            not constant_return_value
+            and not cs_frame_value
+            and prefixed_callsite_addr is None
+        ):
+            return False
+        if exact_callsite_addr is None and prefixed_callsite_addr is None:
+            self._debug_reject_8616(ins_addr, constant_return_value, cs_frame_value)
+            return False
+        self.raw_count += 1
+        self.normalized_count += 1
+        insn = (
+            _instruction_at_or_decode_8616(
+                self.project,
+                exact_callsite_addr,
+                self.insn_by_addr,
+            )
+            if exact_callsite_addr is not None
+            else None
+        )
+        if (
+            exact_callsite_addr is not None
+            and getattr(insn, "id", None) not in {X86_INS_CALL, X86_INS_LCALL}
+        ):
+            return False
+        if not self._matches_return_frame_8616(
+            rhs,
+            insn,
+            exact_callsite_addr,
+            prefixed_callsite_addr,
+            constant_return_value,
+            cs_frame_value,
+        ):
+            return False
+        self.classified_count += 1
+        return True
+
+    def _matches_return_frame_8616(
+        self,
+        rhs: StructuredAstValue,
+        insn: StructuredAstValue,
+        exact_callsite_addr: int | None,
+        prefixed_callsite_addr: int | None,
+        constant_return_value: bool,
+        cs_frame_value: bool,
+    ) -> bool:
+        """Return whether the RHS is the callsite's return IP or CS part."""
+        expected_return_addr = (
+            self.return_addr_by_callsite[exact_callsite_addr]
+            if exact_callsite_addr is not None
+            else None
+        )
+        is_return_ip = (
+            expected_return_addr is not None
+            and constant_return_value
+            and (int(rhs.value) & 0xFFFF) == (int(expected_return_addr) & 0xFFFF)
+        )
+        is_return_cs = (
+            cs_frame_value
+            and getattr(insn, "id", None) == X86_INS_LCALL
+        )
+        is_return_cs |= prefixed_callsite_addr is not None
+        return is_return_ip or is_return_cs
+
+
 def prune_call_return_frame_stack_assignments_8616(
     project: AngrProjectValue,
     codegen: StructuredCodegenValue,
@@ -12018,144 +13735,40 @@ def prune_call_return_frame_stack_assignments_8616(
             function = project.kb.functions.function(addr=func_addr, create=False)
     if function is None:
         return False
-    insn_by_addr = _instruction_by_addr_map_8616(project, function)
     exact_result = prune_exact_call_return_frame_projections_8616(
         project,
         codegen,
         function,
         return_addr_by_callsite,
     )
-    raw_count = exact_result.raw_fact_count
-    normalized_count = exact_result.normalized_fact_count
-    classified_count = exact_result.classified_fact_count
-    materialized_count = exact_result.materialized_count
-    def is_call_return_frame_carrier(statement: StructuredAstValue) -> bool:
-        """Classify one assignment against exact callsite return-frame evidence."""
-        nonlocal raw_count, normalized_count, classified_count
-        if not isinstance(statement, structured_c.CAssignment):
-            return False
-        lhs = statement.lhs
-        tags = copy_structured_tags_8616(statement.tags)
-        ins_addr = tags.get("ins_addr") if tags is not None else None
-        rhs = statement.rhs
-        if debug_return_frame and isinstance(ins_addr, int) and (
-            ins_addr in return_addr_by_callsite
-            or (ins_addr + 1) in return_addr_by_callsite
-        ):
-            log.warning(
-                "[call-return-frame] candidate ins_addr=%#x lhs_type=%s "
-                "rhs_type=%s indexed_ss_stack=%s",
-                ins_addr,
-                type(lhs).__name__,
-                type(rhs).__name__,
-                _is_indexed_ss_stack_store_lhs_8616(project, lhs),
-            )
-        if not (
-            _is_consumed_push_stack_carrier_lhs_8616(project, lhs)
-            or _is_consumed_push_ss_store_lhs_8616(project, codegen, lhs)
-        ):
-            return False
-        if not isinstance(ins_addr, int):
-            return False
-        constant_return_value = (
-            isinstance(rhs, structured_c.CConstant)
-            and isinstance(rhs.value, int)
-        )
-        cs_frame_value = _is_far_call_cs_frame_value_8616(rhs, project)
-        exact_callsite_addr = (
-            ins_addr if ins_addr in return_addr_by_callsite else None
-        )
-        prefixed_callsite_addr = _callsite_after_push_cs_8616(
-            project,
-            ins_addr,
-            insn_by_addr,
-            return_addr_by_callsite,
-        )
-        if (
-            not constant_return_value
-            and not cs_frame_value
-            and prefixed_callsite_addr is None
-        ):
-            return False
-        if exact_callsite_addr is None and prefixed_callsite_addr is None:
-            if debug_return_frame:
-                insn = _instruction_at_or_decode_8616(
-                    project,
-                    ins_addr,
-                    insn_by_addr,
-                )
-                log.warning(
-                    "[call-return-frame] reject ins_addr=%#x insn_id=%r "
-                    "insn_size=%r op0_reg=%r constant=%s cs=%s",
-                    ins_addr,
-                    getattr(insn, "id", None),
-                    getattr(insn, "size", None),
-                    _op_reg_id_8616(insn, 0),
-                    constant_return_value,
-                    cs_frame_value,
-                )
-            return False
-        raw_count += 1
-        normalized_count += 1
-        insn = (
-            _instruction_at_or_decode_8616(
-                project,
-                exact_callsite_addr,
-                insn_by_addr,
-            )
-            if exact_callsite_addr is not None
-            else None
-        )
-        if (
-            exact_callsite_addr is not None
-            and getattr(insn, "id", None) not in {X86_INS_CALL, X86_INS_LCALL}
-        ):
-            return False
-        expected_return_addr = (
-            return_addr_by_callsite[exact_callsite_addr]
-            if exact_callsite_addr is not None
-            else None
-        )
-        is_return_ip = (
-            expected_return_addr is not None
-            and constant_return_value
-            and (int(rhs.value) & 0xFFFF) == (int(expected_return_addr) & 0xFFFF)
-        )
-        is_return_cs = (
-            cs_frame_value
-            and getattr(insn, "id", None) == X86_INS_LCALL
-        )
-        is_return_cs |= prefixed_callsite_addr is not None
-        if not is_return_ip and not is_return_cs:
-            return False
-        classified_count += 1
-        return True
-
-    for node in _iter_c_nodes_deep_8616(root):
-        if isinstance(node, structured_c.CStatements):
-            statements = node.statements
-            retained: list[StructuredAstValue] = []
-            for statement in tuple(statements):
-                if is_call_return_frame_carrier(statement):
-                    materialized_count += 1
-                    continue
-                retained.append(statement)
-            statements[:] = retained
+    classifier = _CallReturnFrameClassifier8616(
+        project=project,
+        codegen=codegen,
+        return_addr_by_callsite=return_addr_by_callsite,
+        insn_by_addr=_instruction_by_addr_map_8616(project, function),
+        debug_return_frame=debug_return_frame,
+        raw_count=exact_result.raw_fact_count,
+        normalized_count=exact_result.normalized_fact_count,
+        classified_count=exact_result.classified_fact_count,
+    )
+    materialized_count = exact_result.materialized_count + _prune_c_statement_lists_8616(
+        root, classifier.is_call_return_frame_carrier
+    )
 
     result = CallReturnFrameCarrierPrune8616(
-        raw_fact_count=raw_count,
-        normalized_fact_count=normalized_count,
-        classified_fact_count=classified_count,
+        raw_fact_count=classifier.raw_count,
+        normalized_fact_count=classifier.normalized_count,
+        classified_fact_count=classifier.classified_count,
         materialized_count=materialized_count,
-        failure_count=max(classified_count - materialized_count, 0),
+        failure_count=max(classifier.classified_count - materialized_count, 0),
     )
     codegen._inertia_call_return_frame_carrier_prune_8616 = result
     _record_semantic_lane_8616(
         codegen,
         name="call-return-frame-carrier-prune",
-        raw=raw_count,
-        normalized=normalized_count,
-        classified=classified_count,
+        raw=classifier.raw_count,
+        normalized=classifier.normalized_count,
+        classified=classifier.classified_count,
         materialized=materialized_count,
         failures=result.failure_count,
     )
@@ -12165,6 +13778,66 @@ def prune_call_return_frame_stack_assignments_8616(
         project=project,
     )
     return bool(materialized_count > 0 or restore_changed)
+
+
+def _frame_setup_addr_8616(
+    project: AngrProjectValue,
+    function_addr: int,
+    insn_by_addr: StructuredAstValue,
+) -> int | None:
+    """Decode the ``push bp`` / ``mov bp, sp`` entry pair addresses."""
+    setup_addr: int | None = None
+    push_bp = _instruction_at_or_decode_8616(project, function_addr, insn_by_addr)
+    if push_bp is not None:
+        insn_by_addr[function_addr] = push_bp
+        push_size = getattr(push_bp, "size", None)
+        if isinstance(push_size, int) and push_size > 0:
+            setup_addr = function_addr + push_size
+            setup = _instruction_at_or_decode_8616(project, setup_addr, insn_by_addr)
+            if setup is not None:
+                insn_by_addr[setup_addr] = setup
+    return setup_addr
+
+
+def _prove_frame_entry_carrier_8616(
+    root: StructuredAstValue,
+    project: AngrProjectValue,
+    codegen: StructuredCodegenValue,
+    function_addr: int,
+    setup_addr: int | None,
+    frame_instruction_addresses: StructuredAstValue,
+    register_carriers: StructuredAstValue,
+) -> bool:
+    """Prove the canonical BP frame entry carrier exists and its uses complete."""
+    entry_carrier_proven = any(
+        is_exact_push_bp_carrier_8616(
+            node,
+            root,
+            project,
+            function_addr,
+            canonical_frame_proven=function_addr in frame_instruction_addresses,
+            codegen=codegen,
+            register_carriers=register_carriers,
+        )
+        for node in _iter_c_nodes_deep_8616(root)
+    )
+    if (
+        not entry_carrier_proven
+        and setup_addr is not None
+        and setup_addr in frame_instruction_addresses
+    ):
+        entry_carrier_proven = any(
+            is_exact_bp_frame_setup_carrier_8616(
+                node,
+                project,
+                setup_addr,
+                register_carriers=register_carriers,
+            )
+            for node in _iter_c_nodes_deep_8616(root)
+        )
+    return entry_carrier_proven and prove_frame_carrier_uses_8616(
+        root, frozenset(frame_instruction_addresses),
+    ).complete
 
 
 def prune_frame_prologue_stack_assignments_8616(
@@ -12194,50 +13867,21 @@ def prune_frame_prologue_stack_assignments_8616(
         return False
 
     insn_by_addr = _instruction_by_addr_map_8616(project, function)
-    setup_addr: int | None = None
-    push_bp = _instruction_at_or_decode_8616(project, function_addr, insn_by_addr)
-    if push_bp is not None:
-        insn_by_addr[function_addr] = push_bp
-        push_size = getattr(push_bp, "size", None)
-        if isinstance(push_size, int) and push_size > 0:
-            setup_addr = function_addr + push_size
-            setup = _instruction_at_or_decode_8616(project, setup_addr, insn_by_addr)
-            if setup is not None:
-                insn_by_addr[setup_addr] = setup
+    setup_addr = _frame_setup_addr_8616(project, function_addr, insn_by_addr)
     frame_instruction_addresses = canonical_frame_instruction_addresses_8616(
         insn_by_addr,
         function_addr,
     )
     register_carriers = collect_frame_register_carriers_8616(root, project, function_addr)
-    entry_carrier_proven = any(
-        is_exact_push_bp_carrier_8616(
-            node,
-            root,
-            project,
-            function_addr,
-            canonical_frame_proven=function_addr in frame_instruction_addresses,
-            codegen=codegen,
-            register_carriers=register_carriers,
-        )
-        for node in _iter_c_nodes_deep_8616(root)
+    entry_carrier_proven = _prove_frame_entry_carrier_8616(
+        root,
+        project,
+        codegen,
+        function_addr,
+        setup_addr,
+        frame_instruction_addresses,
+        register_carriers,
     )
-    if (
-        not entry_carrier_proven
-        and setup_addr is not None
-        and setup_addr in frame_instruction_addresses
-    ):
-        entry_carrier_proven = any(
-            is_exact_bp_frame_setup_carrier_8616(
-                node,
-                project,
-                setup_addr,
-                register_carriers=register_carriers,
-            )
-            for node in _iter_c_nodes_deep_8616(root)
-        )
-    entry_carrier_proven = entry_carrier_proven and prove_frame_carrier_uses_8616(
-        root, frozenset(frame_instruction_addresses),
-    ).complete
     register_carriers = register_carriers.with_frame_proof(entry_carrier_proven)
     if register_carriers.raw_fact_count:
         _record_semantic_lane_8616(
@@ -12253,8 +13897,6 @@ def prune_frame_prologue_stack_assignments_8616(
     raw_count = 0
     normalized_count = 0
     classified_count = 0
-    materialized_count = 0
-    seen: set[int] = set()
 
     def is_prologue_carrier(statement: StructuredAstValue) -> bool:
         """Classify one assignment owned by the proven canonical BP frame."""
@@ -12270,32 +13912,9 @@ def prune_frame_prologue_stack_assignments_8616(
         classified_count += 1
         return True
 
-    def visit(node: StructuredAstValue) -> None:
-        """Remove classified prologue carriers from structured statement lists."""
-        nonlocal materialized_count
-        if node is None or id(node) in seen:
-            return
-        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-            return
-        seen.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            retained: list[StructuredAstValue] = []
-            for statement in tuple(statements):
-                if is_prologue_carrier(statement):
-                    materialized_count += 1
-                    continue
-                retained.append(statement)
-                visit(statement)
-            statements[:] = retained
-        for attr in ("body", "else_node"):
-            visit(getattr(node, attr, None))
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                visit(body)
-
-    visit(root)
+    pruner = _StatementListPruner8616(drop=is_prologue_carrier, seen=set())
+    pruner.visit(root)
+    materialized_count = pruner.removed
     evidence_owner = cast(_FramePrologueCarrierPruneOwner8616, codegen)
     try:
         previous_result = evidence_owner._inertia_frame_prologue_carrier_prune_8616
@@ -12479,67 +14098,42 @@ def _prune_inverse_stack_move_artifacts_8616(
     if has_inverse_fact:
         return 0
 
-    pruned = 0
-    seen: set[int] = set()
-
     def is_inverse_assignment(node: StructuredAstValue) -> bool:
+        """Return whether a node is an exact inverse stack-copy assignment."""
         lhs = getattr(node, "lhs", None)
         rhs = getattr(node, "rhs", None)
         lhs_offset = _c_expr_stack_offset_8616(_strip_casts_8616(lhs))
         rhs_offset = _c_expr_stack_offset_8616(_strip_casts_8616(rhs))
-        matched = (
+        return (
             isinstance(node, structured_c.CAssignment)
             and (lhs_offset == source_offset or _same_stack_cvar_8616(lhs, source_expr))
             and (rhs_offset == dst_offset or _same_stack_move_rhs_8616(rhs, dst_cvar))
         )
-        return matched
 
     def statement_is_inverse_assignment(node: StructuredAstValue) -> bool:
+        """Return whether a statement or its expr is an inverse assignment."""
         if is_inverse_assignment(node):
             return True
         expr = getattr(node, "expr", None)
         return is_inverse_assignment(expr)
 
-    def visit(node: StructuredAstValue) -> None:
-        nonlocal pruned
-        if node is None or id(node) in seen:
-            return
-        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-            return
-        seen.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            new_statements = []
-            list_changed = False
-            for stmt in tuple(statements):
-                if statement_is_inverse_assignment(stmt):
-                    pruned += 1
-                    list_changed = True
-                    continue
-                visit(stmt)
-                new_statements.append(stmt)
-            if list_changed:
-                statements[:] = new_statements
-        for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator"):
-            with contextlib.suppress(Exception):
-                child = getattr(node, attr, None)
-            if child is not None:
-                visit(child)
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                visit(body)
-
-    visit(root)
-    return pruned
+    pruner = _StatementListPruner8616(
+        drop=statement_is_inverse_assignment,
+        seen=set(),
+        child_attrs=("body", "else_node", "initializer", "init", "iteration", "iterator"),
+    )
+    pruner.visit(root)
+    return pruner.removed
 
 
-def _prune_unsupported_function_pointer_stack_move_assignments_8616(
-    root: StructuredAstValue,
+def _collect_function_pointer_allowed_sources_8616(
     codegen: StructuredAstValue,
     facts: tuple[DirectStackMoveFact8616, ...],
-) -> int:
-    """Drop untagged stack writes contradicted by direct function-pointer MOV facts."""
+) -> tuple[
+    dict[tuple[int, int | None], list[StructuredAstValue]],
+    dict[tuple[int, int | None], set[int]],
+]:
+    """Collect proven function-pointer stack writes per destination identity."""
     allowed_sources: dict[tuple[int, int | None], list[StructuredAstValue]] = {}
     direct_write_addrs: dict[tuple[int, int | None], set[int]] = {}
     for fact in facts:
@@ -12557,11 +14151,20 @@ def _prune_unsupported_function_pointer_stack_move_assignments_8616(
             continue
         allowed_sources.setdefault(dst_identity, []).append(source_expr)
         direct_write_addrs.setdefault(dst_identity, set()).add(int(fact.ins_addr))
+    return allowed_sources, direct_write_addrs
+
+
+def _prune_unsupported_function_pointer_stack_move_assignments_8616(
+    root: StructuredAstValue,
+    codegen: StructuredAstValue,
+    facts: tuple[DirectStackMoveFact8616, ...],
+) -> int:
+    """Drop untagged stack writes contradicted by direct function-pointer MOV facts."""
+    allowed_sources, direct_write_addrs = _collect_function_pointer_allowed_sources_8616(
+        codegen, facts
+    )
     if not allowed_sources:
         return 0
-
-    pruned = 0
-    seen: set[int] = set()
 
     def assignment_is_unsupported(stmt: StructuredAstValue) -> bool:
         """Return whether an untagged stack write contradicts direct MOV evidence."""
@@ -12583,38 +14186,13 @@ def _prune_unsupported_function_pointer_stack_move_assignments_8616(
                 return False
         return True
 
-    def visit(node: StructuredAstValue) -> None:
-        """Prune unsupported assignments while preserving structured-code traversal."""
-        nonlocal pruned
-        if node is None or id(node) in seen:
-            return
-        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-            return
-        seen.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            new_statements = []
-            list_changed = False
-            for stmt in tuple(statements):
-                if assignment_is_unsupported(stmt):
-                    pruned += 1
-                    list_changed = True
-                    continue
-                visit(stmt)
-                new_statements.append(stmt)
-            if list_changed:
-                statements[:] = new_statements
-        for attr in ("body", "else_node", "initializer", "init", "iteration", "iterator"):
-            child = getattr(node, attr, None)
-            if child is not None:
-                visit(child)
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                visit(body)
-
-    visit(root)
-    return pruned
+    pruner = _StatementListPruner8616(
+        drop=assignment_is_unsupported,
+        seen=set(),
+        child_attrs=("body", "else_node", "initializer", "init", "iteration", "iterator"),
+    )
+    pruner.visit(root)
+    return pruner.removed
 
 
 def prune_unsupported_function_pointer_stack_move_assignments_8616(
@@ -12791,6 +14369,47 @@ def _remove_tagged_stack_move_assignments_8616(
     return removed
 
 
+@dataclass
+class _StatementListPruner8616:
+    """Prune matching assignments from executable structured statement lists."""
+
+    drop: Callable[[StructuredAstValue], bool]
+    seen: set[int]
+    child_attrs: tuple[str, ...] = ("body", "else_node")
+    removed: int = 0
+
+    def visit(self, node: StructuredAstValue) -> None:
+        """Prune matching statements, then recurse into nested containers."""
+        if node is None or id(node) in self.seen:
+            return
+        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
+            return
+        self.seen.add(id(node))
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            kept: list[StructuredAstValue] = []
+            for stmt in tuple(statements):
+                if self.drop(stmt):
+                    self.removed += 1
+                    continue
+                kept.append(stmt)
+                self.visit(stmt)
+            statements[:] = kept
+        self._visit_children_8616(node)
+
+    def _visit_children_8616(self, node: StructuredAstValue) -> None:
+        """Recurse into the configured child links and condition/body pairs."""
+        for attr in self.child_attrs:
+            with contextlib.suppress(Exception):
+                child = getattr(node, attr, None)
+            if child is not None:
+                self.visit(child)
+        pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for _condition, body in tuple(pairs):
+                self.visit(body)
+
+
 def _remove_duplicate_stack_move_assignments_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
@@ -12805,8 +14424,6 @@ def _remove_duplicate_stack_move_assignments_8616(
     assignment.  An exact untagged copy is therefore removable here, but an
     assignment owned by a different instruction remains independent evidence.
     """
-    removed = 0
-    seen: set[int] = set()
     candidate_addrs = _candidate_ins_addrs_8616(project, ins_addr)
 
     def is_duplicate(stmt: StructuredAstValue) -> bool:
@@ -12823,33 +14440,9 @@ def _remove_duplicate_stack_move_assignments_8616(
             tagged_addr = tags.get("inertia_relocated_from_ins_addr")
         return not isinstance(tagged_addr, int) or tagged_addr in candidate_addrs
 
-    def visit(node: StructuredAstValue) -> None:
-        """Prune duplicates from executable structured statement lists."""
-        nonlocal removed
-        if node is None or id(node) in seen:
-            return
-        if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-            return
-        seen.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            kept: list[StructuredAstValue] = []
-            for stmt in tuple(statements):
-                if is_duplicate(stmt):
-                    removed += 1
-                    continue
-                kept.append(stmt)
-                visit(stmt)
-            statements[:] = kept
-        for attr in ("body", "else_node"):
-            visit(getattr(node, attr, None))
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                visit(body)
-
-    visit(root)
-    return removed
+    pruner = _StatementListPruner8616(drop=is_duplicate, seen=set())
+    pruner.visit(root)
+    return pruner.removed
 
 
 def _remove_consumed_signed_idiv_store_assignments_8616(
@@ -12874,52 +14467,28 @@ def _remove_consumed_signed_idiv_store_assignments_8616(
         or not isinstance(fact.ins_addr, int)
     ):
         return 0
-    removed = 0
-    seen: set[int] = set()
 
-    def visit(node: StructuredAstValue) -> None:
-        """Prune consumed stores from mutable structured statement lists."""
-        nonlocal removed
-        if node is None or id(node) in seen:
-            return
-        if not type(node).__module__.startswith(
-            "angr.analyses.decompiler.structured_codegen"
-        ):
-            return
-        seen.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            retained: list[StructuredAstValue] = []
-            for statement in tuple(statements):
-                consumed_store = (
-                    statement is not preserved_assignment
-                    and isinstance(statement, structured_c.CAssignment)
-                    and _same_stack_cvar_8616(statement.lhs, dst_cvar)
-                    and _node_has_instruction_address_8616(
-                        statement,
-                        project,
-                        fact.ins_addr,
-                    )
-                    and _expr_has_binary_op_8616(
-                        statement.rhs,
-                        DirectStackMoveExpressionOp8616.MOD,
-                    )
-                )
-                if consumed_store:
-                    removed += 1
-                    continue
-                retained.append(statement)
-                visit(statement)
-            statements[:] = retained
-        for attr in ("body", "else_node"):
-            visit(getattr(node, attr, None))
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                visit(body)
+    def is_consumed_store(statement: StructuredAstValue) -> bool:
+        """Return whether the statement is the consumed tagged remainder store."""
+        return (
+            statement is not preserved_assignment
+            and isinstance(statement, structured_c.CAssignment)
+            and _same_stack_cvar_8616(statement.lhs, dst_cvar)
+            and _node_has_instruction_address_8616(
+                statement,
+                project,
+                fact.ins_addr,
+            )
+            and _expr_has_binary_op_8616(
+                statement.rhs,
+                DirectStackMoveExpressionOp8616.MOD,
+            )
+        )
 
-    visit(root)
-    return removed
+    pruner = _StatementListPruner8616(drop=is_consumed_store, seen=set())
+    pruner.visit(root)
+    return pruner.removed
+
 
 
 def _structured_loopback_edges_covering_instruction_8616(
@@ -12982,6 +14551,275 @@ def _loop_body_insertion_index_before_tagged_stack_move_8616(
     return None
 
 
+@dataclass
+class _TaggedLoopMoveRelocater8616:
+    """Restore an exact tagged stack definition at its binary-proven loop scope."""
+
+    project: StructuredAstValue
+    function: StructuredAstValue
+    ins_addr: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    source_expr: StructuredAstValue
+    assignment: StructuredAstValue
+    backward_edges: StructuredAstValue
+    seen: StructuredAstValue
+
+    def visit(self, node: StructuredAstValue) -> int:
+        """Prefer the deepest loop with sufficient binary placement evidence."""
+        if node is None or id(node) in self.seen:
+            return 0
+        self.seen.add(id(node))
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            result = self._visit_statements_8616(statements)
+            if result:
+                return result
+        return self._visit_control_links_8616(node)
+
+    def _visit_statements_8616(self, statements: list[StructuredAstValue]) -> int:
+        """Scan each statement; loop containers get the relocation arms."""
+        for index, stmt in enumerate(tuple(statements)):
+            if isinstance(
+                stmt, (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop)
+            ):
+                result = self._visit_loop_statement_8616(statements, index, stmt)
+                if result:
+                    return result
+                continue
+            nested = self.visit(stmt)
+            if nested:
+                return nested
+        return 0
+
+    def _visit_loop_statement_8616(
+        self,
+        statements: list[StructuredAstValue],
+        index: int,
+        stmt: StructuredAstValue,
+    ) -> int:
+        """Try the in-loop and before-loop relocation arms for one loop."""
+        nested = self.visit(getattr(stmt, "body", None))
+        if nested:
+            return nested
+        if isinstance(stmt, structured_c.CDoWhileLoop):
+            # Post-test conditions execute after the body. Keep exact
+            # body stores in place so loop-carried state is preserved.
+            return 0
+        tagged_count = _removable_tagged_stack_move_assignment_count_8616(
+            stmt,
+            self.project,
+            self.ins_addr,
+            self.dst_cvar,
+            self.source_expr,
+        )
+        if tagged_count == 0:
+            return 0
+        condition_range = _instruction_addr_range_in_node_8616(
+            getattr(stmt, "condition", None),
+            self.project,
+            self.ins_addr,
+        )
+        loop_range = _instruction_addr_range_in_node_8616(stmt, self.project, self.ins_addr)
+        store_candidates = _candidate_function_ins_addrs_8616(
+            self.project,
+            self.function,
+            self.ins_addr,
+        )
+        covering_loopback_edges = _structured_loopback_edges_covering_instruction_8616(
+            self.function,
+            self.project,
+            self.ins_addr,
+            loop_range,
+            condition_range,
+        )
+        following_loop_addr = _following_instruction_addr_in_node_8616(
+            stmt,
+            self.project,
+            self.ins_addr,
+            set(),
+        )
+        in_loop_insertion_index = (
+            _loop_body_insertion_index_before_tagged_stack_move_8616(
+                stmt,
+                self.project,
+                self.ins_addr,
+                self.dst_cvar,
+                self.source_expr,
+            )
+        )
+        machine_loop_after_store = bool(
+            loop_range is not None
+            and any(
+                any(candidate < entry for candidate in store_candidates)
+                and (
+                    entry <= loop_range[0]
+                    or (
+                        condition_range is None
+                        and isinstance(following_loop_addr, int)
+                        and entry <= following_loop_addr
+                    )
+                )
+                and jump >= loop_range[1]
+                for entry, jump in self.backward_edges
+            )
+        )
+        self._debug_loop_relocate_8616(
+            stmt,
+            tagged_count,
+            condition_range,
+            loop_range,
+            machine_loop_after_store,
+            covering_loopback_edges,
+            in_loop_insertion_index,
+        )
+        result = self._try_in_loop_relocate_8616(
+            stmt,
+            tagged_count,
+            covering_loopback_edges,
+            in_loop_insertion_index,
+        )
+        if result:
+            return result
+        return self._try_before_loop_relocate_8616(
+            statements,
+            index,
+            stmt,
+            tagged_count,
+            condition_range,
+            store_candidates,
+            machine_loop_after_store,
+        )
+
+    def _debug_loop_relocate_8616(
+        self,
+        stmt: StructuredAstValue,
+        tagged_count: int,
+        condition_range: tuple[int, int] | None,
+        loop_range: tuple[int, int] | None,
+        machine_loop_after_store: bool,
+        covering_loopback_edges: StructuredAstValue,
+        in_loop_insertion_index: int | None,
+    ) -> None:
+        """Emit optional debug noise for the loop relocation decision."""
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-move-before-loop] ins=%#x tagged=%d condition=%r loop=%r "
+                "machine_after=%s covering=%r read_before_tagged=%s reads_dst=%s",
+                self.ins_addr,
+                tagged_count,
+                condition_range,
+                loop_range,
+                machine_loop_after_store,
+                covering_loopback_edges,
+                in_loop_insertion_index is not None,
+                _node_reads_stack_cvar_8616(stmt, self.dst_cvar),
+            )
+
+    def _try_in_loop_relocate_8616(
+        self,
+        stmt: StructuredAstValue,
+        tagged_count: int,
+        covering_loopback_edges: StructuredAstValue,
+        in_loop_insertion_index: int | None,
+    ) -> int:
+        """Insert inside the loop when a covering loopback edge proves it."""
+        if not (
+            tagged_count > 0 and covering_loopback_edges and in_loop_insertion_index is not None
+        ):
+            return 0
+        loop_body_statements = getattr(
+            getattr(stmt, "body", None),
+            "statements",
+            None,
+        )
+        if not isinstance(loop_body_statements, list):
+            return 0
+        loop_body_statements.insert(in_loop_insertion_index, self.assignment)
+        removed = _remove_duplicate_stack_move_assignments_8616(
+            stmt,
+            self.project,
+            self.ins_addr,
+            self.dst_cvar,
+            self.source_expr,
+            self.assignment,
+        )
+        if removed != tagged_count:
+            raise AssertionError("tagged stack-move count changed during in-loop relocation")
+        return removed
+
+    def _try_before_loop_relocate_8616(
+        self,
+        statements: list[StructuredAstValue],
+        index: int,
+        stmt: StructuredAstValue,
+        tagged_count: int,
+        condition_range: tuple[int, int] | None,
+        store_candidates: StructuredAstValue,
+        machine_loop_after_store: bool,
+    ) -> int:
+        """Relocate the tagged copy just before the loop when proven safe."""
+        condition_store_before = condition_range is not None and any(
+            candidate < condition_range[0] for candidate in store_candidates
+        )
+        if not (
+            tagged_count > 0
+            and (condition_store_before or machine_loop_after_store)
+            and _node_reads_stack_cvar_8616(stmt, self.dst_cvar)
+        ):
+            return 0
+        removed = _remove_tagged_stack_move_assignments_8616(
+            stmt,
+            self.project,
+            self.ins_addr,
+            self.dst_cvar,
+            self.source_expr,
+        )
+        if removed != tagged_count:
+            raise AssertionError("tagged stack-move count changed during relocation")
+        if _list_has_stack_move_assignment_8616(
+            statements[:index],
+            self.dst_cvar,
+            self.source_expr,
+        ):
+            return removed
+        insertion_index = self._relocated_insertion_index_8616(statements, index)
+        statements.insert(insertion_index, self.assignment)
+        return removed
+
+    def _relocated_insertion_index_8616(
+        self, statements: list[StructuredAstValue], index: int
+    ) -> int:
+        """Walk back over previously relocated stores of a later origin."""
+        insertion_index = index
+        while insertion_index > 0:
+            previous_tags = copy_structured_tags_8616(
+                getattr(statements[insertion_index - 1], "tags", None)
+            )
+            if previous_tags is None:
+                break
+            previous_origin = previous_tags.get("inertia_relocated_from_ins_addr")
+            if not isinstance(previous_origin, int):
+                break
+            if previous_origin <= self.ins_addr:
+                break
+            insertion_index -= 1
+        return insertion_index
+
+    def _visit_control_links_8616(self, node: StructuredAstValue) -> int:
+        """Recurse into bodies, else branches, and condition/body pairs."""
+        for attr in ("body", "else_node"):
+            nested = self.visit(getattr(node, attr, None))
+            if nested:
+                return nested
+        pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for _condition, body in tuple(pairs):
+                nested = self.visit(body)
+                if nested:
+                    return nested
+        return 0
+
+
 def _relocate_tagged_stack_move_before_proven_loop_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
@@ -12992,191 +14830,27 @@ def _relocate_tagged_stack_move_before_proven_loop_8616(
     assignment: StructuredAstValue,
 ) -> int:
     """Restore an exact tagged stack definition at its binary-proven loop scope."""
-    seen: set[int] = set()
-    backward_edges = _function_backward_jump_edges_8616(function, project, ins_addr)
-
-    def visit(node: StructuredAstValue) -> int:
-        """Prefer the deepest loop with sufficient binary placement evidence."""
-        if node is None or id(node) in seen:
-            return 0
-        seen.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            for index, stmt in enumerate(tuple(statements)):
-                if isinstance(stmt, (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop)):
-                    nested = visit(getattr(stmt, "body", None))
-                    if nested:
-                        return nested
-                    if isinstance(stmt, structured_c.CDoWhileLoop):
-                        # Post-test conditions execute after the body. Keep exact
-                        # body stores in place so loop-carried state is preserved.
-                        continue
-                    tagged_count = _removable_tagged_stack_move_assignment_count_8616(
-                        stmt,
-                        project,
-                        ins_addr,
-                        dst_cvar,
-                        source_expr,
-                    )
-                    if tagged_count == 0:
-                        continue
-                    condition_range = _instruction_addr_range_in_node_8616(
-                        getattr(stmt, "condition", None),
-                        project,
-                        ins_addr,
-                    )
-                    loop_range = _instruction_addr_range_in_node_8616(stmt, project, ins_addr)
-                    store_candidates = _candidate_function_ins_addrs_8616(
-                        project,
-                        function,
-                        ins_addr,
-                    )
-                    covering_loopback_edges = _structured_loopback_edges_covering_instruction_8616(
-                        function,
-                        project,
-                        ins_addr,
-                        loop_range,
-                        condition_range,
-                    )
-                    following_loop_addr = _following_instruction_addr_in_node_8616(
-                        stmt,
-                        project,
-                        ins_addr,
-                        set(),
-                    )
-                    in_loop_insertion_index = (
-                        _loop_body_insertion_index_before_tagged_stack_move_8616(
-                            stmt,
-                            project,
-                            ins_addr,
-                            dst_cvar,
-                            source_expr,
-                        )
-                    )
-                    machine_loop_after_store = bool(
-                        loop_range is not None
-                        and any(
-                            any(candidate < entry for candidate in store_candidates)
-                            and (
-                                entry <= loop_range[0]
-                                or (
-                                    condition_range is None
-                                    and isinstance(following_loop_addr, int)
-                                    and entry <= following_loop_addr
-                                )
-                            )
-                            and jump >= loop_range[1]
-                            for entry, jump in backward_edges
-                        )
-                    )
-                    if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                        log.warning(
-                            "[direct-stack-move-before-loop] ins=%#x tagged=%d condition=%r loop=%r "
-                            "machine_after=%s covering=%r read_before_tagged=%s reads_dst=%s",
-                            ins_addr,
-                            tagged_count,
-                            condition_range,
-                            loop_range,
-                            machine_loop_after_store,
-                            covering_loopback_edges,
-                            in_loop_insertion_index is not None,
-                            _node_reads_stack_cvar_8616(stmt, dst_cvar),
-                        )
-                    if (
-                        tagged_count > 0
-                        and covering_loopback_edges
-                        and in_loop_insertion_index is not None
-                    ):
-                        loop_body_statements = getattr(
-                            getattr(stmt, "body", None),
-                            "statements",
-                            None,
-                        )
-                        if not isinstance(loop_body_statements, list):
-                            continue
-                        loop_body_statements.insert(in_loop_insertion_index, assignment)
-                        removed = _remove_duplicate_stack_move_assignments_8616(
-                            stmt,
-                            project,
-                            ins_addr,
-                            dst_cvar,
-                            source_expr,
-                            assignment,
-                        )
-                        if removed != tagged_count:
-                            raise AssertionError(
-                                "tagged stack-move count changed during in-loop relocation"
-                            )
-                        return removed
-                    if (
-                        tagged_count > 0
-                        and (
-                            (
-                                condition_range is not None
-                                and any(candidate < condition_range[0] for candidate in store_candidates)
-                            )
-                            or machine_loop_after_store
-                        )
-                        and _node_reads_stack_cvar_8616(stmt, dst_cvar)
-                    ):
-                        removed = _remove_tagged_stack_move_assignments_8616(
-                            stmt,
-                            project,
-                            ins_addr,
-                            dst_cvar,
-                            source_expr,
-                        )
-                        if removed != tagged_count:
-                            raise AssertionError("tagged stack-move count changed during relocation")
-                        if _list_has_stack_move_assignment_8616(
-                            statements[:index],
-                            dst_cvar,
-                            source_expr,
-                        ):
-                            return removed
-                        insertion_index = index
-                        while insertion_index > 0:
-                            previous_tags = copy_structured_tags_8616(
-                                getattr(statements[insertion_index - 1], "tags", None)
-                            )
-                            if previous_tags is None:
-                                break
-                            previous_origin = previous_tags.get("inertia_relocated_from_ins_addr")
-                            if not isinstance(previous_origin, int):
-                                break
-                            if previous_origin <= ins_addr:
-                                break
-                            insertion_index -= 1
-                        statements.insert(insertion_index, assignment)
-                        return removed
-                    continue
-                nested = visit(stmt)
-                if nested:
-                    return nested
-        for attr in ("body", "else_node"):
-            nested = visit(getattr(node, attr, None))
-            if nested:
-                return nested
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                nested = visit(body)
-                if nested:
-                    return nested
-        return 0
-    return visit(root)
+    relocater = _TaggedLoopMoveRelocater8616(
+        project=project,
+        function=function,
+        ins_addr=ins_addr,
+        dst_cvar=dst_cvar,
+        source_expr=source_expr,
+        assignment=assignment,
+        backward_edges=_function_backward_jump_edges_8616(function, project, ins_addr),
+        seen=set(),
+    )
+    return relocater.visit(root)
 
 
-def _restore_same_block_stack_move_order_8616(
-    root: StructuredAstValue,
+
+def _collect_later_stack_update_candidates_8616(
     codegen: StructuredCodegenValue,
     project: AngrProjectValue,
     function: StructuredAstValue,
     fact: DirectStackMoveFact8616,
-    dst_expr: StructuredAstValue,
-    source_expr: StructuredAstValue,
-) -> bool:
-    """Restore a same-block aggregate read before its later stack-slot update."""
+) -> list[tuple[StructuredAstValue, StructuredAstValue, StructuredAstValue]]:
+    """Collect same-block stack updates that follow the move instruction."""
     update_candidates: list[
         tuple[DirectStackUpdateFact8616, StructuredAstValue, StructuredAstValue]
     ] = []
@@ -13187,10 +14861,7 @@ def _restore_same_block_stack_move_order_8616(
             update_fact.ins_addr,
             fact.ins_addr,
         )
-        if (
-            update_fact.ins_addr <= fact.ins_addr
-            or not same_block
-        ):
+        if update_fact.ins_addr <= fact.ins_addr or not same_block:
             continue
         update_cvar = _resolve_direct_stack_update_cvar_8616(
             codegen,
@@ -13209,18 +14880,22 @@ def _restore_same_block_stack_move_order_8616(
         )
         if update_source is not None:
             update_candidates.append((update_fact, update_cvar, update_source))
-    if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-        log.warning(
-            "[direct-stack-move-order] move=%#x updates=%r",
-            fact.ins_addr,
-            tuple(
-                (candidate.ins_addr, candidate.offset, candidate.delta)
-                for candidate, _cvar, _source in update_candidates
-            ),
-        )
-    if len(update_candidates) != 1:
-        return False
-    update_fact, update_cvar, update_source = update_candidates[0]
+    return update_candidates
+
+
+def _locate_move_update_positions_8616(
+    root: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_expr: StructuredAstValue,
+    source_expr: StructuredAstValue,
+    update_cvar: StructuredAstValue,
+    update_fact: StructuredAstValue,
+    update_source: StructuredAstValue,
+) -> tuple[
+    list[tuple[int, list[StructuredAstValue], int]],
+    list[tuple[int, list[StructuredAstValue], int]],
+]:
+    """Return render-order locations of the move and update assignments."""
     move_locations: list[tuple[int, list[StructuredAstValue], int]] = []
     update_locations: list[tuple[int, list[StructuredAstValue], int]] = []
     render_order = 0
@@ -13244,18 +14919,46 @@ def _restore_same_block_stack_move_order_8616(
             ):
                 update_locations.append((render_order, statements, index))
             render_order += 1
-        if (
-            os.environ.get("INERTIA_DEBUG_STACK_NOISE")
-            and (
-                any(location[1] is statements for location in move_locations)
-                or any(location[1] is statements for location in update_locations)
-            )
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE") and (
+            any(location[1] is statements for location in move_locations)
+            or any(location[1] is statements for location in update_locations)
         ):
             log.warning(
                 "[direct-stack-move-order] move=%#x container=%#x",
                 fact.ins_addr,
                 id(node),
             )
+    return move_locations, update_locations
+
+
+def _restore_same_block_stack_move_order_8616(
+    root: StructuredAstValue,
+    codegen: StructuredCodegenValue,
+    project: AngrProjectValue,
+    function: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_expr: StructuredAstValue,
+    source_expr: StructuredAstValue,
+) -> bool:
+    """Restore a same-block aggregate read before its later stack-slot update."""
+    update_candidates = _collect_later_stack_update_candidates_8616(
+        codegen, project, function, fact
+    )
+    if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+        log.warning(
+            "[direct-stack-move-order] move=%#x updates=%r",
+            fact.ins_addr,
+            tuple(
+                (candidate.ins_addr, candidate.offset, candidate.delta)
+                for candidate, _cvar, _source in update_candidates
+            ),
+        )
+    if len(update_candidates) != 1:
+        return False
+    update_fact, update_cvar, update_source = update_candidates[0]
+    move_locations, update_locations = _locate_move_update_positions_8616(
+        root, fact, dst_expr, source_expr, update_cvar, update_fact, update_source
+    )
     if (
         len(move_locations) != 1
         or len(update_locations) != 1
@@ -13276,6 +14979,7 @@ def _restore_same_block_stack_move_order_8616(
         update_index -= 1
     update_statements.insert(update_index, moved)
     return True
+
 
 
 def _first_transparent_assignment_8616(stmt: StructuredAstValue, seen: set[int] | None = None) -> StructuredAstValue:
@@ -13341,6 +15045,100 @@ def _insertion_point_has_stack_move_assignment_8616(
     return False
 
 
+@dataclass
+class _InsertAfterNearestPreceding8616:
+    """Find and use the nearest preceding tagged statement eligible for insertion."""
+
+    root: StructuredAstValue
+    project: StructuredAstValue
+    ins_addr: StructuredAstValue
+    function: StructuredAstValue
+    require_known_block: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    source_expr: StructuredAstValue
+    seen: StructuredAstValue
+    best: StructuredAstValue = None
+
+    def visit(self, node: StructuredAstValue, depth: int) -> None:
+        """Find the nearest preceding tagged statement eligible for insertion."""
+        if node is None or id(node) in self.seen:
+            return
+        self.seen.add(id(node))
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list) and self._visit_statements_8616(statements, depth):
+            return
+        self._visit_control_links_8616(node, depth)
+
+    def _same_block_8616(self, stmt_addr: int) -> bool:
+        """Return whether the candidate predecessor shares the target block."""
+        if self.function is None:
+            return not self.require_known_block
+        if self.require_known_block:
+            return _strict_same_instruction_block_8616(
+                self.project, self.function, stmt_addr, self.ins_addr
+            )
+        return _same_instruction_block_8616(self.project, self.function, stmt_addr, self.ins_addr)
+
+    def _visit_statements_8616(self, statements: list[StructuredAstValue], depth: int) -> bool:
+        """Score each preceding tagged statement; True aborts on existing update."""
+        if _list_has_stack_move_assignment_8616(statements, self.dst_cvar, self.source_expr):
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            return True
+        for index, stmt in enumerate(tuple(statements)):
+            self._score_statement_8616(statements, index, stmt, depth)
+            self.visit(stmt, depth + 1)
+        return False
+
+    def _score_statement_8616(
+        self,
+        statements: list[StructuredAstValue],
+        index: int,
+        stmt: StructuredAstValue,
+        depth: int,
+    ) -> None:
+        """Update the best insertion point when this predecessor is nearer."""
+        stmt_addr = _preceding_instruction_addr_in_node_8616(stmt, self.project, self.ins_addr, set())
+        if not (isinstance(stmt_addr, int) and stmt_addr < self.ins_addr):
+            return
+        same_block = self._same_block_8616(stmt_addr)
+        if not same_block and os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-mov-insert-after] skip predecessor different-block ins=%#x pred=%#x dst=%s",
+                self.ins_addr,
+                stmt_addr,
+                _stack_cvar_identity_8616(self.dst_cvar),
+            )
+        if same_block and (
+            self.best is None
+            or stmt_addr > self.best[0]
+            or (stmt_addr == self.best[0] and depth > self.best[1])
+        ):
+            self.best = (
+                stmt_addr,
+                depth,
+                statements,
+                index,
+                isinstance(
+                    stmt, (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop)
+                ),
+            )
+
+    def _visit_control_links_8616(self, node: StructuredAstValue, depth: int) -> None:
+        """Recurse into loop bodies, else branches, and condition/body pairs."""
+        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
+            with contextlib.suppress(Exception):
+                child = getattr(node, attr, None)
+            if child is not None:
+                self.visit(child, depth + 1)
+        for attr in ("condition_and_nodes",):
+            with contextlib.suppress(Exception):
+                pairs = getattr(node, attr, None)
+            if not pairs:
+                continue
+            for _condition, body in tuple(pairs):
+                self.visit(body, depth + 1)
+
+
 def _insert_after_nearest_preceding_tagged_statement_8616(
     root: StructuredAstValue,
     project: StructuredAstValue,
@@ -13351,78 +15149,32 @@ def _insert_after_nearest_preceding_tagged_statement_8616(
     require_known_block: bool = False,
     refuse_loop_container_predecessor: bool = False,
 ) -> bool:
-    best: tuple[int, int, list[StructuredAstValue], int, bool] | None = None
-    dst_cvar = getattr(assignment, "lhs", None)
-    source_expr = getattr(assignment, "rhs", None)
-    seen: set[int] = set()
-
-    def visit(node: StructuredAstValue, depth: int) -> None:
-        """Find the nearest preceding tagged statement eligible for insertion."""
-        nonlocal best
-        if node is None or id(node) in seen:
-            return
-        seen.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            if _list_has_stack_move_assignment_8616(statements, dst_cvar, source_expr):
-                root._inertia_stack_mov_assignment_already_present_8616 = True
-                return
-            for index, stmt in enumerate(tuple(statements)):
-                stmt_addr = _preceding_instruction_addr_in_node_8616(stmt, project, ins_addr, set())
-                if isinstance(stmt_addr, int) and stmt_addr < ins_addr:
-                    if function is None:
-                        same_block = not require_known_block
-                    elif require_known_block:
-                        same_block = _strict_same_instruction_block_8616(project, function, stmt_addr, ins_addr)
-                    else:
-                        same_block = _same_instruction_block_8616(project, function, stmt_addr, ins_addr)
-                    if not same_block and os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                        log.warning(
-                            "[direct-stack-mov-insert-after] skip predecessor different-block ins=%#x pred=%#x dst=%s",
-                            ins_addr,
-                            stmt_addr,
-                            _stack_cvar_identity_8616(dst_cvar),
-                        )
-                    if same_block and (
-                        best is None or stmt_addr > best[0] or (stmt_addr == best[0] and depth > best[1])
-                    ):
-                        best = (
-                            stmt_addr,
-                            depth,
-                            statements,
-                            index,
-                            isinstance(
-                                stmt, (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop)
-                            ),
-                        )
-                visit(stmt, depth + 1)
-        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
-            with contextlib.suppress(Exception):
-                child = getattr(node, attr, None)
-            if child is not None:
-                visit(child, depth + 1)
-        for attr in ("condition_and_nodes",):
-            with contextlib.suppress(Exception):
-                pairs = getattr(node, attr, None)
-            if not pairs:
-                continue
-            for _condition, body in tuple(pairs):
-                visit(body, depth + 1)
-
-    visit(root, 0)
-    if best is None:
+    inserter = _InsertAfterNearestPreceding8616(
+        root=root,
+        project=project,
+        ins_addr=ins_addr,
+        function=function,
+        require_known_block=require_known_block,
+        dst_cvar=getattr(assignment, "lhs", None),
+        source_expr=getattr(assignment, "rhs", None),
+        seen=set(),
+    )
+    inserter.visit(root, 0)
+    if inserter.best is None:
         if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
             log.warning(
                 "[direct-stack-mov-insert-after] no predecessor ins=%#x dst=%s source=%s",
                 ins_addr,
-                _stack_cvar_identity_8616(dst_cvar),
-                _stack_cvar_identity_8616(source_expr),
+                _stack_cvar_identity_8616(inserter.dst_cvar),
+                _stack_cvar_identity_8616(inserter.source_expr),
             )
         return False
-    _stmt_addr, _depth, statements, index, stmt_is_loop = best
+    _stmt_addr, _depth, statements, index, stmt_is_loop = inserter.best
     if refuse_loop_container_predecessor and stmt_is_loop:
         return False
-    if _insertion_point_has_stack_move_assignment_8616(statements, index + 1, dst_cvar, source_expr):
+    if _insertion_point_has_stack_move_assignment_8616(
+        statements, index + 1, inserter.dst_cvar, inserter.source_expr
+    ):
         root._inertia_stack_mov_assignment_already_present_8616 = True
         return False
     statements.insert(index + 1, assignment)
@@ -13432,10 +15184,11 @@ def _insert_after_nearest_preceding_tagged_statement_8616(
             ins_addr,
             _stmt_addr,
             _depth,
-            _stack_cvar_identity_8616(dst_cvar),
-            _stack_cvar_identity_8616(source_expr),
+            _stack_cvar_identity_8616(inserter.dst_cvar),
+            _stack_cvar_identity_8616(inserter.source_expr),
         )
     return True
+
 
 
 def _insert_between_structured_siblings_8616(
@@ -13547,6 +15300,82 @@ def _c_lvalue_key_8616(node: StructuredAstValue) -> tuple[str, int | str] | None
     return _dirty_expr_key_8616(node)
 
 
+_LVALUE_KEY_CHILD_ATTRS_8616 = (
+    "rhs",
+    "operand",
+    "expr",
+    "condition",
+    "cond",
+    "iftrue",
+    "iffalse",
+    "initializer",
+    "init",
+    "iterator",
+    "iteration",
+    "body",
+    "else_node",
+    "statements",
+    "args",
+    "operands",
+)
+
+
+def _scan_lvalue_key_value_8616(
+    value: StructuredAstValue,
+    key: tuple[str, int | str],
+    seen: set[int],
+    exclude_node_id: int | None,
+) -> bool:
+    """Scan a child attribute value for an lvalue-key read."""
+    if isinstance(value, (list, tuple)):
+        return any(
+            _scan_lvalue_key_value_8616(item, key, seen, exclude_node_id) for item in tuple(value)
+        )
+    return _c_node_reads_lvalue_key_8616(value, key, seen=seen, exclude_node_id=exclude_node_id)
+
+
+def _lvalue_key_attrs_read_8616(
+    node: StructuredAstValue,
+    key: tuple[str, int | str],
+    seen: set[int],
+    exclude_node_id: int | None,
+) -> bool:
+    """Scan the lvalue-reader child attributes for a key read."""
+    for attr in _LVALUE_KEY_CHILD_ATTRS_8616:
+        value = getattr(node, attr, None)
+        if _scan_lvalue_key_value_8616(value, key, seen, exclude_node_id):
+            return True
+    return False
+
+
+def _lvalue_key_pairs_read_8616(
+    node: StructuredAstValue,
+    key: tuple[str, int | str],
+    seen: set[int],
+    exclude_node_id: int | None,
+) -> bool:
+    """Scan condition/body pairs for an lvalue-key read."""
+    pairs = getattr(node, "condition_and_nodes", None)
+    if not pairs:
+        return False
+    for condition, body in tuple(pairs):
+        if _c_node_reads_lvalue_key_8616(
+            condition,
+            key,
+            seen=seen,
+            exclude_node_id=exclude_node_id,
+        ):
+            return True
+        if _c_node_reads_lvalue_key_8616(
+            body,
+            key,
+            seen=seen,
+            exclude_node_id=exclude_node_id,
+        ):
+            return True
+    return False
+
+
 def _c_node_reads_lvalue_key_8616(
     node: StructuredAstValue,
     key: tuple[str, int | str],
@@ -13570,70 +15399,10 @@ def _c_node_reads_lvalue_key_8616(
         return True
     if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
         return False
-    for attr in (
-        "rhs",
-        "operand",
-        "expr",
-        "condition",
-        "cond",
-        "iftrue",
-        "iffalse",
-        "initializer",
-        "init",
-        "iterator",
-        "iteration",
-        "body",
-        "else_node",
-        "statements",
-        "args",
-        "operands",
-    ):
-        value = getattr(node, attr, None)
-        if isinstance(value, (list, tuple)):
-            for item in tuple(value):
-                if isinstance(item, tuple):
-                    if any(
-                        _c_node_reads_lvalue_key_8616(
-                            part,
-                            key,
-                            seen=seen,
-                            exclude_node_id=exclude_node_id,
-                        )
-                        for part in item
-                    ):
-                        return True
-                elif _c_node_reads_lvalue_key_8616(
-                    item,
-                    key,
-                    seen=seen,
-                    exclude_node_id=exclude_node_id,
-                ):
-                    return True
-        elif _c_node_reads_lvalue_key_8616(
-            value,
-            key,
-            seen=seen,
-            exclude_node_id=exclude_node_id,
-        ):
-            return True
-    pairs = getattr(node, "condition_and_nodes", None)
-    if pairs:
-        for condition, body in tuple(pairs):
-            if _c_node_reads_lvalue_key_8616(
-                condition,
-                key,
-                seen=seen,
-                exclude_node_id=exclude_node_id,
-            ):
-                return True
-            if _c_node_reads_lvalue_key_8616(
-                body,
-                key,
-                seen=seen,
-                exclude_node_id=exclude_node_id,
-            ):
-                return True
-    return False
+    if _lvalue_key_attrs_read_8616(node, key, seen, exclude_node_id):
+        return True
+    return _lvalue_key_pairs_read_8616(node, key, seen, exclude_node_id)
+
 
 
 def _rhs_is_pure_register_artifact_expr_8616(rhs: StructuredAstValue) -> bool:
@@ -13667,6 +15436,75 @@ def _assignment_is_disposable_call_cleanup_artifact_8616(
     return not any(_c_node_reads_lvalue_key_8616(candidate, lhs_key) for candidate in following_statements)
 
 
+@dataclass
+class _PostCallCleanupReplacer8616:
+    """Replace the best disposable call-cleanup artifact before a stack move."""
+
+    root: StructuredAstValue
+    project: StructuredAstValue
+    function: StructuredAstValue
+    ins_addr: StructuredAstValue
+    seen: StructuredAstValue
+    best: StructuredAstValue = None
+
+    def visit(self, node: StructuredAstValue, depth: int) -> None:
+        """Find the nearest disposable cleanup artifact in the same block."""
+        if node is None or id(node) in self.seen:
+            return
+        self.seen.add(id(node))
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            self._visit_statements_8616(statements, depth)
+        self._visit_control_links_8616(node, depth)
+
+    def _cleanup_candidate_addr_8616(
+        self,
+        stmt: StructuredAstValue,
+        statements: list[StructuredAstValue],
+        index: int,
+    ) -> int | None:
+        """Return the statement address when it is a disposable artifact."""
+        stmt_addr = _statement_instruction_addr_8616(stmt, self.project, self.ins_addr)
+        if not isinstance(stmt_addr, int) or not (stmt_addr < self.ins_addr):
+            return None
+        if not _same_instruction_block_8616(self.project, self.function, stmt_addr, self.ins_addr):
+            return None
+        if (
+            _direct_call_addr_before_stack_store_8616(
+                self.project, self.function, stmt_addr, self.ins_addr
+            )
+            is None
+        ):
+            return None
+        following = tuple(statements[index + 1 :])
+        if not _assignment_is_disposable_call_cleanup_artifact_8616(stmt, following):
+            return None
+        return stmt_addr
+
+    def _visit_statements_8616(self, statements: list[StructuredAstValue], depth: int) -> None:
+        """Score each cleanup-artifact candidate and recurse."""
+        for index, stmt in enumerate(tuple(statements)):
+            stmt_addr = self._cleanup_candidate_addr_8616(stmt, statements, index)
+            if stmt_addr is not None and (
+                self.best is None
+                or stmt_addr > self.best[0]
+                or (stmt_addr == self.best[0] and depth > self.best[1])
+            ):
+                self.best = (stmt_addr, depth, statements, index)
+            self.visit(stmt, depth + 1)
+
+    def _visit_control_links_8616(self, node: StructuredAstValue, depth: int) -> None:
+        """Recurse into loop bodies, else branches, and condition/body pairs."""
+        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
+            child = getattr(node, attr, None)
+            if child is not None:
+                self.visit(child, depth + 1)
+        pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for _condition, body in tuple(pairs):
+                self.visit(body, depth + 1)
+
+
 def _replace_post_call_cleanup_artifact_before_stack_move_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
@@ -13674,47 +15512,17 @@ def _replace_post_call_cleanup_artifact_before_stack_move_8616(
     ins_addr: int,
     assignment: StructuredAstValue,
 ) -> bool:
-    best: tuple[int, int, list[StructuredAstValue], int] | None = None
-    seen: set[int] = set()
-
-    def visit(node: StructuredAstValue, depth: int) -> None:
-        nonlocal best
-        if node is None or id(node) in seen:
-            return
-        seen.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            for index, stmt in enumerate(tuple(statements)):
-                stmt_addr = _statement_instruction_addr_8616(stmt, project, ins_addr)
-                if not isinstance(stmt_addr, int) or not (stmt_addr < ins_addr):
-                    visit(stmt, depth + 1)
-                    continue
-                if not _same_instruction_block_8616(project, function, stmt_addr, ins_addr):
-                    visit(stmt, depth + 1)
-                    continue
-                if _direct_call_addr_before_stack_store_8616(project, function, stmt_addr, ins_addr) is None:
-                    visit(stmt, depth + 1)
-                    continue
-                following = tuple(statements[index + 1 :])
-                if not _assignment_is_disposable_call_cleanup_artifact_8616(stmt, following):
-                    visit(stmt, depth + 1)
-                    continue
-                if best is None or stmt_addr > best[0] or (stmt_addr == best[0] and depth > best[1]):
-                    best = (stmt_addr, depth, statements, index)
-                visit(stmt, depth + 1)
-        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
-            child = getattr(node, attr, None)
-            if child is not None:
-                visit(child, depth + 1)
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                visit(body, depth + 1)
-
-    visit(root, 0)
-    if best is None:
+    replacer = _PostCallCleanupReplacer8616(
+        root=root,
+        project=project,
+        function=function,
+        ins_addr=ins_addr,
+        seen=set(),
+    )
+    replacer.visit(root, 0)
+    if replacer.best is None:
         return False
-    _stmt_addr, _depth, statements, index = best
+    _stmt_addr, _depth, statements, index = replacer.best
     dst_cvar = getattr(assignment, "lhs", None)
     source_expr = getattr(assignment, "rhs", None)
     if _insertion_point_has_stack_move_assignment_8616(statements, index, dst_cvar, source_expr):
@@ -13732,127 +15540,263 @@ def _replace_post_call_cleanup_artifact_before_stack_move_8616(
     return True
 
 
-def _insert_before_do_while_condition_8616(
-    root: StructuredAstValue, project: AngrProjectValue, ins_addr: int, assignment: StructuredAstValue
-) -> bool:
-    dst_cvar = getattr(assignment, "lhs", None)
-    source_expr = getattr(assignment, "rhs", None)
-    seen: set[int] = set()
 
-    def visit(node: StructuredAstValue) -> bool:
-        if node is None or id(node) in seen:
+@dataclass
+class _DoWhileConditionInserter8616:
+    """Insert a stack move before a proven do-while condition."""
+
+    root: StructuredAstValue
+    project: StructuredAstValue
+    ins_addr: StructuredAstValue
+    assignment: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    source_expr: StructuredAstValue
+    seen: StructuredAstValue
+
+    def visit(self, node: StructuredAstValue) -> bool:
+        """Walk the tree, appending at a matching do-while body tail."""
+        if node is None or id(node) in self.seen:
             return False
-        seen.add(id(node))
+        self.seen.add(id(node))
+        result = self._try_do_while_append_8616(node)
+        if result is not None:
+            return result
+        return self._visit_children_8616(node)
+
+    def _try_do_while_append_8616(self, node: StructuredAstValue) -> bool | None:
+        """Append to the body when the update sits between body and condition."""
         body = getattr(node, "body", None)
         condition = getattr(node, "condition", None)
-        if body is not None and condition is not None and node.__class__.__name__ == "CDoWhileLoop":
-            body_range = _instruction_addr_range_in_node_8616(body, project, ins_addr, set())
-            condition_range = _instruction_addr_range_in_node_8616(condition, project, ins_addr, set())
-            body_statements = getattr(body, "statements", None)
-            if (
-                body_range is not None
-                and condition_range is not None
-                and isinstance(body_statements, list)
-                and body_range[1] < ins_addr < condition_range[0]
-            ):
-                if _insertion_point_has_stack_move_assignment_8616(
-                    body_statements,
-                    len(body_statements),
-                    dst_cvar,
-                    source_expr,
-                ):
-                    root._inertia_stack_mov_assignment_already_present_8616 = True
-                    return False
-                if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                    log.warning(
-                        "[direct-stack-mov-insert-do-condition] insert ins=%#x body_max=%#x "
-                        "cond_min=%#x dst=%s source=%s",
-                        ins_addr,
-                        body_range[1],
-                        condition_range[0],
-                        _stack_cvar_identity_8616(dst_cvar),
-                        _stack_cvar_identity_8616(source_expr),
-                    )
-                body_statements.append(assignment)
-                return True
+        if not (
+            body is not None
+            and condition is not None
+            and node.__class__.__name__ == "CDoWhileLoop"
+        ):
+            return None
+        body_range = _instruction_addr_range_in_node_8616(body, self.project, self.ins_addr, set())
+        condition_range = _instruction_addr_range_in_node_8616(
+            condition, self.project, self.ins_addr, set()
+        )
+        body_statements = getattr(body, "statements", None)
+        if not (
+            body_range is not None
+            and condition_range is not None
+            and isinstance(body_statements, list)
+            and body_range[1] < self.ins_addr < condition_range[0]
+        ):
+            return None
+        if _insertion_point_has_stack_move_assignment_8616(
+            body_statements,
+            len(body_statements),
+            self.dst_cvar,
+            self.source_expr,
+        ):
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            return False
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-mov-insert-do-condition] insert ins=%#x body_max=%#x "
+                "cond_min=%#x dst=%s source=%s",
+                self.ins_addr,
+                body_range[1],
+                condition_range[0],
+                _stack_cvar_identity_8616(self.dst_cvar),
+                _stack_cvar_identity_8616(self.source_expr),
+            )
+        body_statements.append(self.assignment)
+        return True
 
+    def _visit_children_8616(self, node: StructuredAstValue) -> bool:
+        """Recurse into statements, loop bodies, else branches, and pairs."""
         statements = getattr(node, "statements", None)
         if isinstance(statements, list):
             for stmt in tuple(statements):
-                if visit(stmt):
+                if self.visit(stmt):
                     return True
         for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
             with contextlib.suppress(Exception):
                 child = getattr(node, attr, None)
-            if child is not None and visit(child):
+            if child is not None and self.visit(child):
                 return True
         pairs = getattr(node, "condition_and_nodes", None)
         if pairs:
             for _condition, body in tuple(pairs):
-                if visit(body):
+                if self.visit(body):
                     return True
         return False
 
-    return visit(root)
+
+def _insert_before_do_while_condition_8616(
+    root: StructuredAstValue, project: AngrProjectValue, ins_addr: int, assignment: StructuredAstValue
+) -> bool:
+    inserter = _DoWhileConditionInserter8616(
+        root=root,
+        project=project,
+        ins_addr=ins_addr,
+        assignment=assignment,
+        dst_cvar=getattr(assignment, "lhs", None),
+        source_expr=getattr(assignment, "rhs", None),
+        seen=set(),
+    )
+    return inserter.visit(root)
+
+
+
+@dataclass
+class _GuardedBodyStartInserter8616:
+    """Insert a stack move at a proven guarded-body start for the target."""
+
+    root: StructuredAstValue
+    project: StructuredAstValue
+    ins_addr: StructuredAstValue
+    assignment: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    source_expr: StructuredAstValue
+    seen: StructuredAstValue
+
+    def visit(self, node: StructuredAstValue) -> bool:
+        """Walk the tree, inserting at a proven guarded body start."""
+        if node is None or id(node) in self.seen:
+            return False
+        self.seen.add(id(node))
+        result = self._visit_pairs_8616(node)
+        if result is not None:
+            return result
+        return self._visit_children_8616(node)
+
+    def _visit_pairs_8616(self, node: StructuredAstValue) -> bool | None:
+        """Try each condition/body pair; None means fall through to children."""
+        pairs = getattr(node, "condition_and_nodes", None)
+        if not pairs:
+            return None
+        for condition, body in tuple(pairs):
+            result = self._try_guarded_pair_8616(condition, body)
+            if result is not None:
+                return result
+        return None
+
+    def _guard_match_8616(
+        self,
+        condition: StructuredAstValue,
+        body_statements: StructuredAstValue,
+        condition_range: tuple[int, int] | None,
+        body_range: tuple[int, int] | None,
+    ) -> bool:
+        """Return whether the guarded body range covers the target update."""
+        if not isinstance(body_statements, list) or body_range is None:
+            return False
+        range_match = (
+            condition_range is not None and condition_range[1] < int(self.ins_addr) < body_range[0]
+        ) or (
+            condition_range is None and int(self.ins_addr) <= body_range[0] <= int(self.ins_addr) + 0x10
+        )
+        if not range_match:
+            return False
+        return _node_reads_stack_cvar_8616(condition, self.dst_cvar)
+
+    def _try_guarded_pair_8616(
+        self,
+        condition: StructuredAstValue,
+        body: StructuredAstValue,
+    ) -> bool | None:
+        """Insert at a matching guarded body start or recurse into the body."""
+        body_statements = getattr(body, "statements", None)
+        condition_range = _instruction_addr_range_in_node_8616(condition, self.project, self.ins_addr, set())
+        body_range = _instruction_addr_range_in_node_8616(body, self.project, self.ins_addr, set())
+        if not self._guard_match_8616(condition, body_statements, condition_range, body_range):
+            return True if self.visit(body) else None
+        if _insertion_point_has_stack_move_assignment_8616(
+            body_statements, 0, self.dst_cvar, self.source_expr
+        ):
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            return False
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-mov-insert-if-body-start] insert ins=%#x cond_max=%#x "
+                "body_min=%#x dst=%s source=%s",
+                self.ins_addr,
+                condition_range[1] if condition_range is not None else -1,
+                body_range[0],
+                _stack_cvar_identity_8616(self.dst_cvar),
+                _stack_cvar_identity_8616(self.source_expr),
+            )
+        body_statements.insert(0, self.assignment)
+        return True
+
+    def _visit_children_8616(self, node: StructuredAstValue) -> bool:
+        """Recurse into statements, loop bodies, and else branches."""
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            for stmt in tuple(statements):
+                if self.visit(stmt):
+                    return True
+        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
+            with contextlib.suppress(Exception):
+                child = getattr(node, attr, None)
+            if child is not None and self.visit(child):
+                return True
+        return False
 
 
 def _insert_at_guarded_body_start_for_target_stack_move_8616(
     root: StructuredAstValue, project: AngrProjectValue, ins_addr: int, assignment: StructuredAstValue
 ) -> bool:
-    dst_cvar = getattr(assignment, "lhs", None)
-    source_expr = getattr(assignment, "rhs", None)
-    seen: set[int] = set()
+    inserter = _GuardedBodyStartInserter8616(
+        root=root,
+        project=project,
+        ins_addr=ins_addr,
+        assignment=assignment,
+        dst_cvar=getattr(assignment, "lhs", None),
+        source_expr=getattr(assignment, "rhs", None),
+        seen=set(),
+    )
+    return inserter.visit(root)
 
-    def visit(node: StructuredAstValue) -> bool:
-        if node is None or id(node) in seen:
-            return False
-        seen.add(id(node))
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for condition, body in tuple(pairs):
-                body_statements = getattr(body, "statements", None)
-                condition_range = _instruction_addr_range_in_node_8616(condition, project, ins_addr, set())
-                body_range = _instruction_addr_range_in_node_8616(body, project, ins_addr, set())
-                if (
-                    isinstance(body_statements, list)
-                    and body_range is not None
-                    and (
-                        (condition_range is not None and condition_range[1] < int(ins_addr) < body_range[0])
-                        or (condition_range is None and int(ins_addr) <= body_range[0] <= int(ins_addr) + 0x10)
-                    )
-                    and _node_reads_stack_cvar_8616(condition, dst_cvar)
-                ):
-                    if _insertion_point_has_stack_move_assignment_8616(body_statements, 0, dst_cvar, source_expr):
-                        root._inertia_stack_mov_assignment_already_present_8616 = True
-                        return False
-                    if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                        log.warning(
-                            "[direct-stack-mov-insert-if-body-start] insert ins=%#x cond_max=%#x "
-                            "body_min=%#x dst=%s source=%s",
-                            ins_addr,
-                            condition_range[1] if condition_range is not None else -1,
-                            body_range[0],
-                            _stack_cvar_identity_8616(dst_cvar),
-                            _stack_cvar_identity_8616(source_expr),
-                        )
-                    body_statements.insert(0, assignment)
-                    return True
-                if visit(body):
-                    return True
 
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            for stmt in tuple(statements):
-                if visit(stmt):
-                    return True
-        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
-            with contextlib.suppress(Exception):
-                child = getattr(node, attr, None)
-            if child is not None and visit(child):
-                return True
-        return False
 
-    return visit(root)
+def _is_conditional_jcc_insn_8616(insn: StructuredAstValue) -> bool:
+    """Check for a conditional jump mnemonic (not jmp)."""
+    mnemonic = str(getattr(insn, "mnemonic", "") or "").lower()
+    return mnemonic.startswith("j") and mnemonic != "jmp"
+
+
+def _jcc_branch_indexes_8616(insns: tuple[StructuredAstValue, ...], jcc_addr: int) -> tuple[int, ...]:
+    """Find instruction indexes that could carry the requested jcc address."""
+    return tuple(
+        index
+        for index, wrapper in enumerate(insns)
+        if (
+            isinstance(getattr(getattr(wrapper, "insn", wrapper), "address", None), int)
+            and abs(int(getattr(wrapper, "insn", wrapper).address) - jcc_addr) <= 8
+            and _is_conditional_jcc_insn_8616(getattr(wrapper, "insn", wrapper))
+        )
+    )
+
+
+def _single_imm_operand_8616(insn: StructuredAstValue) -> int | None:
+    """Return the immediate of a single-operand instruction, or None."""
+    operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
+    if len(operands) != 1 or getattr(operands[0], "type", None) != X86_OP_IMM:
+        return None
+    imm = getattr(operands[0], "imm", None)
+    return imm if isinstance(imm, int) else None
+
+
+def _jcc_merge_addr_8616(insns: tuple[StructuredAstValue, ...], index: int, else_start: int) -> int | None:
+    """Scan past else_start for the first unconditional-jump merge target."""
+    for candidate_wrapper in insns[index + 2 :]:
+        candidate = getattr(candidate_wrapper, "insn", candidate_wrapper)
+        candidate_addr = getattr(candidate, "address", None)
+        if not isinstance(candidate_addr, int):
+            continue
+        if candidate_addr >= else_start:
+            break
+        if str(getattr(candidate, "mnemonic", "") or "").lower() != "jmp":
+            continue
+        target = _single_imm_operand_8616(candidate)
+        if target is not None:
+            return target
+    return None
 
 
 def _conditional_branch_ranges_for_jcc_8616(
@@ -13862,57 +15806,185 @@ def _conditional_branch_ranges_for_jcc_8616(
     insns = _dedup_sorted_capstone_insns_by_addr_8616(
         wrapper for block in blocks for wrapper in _capstone_insns_for_direct_global_update_8616(project, block)
     )
-    jcc_indexes = tuple(
-        index
-        for index, wrapper in enumerate(insns)
-        if (
-            isinstance(getattr(getattr(wrapper, "insn", wrapper), "address", None), int)
-            and abs(int(getattr(wrapper, "insn", wrapper).address) - jcc_addr) <= 8
-            and str(getattr(getattr(wrapper, "insn", wrapper), "mnemonic", "") or "").lower().startswith("j")
-            and str(getattr(getattr(wrapper, "insn", wrapper), "mnemonic", "") or "").lower() != "jmp"
-        )
-    )
+    jcc_indexes = _jcc_branch_indexes_8616(insns, jcc_addr)
     if len(jcc_indexes) != 1:
         return None
     for index in jcc_indexes:
-        wrapper = insns[index]
-        insn = getattr(wrapper, "insn", wrapper)
-        mnemonic = str(getattr(insn, "mnemonic", "") or "").lower()
-        if not mnemonic.startswith("j") or mnemonic == "jmp":
+        insn = getattr(insns[index], "insn", insns[index])
+        if not _is_conditional_jcc_insn_8616(insn):
             return None
-        operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
-        if len(operands) != 1 or getattr(operands[0], "type", None) != X86_OP_IMM:
-            return None
-        then_start = getattr(operands[0], "imm", None)
+        then_start = _single_imm_operand_8616(insn)
         if not isinstance(then_start, int) or index + 1 >= len(insns):
             return None
         next_insn = getattr(insns[index + 1], "insn", insns[index + 1])
         if str(getattr(next_insn, "mnemonic", "") or "").lower() != "jmp":
             return None
-        next_operands = _boundary_tuple_8616(getattr(next_insn, "operands", ()) or ())
-        if len(next_operands) != 1 or getattr(next_operands[0], "type", None) != X86_OP_IMM:
-            return None
-        else_start = getattr(next_operands[0], "imm", None)
+        else_start = _single_imm_operand_8616(next_insn)
         if not isinstance(else_start, int):
             return None
-        merge_addr = None
-        for candidate_wrapper in insns[index + 2 :]:
-            candidate = getattr(candidate_wrapper, "insn", candidate_wrapper)
-            candidate_addr = getattr(candidate, "address", None)
-            if not isinstance(candidate_addr, int):
-                continue
-            if candidate_addr >= else_start:
-                break
-            if str(getattr(candidate, "mnemonic", "") or "").lower() != "jmp":
-                continue
-            candidate_operands = _boundary_tuple_8616(getattr(candidate, "operands", ()) or ())
-            if len(candidate_operands) == 1 and getattr(candidate_operands[0], "type", None) == X86_OP_IMM:
-                target = getattr(candidate_operands[0], "imm", None)
-                if isinstance(target, int):
-                    merge_addr = target
-                    break
+        merge_addr = _jcc_merge_addr_8616(insns, index, else_start)
         return then_start, else_start, merge_addr
     return None
+
+
+@dataclass
+class _CondBranchMoveInserter8616:
+    """Insert a decoded stack move into the innermost CFG-proven branch."""
+
+    root: StructuredAstValue
+    project: StructuredAstValue
+    function: StructuredAstValue
+    ins_addr: StructuredAstValue
+    assignment: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    source_expr: StructuredAstValue
+    relocate_tagged_assignment: StructuredAstValue
+    seen: StructuredAstValue
+
+    def _maybe_insert_8616(self, branch: StructuredAstValue, statements: list[StructuredAstValue]) -> bool:
+        """Insert at branch start unless the same assignment is already present."""
+        if self.relocate_tagged_assignment and not self._relocate_tagged_8616(branch, statements):
+            return False
+        if _insertion_point_has_stack_move_assignment_8616(
+            statements, 0, self.dst_cvar, self.source_expr
+        ):
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            return False
+        statements.insert(0, self.assignment)
+        if self.relocate_tagged_assignment:
+            _remove_duplicate_stack_move_assignments_8616(
+                self.root,
+                self.project,
+                self.ins_addr,
+                self.dst_cvar,
+                self.source_expr,
+                self.assignment,
+            )
+        return True
+
+    def _relocate_tagged_8616(self, branch: StructuredAstValue, statements: list[StructuredAstValue]) -> bool:
+        """Remove the unique tagged copy so the branch insert relocates it."""
+        tagged_count = _removable_tagged_stack_move_assignment_count_8616(
+            self.root,
+            self.project,
+            self.ins_addr,
+            self.dst_cvar,
+            self.source_expr,
+        )
+        branch_tagged_count = _removable_tagged_stack_move_assignment_count_8616(
+            branch,
+            self.project,
+            self.ins_addr,
+            self.dst_cvar,
+            self.source_expr,
+        )
+        if tagged_count != 1:
+            return False
+        first_statement_is_exact = bool(
+            statements
+            and isinstance(statements[0], structured_c.CAssignment)
+            and _is_same_stack_move_assignment_8616(
+                statements[0],
+                self.dst_cvar,
+                self.source_expr,
+            )
+            and _node_has_instruction_address_8616(
+                statements[0],
+                self.project,
+                self.ins_addr,
+            )
+        )
+        if branch_tagged_count == tagged_count and first_statement_is_exact:
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            return False
+        removed = _remove_tagged_stack_move_assignments_8616(
+            self.root,
+            self.project,
+            self.ins_addr,
+            self.dst_cvar,
+            self.source_expr,
+        )
+        if removed != tagged_count:
+            raise AssertionError("tagged branch stack-move count changed during relocation")
+        return True
+
+    def visit(self, node: StructuredAstValue) -> bool:
+        """Walk conditionals and insert into the machine-proven branch range."""
+        if node is None or id(node) in self.seen:
+            return False
+        self.seen.add(id(node))
+        if self._visit_conditional_pairs_8616(node):
+            return True
+        return self._visit_children_8616(node)
+
+    def _visit_conditional_pairs_8616(self, node: StructuredAstValue) -> bool:
+        """Handle each condition/body pair of a conditional node."""
+        pairs = getattr(node, "condition_and_nodes", None)
+        if not pairs:
+            return False
+        for condition, body in tuple(pairs):
+            if self._visit_branch_pair_8616(node, condition, body):
+                return True
+        return False
+
+    def _branch_target_8616(
+        self,
+        node: StructuredAstValue,
+        body: StructuredAstValue,
+        then_start: int,
+        else_start: int,
+        merge_addr: int | None,
+    ) -> tuple[StructuredAstValue, list[StructuredAstValue]] | None:
+        """Pick the proven branch arm containing this instruction."""
+        body_statements = getattr(body, "statements", None)
+        else_node = getattr(node, "else_node", None)
+        else_statements = getattr(else_node, "statements", None)
+        if isinstance(body_statements, list) and then_start <= int(self.ins_addr) < else_start:
+            return body, body_statements
+        if (
+            isinstance(else_statements, list)
+            and else_start <= int(self.ins_addr)
+            and (merge_addr is None or int(self.ins_addr) < merge_addr)
+        ):
+            return else_node, else_statements
+        return None
+
+    def _visit_branch_pair_8616(
+        self,
+        node: StructuredAstValue,
+        condition: StructuredAstValue,
+        body: StructuredAstValue,
+    ) -> bool:
+        """Resolve the jcc range for one pair and insert into its target arm."""
+        jcc_addr = _preceding_instruction_addr_in_node_8616(condition, self.project, self.ins_addr, set())
+        if not isinstance(jcc_addr, int):
+            return False
+        ranges = _conditional_branch_ranges_for_jcc_8616(self.project, self.function, jcc_addr)
+        if ranges is None:
+            return False
+        then_start, else_start, merge_addr = ranges
+        target = self._branch_target_8616(node, body, then_start, else_start, merge_addr)
+        if target is not None:
+            target_node, target_statements = target
+            if self.visit(target_node):
+                return True
+            return self._maybe_insert_8616(target_node, target_statements)
+        if self.visit(body):
+            return True
+        return self.visit(getattr(node, "else_node", None))
+
+    def _visit_children_8616(self, node: StructuredAstValue) -> bool:
+        """Recurse into statements, loop bodies, and else branches."""
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            for stmt in tuple(statements):
+                if self.visit(stmt):
+                    return True
+        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
+            child = getattr(node, attr, None)
+            if child is not None and self.visit(child):
+                return True
+        return False
 
 
 def _insert_into_conditional_branch_for_direct_stack_move_8616(
@@ -13925,125 +15997,85 @@ def _insert_into_conditional_branch_for_direct_stack_move_8616(
     relocate_tagged_assignment: bool = False,
 ) -> bool:
     """Insert a decoded stack move into the innermost CFG-proven branch."""
-    dst_cvar = getattr(assignment, "lhs", None)
-    source_expr = getattr(assignment, "rhs", None)
-    seen: set[int] = set()
+    inserter = _CondBranchMoveInserter8616(
+        root=root,
+        project=project,
+        function=function,
+        ins_addr=ins_addr,
+        assignment=assignment,
+        dst_cvar=getattr(assignment, "lhs", None),
+        source_expr=getattr(assignment, "rhs", None),
+        relocate_tagged_assignment=relocate_tagged_assignment,
+        seen=set(),
+    )
+    return inserter.visit(root)
 
-    def maybe_insert(
-        branch: StructuredAstValue,
-        statements: list[StructuredAstValue],
-    ) -> bool:
-        """Insert at branch start unless the same assignment is already present."""
-        if relocate_tagged_assignment:
-            tagged_count = _removable_tagged_stack_move_assignment_count_8616(
-                root,
-                project,
-                ins_addr,
-                dst_cvar,
-                source_expr,
-            )
-            branch_tagged_count = _removable_tagged_stack_move_assignment_count_8616(
-                branch,
-                project,
-                ins_addr,
-                dst_cvar,
-                source_expr,
-            )
-            if tagged_count != 1:
-                return False
-            first_statement_is_exact = bool(
-                statements
-                and isinstance(statements[0], structured_c.CAssignment)
-                and _is_same_stack_move_assignment_8616(
-                    statements[0],
-                    dst_cvar,
-                    source_expr,
-                )
-                and _node_has_instruction_address_8616(
-                    statements[0],
-                    project,
-                    ins_addr,
-                )
-            )
-            if branch_tagged_count == tagged_count and first_statement_is_exact:
-                root._inertia_stack_mov_assignment_already_present_8616 = True
-                return False
-            removed = _remove_tagged_stack_move_assignments_8616(
-                root,
-                project,
-                ins_addr,
-                dst_cvar,
-                source_expr,
-            )
-            if removed != tagged_count:
-                raise AssertionError("tagged branch stack-move count changed during relocation")
-        if _insertion_point_has_stack_move_assignment_8616(statements, 0, dst_cvar, source_expr):
-            root._inertia_stack_mov_assignment_already_present_8616 = True
-            return False
-        statements.insert(0, assignment)
-        if relocate_tagged_assignment:
-            _remove_duplicate_stack_move_assignments_8616(
-                root,
-                project,
-                ins_addr,
-                dst_cvar,
-                source_expr,
-                assignment,
-            )
-        return True
 
-    def visit(node: StructuredAstValue) -> bool:
-        """Walk conditionals and insert into the machine-proven branch range."""
-        if node is None or id(node) in seen:
-            return False
-        seen.add(id(node))
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for condition, body in tuple(pairs):
-                jcc_addr = _preceding_instruction_addr_in_node_8616(condition, project, ins_addr, set())
-                if not isinstance(jcc_addr, int):
-                    continue
-                ranges = _conditional_branch_ranges_for_jcc_8616(project, function, jcc_addr)
-                if ranges is None:
-                    continue
-                then_start, else_start, merge_addr = ranges
-                body_statements = getattr(body, "statements", None)
-                else_node = getattr(node, "else_node", None)
-                else_statements = getattr(else_node, "statements", None)
-                target_node = None
-                target_statements = None
-                if isinstance(body_statements, list) and then_start <= int(ins_addr) < else_start:
-                    target_node = body
-                    target_statements = body_statements
-                elif (
-                    isinstance(else_statements, list)
-                    and else_start <= int(ins_addr)
-                    and (merge_addr is None or int(ins_addr) < merge_addr)
-                ):
-                    target_node = else_node
-                    target_statements = else_statements
-                if target_node is not None and target_statements is not None:
-                    if visit(target_node):
-                        return True
-                    if maybe_insert(target_node, target_statements):
-                        return True
-                    continue
-                if visit(body):
-                    return True
-                if visit(else_node):
-                    return True
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            for stmt in tuple(statements):
-                if visit(stmt):
-                    return True
-        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
-            child = getattr(node, attr, None)
-            if child is not None and visit(child):
-                return True
-        return False
 
-    return visit(root)
+def _sequence_has_control_flow_8616(sequence: tuple[StructuredAstValue, ...]) -> bool:
+    """Check whether a candidate sequence contains a control-flow instruction."""
+    return any(
+        X86_GRP_JUMP in frozenset(getattr(item, "groups", ()) or ())
+        or X86_GRP_RET in frozenset(getattr(item, "groups", ()) or ())
+        or getattr(item, "id", None) in {X86_INS_CALL, X86_INS_LCALL, X86_INS_RET}
+        for item in sequence
+    )
+
+
+def _sequence_starts_in_block_8616(
+    block_insns: tuple[StructuredAstValue, ...],
+    project: AngrProjectValue,
+    ins_addr: int,
+    sequence_starts: set[int],
+) -> None:
+    """Record backward-reachable sequence starts for one block."""
+    comparable_addrs_list: list[int | None] = []
+    for insn in block_insns:
+        tagged_addr = getattr(insn, "address", None)
+        comparable_addrs_list.append(
+            _comparable_instruction_addr_8616(project, tagged_addr, ins_addr)
+            if isinstance(tagged_addr, int)
+            else None
+        )
+    comparable_addrs = tuple(comparable_addrs_list)
+    for fact_index, comparable_addr in enumerate(comparable_addrs):
+        if comparable_addr != int(ins_addr):
+            continue
+        sequence_starts.add(int(ins_addr))
+        for start_index in range(fact_index - 1, -1, -1):
+            start_addr = comparable_addrs[start_index]
+            if not isinstance(start_addr, int) or int(ins_addr) - start_addr > 16:
+                break
+            sequence = block_insns[start_index : fact_index + 1]
+            if _sequence_has_control_flow_8616(sequence):
+                break
+            sequence_starts.add(start_addr)
+
+
+def _loopback_edge_for_jump_8616(
+    insn: StructuredAstValue,
+    project: AngrProjectValue,
+    ins_addr: int,
+    sequence_starts: set[int],
+) -> tuple[int, int] | None:
+    """Return the proven (sequence entry, backedge jump) edge for one jump."""
+    jump_addr = getattr(insn, "address", None)
+    operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
+    if not isinstance(jump_addr, int) or len(operands) != 1:
+        return None
+    operand = operands[0]
+    target = getattr(operand, "imm", None)
+    if int(getattr(operand, "type", -1)) != X86_OP_IMM or not isinstance(target, int):
+        return None
+    comparable_jump = _comparable_instruction_addr_8616(project, jump_addr, ins_addr)
+    comparable_target = _comparable_instruction_addr_8616(project, target, ins_addr)
+    if (
+        comparable_target in sequence_starts
+        and isinstance(comparable_jump, int)
+        and comparable_jump > int(ins_addr)
+    ):
+        return comparable_target, comparable_jump
+    return None
 
 
 def _instruction_sequence_loopback_edges_8616(
@@ -14060,54 +16092,16 @@ def _instruction_sequence_loopback_edges_8616(
             getattr(wrapped, "insn", wrapped)
             for wrapped in _boundary_tuple_8616(getattr(capstone, "insns", ()) or ())
         )
-        comparable_addrs_list: list[int | None] = []
-        for insn in block_insns:
-            tagged_addr = getattr(insn, "address", None)
-            comparable_addrs_list.append(
-                _comparable_instruction_addr_8616(project, tagged_addr, ins_addr)
-                if isinstance(tagged_addr, int)
-                else None
-            )
-        comparable_addrs = tuple(comparable_addrs_list)
-        for fact_index, comparable_addr in enumerate(comparable_addrs):
-            if comparable_addr != int(ins_addr):
-                continue
-            sequence_starts.add(int(ins_addr))
-            for start_index in range(fact_index - 1, -1, -1):
-                start_addr = comparable_addrs[start_index]
-                if not isinstance(start_addr, int) or int(ins_addr) - start_addr > 16:
-                    break
-                sequence = block_insns[start_index : fact_index + 1]
-                if any(
-                    X86_GRP_JUMP in frozenset(getattr(item, "groups", ()) or ())
-                    or X86_GRP_RET in frozenset(getattr(item, "groups", ()) or ())
-                    or getattr(item, "id", None) in {X86_INS_CALL, X86_INS_LCALL, X86_INS_RET}
-                    for item in sequence
-                ):
-                    break
-                sequence_starts.add(start_addr)
+        _sequence_starts_in_block_8616(block_insns, project, ins_addr, sequence_starts)
         for insn in block_insns:
             if X86_GRP_JUMP not in frozenset(getattr(insn, "groups", ()) or ()):
                 continue
             jump_insns.append(insn)
     edges: list[tuple[int, int]] = []
     for insn in jump_insns:
-        jump_addr = getattr(insn, "address", None)
-        operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
-        if not isinstance(jump_addr, int) or len(operands) != 1:
-            continue
-        operand = operands[0]
-        target = getattr(operand, "imm", None)
-        if int(getattr(operand, "type", -1)) != X86_OP_IMM or not isinstance(target, int):
-            continue
-        comparable_jump = _comparable_instruction_addr_8616(project, jump_addr, ins_addr)
-        comparable_target = _comparable_instruction_addr_8616(project, target, ins_addr)
-        if (
-            comparable_target in sequence_starts
-            and isinstance(comparable_jump, int)
-            and comparable_jump > int(ins_addr)
-        ):
-            edges.append((comparable_target, comparable_jump))
+        edge = _loopback_edge_for_jump_8616(insn, project, ins_addr, sequence_starts)
+        if edge is not None:
+            edges.append(edge)
     proven_edges = tuple(dict.fromkeys(edges))
     if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
         log.warning(
@@ -14160,6 +16154,238 @@ def _function_has_loopback_to_instruction_8616(
     return bool(_instruction_sequence_loopback_edges_8616(function, project, ins_addr))
 
 
+@dataclass
+class _DoWhileBodyStartInserter8616:
+    """Insert a proven loop-entry move when a binary backedge repeats it."""
+
+    root: StructuredAstValue
+    project: StructuredAstValue
+    ins_addr: StructuredAstValue
+    assignment: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    source_expr: StructuredAstValue
+    proven_loopback_edges: StructuredAstValue
+    condition_reading_do_loop_ids: StructuredAstValue
+    rendered_do_loop_ids: StructuredAstValue
+    rendered_seen: StructuredAstValue
+    seen: StructuredAstValue
+
+    def collect_rendered_do_loops(self, node: StructuredAstValue) -> None:
+        """Collect executable do loops without following compatibility fields."""
+        if node is None or id(node) in self.rendered_seen:
+            return
+        self.rendered_seen.add(id(node))
+        if node.__class__.__name__ == "CDoWhileLoop" and _node_reads_stack_cvar_8616(
+            getattr(node, "condition", None), self.dst_cvar
+        ):
+            self.rendered_do_loop_ids.add(id(node))
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            for statement in tuple(statements):
+                self.collect_rendered_do_loops(statement)
+        for attr in ("body", "else_node"):
+            self.collect_rendered_do_loops(getattr(node, attr, None))
+        pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for _condition, body in tuple(pairs):
+                self.collect_rendered_do_loops(body)
+        cases = getattr(node, "cases", None)
+        if cases:
+            for _case_value, body in tuple(cases):
+                self.collect_rendered_do_loops(body)
+        self.collect_rendered_do_loops(getattr(node, "default", None))
+
+    def visit(self, node: StructuredAstValue) -> bool:
+        """Walk the tree; a CDoWhileLoop match inserts, aborts, or recurses."""
+        if node is None or id(node) in self.seen:
+            return False
+        self.seen.add(id(node))
+        result = self._try_do_while_insert_8616(node)
+        if result is not None:
+            return result
+        return self._visit_children_8616(node)
+
+    def _repeated_prefix_count_8616(self, body_statements: StructuredAstValue) -> int:
+        """Count leading body statements already emitted for this update."""
+        repeated_prefix_count = 0
+        if isinstance(body_statements, list):
+            for statement in body_statements:
+                tags = copy_structured_tags_8616(getattr(statement, "tags", None))
+                statement_addr = tags.get("ins_addr") if tags is not None else None
+                if not isinstance(statement_addr, int) and tags is not None:
+                    statement_addr = tags.get("inertia_relocated_from_ins_addr")
+                comparable_addr = (
+                    _comparable_instruction_addr_8616(self.project, statement_addr, self.ins_addr)
+                    if isinstance(statement_addr, int)
+                    else None
+                )
+                if not isinstance(statement, structured_c.CAssignment) or not isinstance(comparable_addr, int):
+                    break
+                if comparable_addr > int(self.ins_addr):
+                    break
+                repeated_prefix_count += 1
+        return repeated_prefix_count
+
+    def _post_prefix_body_range_8616(
+        self,
+        body_statements: StructuredAstValue,
+        repeated_prefix_count: int,
+    ) -> tuple[int, int] | None:
+        """Merge instruction ranges of the body tail after the repeated prefix."""
+        body_ranges = tuple(
+            candidate_range
+            for statement in (
+                body_statements[repeated_prefix_count:] if isinstance(body_statements, list) else ()
+            )
+            if (
+                candidate_range := _instruction_addr_range_in_node_8616(
+                    statement,
+                    self.project,
+                    self.ins_addr,
+                    set(),
+                )
+            )
+            is not None
+        )
+        return (
+            (min(item[0] for item in body_ranges), max(item[1] for item in body_ranges))
+            if body_ranges
+            else None
+        )
+
+    def _ordered_condition_8616(
+        self,
+        body_range: tuple[int, int] | None,
+        condition_range: tuple[int, int] | None,
+    ) -> bool:
+        """Return whether the body provably precedes the tagged condition."""
+        exact_edge_covers_boundary = condition_range is not None and any(
+            entry <= int(self.ins_addr) < condition_range[0] and jump >= condition_range[1]
+            for entry, jump in self.proven_loopback_edges
+        )
+        return (
+            body_range is not None
+            and condition_range is not None
+            and self.ins_addr < condition_range[0]
+            and body_range[1] <= condition_range[0]
+            and exact_edge_covers_boundary
+        )
+
+    def _unique_unmapped_condition_8616(
+        self,
+        node: StructuredAstValue,
+        body_range: tuple[int, int] | None,
+        condition_range: tuple[int, int] | None,
+    ) -> bool:
+        """Return whether this is the unique do loop with an unmapped condition."""
+        return (
+            body_range is not None
+            and condition_range is None
+            and self.condition_reading_do_loop_ids == frozenset({id(node)})
+            and self.ins_addr <= body_range[1]
+        )
+
+    def _try_do_while_insert_8616(self, node: StructuredAstValue) -> bool | None:
+        """Try inserting at a do-while body start; None means keep walking."""
+        body = getattr(node, "body", None)
+        condition = getattr(node, "condition", None)
+        if not (body is not None and condition is not None and node.__class__.__name__ == "CDoWhileLoop"):
+            return None
+        body_statements = getattr(body, "statements", None)
+        repeated_prefix_count = self._repeated_prefix_count_8616(body_statements)
+        body_range = self._post_prefix_body_range_8616(body_statements, repeated_prefix_count)
+        condition_range = _instruction_addr_range_in_node_8616(
+            condition, self.project, self.ins_addr, set()
+        )
+        ordered_condition = self._ordered_condition_8616(body_range, condition_range)
+        unique_unmapped_condition = self._unique_unmapped_condition_8616(
+            node, body_range, condition_range
+        )
+        self._debug_do_while_refusal_8616(
+            node, condition, body_range, condition_range, ordered_condition, unique_unmapped_condition
+        )
+        if not (
+            body_range is not None
+            and isinstance(body_statements, list)
+            and (ordered_condition or unique_unmapped_condition)
+            and _node_reads_stack_cvar_8616(condition, self.dst_cvar)
+        ):
+            return None
+        insertion_index = repeated_prefix_count
+        if _insertion_point_has_stack_move_assignment_8616(
+            body_statements,
+            insertion_index,
+            self.dst_cvar,
+            self.source_expr,
+        ):
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            return False
+        self._debug_do_while_insert_8616(body_range, condition_range)
+        body_statements.insert(insertion_index, self.assignment)
+        return True
+
+    def _debug_do_while_refusal_8616(
+        self,
+        node: StructuredAstValue,
+        condition: StructuredAstValue,
+        body_range: tuple[int, int] | None,
+        condition_range: tuple[int, int] | None,
+        ordered_condition: bool,
+        unique_unmapped_condition: bool,
+    ) -> None:
+        """Emit optional debug noise when a do-while match is refused."""
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE") and not (
+            ordered_condition or unique_unmapped_condition
+        ):
+            log.warning(
+                "[direct-stack-mov-insert-do-body-start] refuse ins=%#x loop=%#x loops=%d "
+                "body_range=%r condition_range=%r reads_dst=%s",
+                self.ins_addr,
+                id(node),
+                len(self.condition_reading_do_loop_ids),
+                body_range,
+                condition_range,
+                _node_reads_stack_cvar_8616(condition, self.dst_cvar),
+            )
+
+    def _debug_do_while_insert_8616(
+        self,
+        body_range: tuple[int, int] | None,
+        condition_range: tuple[int, int] | None,
+    ) -> None:
+        """Emit optional debug noise for a do-while insertion."""
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            condition_min = condition_range[0] if condition_range is not None else -1
+            log.warning(
+                "[direct-stack-mov-insert-do-body-start] insert ins=%#x body_min=%#x "
+                "cond_min=%#x dst=%s source=%s",
+                self.ins_addr,
+                body_range[0],
+                condition_min,
+                _stack_cvar_identity_8616(self.dst_cvar),
+                _stack_cvar_identity_8616(self.source_expr),
+            )
+
+    def _visit_children_8616(self, node: StructuredAstValue) -> bool:
+        """Recurse into statements, loop bodies, else branches, and pairs."""
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            for stmt in tuple(statements):
+                if self.visit(stmt):
+                    return True
+        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
+            with contextlib.suppress(Exception):
+                child = getattr(node, attr, None)
+            if child is not None and self.visit(child):
+                return True
+        pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for _condition, body in tuple(pairs):
+                if self.visit(body):
+                    return True
+        return False
+
+
 def _insert_at_do_while_body_start_8616(
     root: StructuredAstValue,
     project: AngrProjectValue,
@@ -14171,7 +16397,6 @@ def _insert_at_do_while_body_start_8616(
 ) -> bool:
     """Insert a proven loop-entry move when a binary backedge repeats it."""
     dst_cvar = getattr(assignment, "lhs", None)
-    source_expr = getattr(assignment, "rhs", None)
     if not proven_loopback_edges:
         proven_loopback_edges = _instruction_sequence_loopback_edges_8616(
             function,
@@ -14180,163 +16405,303 @@ def _insert_at_do_while_body_start_8616(
         )
     if not proven_loopback_edges:
         return False
-    rendered_do_loop_ids: set[int] = set()
-    rendered_seen: set[int] = set()
+    inserter = _DoWhileBodyStartInserter8616(
+        root=root,
+        project=project,
+        ins_addr=ins_addr,
+        assignment=assignment,
+        dst_cvar=dst_cvar,
+        source_expr=getattr(assignment, "rhs", None),
+        proven_loopback_edges=proven_loopback_edges,
+        condition_reading_do_loop_ids=frozenset(),
+        rendered_do_loop_ids=set(),
+        rendered_seen=set(),
+        seen=set(),
+    )
+    inserter.collect_rendered_do_loops(root)
+    inserter.condition_reading_do_loop_ids = frozenset(inserter.rendered_do_loop_ids)
+    return inserter.visit(root)
 
-    def collect_rendered_do_loops(node: StructuredAstValue) -> None:
-        """Collect executable do loops without following compatibility fields."""
-        if node is None or id(node) in rendered_seen:
-            return
-        rendered_seen.add(id(node))
-        if node.__class__.__name__ == "CDoWhileLoop" and _node_reads_stack_cvar_8616(
-            getattr(node, "condition", None), dst_cvar
-        ):
-            rendered_do_loop_ids.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            for statement in tuple(statements):
-                collect_rendered_do_loops(statement)
-        for attr in ("body", "else_node"):
-            collect_rendered_do_loops(getattr(node, attr, None))
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                collect_rendered_do_loops(body)
-        cases = getattr(node, "cases", None)
-        if cases:
-            for _case_value, body in tuple(cases):
-                collect_rendered_do_loops(body)
-        collect_rendered_do_loops(getattr(node, "default", None))
 
-    collect_rendered_do_loops(root)
-    condition_reading_do_loop_ids = frozenset(rendered_do_loop_ids)
-    seen: set[int] = set()
 
-    def visit(node: StructuredAstValue) -> bool:
-        if node is None or id(node) in seen:
+@dataclass
+class _LoopBodyStartInserter8616:
+    """Insert a proven stack effect at the matching structured loop boundary."""
+
+    root: StructuredAstValue
+    project: StructuredAstValue
+    ins_addr: StructuredAstValue
+    assignment: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    source_expr: StructuredAstValue
+    proven_loopback_edges: StructuredAstValue
+    repeated_sequence_entry: StructuredAstValue
+    seen: StructuredAstValue
+    best_untagged_tail: StructuredAstValue = None
+
+    def _body_has_loopback_to_update_8616(self, body_range: tuple[int, int]) -> bool:
+        """Return whether the loop body provably jumps back to the update."""
+        start, end = body_range
+        if not isinstance(start, int) or not isinstance(end, int) or end < start:
             return False
-        seen.add(id(node))
+        if self.proven_loopback_edges:
+            return any(
+                entry <= int(self.ins_addr) < start and jump >= end
+                for entry, jump in self.proven_loopback_edges
+            )
+        return self._bytes_jump_back_to_update_8616(start, end)
+
+    def _bytes_jump_back_to_update_8616(self, start: int, end: int) -> bool:
+        """Disassemble the body range looking for a jump back to the update."""
+        try:
+            code = bytes(self.project.loader.memory.load(start, min(max(end - start + 8, 1), 0x200)))
+            capstone = self.project.arch.capstone
+        except Exception:
+            return False
+        target_addrs = _candidate_ins_addrs_8616(self.project, int(self.ins_addr))
+        try:
+            insns = tuple(capstone.disasm(code, start))
+        except Exception:
+            return False
+        for item in insns:
+            if self._insn_jumps_to_update_8616(item, start, end, target_addrs):
+                return True
+        return False
+
+    @staticmethod
+    def _insn_jumps_to_update_8616(
+        item: StructuredAstValue, start: int, end: int, target_addrs: StructuredAstValue
+    ) -> bool:
+        """Return whether one disassembled instruction jumps to the update."""
+        addr = getattr(item, "address", None)
+        if not isinstance(addr, int) or addr < start or addr > end + 8:
+            return False
+        if str(getattr(item, "mnemonic", "") or "").lower() not in {"jmp", "ljmp"}:
+            return False
+        operands = _boundary_tuple_8616(getattr(item, "operands", ()) or ())
+        if len(operands) != 1 or int(getattr(operands[0], "type", -1)) != X86_OP_IMM:
+            return False
+        target = getattr(operands[0], "imm", None)
+        return isinstance(target, int) and int(target) in target_addrs
+
+    def _mark_already_present_8616(self) -> bool:
+        """Record that an equivalent update already exists at the point."""
+        self.root._inertia_stack_update_assignment_already_present_8616 = True
+        return False
+
+    def _insert_body_start_8616(
+        self,
+        body_statements: list[StructuredAstValue],
+        insert_index: int,
+        debug_message: str,
+        debug_values: tuple[StructuredAstValue, ...],
+    ) -> bool:
+        """Insert at a proven body position after checking for an existing update."""
+        if _insertion_point_has_stack_move_assignment_8616(
+            body_statements,
+            insert_index,
+            self.dst_cvar,
+            self.source_expr,
+        ):
+            return self._mark_already_present_8616()
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                debug_message,
+                *debug_values,
+                _stack_cvar_identity_8616(self.dst_cvar),
+            )
+        body_statements.insert(insert_index, self.assignment)
+        return True
+
+    def visit(self, node: StructuredAstValue, depth: int = 0) -> bool:
+        """Find a loop body start or tail insertion point for a proven stack update."""
+        if node is None or id(node) in self.seen:
+            return False
+        self.seen.add(id(node))
         body = getattr(node, "body", None)
         condition = getattr(node, "condition", None)
-        if body is not None and condition is not None and node.__class__.__name__ == "CDoWhileLoop":
-            body_statements = getattr(body, "statements", None)
-            repeated_prefix_count = 0
-            if isinstance(body_statements, list):
-                for statement in body_statements:
-                    tags = copy_structured_tags_8616(getattr(statement, "tags", None))
-                    statement_addr = tags.get("ins_addr") if tags is not None else None
-                    if not isinstance(statement_addr, int) and tags is not None:
-                        statement_addr = tags.get("inertia_relocated_from_ins_addr")
-                    comparable_addr = (
-                        _comparable_instruction_addr_8616(project, statement_addr, ins_addr)
-                        if isinstance(statement_addr, int)
-                        else None
-                    )
-                    if not isinstance(statement, structured_c.CAssignment) or not isinstance(comparable_addr, int):
-                        break
-                    if comparable_addr > int(ins_addr):
-                        break
-                    repeated_prefix_count += 1
-            body_ranges = tuple(
-                candidate_range
-                for statement in (body_statements[repeated_prefix_count:] if isinstance(body_statements, list) else ())
-                if (
-                    candidate_range := _instruction_addr_range_in_node_8616(
-                        statement,
-                        project,
-                        ins_addr,
-                        set(),
-                    )
+        body_statements = getattr(body, "statements", None)
+        if body is not None and condition is not None and node.__class__.__name__ != "CDoWhileLoop":
+            body_range = _instruction_addr_range_in_node_8616(body, self.project, self.ins_addr, set())
+            condition_range = _instruction_addr_range_in_node_8616(condition, self.project, self.ins_addr, set())
+            self._debug_loop_ranges_8616(node, condition_range, body_range)
+            result = self._try_tagged_loop_body_8616(body_statements, body_range, condition_range)
+            if result is None:
+                result = self._try_untagged_while_tail_8616(
+                    node, body_statements, body_range, condition_range, depth
                 )
-                is not None
-            )
-            body_range = (
-                (min(item[0] for item in body_ranges), max(item[1] for item in body_ranges))
-                if body_ranges
-                else None
-            )
-            condition_range = _instruction_addr_range_in_node_8616(condition, project, ins_addr, set())
-            exact_edge_covers_boundary = (
-                condition_range is not None
-                and any(
-                    entry <= int(ins_addr) < condition_range[0]
-                    and jump >= condition_range[1]
-                    for entry, jump in proven_loopback_edges
-                )
-            )
-            ordered_condition = (
-                body_range is not None
-                and condition_range is not None
-                and ins_addr < condition_range[0]
-                and body_range[1] <= condition_range[0]
-                and exact_edge_covers_boundary
-            )
-            unique_unmapped_condition = (
-                body_range is not None
-                and condition_range is None
-                and condition_reading_do_loop_ids == frozenset({id(node)})
-                and ins_addr <= body_range[1]
-            )
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE") and not (
-                ordered_condition or unique_unmapped_condition
-            ):
-                log.warning(
-                    "[direct-stack-mov-insert-do-body-start] refuse ins=%#x loop=%#x loops=%d "
-                    "body_range=%r condition_range=%r reads_dst=%s",
-                    ins_addr,
-                    id(node),
-                    len(condition_reading_do_loop_ids),
-                    body_range,
-                    condition_range,
-                    _node_reads_stack_cvar_8616(condition, dst_cvar),
-                )
-            if (
-                body_range is not None
-                and isinstance(body_statements, list)
-                and (ordered_condition or unique_unmapped_condition)
-                and _node_reads_stack_cvar_8616(condition, dst_cvar)
-            ):
-                insertion_index = repeated_prefix_count
-                if _insertion_point_has_stack_move_assignment_8616(
-                    body_statements,
-                    insertion_index,
-                    dst_cvar,
-                    source_expr,
-                ):
-                    root._inertia_stack_mov_assignment_already_present_8616 = True
-                    return False
-                if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                    condition_min = condition_range[0] if condition_range is not None else -1
-                    log.warning(
-                        "[direct-stack-mov-insert-do-body-start] insert ins=%#x body_min=%#x "
-                        "cond_min=%#x dst=%s source=%s",
-                        ins_addr,
-                        body_range[0],
-                        condition_min,
-                        _stack_cvar_identity_8616(dst_cvar),
-                        _stack_cvar_identity_8616(source_expr),
-                    )
-                body_statements.insert(insertion_index, assignment)
-                return True
+            if result is None:
+                result = self._try_repeated_sequence_8616(node, body_statements, depth)
+            if result is None:
+                result = self._try_contained_insert_8616(body_statements, body_range, depth)
+            if result is not None:
+                return result
+        return self._visit_children_8616(node, depth)
 
+    def _debug_loop_ranges_8616(
+        self,
+        node: StructuredAstValue,
+        condition_range: tuple[int, int] | None,
+        body_range: tuple[int, int] | None,
+    ) -> None:
+        """Emit optional debug noise for loop range matching."""
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-update-loop-body-start-check] ins=%#x loop=%s cond_range=%s body_range=%s dst=%s",
+                self.ins_addr,
+                node.__class__.__name__,
+                condition_range,
+                body_range,
+                _stack_cvar_identity_8616(self.dst_cvar),
+            )
+
+    def _try_tagged_loop_body_8616(
+        self,
+        body_statements: StructuredAstValue,
+        body_range: tuple[int, int] | None,
+        condition_range: tuple[int, int] | None,
+    ) -> bool | None:
+        """Insert at the start/tail of a tagged loop body spanning the update."""
+        if not (
+            isinstance(body_statements, list)
+            and body_range is not None
+            and condition_range is not None
+            and condition_range[1] < int(self.ins_addr) < body_range[0]
+        ):
+            return None
+        insert_index = (
+            0
+            if self.repeated_sequence_entry
+            else len(body_statements) if self._body_has_loopback_to_update_8616(body_range) else 0
+        )
+        return self._insert_body_start_8616(
+            body_statements,
+            insert_index,
+            "[direct-stack-update-insert-loop-body] insert ins=%#x index=%d "
+            "cond_max=%#x body_min=%#x dst=%s",
+            (self.ins_addr, insert_index, condition_range[1], body_range[0]),
+        )
+
+    def _try_untagged_while_tail_8616(
+        self,
+        node: StructuredAstValue,
+        body_statements: StructuredAstValue,
+        body_range: tuple[int, int] | None,
+        condition_range: tuple[int, int] | None,
+        depth: int,
+    ) -> bool | None:
+        """Handle while(true)-style loops without a tagged condition range."""
+        if not (
+            node.__class__.__name__ == "CWhileLoop"
+            and isinstance(body_statements, list)
+            and body_range is not None
+            and condition_range is None
+        ):
+            return None
+        if int(self.ins_addr) < body_range[0] and self._body_has_loopback_to_update_8616(body_range):
+            insert_index = 0 if self.repeated_sequence_entry else len(body_statements)
+            if _insertion_point_has_stack_move_assignment_8616(
+                body_statements,
+                insert_index,
+                self.dst_cvar,
+                self.source_expr,
+            ):
+                return self._mark_already_present_8616()
+            body_statements.insert(insert_index, self.assignment)
+            return True
+        # Guard-style while(true) loops often have no tagged condition; the
+        # body guard ranges still prove the nearest following stack update
+        # belongs at the loop tail before the implicit loopback.
+        gap = int(self.ins_addr) - int(body_range[1])
+        if 0 < gap <= 16:
+            candidate = (gap, depth, body_statements, len(body_statements))
+            if (
+                self.best_untagged_tail is None
+                or gap < self.best_untagged_tail[0]
+                or (gap == self.best_untagged_tail[0] and depth > self.best_untagged_tail[1])
+            ):
+                self.best_untagged_tail = candidate
+        return None
+
+    def _try_repeated_sequence_8616(
+        self,
+        node: StructuredAstValue,
+        body_statements: StructuredAstValue,
+        depth: int,
+    ) -> bool | None:
+        """Prefer the deepest matching loop for repeated sequence entries."""
+        if not (
+            self.repeated_sequence_entry
+            and self.proven_loopback_edges
+            and isinstance(body_statements, list)
+        ):
+            return None
+        # Prefer the deepest matching loop. The exact tagged definition
+        # and typed stack read below prevent scope- or name-based hoists.
+        for stmt in tuple(body_statements):
+            if self.visit(stmt, depth + 1):
+                return True
+        read_before_definition_index = _loop_body_insertion_index_before_tagged_stack_move_8616(
+            node,
+            self.project,
+            self.ins_addr,
+            self.dst_cvar,
+            self.source_expr,
+        )
+        if read_before_definition_index is None:
+            return None
+        return self._insert_body_start_8616(
+            body_statements,
+            read_before_definition_index,
+            "[direct-stack-update-insert-before-read] insert ins=%#x index=%d dst=%s",
+            (self.ins_addr, read_before_definition_index),
+        )
+
+    def _try_contained_insert_8616(
+        self,
+        body_statements: StructuredAstValue,
+        body_range: tuple[int, int] | None,
+        depth: int,
+    ) -> bool | None:
+        """Insert before the next tagged statement inside the containing loop."""
+        if not (
+            isinstance(body_statements, list)
+            and body_range is not None
+            and body_range[0] <= int(self.ins_addr) <= body_range[1]
+        ):
+            return None
+        for stmt in tuple(body_statements):
+            if self.visit(stmt, depth + 1):
+                return True
+        for index, stmt in enumerate(tuple(body_statements)):
+            stmt_addr = _following_instruction_addr_in_node_8616(stmt, self.project, self.ins_addr, set())
+            if isinstance(stmt_addr, int) and stmt_addr > int(self.ins_addr):
+                return self._insert_body_start_8616(
+                    body_statements,
+                    index,
+                    "[direct-stack-update-insert-loop-contained] insert ins=%#x stmt_addr=%#x dst=%s",
+                    (self.ins_addr, stmt_addr),
+                )
+        return None
+
+    def _visit_children_8616(self, node: StructuredAstValue, depth: int) -> bool:
+        """Recurse into statements, loop bodies, else branches, and pairs."""
         statements = getattr(node, "statements", None)
         if isinstance(statements, list):
             for stmt in tuple(statements):
-                if visit(stmt):
+                if self.visit(stmt, depth + 1):
                     return True
         for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
             with contextlib.suppress(Exception):
                 child = getattr(node, attr, None)
-            if child is not None and visit(child):
+            if child is not None and self.visit(child, depth + 1):
                 return True
         pairs = getattr(node, "condition_and_nodes", None)
         if pairs:
-            for _condition, body in tuple(pairs):
-                if visit(body):
+            for _condition, guarded_body in tuple(pairs):
+                if self.visit(guarded_body, depth + 1):
                     return True
         return False
-
-    return visit(root)
 
 
 def _insert_at_loop_body_start_after_condition_8616(
@@ -14349,210 +16714,85 @@ def _insert_at_loop_body_start_after_condition_8616(
     repeated_sequence_entry: bool = False,
 ) -> bool:
     """Insert a proven stack effect at the matching structured loop boundary."""
-    dst_cvar = getattr(assignment, "lhs", None)
-    source_expr = getattr(assignment, "rhs", None)
-    seen: set[int] = set()
-    best_untagged_tail: tuple[int, int, list[StructuredAstValue], int] | None = None
-
-    def _body_has_loopback_to_update(body_range: tuple[int, int]) -> bool:
-        start, end = body_range
-        if not isinstance(start, int) or not isinstance(end, int) or end < start:
-            return False
-        if proven_loopback_edges:
-            return any(
-                entry <= int(ins_addr) < start and jump >= end
-                for entry, jump in proven_loopback_edges
-            )
-        try:
-            code = bytes(project.loader.memory.load(start, min(max(end - start + 8, 1), 0x200)))
-            capstone = project.arch.capstone
-        except Exception:
-            return False
-        target_addrs = _candidate_ins_addrs_8616(project, int(ins_addr))
-        try:
-            insns = tuple(capstone.disasm(code, start))
-        except Exception:
-            return False
-        for item in insns:
-            addr = getattr(item, "address", None)
-            if not isinstance(addr, int) or addr < start or addr > end + 8:
-                continue
-            if str(getattr(item, "mnemonic", "") or "").lower() not in {"jmp", "ljmp"}:
-                continue
-            operands = _boundary_tuple_8616(getattr(item, "operands", ()) or ())
-            if len(operands) != 1 or int(getattr(operands[0], "type", -1)) != X86_OP_IMM:
-                continue
-            target = getattr(operands[0], "imm", None)
-            if isinstance(target, int) and int(target) in target_addrs:
-                return True
-        return False
-
-    def visit(node: StructuredAstValue, depth: int = 0) -> bool:
-        """Find a loop body start or tail insertion point for a proven stack update."""
-        nonlocal best_untagged_tail
-        if node is None or id(node) in seen:
-            return False
-        seen.add(id(node))
-        body = getattr(node, "body", None)
-        condition = getattr(node, "condition", None)
-        body_statements = getattr(body, "statements", None)
-        if body is not None and condition is not None and node.__class__.__name__ != "CDoWhileLoop":
-            body_range = _instruction_addr_range_in_node_8616(body, project, ins_addr, set())
-            condition_range = _instruction_addr_range_in_node_8616(condition, project, ins_addr, set())
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                log.warning(
-                    "[direct-stack-update-loop-body-start-check] ins=%#x loop=%s cond_range=%s body_range=%s dst=%s",
-                    ins_addr,
-                    node.__class__.__name__,
-                    condition_range,
-                    body_range,
-                    _stack_cvar_identity_8616(dst_cvar),
-                )
-            if (
-                isinstance(body_statements, list)
-                and body_range is not None
-                and condition_range is not None
-                and condition_range[1] < int(ins_addr) < body_range[0]
-            ):
-                insert_index = (
-                    0
-                    if repeated_sequence_entry
-                    else len(body_statements) if _body_has_loopback_to_update(body_range) else 0
-                )
-                if _insertion_point_has_stack_move_assignment_8616(
-                    body_statements,
-                    insert_index,
-                    dst_cvar,
-                    source_expr,
-                ):
-                    root._inertia_stack_update_assignment_already_present_8616 = True
-                    return False
-                if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                    log.warning(
-                        "[direct-stack-update-insert-loop-body] insert ins=%#x index=%d "
-                        "cond_max=%#x body_min=%#x dst=%s",
-                        ins_addr,
-                        insert_index,
-                        condition_range[1],
-                        body_range[0],
-                        _stack_cvar_identity_8616(dst_cvar),
-                    )
-                body_statements.insert(insert_index, assignment)
-                return True
-            if (
-                node.__class__.__name__ == "CWhileLoop"
-                and isinstance(body_statements, list)
-                and body_range is not None
-                and condition_range is None
-            ):
-                if int(ins_addr) < body_range[0] and _body_has_loopback_to_update(body_range):
-                    insert_index = 0 if repeated_sequence_entry else len(body_statements)
-                    if _insertion_point_has_stack_move_assignment_8616(
-                        body_statements,
-                        insert_index,
-                        dst_cvar,
-                        source_expr,
-                    ):
-                        root._inertia_stack_update_assignment_already_present_8616 = True
-                        return False
-                    body_statements.insert(insert_index, assignment)
-                    return True
-                # Guard-style while(true) loops often have no tagged condition; the
-                # body guard ranges still prove the nearest following stack update
-                # belongs at the loop tail before the implicit loopback.
-                gap = int(ins_addr) - int(body_range[1])
-                if 0 < gap <= 16:
-                    candidate = (gap, depth, body_statements, len(body_statements))
-                    if (
-                        best_untagged_tail is None
-                        or gap < best_untagged_tail[0]
-                        or (gap == best_untagged_tail[0] and depth > best_untagged_tail[1])
-                    ):
-                        best_untagged_tail = candidate
-            if repeated_sequence_entry and proven_loopback_edges and isinstance(body_statements, list):
-                # Prefer the deepest matching loop. The exact tagged definition
-                # and typed stack read below prevent scope- or name-based hoists.
-                for stmt in tuple(body_statements):
-                    if visit(stmt, depth + 1):
-                        return True
-                read_before_definition_index = _loop_body_insertion_index_before_tagged_stack_move_8616(
-                    node,
-                    project,
-                    ins_addr,
-                    dst_cvar,
-                    source_expr,
-                )
-                if read_before_definition_index is not None:
-                    if _insertion_point_has_stack_move_assignment_8616(
-                        body_statements,
-                        read_before_definition_index,
-                        dst_cvar,
-                        source_expr,
-                    ):
-                        root._inertia_stack_update_assignment_already_present_8616 = True
-                        return False
-                    if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                        log.warning(
-                            "[direct-stack-update-insert-before-read] insert ins=%#x index=%d dst=%s",
-                            ins_addr,
-                            read_before_definition_index,
-                            _stack_cvar_identity_8616(dst_cvar),
-                        )
-                    body_statements.insert(read_before_definition_index, assignment)
-                    return True
-            if (
-                isinstance(body_statements, list)
-                and body_range is not None
-                and body_range[0] <= int(ins_addr) <= body_range[1]
-            ):
-                for stmt in tuple(body_statements):
-                    if visit(stmt, depth + 1):
-                        return True
-                for index, stmt in enumerate(tuple(body_statements)):
-                    stmt_addr = _following_instruction_addr_in_node_8616(stmt, project, ins_addr, set())
-                    if isinstance(stmt_addr, int) and stmt_addr > int(ins_addr):
-                        if _insertion_point_has_stack_move_assignment_8616(
-                            body_statements, index, dst_cvar, source_expr
-                        ):
-                            root._inertia_stack_update_assignment_already_present_8616 = True
-                            return False
-                        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                            log.warning(
-                                "[direct-stack-update-insert-loop-contained] insert ins=%#x stmt_addr=%#x dst=%s",
-                                ins_addr,
-                                stmt_addr,
-                                _stack_cvar_identity_8616(dst_cvar),
-                            )
-                        body_statements.insert(index, assignment)
-                        return True
-
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            for stmt in tuple(statements):
-                if visit(stmt, depth + 1):
-                    return True
-        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
-            with contextlib.suppress(Exception):
-                child = getattr(node, attr, None)
-            if child is not None and visit(child, depth + 1):
-                return True
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, guarded_body in tuple(pairs):
-                if visit(guarded_body, depth + 1):
-                    return True
-        return False
-
-    if visit(root):
+    inserter = _LoopBodyStartInserter8616(
+        root=root,
+        project=project,
+        ins_addr=ins_addr,
+        assignment=assignment,
+        dst_cvar=getattr(assignment, "lhs", None),
+        source_expr=getattr(assignment, "rhs", None),
+        proven_loopback_edges=proven_loopback_edges,
+        repeated_sequence_entry=repeated_sequence_entry,
+        seen=set(),
+    )
+    if inserter.visit(root):
         return True
-    if best_untagged_tail is None:
+    if inserter.best_untagged_tail is None:
         return False
-    _gap, _depth, body_statements, insert_index = best_untagged_tail
-    if _insertion_point_has_stack_move_assignment_8616(body_statements, insert_index, dst_cvar, source_expr):
+    _gap, _depth, body_statements, insert_index = inserter.best_untagged_tail
+    if _insertion_point_has_stack_move_assignment_8616(
+        body_statements, insert_index, inserter.dst_cvar, inserter.source_expr
+    ):
         root._inertia_stack_update_assignment_already_present_8616 = True
         return False
     body_statements.insert(insert_index, assignment)
     return True
+
+
+
+_FOLLOWING_ADDR_CHILD_ATTRS_8616 = (
+    "statements",
+    "lhs",
+    "rhs",
+    "operand",
+    "expr",
+    "stmts",
+    "init",
+    "initializer",
+    "condition",
+    "cond",
+    "iftrue",
+    "iffalse",
+    "iteration",
+    "iterator",
+    "body",
+    "else_node",
+)
+
+
+def _consider_following_addr_8616(
+    value: StructuredAstValue,
+    best: int | None,
+    project: AngrProjectValue,
+    ins_addr: int,
+    seen: set[int],
+) -> int | None:
+    """Fold one child candidate into the current best following address."""
+    candidate = _following_instruction_addr_in_node_8616(value, project, ins_addr, seen)
+    if isinstance(candidate, int) and (best is None or candidate < best):
+        return candidate
+    return best
+
+
+def _following_addr_in_attrs_8616(
+    node: StructuredAstValue,
+    project: AngrProjectValue,
+    ins_addr: int,
+    seen: set[int],
+    best: int | None,
+) -> int | None:
+    """Scan child-bearing attributes for nearer following addresses."""
+    for attr in _FOLLOWING_ADDR_CHILD_ATTRS_8616:
+        if not hasattr(node, attr):
+            continue
+        with contextlib.suppress(Exception):
+            value = getattr(node, attr)
+        if isinstance(value, (list, tuple)):
+            for item in tuple(value):
+                best = _consider_following_addr_8616(item, best, project, ins_addr, seen)
+        elif value is not None:
+            best = _consider_following_addr_8616(value, best, project, ins_addr, seen)
+    return best
 
 
 def _following_instruction_addr_in_node_8616(
@@ -14564,47 +16804,94 @@ def _following_instruction_addr_in_node_8616(
     best = _statement_instruction_addr_8616(node, project, ins_addr)
     if not isinstance(best, int) or best <= ins_addr:
         best = None
-
-    def consider(value: StructuredAstValue) -> None:
-        nonlocal best
-        candidate = _following_instruction_addr_in_node_8616(value, project, ins_addr, seen)
-        if isinstance(candidate, int) and (best is None or candidate < best):
-            best = candidate
-
-    for attr in (
-        "statements",
-        "lhs",
-        "rhs",
-        "operand",
-        "expr",
-        "stmts",
-        "init",
-        "initializer",
-        "condition",
-        "cond",
-        "iftrue",
-        "iffalse",
-        "iteration",
-        "iterator",
-        "body",
-        "else_node",
-    ):
-        if not hasattr(node, attr):
-            continue
-        with contextlib.suppress(Exception):
-            value = getattr(node, attr)
-        if isinstance(value, (list, tuple)):
-            for item in tuple(value):
-                consider(item)
-        elif value is not None:
-            consider(value)
-
+    best = _following_addr_in_attrs_8616(node, project, ins_addr, seen, best)
     condition_and_nodes = getattr(node, "condition_and_nodes", None)
     if condition_and_nodes:
         for condition, body in tuple(condition_and_nodes):
-            consider(condition)
-            consider(body)
+            best = _consider_following_addr_8616(condition, best, project, ins_addr, seen)
+            best = _consider_following_addr_8616(body, best, project, ins_addr, seen)
     return best
+
+
+
+@dataclass
+class _InsertBeforeNearestFollowingTagged8616:
+    """Find and use the nearest following tagged statement eligible for insertion."""
+
+    root: StructuredAstValue
+    project: StructuredAstValue
+    ins_addr: StructuredAstValue
+    ignore_existing_assignment: StructuredAstValue
+    prefer_loop_container: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    source_expr: StructuredAstValue
+    seen: StructuredAstValue
+    best: StructuredAstValue = None
+
+    def visit(self, node: StructuredAstValue, depth: int) -> None:
+        """Find the nearest following tagged statement eligible for insertion."""
+        if node is None or id(node) in self.seen:
+            return
+        self.seen.add(id(node))
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list) and self._visit_statements_8616(statements, depth):
+            return
+        self._visit_control_links_8616(node, depth)
+
+    def _visit_statements_8616(self, statements: list[StructuredAstValue], depth: int) -> bool:
+        """Score each statement and stop early when the update already exists."""
+        if not self.ignore_existing_assignment and _list_has_stack_move_assignment_8616(
+            statements, self.dst_cvar, self.source_expr
+        ):
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            return True
+        for index, stmt in enumerate(tuple(statements)):
+            stmt_addr = _following_instruction_addr_in_node_8616(stmt, self.project, self.ins_addr, set())
+            if isinstance(stmt_addr, int):
+                distance = stmt_addr - self.ins_addr
+                if distance > 0:
+                    stmt_is_loop = isinstance(
+                        stmt,
+                        (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop),
+                    )
+                    self._update_best_8616(distance, depth, statements, index, stmt_is_loop)
+            self.visit(stmt, depth + 1)
+        return False
+
+    def _update_best_8616(
+        self,
+        distance: int,
+        depth: int,
+        statements: list[StructuredAstValue],
+        index: int,
+        stmt_is_loop: bool,
+    ) -> None:
+        """Replace the best insertion point when this candidate is nearer."""
+        replace_best = self.best is None or distance < self.best[0]
+        if self.best is not None and distance == self.best[0]:
+            best_is_loop = self.best[4]
+            replace_best = depth > self.best[1]
+            if self.prefer_loop_container and best_is_loop and not stmt_is_loop:
+                replace_best = False
+            elif self.prefer_loop_container and stmt_is_loop and depth > self.best[1]:
+                replace_best = True
+        if replace_best:
+            self.best = (distance, depth, statements, index, stmt_is_loop)
+
+    def _visit_control_links_8616(self, node: StructuredAstValue, depth: int) -> None:
+        """Recurse into loop bodies, else branches, and condition/body pairs."""
+        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
+            with contextlib.suppress(Exception):
+                child = getattr(node, attr, None)
+            if child is not None:
+                self.visit(child, depth + 1)
+        for attr in ("condition_and_nodes",):
+            with contextlib.suppress(Exception):
+                pairs = getattr(node, attr, None)
+            if not pairs:
+                continue
+            for _condition, body in tuple(pairs):
+                self.visit(body, depth + 1)
 
 
 def _insert_before_nearest_following_tagged_statement_8616(
@@ -14616,71 +16903,82 @@ def _insert_before_nearest_following_tagged_statement_8616(
     ignore_existing_assignment: bool = False,
     prefer_loop_container: bool = False,
 ) -> bool:
-    best: tuple[int, int, list[StructuredAstValue], int, bool] | None = None
-    dst_cvar = getattr(assignment, "lhs", None)
-    source_expr = getattr(assignment, "rhs", None)
-    seen: set[int] = set()
-
-    def visit(node: StructuredAstValue, depth: int) -> None:
-        """Find the nearest following tagged statement eligible for insertion."""
-        nonlocal best
-        if node is None or id(node) in seen:
-            return
-        seen.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            if not ignore_existing_assignment and _list_has_stack_move_assignment_8616(
-                statements, dst_cvar, source_expr
-            ):
-                root._inertia_stack_mov_assignment_already_present_8616 = True
-                return
-            for index, stmt in enumerate(tuple(statements)):
-                stmt_addr = _following_instruction_addr_in_node_8616(stmt, project, ins_addr, set())
-                if isinstance(stmt_addr, int):
-                    distance = stmt_addr - ins_addr
-                    if distance > 0:
-                        stmt_is_loop = isinstance(
-                            stmt,
-                            (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop),
-                        )
-                        replace_best = best is None or distance < best[0]
-                        if best is not None and distance == best[0]:
-                            best_is_loop = best[4]
-                            replace_best = depth > best[1]
-                            if prefer_loop_container and best_is_loop and not stmt_is_loop:
-                                replace_best = False
-                            elif prefer_loop_container and stmt_is_loop and depth > best[1]:
-                                replace_best = True
-                        if replace_best:
-                            best = (distance, depth, statements, index, stmt_is_loop)
-                visit(stmt, depth + 1)
-        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
-            with contextlib.suppress(Exception):
-                child = getattr(node, attr, None)
-            if child is not None:
-                visit(child, depth + 1)
-        for attr in ("condition_and_nodes",):
-            with contextlib.suppress(Exception):
-                pairs = getattr(node, attr, None)
-            if not pairs:
-                continue
-            for _condition, body in tuple(pairs):
-                visit(body, depth + 1)
-
-    visit(root, 0)
-    if best is None:
+    visitor = _InsertBeforeNearestFollowingTagged8616(
+        root=root,
+        project=project,
+        ins_addr=ins_addr,
+        ignore_existing_assignment=ignore_existing_assignment,
+        prefer_loop_container=prefer_loop_container,
+        dst_cvar=getattr(assignment, "lhs", None),
+        source_expr=getattr(assignment, "rhs", None),
+        seen=set(),
+    )
+    visitor.visit(root, 0)
+    if visitor.best is None:
         return False
-    _distance, _depth, statements, index, _stmt_is_loop = best
-    if _insertion_point_has_stack_move_assignment_8616(statements, index, dst_cvar, source_expr):
+    _distance, _depth, statements, index, _stmt_is_loop = visitor.best
+    if _insertion_point_has_stack_move_assignment_8616(statements, index, visitor.dst_cvar, visitor.source_expr):
         root._inertia_stack_mov_assignment_already_present_8616 = True
         return False
     statements.insert(index, assignment)
     return True
 
 
-def _node_reads_stack_cvar_8616(
-    node: StructuredAstValue, target_cvar: StructuredAstValue, *, seen: set[int] | None = None
+
+_NODE_READ_CHILD_ATTRS_8616 = (
+    "condition",
+    "cond",
+    "lhs",
+    "rhs",
+    "operand",
+    "expr",
+    "variable",
+    "index",
+    "iftrue",
+    "iffalse",
+    "body",
+    "else_node",
+    "args",
+    "operands",
+    "statements",
+)
+
+
+def _scan_node_value_reads_leaf_8616(
+    value: StructuredAstValue,
+    leaf_pred: StructuredAstValue,
+    seen: set[int],
 ) -> bool:
+    """Scan a child attribute value (scalar, list, or nested tuple) for a leaf read."""
+    if isinstance(value, (list, tuple)):
+        return any(
+            _scan_node_value_reads_leaf_8616(item, leaf_pred, seen) for item in tuple(value)
+        )
+    return _node_reads_leaf_8616(value, leaf_pred, seen=seen)
+
+
+def _node_attrs_read_leaf_8616(
+    node: StructuredAstValue,
+    leaf_pred: StructuredAstValue,
+    seen: set[int],
+) -> bool:
+    """Scan the known child-bearing attributes for a leaf read."""
+    for attr in _NODE_READ_CHILD_ATTRS_8616:
+        value = None
+        with contextlib.suppress(Exception):
+            value = getattr(node, attr, None)
+        if _scan_node_value_reads_leaf_8616(value, leaf_pred, seen):
+            return True
+    return False
+
+
+def _node_reads_leaf_8616(
+    node: StructuredAstValue,
+    leaf_pred: StructuredAstValue,
+    *,
+    seen: set[int] | None = None,
+) -> bool:
+    """Return whether a structured-C node reads a leaf matching the predicate."""
     if node is None:
         return False
     if seen is None:
@@ -14690,117 +16988,125 @@ def _node_reads_stack_cvar_8616(
         return False
     seen.add(node_id)
     if isinstance(node, structured_c.CVariable):
-        return _same_stack_cvar_8616(node, target_cvar)
+        return leaf_pred(node)
     if isinstance(node, structured_c.CAssignment):
-        return _node_reads_stack_cvar_8616(node.rhs, target_cvar, seen=seen)
+        return _node_reads_leaf_8616(node.rhs, leaf_pred, seen=seen)
     if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
         return False
-    for attr in (
-        "condition",
-        "cond",
-        "lhs",
-        "rhs",
-        "operand",
-        "expr",
-        "variable",
-        "index",
-        "iftrue",
-        "iffalse",
-        "body",
-        "else_node",
-        "args",
-        "operands",
-        "statements",
-    ):
-        value = None
-        with contextlib.suppress(Exception):
-            value = getattr(node, attr, None)
-        if isinstance(value, (list, tuple)):
-            for item in tuple(value):
-                if isinstance(item, tuple):
-                    if any(_node_reads_stack_cvar_8616(part, target_cvar, seen=seen) for part in item):
-                        return True
-                elif _node_reads_stack_cvar_8616(item, target_cvar, seen=seen):
-                    return True
-        elif _node_reads_stack_cvar_8616(value, target_cvar, seen=seen):
-            return True
+    if _node_attrs_read_leaf_8616(node, leaf_pred, seen):
+        return True
+    return _node_pairs_read_leaf_8616(node, leaf_pred, seen)
+
+
+def _node_pairs_read_leaf_8616(
+    node: StructuredAstValue,
+    leaf_pred: StructuredAstValue,
+    seen: set[int],
+) -> bool:
+    """Scan condition/body pairs for a leaf read."""
     pairs = None
     with contextlib.suppress(Exception):
         pairs = getattr(node, "condition_and_nodes", None)
-    if pairs:
-        for condition, body in tuple(pairs):
-            if _node_reads_stack_cvar_8616(condition, target_cvar, seen=seen) or _node_reads_stack_cvar_8616(
-                body,
-                target_cvar,
-                seen=seen,
-            ):
-                return True
+    if not pairs:
+        return False
+    for condition, body in tuple(pairs):
+        if _node_reads_leaf_8616(condition, leaf_pred, seen=seen) or _node_reads_leaf_8616(
+            body,
+            leaf_pred,
+            seen=seen,
+        ):
+            return True
     return False
+
+
+def _node_reads_stack_cvar_8616(
+    node: StructuredAstValue, target_cvar: StructuredAstValue, *, seen: set[int] | None = None
+) -> bool:
+    return _node_reads_leaf_8616(
+        node, lambda leaf: _same_stack_cvar_8616(leaf, target_cvar), seen=seen
+    )
 
 
 def _node_reads_generated_stack_cvar_name_8616(
     node: StructuredAstValue, target_cvar: StructuredAstValue, *, seen: set[int] | None = None
 ) -> bool:
     target_names = _generated_stack_cvar_names_8616(target_cvar)
-    if not target_names or node is None:
+    if not target_names:
         return False
-    if seen is None:
-        seen = set()
-    node_id = id(node)
-    if node_id in seen:
-        return False
-    seen.add(node_id)
-    if isinstance(node, structured_c.CVariable):
-        return bool(target_names & _structured_cvar_names_8616(node))
-    if isinstance(node, structured_c.CAssignment):
-        return _node_reads_generated_stack_cvar_name_8616(node.rhs, target_cvar, seen=seen)
-    if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
-        return False
-    for attr in (
-        "condition",
-        "cond",
-        "lhs",
-        "rhs",
-        "operand",
-        "expr",
-        "variable",
-        "index",
-        "iftrue",
-        "iffalse",
-        "body",
-        "else_node",
-        "args",
-        "operands",
-        "statements",
-    ):
-        value = None
-        with contextlib.suppress(Exception):
-            value = getattr(node, attr, None)
-        if isinstance(value, (list, tuple)):
-            for item in tuple(value):
-                if isinstance(item, tuple):
-                    if any(_node_reads_generated_stack_cvar_name_8616(part, target_cvar, seen=seen) for part in item):
-                        return True
-                elif _node_reads_generated_stack_cvar_name_8616(item, target_cvar, seen=seen):
-                    return True
-        elif _node_reads_generated_stack_cvar_name_8616(value, target_cvar, seen=seen):
-            return True
-    pairs = None
-    with contextlib.suppress(Exception):
-        pairs = getattr(node, "condition_and_nodes", None)
-    if pairs:
-        for condition, body in tuple(pairs):
-            if _node_reads_generated_stack_cvar_name_8616(
-                condition,
-                target_cvar,
-                seen=seen,
-            ) or _node_reads_generated_stack_cvar_name_8616(body, target_cvar, seen=seen):
-                return True
-    return False
+    return _node_reads_leaf_8616(
+        node, lambda leaf: bool(target_names & _structured_cvar_names_8616(leaf)), seen=seen
+    )
+
 
 
 def _same_register_cvar_name_8616(node: StructuredAstValue, reg_name: str) -> bool:
     return bool(_cvar_register_name_8616(node) == reg_name)
+
+
+_REGISTER_READ_CHILD_ATTRS_8616 = (
+    "condition",
+    "cond",
+    "lhs",
+    "rhs",
+    "operand",
+    "expr",
+    "iftrue",
+    "iffalse",
+    "body",
+    "else_node",
+    "args",
+    "operands",
+    "statements",
+)
+
+
+def _scan_register_name_value_8616(
+    value: StructuredAstValue,
+    reg_name: str,
+    seen: set[int],
+    memo: dict[int, bool] | None,
+) -> bool:
+    """Scan a child attribute value for a register read, memoizing shared subtrees."""
+    if isinstance(value, (list, tuple)):
+        return any(
+            _scan_register_name_value_8616(item, reg_name, seen, memo) for item in tuple(value)
+        )
+    return _node_reads_register_name_8616(value, reg_name, seen=seen, memo=memo)
+
+
+def _register_name_attrs_read_8616(
+    node: StructuredAstValue,
+    reg_name: str,
+    seen: set[int],
+    memo: dict[int, bool] | None,
+) -> bool:
+    """Scan the register-reader child attributes for a register read."""
+    for attr in _REGISTER_READ_CHILD_ATTRS_8616:
+        value = None
+        with contextlib.suppress(Exception):
+            value = getattr(node, attr, None)
+        if _scan_register_name_value_8616(value, reg_name, seen, memo):
+            return True
+    return False
+
+
+def _register_name_pairs_read_8616(
+    node: StructuredAstValue,
+    reg_name: str,
+    seen: set[int],
+    memo: dict[int, bool] | None,
+) -> bool:
+    """Scan condition/body pairs for a register read."""
+    pairs = None
+    with contextlib.suppress(Exception):
+        pairs = getattr(node, "condition_and_nodes", None)
+    if not pairs:
+        return False
+    return any(
+        _node_reads_register_name_8616(condition, reg_name, seen=seen, memo=memo)
+        or _node_reads_register_name_8616(body, reg_name, seen=seen, memo=memo)
+        for condition, body in tuple(pairs)
+    )
 
 
 def _node_reads_register_name_8616(
@@ -14828,52 +17134,9 @@ def _node_reads_register_name_8616(
     elif not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
         result = False
     else:
-        result = False
-        for attr in (
-            "condition",
-            "cond",
-            "lhs",
-            "rhs",
-            "operand",
-            "expr",
-            "iftrue",
-            "iffalse",
-            "body",
-            "else_node",
-            "args",
-            "operands",
-            "statements",
-        ):
-            value = None
-            with contextlib.suppress(Exception):
-                value = getattr(node, attr, None)
-            if isinstance(value, (list, tuple)):
-                for item in tuple(value):
-                    if isinstance(item, tuple):
-                        if any(
-                            _node_reads_register_name_8616(part, reg_name, seen=seen, memo=memo)
-                            for part in item
-                        ):
-                            result = True
-                            break
-                    elif _node_reads_register_name_8616(item, reg_name, seen=seen, memo=memo):
-                        result = True
-                        break
-                if result:
-                    break
-            elif _node_reads_register_name_8616(value, reg_name, seen=seen, memo=memo):
-                result = True
-                break
-        if not result:
-            pairs = None
-            with contextlib.suppress(Exception):
-                pairs = getattr(node, "condition_and_nodes", None)
-            if pairs:
-                result = any(
-                    _node_reads_register_name_8616(condition, reg_name, seen=seen, memo=memo)
-                    or _node_reads_register_name_8616(body, reg_name, seen=seen, memo=memo)
-                    for condition, body in tuple(pairs)
-                )
+        result = _register_name_attrs_read_8616(node, reg_name, seen, memo) or _register_name_pairs_read_8616(
+            node, reg_name, seen, memo
+        )
     if memo is not None:
         memo[node_id] = result
     return result
@@ -14900,57 +17163,220 @@ def _insertion_point_has_register_move_assignment_8616(
     return bool(insert_index < len(statements) and _is_same_register_move_assignment_8616(statements[insert_index], reg_name, source_expr))
 
 
-def _insert_before_first_register_cvar_use_8616(
-    root: StructuredAstValue, reg_name: str, source_expr: StructuredAstValue, codegen: StructuredAstValue,
-    *, project: AngrProjectValue, ins_addr: int, register_width: int,
-) -> bool:
+@dataclass
+class _InsertBeforeFirstRegisterUse8616:
     """Place a proven reload only at a consumer carrying its instruction origin."""
-    seen: set[int] = set()
 
-    def visit(node: StructuredAstValue) -> bool:
+    reg_name: StructuredAstValue
+    register_width: StructuredAstValue
+    project: StructuredAstValue
+    ins_addr: StructuredAstValue
+    root: StructuredAstValue
+    source_expr: StructuredAstValue
+    codegen: StructuredAstValue
+    seen: StructuredAstValue
+
+    def visit(self, node: StructuredAstValue) -> bool:
         """Keep unrelated earlier reads intact when a register name is reused."""
-        if node is None or id(node) in seen:
+        if node is None or id(node) in self.seen:
             return False
-        seen.add(id(node))
+        self.seen.add(id(node))
         statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            for index, stmt in enumerate(tuple(statements)):
-                nested_statements = getattr(stmt, "statements", None)
-                if (
-                    isinstance(stmt, (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop))
-                    or isinstance(nested_statements, list)
-                ) and visit(stmt):
+        if isinstance(statements, list) and self._visit_statements_8616(statements):
+            return True
+        return self._visit_control_links_8616(node)
+
+    def _visit_statements_8616(self, statements: list[StructuredAstValue]) -> bool:
+        """Insert before the first statement that reads the register at this instruction."""
+        for index, stmt in enumerate(tuple(statements)):
+            nested_statements = getattr(stmt, "statements", None)
+            if (
+                isinstance(stmt, (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop))
+                or isinstance(nested_statements, list)
+            ) and self.visit(stmt):
+                return True
+            cvar = (
+                instruction_local_register_read_8616(stmt, self.reg_name, self.register_width)
+                if _node_has_instruction_address_8616(stmt, self.project, self.ins_addr)
+                else None
+            )
+            if cvar is not None:
+                if _insertion_point_has_register_move_assignment_8616(
+                    statements, index, self.reg_name, self.source_expr
+                ):
+                    self.root._inertia_stack_mov_assignment_already_present_8616 = True
                     return True
-                cvar = (
-                    instruction_local_register_read_8616(stmt, reg_name, register_width)
-                    if _node_has_instruction_address_8616(stmt, project, ins_addr)
-                    else None
+                assignment = structured_c.CAssignment(
+                    cvar, self.source_expr, codegen=self.codegen, tags={"ins_addr": self.ins_addr}
                 )
-                if cvar is not None:
-                    if _insertion_point_has_register_move_assignment_8616(statements, index, reg_name, source_expr):
-                        root._inertia_stack_mov_assignment_already_present_8616 = True
-                        return True
-                    assignment = structured_c.CAssignment(cvar, source_expr, codegen=codegen, tags={"ins_addr": ins_addr})
-                    statements.insert(index, assignment)
-                    return True
-                if visit(stmt):
-                    return True
+                statements.insert(index, assignment)
+                return True
+            if self.visit(stmt):
+                return True
+        return False
+
+    def _visit_control_links_8616(self, node: StructuredAstValue) -> bool:
+        """Recurse into bodies, else branches, and condition/body pairs."""
         for attr in ("body", "else_node"):
             child = None
             with contextlib.suppress(Exception):
                 child = getattr(node, attr, None)
-            if visit(child):
+            if self.visit(child):
                 return True
         pairs = None
         with contextlib.suppress(Exception):
             pairs = getattr(node, "condition_and_nodes", None)
         if pairs:
             for _condition, body in tuple(pairs):
-                if visit(body):
+                if self.visit(body):
                     return True
         return False
 
-    return visit(root)
+
+def _insert_before_first_register_cvar_use_8616(
+    root: StructuredAstValue, reg_name: str, source_expr: StructuredAstValue, codegen: StructuredAstValue,
+    *, project: AngrProjectValue, ins_addr: int, register_width: int,
+) -> bool:
+    """Place a proven reload only at a consumer carrying its instruction origin."""
+    visitor = _InsertBeforeFirstRegisterUse8616(
+        reg_name=reg_name,
+        register_width=register_width,
+        project=project,
+        ins_addr=ins_addr,
+        root=root,
+        source_expr=source_expr,
+        codegen=codegen,
+        seen=set(),
+    )
+    return visitor.visit(root)
+
+
+
+@dataclass
+class _InsertBeforeFirstStackUse8616:
+    """Closure-state walker extracted from a nested `visit`-style def."""
+
+    assignment: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    ignore_existing_assignment: StructuredAstValue
+    prefer_outer_control_read: StructuredAstValue
+    root: StructuredAstValue
+    seen: StructuredAstValue
+    source_expr: StructuredAstValue
+
+    def visit(self, node: StructuredAstValue, path: str = "root") -> bool:
+        """Insert a stack assignment before the first visible stack read."""
+        if node is None or id(node) in self.seen:
+            return False
+        self.seen.add(id(node))
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list) and self._visit_statements_8616(node, statements, path):
+            return True
+        return self._visit_control_links_8616(node, path)
+
+    def _visit_statements_8616(
+        self,
+        node: StructuredAstValue,
+        statements: list[StructuredAstValue],
+        path: str,
+    ) -> bool:
+        """Scan a statement list for the first readable stack-cvar use point."""
+        if not self.ignore_existing_assignment and _list_has_stack_move_assignment_8616(
+            statements, self.dst_cvar, self.source_expr
+        ):
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            return True
+        for index, stmt in enumerate(tuple(statements)):
+            item_path = f"{path}.{index}"
+            nested_statements = getattr(stmt, "statements", None)
+            condition_and_nodes = getattr(stmt, "condition_and_nodes", None)
+            if isinstance(
+                stmt, (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop)
+            ) and self.visit(stmt, item_path):
+                return True
+            if condition_and_nodes:
+                if self._visit_condition_stmt_8616(statements, index, item_path, stmt, condition_and_nodes):
+                    return True
+                continue
+            if isinstance(nested_statements, list) and self.visit(stmt, item_path):
+                return True
+            if _node_reads_stack_cvar_8616(stmt, self.dst_cvar) or _node_reads_generated_stack_cvar_name_8616(
+                stmt,
+                self.dst_cvar,
+            ):
+                if self._try_insert_at_index_8616(statements, index, item_path, stmt):
+                    return True
+            elif self.visit(stmt, item_path):
+                return True
+        return False
+
+    def _visit_condition_stmt_8616(
+        self,
+        statements: list[StructuredAstValue],
+        index: int,
+        item_path: str,
+        stmt: StructuredAstValue,
+        condition_and_nodes: StructuredAstValue,
+    ) -> bool:
+        """Handle a condition-paired statement: insert before a reading condition or recurse."""
+        if self._condition_reads_dst_8616(stmt, condition_and_nodes):
+            return self._try_insert_at_index_8616(statements, index, item_path, stmt)
+        return self.visit(stmt, item_path)
+
+    def _condition_reads_dst_8616(self, stmt: StructuredAstValue, condition_and_nodes: StructuredAstValue) -> bool:
+        """Check whether the paired conditions or the statement read the target cvar."""
+        return any(
+            _node_reads_stack_cvar_8616(condition, self.dst_cvar)
+            or _node_reads_generated_stack_cvar_name_8616(condition, self.dst_cvar)
+            for condition, _body in tuple(condition_and_nodes)
+            if condition is not None
+        ) or (
+            self.prefer_outer_control_read
+            and (
+                _node_reads_stack_cvar_8616(stmt, self.dst_cvar)
+                or _node_reads_generated_stack_cvar_name_8616(stmt, self.dst_cvar)
+            )
+        )
+
+    def _try_insert_at_index_8616(
+        self,
+        statements: list[StructuredAstValue],
+        index: int,
+        item_path: str,
+        stmt: StructuredAstValue,
+    ) -> bool:
+        """Insert the assignment at ``index`` unless an identical store already sits there."""
+        if _insertion_point_has_stack_move_assignment_8616(statements, index, self.dst_cvar, self.source_expr):
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            return True
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-mov-insert] stack before first use path=%s stmt=%s dst=%s",
+                item_path,
+                type(stmt).__name__,
+                _stack_cvar_identity_8616(self.dst_cvar),
+            )
+        statements.insert(index, self.assignment)
+        return True
+
+    def _visit_control_links_8616(self, node: StructuredAstValue, path: str) -> bool:
+        """Recurse into loop bodies, else branches, and condition/body pairs."""
+        for attr in ("body", "else_node"):
+            child = None
+            with contextlib.suppress(Exception):
+                child = getattr(node, attr, None)
+            if self.visit(child, f"{path}.{attr}"):
+                return True
+        pairs = None
+        with contextlib.suppress(Exception):
+            pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for pair_index, (_condition, body) in enumerate(tuple(pairs)):
+                if self.visit(body, f"{path}.condition_and_nodes.{pair_index}.body"):
+                    return True
+        return False
+
+
 
 
 def _insert_before_first_stack_cvar_use_8616(
@@ -14964,90 +17390,80 @@ def _insert_before_first_stack_cvar_use_8616(
     source_expr = getattr(assignment, "rhs", None)
     seen: set[int] = set()
 
-    def visit(node: StructuredAstValue, path: str = "root") -> bool:
-        """Insert a stack assignment before the first visible stack read."""
-        if node is None or id(node) in seen:
+    visitor = _InsertBeforeFirstStackUse8616(
+        assignment=assignment,
+        dst_cvar=dst_cvar,
+        ignore_existing_assignment=ignore_existing_assignment,
+        prefer_outer_control_read=prefer_outer_control_read,
+        root=root,
+        seen=seen,
+        source_expr=source_expr,
+    )
+    return visitor.visit(root)
+
+
+
+@dataclass
+class _InsertBeforeFirstStackOffsetUse8616:
+    """Closure-state walker extracted from a nested `visit`-style def."""
+
+    assignment: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    root: StructuredAstValue
+    seen: StructuredAstValue
+    source_expr: StructuredAstValue
+    target_offset: StructuredAstValue
+
+    def visit(self, node: StructuredAstValue) -> bool:
+        """Insert a stack assignment before the first read of a raw stack offset."""
+        if node is None or id(node) in self.seen:
             return False
-        seen.add(id(node))
+        self.seen.add(id(node))
         statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            if not ignore_existing_assignment and _list_has_stack_move_assignment_8616(
-                statements, dst_cvar, source_expr
-            ):
-                root._inertia_stack_mov_assignment_already_present_8616 = True
+        if isinstance(statements, list) and self._visit_statements_8616(statements):
+            return True
+        return self._visit_control_links_8616(node)
+
+    def _visit_statements_8616(self, statements: list[StructuredAstValue]) -> bool:
+        """Scan a statement list for the first offset-reading statement."""
+        if _list_has_stack_move_assignment_8616(statements, self.dst_cvar, self.source_expr):
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            return True
+        for index, stmt in enumerate(tuple(statements)):
+            if isinstance(
+                stmt, (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop)
+            ) and self.visit(stmt):
                 return True
-            for index, stmt in enumerate(tuple(statements)):
-                item_path = f"{path}.{index}"
-                nested_statements = getattr(stmt, "statements", None)
-                condition_and_nodes = getattr(stmt, "condition_and_nodes", None)
-                if isinstance(
-                    stmt, (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop)
-                ) and visit(stmt, item_path):
+            nested_statements = getattr(stmt, "statements", None)
+            if isinstance(nested_statements, list) and self.visit(stmt):
+                return True
+            if _expr_reads_stack_offset_8616(stmt, self.target_offset):
+                if _insertion_point_has_stack_move_assignment_8616(statements, index, self.dst_cvar, self.source_expr):
+                    self.root._inertia_stack_mov_assignment_already_present_8616 = True
                     return True
-                if condition_and_nodes:
-                    if any(
-                        _node_reads_stack_cvar_8616(condition, dst_cvar)
-                        or _node_reads_generated_stack_cvar_name_8616(condition, dst_cvar)
-                        for condition, _body in tuple(condition_and_nodes)
-                        if condition is not None
-                    ) or (
-                        prefer_outer_control_read
-                        and (
-                            _node_reads_stack_cvar_8616(stmt, dst_cvar)
-                            or _node_reads_generated_stack_cvar_name_8616(stmt, dst_cvar)
-                        )
-                    ):
-                        if _insertion_point_has_stack_move_assignment_8616(statements, index, dst_cvar, source_expr):
-                            root._inertia_stack_mov_assignment_already_present_8616 = True
-                            return True
-                        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                            log.warning(
-                                "[direct-stack-mov-insert] stack before first use path=%s stmt=%s dst=%s",
-                                item_path,
-                                type(stmt).__name__,
-                                _stack_cvar_identity_8616(dst_cvar),
-                            )
-                        statements.insert(index, assignment)
-                        return True
-                    if visit(stmt, item_path):
-                        return True
-                    continue
-                if isinstance(nested_statements, list) and visit(stmt, item_path):
-                    return True
-                if _node_reads_stack_cvar_8616(stmt, dst_cvar) or _node_reads_generated_stack_cvar_name_8616(
-                    stmt,
-                    dst_cvar,
-                ):
-                    if _insertion_point_has_stack_move_assignment_8616(statements, index, dst_cvar, source_expr):
-                        root._inertia_stack_mov_assignment_already_present_8616 = True
-                        return True
-                    if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                        log.warning(
-                            "[direct-stack-mov-insert] stack before first use path=%s stmt=%s dst=%s",
-                            item_path,
-                            type(stmt).__name__,
-                            _stack_cvar_identity_8616(dst_cvar),
-                        )
-                    statements.insert(index, assignment)
-                    return True
-                if visit(stmt, item_path):
-                    return True
+                statements.insert(index, self.assignment)
+                return True
+            if self.visit(stmt):
+                return True
+        return False
+
+    def _visit_control_links_8616(self, node: StructuredAstValue) -> bool:
+        """Recurse into loop bodies, else branches, and condition/body pairs."""
         for attr in ("body", "else_node"):
             child = None
             with contextlib.suppress(Exception):
                 child = getattr(node, attr, None)
-            if visit(child, f"{path}.{attr}"):
+            if self.visit(child):
                 return True
         pairs = None
         with contextlib.suppress(Exception):
             pairs = getattr(node, "condition_and_nodes", None)
         if pairs:
-            for pair_index, (_condition, body) in enumerate(tuple(pairs)):
-                if visit(body, f"{path}.condition_and_nodes.{pair_index}.body"):
+            for _condition, body in tuple(pairs):
+                if self.visit(body):
                     return True
         return False
 
-    return visit(root)
 
 
 def _insert_before_first_stack_offset_use_8616(
@@ -15057,48 +17473,69 @@ def _insert_before_first_stack_offset_use_8616(
     source_expr = getattr(assignment, "rhs", None)
     seen: set[int] = set()
 
-    def visit(node: StructuredAstValue) -> bool:
-        """Insert a stack assignment before the first read of a raw stack offset."""
-        if node is None or id(node) in seen:
-            return False
-        seen.add(id(node))
+    visitor = _InsertBeforeFirstStackOffsetUse8616(
+        assignment=assignment,
+        dst_cvar=dst_cvar,
+        root=root,
+        seen=seen,
+        source_expr=source_expr,
+        target_offset=target_offset,
+    )
+    return visitor.visit(root)
+
+
+
+@dataclass
+class _InsertGlobalUpdateBeforeNearest8616:
+    """Closure-state walker extracted from a nested `visit`-style def."""
+
+    best: StructuredAstValue
+    delta: StructuredAstValue
+    dst_cvar: StructuredAstValue
+    ins_addr: StructuredAstValue
+    project: StructuredAstValue
+    root: StructuredAstValue
+    seen: StructuredAstValue
+
+    def visit(self, node: StructuredAstValue, depth: int) -> None:
+        """Record the closest following tagged insertion point."""
+        if node is None or id(node) in self.seen:
+            return
+        self.seen.add(id(node))
         statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            if _list_has_stack_move_assignment_8616(statements, dst_cvar, source_expr):
-                root._inertia_stack_mov_assignment_already_present_8616 = True
-                return True
-            for index, stmt in enumerate(tuple(statements)):
-                if isinstance(
-                    stmt, (structured_c.CForLoop, structured_c.CWhileLoop, structured_c.CDoWhileLoop)
-                ) and visit(stmt):
-                    return True
-                nested_statements = getattr(stmt, "statements", None)
-                if isinstance(nested_statements, list) and visit(stmt):
-                    return True
-                if _expr_reads_stack_offset_8616(stmt, target_offset):
-                    if _insertion_point_has_stack_move_assignment_8616(statements, index, dst_cvar, source_expr):
-                        root._inertia_stack_mov_assignment_already_present_8616 = True
-                        return True
-                    statements.insert(index, assignment)
-                    return True
-                if visit(stmt):
-                    return True
-        for attr in ("body", "else_node"):
-            child = None
+        if isinstance(statements, list) and self._visit_statements_8616(statements, depth):
+            return
+        self._visit_control_links_8616(node, depth)
+
+    def _visit_statements_8616(self, statements: list[StructuredAstValue], depth: int) -> bool:
+        """Score each statement position as a candidate insertion point."""
+        if _list_has_global_update_assignment_for_insn_8616(statements, self.project, self.dst_cvar, self.delta, self.ins_addr):
+            self.root._inertia_global_update_assignment_already_present_8616 = True
+            return True
+        for index, stmt in enumerate(tuple(statements)):
+            stmt_addr = _following_instruction_addr_in_node_8616(stmt, self.project, self.ins_addr, set())
+            if isinstance(stmt_addr, int):
+                distance = stmt_addr - self.ins_addr
+                if distance > 0 and (
+                    self.best is None or distance < self.best[0] or (distance == self.best[0] and depth > self.best[1])
+                ):
+                    self.best = (distance, depth, statements, index)
+            self.visit(stmt, depth + 1)
+        return False
+
+    def _visit_control_links_8616(self, node: StructuredAstValue, depth: int) -> None:
+        """Recurse into loop bodies, else branches, and condition/body pairs."""
+        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
             with contextlib.suppress(Exception):
                 child = getattr(node, attr, None)
-            if visit(child):
-                return True
-        pairs = None
+            if child is not None:
+                self.visit(child, depth + 1)
         with contextlib.suppress(Exception):
             pairs = getattr(node, "condition_and_nodes", None)
         if pairs:
             for _condition, body in tuple(pairs):
-                if visit(body):
-                    return True
-        return False
+                self.visit(body, depth + 1)
 
-    return visit(root)
 
 
 def _insert_global_update_before_nearest_following_tagged_statement_8616(
@@ -15113,45 +17550,135 @@ def _insert_global_update_before_nearest_following_tagged_statement_8616(
     dst_cvar = getattr(assignment, "lhs", None)
     seen: set[int] = set()
 
-    def visit(node: StructuredAstValue, depth: int) -> None:
-        nonlocal best
-        if node is None or id(node) in seen:
-            return
-        seen.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            if _list_has_global_update_assignment_for_insn_8616(statements, project, dst_cvar, delta, ins_addr):
-                root._inertia_global_update_assignment_already_present_8616 = True
-                return
-            for index, stmt in enumerate(tuple(statements)):
-                stmt_addr = _following_instruction_addr_in_node_8616(stmt, project, ins_addr, set())
-                if isinstance(stmt_addr, int):
-                    distance = stmt_addr - ins_addr
-                    if distance > 0 and (
-                        best is None or distance < best[0] or (distance == best[0] and depth > best[1])
-                    ):
-                        best = (distance, depth, statements, index)
-                visit(stmt, depth + 1)
-        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
-            with contextlib.suppress(Exception):
-                child = getattr(node, attr, None)
-            if child is not None:
-                visit(child, depth + 1)
-        with contextlib.suppress(Exception):
-            pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                visit(body, depth + 1)
-
-    visit(root, 0)
-    if best is None:
+    visitor = _InsertGlobalUpdateBeforeNearest8616(
+        best=best,
+        delta=delta,
+        dst_cvar=dst_cvar,
+        ins_addr=ins_addr,
+        project=project,
+        root=root,
+        seen=seen,
+    )
+    visitor.visit(root, 0)
+    if visitor.best is None:
         return False
-    _distance, _depth, statements, index = best
+    _distance, _depth, statements, index = visitor.best
     if _insertion_point_has_global_update_assignment_8616(statements, index, project, dst_cvar, delta, ins_addr):
         root._inertia_global_update_assignment_already_present_8616 = True
         return False
     statements.insert(index, assignment)
     return True
+
+
+
+@dataclass
+class _GlobalLoopCollector8616:
+    """Collect loops that contain the target instruction, tracking ancestor ranges."""
+
+    project: StructuredAstValue
+    ins_addr: int
+    fact_candidates: StructuredAstValue
+    loops: StructuredAstValue
+    seen: StructuredAstValue
+    loop_types: StructuredAstValue
+
+    def collect(
+        self,
+        node: StructuredAstValue,
+        depth: int,
+        ancestors: tuple[tuple[tuple[int, int], tuple[int, int] | None], ...],
+    ) -> None:
+        """Collect loops through the dynamic third-party structured-C boundary."""
+        if node is None or id(node) in self.seen:
+            return
+        self.seen.add(id(node))
+        next_ancestors = ancestors
+        if isinstance(node, self.loop_types):
+            loop_range = _instruction_addr_range_in_node_8616(node, self.project, self.ins_addr)
+            condition_range = _instruction_addr_range_in_node_8616(node.condition, self.project, self.ins_addr)
+            if loop_range is not None and any(
+                loop_range[0] <= candidate <= loop_range[1] for candidate in self.fact_candidates
+            ):
+                self.loops.append((depth, node, loop_range, condition_range, ancestors))
+            if loop_range is not None:
+                next_ancestors = (*ancestors, (loop_range, condition_range))
+
+        if isinstance(node, structured_c.CStatements):
+            for statement in tuple(node.statements):
+                self.collect(statement, depth + 1, next_ancestors)
+            return
+        if isinstance(node, self.loop_types):
+            self.collect(node.body, depth + 1, next_ancestors)
+            return
+        if isinstance(node, structured_c.CIfElse):
+            for _condition, body in tuple(node.condition_and_nodes):
+                self.collect(body, depth + 1, next_ancestors)
+            self.collect(node.else_node, depth + 1, next_ancestors)
+
+
+def _edge_covers_ancestor_8616(
+    edge: tuple[int, int],
+    ancestor: tuple[tuple[int, int], tuple[int, int] | None],
+) -> bool:
+    """Return whether an edge proves an ancestor rather than this loop."""
+    ancestor_range, ancestor_condition = ancestor
+    repeated_start = ancestor_condition[0] if ancestor_condition is not None else ancestor_range[0]
+    entry, jump = edge
+    return entry <= repeated_start and jump >= ancestor_range[1]
+
+
+def _loop_body_insertion_candidates_8616(
+    body: StructuredAstValue,
+    body_statements: list[StructuredAstValue] | None,
+    project: AngrProjectValue,
+    ins_addr: int,
+    local_edges: tuple[tuple[int, int], ...],
+) -> list[tuple[int, int]]:
+    """Collect (distance, index) insertion candidates inside the loop body."""
+    insertion_candidates: list[tuple[int, int]] = []
+    if isinstance(body_statements, list):
+        for index, statement in enumerate(tuple(body_statements)):
+            following_addr = _following_instruction_addr_in_node_8616(statement, project, ins_addr, set())
+            if not isinstance(following_addr, int):
+                continue
+            if any(entry <= following_addr <= jump for entry, jump in local_edges):
+                insertion_candidates.append((following_addr - ins_addr, index))
+    else:
+        following_addr = _following_instruction_addr_in_node_8616(body, project, ins_addr, set())
+        if isinstance(following_addr, int) and any(
+            entry <= following_addr <= jump for entry, jump in local_edges
+        ):
+            insertion_candidates.append((following_addr - ins_addr, 0))
+    return insertion_candidates
+
+
+def _insert_assignment_into_loop_body_8616(
+    root: StructuredAstValue,
+    loop: StructuredAstValue,
+    body: StructuredAstValue,
+    body_statements: list[StructuredAstValue] | None,
+    insertion_index: int,
+    assignment: StructuredAstValue,
+    project: AngrProjectValue,
+    ins_addr: int,
+    delta: int,
+) -> DirectGlobalLoopInsertionStatus8616:
+    """Insert the assignment at the proven in-body position."""
+    dst_cvar = assignment.lhs
+    if isinstance(body_statements, list):
+        if _list_has_global_update_assignment_for_insn_8616(
+            body_statements,
+            project,
+            dst_cvar,
+            delta,
+            ins_addr,
+        ):
+            root._inertia_global_update_assignment_already_present_8616 = True
+            return DirectGlobalLoopInsertionStatus8616.NOT_APPLICABLE
+        body_statements.insert(insertion_index, assignment)
+    else:
+        loop.body = structured_c.CStatements([assignment, body], codegen=assignment.codegen)
+    return DirectGlobalLoopInsertionStatus8616.INSERTED
 
 
 def _insert_global_update_in_proven_loop_8616(
@@ -15180,40 +17707,15 @@ def _insert_global_update_in_proven_loop_8616(
         ]
     ] = []
     seen: set[int] = set()
-
-    def collect(
-        node: StructuredAstValue,
-        depth: int,
-        ancestors: tuple[tuple[tuple[int, int], tuple[int, int] | None], ...],
-    ) -> None:
-        """Collect loops through the dynamic third-party structured-C boundary."""
-        if node is None or id(node) in seen:
-            return
-        seen.add(id(node))
-        next_ancestors = ancestors
-        if isinstance(node, loop_types):
-            loop_range = _instruction_addr_range_in_node_8616(node, project, ins_addr)
-            condition_range = _instruction_addr_range_in_node_8616(node.condition, project, ins_addr)
-            if loop_range is not None and any(
-                loop_range[0] <= candidate <= loop_range[1] for candidate in fact_candidates
-            ):
-                loops.append((depth, node, loop_range, condition_range, ancestors))
-            if loop_range is not None:
-                next_ancestors = (*ancestors, (loop_range, condition_range))
-
-        if isinstance(node, structured_c.CStatements):
-            for statement in tuple(node.statements):
-                collect(statement, depth + 1, next_ancestors)
-            return
-        if isinstance(node, loop_types):
-            collect(node.body, depth + 1, next_ancestors)
-            return
-        if isinstance(node, structured_c.CIfElse):
-            for _condition, body in tuple(node.condition_and_nodes):
-                collect(body, depth + 1, next_ancestors)
-            collect(node.else_node, depth + 1, next_ancestors)
-
-    collect(root, 0, ())
+    collector = _GlobalLoopCollector8616(
+        project=project,
+        ins_addr=ins_addr,
+        fact_candidates=fact_candidates,
+        loops=loops,
+        seen=seen,
+        loop_types=loop_types,
+    )
+    collector.collect(root, 0, ())
     if not loops:
         return DirectGlobalLoopInsertionStatus8616.NOT_APPLICABLE
 
@@ -15225,61 +17727,40 @@ def _insert_global_update_in_proven_loop_8616(
         loop_range,
         condition_range,
     )
-
-    def edge_covers_ancestor(
-        edge: tuple[int, int],
-        ancestor: tuple[tuple[int, int], tuple[int, int] | None],
-    ) -> bool:
-        """Return whether an edge proves an ancestor rather than this loop."""
-        ancestor_range, ancestor_condition = ancestor
-        repeated_start = ancestor_condition[0] if ancestor_condition is not None else ancestor_range[0]
-        entry, jump = edge
-        return entry <= repeated_start and jump >= ancestor_range[1]
-
     local_edges = tuple(
         edge
         for edge in covering_edges
-        if not any(edge_covers_ancestor(edge, ancestor) for ancestor in ancestors)
+        if not any(_edge_covers_ancestor_8616(edge, ancestor) for ancestor in ancestors)
     )
     if not local_edges:
         return DirectGlobalLoopInsertionStatus8616.REFUSED_UNPROVEN_NESTED_SCOPE
 
     body = loop.body
     body_statements = body.statements if isinstance(body, structured_c.CStatements) else None
-    insertion_candidates: list[tuple[int, int]] = []
-    if isinstance(body_statements, list):
-        for index, statement in enumerate(tuple(body_statements)):
-            following_addr = _following_instruction_addr_in_node_8616(statement, project, ins_addr, set())
-            if not isinstance(following_addr, int):
-                continue
-            if any(entry <= following_addr <= jump for entry, jump in local_edges):
-                insertion_candidates.append((following_addr - ins_addr, index))
-    else:
-        following_addr = _following_instruction_addr_in_node_8616(body, project, ins_addr, set())
-        if isinstance(following_addr, int) and any(
-            entry <= following_addr <= jump for entry, jump in local_edges
-        ):
-            insertion_candidates.append((following_addr - ins_addr, 0))
+    insertion_candidates = _loop_body_insertion_candidates_8616(
+        body,
+        body_statements,
+        project,
+        ins_addr,
+        local_edges,
+    )
     insertion_candidates = [candidate for candidate in insertion_candidates if candidate[0] > 0]
     if not insertion_candidates:
         return DirectGlobalLoopInsertionStatus8616.REFUSED_UNPROVEN_NESTED_SCOPE
 
     _distance, insertion_index = min(insertion_candidates)
-    dst_cvar = assignment.lhs
-    if isinstance(body_statements, list):
-        if _list_has_global_update_assignment_for_insn_8616(
-            body_statements,
-            project,
-            dst_cvar,
-            delta,
-            ins_addr,
-        ):
-            root._inertia_global_update_assignment_already_present_8616 = True
-            return DirectGlobalLoopInsertionStatus8616.NOT_APPLICABLE
-        body_statements.insert(insertion_index, assignment)
-    else:
-        loop.body = structured_c.CStatements([assignment, body], codegen=assignment.codegen)
-    return DirectGlobalLoopInsertionStatus8616.INSERTED
+    return _insert_assignment_into_loop_body_8616(
+        root,
+        loop,
+        body,
+        body_statements,
+        insertion_index,
+        assignment,
+        project,
+        ins_addr,
+        delta,
+    )
+
 
 
 def _direct_global_update_ordered_insns_8616(
@@ -15419,33 +17900,327 @@ def _insert_global_update_at_body_start_8616(
     return True
 
 
-def materialize_direct_global_incdec_instructions_8616(
-    codegen: StructuredAstValue, project: StructuredAstValue | None = None, function: StructuredAstValue | None = None
-) -> bool:
-    """Materialize direct no-base/no-index real-mode global INC/DEC effects."""
-    if project is None:
-        project = getattr(codegen, "project", None)
-    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
-    if project is None or root is None:
-        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-            log.warning(
-                "[direct-stack-mov] unavailable project=%s root=%s",
-                project is not None,
-                root is not None,
+def _debug_global_update_insn_dump_8616(
+    codegen: StructuredAstValue,
+    project: StructuredAstValue,
+    function: StructuredAstValue,
+    facts: StructuredAstValue,
+) -> None:
+    """Emit the optional INERTIA_DEBUG_GLOBAL_UPDATE instruction summary."""
+    blocks = _direct_global_update_blocks_8616(project, function)
+    insn_debug = []
+    for block in blocks:
+        for wrapper in _capstone_insns_for_direct_global_update_8616(project, block)[:8]:
+            insn = getattr(wrapper, "insn", wrapper)
+            insn_debug.append(
+                (
+                    getattr(insn, "address", None),
+                    getattr(insn, "id", None),
+                    getattr(insn, "mnemonic", None),
+                    len(_boundary_tuple_8616(getattr(insn, "operands", ()) or ())),
+                )
             )
+    print(
+        "[dbg-global-update] "
+        f"func={getattr(function, 'addr', None)!r} "
+        f"cfunc={getattr(getattr(codegen, 'cfunc', None), 'addr', None)!r} "
+        f"blocks={_boundary_tuple_8616(getattr(block, 'addr', None) for block in blocks)!r} "
+        f"insns={tuple(insn_debug)!r} "
+        f"facts={facts!r}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def _republish_codegen_root_8616(codegen: StructuredAstValue, root: StructuredAstValue) -> None:
+    """Publish the rewritten root on every cfunc projection."""
+    with contextlib.suppress(Exception):
+        codegen.cfunc.body = root
+    with contextlib.suppress(Exception):
+        codegen.cfunc.statements = root
+    with contextlib.suppress(Exception):
+        codegen.cfunc.stmt = root
+    with contextlib.suppress(Exception):
+        codegen.cfunc.statements = root
+    with contextlib.suppress(Exception):
+        codegen.cfunc.stmt = root
+
+
+@dataclass
+class _GlobalIncdecRun8616:
+    """Materialize direct no-base/no-index real-mode global INC/DEC effects."""
+
+    codegen: StructuredAstValue
+    project: StructuredAstValue
+    function: StructuredAstValue
+    root: StructuredAstValue
+    stats: dict[str, int]
+    changed: bool = False
+    addr: int = 0
+    width: int = 0
+    delta: int = 0
+    name: str = ""
+    cvar: StructuredAstValue = None
+
+    def _record_storage_identity_8616(self, ins_addr: int) -> None:
+        """Retain the exact DS object after new or prior materialization."""
+        record_global_storage_identity_fact_8616(
+            self.codegen,
+            GlobalStorageIdentityFact8616(
+                space=MemSpace.DS,
+                offset=self.addr,
+                width=self.width,
+                name=self.name,
+                evidence_addr=ins_addr,
+                kind=StorageIdentityEvidenceKind8616.DIRECT_GLOBAL_UPDATE,
+            ),
+        )
+
+    def _build_fact_cvar_8616(self, fact: DirectGlobalUpdateFact8616) -> StructuredAstValue:
+        """Name the global, rename generated cvars, and build the carrier cvar."""
+        self.addr = fact.displacement & 0xFFFF
+        self.width = fact.width if fact.width in {1, 2} else 2
+        self.delta = fact.delta
+        self.stats["classified_fact_count"] = int(self.stats.get("classified_fact_count", 0) or 0) + 1
+        name = _direct_global_update_name_8616(
+            self.project, getattr(getattr(self.codegen, "cfunc", None), "addr", None), self.addr
+        )
+        self.name = _preferred_same_addr_global_name_8616(self.root, self.addr, self.width, name)
+        renamed_count = _rename_generated_same_addr_global_cvars_8616(self.root, self.addr, self.width, self.name)
+        if renamed_count:
+            self.changed = True
+        variable = SimMemoryVariable(
+            self.addr, self.width, name=self.name, region=getattr(getattr(self.codegen, "cfunc", None), "addr", None)
+        )
+        cvar = structured_c.CVariable(
+            variable,
+            unified_variable=variable,
+            variable_type=_type_for_access_width_8616(self.width),
+            codegen=self.codegen,
+            tags={"ins_addr": fact.ins_addr},
+        )
+        variables_in_use = getattr(self.codegen.cfunc, "variables_in_use", None)
+        if isinstance(variables_in_use, dict):
+            variables_in_use[variable] = cvar
+        unified = getattr(self.codegen.cfunc, "unified_local_vars", None)
+        if isinstance(unified, dict):
+            unified[variable] = {(cvar, getattr(cvar, "variable_type", None))}
+        return cvar
+
+    def _replacement_factory_8616(self, tags: StructuredAstValue) -> StructuredAstValue:
+        """Build the update assignment for a tagged node."""
+        rhs = structured_c.CBinaryOp(
+            "Add" if self.delta > 0 else "Sub",
+            self.cvar,
+            structured_c.CConstant(abs(int(self.delta)), _type_for_access_width_8616(self.width), codegen=self.codegen),
+            codegen=self.codegen,
+        )
+        return structured_c.CAssignment(self.cvar, rhs, codegen=self.codegen, tags=tags)
+
+    def _count_already_materialized_8616(self) -> None:
+        """Count one already-materialized consumed fact."""
+        self.stats["already_materialized_count"] = int(
+            self.stats.get("already_materialized_count", 0) or 0
+        ) + 1
+        self.stats["consumed_fact_count"] = int(
+            self.stats.get("consumed_fact_count", 0) or 0
+        ) + 1
+
+    def _already_materialized_8616(
+        self,
+        fact: DirectGlobalUpdateFact8616,
+        fact_key: DirectGlobalUpdateFact8616,
+        consumed_facts: set[DirectGlobalUpdateFact8616],
+    ) -> bool:
+        """Handle facts whose update already exists in the structured tree."""
+        if (
+            _direct_global_update_has_adjacent_high_carry_8616(
+                self.project,
+                self.function,
+                fact,
+            )
+            and _tree_has_covering_dword_update_assignment_for_insn_8616(
+                self.root,
+                self.project,
+                addr=self.addr,
+                delta=self.delta,
+                ins_addr=fact.ins_addr,
+            )
+        ):
+            consumed_facts.add(fact_key)
+            self._record_storage_identity_8616(fact.ins_addr)
+            self._count_already_materialized_8616()
+            return True
+        if fact_key in consumed_facts and _tree_has_global_update_assignment_for_insn_8616(
+            self.root, self.project, self.cvar, self.delta, fact.ins_addr
+        ):
+            self._record_storage_identity_8616(fact.ins_addr)
+            self._count_already_materialized_8616()
+            if os.environ.get("INERTIA_DEBUG_GLOBAL_UPDATE") == "1":
+                print(
+                    f"[dbg-global-update] consumed-fact-present ins={fact.ins_addr:#x} addr={self.addr:#x} name={self.name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            return True
+        if _tree_has_global_update_assignment_for_insn_8616(self.root, self.project, self.cvar, self.delta, fact.ins_addr):
+            consumed_facts.add(fact_key)
+            self._record_storage_identity_8616(fact.ins_addr)
+            self._count_already_materialized_8616()
+            if os.environ.get("INERTIA_DEBUG_GLOBAL_UPDATE") == "1":
+                print(
+                    f"[dbg-global-update] already-in-tree ins={fact.ins_addr:#x} addr={self.addr:#x} name={self.name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            return True
         return False
+
+    def _insert_fallback_8616(
+        self, fact: DirectGlobalUpdateFact8616, inserted_assignment: StructuredAstValue
+    ) -> tuple[bool, StructuredAstValue]:
+        """Try loop, tagged-statement, and body-start insertion in order."""
+        loop_status = _insert_global_update_in_proven_loop_8616(
+            self.root,
+            self.project,
+            self.function,
+            fact.ins_addr,
+            inserted_assignment,
+            delta=self.delta,
+        )
+        if loop_status is DirectGlobalLoopInsertionStatus8616.INSERTED:
+            self.stats["loop_inserted_count"] = int(self.stats.get("loop_inserted_count", 0) or 0) + 1
+            return True, DirectGlobalUpdateMaterializationKind8616.INSERTED_IN_PROVEN_LOOP
+        materialized_by = None
+        materialized = False
+        if loop_status is DirectGlobalLoopInsertionStatus8616.NOT_APPLICABLE:
+            materialized = _insert_global_update_before_nearest_following_tagged_statement_8616(
+                self.root,
+                self.project,
+                fact.ins_addr,
+                inserted_assignment,
+                delta=self.delta,
+            )
+        if materialized:
+            materialized_by = DirectGlobalUpdateMaterializationKind8616.INSERTED_BEFORE_NEXT_TAGGED_STATEMENT
+            self.stats["inserted_count"] = int(self.stats.get("inserted_count", 0) or 0) + 1
+        elif (
+            loop_status is DirectGlobalLoopInsertionStatus8616.NOT_APPLICABLE
+            and _direct_global_update_can_insert_at_body_start_8616(self.project, self.function, fact)
+        ):
+            materialized = _insert_global_update_at_body_start_8616(
+                self.root,
+                self.project,
+                inserted_assignment,
+                delta=self.delta,
+                ins_addr=fact.ins_addr,
+            )
+            if materialized:
+                materialized_by = DirectGlobalUpdateMaterializationKind8616.INSERTED_AT_BODY_START
+                self.stats["body_start_inserted_count"] = int(self.stats.get("body_start_inserted_count", 0) or 0) + 1
+        return materialized, materialized_by
+
+    def _fail_materialization_8616(self, fact: DirectGlobalUpdateFact8616) -> None:
+        """Count the failure or mark the update as already present."""
+        if bool(getattr(self.root, "_inertia_global_update_assignment_already_present_8616", False)):
+            self._record_storage_identity_8616(fact.ins_addr)
+            self.stats["already_materialized_count"] = int(self.stats.get("already_materialized_count", 0) or 0) + 1
+            if os.environ.get("INERTIA_DEBUG_GLOBAL_UPDATE") == "1":
+                print(
+                    f"[dbg-global-update] already-present ins={fact.ins_addr:#x} addr={self.addr:#x} name={self.name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            return
+        self.stats["failure_count"] = int(self.stats.get("failure_count", 0) or 0) + 1
+        if os.environ.get("INERTIA_DEBUG_GLOBAL_UPDATE") == "1":
+            print(
+                "[dbg-global-update] failed-materialize "
+                f"ins={fact.ins_addr:#x} addr={self.addr:#x} name={self.name} stats={self.stats!r}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    def _publish_materialized_8616(
+        self, fact: DirectGlobalUpdateFact8616, materialized_by: StructuredAstValue
+    ) -> None:
+        """Record declarations, evidence, and identity for a materialized fact."""
+        record_global_declaration_spec_8616(
+            self.codegen,
+            ctype=ctype_for_global_width_8616(self.width),
+            name=self.name,
+            array_len=None,
+        )
+        evidence = _boundary_tuple_8616(getattr(self.codegen, "_inertia_direct_global_update_evidence_8616", ()) or ())
+        self.codegen._inertia_direct_global_update_evidence_8616 = tuple(
+            dict.fromkeys(
+                (*evidence, (("displacement", self.addr), ("width", self.width), ("delta", self.delta), ("ins_addr", fact.ins_addr), ("name", self.name)))
+            )
+        )
+        self._record_storage_identity_8616(fact.ins_addr)
+        self.stats["materialized_count"] = int(self.stats.get("materialized_count", 0) or 0) + 1
+        if os.environ.get("INERTIA_DEBUG_GLOBAL_UPDATE") == "1":
+            print(
+                "[dbg-global-update] materialized "
+                f"kind={materialized_by.name if materialized_by is not None else None} "
+                f"ins={fact.ins_addr:#x} addr={self.addr:#x} name={self.name} stats={self.stats!r}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    def _materialize_fact_8616(
+        self,
+        fact: DirectGlobalUpdateFact8616,
+        consumed_facts: set[DirectGlobalUpdateFact8616],
+    ) -> None:
+        """Materialize one INC/DEC fact through replace-then-insert ordering."""
+        self.cvar = self._build_fact_cvar_8616(fact)
+        fact_key = DirectGlobalUpdateFact8616(self.addr, self.width, int(self.delta), int(fact.ins_addr))
+        if self._already_materialized_8616(fact, fact_key, consumed_facts):
+            return
+        self.root._inertia_global_update_assignment_already_present_8616 = False
+        materialized = _replace_tagged_assignment_8616(
+            self.root,
+            self.project,
+            fact.ins_addr,
+            self._replacement_factory_8616,
+            remove_duplicate_tagged_assignments=True,
+            already_materialized_predicate=lambda node: (
+                _is_same_global_update_assignment_8616(node, self.cvar, self.delta)
+            ),
+            already_materialized_attr="_inertia_global_update_assignment_already_present_8616",
+        )
+        materialized_by = (
+            DirectGlobalUpdateMaterializationKind8616.REPLACED_TAGGED_ASSIGNMENT if materialized else None
+        )
+        if materialized:
+            self.stats["replaced_count"] = int(self.stats.get("replaced_count", 0) or 0) + 1
+        else:
+            inserted_assignment = self._replacement_factory_8616({"ins_addr": fact.ins_addr})
+            materialized, kind = self._insert_fallback_8616(fact, inserted_assignment)
+            if materialized_by is None:
+                materialized_by = kind
+        if not materialized:
+            self._fail_materialization_8616(fact)
+            return
+        consumed_facts.add(fact_key)
+        self._publish_materialized_8616(fact, materialized_by)
+        self.changed = True
+
+
+def _resolve_update_function_8616(
+    codegen: StructuredAstValue, project: StructuredAstValue, function: StructuredAstValue | None
+) -> StructuredAstValue:
+    """Resolve the angr function for the active cfunc when not supplied."""
     if function is None:
         func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
         with contextlib.suppress(Exception):
             function = project.kb.functions.function(addr=func_addr, create=False)
-    if function is None:
-        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-            log.warning(
-                "[direct-stack-mov] function unavailable cfunc_addr=%r",
-                getattr(getattr(codegen, "cfunc", None), "addr", None),
-            )
-        return False
+    return function
 
+
+def _global_update_stats_8616(codegen: StructuredAstValue) -> dict[str, int]:
+    """Return the codegen-owned global-update stats bucket, creating it once."""
     stats = getattr(codegen, "_inertia_direct_global_update_lowering_8616", None)
     if not isinstance(stats, dict):
         stats = {
@@ -15461,266 +18236,333 @@ def materialize_direct_global_incdec_instructions_8616(
             "failure_count": 0,
         }
         codegen._inertia_direct_global_update_lowering_8616 = stats
+    return stats
 
+
+def _consumed_global_update_facts_8616(codegen: StructuredAstValue) -> set[DirectGlobalUpdateFact8616]:
+    """Return the codegen-owned consumed-fact set, creating it once."""
+    consumed_facts = getattr(codegen, "_inertia_consumed_direct_global_update_facts_8616", None)
+    if not isinstance(consumed_facts, set):
+        consumed_facts = set()
+        codegen._inertia_consumed_direct_global_update_facts_8616 = consumed_facts
+    return consumed_facts
+
+
+def materialize_direct_global_incdec_instructions_8616(
+    codegen: StructuredAstValue, project: StructuredAstValue | None = None, function: StructuredAstValue | None = None
+) -> bool:
+    """Materialize direct no-base/no-index real-mode global INC/DEC effects."""
+    if project is None:
+        project = getattr(codegen, "project", None)
+    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
+    if project is None or root is None:
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-mov] unavailable project=%s root=%s",
+                project is not None,
+                root is not None,
+            )
+        return False
+    function = _resolve_update_function_8616(codegen, project, function)
+    if function is None:
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-mov] function unavailable cfunc_addr=%r",
+                getattr(getattr(codegen, "cfunc", None), "addr", None),
+            )
+        return False
+
+    stats = _global_update_stats_8616(codegen)
     facts = _direct_global_update_instruction_facts_8616(project, function)
     if os.environ.get("INERTIA_DEBUG_GLOBAL_UPDATE") == "1":
-        blocks = _direct_global_update_blocks_8616(project, function)
-        insn_debug = []
-        for block in blocks:
-            for wrapper in _capstone_insns_for_direct_global_update_8616(project, block)[:8]:
-                insn = getattr(wrapper, "insn", wrapper)
-                insn_debug.append(
-                    (
-                        getattr(insn, "address", None),
-                        getattr(insn, "id", None),
-                        getattr(insn, "mnemonic", None),
-                        len(_boundary_tuple_8616(getattr(insn, "operands", ()) or ())),
-                    )
-                )
-        print(
-            "[dbg-global-update] "
-            f"func={getattr(function, 'addr', None)!r} "
-            f"cfunc={getattr(getattr(codegen, 'cfunc', None), 'addr', None)!r} "
-            f"blocks={_boundary_tuple_8616(getattr(block, 'addr', None) for block in blocks)!r} "
-            f"insns={tuple(insn_debug)!r} "
-            f"facts={facts!r}",
-            file=sys.stderr,
-            flush=True,
-        )
+        _debug_global_update_insn_dump_8616(codegen, project, function, facts)
     stats["raw_fact_count"] = int(stats.get("raw_fact_count", 0) or 0) + len(facts)
     if not facts:
         return False
 
-    changed = False
+    run = _GlobalIncdecRun8616(
+        codegen=codegen,
+        project=project,
+        function=function,
+        root=root,
+        stats=stats,
+    )
+    consumed_facts = _consumed_global_update_facts_8616(codegen)
     for fact in facts:
-        addr = fact.displacement & 0xFFFF
-        width = fact.width if fact.width in {1, 2} else 2
-        delta = fact.delta
-        stats["classified_fact_count"] = int(stats.get("classified_fact_count", 0) or 0) + 1
-        name = _direct_global_update_name_8616(project, getattr(getattr(codegen, "cfunc", None), "addr", None), addr)
-        name = _preferred_same_addr_global_name_8616(root, addr, width, name)
-        renamed_count = _rename_generated_same_addr_global_cvars_8616(root, addr, width, name)
-        if renamed_count:
-            changed = True
-        variable = SimMemoryVariable(
-            addr, width, name=name, region=getattr(getattr(codegen, "cfunc", None), "addr", None)
+        run._materialize_fact_8616(fact, consumed_facts)
+
+    if run.changed:
+        _republish_codegen_root_8616(codegen, root)
+    return run.changed
+
+
+def _stack_update_stats_8616(codegen: StructuredAstValue) -> dict[str, int]:
+    """Return the codegen-owned stack-update stats bucket, creating it once."""
+    stats = getattr(codegen, "_inertia_direct_stack_update_lowering_8616", None)
+    if not isinstance(stats, dict):
+        stats = {
+            "raw_fact_count": 0,
+            "classified_fact_count": 0,
+            "materialized_count": 0,
+            "failure_count": 0,
+            "refused_count": 0,
+            "conflicting_tagged_assignment_removed_count": 0,
+        }
+        codegen._inertia_direct_stack_update_lowering_8616 = stats
+    return stats
+
+
+@dataclass
+class _StackIncdecRun8616:
+    """Materialize direct BP-relative stack INC/DEC effects at their tagged C node."""
+
+    codegen: StructuredAstValue
+    project: StructuredAstValue
+    function: StructuredAstValue
+    root: StructuredAstValue
+    stats: dict[str, int]
+    debug_stack_noise: bool
+    changed: bool = False
+    query_index: StructuredAstValue = None
+    fact: StructuredAstValue = None
+    width: int = 2
+    cvar: StructuredAstValue = None
+    source_expr: StructuredAstValue = None
+    rendered_assignment_ids: frozenset[int] | None = None
+
+    def _replacement_factory_8616(self, tags: StructuredAstValue) -> StructuredAstValue:
+        """Build the stack-update assignment for a tagged node."""
+        return _direct_stack_update_assignment_8616(
+            self.codegen,
+            self.cvar,
+            self.width,
+            self.fact.delta,
+            tags=tags,
+            source_expr=self.source_expr,
+            operation=self.fact.operation,
         )
-        cvar = structured_c.CVariable(
-            variable,
-            unified_variable=variable,
-            variable_type=_type_for_access_width_8616(width),
-            codegen=codegen,
-            tags={"ins_addr": fact.ins_addr},
+
+    def _has_rendered_owner_8616(self, node: StructuredAstValue) -> bool:
+        """Use one ownership index for this mutable replacement attempt."""
+        if self.rendered_assignment_ids is None:
+            self.rendered_assignment_ids = _rendered_stack_update_assignment_ids_8616(
+                self.query_index.nodes
+            )
+        return id(node) in self.rendered_assignment_ids
+
+    def _already_materialized_predicate_8616(self, node: StructuredAstValue) -> bool:
+        return self._has_rendered_owner_8616(node) and _is_same_stack_update_assignment_8616(
+            node, self.cvar, self.fact.delta, self.source_expr, operation=self.fact.operation
         )
 
-        def record_storage_identity() -> None:
-            """Retain the exact DS object after new or prior materialization."""
-            record_global_storage_identity_fact_8616(
-                codegen,
-                GlobalStorageIdentityFact8616(
-                    space=MemSpace.DS,
-                    offset=addr,  # noqa: B023
-                    width=width,  # noqa: B023
-                    name=name,  # noqa: B023
-                    evidence_addr=fact.ins_addr,  # noqa: B023
-                    kind=StorageIdentityEvidenceKind8616.DIRECT_GLOBAL_UPDATE,
-                ),
-            )
-
-        variables_in_use = getattr(codegen.cfunc, "variables_in_use", None)
-        if isinstance(variables_in_use, dict):
-            variables_in_use[variable] = cvar
-        unified = getattr(codegen.cfunc, "unified_local_vars", None)
-        if isinstance(unified, dict):
-            unified[variable] = {(cvar, getattr(cvar, "variable_type", None))}
-
-        consumed_facts = getattr(codegen, "_inertia_consumed_direct_global_update_facts_8616", None)
-        if not isinstance(consumed_facts, set):
-            consumed_facts = set()
-            codegen._inertia_consumed_direct_global_update_facts_8616 = consumed_facts
-        fact_key = DirectGlobalUpdateFact8616(addr, width, int(delta), int(fact.ins_addr))
-        if (
-            _direct_global_update_has_adjacent_high_carry_8616(
-                project,
-                function,
-                fact,
-            )
-            and _tree_has_covering_dword_update_assignment_for_insn_8616(
-                root,
-                project,
-                addr=addr,
-                delta=delta,
-                ins_addr=fact.ins_addr,
-            )
-        ):
-            consumed_facts.add(fact_key)
-            record_storage_identity()
-            stats["already_materialized_count"] = int(
-                stats.get("already_materialized_count", 0) or 0
-            ) + 1
-            stats["consumed_fact_count"] = int(
-                stats.get("consumed_fact_count", 0) or 0
-            ) + 1
-            continue
-        if fact_key in consumed_facts and _tree_has_global_update_assignment_for_insn_8616(
-            root, project, cvar, delta, fact.ins_addr
-        ):
-            record_storage_identity()
-            stats["already_materialized_count"] = int(stats.get("already_materialized_count", 0) or 0) + 1
-            stats["consumed_fact_count"] = int(stats.get("consumed_fact_count", 0) or 0) + 1
-            if os.environ.get("INERTIA_DEBUG_GLOBAL_UPDATE") == "1":
-                print(
-                    f"[dbg-global-update] consumed-fact-present ins={fact.ins_addr:#x} addr={addr:#x} name={name}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-            continue
-        if _tree_has_global_update_assignment_for_insn_8616(root, project, cvar, delta, fact.ins_addr):
-            consumed_facts.add(fact_key)
-            record_storage_identity()
-            stats["already_materialized_count"] = int(stats.get("already_materialized_count", 0) or 0) + 1
-            stats["consumed_fact_count"] = int(stats.get("consumed_fact_count", 0) or 0) + 1
-            if os.environ.get("INERTIA_DEBUG_GLOBAL_UPDATE") == "1":
-                print(
-                    f"[dbg-global-update] already-in-tree ins={fact.ins_addr:#x} addr={addr:#x} name={name}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-            continue
-
-        def replacement_factory(
-            tags: StructuredAstValue,
-            *,
-            _cvar: StructuredAstValue = cvar,
-            _width: StructuredAstValue = width,
-            _delta: StructuredAstValue = delta,
-        ) -> StructuredAstValue:
-            rhs = structured_c.CBinaryOp(
-                "Add" if _delta > 0 else "Sub",
-                _cvar,
-                structured_c.CConstant(abs(int(_delta)), _type_for_access_width_8616(_width), codegen=codegen),
-                codegen=codegen,
-            )
-            return structured_c.CAssignment(_cvar, rhs, codegen=codegen, tags=tags)
-
-        root._inertia_global_update_assignment_already_present_8616 = False
-
-        materialized = _replace_tagged_assignment_8616(
-            root,
-            project,
-            fact.ins_addr,
-            replacement_factory,
-            remove_duplicate_tagged_assignments=True,
-            already_materialized_predicate=lambda node, _cvar=cvar, _delta=delta: (
-                _is_same_global_update_assignment_8616(
-                    node,
-                    _cvar,
-                    _delta,
-                )
-            ),
-            already_materialized_attr="_inertia_global_update_assignment_already_present_8616",
+    def _try_existing_assignment_8616(self, facts: StructuredAstValue) -> bool:
+        """Accept an existing equivalent update assignment with matching semantics."""
+        semantic_fact_count = sum(
+            1
+            for candidate in facts
+            if _same_direct_stack_update_semantics_8616(candidate, self.fact)
         )
-        materialized_by = DirectGlobalUpdateMaterializationKind8616.REPLACED_TAGGED_ASSIGNMENT if materialized else None
-        if materialized:
-            stats["replaced_count"] = int(stats.get("replaced_count", 0) or 0) + 1
-        else:
-            inserted_assignment = replacement_factory({"ins_addr": fact.ins_addr})
-            loop_status = _insert_global_update_in_proven_loop_8616(
-                root,
-                project,
-                function,
-                fact.ins_addr,
-                inserted_assignment,
-                delta=delta,
+        materialized = _has_existing_stack_update_assignment_8616(
+            self.root,
+            self.project,
+            self.fact,
+            self.cvar,
+            self.source_expr,
+            expected_semantic_count=semantic_fact_count,
+            query_index=self.query_index,
+        )
+        if self.debug_stack_noise:
+            log.warning(
+                "[direct-stack-update-path] ins=%#x existing=%s semantic_count=%d",
+                self.fact.ins_addr,
+                materialized,
+                semantic_fact_count,
             )
-            materialized = loop_status is DirectGlobalLoopInsertionStatus8616.INSERTED
-            if materialized:
-                materialized_by = DirectGlobalUpdateMaterializationKind8616.INSERTED_IN_PROVEN_LOOP
-                stats["loop_inserted_count"] = int(stats.get("loop_inserted_count", 0) or 0) + 1
-            elif loop_status is DirectGlobalLoopInsertionStatus8616.NOT_APPLICABLE:
-                materialized = _insert_global_update_before_nearest_following_tagged_statement_8616(
-                    root,
-                    project,
-                    fact.ins_addr,
-                    inserted_assignment,
-                    delta=delta,
-                )
-            if materialized and materialized_by is None:
-                materialized_by = DirectGlobalUpdateMaterializationKind8616.INSERTED_BEFORE_NEXT_TAGGED_STATEMENT
-                stats["inserted_count"] = int(stats.get("inserted_count", 0) or 0) + 1
-            elif (
-                loop_status is DirectGlobalLoopInsertionStatus8616.NOT_APPLICABLE
-                and _direct_global_update_can_insert_at_body_start_8616(project, function, fact)
-            ):
-                materialized = _insert_global_update_at_body_start_8616(
-                    root,
-                    project,
-                    inserted_assignment,
-                    delta=delta,
-                    ins_addr=fact.ins_addr,
-                )
-                if materialized:
-                    materialized_by = DirectGlobalUpdateMaterializationKind8616.INSERTED_AT_BODY_START
-                    stats["body_start_inserted_count"] = int(stats.get("body_start_inserted_count", 0) or 0) + 1
+        return materialized
 
+    def _try_materialize_8616(self, facts: StructuredAstValue) -> tuple[bool, bool]:
+        """Run the ordered materialization chain for one fact."""
+        self.root._inertia_stack_update_assignment_already_present_8616 = False
+        loop_iterator_result = _materialize_proven_stack_update_loop_iterator_8616(
+            self.root,
+            self.project,
+            self.function,
+            self.fact,
+            self.cvar,
+            self.source_expr,
+            self._replacement_factory_8616,
+            query_index=self.query_index,
+        )
+        materialized = loop_iterator_result.matched
+        fact_changed = loop_iterator_result.changed
+        if self.debug_stack_noise:
+            log.warning(
+                "[direct-stack-update-path] ins=%#x loop_iterator matched=%s changed=%s",
+                self.fact.ins_addr,
+                loop_iterator_result.matched,
+                loop_iterator_result.changed,
+            )
         if not materialized:
-            if bool(getattr(root, "_inertia_global_update_assignment_already_present_8616", False)):
-                record_storage_identity()
-                stats["already_materialized_count"] = int(stats.get("already_materialized_count", 0) or 0) + 1
-                if os.environ.get("INERTIA_DEBUG_GLOBAL_UPDATE") == "1":
-                    print(
-                        f"[dbg-global-update] already-present ins={fact.ins_addr:#x} addr={addr:#x} name={name}",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                continue
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            if os.environ.get("INERTIA_DEBUG_GLOBAL_UPDATE") == "1":
-                print(
-                    "[dbg-global-update] failed-materialize "
-                    f"ins={fact.ins_addr:#x} addr={addr:#x} name={name} stats={stats!r}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-            continue
+            materialized = _replace_proven_while_stack_update_8616(
+                self.root,
+                self.project,
+                self.function,
+                self.fact,
+                self.cvar,
+                self._replacement_factory_8616,
+                query_index=self.query_index,
+            )
+            fact_changed = materialized
+        if not materialized:
+            materialized = self._try_existing_assignment_8616(facts)
+        if materialized:
+            fact_changed = self._remove_conflicting_8616() or fact_changed
+        materialized, fact_changed = self._replacement_chain_8616(materialized, fact_changed)
+        return materialized, fact_changed
 
-        consumed_facts.add(fact_key)
-        record_global_declaration_spec_8616(
-            codegen,
-            ctype=ctype_for_global_width_8616(width),
-            name=name,
-            array_len=None,
+    def _remove_conflicting_8616(self) -> bool:
+        """Drop conflicting tagged duplicates after materialization."""
+        removed_count = _remove_conflicting_tagged_stack_update_assignments_8616(
+            self.root,
+            self.project,
+            self.fact,
+            query_index=self.query_index,
         )
-        evidence = _boundary_tuple_8616(getattr(codegen, "_inertia_direct_global_update_evidence_8616", ()) or ())
-        codegen._inertia_direct_global_update_evidence_8616 = tuple(
+        self.stats["conflicting_tagged_assignment_removed_count"] = int(
+            self.stats.get("conflicting_tagged_assignment_removed_count", 0) or 0
+        ) + removed_count
+        return removed_count > 0
+
+    def _replacement_chain_8616(self, materialized: bool, fact_changed: bool) -> tuple[bool, bool]:
+        """Continue the ordered replacement chain after loop/existing arms."""
+        if not materialized and self.fact.operation is DirectStackUpdateOp8616.ARITHMETIC:
+            materialized = _replace_stack_update_loop_iterator_8616(
+                self.root,
+                self.cvar,
+                self.width,
+                self.fact.delta,
+                self._replacement_factory_8616,
+                source_expr=self.source_expr,
+                query_index=self.query_index,
+            )
+            fact_changed = materialized
+        if not materialized and self.root._inertia_stack_update_assignment_already_present_8616:
+            materialized = True
+        if not materialized:
+            materialized = _replace_tagged_assignment_8616(
+                self.root,
+                self.project,
+                self.fact.ins_addr,
+                self._replacement_factory_8616,
+                allow_tagged_iterator_expression=True,
+                remove_duplicate_tagged_assignments=True,
+                already_materialized_predicate=self._already_materialized_predicate_8616,
+                already_materialized_attr="_inertia_stack_update_assignment_already_present_8616",
+                candidate_position_predicate=self._has_rendered_owner_8616,
+            )
+            fact_changed = materialized
+        if not materialized:
+            materialized = _replace_unique_tagged_dirty_stack_update_8616(
+                self.root,
+                self.project,
+                self.fact,
+                self.cvar,
+                self._replacement_factory_8616,
+                query_index=self.query_index,
+            )
+            fact_changed = materialized
+        if not materialized and self.root._inertia_stack_update_assignment_already_present_8616:
+            materialized = True
+        return self._insert_chain_8616(materialized, fact_changed)
+
+    def _insert_chain_8616(self, materialized: bool, fact_changed: bool) -> tuple[bool, bool]:
+        """Run the insertion arms for arithmetic facts that did not replace."""
+        if not materialized and self.fact.operation is DirectStackUpdateOp8616.ARITHMETIC:
+            inserted_assignment = self._replacement_factory_8616({"ins_addr": self.fact.ins_addr})
+            materialized = _insert_at_loop_body_start_after_condition_8616(
+                self.root,
+                self.project,
+                self.fact.ins_addr,
+                inserted_assignment,
+            )
+            fact_changed = materialized
+        if not materialized and self.fact.operation is DirectStackUpdateOp8616.ARITHMETIC:
+            inserted_assignment = self._replacement_factory_8616({"ins_addr": self.fact.ins_addr})
+            materialized = _insert_before_nearest_following_tagged_statement_8616(
+                self.root,
+                self.project,
+                self.fact.ins_addr,
+                inserted_assignment,
+            )
+            fact_changed = materialized
+        elif not materialized:
+            self.stats["refused_count"] = int(self.stats.get("refused_count", 0) or 0) + 1
+        return materialized, fact_changed
+
+    def _record_materialized_8616(self) -> None:
+        """Publish the materialization evidence entry for one fact."""
+        self.stats["materialized_count"] = int(self.stats.get("materialized_count", 0) or 0) + 1
+        evidence = _boundary_tuple_8616(getattr(self.codegen, "_inertia_direct_stack_update_evidence_8616", ()) or ())
+        fact = self.fact
+        self.codegen._inertia_direct_stack_update_evidence_8616 = _boundary_tuple_8616(
             dict.fromkeys(
-                (*evidence, (("displacement", addr), ("width", width), ("delta", delta), ("ins_addr", fact.ins_addr), ("name", name)))
+                (*evidence, (("offset", fact.offset), ("width", self.width), ("delta", fact.delta), ("source_kind", fact.source_kind), ("source_value", fact.source_value), ("source_offset", fact.source_offset), ("source_base_offset", fact.source_base_offset), ("source_index_offset", fact.source_index_offset), ("source_index_scale", fact.source_index_scale), ("operation", fact.operation), ("ins_addr", fact.ins_addr), ("name", getattr(getattr(self.cvar, "variable", None), "name", None))))
             )
         )
-        record_storage_identity()
-        stats["materialized_count"] = int(stats.get("materialized_count", 0) or 0) + 1
-        if os.environ.get("INERTIA_DEBUG_GLOBAL_UPDATE") == "1":
-            print(
-                "[dbg-global-update] materialized "
-                f"kind={materialized_by.name if materialized_by is not None else None} "
-                f"ins={fact.ins_addr:#x} addr={addr:#x} name={name} stats={stats!r}",
-                file=sys.stderr,
-                flush=True,
-            )
-        changed = True
 
-    if changed:
-        with contextlib.suppress(Exception):
-            codegen.cfunc.body = root
-        with contextlib.suppress(Exception):
-            codegen.cfunc.statements = root
-        with contextlib.suppress(Exception):
-            codegen.cfunc.stmt = root
-        with contextlib.suppress(Exception):
-            codegen.cfunc.statements = root
-        with contextlib.suppress(Exception):
-            codegen.cfunc.stmt = root
-    return changed
+    def materialize_fact_8616(self, fact: StructuredAstValue, facts: StructuredAstValue) -> None:
+        """Materialize one stack-update fact, tracking per-fact change."""
+        self.fact = fact
+        self.rendered_assignment_ids = None
+        if self.debug_stack_noise:
+            log.warning(
+                "[direct-stack-update] fact ins=%#x offset=%s delta=%s op=%s",
+                fact.ins_addr,
+                fact.offset,
+                fact.delta,
+                fact.operation.name,
+            )
+        self.width = fact.width if fact.width in {1, 2} else 2
+        self.stats["classified_fact_count"] = int(self.stats.get("classified_fact_count", 0) or 0) + 1
+        self.cvar = _resolve_direct_stack_update_cvar_8616(self.codegen, fact.offset, self.width)
+        self.source_expr = _direct_stack_update_source_expr_8616(self.codegen, fact)
+        if self.cvar is None or self.source_expr is None:
+            self.stats["failure_count"] = int(self.stats.get("failure_count", 0) or 0) + 1
+            return
+        materialized, fact_changed = self._try_materialize_8616(facts)
+        if not materialized:
+            if self.root._inertia_stack_update_assignment_already_present_8616:
+                return
+            self.stats["failure_count"] = int(self.stats.get("failure_count", 0) or 0) + 1
+            return
+        self._record_materialized_8616()
+        self.changed = fact_changed or self.changed
+        if fact_changed:
+            self.query_index = StructuredAstQueryIndex8616.build(self.root)
+
+
+def _filtered_stack_update_facts_8616(
+    codegen: StructuredAstValue,
+    project: StructuredAstValue,
+    function: StructuredAstValue,
+    stats: dict[str, int],
+    debug_stack_noise: bool,
+    root: StructuredAstValue,
+) -> StructuredAstValue:
+    """Collect the stack-update facts filtered for the active function."""
+    if debug_stack_noise:
+        log.warning(
+            "[direct-stack-update] start function=%#x root=%s",
+            getattr(function, "addr", -1) or -1,
+            type(root).__name__,
+        )
+    facts = _filter_direct_stack_update_facts_for_active_function_8616(
+        project,
+        function,
+        _direct_stack_update_instruction_facts_8616(project, function),
+    )
+    stats["raw_fact_count"] = int(stats.get("raw_fact_count", 0) or 0) + len(facts)
+    return facts
 
 
 def materialize_direct_stack_incdec_instructions_8616(
@@ -15735,39 +18577,14 @@ def materialize_direct_stack_incdec_instructions_8616(
         if debug_stack_noise:
             log.warning("[direct-stack-update] unavailable project_or_root changed=False")
         return False
-    if function is None:
-        func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
-        with contextlib.suppress(Exception):
-            function = project.kb.functions.function(addr=func_addr, create=False)
+    function = _resolve_update_function_8616(codegen, project, function)
     if function is None:
         if debug_stack_noise:
             log.warning("[direct-stack-update] unavailable function changed=False")
         return False
 
-    stats = getattr(codegen, "_inertia_direct_stack_update_lowering_8616", None)
-    if not isinstance(stats, dict):
-        stats = {
-            "raw_fact_count": 0,
-            "classified_fact_count": 0,
-            "materialized_count": 0,
-            "failure_count": 0,
-            "refused_count": 0,
-            "conflicting_tagged_assignment_removed_count": 0,
-        }
-        codegen._inertia_direct_stack_update_lowering_8616 = stats
-
-    if debug_stack_noise:
-        log.warning(
-            "[direct-stack-update] start function=%#x root=%s",
-            getattr(function, "addr", -1) or -1,
-            type(root).__name__,
-        )
-    facts = _filter_direct_stack_update_facts_for_active_function_8616(
-        project,
-        function,
-        _direct_stack_update_instruction_facts_8616(project, function),
-    )
-    stats["raw_fact_count"] = int(stats.get("raw_fact_count", 0) or 0) + len(facts)
+    stats = _stack_update_stats_8616(codegen)
+    facts = _filtered_stack_update_facts_8616(codegen, project, function, stats, debug_stack_noise, root)
     if not facts:
         if debug_stack_noise:
             log.warning(
@@ -15778,212 +18595,19 @@ def materialize_direct_stack_incdec_instructions_8616(
         _record_direct_stack_update_lane_8616(codegen, stats)
         return False
 
-    changed = False
-    query_index = StructuredAstQueryIndex8616.build(root)
+    run = _StackIncdecRun8616(
+        codegen=codegen,
+        project=project,
+        function=function,
+        root=root,
+        stats=stats,
+        debug_stack_noise=debug_stack_noise,
+        query_index=StructuredAstQueryIndex8616.build(root),
+    )
     for fact in facts:
-        fact_query_index = query_index
-        if debug_stack_noise:
-            log.warning(
-                "[direct-stack-update] fact ins=%#x offset=%s delta=%s op=%s",
-                fact.ins_addr,
-                fact.offset,
-                fact.delta,
-                fact.operation.name,
-            )
-        width = fact.width if fact.width in {1, 2} else 2
-        stats["classified_fact_count"] = int(stats.get("classified_fact_count", 0) or 0) + 1
-        cvar = _resolve_direct_stack_update_cvar_8616(codegen, fact.offset, width)
-        source_expr = _direct_stack_update_source_expr_8616(codegen, fact)
-        if cvar is None or source_expr is None:
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
+        run.materialize_fact_8616(fact, facts)
 
-        fact_changed = False
-
-        def replacement_factory(
-            tags: StructuredAstValue,
-            *,
-            _cvar: StructuredAstValue = cvar,
-            _width: StructuredAstValue = width,
-            _delta: StructuredAstValue = fact.delta,
-            _source_expr: StructuredAstValue = source_expr,
-            _operation: StructuredAstValue = fact.operation,
-        ) -> StructuredAstValue:
-            return _direct_stack_update_assignment_8616(
-                codegen,
-                _cvar,
-                _width,
-                _delta,
-                tags=tags,
-                source_expr=_source_expr,
-                operation=_operation,
-            )
-
-        root._inertia_stack_update_assignment_already_present_8616 = False
-        loop_iterator_result = _materialize_proven_stack_update_loop_iterator_8616(
-            root,
-            project,
-            function,
-            fact,
-            cvar,
-            source_expr,
-            replacement_factory,
-            query_index=fact_query_index,
-        )
-        materialized = loop_iterator_result.matched
-        fact_changed = loop_iterator_result.changed
-        if debug_stack_noise:
-            log.warning(
-                "[direct-stack-update-path] ins=%#x loop_iterator matched=%s changed=%s",
-                fact.ins_addr,
-                loop_iterator_result.matched,
-                loop_iterator_result.changed,
-            )
-        if not materialized:
-            materialized = _replace_proven_while_stack_update_8616(
-                root,
-                project,
-                function,
-                fact,
-                cvar,
-                replacement_factory,
-                query_index=fact_query_index,
-            )
-            fact_changed = materialized
-        if not materialized:
-            semantic_fact_count = sum(
-                1
-                for candidate in facts
-                if _same_direct_stack_update_semantics_8616(candidate, fact)
-            )
-            materialized = _has_existing_stack_update_assignment_8616(
-                root,
-                project,
-                fact,
-                cvar,
-                source_expr,
-                expected_semantic_count=semantic_fact_count,
-                query_index=fact_query_index,
-            )
-            if debug_stack_noise:
-                log.warning(
-                    "[direct-stack-update-path] ins=%#x existing=%s semantic_count=%d",
-                    fact.ins_addr,
-                    materialized,
-                    semantic_fact_count,
-                )
-        if materialized:
-            removed_count = _remove_conflicting_tagged_stack_update_assignments_8616(
-                root,
-                project,
-                fact,
-                query_index=fact_query_index,
-            )
-            stats["conflicting_tagged_assignment_removed_count"] = int(
-                stats.get("conflicting_tagged_assignment_removed_count", 0) or 0
-            ) + removed_count
-            fact_changed = removed_count > 0 or fact_changed
-
-        rendered_assignment_ids: frozenset[int] | None = None
-
-        def has_rendered_owner(
-            node: StructuredAstValue,
-            _query_index: StructuredAstQueryIndex8616 = fact_query_index,
-        ) -> bool:
-            """Use one ownership index for this mutable replacement attempt."""
-            nonlocal rendered_assignment_ids
-            if rendered_assignment_ids is None:
-                rendered_assignment_ids = _rendered_stack_update_assignment_ids_8616(
-                    _query_index.nodes
-                )
-            return id(node) in rendered_assignment_ids
-
-        def already_materialized_predicate(
-            node: StructuredAstValue,
-            _cvar: StructuredAstValue = cvar,
-            _delta: StructuredAstValue = fact.delta,
-            _source_expr: StructuredAstValue = source_expr,
-            _operation: StructuredAstValue = fact.operation,
-        ) -> bool:
-            return has_rendered_owner(node) and _is_same_stack_update_assignment_8616(
-                node, _cvar, _delta, _source_expr, operation=_operation
-            )
-
-        if not materialized and fact.operation is DirectStackUpdateOp8616.ARITHMETIC:
-            materialized = _replace_stack_update_loop_iterator_8616(
-                root,
-                cvar,
-                width,
-                fact.delta,
-                replacement_factory,
-                source_expr=source_expr,
-                query_index=fact_query_index,
-            )
-            fact_changed = materialized
-        if not materialized and root._inertia_stack_update_assignment_already_present_8616:
-            materialized = True
-        if not materialized:
-            materialized = _replace_tagged_assignment_8616(
-                root,
-                project,
-                fact.ins_addr,
-                replacement_factory,
-                allow_tagged_iterator_expression=True,
-                remove_duplicate_tagged_assignments=True,
-                already_materialized_predicate=already_materialized_predicate,
-                already_materialized_attr="_inertia_stack_update_assignment_already_present_8616",
-                candidate_position_predicate=has_rendered_owner,
-            )
-            fact_changed = materialized
-        if not materialized:
-            materialized = _replace_unique_tagged_dirty_stack_update_8616(
-                root,
-                project,
-                fact,
-                cvar,
-                replacement_factory,
-                query_index=fact_query_index,
-            )
-            fact_changed = materialized
-        if not materialized and root._inertia_stack_update_assignment_already_present_8616:
-            materialized = True
-        if not materialized and fact.operation is DirectStackUpdateOp8616.ARITHMETIC:
-            inserted_assignment = replacement_factory({"ins_addr": fact.ins_addr})
-            materialized = _insert_at_loop_body_start_after_condition_8616(
-                root,
-                project,
-                fact.ins_addr,
-                inserted_assignment,
-            )
-            fact_changed = materialized
-        if not materialized and fact.operation is DirectStackUpdateOp8616.ARITHMETIC:
-            inserted_assignment = replacement_factory({"ins_addr": fact.ins_addr})
-            materialized = _insert_before_nearest_following_tagged_statement_8616(
-                root,
-                project,
-                fact.ins_addr,
-                inserted_assignment,
-            )
-            fact_changed = materialized
-        elif not materialized:
-            stats["refused_count"] = int(stats.get("refused_count", 0) or 0) + 1
-        if not materialized:
-            if root._inertia_stack_update_assignment_already_present_8616:
-                continue
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-        stats["materialized_count"] = int(stats.get("materialized_count", 0) or 0) + 1
-        evidence = _boundary_tuple_8616(getattr(codegen, "_inertia_direct_stack_update_evidence_8616", ()) or ())
-        codegen._inertia_direct_stack_update_evidence_8616 = _boundary_tuple_8616(
-                dict.fromkeys(
-                    (*evidence, (("offset", fact.offset), ("width", width), ("delta", fact.delta), ("source_kind", fact.source_kind), ("source_value", fact.source_value), ("source_offset", fact.source_offset), ("source_base_offset", fact.source_base_offset), ("source_index_offset", fact.source_index_offset), ("source_index_scale", fact.source_index_scale), ("operation", fact.operation), ("ins_addr", fact.ins_addr), ("name", getattr(getattr(cvar, "variable", None), "name", None))))
-                )
-            )
-        changed = fact_changed or changed
-        if fact_changed:
-            query_index = StructuredAstQueryIndex8616.build(root)
-
-    if changed:
+    if run.changed:
         with contextlib.suppress(Exception):
             codegen.cfunc.body = root
         with contextlib.suppress(Exception):
@@ -15991,7 +18615,7 @@ def materialize_direct_stack_incdec_instructions_8616(
         with contextlib.suppress(Exception):
             codegen.cfunc.stmt = root
     _record_direct_stack_update_lane_8616(codegen, stats)
-    return changed
+    return run.changed
 
 
 def materialize_direct_stack_mov_instructions_8616(
@@ -16950,202 +19574,211 @@ class _DirectStackMovRun8616:
     def _fact_kind_fallback_chain_8616(self) -> None:
         """Run the per-source-kind fallback placement chain."""
         if self.fact.source_kind is DirectStackMoveSourceKind8616.IMMEDIATE:
-            repeats_at_loop_entry = _function_has_loopback_to_instruction_8616(
-                self.function, self.project, self.fact.ins_addr
-            )
-            is_proven_precontrol = _direct_stack_move_is_before_known_precontrol_8616(
-                self.root, self.project, self.function, self.fact.ins_addr
-            )
-            if repeats_at_loop_entry:
-                self.materialized = _insert_at_do_while_body_start_8616(
-                    self.root,
-                    self.project,
-                    self.function,
-                    self.fact.ins_addr,
-                    self.fallback_assignment,
-                )
-            elif is_proven_precontrol:
-                self.materialized = _insert_before_first_stack_cvar_use_8616(self.root, self.fallback_assignment)
-                if not self.materialized:
-                    self.materialized = _replace_precontrol_stack_assignment_8616(
-                        self.root,
-                        self.dst_cvar,
-                        self.fallback_assignment,
-                        insert_before_control_when_no_match=True,
-                    )
-            if not self.materialized and not is_proven_precontrol:
-                self.materialized = _insert_into_conditional_branch_for_direct_stack_move_8616(
-                    self.root,
-                    self.project,
-                    self.function,
-                    self.fact.ins_addr,
-                    self.fallback_assignment,
-                )
-            if not self.materialized and _direct_stack_move_is_before_first_control_8616(
-                self.root, self.project, self.fact.ins_addr
-            ):
-                self.materialized = _replace_precontrol_stack_assignment_8616(
-                    self.root,
-                    self.dst_cvar,
-                    self.fallback_assignment,
-                    insert_before_control_when_no_match=is_proven_precontrol,
-                )
-            if not self.materialized:
-                self.materialized = _insert_after_nearest_preceding_tagged_statement_8616(
-                    self.root,
-                    self.project,
-                    self.fact.ins_addr,
-                    self.fallback_assignment,
-                    function=self.function,
-                    require_known_block=True,
-                )
-            if not self.materialized and self.allow_unscoped_fallback_insert:
-                self.materialized = _insert_before_nearest_following_tagged_statement_8616(
-                    self.root,
-                    self.project,
-                    self.fact.ins_addr,
-                    self.fallback_assignment,
-                )
+            self._fallback_immediate_arm_8616()
         elif self.fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
-            self.materialized = _replace_precontrol_stack_assignment_8616(
-                self.root,
-                self.dst_cvar,
-                self.fallback_assignment,
-                allow_low_half_lhs=True,
-            )
-        elif (
-            self.fact.source_kind
-            in {
-                DirectStackMoveSourceKind8616.STACK_SLOT,
-                DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
-            }
-            and self.allow_stack_slot_fallback
-        ):
-            if not self.materialized:
-                self.materialized = _insert_at_do_while_body_start_8616(
-                    self.root,
-                    self.project,
-                    self.function,
-                    self.fact.ins_addr,
-                    self.fallback_assignment,
-                )
-            if _direct_stack_move_is_before_known_precontrol_8616(self.root, self.project, self.function, self.fact.ins_addr):
-                self.materialized = self.materialized or _replace_precontrol_stack_assignment_8616(
-                    self.root, self.dst_cvar, self.fallback_assignment, insert_before_control_when_no_match=True
-                )
-            if not self.materialized:
-                self.materialized = _replace_post_call_cleanup_artifact_before_stack_move_8616(
-                    self.root,
-                    self.project,
-                    self.function,
-                    self.fact.ins_addr,
-                    self.fallback_assignment,
-                )
-            if not self.materialized:
-                self.materialized = _insert_at_guarded_body_start_for_target_stack_move_8616(
-                    self.root,
-                    self.project,
-                    self.fact.ins_addr,
-                    self.fallback_assignment,
-                )
-            if not self.materialized:
-                self.materialized = _insert_after_nearest_preceding_tagged_statement_8616(
-                    self.root,
-                    self.project,
-                    self.fact.ins_addr,
-                    self.fallback_assignment,
-                    function=self.function,
-                    require_known_block=True,
-                    refuse_loop_container_predecessor=True,
-                )
-            if not self.materialized:
-                self.materialized = _insert_before_do_while_condition_8616(
-                    self.root, self.project, self.fact.ins_addr, self.fallback_assignment
-                )
-            if not self.materialized:
-                self.materialized = _insert_before_nearest_following_tagged_statement_8616(
-                    self.root,
-                    self.project,
-                    self.fact.ins_addr,
-                    self.fallback_assignment,
-                    prefer_loop_container=True,
-                )
-            if not self.materialized:
-                self.materialized = _insert_before_first_stack_cvar_use_8616(
-                    self.root,
-                    self.fallback_assignment,
-                )
-            if not self.materialized and self.allow_unscoped_fallback_insert:
-                self.materialized = _insert_after_nearest_preceding_tagged_statement_8616(
-                    self.root,
-                    self.project,
-                    self.fact.ins_addr,
-                    self.fallback_assignment,
-                    function=self.function,
-                )
+            self._fallback_wide_call_arm_8616()
+        elif self.fact.source_kind in {DirectStackMoveSourceKind8616.STACK_SLOT, DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT} and self.allow_stack_slot_fallback:
+            self._fallback_stack_slot_arm_8616()
         elif self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT_EXPR and self.allow_stack_slot_fallback:
-            if _direct_stack_move_is_before_known_precontrol_8616(self.root, self.project, self.function, self.fact.ins_addr):
+            self._fallback_stack_slot_expr_arm_8616()
+        elif self.fact.source_kind in {DirectStackMoveSourceKind8616.GLOBAL_EXPR, DirectStackMoveSourceKind8616.GLOBAL_MINUS_STACK_SLOT, DirectStackMoveSourceKind8616.GLOBAL_MINUS_SEGMENTED_MEMORY} and self.allow_stack_slot_fallback:
+            self._fallback_global_expr_arm_8616()
+        elif self.fact.source_kind is DirectStackMoveSourceKind8616.SEGMENTED_MEMORY:
+            self._fallback_segmented_refusal_8616()
+
+    def _fallback_immediate_arm_8616(self) -> None:
+        """Run the IMMEDIATE fallback placement chain."""
+        repeats_at_loop_entry = _function_has_loopback_to_instruction_8616(
+            self.function, self.project, self.fact.ins_addr
+        )
+        is_proven_precontrol = _direct_stack_move_is_before_known_precontrol_8616(
+            self.root, self.project, self.function, self.fact.ins_addr
+        )
+        if repeats_at_loop_entry:
+            self.materialized = _insert_at_do_while_body_start_8616(
+                self.root,
+                self.project,
+                self.function,
+                self.fact.ins_addr,
+                self.fallback_assignment,
+            )
+        elif is_proven_precontrol:
+            self.materialized = _insert_before_first_stack_cvar_use_8616(self.root, self.fallback_assignment)
+            if not self.materialized:
                 self.materialized = _replace_precontrol_stack_assignment_8616(
                     self.root,
                     self.dst_cvar,
                     self.fallback_assignment,
                     insert_before_control_when_no_match=True,
                 )
-            if not self.materialized:
-                self.materialized = _insert_before_first_stack_cvar_use_8616(self.root, self.fallback_assignment)
-            if not self.materialized and self.allow_unscoped_fallback_insert:
-                self.materialized = _insert_before_nearest_following_tagged_statement_8616(
-                    self.root,
-                    self.project,
-                    self.fact.ins_addr,
-                    self.fallback_assignment,
-                )
-        elif (
-            self.fact.source_kind
-            in {
-                DirectStackMoveSourceKind8616.GLOBAL_EXPR,
-                DirectStackMoveSourceKind8616.GLOBAL_MINUS_STACK_SLOT,
-                DirectStackMoveSourceKind8616.GLOBAL_MINUS_SEGMENTED_MEMORY,
-            }
-            and self.allow_stack_slot_fallback
+        if not self.materialized and not is_proven_precontrol:
+            self.materialized = _insert_into_conditional_branch_for_direct_stack_move_8616(
+                self.root,
+                self.project,
+                self.function,
+                self.fact.ins_addr,
+                self.fallback_assignment,
+            )
+        if not self.materialized and _direct_stack_move_is_before_first_control_8616(
+            self.root, self.project, self.fact.ins_addr
         ):
-            self.materialized = _insert_between_structured_siblings_8616(
+            self.materialized = _replace_precontrol_stack_assignment_8616(
+                self.root,
+                self.dst_cvar,
+                self.fallback_assignment,
+                insert_before_control_when_no_match=is_proven_precontrol,
+            )
+        if not self.materialized:
+            self.materialized = _insert_after_nearest_preceding_tagged_statement_8616(
+                self.root,
+                self.project,
+                self.fact.ins_addr,
+                self.fallback_assignment,
+                function=self.function,
+                require_known_block=True,
+            )
+        if not self.materialized and self.allow_unscoped_fallback_insert:
+            self.materialized = _insert_before_nearest_following_tagged_statement_8616(
                 self.root,
                 self.project,
                 self.fact.ins_addr,
                 self.fallback_assignment,
             )
-            if (
-                not self.materialized
-                and _direct_stack_move_is_before_known_precontrol_8616(
-                    self.root,
-                    self.project,
-                    self.function,
-                    self.fact.ins_addr,
-                )
-            ):
-                self.materialized = _replace_precontrol_stack_assignment_8616(
-                    self.root,
-                    self.dst_cvar,
-                    self.fallback_assignment,
-                    insert_before_control_when_no_match=True,
-                )
-            if not self.materialized:
-                self.materialized = _insert_before_first_stack_cvar_use_8616(self.root, self.fallback_assignment)
-            if not self.materialized and self.allow_unscoped_fallback_insert:
-                self.materialized = _insert_before_nearest_following_tagged_statement_8616(
-                    self.root,
-                    self.project,
-                    self.fact.ins_addr,
-                    self.fallback_assignment,
-                )
-        elif self.fact.source_kind is DirectStackMoveSourceKind8616.SEGMENTED_MEMORY:
-            # Structuring owns CFG scope through the placement service above.
-            # Refuse here when no exact owner accepted the Lowering-built value.
-            self.stats["segmented_memory_scope_refused_count"] = (
-                int(self.stats.get("segmented_memory_scope_refused_count", 0) or 0)
-                + int(not self.materialized)
+
+    def _fallback_wide_call_arm_8616(self) -> None:
+        """Run the WIDE_CALL_RETURN_STACK_ARITH fallback placement."""
+        self.materialized = _replace_precontrol_stack_assignment_8616(
+            self.root,
+            self.dst_cvar,
+            self.fallback_assignment,
+            allow_low_half_lhs=True,
+        )
+
+    def _fallback_stack_slot_arm_8616(self) -> None:
+        """Run the STACK_SLOT/STACK_AGGREGATE_ELEMENT fallback chain."""
+        if not self.materialized:
+            self.materialized = _insert_at_do_while_body_start_8616(
+                self.root,
+                self.project,
+                self.function,
+                self.fact.ins_addr,
+                self.fallback_assignment,
             )
+        if _direct_stack_move_is_before_known_precontrol_8616(self.root, self.project, self.function, self.fact.ins_addr):
+            self.materialized = self.materialized or _replace_precontrol_stack_assignment_8616(
+                self.root, self.dst_cvar, self.fallback_assignment, insert_before_control_when_no_match=True
+            )
+        if not self.materialized:
+            self.materialized = _replace_post_call_cleanup_artifact_before_stack_move_8616(
+                self.root,
+                self.project,
+                self.function,
+                self.fact.ins_addr,
+                self.fallback_assignment,
+            )
+        if not self.materialized:
+            self.materialized = _insert_at_guarded_body_start_for_target_stack_move_8616(
+                self.root,
+                self.project,
+                self.fact.ins_addr,
+                self.fallback_assignment,
+            )
+        if not self.materialized:
+            self.materialized = _insert_after_nearest_preceding_tagged_statement_8616(
+                self.root,
+                self.project,
+                self.fact.ins_addr,
+                self.fallback_assignment,
+                function=self.function,
+                require_known_block=True,
+                refuse_loop_container_predecessor=True,
+            )
+        if not self.materialized:
+            self.materialized = _insert_before_do_while_condition_8616(
+                self.root, self.project, self.fact.ins_addr, self.fallback_assignment
+            )
+        if not self.materialized:
+            self.materialized = _insert_before_nearest_following_tagged_statement_8616(
+                self.root,
+                self.project,
+                self.fact.ins_addr,
+                self.fallback_assignment,
+                prefer_loop_container=True,
+            )
+        if not self.materialized:
+            self.materialized = _insert_before_first_stack_cvar_use_8616(
+                self.root,
+                self.fallback_assignment,
+            )
+        if not self.materialized and self.allow_unscoped_fallback_insert:
+            self.materialized = _insert_after_nearest_preceding_tagged_statement_8616(
+                self.root,
+                self.project,
+                self.fact.ins_addr,
+                self.fallback_assignment,
+                function=self.function,
+            )
+
+    def _fallback_stack_slot_expr_arm_8616(self) -> None:
+        """Run the STACK_SLOT_EXPR fallback placement chain."""
+        if _direct_stack_move_is_before_known_precontrol_8616(self.root, self.project, self.function, self.fact.ins_addr):
+            self.materialized = _replace_precontrol_stack_assignment_8616(
+                self.root,
+                self.dst_cvar,
+                self.fallback_assignment,
+                insert_before_control_when_no_match=True,
+            )
+        if not self.materialized:
+            self.materialized = _insert_before_first_stack_cvar_use_8616(self.root, self.fallback_assignment)
+        if not self.materialized and self.allow_unscoped_fallback_insert:
+            self.materialized = _insert_before_nearest_following_tagged_statement_8616(
+                self.root,
+                self.project,
+                self.fact.ins_addr,
+                self.fallback_assignment,
+            )
+
+    def _fallback_global_expr_arm_8616(self) -> None:
+        """Run the GLOBAL_* fallback placement chain."""
+        self.materialized = _insert_between_structured_siblings_8616(
+            self.root,
+            self.project,
+            self.fact.ins_addr,
+            self.fallback_assignment,
+        )
+        if (
+            not self.materialized
+            and _direct_stack_move_is_before_known_precontrol_8616(
+                self.root,
+                self.project,
+                self.function,
+                self.fact.ins_addr,
+            )
+        ):
+            self.materialized = _replace_precontrol_stack_assignment_8616(
+                self.root,
+                self.dst_cvar,
+                self.fallback_assignment,
+                insert_before_control_when_no_match=True,
+            )
+        if not self.materialized:
+            self.materialized = _insert_before_first_stack_cvar_use_8616(self.root, self.fallback_assignment)
+        if not self.materialized and self.allow_unscoped_fallback_insert:
+            self.materialized = _insert_before_nearest_following_tagged_statement_8616(
+                self.root,
+                self.project,
+                self.fact.ins_addr,
+                self.fallback_assignment,
+            )
+
+    def _fallback_segmented_refusal_8616(self) -> None:
+        """Refuse unscoped segmented-memory placement."""
+        # Structuring owns CFG scope through the placement service above.
+        # Refuse here when no exact owner accepted the Lowering-built value.
+        self.stats["segmented_memory_scope_refused_count"] = (
+            int(self.stats.get("segmented_memory_scope_refused_count", 0) or 0)
+            + int(not self.materialized)
+        )
 
     def _fact_materialize_fallback_8616(self) -> bool:
         """Apply the last-resort materialization fallback for a fact."""
@@ -17923,6 +20556,25 @@ def _candidate_functions_for_indexed_stack_facts_8616(codegen: StructuredAstValu
     return _candidate_functions_for_stack_facts_8616(codegen, project)
 
 
+def _indexed_bp_operand_stack_slot_8616(operand: StructuredAstValue) -> tuple[int, int] | None:
+    """Return ``(displacement, access size)`` for a ``[bp+index+disp]`` operand."""
+    if int(getattr(operand, "type", -1)) != X86_OP_MEM:
+        return None
+    mem = getattr(operand, "mem", None)
+    if mem is None:
+        return None
+    if int(getattr(mem, "base", 0) or 0) != X86_REG_BP:
+        return None
+    index_reg = int(getattr(mem, "index", 0) or 0)
+    if index_reg in {0, X86_REG_INVALID}:
+        return None
+    displacement = _canonical_stack_offset_8616(int(getattr(mem, "disp", 0) or 0))
+    if not isinstance(displacement, int):
+        return None
+    size = int(getattr(operand, "size", 0) or 0)
+    return displacement, size if size > 0 else 0
+
+
 def _indexed_bp_stack_fact_sizes_8616(codegen: StructuredAstValue, project: StructuredAstValue) -> dict[int, frozenset[int]]:
     cached = getattr(codegen, "_inertia_indexed_bp_stack_access_facts_8616", None)
     if isinstance(cached, dict):
@@ -17934,21 +20586,11 @@ def _indexed_bp_stack_fact_sizes_8616(codegen: StructuredAstValue, project: Stru
             capstone = getattr(block, "capstone", None)
             for insn in _boundary_tuple_8616(getattr(capstone, "insns", ()) or ()):
                 for operand in _boundary_tuple_8616(getattr(insn, "operands", ()) or ()):
-                    if int(getattr(operand, "type", -1)) != X86_OP_MEM:
+                    slot = _indexed_bp_operand_stack_slot_8616(operand)
+                    if slot is None:
                         continue
-                    mem = getattr(operand, "mem", None)
-                    if mem is None:
-                        continue
-                    if int(getattr(mem, "base", 0) or 0) != X86_REG_BP:
-                        continue
-                    index_reg = int(getattr(mem, "index", 0) or 0)
-                    if index_reg in {0, X86_REG_INVALID}:
-                        continue
-                    displacement = _canonical_stack_offset_8616(int(getattr(mem, "disp", 0) or 0))
-                    if not isinstance(displacement, int):
-                        continue
-                    size = int(getattr(operand, "size", 0) or 0)
-                    collected.setdefault(displacement, set()).add(size if size > 0 else 0)
+                    displacement, size = slot
+                    collected.setdefault(displacement, set()).add(size)
 
     facts = {disp: frozenset(sizes) for disp, sizes in sorted(collected.items())}
     codegen._inertia_indexed_bp_stack_access_facts_8616 = facts
@@ -18009,6 +20651,33 @@ def _stack_cvar_displacement_8616(codegen: StructuredAstValue, node: StructuredA
     return _canonical_stack_offset_8616(offset) if isinstance(offset, int) else None
 
 
+def _indexed_bp_term_displacement_8616(
+    codegen: StructuredAstValue, sign: int, term: StructuredAstValue
+) -> int | None:
+    """Resolve one signed term to a canonical BP-stack displacement."""
+    value = _constant_value_8616(term)
+    if value is not None:
+        return _signed_16bit_term_value_8616(sign, value)
+    if sign == 1:
+        return _stack_cvar_displacement_8616(codegen, term)
+    return None
+
+
+def _infer_indexed_access_width_8616(
+    residual_terms: tuple[tuple[int, StructuredAstValue], ...],
+    sizes: frozenset[int],
+) -> int | None:
+    """Infer the indexed access width from residual constants and fact sizes."""
+    constant_residual = 0
+    for sign, term in residual_terms:
+        value = _constant_value_8616(term)
+        if value is not None:
+            constant_residual += int(sign) * int(value)
+    if constant_residual % 2 or 1 in sizes:
+        return 1
+    return 2 if 2 in sizes else None
+
+
 def _match_indexed_bp_stack_address_terms_8616(
     codegen: StructuredAstValue,
     project: StructuredAstValue,
@@ -18022,12 +20691,7 @@ def _match_indexed_bp_stack_address_terms_8616(
     matched_index: int | None = None
     matched_displacement: int | None = None
     for index, (sign, term) in enumerate(terms):
-        displacement = None
-        value = _constant_value_8616(term)
-        if value is not None:
-            displacement = _signed_16bit_term_value_8616(sign, value)
-        elif sign == 1:
-            displacement = _stack_cvar_displacement_8616(codegen, term)
+        displacement = _indexed_bp_term_displacement_8616(codegen, sign, term)
         if displacement is None or displacement not in fact_sizes:
             continue
         matched_index = index
@@ -18045,16 +20709,9 @@ def _match_indexed_bp_stack_address_terms_8616(
         return None
     residual_terms = normalized_terms
     if width is None:
-        constant_residual = 0
-        for sign, term in residual_terms:
-            value = _constant_value_8616(term)
-            if value is not None:
-                constant_residual += int(sign) * int(value)
-        sizes = fact_sizes.get(matched_displacement, frozenset())
-        if constant_residual % 2 or 1 in sizes:
-            width = 1
-        elif 2 in sizes:
-            width = 2
+        width = _infer_indexed_access_width_8616(
+            residual_terms, fact_sizes.get(matched_displacement, frozenset())
+        )
     return RealModeIndexedStackAddress8616(
         base_displacement=matched_displacement,
         residual_terms=residual_terms,
@@ -18187,6 +20844,38 @@ class _SSLinearLowerRun8616:
         source_addrs = instruction_addrs_from_node_8616(node)
         if not source_addrs:
             return None
+        access_index = self._bp_access_index_8616()
+        if access_index is None:
+            return None
+        exact = select_instruction_bp_stack_access_8616(
+            access_index,
+            source_addrs,
+            displacement=shaped_access.displacement,
+            size=shaped_access.width if isinstance(shaped_access.width, int) else 0,
+            kind=StackMemoryAliasFactKind8616.STORE if require_lvalue else StackMemoryAliasFactKind8616.LOAD,
+        )
+        if exact is None:
+            return None
+        shaped_width = shaped_access.width if isinstance(shaped_access.width, int) else 0
+        owner_hint = self._logical_owner_hint_8616(source_addrs, shaped_access, shaped_width, exact)
+        exact = self._projected_exact_access_8616(source_addrs, shaped_access, shaped_width, exact)
+        if exact is None:
+            return None
+        self.instruction_bp_access_lane.raw += 1
+        self.instruction_bp_access_lane.normalized += 1
+        size = exact.size
+        width = shaped_access.width if isinstance(shaped_access.width, int) and shaped_access.width > 0 else size
+        logical_same_base_owner = bool(
+            exact.evidence is InstructionBpStackAccessEvidence8616.LOGICAL_ACCESS
+            and size > width > 0
+        )
+        if size > 0 and width > 0 and size != width and not logical_same_base_owner:
+            return None
+        self.instruction_bp_access_lane.classified += 1
+        return exact, owner_hint
+
+    def _bp_access_index_8616(self) -> StructuredAstValue | None:
+        """Lazily build the instruction-level BP access index, or None."""
         if self.instruction_bp_access_index is None:
             try:
                 source_alias = self.codegen._inertia_stack_memory_ssa_alias_artifact
@@ -18198,16 +20887,16 @@ class _SSLinearLowerRun8616:
                 self.codegen,
                 source_alias,
             )
-        exact = select_instruction_bp_stack_access_8616(
-            self.instruction_bp_access_index,
-            source_addrs,
-            displacement=shaped_access.displacement,
-            size=shaped_access.width if isinstance(shaped_access.width, int) else 0,
-            kind=StackMemoryAliasFactKind8616.STORE if require_lvalue else StackMemoryAliasFactKind8616.LOAD,
-        )
-        if exact is None:
-            return None
-        shaped_width = shaped_access.width if isinstance(shaped_access.width, int) else 0
+        return self.instruction_bp_access_index
+
+    def _logical_owner_hint_8616(
+        self,
+        source_addrs: StructuredAstValue,
+        shaped_access: RealModeLinearStackAccess8616,
+        shaped_width: int,
+        exact: StructuredAstValue,
+    ) -> StackValueOwnerHint8616 | None:
+        """Derive the owner-range hint from logical-access candidates."""
         logical_owner_ranges = {
             StackValueOwnerHint8616(candidate.displacement, candidate.size)
             for source_addr in source_addrs
@@ -18222,61 +20911,57 @@ class _SSLinearLowerRun8616:
             and candidate.displacement + candidate.size
             >= shaped_access.displacement + shaped_width
         }
-        owner_hint = (
-            next(iter(logical_owner_ranges))
-            if len(logical_owner_ranges) == 1
-            else StackValueOwnerHint8616(exact.displacement, exact.size)
-            if exact.evidence
-            is InstructionBpStackAccessEvidence8616.LOGICAL_ACCESS
-            else None
-        )
-        if (
+        if len(logical_owner_ranges) == 1:
+            return next(iter(logical_owner_ranges))
+        if exact.evidence is InstructionBpStackAccessEvidence8616.LOGICAL_ACCESS:
+            return StackValueOwnerHint8616(exact.displacement, exact.size)
+        return None
+
+    def _projected_exact_access_8616(
+        self,
+        source_addrs: StructuredAstValue,
+        shaped_access: RealModeLinearStackAccess8616,
+        shaped_width: int,
+        exact: StructuredAstValue,
+    ) -> StructuredAstValue | None:
+        """Refine a logical access to the projected execution slice, or None to refuse."""
+        if not (
             exact.evidence is InstructionBpStackAccessEvidence8616.LOGICAL_ACCESS
             and exact.displacement != shaped_access.displacement
             and shaped_width > 0
         ):
-            entry_sp_offset = entry_sp_offset_for_machine_bp_range_8616(
-                self.codegen,
-                exact.displacement,
-                exact.size,
-            )
-            relative_offset = (
-                shaped_access.displacement - entry_sp_offset
-                if isinstance(entry_sp_offset, int)
-                else -1
-            )
-            projected_displacement = exact.displacement + relative_offset
-            if not 0 <= relative_offset <= exact.size - shaped_width:
-                return None
-            if relative_offset:
-                projected = {
-                    candidate
-                    for source_addr in source_addrs
-                    for candidate in self.instruction_bp_access_index.by_instruction_addr.get(
-                        source_addr,
-                        (),
-                    )
-                    if candidate.evidence
-                    is InstructionBpStackAccessEvidence8616.EXECUTION_SLICE
-                    and candidate.displacement == projected_displacement
-                    and candidate.size == shaped_width
-                    and candidate.kind is exact.kind
-                }
-                if len(projected) != 1:
-                    return None
-                exact = next(iter(projected))
-        self.instruction_bp_access_lane.raw += 1
-        self.instruction_bp_access_lane.normalized += 1
-        size = exact.size
-        width = shaped_access.width if isinstance(shaped_access.width, int) and shaped_access.width > 0 else size
-        logical_same_base_owner = bool(
-            exact.evidence is InstructionBpStackAccessEvidence8616.LOGICAL_ACCESS
-            and size > width > 0
+            return exact
+        entry_sp_offset = entry_sp_offset_for_machine_bp_range_8616(
+            self.codegen,
+            exact.displacement,
+            exact.size,
         )
-        if size > 0 and width > 0 and size != width and not logical_same_base_owner:
+        relative_offset = (
+            shaped_access.displacement - entry_sp_offset
+            if isinstance(entry_sp_offset, int)
+            else -1
+        )
+        projected_displacement = exact.displacement + relative_offset
+        if not 0 <= relative_offset <= exact.size - shaped_width:
             return None
-        self.instruction_bp_access_lane.classified += 1
-        return exact, owner_hint
+        if not relative_offset:
+            return exact
+        projected = {
+            candidate
+            for source_addr in source_addrs
+            for candidate in self.instruction_bp_access_index.by_instruction_addr.get(
+                source_addr,
+                (),
+            )
+            if candidate.evidence
+            is InstructionBpStackAccessEvidence8616.EXECUTION_SLICE
+            and candidate.displacement == projected_displacement
+            and candidate.size == shaped_width
+            and candidate.kind is exact.kind
+        }
+        if len(projected) != 1:
+            return None
+        return next(iter(projected))
 
     def transform(self, node: StructuredAstValue, *, require_lvalue: bool = False) -> StructuredAstValue:
         """Materialize proven SS accesses without substituting read projections for writes."""
@@ -18339,13 +21024,9 @@ class _SSLinearLowerRun8616:
                 access.displacement,
                 access.width,
             ):
-                indexed_access = _match_indexed_bp_stack_address_8616(self.project, self.codegen, stripped_node)
-                if indexed_access is not None:
-                    materialized = _materialize_indexed_bp_stack_address_8616(self.project, self.codegen, indexed_access)
-                    if materialized is not None:
-                        self.changed = True
-                        self.materialized_count += 1
-                        return materialized
+                materialized = self._materialize_indexed_deref_8616(stripped_node)
+                if materialized is not None:
+                    return materialized
             instruction_selection = self._instruction_bp_stack_access_8616(
                 stripped_node,
                 access,
@@ -18383,14 +21064,19 @@ class _SSLinearLowerRun8616:
             self.changed = True
             self.materialized_count += 1
             return cvar
+        return self._materialize_indexed_deref_8616(stripped_node)
+
+    def _materialize_indexed_deref_8616(self, stripped_node: StructuredAstValue) -> StructuredAstValue | None:
+        """Materialize a proven indexed BP stack address; ``None`` means fall through."""
         indexed_access = _match_indexed_bp_stack_address_8616(self.project, self.codegen, stripped_node)
-        if indexed_access is not None:
-            materialized = _materialize_indexed_bp_stack_address_8616(self.project, self.codegen, indexed_access)
-            if materialized is not None:
-                self.changed = True
-                self.materialized_count += 1
-                return materialized
-        return None
+        if indexed_access is None:
+            return None
+        materialized = _materialize_indexed_bp_stack_address_8616(self.project, self.codegen, indexed_access)
+        if materialized is None:
+            return None
+        self.changed = True
+        self.materialized_count += 1
+        return materialized
 
     def _transform_indexed_pointer_8616(self, stripped_node: StructuredAstValue) -> StructuredAstValue | None:
         """Materialize a proven indexed BP stack pointer call; ``None`` means fall through."""
@@ -18420,21 +21106,22 @@ class _SSLinearLowerRun8616:
             "init", "initializer", "condition", "cond", "iftrue", "iffalse", "iteration",
             "iterator", "body", "else_node", "retval", "switch", "cases", "default",
         ):
-            if not hasattr(node, attr):
-                continue
-            value = getattr(node, attr)
-            if isinstance(value, dict):
-                if self._replace_dict_children_8616(value):
-                    local_changed = True
-                continue
-            if isinstance(value, (list, tuple)):
-                if self._replace_seq_children_8616(node, attr, value):
-                    local_changed = True
-            elif value is not None and self._replace_scalar_child_8616(node, attr, value):
+            if self._replace_named_child_8616(node, attr):
                 local_changed = True
         if self._replace_condition_pairs_8616(node):
             local_changed = True
         return local_changed
+
+    def _replace_named_child_8616(self, node: StructuredAstValue, attr: str) -> bool:
+        """Transform one named child field (dict, sequence, or scalar)."""
+        if not hasattr(node, attr):
+            return False
+        value = getattr(node, attr)
+        if isinstance(value, dict):
+            return self._replace_dict_children_8616(value)
+        if isinstance(value, (list, tuple)):
+            return self._replace_seq_children_8616(node, attr, value)
+        return value is not None and self._replace_scalar_child_8616(node, attr, value)
 
     def _replace_dict_children_8616(self, value: dict) -> bool:
         """Transform each dict-valued child in place."""

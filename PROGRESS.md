@@ -577,3 +577,71 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   `_recorded_stub_8616`.
 - One `test_x86_16_cli` failure: kvikdos non-UTF8 subprocess decode
   (pre-existing environmental, in recompile_check path).
+- `turbo_debug_tdinfo.py`: full TDS 3.x table coverage — flat indexed type
+  table (8B records, 1-based), member stream (fields/methods/var-decls/
+  offset-exts/trailers), builtin descriptors + range extensions,
+  MEMBER_FUNCTION(0x2D) + VL_STRUCT/VL_UNION extension slots, class table
+  (11B: parent idx/count, member ordinal, name, vptr, info), parent table,
+  module-class ranges, line/scope/correlation tables; per-module type
+  copies reconciled by run anchoring + continuation; member offsets solved
+  against aggregate trailer size (m_actor signal@82 matches TDUMP).
+- `dump_debug_info.py`: serializes modules, sources, segments, classes,
+  parents, module-class runs, line entries, scopes, correlations,
+  descriptors (incl. builtin_type_id, member_ref), member lists
+  (block_ordinal), and named raw_table_spans for every TDINFO region.
+- `borland_mangling.py`: typed Borland C++ name demangler (`@scope@name$Q<types>`)
+  — scopes, ctor/dtor/operator/conversion specials, builtins, near/far
+  pointers & references, `<len>` class types, arrays, function-pointer
+  signatures (`NQV$V`), member pointers, `T<n>` 1-based arg repeats,
+  U/Z/X/W qualifiers. All 512 mangled names in RIPTIDE.EXE decode with
+  zero errors; every function signature renders identical to TDUMP's own
+  demangling (verified against TD.OUT). Exposed in the dump as
+  `demangled_names` + per-list `method_signatures`.
+- Member type resolution + `struct_declarations`: flat type indexes now
+  render as C-style names via `TDINFO_BUILTIN_TYPE_NAMES` (evidence-mapped:
+  id5=int, id8=uchar, id9=uint, id6=long, id0a=ulong, id4=char, id0=void,
+  id0d/0f/10=float/double/ldouble; unconfirmed → builtin_NN).  Pointer
+  targets recurse (m_actor far*, unsigned char far*, void(far*)() for fn
+  pointers), array counts derive from size/elem_size when bounds absent
+  (loop.cels → cel far*[16]), anonymous bitfield containers inline as
+  `struct { unsigned deleting:1; ... }`.  Per-member `type_name` serialized;
+  `struct_declarations` emits full reconstructed structs (m_actor 84B,
+  FILE == stdio.h, GAME_CAST actors[200], PCXHEAD, TILEMAP 930B).
+- MEMBER_FUNCTION extension decoded: the 8-byte slot after each 0x2D
+  descriptor = `owner_type_idx u16, reserved u16, method_ordinal u16,
+  flags u16` (owner verified: 0x6f3→m_actor, 0x7ce→text_pager; ordinal =
+  the method's member-table record index, matching TDUMP [NNN]; flags
+  0x1000=method / 0x3000=virtual — gui_item vtable methods — /0x9000).
+  `TDInfoTypeDescriptor.extension` preserves all extension slots raw.
+- `function_signatures`: symbol × descriptor join gives 492 signatures —
+  seg:off address + demangled param list + descriptor return type
+  (`m_actor::facing_actor` → `unsigned char`, `gm_read` → `long`,
+  `check_new_pos` → `unsigned int`).  Return type is the piece mangling
+  cannot express; this completes per-function signatures.
+- BC31 empirical harness (dosbox + real BCC/TDUMP on TT/TT2/TT3.EXE) resolved
+  the remaining unknowns: every Borland builtin id is now named from TDUMP's
+  own Types Table — the exotics are Turbo-Pascal/DPMI shared builtins
+  (0x07 signed quad→long long, 0x0C pascal_char, 0x0E pascal_real48,
+  0x24 label, 0x28 pascal_bool, 0x2A pword, 0x2B tbyte); id4 corrected to
+  `signed char` (TD32 folds plain char into id8=uchar, short/ushort into
+  the int slots).  Pointer attr bits decoded: 0x01=huge, 0x04=_DS —
+  serialized as `pointer_flags`.
+- MEMBER_FUNCTION extension fully decoded against BC31: ext =
+  `owner_type u16, vtab_offset u16, member_name_index u16, flags u16`.
+  vtab_offset = byte offset into the owning class vtable (0 for
+  non-virtual; gui_item/button virtuals at 4,8 — BC uses 2 slots for
+  dtors).  Field [4:6] is the member's name-pool index (earlier
+  `method_ordinal` was wrong — TDUMP's [NNN] is the name index; dump now
+  emits `member_name_index`+`member_name`).  Flags high nibble
+  (0x1000/0x3000/0x9000) varies per module for the same class —
+  emission-state marker, not virtualness.
+- New descriptor kind MEMBER_POINTER=0x38 (T K::*, size 4 data / 6 fn,
+  ref=pointee descriptor, 8-byte ext slot).  SEGMENT=0x17 renders
+  `T _seg *`, member ptrs render `member_ptr(T)`.
+- VL_STRUCT/VL_UNION = named parameter-frame type tags (19 records named
+  PARMS/WPPARMS/RPPARMS/SHOWPAGEPARMS, class STRUCT_UNION_OR_ENUM symbols);
+  their member-payload encoding is the one unresolved format detail —
+  redundant for reconstruction since signatures come from mangling.
+- Coverage attribution verified: map entries are 1-based start indexes
+  into the offsets table; regression test added
+  (test_tdinfo_coverage_offsets_attribute_to_their_segment).

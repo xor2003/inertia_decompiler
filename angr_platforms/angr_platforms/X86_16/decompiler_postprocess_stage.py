@@ -1800,6 +1800,312 @@ def _branch_target_return_expr_8616(
     )
 
 
+def _terminal_ax_stack_offset_8616(expr: StructuredAstValue) -> int | None:
+    """Read a stack offset from a dynamic codegen variable compatibility object."""
+    if not isinstance(expr, CVariable):
+        return None
+    variable = expr.variable
+    if not isinstance(variable, SimStackVariable):
+        return None
+    offset = variable.offset
+    return offset if isinstance(offset, int) else None
+
+
+def _terminal_ax_load_block_8616(project: StructuredAstValue, block_addr: int) -> StructuredAstValue | None:
+    try:
+        return project.factory.block(int(block_addr), opt_level=0)
+    except Exception:
+        return None
+
+
+@dataclass
+class _TerminalAxScanRun8616:
+    """Run state for terminal-AX return expression recovery."""
+
+    project: StructuredAstValue
+    codegen: StructuredAstValue
+    allow_al_return: bool
+    ax_value: StructuredAstValue | None = None
+    dx_value: StructuredAstValue | None = None
+    cx_value: StructuredAstValue | None = None
+    cl_value: StructuredAstValue | None = None
+
+    def combined_return_expr_8616(self) -> StructuredAstValue | None:
+        """Combine dynamic codegen compatibility expressions when both halves are proven."""
+        if self.ax_value is None:
+            return None
+        if self.dx_value is None:
+            return self.ax_value
+        ax_offset = _terminal_ax_stack_offset_8616(self.ax_value)
+        dx_offset = _terminal_ax_stack_offset_8616(self.dx_value)
+        if isinstance(ax_offset, int) and isinstance(dx_offset, int) and dx_offset == ax_offset + 2:
+            wide = _jcc._stack_slot_expr_8616(self.codegen, ax_offset, 4)
+            if wide is not None:
+                return wide
+        if isinstance(self.ax_value, CConstant) and isinstance(self.dx_value, CConstant):
+            low = int(self.ax_value.value or 0) & 0xFFFF
+            high = int(self.dx_value.value or 0) & 0xFFFF
+            value = (high << 16) | low
+            if value & 0x80000000:
+                value -= 0x100000000
+            return CConstant(value, SimTypeLong(True), codegen=self.codegen)
+        return self.ax_value
+
+    def terminal_effect_value_expr_8616(
+        self, effect: TerminalAxReturnEffect8616, *, size: int
+    ) -> StructuredAstValue | None:
+        """Materialize a typed terminal-AX effect into a dynamic codegen C expression."""
+        if effect.kind is TerminalAxReturnEffectKind8616.MOV_REG_IMM:
+            value = int(effect.imm or 0)
+            if size == 1:
+                return CConstant(value & 0xFF, SimTypeChar(False), codegen=self.codegen)
+            return CConstant(_signed_i16_immediate_8616(value), SimTypeShort(False), codegen=self.codegen)
+        if effect.kind is TerminalAxReturnEffectKind8616.MOV_REG_STACK:
+            return _terminal_stack_arg_expr_8616(
+                self.project, self.codegen, int(effect.mem_disp or 0), int(effect.mem_size or size)
+            )
+        if effect.kind is TerminalAxReturnEffectKind8616.MOV_REG_DIRECT_GLOBAL:
+            return _terminal_direct_global_expr_8616(
+                self.project,
+                self.codegen,
+                int(effect.mem_disp or 0),
+                int(effect.mem_size or size),
+            )
+        return None
+
+    def terminal_effect_rhs_expr_8616(
+        self, effect: TerminalAxReturnEffect8616, *, size: int
+    ) -> StructuredAstValue | None:
+        """Materialize a typed terminal-AX RHS operand into a dynamic codegen C expression."""
+        if effect.rhs_kind is TerminalAxReturnOperandKind8616.REGISTER:
+            register_value = {
+                "ax": self.ax_value, "dx": self.dx_value,
+                "cx": self.cx_value, "cl": self.cl_value,
+            }.get(effect.rhs_reg or "")
+            return _clone_c_expr_8616(register_value) if register_value is not None else None
+        if effect.rhs_kind is TerminalAxReturnOperandKind8616.IMM:
+            value = int(effect.imm or 0)
+            if size == 1:
+                return CConstant(value & 0xFF, SimTypeChar(False), codegen=self.codegen)
+            return CConstant(_signed_i16_immediate_8616(value), SimTypeShort(False), codegen=self.codegen)
+        if effect.rhs_kind is TerminalAxReturnOperandKind8616.STACK:
+            return _terminal_stack_arg_expr_8616(
+                self.project, self.codegen, int(effect.mem_disp or 0), int(effect.mem_size or size)
+            )
+        if effect.rhs_kind is TerminalAxReturnOperandKind8616.DIRECT_GLOBAL:
+            return _terminal_direct_global_expr_8616(
+                self.project,
+                self.codegen,
+                int(effect.mem_disp or 0),
+                int(effect.mem_size or size),
+            )
+        return None
+
+    def _byte_stack_value_expr_from_disp_8616(self, disp: int) -> StructuredAstValue | None:
+        """Materialize an 8-bit stack value from a typed BP-relative terminal effect."""
+        byte = _terminal_stack_arg_expr_8616(self.project, self.codegen, disp, 1)
+        if byte is None:
+            return None
+        return CBinaryOp(
+            "And",
+            _clone_c_expr_8616(byte),
+            CConstant(0xFF, SimTypeShort(False), codegen=self.codegen),
+            codegen=self.codegen,
+        )
+
+    def process_instruction_8616(
+        self,
+        insn: StructuredAstValue,
+        effect: TerminalAxReturnEffect8616,
+    ) -> TerminalAxInstructionAction8616:
+        """Consume one dynamic capstone compatibility boundary instruction."""
+        action = self._special_effect_8616(effect)
+        if action is not None:
+            return action
+        action = self._ax_alu_effect_8616(effect)
+        if action is not None:
+            return action
+        action = self._ax_shift_effect_8616(effect)
+        if action is not None:
+            return action
+        action = self._cx_effect_8616(effect)
+        if action is not None:
+            return action
+        action = self._reg_alu_value_effect_8616(effect)
+        if action is not None:
+            return action
+        action = self._ax_mul_effect_8616(effect)
+        if action is not None:
+            return action
+        if effect.kind in {
+            TerminalAxReturnEffectKind8616.MOV_REG_IMM,
+            TerminalAxReturnEffectKind8616.MOV_REG_STACK,
+            TerminalAxReturnEffectKind8616.MOV_REG_DIRECT_GLOBAL,
+        }:
+            action = self._mov_value_effect_8616(effect)
+            if action is not None:
+                return action
+        return TerminalAxInstructionAction8616()
+
+    def _special_effect_8616(
+        self, effect: TerminalAxReturnEffect8616
+    ) -> TerminalAxInstructionAction8616 | None:
+        """Handle abort/clobber/no-op effect kinds; ``None`` means no match."""
+        if effect.kind is TerminalAxReturnEffectKind8616.OTHER and effect.dst_reg in {"al", "ah", "ax", "cl", "cx", "dx"}:
+            return TerminalAxInstructionAction8616(abort=True)
+        if effect.kind is TerminalAxReturnEffectKind8616.CALL_CLOBBER:
+            self.ax_value = None
+            self.dx_value = None
+            self.cx_value = None
+            self.cl_value = None
+            return TerminalAxInstructionAction8616(classified=True)
+        if effect.kind is TerminalAxReturnEffectKind8616.CLEAR_AH_TO_ZERO and self.ax_value is not None:
+            return TerminalAxInstructionAction8616(classified=True)
+        return None
+
+    def _ax_alu_effect_8616(
+        self, effect: TerminalAxReturnEffect8616
+    ) -> TerminalAxInstructionAction8616 | None:
+        """Apply AX_ALU_IMM/AX_INCDEC updates; ``None`` means no match."""
+        if effect.kind is TerminalAxReturnEffectKind8616.AX_ALU_IMM and self.ax_value is not None and effect.op:
+            imm = CConstant(
+                _signed_i16_immediate_8616(int(effect.imm or 0)),
+                SimTypeShort(False),
+                codegen=self.codegen,
+            )
+            self.ax_value = CBinaryOp(effect.op, _clone_c_expr_8616(self.ax_value), imm, codegen=self.codegen)
+            return TerminalAxInstructionAction8616(classified=True)
+        if effect.kind is TerminalAxReturnEffectKind8616.AX_INCDEC and self.ax_value is not None and effect.op:
+            one = CConstant(1, SimTypeShort(False), codegen=self.codegen)
+            self.ax_value = CBinaryOp(effect.op, _clone_c_expr_8616(self.ax_value), one, codegen=self.codegen)
+            return TerminalAxInstructionAction8616(classified=True)
+        return None
+
+    def _ax_shift_effect_8616(
+        self, effect: TerminalAxReturnEffect8616
+    ) -> TerminalAxInstructionAction8616 | None:
+        """Apply AL_SHL_IMM/AX_SHR_CL updates; ``None`` means no match."""
+        if effect.kind is TerminalAxReturnEffectKind8616.AL_SHL_IMM and self.ax_value is not None:
+            imm = CConstant(int(effect.imm or 0), SimTypeChar(False), codegen=self.codegen)
+            self.ax_value = CBinaryOp("Shl", _clone_c_expr_8616(self.ax_value), imm, codegen=self.codegen)
+            return TerminalAxInstructionAction8616(classified=True)
+        if effect.kind is TerminalAxReturnEffectKind8616.AX_SHR_CL and self.ax_value is not None and self.cl_value is not None:
+            self.ax_value = CBinaryOp("Shr", _clone_c_expr_8616(self.ax_value), _clone_c_expr_8616(self.cl_value), codegen=self.codegen)
+            return TerminalAxInstructionAction8616(classified=True)
+        return None
+
+    def _cx_effect_8616(
+        self, effect: TerminalAxReturnEffect8616
+    ) -> TerminalAxInstructionAction8616 | None:
+        """Apply CX_SHL_IMM/AX_OR_CX updates; ``None`` means no match."""
+        if effect.kind is TerminalAxReturnEffectKind8616.CX_SHL_IMM and self.cx_value is not None:
+            imm = CConstant(int(effect.imm or 0), SimTypeShort(False), codegen=self.codegen)
+            self.cx_value = CBinaryOp("Shl", _clone_c_expr_8616(self.cx_value), imm, codegen=self.codegen)
+            return TerminalAxInstructionAction8616(classified=True)
+        if effect.kind is TerminalAxReturnEffectKind8616.AX_OR_CX and self.ax_value is not None and self.cx_value is not None:
+            self.ax_value = CBinaryOp("Or", _clone_c_expr_8616(self.ax_value), _clone_c_expr_8616(self.cx_value), codegen=self.codegen)
+            return TerminalAxInstructionAction8616(classified=True)
+        return None
+
+    def _reg_alu_value_effect_8616(
+        self, effect: TerminalAxReturnEffect8616
+    ) -> TerminalAxInstructionAction8616 | None:
+        """Apply a REG_ALU_VALUE update; ``None`` means no match."""
+        if not (
+            effect.kind is TerminalAxReturnEffectKind8616.REG_ALU_VALUE
+            and effect.dst_reg in {"al", "ax"}
+            and self.ax_value is not None
+            and effect.op
+        ):
+            return None
+        rhs_size = 1 if effect.dst_reg == "al" else 2
+        rhs = self.terminal_effect_rhs_expr_8616(effect, size=rhs_size)
+        if rhs is None:
+            return TerminalAxInstructionAction8616(abort=True)
+        self.ax_value = CBinaryOp(effect.op, _clone_c_expr_8616(self.ax_value), _clone_c_expr_8616(rhs), codegen=self.codegen)
+        return TerminalAxInstructionAction8616(classified=True)
+
+    def _ax_mul_effect_8616(
+        self, effect: TerminalAxReturnEffect8616
+    ) -> TerminalAxInstructionAction8616 | None:
+        """Apply an AX_MUL_VALUE update; ``None`` means no match."""
+        if effect.kind is not TerminalAxReturnEffectKind8616.AX_MUL_VALUE or self.ax_value is None:
+            return None
+        rhs = self.terminal_effect_rhs_expr_8616(effect, size=2)
+        if rhs is None:
+            return TerminalAxInstructionAction8616(abort=True)
+        self.ax_value = CBinaryOp("Mul", _clone_c_expr_8616(self.ax_value), _clone_c_expr_8616(rhs), codegen=self.codegen)
+        self.dx_value = None
+        return TerminalAxInstructionAction8616(classified=True)
+
+    def _mov_value_effect_8616(
+        self, effect: TerminalAxReturnEffect8616
+    ) -> TerminalAxInstructionAction8616 | None:
+        """Route MOV_REG_* effects into tracked register values; ``None`` means no match."""
+        if effect.dst_reg == "cl" and effect.kind is TerminalAxReturnEffectKind8616.MOV_REG_IMM:
+            self.cl_value = CConstant(int(effect.imm or 0), SimTypeChar(False), codegen=self.codegen)
+            return TerminalAxInstructionAction8616(classified=True)
+        if effect.dst_reg == "cx":
+            value = self.terminal_effect_value_expr_8616(effect, size=2)
+            if value is not None:
+                self.cx_value = value
+                return TerminalAxInstructionAction8616(classified=True)
+        if effect.dst_reg == "al":
+            action = self._mov_al_effect_8616(effect)
+            if action is not None:
+                return action
+        if effect.dst_reg == "ah":
+            action = self._mov_ah_effect_8616(effect)
+            if action is not None:
+                return action
+        if effect.dst_reg in {"ax", "dx"}:
+            action = self._mov_ax_dx_effect_8616(effect)
+            if action is not None:
+                return action
+        return None
+
+    def _mov_ah_effect_8616(
+        self, effect: TerminalAxReturnEffect8616
+    ) -> TerminalAxInstructionAction8616 | None:
+        """Compose a MOV-to-AH byte lane into AX; ``None`` means no proven value."""
+        if self.ax_value is None:
+            return None
+        value = self.terminal_effect_value_expr_8616(effect, size=1)
+        if isinstance(value, CExpression) and isinstance(self.ax_value, CExpression):
+            self.ax_value = compose_ax_byte_lanes_8616(self.codegen, self.ax_value, value)
+            self.dx_value = None
+            return TerminalAxInstructionAction8616(classified=True)
+        return None
+
+    def _mov_ax_dx_effect_8616(
+        self, effect: TerminalAxReturnEffect8616
+    ) -> TerminalAxInstructionAction8616 | None:
+        """Apply a MOV-to-AX/DX word value; ``None`` means no proven value."""
+        value = self.terminal_effect_value_expr_8616(effect, size=2)
+        if value is not None:
+            if effect.dst_reg == "ax":
+                self.ax_value = value
+            elif effect.dst_reg == "dx":
+                self.dx_value = value
+            return TerminalAxInstructionAction8616(classified=True)
+        return None
+
+    def _mov_al_effect_8616(
+        self, effect: TerminalAxReturnEffect8616
+    ) -> TerminalAxInstructionAction8616 | None:
+        """Apply a MOV-to-AL value update; ``None`` means no proven value."""
+        value = None
+        if not self.allow_al_return and effect.kind is TerminalAxReturnEffectKind8616.MOV_REG_STACK:
+            value = self._byte_stack_value_expr_from_disp_8616(int(effect.mem_disp or 0))
+        elif self.allow_al_return:
+            value = self.terminal_effect_value_expr_8616(effect, size=1)
+        if value is not None:
+            self.ax_value = value
+            self.dx_value = None
+            return TerminalAxInstructionAction8616(classified=True)
+        return None
+
+
 def _linear_terminal_ax_return_expr_8616(
     project: StructuredAstValue, codegen: StructuredAstValue, function: StructuredAstValue
 ) -> StructuredAstValue | None:
@@ -1818,10 +2124,6 @@ def _linear_terminal_ax_return_expr_8616(
         )
     if not block_addrs:
         return None
-    ax_value: StructuredAstValue | None = None
-    dx_value: StructuredAstValue | None = None
-    cx_value: StructuredAstValue | None = None
-    cl_value: StructuredAstValue | None = None
     prototype = getattr(getattr(codegen, "cfunc", None), "functy", None) or getattr(
         getattr(codegen, "cfunc", None), "prototype", None
     )
@@ -1829,205 +2131,14 @@ def _linear_terminal_ax_return_expr_8616(
     return_bits = getattr(return_type, "size", None)
     allow_al_return = isinstance(return_type, SimTypeChar) or (isinstance(return_bits, int) and return_bits <= 8)
 
-    def _stack_offset(expr: StructuredAstValue) -> int | None:
-        """Read a stack offset from a dynamic codegen variable compatibility object."""
-        if not isinstance(expr, CVariable):
-            return None
-        variable = expr.variable
-        if not isinstance(variable, SimStackVariable):
-            return None
-        offset = variable.offset
-        return offset if isinstance(offset, int) else None
-
-    def _combined_return_expr() -> StructuredAstValue | None:
-        """Combine dynamic codegen compatibility expressions when both halves are proven."""
-        if ax_value is None:
-            return None
-        if dx_value is None:
-            return ax_value
-        ax_offset = _stack_offset(ax_value)
-        dx_offset = _stack_offset(dx_value)
-        if isinstance(ax_offset, int) and isinstance(dx_offset, int) and dx_offset == ax_offset + 2:
-            wide = _jcc._stack_slot_expr_8616(codegen, ax_offset, 4)
-            if wide is not None:
-                return wide
-        if isinstance(ax_value, CConstant) and isinstance(dx_value, CConstant):
-            low = int(ax_value.value or 0) & 0xFFFF
-            high = int(dx_value.value or 0) & 0xFFFF
-            value = (high << 16) | low
-            if value & 0x80000000:
-                value -= 0x100000000
-            return CConstant(value, SimTypeLong(True), codegen=codegen)
-        return ax_value
-
-    def _terminal_effect_value_expr(effect: TerminalAxReturnEffect8616, *, size: int) -> StructuredAstValue | None:
-        """Materialize a typed terminal-AX effect into a dynamic codegen C expression."""
-        if effect.kind is TerminalAxReturnEffectKind8616.MOV_REG_IMM:
-            value = int(effect.imm or 0)
-            if size == 1:
-                return CConstant(value & 0xFF, SimTypeChar(False), codegen=codegen)
-            return CConstant(_signed_i16_immediate_8616(value), SimTypeShort(False), codegen=codegen)
-        if effect.kind is TerminalAxReturnEffectKind8616.MOV_REG_STACK:
-            return _terminal_stack_arg_expr_8616(
-                project, codegen, int(effect.mem_disp or 0), int(effect.mem_size or size)
-            )
-        if effect.kind is TerminalAxReturnEffectKind8616.MOV_REG_DIRECT_GLOBAL:
-            return _terminal_direct_global_expr_8616(
-                project,
-                codegen,
-                int(effect.mem_disp or 0),
-                int(effect.mem_size or size),
-            )
-        return None
-
-    def _terminal_effect_rhs_expr(effect: TerminalAxReturnEffect8616, *, size: int) -> StructuredAstValue | None:
-        """Materialize a typed terminal-AX RHS operand into a dynamic codegen C expression."""
-        if effect.rhs_kind is TerminalAxReturnOperandKind8616.REGISTER:
-            register_value = {"ax": ax_value, "dx": dx_value, "cx": cx_value, "cl": cl_value}.get(effect.rhs_reg or "")
-            return _clone_c_expr_8616(register_value) if register_value is not None else None
-        if effect.rhs_kind is TerminalAxReturnOperandKind8616.IMM:
-            value = int(effect.imm or 0)
-            if size == 1:
-                return CConstant(value & 0xFF, SimTypeChar(False), codegen=codegen)
-            return CConstant(_signed_i16_immediate_8616(value), SimTypeShort(False), codegen=codegen)
-        if effect.rhs_kind is TerminalAxReturnOperandKind8616.STACK:
-            return _terminal_stack_arg_expr_8616(
-                project, codegen, int(effect.mem_disp or 0), int(effect.mem_size or size)
-            )
-        if effect.rhs_kind is TerminalAxReturnOperandKind8616.DIRECT_GLOBAL:
-            return _terminal_direct_global_expr_8616(
-                project,
-                codegen,
-                int(effect.mem_disp or 0),
-                int(effect.mem_size or size),
-            )
-        return None
-
-    def _byte_stack_value_expr_from_disp(disp: int) -> StructuredAstValue | None:
-        """Materialize an 8-bit stack value from a typed BP-relative terminal effect."""
-        byte = _terminal_stack_arg_expr_8616(project, codegen, disp, 1)
-        if byte is None:
-            return None
-        return CBinaryOp(
-            "And",
-            _clone_c_expr_8616(byte),
-            CConstant(0xFF, SimTypeShort(False), codegen=codegen),
-            codegen=codegen,
-        )
-
-    def _load_block(block_addr: int) -> StructuredAstValue | None:
-        try:
-            return project.factory.block(int(block_addr), opt_level=0)
-        except Exception:
-            return None
-
-    def _process_terminal_ax_instruction(
-        insn: StructuredAstValue,
-        effect: TerminalAxReturnEffect8616,
-    ) -> TerminalAxInstructionAction8616:
-        """Consume one dynamic capstone compatibility boundary instruction."""
-        nonlocal ax_value, dx_value, cx_value, cl_value
-        if effect.kind is TerminalAxReturnEffectKind8616.OTHER and effect.dst_reg in {"al", "ah", "ax", "cl", "cx", "dx"}:
-            return TerminalAxInstructionAction8616(abort=True)
-        if effect.kind is TerminalAxReturnEffectKind8616.CALL_CLOBBER:
-            ax_value = None
-            dx_value = None
-            cx_value = None
-            cl_value = None
-            return TerminalAxInstructionAction8616(classified=True)
-        if effect.kind is TerminalAxReturnEffectKind8616.CLEAR_AH_TO_ZERO and ax_value is not None:
-            return TerminalAxInstructionAction8616(classified=True)
-        if effect.kind is TerminalAxReturnEffectKind8616.AX_ALU_IMM and ax_value is not None and effect.op:
-            imm = CConstant(
-                _signed_i16_immediate_8616(int(effect.imm or 0)),
-                SimTypeShort(False),
-                codegen=codegen,
-            )
-            ax_value = CBinaryOp(effect.op, _clone_c_expr_8616(ax_value), imm, codegen=codegen)
-            return TerminalAxInstructionAction8616(classified=True)
-        if effect.kind is TerminalAxReturnEffectKind8616.AX_INCDEC and ax_value is not None and effect.op:
-            one = CConstant(1, SimTypeShort(False), codegen=codegen)
-            ax_value = CBinaryOp(effect.op, _clone_c_expr_8616(ax_value), one, codegen=codegen)
-            return TerminalAxInstructionAction8616(classified=True)
-        if effect.kind is TerminalAxReturnEffectKind8616.AL_SHL_IMM and ax_value is not None:
-            imm = CConstant(int(effect.imm or 0), SimTypeChar(False), codegen=codegen)
-            ax_value = CBinaryOp("Shl", _clone_c_expr_8616(ax_value), imm, codegen=codegen)
-            return TerminalAxInstructionAction8616(classified=True)
-        if effect.kind is TerminalAxReturnEffectKind8616.AX_SHR_CL and ax_value is not None and cl_value is not None:
-            ax_value = CBinaryOp("Shr", _clone_c_expr_8616(ax_value), _clone_c_expr_8616(cl_value), codegen=codegen)
-            return TerminalAxInstructionAction8616(classified=True)
-        if effect.kind is TerminalAxReturnEffectKind8616.CX_SHL_IMM and cx_value is not None:
-            imm = CConstant(int(effect.imm or 0), SimTypeShort(False), codegen=codegen)
-            cx_value = CBinaryOp("Shl", _clone_c_expr_8616(cx_value), imm, codegen=codegen)
-            return TerminalAxInstructionAction8616(classified=True)
-        if effect.kind is TerminalAxReturnEffectKind8616.AX_OR_CX and ax_value is not None and cx_value is not None:
-            ax_value = CBinaryOp("Or", _clone_c_expr_8616(ax_value), _clone_c_expr_8616(cx_value), codegen=codegen)
-            return TerminalAxInstructionAction8616(classified=True)
-        if (
-            effect.kind is TerminalAxReturnEffectKind8616.REG_ALU_VALUE
-            and effect.dst_reg in {"al", "ax"}
-            and ax_value is not None
-            and effect.op
-        ):
-            rhs_size = 1 if effect.dst_reg == "al" else 2
-            rhs = _terminal_effect_rhs_expr(effect, size=rhs_size)
-            if rhs is None:
-                return TerminalAxInstructionAction8616(abort=True)
-            ax_value = CBinaryOp(effect.op, _clone_c_expr_8616(ax_value), _clone_c_expr_8616(rhs), codegen=codegen)
-            return TerminalAxInstructionAction8616(classified=True)
-        if effect.kind is TerminalAxReturnEffectKind8616.AX_MUL_VALUE and ax_value is not None:
-            rhs = _terminal_effect_rhs_expr(effect, size=2)
-            if rhs is None:
-                return TerminalAxInstructionAction8616(abort=True)
-            ax_value = CBinaryOp("Mul", _clone_c_expr_8616(ax_value), _clone_c_expr_8616(rhs), codegen=codegen)
-            dx_value = None
-            return TerminalAxInstructionAction8616(classified=True)
-        if effect.kind in {
-            TerminalAxReturnEffectKind8616.MOV_REG_IMM,
-            TerminalAxReturnEffectKind8616.MOV_REG_STACK,
-            TerminalAxReturnEffectKind8616.MOV_REG_DIRECT_GLOBAL,
-        }:
-            if effect.dst_reg == "cl" and effect.kind is TerminalAxReturnEffectKind8616.MOV_REG_IMM:
-                cl_value = CConstant(int(effect.imm or 0), SimTypeChar(False), codegen=codegen)
-                return TerminalAxInstructionAction8616(classified=True)
-            if effect.dst_reg == "cx":
-                value = _terminal_effect_value_expr(effect, size=2)
-                if value is not None:
-                    cx_value = value
-                    return TerminalAxInstructionAction8616(classified=True)
-            if effect.dst_reg == "al":
-                value = None
-                if not allow_al_return and effect.kind is TerminalAxReturnEffectKind8616.MOV_REG_STACK:
-                    value = _byte_stack_value_expr_from_disp(int(effect.mem_disp or 0))
-                elif allow_al_return:
-                    value = _terminal_effect_value_expr(effect, size=1)
-                if value is not None:
-                    ax_value = value
-                    dx_value = None
-                    return TerminalAxInstructionAction8616(classified=True)
-            if effect.dst_reg == "ah" and ax_value is not None:
-                value = _terminal_effect_value_expr(effect, size=1)
-                if isinstance(value, CExpression) and isinstance(ax_value, CExpression):
-                    ax_value = compose_ax_byte_lanes_8616(codegen, ax_value, value)
-                    dx_value = None
-                    return TerminalAxInstructionAction8616(classified=True)
-            if effect.dst_reg in {"ax", "dx"}:
-                value = _terminal_effect_value_expr(effect, size=2)
-                if value is not None:
-                    if effect.dst_reg == "ax":
-                        ax_value = value
-                    elif effect.dst_reg == "dx":
-                        dx_value = value
-                    return TerminalAxInstructionAction8616(classified=True)
-        return TerminalAxInstructionAction8616()
-
+    run = _TerminalAxScanRun8616(project=project, codegen=codegen, allow_al_return=allow_al_return)
     scan_result = _structuring_linear_terminal_ax_return_scan_8616(
         block_addrs,
-        _load_block,
+        lambda addr: _terminal_ax_load_block_8616(project, addr),
         _jcc._branch_target_imm_8616,
         TerminalAxScanCallbacks8616(
-            combined_return_expr=_combined_return_expr,
-            process_instruction=_process_terminal_ax_instruction,
+            combined_return_expr=run.combined_return_expr_8616,
+            process_instruction=run.process_instruction_8616,
         ),
     )
     if scan_result.terminal_value_block_count:
@@ -9832,6 +9943,1137 @@ def _postprocess_run_pass_specs_8616(
     return _impl()
 
 
+@dataclass
+class _PostprocessPassRun8616:
+    """Run state for one postprocess pass transaction."""
+
+    project: StructuredAstValue
+    codegen: StructuredAstValue
+    validation_enabled: StructuredAstValue
+    per_pass_validation_enabled: StructuredAstValue
+    pass_timeout_seconds: StructuredAstValue
+    timeout_continue_passes: StructuredAstValue
+    trace_func_addr: StructuredAstValue
+    transaction_state: StructuredAstValue
+    rollback_snapshots: StructuredAstValue
+    optimization_witnesses: StructuredAstValue
+    pass_name: str = ""
+    step_func: StructuredAstValue = None
+    debug_pointer_ast: bool = False
+    pointer_ast_before: StructuredAstValue = ()
+    prototype_arg_state_before: StructuredAstValue = ()
+    prototype_before: StructuredAstValue = None
+    preflight: StructuredAstValue = None
+    is_optimization_pass: bool = False
+    force_pass_validation: bool = False
+    requires_snapshot: bool = False
+    return_chain_expected: StructuredAstValue = None
+    cycle_before: StructuredAstValue = None
+    cycle_after: StructuredAstValue = None
+    snapshot: StructuredAstValue = None
+    metadata_snapshot: StructuredAstValue = None
+    text_snapshot: StructuredAstValue = None
+    project_function_snapshot: StructuredAstValue = None
+    optimization_before: StructuredAstValue = None
+    step_changed: bool = False
+
+    def _optimization_witness_8616(self) -> tuple[object, object]:
+        """Build the exact AST and validation-input witness for one state."""
+        return (
+            structured_ast_generation_8616(self.codegen),
+            tail_validation_summary_input_generation_8616(self.project, self.codegen),
+        )
+
+    def _pointer_ast_lines_8616(self) -> tuple[str, ...]:
+        """Render pointer-relevant lines at the explicit angr C-AST boundary."""
+        if not self.debug_pointer_ast:
+            return ()
+        try:
+            text = str(self.codegen.cfunc.c_repr())
+        except (AttributeError, TypeError):
+            return ()
+        return tuple(
+            line.strip()
+            for line in text.splitlines()
+            if "[0]" in line or "SEG_U16" in line
+        )
+
+
+    def _prototype_arg_state_8616(self) -> tuple[tuple[int, int, str], ...]:
+        """Return argument storage/type state at the explicit angr boundary."""
+        if os.environ.get("INERTIA_DEBUG_X87_PROTO") != "1":
+            return ()
+        try:
+            return tuple(
+                (arg.variable.offset, arg.variable.size, repr(arg.variable_type))
+                for arg in tuple(self.codegen.cfunc.arg_list or ())
+            )
+        except AttributeError:
+            return ()
+
+
+    def _materialize_rollback_snapshot_8616(self) -> PostprocessRollbackSnapshot8616 | None:
+        """Capture every projection restored after a rejected postprocess pass."""
+        cfunc_snapshot = _snapshot_codegen_cfunc(self.codegen)
+        if cfunc_snapshot is None:
+            return None
+        return PostprocessRollbackSnapshot8616(
+            cfunc=cfunc_snapshot,
+            metadata=_snapshot_codegen_inertia_metadata_8616(self.codegen),
+            text=_snapshot_codegen_text_state_8616(self.codegen),
+            project_function=_snapshot_project_function_metadata_8616(
+                self.project,
+                getattr(getattr(self.codegen, "cfunc", None), "addr", None),
+            ),
+            cycle_path=self.cycle_before,
+        )
+
+
+    def _restore_step_state_8616(self, *, context: str | None = None) -> None:
+        _restore_project_function_metadata_8616(self.project_function_snapshot)
+        _restore_codegen_cfunc(self.codegen, self.snapshot)
+        _restore_codegen_inertia_metadata_8616(self.codegen, self.metadata_snapshot)
+        _restore_codegen_text_state_8616(self.codegen, self.text_snapshot)
+        self.transaction_state.record_cycle_path(self.cycle_before)
+        self.rollback_snapshots.invalidate(RollbackSnapshotInvalidation8616.RESTORE_CONSUMED)
+
+
+    def _preflight_gate_8616(self) -> bool | None:
+        """Decide the pass preflight; ``None`` means continue to execution."""
+        self.prototype_before = self.codegen.cfunc.functy
+        large_function_skip = bool(getattr(self.codegen, "_inertia_skip_per_pass_validation_large_function", False))
+        optional_reject_budget = int(
+            getattr(
+                self.codegen,
+                "_inertia_postprocess_optional_reject_budget_8616",
+                _PASS_REJECT_BUDGET_DEFAULT_8616,
+            )
+            or 0
+        )
+        optional_reject_count = int(
+            getattr(self.codegen, "_inertia_postprocess_optional_reject_count_8616", 0) or 0
+        )
+        preflight_input = PostprocessPassPreflightInput8616(
+            pass_name=self.pass_name,
+            validation_enabled=self.validation_enabled,
+            per_pass_validation_enabled=self.per_pass_validation_enabled,
+            large_function_skip=large_function_skip,
+            force_per_pass_requested=bool(os.environ.get("INERTIA_FORCE_PER_PASS_TV")),
+            optional_reject_budget=optional_reject_budget,
+            optional_reject_count=optional_reject_count,
+        )
+        self.preflight = decide_postprocess_pass_preflight_8616(preflight_input)
+        if self.preflight.action is PostprocessPassPreflightAction8616.PROBE_LOCAL_EVIDENCE:
+            self.preflight = decide_postprocess_pass_preflight_8616(
+                preflight_input.with_local_evidence(
+                    _postprocess_pass_has_local_evidence_8616(self.pass_name, self.codegen)
+                )
+            )
+        if self.preflight.action is PostprocessPassPreflightAction8616.REFUSE_LOCAL_PROOF:
+            reason = _postprocess_local_validation_refusal_reason_8616(self.pass_name, self.codegen)
+            refused = _boundary_list_8616(getattr(self.codegen, "_inertia_postprocess_refused_passes_8616", ()) or ())
+            refused.append({"pass": self.pass_name, "reason": reason.value})
+            self.codegen._inertia_postprocess_refused_passes_8616 = tuple(refused)
+            skipped = _boundary_list_8616(getattr(self.codegen, "_inertia_postprocess_rejected_passes", ()) or ())
+            skipped.append(self.pass_name)
+            self.codegen._inertia_postprocess_rejected_passes = tuple(skipped)
+            return True
+        if self.preflight.action is PostprocessPassPreflightAction8616.SKIP_REJECT_BUDGET:
+            skipped = _boundary_list_8616(
+                getattr(self.codegen, "_inertia_postprocess_reject_budget_skipped_passes_8616", ()) or ()
+            )
+            skipped.append(self.pass_name)
+            self.codegen._inertia_postprocess_reject_budget_skipped_passes_8616 = tuple(skipped)
+            rejected = _boundary_list_8616(getattr(self.codegen, "_inertia_postprocess_rejected_passes", ()) or ())
+            rejected.append(self.pass_name)
+            self.codegen._inertia_postprocess_rejected_passes = tuple(rejected)
+            return True
+        if self.preflight.action is not PostprocessPassPreflightAction8616.EXECUTE:
+            raise PipelineHardError(
+                "postprocess preflight did not close its local-evidence request",
+                layer="rewrite/postprocess:pass_transaction",
+            )
+        self.is_optimization_pass = self.preflight.is_optimization_pass
+        self.force_pass_validation = self.preflight.force_pass_validation
+        self.requires_snapshot = self.preflight.requires_snapshot
+        self.return_chain_expected = _return_chain_expected_counts_8616(self.codegen)
+        self.cycle_before = self.transaction_state.known_cycle_path
+
+
+    def _snapshot_setup_8616(self) -> bool | None:
+        """Acquire the rollback snapshot family; ``None`` means continue."""
+        snapshot_state = (
+            self.rollback_snapshots.acquire(self._materialize_rollback_snapshot_8616)
+            if self.requires_snapshot or self.return_chain_expected is not None
+            else None
+        )
+        self.rollback_snapshots.stats()
+        self.snapshot = snapshot_state.cfunc if snapshot_state is not None else None
+        if self.requires_snapshot and self.snapshot is None:
+            rejected = _boundary_list_8616(getattr(self.codegen, "_inertia_postprocess_rejected_passes", ()) or ())
+            rejected.append(self.pass_name)
+            self.codegen._inertia_postprocess_rejected_passes = tuple(rejected)
+            logging.getLogger(__name__).warning(
+                "Skipping 86_16 postprocess pass %s at function=%#x: validation snapshot unavailable: %s",
+                self.pass_name,
+                self.trace_func_addr if isinstance(self.trace_func_addr, int) else -1,
+                getattr(self.codegen, "_inertia_postprocess_snapshot_error", None) or "unknown",
+            )
+            return True
+        self.metadata_snapshot = snapshot_state.metadata if snapshot_state is not None else None
+        self.text_snapshot = snapshot_state.text if snapshot_state is not None else None
+        self.project_function_snapshot = snapshot_state.project_function if snapshot_state is not None else None
+        if snapshot_state is not None:
+            self.cycle_before = snapshot_state.cycle_path
+        self.optimization_before = (
+            self.optimization_witnesses.current_or_build(self._optimization_witness_8616)
+            if self.is_optimization_pass
+            else None
+        )
+
+
+    def _execute_step_8616(self) -> bool | None:
+        """Execute the pass step with timeout and debug surfacing; ``None`` means continue."""
+        try:
+            if isinstance(self.pass_timeout_seconds, int) and self.pass_timeout_seconds > 0:
+                with analysis_timeout(self.pass_timeout_seconds):  # noqa: SIM117
+                    with span("x86_16.postprocess.pass.execute", function=self.trace_func_addr, pass_name=self.pass_name):
+                        self.step_changed = bool(self.step_func())
+            else:
+                with span("x86_16.postprocess.pass.execute", function=self.trace_func_addr, pass_name=self.pass_name):
+                    self.step_changed = bool(self.step_func())
+            if os.environ.get("INERTIA_DEBUG_X87_PROTO") == "1" and self.codegen.cfunc.functy != self.prototype_before:
+                print(
+                    "[dbg-x87-proto] "
+                    f"pass={self.pass_name} changed={self.step_changed} "
+                    f"before={self.prototype_before!r} after={self.codegen.cfunc.functy!r}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            prototype_arg_state_after = self._prototype_arg_state_8616()
+            if prototype_arg_state_after != self.prototype_arg_state_before:
+                print(
+                    "[dbg-x87-proto] "
+                    f"pass={self.pass_name} changed={self.step_changed} "
+                    f"args_before={self.prototype_arg_state_before!r} args_after={prototype_arg_state_after!r}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            pointer_ast_after = self._pointer_ast_lines_8616()
+            if pointer_ast_after != self.pointer_ast_before:
+                logging.getLogger(__name__).warning(
+                    "[pointer-memory-postprocess-mutation] pass=%s reported_changed=%s before=%r after=%r",
+                    self.pass_name,
+                    self.step_changed,
+                    self.pointer_ast_before,
+                    pointer_ast_after,
+                )
+        except AnalysisTimeout as ex:
+            return self._on_pass_timeout_8616(ex)
+        except PipelineHardError:
+            self._restore_or_invalidate_on_error_8616()
+            raise
+        except Exception as ex:
+            return self._on_pass_error_8616(ex)
+        return None
+
+    def _restore_or_invalidate_on_error_8616(self) -> None:
+        """Restore the snapshot when validation requires it, else invalidate it."""
+        if self.per_pass_validation_enabled or self.force_pass_validation or self.is_optimization_pass:
+            self._restore_step_state_8616()
+        else:
+            self.rollback_snapshots.invalidate(RollbackSnapshotInvalidation8616.PASS_EXCEPTION)
+
+    def _on_pass_timeout_8616(self, ex: StructuredAstValue) -> bool:
+        """Record a pass timeout; continue only for allow-listed passes."""
+        self._restore_or_invalidate_on_error_8616()
+        self.codegen._inertia_rewrite_failed = True
+        self.codegen._inertia_rewrite_failure_pass = self.pass_name
+        self.codegen._inertia_rewrite_failure_error = f"timeout: {ex}"
+        timed_out = _boundary_list_8616(getattr(self.codegen, "_inertia_postprocess_timeout_passes", ()) or ())
+        timed_out.append(self.pass_name)
+        self.codegen._inertia_postprocess_timeout_passes = tuple(timed_out)
+        logging.getLogger(__name__).warning(
+            "Skipping 86_16 postprocess pass %s after %s: timeout (%s)",
+            self.pass_name,
+            self.transaction_state.last_changed_pass or "no earlier rewrite",
+            ex,
+        )
+        if self.pass_name in self.timeout_continue_passes:
+            continued = _boundary_list_8616(
+                getattr(self.codegen, "_inertia_postprocess_timeout_continued_passes", ()) or ()
+            )
+            continued.append(self.pass_name)
+            self.codegen._inertia_postprocess_timeout_continued_passes = tuple(continued)
+            return True
+        return False
+
+    def _on_pass_error_8616(self, ex: Exception) -> bool:
+        """Record a pass failure and reject the step."""
+        self._restore_or_invalidate_on_error_8616()
+        self.codegen._inertia_rewrite_failed = True
+        self.codegen._inertia_rewrite_failure_pass = self.pass_name
+        self.codegen._inertia_rewrite_failure_error = str(ex)
+        logging.getLogger(__name__).warning(
+            "Skipping 86_16 postprocess pass %s after %s: %s",
+            self.pass_name,
+            self.transaction_state.last_changed_pass or "no earlier rewrite",
+            ex,
+            exc_info=ex,
+        )
+        return False
+
+
+    def _cycle_gate_8616(self) -> bool | None:
+        """Reject passes that introduce a C AST cycle; ``None`` means continue."""
+        self.cycle_after = _c_ast_cycle_path_8616(getattr(getattr(self.codegen, "cfunc", None), "statements", None))
+        if self.cycle_after and not self.cycle_before:
+            rejected_cycles = _boundary_list_8616(
+                getattr(self.codegen, "_inertia_postprocess_cycle_rejected_passes_8616", ()) or ()
+            )
+            rejected_cycles.append({"pass": self.pass_name, "path": self.cycle_after})
+            self.codegen._inertia_postprocess_cycle_rejected_passes_8616 = tuple(rejected_cycles)
+            logging.getLogger(__name__).warning(
+                "postprocess C AST cycle rejected function=%#x pass=%s path=%s",
+                self.trace_func_addr if isinstance(self.trace_func_addr, int) else -1,
+                self.pass_name,
+                " -> ".join(self.cycle_after),
+            )
+            if self.snapshot is None:
+                self.codegen._inertia_rewrite_failed = True
+                self.codegen._inertia_rewrite_failure_pass = self.pass_name
+                self.codegen._inertia_rewrite_failure_error = (
+                    "pass introduced a structured C AST cycle without rollback state"
+                )
+                return False
+            self._restore_step_state_8616(context=f"postprocess:{self.pass_name}:cycle-restore")
+            rejected = _boundary_list_8616(getattr(self.codegen, "_inertia_postprocess_rejected_passes", ()) or ())
+            rejected.append(self.pass_name)
+            self.codegen._inertia_postprocess_rejected_passes = tuple(rejected)
+            return True
+        self.transaction_state.record_cycle_path(self.cycle_after)
+
+
+    def _return_chain_gate_8616(self) -> bool | None:
+        """Reject passes that regress the proven return chain; ``None`` means continue."""
+        if self.return_chain_expected is not None:
+            actual_if_count, actual_return_count = _return_chain_counts_8616(self.codegen)
+            expected_if_count, expected_return_count = self.return_chain_expected
+            if actual_if_count < expected_if_count or actual_return_count < expected_return_count:
+                logging.getLogger(__name__).warning(
+                    "postprocess semantic gate restored function=%#x pass=%s reason=return-chain-regression "
+                    "ifs=%d/%d returns=%d/%d",
+                    self.trace_func_addr if isinstance(self.trace_func_addr, int) else -1,
+                    self.pass_name,
+                    actual_if_count,
+                    expected_if_count,
+                    actual_return_count,
+                    expected_return_count,
+                )
+                self._restore_step_state_8616()
+                rejected = _boundary_list_8616(getattr(self.codegen, "_inertia_postprocess_rejected_passes", ()) or ())
+                rejected.append(self.pass_name)
+                self.codegen._inertia_postprocess_rejected_passes = tuple(rejected)
+                return True
+
+
+    def _misreport_invalidate_8616(self) -> None:
+        """Record optimization misreports and invalidate stale witnesses/snapshots."""
+        if self.is_optimization_pass and not self.step_changed:
+            optimization_after = self._optimization_witness_8616()
+            self.optimization_witnesses.record(optimization_after)
+            if optimization_after != self.optimization_before:
+                self.step_changed = True
+                misreported = _boundary_list_8616(
+                    getattr(
+                        self.codegen,
+                        "_inertia_postprocess_misreported_unchanged_passes_8616",
+                        (),
+                    )
+                    or ()
+                )
+                misreported.append(self.pass_name)
+                self.codegen._inertia_postprocess_misreported_unchanged_passes_8616 = tuple(misreported)
+        if self.step_changed:
+            self.optimization_witnesses.invalidate()
+            self.rollback_snapshots.invalidate(RollbackSnapshotInvalidation8616.PASS_REPORTED_CHANGE)
+        elif self.cycle_after != self.cycle_before:
+            self.rollback_snapshots.invalidate(RollbackSnapshotInvalidation8616.PASS_MUTATION_DETECTED)
+
+
+    def _regen_gate_8616(self) -> bool | None:
+        """Handle the unchanged-skip and regeneration gates; ``None`` means continue."""
+        if not self.step_changed:
+            _record_unchanged_postprocess_validation_skip_8616(self.codegen, self.pass_name)
+            return True
+        if self.step_changed:
+            _invalidate_tail_validation_derived_caches_8616(self.codegen)
+            validation_context = (
+                f"{self.trace_func_addr:#x} postprocess:{self.pass_name}:validation"
+                if isinstance(self.trace_func_addr, int)
+                else f"postprocess:{self.pass_name}:validation"
+            )
+            if getattr(self.codegen, "_inertia_postprocess_regeneration_disabled", False):
+                rejected = _boundary_list_8616(
+                    getattr(self.codegen, "_inertia_postprocess_rejected_passes", ()) or ()
+                )
+                rejected.append(self.pass_name)
+                self.codegen._inertia_postprocess_rejected_passes = tuple(rejected)
+                logging.getLogger(__name__).warning(
+                    "postprocess validation skipped function=%#x pass=%s verdict=regeneration-disabled",
+                    self.trace_func_addr if isinstance(self.trace_func_addr, int) else -1,
+                    self.pass_name,
+                )
+                self._restore_step_state_8616(context=f"{validation_context}:restore")
+                return True
+            if not _regenerate_text_safely(self.codegen, context=validation_context):
+                self._restore_step_state_8616(context=f"{validation_context}:restore")
+                rejected = _boundary_list_8616(
+                    getattr(self.codegen, "_inertia_postprocess_rejected_passes", ()) or ()
+                )
+                rejected.append(self.pass_name)
+                self.codegen._inertia_postprocess_rejected_passes = tuple(rejected)
+                return True
+
+
+    def _validation_gate_8616(self) -> bool | None:
+        """Run per-pass tail-validation gating; ``None`` means continue."""
+        if not (
+            self.validation_enabled
+            and self.preflight.enforce_pass_validation
+            and self.transaction_state.baseline_summary is not None
+        ):
+            return None
+        result = self._regen_gate_8616()
+        if result is not None:
+            return result
+        with span("x86_16.postprocess.validation.summary", function=self.trace_func_addr, pass_name=self.pass_name):
+            current_summary = collect_x86_16_tail_validation_summary(self.project, self.codegen, mode="live_out")
+        if (
+            self.step_changed
+            and os.environ.get("INERTIA_DEBUG_POSTPROCESS_DELTA")
+        ):
+            logging.getLogger(__name__).warning(
+                "[postprocess-validation-surface] function=%#x pass=%s "
+                "conditions=%r",
+                self.trace_func_addr
+                if isinstance(self.trace_func_addr, int)
+                else -1,
+                self.pass_name,
+                current_summary.conditions,
+            )
+        with span("x86_16.postprocess.validation.compare", function=self.trace_func_addr, pass_name=self.pass_name):
+            validation = compare_x86_16_tail_validation_summaries(
+                self.transaction_state.baseline_summary,
+                current_summary,
+            )
+        if x86_16_tail_validation_result_passed(validation):
+            return None
+        is_exit_goto_repair_delta = _postprocess_exit_goto_repair_delta_8616(validation)
+        has_structured_blocking_reason = bool(_postprocess_validation_blocking_reasons_8616(validation))
+        delta_kind = _classify_postprocess_validation_delta_8616(validation)
+        delta_kind, is_blocking_delta = self._classify_validation_delta_8616(
+            validation, delta_kind, is_exit_goto_repair_delta, has_structured_blocking_reason
+        )
+        if not is_blocking_delta:
+            self.transaction_state.replace_baseline(current_summary)
+            _dump_postprocess_trace_text_8616(
+                self.codegen,
+                pass_name=f"accepted.{self.pass_name}",
+                trace_func_addr=self.trace_func_addr,
+            )
+            # Non-blocking per-pass delta: keep pass result and continue.
+            if self.step_changed:
+                self.transaction_state.accept_change(self.pass_name)
+                self.codegen._inertia_last_postprocess_pass = self.pass_name
+            return True
+        return self._reject_validation_delta_8616(validation)
+
+    def _classify_validation_delta_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool]:
+        """Resolve the delta kind and whether it blocks, via ordered pass arms."""
+        for arm in (
+            self._delta_helper_name_only_8616,
+            self._delta_missing_terminal_ax_8616,
+            self._delta_stack_prototype_width_8616,
+            self._delta_jcc_rewrite_8616,
+            self._delta_direct_global_update_8616,
+            self._delta_stack_mov_incdec_bootstrap_8616,
+            self._delta_direct_stack_update_8616,
+            self._delta_direct_stack_move_8616,
+            self._delta_global_byte_sum_loop_8616,
+            self._delta_unreachable_after_return_8616,
+            self._delta_switch_loop_exit_return_8616,
+            self._delta_callsite_cleanup_8616,
+            self._delta_return_shape_8616,
+            self._delta_unobserved_scalar_return_8616,
+            self._delta_exposed_stack_arg_return_8616,
+            self._delta_exit_goto_repair_8616,
+        ):
+            result = arm(validation, delta_kind, is_exit_goto_repair_delta, has_structured_blocking_reason)
+            if result is not None:
+                return result
+        return delta_kind, True
+
+
+    def _accept_delta_8616(self, delta_kind: StructuredAstValue) -> None:
+        """Record an accepted non-blocking validation delta."""
+        accepted = _boundary_list_8616(
+            getattr(self.codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
+        )
+        accepted.append({"pass": self.pass_name, "kind": delta_kind.value})
+        self.codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
+        logging.getLogger(__name__).warning(
+            "postprocess validation accepted function=%#x pass=%s kind=%s",
+            self.trace_func_addr if isinstance(self.trace_func_addr, int) else -1,
+            self.pass_name,
+            delta_kind.value,
+        )
+
+
+    def _delta_helper_name_only_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if not (self.pass_name in _HELPER_NAME_ONLY_VALIDATION_PASS_NAMES_8616
+                    and delta_kind is _PostprocessValidationDeltaKind8616.NAME_ONLY_HELPER_ANNOTATION):
+            return None
+        is_blocking_delta = True
+        is_blocking_delta = has_structured_blocking_reason
+        if not is_blocking_delta:
+            self._accept_delta_8616(delta_kind)
+        return delta_kind, is_blocking_delta
+
+    def _delta_missing_terminal_ax_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if self.pass_name not in _MISSING_TERMINAL_AX_RETURN_PASS_NAMES_8616:
+            return None
+        is_blocking_delta = True
+        if _is_missing_terminal_ax_return_delta_8616(self.codegen, validation) or (
+            int(getattr(self.codegen, "_inertia_missing_terminal_ax_return_materialized_8616", 0) or 0) > 0
+            and _is_direct_callsite_helper_delta_only_8616(
+                self.project,
+                getattr(self.codegen, "_inertia_current_function_8616", None),
+                validation,
+            )
+        ):
+            delta_kind = _PostprocessValidationDeltaKind8616.MISSING_TERMINAL_AX_RETURN
+            is_blocking_delta = False
+            self._accept_delta_8616(delta_kind)
+        else:
+            is_blocking_delta = True
+        return delta_kind, is_blocking_delta
+
+    def _delta_stack_prototype_width_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if not (self.pass_name == "_reconcile_exact_stack_argument_prototype_8616"
+                    and _is_stack_prototype_width_reconciliation_delta_8616(self.codegen, validation)):
+            return None
+        is_blocking_delta = True
+        delta_kind = _PostprocessValidationDeltaKind8616.STACK_PROTOTYPE_WIDTH_RECONCILIATION
+        is_blocking_delta = False
+        self._accept_delta_8616(delta_kind)
+        return delta_kind, is_blocking_delta
+
+    def _delta_jcc_rewrite_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if self.pass_name not in _JCC_REWRITE_VALIDATION_PASS_NAMES_8616:
+            return None
+        is_blocking_delta = True
+        if is_exit_goto_repair_delta:
+            is_blocking_delta = False
+        elif (
+            self.pass_name == "_repair_conditional_continue_guards_after_loop_break_8616"
+            and _is_conditional_continue_guard_repair_delta_8616(self.codegen, validation)
+        ):
+            delta_kind = _PostprocessValidationDeltaKind8616.CONDITIONAL_CONTINUE_GUARD_REPAIR
+            is_blocking_delta = False
+            self._accept_delta_8616(delta_kind)
+        elif _is_jcc_call_return_condition_rebinding_delta_8616(self.codegen, validation):
+            delta_kind = _PostprocessValidationDeltaKind8616.JCC_CALL_RETURN_CONDITION_REBINDING
+            is_blocking_delta = False
+            self._accept_delta_8616(delta_kind)
+        elif _is_jcc_condition_materialization_validation_delta_8616(
+            self.project,
+            self.codegen,
+            validation,
+            function=getattr(self.codegen, "_inertia_current_function_8616", None),
+        ):
+            delta_kind = _PostprocessValidationDeltaKind8616.JCC_CONDITION_MATERIALIZATION
+            is_blocking_delta = False
+            self.codegen._inertia_jcc_condition_materialization_validation_accepts = (
+                int(
+                    getattr(self.codegen, "_inertia_jcc_condition_materialization_validation_accepts", 0)
+                    or 0
+                )
+                + 1
+            )
+            self._accept_delta_8616(delta_kind)
+        else:
+            is_blocking_delta = True
+        return delta_kind, is_blocking_delta
+
+    def _delta_direct_global_update_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if self.pass_name not in _DIRECT_GLOBAL_UPDATE_VALIDATION_PASS_NAMES_8616:
+            return None
+        is_blocking_delta = True
+        if _is_direct_global_update_materialization_delta_8616(self.codegen, validation):
+            delta_kind = _PostprocessValidationDeltaKind8616.DIRECT_GLOBAL_UPDATE_MATERIALIZATION
+            is_blocking_delta = False
+            self.codegen._inertia_direct_global_update_validation_accepts_8616 = (
+                int(getattr(self.codegen, "_inertia_direct_global_update_validation_accepts_8616", 0) or 0)
+                + 1
+            )
+            self._accept_delta_8616(delta_kind)
+        else:
+            is_blocking_delta = True
+        return delta_kind, is_blocking_delta
+
+    def _delta_stack_mov_incdec_bootstrap_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if self.pass_name != "_materialize_direct_stack_mov_incdec_instructions_bootstrap_8616":
+            return None
+        is_blocking_delta = True
+        if _is_direct_stack_move_update_materialization_delta_8616(self.codegen, validation):
+            delta_kind = _PostprocessValidationDeltaKind8616.DIRECT_STACK_MOVE_UPDATE_MATERIALIZATION
+            is_blocking_delta = False
+            self.codegen._inertia_direct_stack_move_update_validation_accepts_8616 = (
+                int(
+                    getattr(
+                        self.codegen,
+                        "_inertia_direct_stack_move_update_validation_accepts_8616",
+                        0,
+                    )
+                    or 0
+                )
+                + 1
+            )
+            self._accept_delta_8616(delta_kind)
+        else:
+            is_blocking_delta = True
+        return delta_kind, is_blocking_delta
+
+    def _delta_direct_stack_update_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if self.pass_name not in _DIRECT_STACK_UPDATE_VALIDATION_PASS_NAMES_8616:
+            return None
+        is_blocking_delta = True
+        direct_update_delta = _is_direct_stack_update_materialization_delta_8616(self.codegen, validation)
+        direct_move_delta = _is_direct_stack_move_materialization_delta_8616(
+            self.codegen, validation
+        ) or _is_direct_stack_move_idiv_remainder_materialization_delta_8616(self.codegen, validation)
+        if direct_update_delta or direct_move_delta:
+            delta_kind = (
+                _PostprocessValidationDeltaKind8616.DIRECT_STACK_UPDATE_MATERIALIZATION
+                if direct_update_delta
+                else _PostprocessValidationDeltaKind8616.DIRECT_STACK_MOVE_MATERIALIZATION
+            )
+            is_blocking_delta = False
+            if direct_update_delta:
+                self.codegen._inertia_direct_stack_update_validation_accepts_8616 = (
+                    int(
+                        getattr(self.codegen, "_inertia_direct_stack_update_validation_accepts_8616", 0) or 0
+                    )
+                    + 1
+                )
+            if direct_move_delta:
+                self.codegen._inertia_direct_stack_move_validation_accepts_8616 = (
+                    int(getattr(self.codegen, "_inertia_direct_stack_move_validation_accepts_8616", 0) or 0)
+                    + 1
+                )
+            self._accept_delta_8616(delta_kind)
+        else:
+            is_blocking_delta = True
+        return delta_kind, is_blocking_delta
+
+    def _delta_direct_stack_move_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if self.pass_name not in _DIRECT_STACK_MOVE_VALIDATION_PASS_NAMES_8616:
+            return None
+        is_blocking_delta = True
+        direct_move_delta_kind = _direct_stack_move_validation_delta_kind_8616(self.codegen, validation)
+        if direct_move_delta_kind is not None:
+            delta_kind = direct_move_delta_kind
+            is_blocking_delta = False
+            if delta_kind is _PostprocessValidationDeltaKind8616.DIRECT_STACK_MOVE_MATERIALIZATION:
+                self.codegen._inertia_direct_stack_move_validation_accepts_8616 = (
+                    int(getattr(self.codegen, "_inertia_direct_stack_move_validation_accepts_8616", 0) or 0)
+                    + 1
+                )
+            elif (
+                delta_kind
+                is _PostprocessValidationDeltaKind8616.CALLSITE_STACK_ARGUMENT_MATERIALIZATION
+            ):
+                self.codegen._inertia_direct_stack_move_callsite_arg_validation_accepts_8616 = (
+                    int(
+                        getattr(
+                            self.codegen,
+                            "_inertia_direct_stack_move_callsite_arg_validation_accepts_8616",
+                            0,
+                        )
+                        or 0
+                    )
+                    + 1
+                )
+            self._accept_delta_8616(delta_kind)
+        else:
+            is_blocking_delta = True
+        return delta_kind, is_blocking_delta
+
+    def _delta_global_byte_sum_loop_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if self.pass_name != "_materialize_global_byte_index_sum_loop_8616":
+            return None
+        is_blocking_delta = True
+        if _is_global_byte_sum_loop_materialization_delta_8616(self.codegen, validation):
+            delta_kind = _PostprocessValidationDeltaKind8616.GLOBAL_BYTE_SUM_LOOP_MATERIALIZATION
+            is_blocking_delta = False
+            self._accept_delta_8616(delta_kind)
+        else:
+            is_blocking_delta = True
+        return delta_kind, is_blocking_delta
+
+    def _delta_unreachable_after_return_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if self.pass_name != "_prune_unreachable_after_return_final_8616":
+            return None
+        is_blocking_delta = True
+        if int(getattr(self.codegen, "_inertia_unreachable_after_return_pruned_8616", 0) or 0) > 0:
+            delta_kind = _PostprocessValidationDeltaKind8616.UNREACHABLE_AFTER_RETURN_PRUNE
+            is_blocking_delta = False
+            self._accept_delta_8616(delta_kind)
+        else:
+            is_blocking_delta = True
+        return delta_kind, is_blocking_delta
+
+    def _delta_switch_loop_exit_return_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if self.pass_name not in {
+                    "_repair_switch_loop_exit_returns_from_evidence_8616",
+                    "_repair_switch_loop_exit_returns_from_evidence_final_8616",
+                }:
+            return None
+        is_blocking_delta = True
+        if bool(getattr(self.codegen, "_inertia_switch_loop_exit_return_materialized_8616", False)):
+            delta_kind = _PostprocessValidationDeltaKind8616.SWITCH_LOOP_EXIT_RETURN_REPAIR
+            is_blocking_delta = False
+            self._accept_delta_8616(delta_kind)
+        else:
+            is_blocking_delta = True
+        return delta_kind, is_blocking_delta
+
+    def _delta_callsite_cleanup_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if self.pass_name not in {
+                    "_recover_missing_direct_calls_from_evidence_early_8616",
+                    "_recover_missing_direct_calls_from_evidence_8616",
+                    "_normalize_fact_backed_stack_accesses_8616",
+                    "_normalize_call_target_names_8616",
+                    "_normalize_recovered_call_target_names_8616",
+                    "_materialize_callsite_stack_arguments_8616",
+                    "_materialize_callsite_stack_arguments_after_ss_lowering_8616",
+                    "_prune_consumed_segmented_stack_arg_stores_8616",
+                    "_prune_consumed_segmented_stack_arg_stores_final_8616",
+                    "_prune_consumed_segmented_stack_arg_stores_after_ss_lowering_8616",
+                    "_prune_scalar_global_high_byte_call_arg_remnants_after_ss_lowering_8616",
+                    "_materialize_callsite_prototypes_8616",
+                    "_materialize_recovered_callsite_stack_arguments_8616",
+                    "_recover_missing_direct_calls_final_8616",
+                    "_materialize_empty_if_return_branches_8616",
+                    "_materialize_empty_if_return_branches_final_8616",
+                    "_materialize_void_tail_call_guard_from_cfg_8616",
+                    "_materialize_void_tail_call_guard_from_cfg_final_8616",
+                    "_prune_surplus_void_empty_return_guards_8616",
+                    "_prune_surplus_void_empty_return_guards_final_8616",
+                    "_prune_duplicate_empty_return_guard_before_cfg_suffix_8616",
+                    "_prune_duplicate_empty_return_guard_before_cfg_suffix_final_8616",
+                }:
+            return None
+        is_blocking_delta = True
+        if is_exit_goto_repair_delta:
+            is_blocking_delta = False
+        elif _is_stack_probe_helper_cleanup_delta_8616(self.codegen, validation):
+            delta_kind = _PostprocessValidationDeltaKind8616.STACK_PROBE_HELPER_CLEANUP
+            is_blocking_delta = False
+            self._accept_delta_8616(delta_kind)
+        elif (
+            self.pass_name in _CALLSITE_STACK_ARGUMENT_PASS_NAMES_8616
+            and _is_callsite_stack_argument_materialization_delta_8616(self.codegen, validation)
+        ):
+            delta_kind = _PostprocessValidationDeltaKind8616.CALLSITE_STACK_ARGUMENT_MATERIALIZATION
+            is_blocking_delta = False
+            self._accept_delta_8616(delta_kind)
+        else:
+            current_function = getattr(self.codegen, "_inertia_current_function_8616", None)
+            if (
+                self.pass_name
+                in {
+                    "_prune_surplus_void_empty_return_guards_8616",
+                    "_prune_surplus_void_empty_return_guards_final_8616",
+                }
+                and _is_proven_surplus_empty_guard_cleanup_delta_8616(
+                    self.codegen,
+                    validation,
+                )
+            ):
+                delta_kind = (
+                    _PostprocessValidationDeltaKind8616.PROVEN_SURPLUS_EMPTY_GUARD_CLEANUP
+                )
+                is_blocking_delta = False
+                accepted = _boundary_list_8616(
+                    getattr(
+                        self.codegen,
+                        "_inertia_postprocess_accepted_validation_deltas",
+                        (),
+                    )
+                    or ()
+                )
+                accepted.append(
+                    {
+                        "pass": self.pass_name,
+                        "kind": delta_kind.value,
+                    }
+                )
+                self.codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
+                logging.getLogger(__name__).warning(
+                    "postprocess validation accepted function=%#x pass=%s kind=%s",
+                    self.trace_func_addr if isinstance(self.trace_func_addr, int) else -1,
+                    self.pass_name,
+                    delta_kind.value,
+                )
+            elif self.pass_name in {
+                "_materialize_empty_if_return_branches_8616",
+                "_materialize_empty_if_return_branches_final_8616",
+                "_prune_surplus_void_empty_return_guards_8616",
+                "_prune_surplus_void_empty_return_guards_final_8616",
+                "_prune_duplicate_empty_return_guard_before_cfg_suffix_8616",
+                "_prune_duplicate_empty_return_guard_before_cfg_suffix_final_8616",
+            } and _is_cfg_return_chain_callsite_materialization_delta_8616(
+                self.project, current_function, self.codegen, validation
+            ):
+                delta_kind = _PostprocessValidationDeltaKind8616.CFG_RETURN_CHAIN_MATERIALIZATION
+                is_blocking_delta = False
+                self._accept_delta_8616(delta_kind)
+            elif self.pass_name in {
+                "_materialize_void_tail_call_guard_from_cfg_8616",
+                "_materialize_void_tail_call_guard_from_cfg_final_8616",
+            } and _is_void_tail_call_guard_materialization_delta_8616(self.codegen, validation):
+                delta_kind = (
+                    _PostprocessValidationDeltaKind8616.CFG_VOID_TAIL_CALL_GUARD_MATERIALIZATION
+                )
+                is_blocking_delta = False
+                self._accept_delta_8616(delta_kind)
+            elif self.pass_name in {
+                "_materialize_cfg_selector_return_branches_early_8616",
+                "_materialize_cfg_selector_return_branches_8616",
+                "_materialize_empty_if_return_branches_8616",
+                "_materialize_empty_if_return_branches_final_8616",
+            } and _is_cfg_return_expr_chain_materialization_delta_8616(
+                self.project, current_function, self.codegen, validation
+            ):
+                delta_kind = _PostprocessValidationDeltaKind8616.CFG_RETURN_EXPR_CHAIN_MATERIALIZATION
+                is_blocking_delta = False
+                self._accept_delta_8616(delta_kind)
+            else:
+                is_blocking_delta = True
+        return delta_kind, is_blocking_delta
+
+    def _delta_return_shape_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if self.pass_name != "_classify_return_shape_8616":
+            return None
+        is_blocking_delta = True
+        if _is_default_scalar_void_return_classification_delta_8616(self.codegen, validation):
+            delta_kind = _PostprocessValidationDeltaKind8616.DEFAULT_SCALAR_VOID_RETURN_CLASSIFICATION
+            is_blocking_delta = False
+            self._accept_delta_8616(delta_kind)
+        return delta_kind, is_blocking_delta
+
+    def _delta_unobserved_scalar_return_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if not (_is_unobserved_default_scalar_synthetic_return_delta_8616(
+                    getattr(self.codegen, "_inertia_current_function_8616", None),
+                    validation,
+                )):
+            return None
+        is_blocking_delta = True
+        delta_kind = _PostprocessValidationDeltaKind8616.UNOBSERVED_DEFAULT_SCALAR_SYNTHETIC_RETURN
+        is_blocking_delta = False
+        self._accept_delta_8616(delta_kind)
+        return delta_kind, is_blocking_delta
+
+    def _delta_exposed_stack_arg_return_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if not (_is_exposed_nonvoid_stack_arg_scalar_return_delta_8616(
+                    getattr(self.codegen, "_inertia_current_function_8616", None),
+                    validation,
+                )):
+            return None
+        is_blocking_delta = True
+        delta_kind = _PostprocessValidationDeltaKind8616.EXPOSED_NONVOID_STACK_ARG_SCALAR_RETURN
+        is_blocking_delta = False
+        self._accept_delta_8616(delta_kind)
+        return delta_kind, is_blocking_delta
+
+    def _delta_exit_goto_repair_8616(
+        self, validation: StructuredAstValue, delta_kind: StructuredAstValue,
+        is_exit_goto_repair_delta: bool, has_structured_blocking_reason: bool,
+    ) -> tuple[StructuredAstValue, bool] | None:
+        """Classify one validation-delta arm; ``None`` means gate miss."""
+        if not (is_exit_goto_repair_delta):
+            return None
+        is_blocking_delta = True
+        is_blocking_delta = False
+        return delta_kind, is_blocking_delta
+
+    def _reject_validation_delta_8616(self, validation: StructuredAstValue) -> bool:
+        """Reject a blocking validation delta: record, dump, restore, and decide."""
+        rejected = _boundary_list_8616(getattr(self.codegen, "_inertia_postprocess_rejected_passes", ()) or ())
+        rejected.append(self.pass_name)
+        self.codegen._inertia_postprocess_rejected_passes = tuple(rejected)
+        logging.getLogger(__name__).warning(
+            "postprocess validation rejected function=%#x pass=%s verdict=%s",
+            self.trace_func_addr if isinstance(self.trace_func_addr, int) else -1,
+            self.pass_name,
+            validation.get("summary_text") or validation.get("verdict") or validation.get("status"),
+        )
+        if os.environ.get("INERTIA_DEBUG_POSTPROCESS_VALIDATION") or os.environ.get(
+            "INERTIA_DEBUG_POSTPROCESS_DELTA"
+        ):
+            logging.getLogger(__name__).warning(
+                "[postprocess-validation] function=%#x pass=%s delta=%s",
+                self.trace_func_addr if isinstance(self.trace_func_addr, int) else -1,
+                self.pass_name,
+                validation.get("summary_text") or validation.get("delta"),
+            )
+        destructive_rejected_delta = (
+            _validation_delta_removes_stack_or_control_effects_8616(validation)
+            and self.pass_name not in _PASS_LOCAL_REJECT_CONTINUE_PASS_NAMES_8616
+        )
+        if os.environ.get("INERTIA_DEBUG_POSTPROCESS_VALIDATION") or os.environ.get(
+            "INERTIA_DEBUG_POSTPROCESS_DELTA"
+        ):
+            logging.getLogger(__name__).warning(
+                "[postprocess-validation] function=%#x pass=%s destructive_rejected_delta=%s",
+                self.trace_func_addr if isinstance(self.trace_func_addr, int) else -1,
+                self.pass_name,
+                destructive_rejected_delta,
+            )
+        rejected_dump_dir = os.environ.get("INERTIA_DEBUG_REJECTED_POSTPROCESS_TEXT_DIR")
+        if rejected_dump_dir:
+            with contextlib.suppress(Exception):
+                _regenerate_text_safely(
+                    self.codegen,
+                    context=(
+                        f"{self.trace_func_addr:#x} postprocess:{self.pass_name}:rejected-dump"
+                        if isinstance(self.trace_func_addr, int)
+                        else f"postprocess:{self.pass_name}:rejected-dump"
+                    ),
+                )
+                os.makedirs(rejected_dump_dir, exist_ok=True)
+                dump_addr = self.trace_func_addr if isinstance(self.trace_func_addr, int) else 0
+                safe_pass_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", self.pass_name)
+                with open(
+                    os.path.join(rejected_dump_dir, f"{dump_addr:x}.{safe_pass_name}.c"),
+                    "w",
+                    encoding="utf-8",
+                ) as fp:
+                    fp.write(getattr(self.codegen, "text", "") or "")
+        self._restore_step_state_8616(
+            context=(
+                f"{self.trace_func_addr:#x} postprocess:{self.pass_name}:restore"
+                if isinstance(self.trace_func_addr, int)
+                else f"postprocess:{self.pass_name}:restore"
+            ),
+        )
+        restore_proof_required = (
+            destructive_rejected_delta or self.pass_name in _MANDATORY_VALIDATION_PASS_NAMES_8616
+        )
+        if restore_proof_required:
+            restored_step_proven = _postprocess_restored_step_matches_baseline_8616(
+                self.project,
+                self.codegen,
+                self.transaction_state.baseline_summary,
+                restored_cfunc_snapshot=self.snapshot,
+            )
+            if restored_step_proven:
+                if destructive_rejected_delta:
+                    _clear_proven_destructive_rejection_8616(self.codegen)
+                else:
+                    _clear_proven_rejected_pass_restore_8616(self.codegen)
+                logging.getLogger(__name__).warning(
+                    "postprocess validation restored rejected pass function=%#x pass=%s destructive=%s",
+                    self.trace_func_addr if isinstance(self.trace_func_addr, int) else -1,
+                    self.pass_name,
+                    destructive_rejected_delta,
+                )
+                return True
+        if destructive_rejected_delta:
+            destructive_validation = dict(validation)
+            _mark_destructive_postprocess_validation_failure_8616(
+                self.project,
+                self.codegen,
+                destructive_validation,
+                pass_name=self.pass_name,
+                summary_text=(
+                    validation.get("summary_text") or validation.get("verdict") or validation.get("status")
+                ),
+            )
+            return False
+        if self.pass_name in _PASS_LOCAL_REJECT_CONTINUE_PASS_NAMES_8616:
+            # Optional metadata pass: keep baseline snapshot and
+            # continue. Semantic rewrites still require typed
+            # acceptance above or they fail the stage.
+            if self.pass_name in _PASS_REJECT_BUDGET_ELIGIBLE_NAMES_8616:
+                self.codegen._inertia_postprocess_optional_reject_count_8616 = (
+                    int(getattr(self.codegen, "_inertia_postprocess_optional_reject_count_8616", 0) or 0) + 1
+                )
+            return True
+        self.codegen._inertia_postprocess_validation_failed = True
+        self.codegen._inertia_postprocess_validation_failure_pass = self.pass_name
+        self.codegen._inertia_postprocess_validation_failure_error = (
+            validation.get("summary_text") or validation.get("verdict") or validation.get("status")
+        )
+        return False
+
+
+
+
+    def apply_step_8616(self, pass_name: str, step_func: StructuredAstValue) -> bool:
+        """Run one pass through dynamic codegen compatibility state and validation guards."""
+        self.pass_name = pass_name
+        self.step_func = step_func
+        self.debug_pointer_ast = os.environ.get("INERTIA_DEBUG_POINTER_MEMORY_IDIOMS") == "1"
+        self.pointer_ast_before = self._pointer_ast_lines_8616()
+        self.prototype_arg_state_before = self._prototype_arg_state_8616()
+        # Repair: ensure statements is always CStatements before every pass.
+        # Many transform() callbacks return plain lists, which corrupts downstream.
+        if _repair_cfunc_statements_wrapper(self.codegen):
+            self.rollback_snapshots.invalidate(RollbackSnapshotInvalidation8616.PREPASS_REPAIR)
+            self.optimization_witnesses.invalidate()
+        for phase in (
+            self._preflight_gate_8616,
+            self._snapshot_setup_8616,
+            self._execute_step_8616,
+            self._cycle_gate_8616,
+            self._return_chain_gate_8616,
+        ):
+            result = phase()
+            if result is not None:
+                return result
+        self._misreport_invalidate_8616()
+        result = self._validation_gate_8616()
+        if result is not None:
+            return result
+        if self.step_changed:
+            self.transaction_state.accept_change(self.pass_name)
+            self.codegen._inertia_last_postprocess_pass = self.pass_name
+        return True
+
+
+def _reset_postprocess_run_flags_8616(codegen: StructuredAstValue) -> None:
+    """Reset the per-run rewrite and validation failure surface on codegen."""
+    codegen._inertia_rewrite_failed = False
+    codegen._inertia_rewrite_failure_pass = None
+    codegen._inertia_rewrite_failure_error = None
+    codegen._inertia_last_postprocess_pass = None
+    codegen._inertia_postprocess_regeneration_disabled = False
+    codegen._inertia_regeneration_suppressed_contexts = ()
+    codegen._inertia_postprocess_validation_failed = False
+    codegen._inertia_postprocess_validation_failure_pass = None
+    codegen._inertia_postprocess_validation_failure_error = None
+
+
+def _transfer_typed_conditions_once_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> None:
+    """Transfer typed conditions to codegen exactly once per function."""
+    if getattr(codegen, "_inertia_typed_conditions_transferred", False):
+        return
+    cfunc = getattr(codegen, "cfunc", None)
+    func_addr = getattr(cfunc, "addr", None) if cfunc is not None else None
+    if func_addr is not None:
+        try:
+            transfer_typed_conditions_to_codegen_8616(project, func_addr, codegen)
+        except Exception as ex:
+            logging.getLogger(__name__).debug(
+                "Typed condition transfer failed at function=%#x stage=postprocess-transfer: %s",
+                func_addr,
+                ex,
+            )
+    codegen._inertia_typed_conditions_transferred = True
+
+
+def _regenerate_final_postprocess_text_8616(
+    codegen: StructuredAstValue,
+    transaction_state: StructuredAstValue,
+    trace_func_addr: StructuredAstValue,
+) -> None:
+    """Regenerate the final text when validation passed and regeneration is allowed."""
+    if codegen._inertia_postprocess_validation_failed or getattr(
+        codegen, "_inertia_postprocess_regeneration_disabled", False
+    ) or not _postprocess_should_regenerate_final_8616(
+        codegen,
+        transaction_state.accepted_changed,
+    ):
+        return
+    final_context = (
+        f"{trace_func_addr:#x} postprocess:final"
+        if isinstance(trace_func_addr, int)
+        else "postprocess:final"
+    )
+    _regenerate_text_safely(codegen, context=final_context)
+    _dump_postprocess_trace_text_8616(
+        codegen,
+        pass_name="final",
+        trace_func_addr=trace_func_addr,
+    )
+
+
 def _postprocess_codegen_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
     """Run guarded cleanup over an already structured and semantically primed C AST."""
 
@@ -9856,15 +11098,7 @@ def _postprocess_codegen_8616(project: StructuredAstValue, codegen: StructuredAs
 
         _debug_pointer_surface_8616("entry")
 
-        codegen._inertia_rewrite_failed = False
-        codegen._inertia_rewrite_failure_pass = None
-        codegen._inertia_rewrite_failure_error = None
-        codegen._inertia_last_postprocess_pass = None
-        codegen._inertia_postprocess_regeneration_disabled = False
-        codegen._inertia_regeneration_suppressed_contexts = ()
-        codegen._inertia_postprocess_validation_failed = False
-        codegen._inertia_postprocess_validation_failure_pass = None
-        codegen._inertia_postprocess_validation_failure_error = None
+        _reset_postprocess_run_flags_8616(codegen)
         pass_specs = _decompiler_postprocess_passes_for_function(project, codegen)
         pass_timeout_seconds, validation_enabled, per_pass_validation_enabled, skip_names, initial_baseline_summary = (
             _postprocess_runtime_config_8616(project, codegen, pass_specs)
@@ -9896,12 +11130,6 @@ def _postprocess_codegen_8616(project: StructuredAstValue, codegen: StructuredAs
             tuple[object, object]
         ]()
 
-        def _optimization_witness_8616() -> tuple[object, object]:
-            """Build the exact AST and validation-input witness for one state."""
-            return (
-                structured_ast_generation_8616(codegen),
-                tail_validation_summary_input_generation_8616(project, codegen),
-            )
 
         def _complete_postprocess_8616() -> bool:
             """Publish closed witness accounting before completing the transaction."""
@@ -9914,1110 +11142,22 @@ def _postprocess_codegen_8616(project: StructuredAstValue, codegen: StructuredAs
                 transaction_state,
             )
 
-        def _apply_step(pass_name: str, step_func: Callable[[], bool]) -> bool:
-            """Run one pass through dynamic codegen compatibility state and validation guards."""
-            debug_pointer_ast = os.environ.get("INERTIA_DEBUG_POINTER_MEMORY_IDIOMS") == "1"
+        run = _PostprocessPassRun8616(
+            project=project,
+            codegen=codegen,
+            validation_enabled=validation_enabled,
+            per_pass_validation_enabled=per_pass_validation_enabled,
+            pass_timeout_seconds=pass_timeout_seconds,
+            timeout_continue_passes=timeout_continue_passes,
+            trace_func_addr=trace_func_addr,
+            transaction_state=transaction_state,
+            rollback_snapshots=rollback_snapshots,
+            optimization_witnesses=optimization_witnesses,
+        )
 
-            def _pointer_ast_lines_8616() -> tuple[str, ...]:
-                """Render pointer-relevant lines at the explicit angr C-AST boundary."""
-                if not debug_pointer_ast:
-                    return ()
-                try:
-                    text = str(codegen.cfunc.c_repr())
-                except (AttributeError, TypeError):
-                    return ()
-                return tuple(
-                    line.strip()
-                    for line in text.splitlines()
-                    if "[0]" in line or "SEG_U16" in line
-                )
-
-            def _prototype_arg_state_8616() -> tuple[tuple[int, int, str], ...]:
-                """Return argument storage/type state at the explicit angr boundary."""
-                if os.environ.get("INERTIA_DEBUG_X87_PROTO") != "1":
-                    return ()
-                try:
-                    return tuple(
-                        (arg.variable.offset, arg.variable.size, repr(arg.variable_type))
-                        for arg in tuple(codegen.cfunc.arg_list or ())
-                    )
-                except AttributeError:
-                    return ()
-
-            pointer_ast_before = _pointer_ast_lines_8616()
-            prototype_arg_state_before = _prototype_arg_state_8616()
-            # Repair: ensure statements is always CStatements before every pass.
-            # Many transform() callbacks return plain lists, which corrupts downstream.
-            if _repair_cfunc_statements_wrapper(codegen):
-                rollback_snapshots.invalidate(RollbackSnapshotInvalidation8616.PREPASS_REPAIR)
-                optimization_witnesses.invalidate()
-            prototype_before = codegen.cfunc.functy
-            large_function_skip = bool(getattr(codegen, "_inertia_skip_per_pass_validation_large_function", False))
-            optional_reject_budget = int(
-                getattr(
-                    codegen,
-                    "_inertia_postprocess_optional_reject_budget_8616",
-                    _PASS_REJECT_BUDGET_DEFAULT_8616,
-                )
-                or 0
-            )
-            optional_reject_count = int(
-                getattr(codegen, "_inertia_postprocess_optional_reject_count_8616", 0) or 0
-            )
-            preflight_input = PostprocessPassPreflightInput8616(
-                pass_name=pass_name,
-                validation_enabled=validation_enabled,
-                per_pass_validation_enabled=per_pass_validation_enabled,
-                large_function_skip=large_function_skip,
-                force_per_pass_requested=bool(os.environ.get("INERTIA_FORCE_PER_PASS_TV")),
-                optional_reject_budget=optional_reject_budget,
-                optional_reject_count=optional_reject_count,
-            )
-            preflight = decide_postprocess_pass_preflight_8616(preflight_input)
-            if preflight.action is PostprocessPassPreflightAction8616.PROBE_LOCAL_EVIDENCE:
-                preflight = decide_postprocess_pass_preflight_8616(
-                    preflight_input.with_local_evidence(
-                        _postprocess_pass_has_local_evidence_8616(pass_name, codegen)
-                    )
-                )
-            if preflight.action is PostprocessPassPreflightAction8616.REFUSE_LOCAL_PROOF:
-                reason = _postprocess_local_validation_refusal_reason_8616(pass_name, codegen)
-                refused = _boundary_list_8616(getattr(codegen, "_inertia_postprocess_refused_passes_8616", ()) or ())
-                refused.append({"pass": pass_name, "reason": reason.value})
-                codegen._inertia_postprocess_refused_passes_8616 = tuple(refused)
-                skipped = _boundary_list_8616(getattr(codegen, "_inertia_postprocess_rejected_passes", ()) or ())
-                skipped.append(pass_name)
-                codegen._inertia_postprocess_rejected_passes = tuple(skipped)
-                return True
-            if preflight.action is PostprocessPassPreflightAction8616.SKIP_REJECT_BUDGET:
-                skipped = _boundary_list_8616(
-                    getattr(codegen, "_inertia_postprocess_reject_budget_skipped_passes_8616", ()) or ()
-                )
-                skipped.append(pass_name)
-                codegen._inertia_postprocess_reject_budget_skipped_passes_8616 = tuple(skipped)
-                rejected = _boundary_list_8616(getattr(codegen, "_inertia_postprocess_rejected_passes", ()) or ())
-                rejected.append(pass_name)
-                codegen._inertia_postprocess_rejected_passes = tuple(rejected)
-                return True
-            if preflight.action is not PostprocessPassPreflightAction8616.EXECUTE:
-                raise PipelineHardError(
-                    "postprocess preflight did not close its local-evidence request",
-                    layer="rewrite/postprocess:pass_transaction",
-                )
-            is_optimization_pass = preflight.is_optimization_pass
-            force_pass_validation = preflight.force_pass_validation
-            requires_snapshot = preflight.requires_snapshot
-            return_chain_expected = _return_chain_expected_counts_8616(codegen)
-            cycle_before = transaction_state.known_cycle_path
-
-            def _materialize_rollback_snapshot_8616() -> PostprocessRollbackSnapshot8616 | None:
-                """Capture every projection restored after a rejected postprocess pass."""
-                cfunc_snapshot = _snapshot_codegen_cfunc(codegen)
-                if cfunc_snapshot is None:
-                    return None
-                return PostprocessRollbackSnapshot8616(
-                    cfunc=cfunc_snapshot,
-                    metadata=_snapshot_codegen_inertia_metadata_8616(codegen),
-                    text=_snapshot_codegen_text_state_8616(codegen),
-                    project_function=_snapshot_project_function_metadata_8616(
-                        project,
-                        getattr(getattr(codegen, "cfunc", None), "addr", None),
-                    ),
-                    cycle_path=cycle_before,
-                )
-
-            snapshot_state = (
-                rollback_snapshots.acquire(_materialize_rollback_snapshot_8616)
-                if requires_snapshot or return_chain_expected is not None
-                else None
-            )
-            rollback_snapshots.stats()
-            snapshot = snapshot_state.cfunc if snapshot_state is not None else None
-            if requires_snapshot and snapshot is None:
-                rejected = _boundary_list_8616(getattr(codegen, "_inertia_postprocess_rejected_passes", ()) or ())
-                rejected.append(pass_name)
-                codegen._inertia_postprocess_rejected_passes = tuple(rejected)
-                logging.getLogger(__name__).warning(
-                    "Skipping 86_16 postprocess pass %s at function=%#x: validation snapshot unavailable: %s",
-                    pass_name,
-                    trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                    getattr(codegen, "_inertia_postprocess_snapshot_error", None) or "unknown",
-                )
-                return True
-            metadata_snapshot = snapshot_state.metadata if snapshot_state is not None else None
-            text_snapshot = snapshot_state.text if snapshot_state is not None else None
-            project_function_snapshot = snapshot_state.project_function if snapshot_state is not None else None
-            if snapshot_state is not None:
-                cycle_before = snapshot_state.cycle_path
-            optimization_before = (
-                optimization_witnesses.current_or_build(_optimization_witness_8616)
-                if is_optimization_pass
-                else None
-            )
-
-            def _restore_step_state(*, context: str | None = None) -> None:
-                _restore_project_function_metadata_8616(project_function_snapshot)
-                _restore_codegen_cfunc(codegen, snapshot)
-                _restore_codegen_inertia_metadata_8616(codegen, metadata_snapshot)
-                _restore_codegen_text_state_8616(codegen, text_snapshot)
-                transaction_state.record_cycle_path(cycle_before)
-                rollback_snapshots.invalidate(RollbackSnapshotInvalidation8616.RESTORE_CONSUMED)
-
-            try:
-                if isinstance(pass_timeout_seconds, int) and pass_timeout_seconds > 0:
-                    with analysis_timeout(pass_timeout_seconds):  # noqa: SIM117
-                        with span("x86_16.postprocess.pass.execute", function=trace_func_addr, pass_name=pass_name):
-                            step_changed = bool(step_func())
-                else:
-                    with span("x86_16.postprocess.pass.execute", function=trace_func_addr, pass_name=pass_name):
-                        step_changed = bool(step_func())
-                if os.environ.get("INERTIA_DEBUG_X87_PROTO") == "1" and codegen.cfunc.functy != prototype_before:
-                    print(
-                        "[dbg-x87-proto] "
-                        f"pass={pass_name} changed={step_changed} "
-                        f"before={prototype_before!r} after={codegen.cfunc.functy!r}",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                prototype_arg_state_after = _prototype_arg_state_8616()
-                if prototype_arg_state_after != prototype_arg_state_before:
-                    print(
-                        "[dbg-x87-proto] "
-                        f"pass={pass_name} changed={step_changed} "
-                        f"args_before={prototype_arg_state_before!r} args_after={prototype_arg_state_after!r}",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                pointer_ast_after = _pointer_ast_lines_8616()
-                if pointer_ast_after != pointer_ast_before:
-                    logging.getLogger(__name__).warning(
-                        "[pointer-memory-postprocess-mutation] pass=%s reported_changed=%s before=%r after=%r",
-                        pass_name,
-                        step_changed,
-                        pointer_ast_before,
-                        pointer_ast_after,
-                    )
-            except AnalysisTimeout as ex:
-                if per_pass_validation_enabled or force_pass_validation or is_optimization_pass:
-                    _restore_step_state()
-                else:
-                    rollback_snapshots.invalidate(RollbackSnapshotInvalidation8616.PASS_EXCEPTION)
-                codegen._inertia_rewrite_failed = True
-                codegen._inertia_rewrite_failure_pass = pass_name
-                codegen._inertia_rewrite_failure_error = f"timeout: {ex}"
-                timed_out = _boundary_list_8616(getattr(codegen, "_inertia_postprocess_timeout_passes", ()) or ())
-                timed_out.append(pass_name)
-                codegen._inertia_postprocess_timeout_passes = tuple(timed_out)
-                logging.getLogger(__name__).warning(
-                    "Skipping 86_16 postprocess pass %s after %s: timeout (%s)",
-                    pass_name,
-                    transaction_state.last_changed_pass or "no earlier rewrite",
-                    ex,
-                )
-                if pass_name in timeout_continue_passes:
-                    continued = _boundary_list_8616(
-                        getattr(codegen, "_inertia_postprocess_timeout_continued_passes", ()) or ()
-                    )
-                    continued.append(pass_name)
-                    codegen._inertia_postprocess_timeout_continued_passes = tuple(continued)
-                    return True
-                return False
-            except PipelineHardError:
-                if per_pass_validation_enabled or force_pass_validation or is_optimization_pass:
-                    _restore_step_state()
-                else:
-                    rollback_snapshots.invalidate(RollbackSnapshotInvalidation8616.PASS_EXCEPTION)
-                raise
-            except Exception as ex:
-                if per_pass_validation_enabled or force_pass_validation or is_optimization_pass:
-                    _restore_step_state()
-                else:
-                    rollback_snapshots.invalidate(RollbackSnapshotInvalidation8616.PASS_EXCEPTION)
-                codegen._inertia_rewrite_failed = True
-                codegen._inertia_rewrite_failure_pass = pass_name
-                codegen._inertia_rewrite_failure_error = str(ex)
-                logging.getLogger(__name__).warning(
-                    "Skipping 86_16 postprocess pass %s after %s: %s",
-                    pass_name,
-                    transaction_state.last_changed_pass or "no earlier rewrite",
-                    ex,
-                    exc_info=True,
-                )
-                return False
-            cycle_after = _c_ast_cycle_path_8616(getattr(getattr(codegen, "cfunc", None), "statements", None))
-            if cycle_after and not cycle_before:
-                rejected_cycles = _boundary_list_8616(
-                    getattr(codegen, "_inertia_postprocess_cycle_rejected_passes_8616", ()) or ()
-                )
-                rejected_cycles.append({"pass": pass_name, "path": cycle_after})
-                codegen._inertia_postprocess_cycle_rejected_passes_8616 = tuple(rejected_cycles)
-                logging.getLogger(__name__).warning(
-                    "postprocess C AST cycle rejected function=%#x pass=%s path=%s",
-                    trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                    pass_name,
-                    " -> ".join(cycle_after),
-                )
-                if snapshot is None:
-                    codegen._inertia_rewrite_failed = True
-                    codegen._inertia_rewrite_failure_pass = pass_name
-                    codegen._inertia_rewrite_failure_error = (
-                        "pass introduced a structured C AST cycle without rollback state"
-                    )
-                    return False
-                _restore_step_state(context=f"postprocess:{pass_name}:cycle-restore")
-                rejected = _boundary_list_8616(getattr(codegen, "_inertia_postprocess_rejected_passes", ()) or ())
-                rejected.append(pass_name)
-                codegen._inertia_postprocess_rejected_passes = tuple(rejected)
-                return True
-            transaction_state.record_cycle_path(cycle_after)
-            if return_chain_expected is not None:
-                actual_if_count, actual_return_count = _return_chain_counts_8616(codegen)
-                expected_if_count, expected_return_count = return_chain_expected
-                if actual_if_count < expected_if_count or actual_return_count < expected_return_count:
-                    logging.getLogger(__name__).warning(
-                        "postprocess semantic gate restored function=%#x pass=%s reason=return-chain-regression "
-                        "ifs=%d/%d returns=%d/%d",
-                        trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                        pass_name,
-                        actual_if_count,
-                        expected_if_count,
-                        actual_return_count,
-                        expected_return_count,
-                    )
-                    _restore_step_state()
-                    rejected = _boundary_list_8616(getattr(codegen, "_inertia_postprocess_rejected_passes", ()) or ())
-                    rejected.append(pass_name)
-                    codegen._inertia_postprocess_rejected_passes = tuple(rejected)
-                    return True
-            if is_optimization_pass and not step_changed:
-                optimization_after = _optimization_witness_8616()
-                optimization_witnesses.record(optimization_after)
-                if optimization_after != optimization_before:
-                    step_changed = True
-                    misreported = _boundary_list_8616(
-                        getattr(
-                            codegen,
-                            "_inertia_postprocess_misreported_unchanged_passes_8616",
-                            (),
-                        )
-                        or ()
-                    )
-                    misreported.append(pass_name)
-                    codegen._inertia_postprocess_misreported_unchanged_passes_8616 = tuple(misreported)
-            if step_changed:
-                optimization_witnesses.invalidate()
-                rollback_snapshots.invalidate(RollbackSnapshotInvalidation8616.PASS_REPORTED_CHANGE)
-            elif cycle_after != cycle_before:
-                rollback_snapshots.invalidate(RollbackSnapshotInvalidation8616.PASS_MUTATION_DETECTED)
-            if (
-                validation_enabled
-                and preflight.enforce_pass_validation
-                and transaction_state.baseline_summary is not None
-            ):
-                if not step_changed:
-                    _record_unchanged_postprocess_validation_skip_8616(codegen, pass_name)
-                    return True
-                if step_changed:
-                    _invalidate_tail_validation_derived_caches_8616(codegen)
-                    validation_context = (
-                        f"{trace_func_addr:#x} postprocess:{pass_name}:validation"
-                        if isinstance(trace_func_addr, int)
-                        else f"postprocess:{pass_name}:validation"
-                    )
-                    if getattr(codegen, "_inertia_postprocess_regeneration_disabled", False):
-                        rejected = _boundary_list_8616(
-                            getattr(codegen, "_inertia_postprocess_rejected_passes", ()) or ()
-                        )
-                        rejected.append(pass_name)
-                        codegen._inertia_postprocess_rejected_passes = tuple(rejected)
-                        logging.getLogger(__name__).warning(
-                            "postprocess validation skipped function=%#x pass=%s verdict=regeneration-disabled",
-                            trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                            pass_name,
-                        )
-                        _restore_step_state(context=f"{validation_context}:restore")
-                        return True
-                    if not _regenerate_text_safely(codegen, context=validation_context):
-                        _restore_step_state(context=f"{validation_context}:restore")
-                        rejected = _boundary_list_8616(
-                            getattr(codegen, "_inertia_postprocess_rejected_passes", ()) or ()
-                        )
-                        rejected.append(pass_name)
-                        codegen._inertia_postprocess_rejected_passes = tuple(rejected)
-                        return True
-                with span("x86_16.postprocess.validation.summary", function=trace_func_addr, pass_name=pass_name):
-                    current_summary = collect_x86_16_tail_validation_summary(project, codegen, mode="live_out")
-                if (
-                    step_changed
-                    and os.environ.get("INERTIA_DEBUG_POSTPROCESS_DELTA")
-                ):
-                    logging.getLogger(__name__).warning(
-                        "[postprocess-validation-surface] function=%#x pass=%s "
-                        "conditions=%r",
-                        trace_func_addr
-                        if isinstance(trace_func_addr, int)
-                        else -1,
-                        pass_name,
-                        current_summary.conditions,
-                    )
-                with span("x86_16.postprocess.validation.compare", function=trace_func_addr, pass_name=pass_name):
-                    validation = compare_x86_16_tail_validation_summaries(
-                        transaction_state.baseline_summary,
-                        current_summary,
-                    )
-                if not x86_16_tail_validation_result_passed(validation):
-                    is_exit_goto_repair_delta = _postprocess_exit_goto_repair_delta_8616(validation)
-                    has_structured_blocking_reason = bool(_postprocess_validation_blocking_reasons_8616(validation))
-                    is_blocking_delta = True
-                    delta_kind = _classify_postprocess_validation_delta_8616(validation)
-                    if (
-                        pass_name in _HELPER_NAME_ONLY_VALIDATION_PASS_NAMES_8616
-                        and delta_kind is _PostprocessValidationDeltaKind8616.NAME_ONLY_HELPER_ANNOTATION
-                    ):
-                        is_blocking_delta = has_structured_blocking_reason
-                        if not is_blocking_delta:
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                    elif pass_name in _MISSING_TERMINAL_AX_RETURN_PASS_NAMES_8616:
-                        if _is_missing_terminal_ax_return_delta_8616(codegen, validation) or (
-                            int(getattr(codegen, "_inertia_missing_terminal_ax_return_materialized_8616", 0) or 0) > 0
-                            and _is_direct_callsite_helper_delta_only_8616(
-                                project,
-                                getattr(codegen, "_inertia_current_function_8616", None),
-                                validation,
-                            )
-                        ):
-                            delta_kind = _PostprocessValidationDeltaKind8616.MISSING_TERMINAL_AX_RETURN
-                            is_blocking_delta = False
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        else:
-                            is_blocking_delta = True
-                    elif (
-                        pass_name == "_reconcile_exact_stack_argument_prototype_8616"
-                        and _is_stack_prototype_width_reconciliation_delta_8616(codegen, validation)
-                    ):
-                        delta_kind = _PostprocessValidationDeltaKind8616.STACK_PROTOTYPE_WIDTH_RECONCILIATION
-                        is_blocking_delta = False
-                        accepted = _boundary_list_8616(
-                            getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                        )
-                        accepted.append({"pass": pass_name, "kind": delta_kind.value})
-                        codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                        logging.getLogger(__name__).warning(
-                            "postprocess validation accepted function=%#x pass=%s kind=%s",
-                            trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                            pass_name,
-                            delta_kind.value,
-                        )
-                    elif pass_name in _JCC_REWRITE_VALIDATION_PASS_NAMES_8616:
-                        if is_exit_goto_repair_delta:
-                            is_blocking_delta = False
-                        elif (
-                            pass_name == "_repair_conditional_continue_guards_after_loop_break_8616"
-                            and _is_conditional_continue_guard_repair_delta_8616(codegen, validation)
-                        ):
-                            delta_kind = _PostprocessValidationDeltaKind8616.CONDITIONAL_CONTINUE_GUARD_REPAIR
-                            is_blocking_delta = False
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        elif _is_jcc_call_return_condition_rebinding_delta_8616(codegen, validation):
-                            delta_kind = _PostprocessValidationDeltaKind8616.JCC_CALL_RETURN_CONDITION_REBINDING
-                            is_blocking_delta = False
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        elif _is_jcc_condition_materialization_validation_delta_8616(
-                            project,
-                            codegen,
-                            validation,
-                            function=getattr(codegen, "_inertia_current_function_8616", None),
-                        ):
-                            delta_kind = _PostprocessValidationDeltaKind8616.JCC_CONDITION_MATERIALIZATION
-                            is_blocking_delta = False
-                            codegen._inertia_jcc_condition_materialization_validation_accepts = (
-                                int(
-                                    getattr(codegen, "_inertia_jcc_condition_materialization_validation_accepts", 0)
-                                    or 0
-                                )
-                                + 1
-                            )
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        else:
-                            is_blocking_delta = True
-                    elif pass_name in _DIRECT_GLOBAL_UPDATE_VALIDATION_PASS_NAMES_8616:
-                        if _is_direct_global_update_materialization_delta_8616(codegen, validation):
-                            delta_kind = _PostprocessValidationDeltaKind8616.DIRECT_GLOBAL_UPDATE_MATERIALIZATION
-                            is_blocking_delta = False
-                            codegen._inertia_direct_global_update_validation_accepts_8616 = (
-                                int(getattr(codegen, "_inertia_direct_global_update_validation_accepts_8616", 0) or 0)
-                                + 1
-                            )
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        else:
-                            is_blocking_delta = True
-                    elif pass_name == "_materialize_direct_stack_mov_incdec_instructions_bootstrap_8616":
-                        if _is_direct_stack_move_update_materialization_delta_8616(codegen, validation):
-                            delta_kind = _PostprocessValidationDeltaKind8616.DIRECT_STACK_MOVE_UPDATE_MATERIALIZATION
-                            is_blocking_delta = False
-                            codegen._inertia_direct_stack_move_update_validation_accepts_8616 = (
-                                int(
-                                    getattr(
-                                        codegen,
-                                        "_inertia_direct_stack_move_update_validation_accepts_8616",
-                                        0,
-                                    )
-                                    or 0
-                                )
-                                + 1
-                            )
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        else:
-                            is_blocking_delta = True
-                    elif pass_name in _DIRECT_STACK_UPDATE_VALIDATION_PASS_NAMES_8616:
-                        direct_update_delta = _is_direct_stack_update_materialization_delta_8616(codegen, validation)
-                        direct_move_delta = _is_direct_stack_move_materialization_delta_8616(
-                            codegen, validation
-                        ) or _is_direct_stack_move_idiv_remainder_materialization_delta_8616(codegen, validation)
-                        if direct_update_delta or direct_move_delta:
-                            delta_kind = (
-                                _PostprocessValidationDeltaKind8616.DIRECT_STACK_UPDATE_MATERIALIZATION
-                                if direct_update_delta
-                                else _PostprocessValidationDeltaKind8616.DIRECT_STACK_MOVE_MATERIALIZATION
-                            )
-                            is_blocking_delta = False
-                            if direct_update_delta:
-                                codegen._inertia_direct_stack_update_validation_accepts_8616 = (
-                                    int(
-                                        getattr(codegen, "_inertia_direct_stack_update_validation_accepts_8616", 0) or 0
-                                    )
-                                    + 1
-                                )
-                            if direct_move_delta:
-                                codegen._inertia_direct_stack_move_validation_accepts_8616 = (
-                                    int(getattr(codegen, "_inertia_direct_stack_move_validation_accepts_8616", 0) or 0)
-                                    + 1
-                                )
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        else:
-                            is_blocking_delta = True
-                    elif pass_name in _DIRECT_STACK_MOVE_VALIDATION_PASS_NAMES_8616:
-                        direct_move_delta_kind = _direct_stack_move_validation_delta_kind_8616(codegen, validation)
-                        if direct_move_delta_kind is not None:
-                            delta_kind = direct_move_delta_kind
-                            is_blocking_delta = False
-                            if delta_kind is _PostprocessValidationDeltaKind8616.DIRECT_STACK_MOVE_MATERIALIZATION:
-                                codegen._inertia_direct_stack_move_validation_accepts_8616 = (
-                                    int(getattr(codegen, "_inertia_direct_stack_move_validation_accepts_8616", 0) or 0)
-                                    + 1
-                                )
-                            elif (
-                                delta_kind
-                                is _PostprocessValidationDeltaKind8616.CALLSITE_STACK_ARGUMENT_MATERIALIZATION
-                            ):
-                                codegen._inertia_direct_stack_move_callsite_arg_validation_accepts_8616 = (
-                                    int(
-                                        getattr(
-                                            codegen,
-                                            "_inertia_direct_stack_move_callsite_arg_validation_accepts_8616",
-                                            0,
-                                        )
-                                        or 0
-                                    )
-                                    + 1
-                                )
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        else:
-                            is_blocking_delta = True
-                    elif pass_name == "_materialize_global_byte_index_sum_loop_8616":
-                        if _is_global_byte_sum_loop_materialization_delta_8616(codegen, validation):
-                            delta_kind = _PostprocessValidationDeltaKind8616.GLOBAL_BYTE_SUM_LOOP_MATERIALIZATION
-                            is_blocking_delta = False
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        else:
-                            is_blocking_delta = True
-                    elif pass_name == "_prune_unreachable_after_return_final_8616":
-                        if int(getattr(codegen, "_inertia_unreachable_after_return_pruned_8616", 0) or 0) > 0:
-                            delta_kind = _PostprocessValidationDeltaKind8616.UNREACHABLE_AFTER_RETURN_PRUNE
-                            is_blocking_delta = False
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        else:
-                            is_blocking_delta = True
-                    elif pass_name in {
-                        "_repair_switch_loop_exit_returns_from_evidence_8616",
-                        "_repair_switch_loop_exit_returns_from_evidence_final_8616",
-                    }:
-                        if bool(getattr(codegen, "_inertia_switch_loop_exit_return_materialized_8616", False)):
-                            delta_kind = _PostprocessValidationDeltaKind8616.SWITCH_LOOP_EXIT_RETURN_REPAIR
-                            is_blocking_delta = False
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        else:
-                            is_blocking_delta = True
-                    elif pass_name in {
-                        "_recover_missing_direct_calls_from_evidence_early_8616",
-                        "_recover_missing_direct_calls_from_evidence_8616",
-                        "_normalize_fact_backed_stack_accesses_8616",
-                        "_normalize_call_target_names_8616",
-                        "_normalize_recovered_call_target_names_8616",
-                        "_materialize_callsite_stack_arguments_8616",
-                        "_materialize_callsite_stack_arguments_after_ss_lowering_8616",
-                        "_prune_consumed_segmented_stack_arg_stores_8616",
-                        "_prune_consumed_segmented_stack_arg_stores_final_8616",
-                        "_prune_consumed_segmented_stack_arg_stores_after_ss_lowering_8616",
-                        "_prune_scalar_global_high_byte_call_arg_remnants_after_ss_lowering_8616",
-                        "_materialize_callsite_prototypes_8616",
-                        "_materialize_recovered_callsite_stack_arguments_8616",
-                        "_recover_missing_direct_calls_final_8616",
-                        "_materialize_empty_if_return_branches_8616",
-                        "_materialize_empty_if_return_branches_final_8616",
-                        "_materialize_void_tail_call_guard_from_cfg_8616",
-                        "_materialize_void_tail_call_guard_from_cfg_final_8616",
-                        "_prune_surplus_void_empty_return_guards_8616",
-                        "_prune_surplus_void_empty_return_guards_final_8616",
-                        "_prune_duplicate_empty_return_guard_before_cfg_suffix_8616",
-                        "_prune_duplicate_empty_return_guard_before_cfg_suffix_final_8616",
-                    }:
-                        if is_exit_goto_repair_delta:
-                            is_blocking_delta = False
-                        elif _is_stack_probe_helper_cleanup_delta_8616(codegen, validation):
-                            delta_kind = _PostprocessValidationDeltaKind8616.STACK_PROBE_HELPER_CLEANUP
-                            is_blocking_delta = False
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        elif (
-                            pass_name in _CALLSITE_STACK_ARGUMENT_PASS_NAMES_8616
-                            and _is_callsite_stack_argument_materialization_delta_8616(codegen, validation)
-                        ):
-                            delta_kind = _PostprocessValidationDeltaKind8616.CALLSITE_STACK_ARGUMENT_MATERIALIZATION
-                            is_blocking_delta = False
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                        else:
-                            current_function = getattr(codegen, "_inertia_current_function_8616", None)
-                            if (
-                                pass_name
-                                in {
-                                    "_prune_surplus_void_empty_return_guards_8616",
-                                    "_prune_surplus_void_empty_return_guards_final_8616",
-                                }
-                                and _is_proven_surplus_empty_guard_cleanup_delta_8616(
-                                    codegen,
-                                    validation,
-                                )
-                            ):
-                                delta_kind = (
-                                    _PostprocessValidationDeltaKind8616.PROVEN_SURPLUS_EMPTY_GUARD_CLEANUP
-                                )
-                                is_blocking_delta = False
-                                accepted = _boundary_list_8616(
-                                    getattr(
-                                        codegen,
-                                        "_inertia_postprocess_accepted_validation_deltas",
-                                        (),
-                                    )
-                                    or ()
-                                )
-                                accepted.append(
-                                    {
-                                        "pass": pass_name,
-                                        "kind": delta_kind.value,
-                                    }
-                                )
-                                codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                                logging.getLogger(__name__).warning(
-                                    "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                    trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                    pass_name,
-                                    delta_kind.value,
-                                )
-                            elif pass_name in {
-                                "_materialize_empty_if_return_branches_8616",
-                                "_materialize_empty_if_return_branches_final_8616",
-                                "_prune_surplus_void_empty_return_guards_8616",
-                                "_prune_surplus_void_empty_return_guards_final_8616",
-                                "_prune_duplicate_empty_return_guard_before_cfg_suffix_8616",
-                                "_prune_duplicate_empty_return_guard_before_cfg_suffix_final_8616",
-                            } and _is_cfg_return_chain_callsite_materialization_delta_8616(
-                                project, current_function, codegen, validation
-                            ):
-                                delta_kind = _PostprocessValidationDeltaKind8616.CFG_RETURN_CHAIN_MATERIALIZATION
-                                is_blocking_delta = False
-                                accepted = _boundary_list_8616(
-                                    getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                                )
-                                accepted.append(
-                                    {
-                                        "pass": pass_name,
-                                        "kind": delta_kind.value,
-                                    }
-                                )
-                                codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                                logging.getLogger(__name__).warning(
-                                    "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                    trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                    pass_name,
-                                    delta_kind.value,
-                                )
-                            elif pass_name in {
-                                "_materialize_void_tail_call_guard_from_cfg_8616",
-                                "_materialize_void_tail_call_guard_from_cfg_final_8616",
-                            } and _is_void_tail_call_guard_materialization_delta_8616(codegen, validation):
-                                delta_kind = (
-                                    _PostprocessValidationDeltaKind8616.CFG_VOID_TAIL_CALL_GUARD_MATERIALIZATION
-                                )
-                                is_blocking_delta = False
-                                accepted = _boundary_list_8616(
-                                    getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                                )
-                                accepted.append(
-                                    {
-                                        "pass": pass_name,
-                                        "kind": delta_kind.value,
-                                    }
-                                )
-                                codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                                logging.getLogger(__name__).warning(
-                                    "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                    trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                    pass_name,
-                                    delta_kind.value,
-                                )
-                            elif pass_name in {
-                                "_materialize_cfg_selector_return_branches_early_8616",
-                                "_materialize_cfg_selector_return_branches_8616",
-                                "_materialize_empty_if_return_branches_8616",
-                                "_materialize_empty_if_return_branches_final_8616",
-                            } and _is_cfg_return_expr_chain_materialization_delta_8616(
-                                project, current_function, codegen, validation
-                            ):
-                                delta_kind = _PostprocessValidationDeltaKind8616.CFG_RETURN_EXPR_CHAIN_MATERIALIZATION
-                                is_blocking_delta = False
-                                accepted = _boundary_list_8616(
-                                    getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                                )
-                                accepted.append(
-                                    {
-                                        "pass": pass_name,
-                                        "kind": delta_kind.value,
-                                    }
-                                )
-                                codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                                logging.getLogger(__name__).warning(
-                                    "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                    trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                    pass_name,
-                                    delta_kind.value,
-                                )
-                            else:
-                                is_blocking_delta = True
-                    elif pass_name == "_classify_return_shape_8616":
-                        if _is_default_scalar_void_return_classification_delta_8616(codegen, validation):
-                            delta_kind = _PostprocessValidationDeltaKind8616.DEFAULT_SCALAR_VOID_RETURN_CLASSIFICATION
-                            is_blocking_delta = False
-                            accepted = _boundary_list_8616(
-                                getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                            )
-                            accepted.append(
-                                {
-                                    "pass": pass_name,
-                                    "kind": delta_kind.value,
-                                }
-                            )
-                            codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation accepted function=%#x pass=%s kind=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                delta_kind.value,
-                            )
-                    elif _is_unobserved_default_scalar_synthetic_return_delta_8616(
-                        getattr(codegen, "_inertia_current_function_8616", None),
-                        validation,
-                    ):
-                        delta_kind = _PostprocessValidationDeltaKind8616.UNOBSERVED_DEFAULT_SCALAR_SYNTHETIC_RETURN
-                        is_blocking_delta = False
-                        accepted = _boundary_list_8616(
-                            getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                        )
-                        accepted.append(
-                            {
-                                "pass": pass_name,
-                                "kind": delta_kind.value,
-                            }
-                        )
-                        codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                        logging.getLogger(__name__).warning(
-                            "postprocess validation accepted function=%#x pass=%s kind=%s",
-                            trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                            pass_name,
-                            delta_kind.value,
-                        )
-                    elif _is_exposed_nonvoid_stack_arg_scalar_return_delta_8616(
-                        getattr(codegen, "_inertia_current_function_8616", None),
-                        validation,
-                    ):
-                        delta_kind = _PostprocessValidationDeltaKind8616.EXPOSED_NONVOID_STACK_ARG_SCALAR_RETURN
-                        is_blocking_delta = False
-                        accepted = _boundary_list_8616(
-                            getattr(codegen, "_inertia_postprocess_accepted_validation_deltas", ()) or ()
-                        )
-                        accepted.append(
-                            {
-                                "pass": pass_name,
-                                "kind": delta_kind.value,
-                            }
-                        )
-                        codegen._inertia_postprocess_accepted_validation_deltas = tuple(accepted)
-                        logging.getLogger(__name__).warning(
-                            "postprocess validation accepted function=%#x pass=%s kind=%s",
-                            trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                            pass_name,
-                            delta_kind.value,
-                        )
-                    elif is_exit_goto_repair_delta:
-                        is_blocking_delta = False
-                    if not is_blocking_delta:
-                        transaction_state.replace_baseline(current_summary)
-                        _dump_postprocess_trace_text_8616(
-                            codegen,
-                            pass_name=f"accepted.{pass_name}",
-                            trace_func_addr=trace_func_addr,
-                        )
-                        # Non-blocking per-pass delta: keep pass result and continue.
-                        if step_changed:
-                            transaction_state.accept_change(pass_name)
-                            codegen._inertia_last_postprocess_pass = pass_name
-                        return True
-                    rejected = _boundary_list_8616(getattr(codegen, "_inertia_postprocess_rejected_passes", ()) or ())
-                    rejected.append(pass_name)
-                    codegen._inertia_postprocess_rejected_passes = tuple(rejected)
-                    logging.getLogger(__name__).warning(
-                        "postprocess validation rejected function=%#x pass=%s verdict=%s",
-                        trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                        pass_name,
-                        validation.get("summary_text") or validation.get("verdict") or validation.get("status"),
-                    )
-                    if os.environ.get("INERTIA_DEBUG_POSTPROCESS_VALIDATION") or os.environ.get(
-                        "INERTIA_DEBUG_POSTPROCESS_DELTA"
-                    ):
-                        logging.getLogger(__name__).warning(
-                            "[postprocess-validation] function=%#x pass=%s delta=%s",
-                            trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                            pass_name,
-                            validation.get("summary_text") or validation.get("delta"),
-                        )
-                    destructive_rejected_delta = (
-                        _validation_delta_removes_stack_or_control_effects_8616(validation)
-                        and pass_name not in _PASS_LOCAL_REJECT_CONTINUE_PASS_NAMES_8616
-                    )
-                    if os.environ.get("INERTIA_DEBUG_POSTPROCESS_VALIDATION") or os.environ.get(
-                        "INERTIA_DEBUG_POSTPROCESS_DELTA"
-                    ):
-                        logging.getLogger(__name__).warning(
-                            "[postprocess-validation] function=%#x pass=%s destructive_rejected_delta=%s",
-                            trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                            pass_name,
-                            destructive_rejected_delta,
-                        )
-                    rejected_dump_dir = os.environ.get("INERTIA_DEBUG_REJECTED_POSTPROCESS_TEXT_DIR")
-                    if rejected_dump_dir:
-                        with contextlib.suppress(Exception):
-                            _regenerate_text_safely(
-                                codegen,
-                                context=(
-                                    f"{trace_func_addr:#x} postprocess:{pass_name}:rejected-dump"
-                                    if isinstance(trace_func_addr, int)
-                                    else f"postprocess:{pass_name}:rejected-dump"
-                                ),
-                            )
-                            os.makedirs(rejected_dump_dir, exist_ok=True)
-                            dump_addr = trace_func_addr if isinstance(trace_func_addr, int) else 0
-                            safe_pass_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", pass_name)
-                            with open(
-                                os.path.join(rejected_dump_dir, f"{dump_addr:x}.{safe_pass_name}.c"),
-                                "w",
-                                encoding="utf-8",
-                            ) as fp:
-                                fp.write(getattr(codegen, "text", "") or "")
-                    _restore_step_state(
-                        context=(
-                            f"{trace_func_addr:#x} postprocess:{pass_name}:restore"
-                            if isinstance(trace_func_addr, int)
-                            else f"postprocess:{pass_name}:restore"
-                        ),
-                    )
-                    restore_proof_required = (
-                        destructive_rejected_delta or pass_name in _MANDATORY_VALIDATION_PASS_NAMES_8616
-                    )
-                    if restore_proof_required:
-                        restored_step_proven = _postprocess_restored_step_matches_baseline_8616(
-                            project,
-                            codegen,
-                            transaction_state.baseline_summary,
-                            restored_cfunc_snapshot=snapshot,
-                        )
-                        if restored_step_proven:
-                            if destructive_rejected_delta:
-                                _clear_proven_destructive_rejection_8616(codegen)
-                            else:
-                                _clear_proven_rejected_pass_restore_8616(codegen)
-                            logging.getLogger(__name__).warning(
-                                "postprocess validation restored rejected pass function=%#x pass=%s destructive=%s",
-                                trace_func_addr if isinstance(trace_func_addr, int) else -1,
-                                pass_name,
-                                destructive_rejected_delta,
-                            )
-                            return True
-                    if destructive_rejected_delta:
-                        destructive_validation = dict(validation)
-                        _mark_destructive_postprocess_validation_failure_8616(
-                            project,
-                            codegen,
-                            destructive_validation,
-                            pass_name=pass_name,
-                            summary_text=(
-                                validation.get("summary_text") or validation.get("verdict") or validation.get("status")
-                            ),
-                        )
-                        return False
-                    if pass_name in _PASS_LOCAL_REJECT_CONTINUE_PASS_NAMES_8616:
-                        # Optional metadata pass: keep baseline snapshot and
-                        # continue. Semantic rewrites still require typed
-                        # acceptance above or they fail the stage.
-                        if pass_name in _PASS_REJECT_BUDGET_ELIGIBLE_NAMES_8616:
-                            codegen._inertia_postprocess_optional_reject_count_8616 = (
-                                int(getattr(codegen, "_inertia_postprocess_optional_reject_count_8616", 0) or 0) + 1
-                            )
-                        return True
-                    codegen._inertia_postprocess_validation_failed = True
-                    codegen._inertia_postprocess_validation_failure_pass = pass_name
-                    codegen._inertia_postprocess_validation_failure_error = (
-                        validation.get("summary_text") or validation.get("verdict") or validation.get("status")
-                    )
-                    return False
-
-            if step_changed:
-                transaction_state.accept_change(pass_name)
-                codegen._inertia_last_postprocess_pass = pass_name
-            return True
 
         # ── Transfer typed conditions BEFORE typed condition pass ──
-        if not getattr(codegen, "_inertia_typed_conditions_transferred", False):
-            cfunc = getattr(codegen, "cfunc", None)
-            func_addr = getattr(cfunc, "addr", None) if cfunc is not None else None
-            if func_addr is not None:
-                try:
-                    transfer_typed_conditions_to_codegen_8616(project, func_addr, codegen)
-                except Exception as ex:
-                    logging.getLogger(__name__).debug(
-                        "Typed condition transfer failed at function=%#x stage=postprocess-transfer: %s",
-                        func_addr,
-                        ex,
-                    )
-            codegen._inertia_typed_conditions_transferred = True
+        _transfer_typed_conditions_once_8616(project, codegen)
 
         if timing_output_enabled() and os.environ.get("INERTIA_TAIL_VALIDATION_STDERR_JSON") != "1":
             print(
@@ -11027,29 +11167,13 @@ def _postprocess_codegen_8616(project: StructuredAstValue, codegen: StructuredAs
                 flush=True,
             )
 
-        if not _postprocess_run_bootstrap_steps_8616(project, codegen, skip_names, _apply_step):
+        if not _postprocess_run_bootstrap_steps_8616(project, codegen, skip_names, run.apply_step_8616):
             return _complete_postprocess_8616()
-        if not _postprocess_run_optimization_step_8616(project, codegen, per_pass_validation_enabled, _apply_step):
+        if not _postprocess_run_optimization_step_8616(project, codegen, per_pass_validation_enabled, run.apply_step_8616):
             return _complete_postprocess_8616()
 
-        _postprocess_run_pass_specs_8616(project, codegen, pass_specs, trace_func_addr, _apply_step)
-        if not codegen._inertia_postprocess_validation_failed and not getattr(
-            codegen, "_inertia_postprocess_regeneration_disabled", False
-        ) and _postprocess_should_regenerate_final_8616(
-            codegen,
-            transaction_state.accepted_changed,
-        ):
-            final_context = (
-                f"{trace_func_addr:#x} postprocess:final"
-                if isinstance(trace_func_addr, int)
-                else "postprocess:final"
-            )
-            _regenerate_text_safely(codegen, context=final_context)
-            _dump_postprocess_trace_text_8616(
-                codegen,
-                pass_name="final",
-                trace_func_addr=trace_func_addr,
-            )
+        _postprocess_run_pass_specs_8616(project, codegen, pass_specs, trace_func_addr, run.apply_step_8616)
+        _regenerate_final_postprocess_text_8616(codegen, transaction_state, trace_func_addr)
         return _complete_postprocess_8616()
 
     return _impl()
