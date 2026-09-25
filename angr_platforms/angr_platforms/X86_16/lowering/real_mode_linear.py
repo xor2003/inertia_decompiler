@@ -25,7 +25,7 @@ import re
 import sys
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from types import SimpleNamespace
 from typing import Any, Protocol, cast
@@ -4280,28 +4280,21 @@ def match_stable_ds_es_linear_global_address_8616(
     )
 
 
-def lower_stable_ds_es_linear_global_dereferences_8616(
-    codegen: StructuredAstValue, project: StructuredAstValue | None = None
-) -> bool:
-    """Replace stable DS/ES real-mode linear dereferences with global variable references."""
-    if project is None:
-        project = getattr(codegen, "project", None)
-    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
-    if project is None or root is None:
-        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-            log.warning(
-                "[direct-stack-update] unavailable project=%s root=%s",
-                project is not None,
-                root is not None,
-            )
-        return False
+@dataclass
+class _DsEsGlobalDerefRun8616:
+    """One DS/ES-linear global dereference lowering walk over a structured tree."""
 
-    def global_cvar(access: RealModeLinearGlobalAddress8616) -> StructuredAstValue:
+    codegen: StructuredAstValue
+    project: StructuredAstValue
+    changed: bool = False
+    seen: set[int] = field(default_factory=set)
+
+    def global_cvar_8616(self, access: RealModeLinearGlobalAddress8616) -> StructuredAstValue:
         addr = access.displacement & 0xFFFF
         name = f"g_{addr:04X}"
         scalar_width = min(access.width or 1, 2)
         target_type = _type_for_access_width_8616(scalar_width)
-        variables_in_use = getattr(codegen.cfunc, "variables_in_use", None)
+        variables_in_use = getattr(self.codegen.cfunc, "variables_in_use", None)
         if isinstance(variables_in_use, dict):
             for variable, cvar in tuple(variables_in_use.items()):
                 if isinstance(variable, SimMemoryVariable) and getattr(variable, "addr", None) == addr:
@@ -4321,82 +4314,74 @@ def lower_stable_ds_es_linear_global_dereferences_8616(
                     return cvar
                 if (
                     isinstance(variable, SimStackVariable)
-                    and machine_bp_offset_for_stack_variable_8616(codegen, variable)
+                    and machine_bp_offset_for_stack_variable_8616(self.codegen, variable)
                     == access.displacement
                 ):
                     replacement = SimMemoryVariable(
                         addr,
                         scalar_width,
                         name=name,
-                        region=getattr(codegen.cfunc, "addr", None),
+                        region=getattr(self.codegen.cfunc, "addr", None),
                     )
                     replacement_type = getattr(cvar, "variable_type", None) or target_type
                     replacement_cvar = structured_c.CVariable(
-                        replacement, variable_type=replacement_type, codegen=codegen
+                        replacement, variable_type=replacement_type, codegen=self.codegen
                     )
                     variables_in_use.pop(variable, None)
                     variables_in_use[replacement] = replacement_cvar
-                    unified = getattr(codegen.cfunc, "unified_local_vars", None)
+                    unified = getattr(self.codegen.cfunc, "unified_local_vars", None)
                     if isinstance(unified, dict):
                         unified.pop(variable, None)
                         unified[replacement] = {(replacement_cvar, getattr(replacement_cvar, "variable_type", None))}
                     return replacement_cvar
         variable = SimMemoryVariable(
-            addr, scalar_width, name=f"mem_{addr:04X}", region=getattr(codegen.cfunc, "addr", None)
+            addr, scalar_width, name=f"mem_{addr:04X}", region=getattr(self.codegen.cfunc, "addr", None)
         )
-        cvar = structured_c.CVariable(variable, variable_type=target_type, codegen=codegen)
+        cvar = structured_c.CVariable(variable, variable_type=target_type, codegen=self.codegen)
         if isinstance(variables_in_use, dict):
             variables_in_use[variable] = cvar
-        unified = getattr(codegen.cfunc, "unified_local_vars", None)
+        unified = getattr(self.codegen.cfunc, "unified_local_vars", None)
         if isinstance(unified, dict):
             unified[variable] = {(cvar, getattr(cvar, "variable_type", None))}
         return cvar
-
-    def global_expr(access: RealModeLinearGlobalAddress8616) -> StructuredAstValue:
+    def global_expr_8616(self, access: RealModeLinearGlobalAddress8616) -> StructuredAstValue:
         if not access.residual_terms:
-            return global_cvar(access)
+            return self.global_cvar_8616(access)
         target_type = _type_for_access_width_8616(access.width)
-        ptr_type = SimTypePointer(target_type).with_arch(project.arch)
+        ptr_type = SimTypePointer(target_type).with_arch(self.project.arch)
         rebuilt = structured_c.CUnaryOp(
             "Reference",
-            global_cvar(access),
-            codegen=codegen,
+            self.global_cvar_8616(access),
+            codegen=self.codegen,
         )
         for sign, term in access.residual_terms:
             rebuilt = structured_c.CBinaryOp(
                 "Add" if sign == 1 else "Sub",
                 rebuilt,
                 term,
-                codegen=codegen,
+                codegen=self.codegen,
             )
         return structured_c.CUnaryOp(
             "Dereference",
-            structured_c.CTypeCast(ptr_type, ptr_type, rebuilt, codegen=codegen),
-            codegen=codegen,
+            structured_c.CTypeCast(ptr_type, ptr_type, rebuilt, codegen=self.codegen),
+            codegen=self.codegen,
         )
-
-    changed = False
-
-    def transform(node: StructuredAstValue) -> StructuredAstValue:
-        nonlocal changed
-        access = match_stable_ds_es_linear_global_access_8616(node, project, codegen)
+    def transform(self, node: StructuredAstValue) -> StructuredAstValue:
+        access = match_stable_ds_es_linear_global_access_8616(node, self.project, self.codegen)
         if access is not None:
             if not may_lower_codegen_access_to_entry_ds_object_8616(
-                codegen,
+                self.codegen,
                 node,
                 segment_register=access.segment_name,
                 offset=access.displacement,
                 width=access.width,
             ):
                 return node
-            changed = True
-            _record_real_mode_global_lowering_evidence_8616(codegen, project, access)
-            return global_expr(access)
+            self.changed = True
+            _record_real_mode_global_lowering_evidence_8616(self.codegen, self.project, access)
+            return self.global_expr_8616(access)
         return node
-
-    _seen = set()
-
-    def replace_children(root_node: StructuredAstValue) -> bool:
+    def replace_children(self, root_node: StructuredAstValue) -> bool:
         if root_node is None:
             return False
         node_stack: list[StructuredAstValue] = [root_node]
@@ -4406,9 +4391,9 @@ def lower_stable_ds_es_linear_global_dereferences_8616(
             if node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
                 continue
             node_id = id(node)
-            if node_id in _seen:
+            if node_id in self.seen:
                 continue
-            _seen.add(node_id)
+            self.seen.add(node_id)
 
             for attr in (
                 "statements",
@@ -4433,7 +4418,7 @@ def lower_stable_ds_es_linear_global_dereferences_8616(
                     for index, item in enumerate(tuple(value)):
                         if not type(item).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
                             continue
-                        replacement = transform(item)
+                        replacement = self.transform(item)
                         if replacement is not item:
                             value[index] = replacement
                             local_changed = True
@@ -4442,7 +4427,7 @@ def lower_stable_ds_es_linear_global_dereferences_8616(
                         if type(candidate).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
                             node_stack.append(candidate)
                 elif value is not None:
-                    replacement = transform(value)
+                    replacement = self.transform(value)
                     if replacement is not value:
                         setattr(node, attr, replacement)
                         local_changed = True
@@ -4455,12 +4440,12 @@ def lower_stable_ds_es_linear_global_dereferences_8616(
                 pair_changed = False
                 for cond, body in condition_and_nodes:
                     new_cond = (
-                        transform(cond)
+                        self.transform(cond)
                         if type(cond).__module__.startswith("angr.analyses.decompiler.structured_codegen")
                         else cond
                     )
                     new_body = (
-                        transform(body)
+                        self.transform(body)
                         if type(body).__module__.startswith("angr.analyses.decompiler.structured_codegen")
                         else body
                     )
@@ -4483,14 +4468,34 @@ def lower_stable_ds_es_linear_global_dereferences_8616(
                     node.condition_and_nodes = new_pairs
         return local_changed
 
+
+def lower_stable_ds_es_linear_global_dereferences_8616(
+    codegen: StructuredAstValue, project: StructuredAstValue | None = None
+) -> bool:
+    """Replace stable DS/ES real-mode linear dereferences with global variable references."""
+    if project is None:
+        project = getattr(codegen, "project", None)
+    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
+    if project is None or root is None:
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-update] unavailable project=%s root=%s",
+                project is not None,
+                root is not None,
+            )
+        return False
+
+
+
+    run = _DsEsGlobalDerefRun8616(codegen=codegen, project=project)
     had_active_bias = hasattr(codegen, "_inertia_active_stack_base_bp_bias_8616")
     previous_active_bias = getattr(codegen, "_inertia_active_stack_base_bp_bias_8616", None)
     pass_stack_base_bias = _infer_stack_base_bp_bias_8616(codegen)
     if isinstance(pass_stack_base_bias, int):
         codegen._inertia_active_stack_base_bp_bias_8616 = pass_stack_base_bias
     try:
-        if replace_children(root):
-            changed = True
+        if run.replace_children(root):
+            run.changed = True
     finally:
         if had_active_bias:
             codegen._inertia_active_stack_base_bp_bias_8616 = previous_active_bias
@@ -4498,29 +4503,28 @@ def lower_stable_ds_es_linear_global_dereferences_8616(
             with contextlib.suppress(Exception):
                 delattr(codegen, "_inertia_active_stack_base_bp_bias_8616")
     if materialize_proven_control_stack_escape_8616(codegen, project):
-        changed = True
+        run.changed = True
     if prune_callee_saved_stack_spills_8616(codegen, project):
-        changed = True
+        run.changed = True
     if _materialize_return_register_assignments_8616(codegen, project):
-        changed = True
-    return changed
+        run.changed = True
+    return run.changed
 
 
-def lower_stable_ds_es_linear_global_addresses_8616(
-    codegen: StructuredCodegenValue, project: AngrProjectValue = None
-) -> bool:
-    """Replace stable DS/ES address-valued expressions with data-space object references."""
-    if project is None:
-        project = getattr(codegen, "project", None)
-    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
-    if project is None or root is None:
-        return False
+@dataclass
+class _DsEsGlobalAddrRun8616:
+    """One DS/ES-linear global address lowering walk over a structured tree."""
 
-    def global_address_cvar(displacement: int) -> StructuredAstValue:
+    codegen: StructuredAstValue
+    project: StructuredAstValue
+    changed: bool = False
+    seen: set[int] = field(default_factory=set)
+
+    def global_address_cvar_8616(self, displacement: int) -> StructuredAstValue:
         addr = displacement & 0xFFFF
         name = f"g_{addr:04X}"
         target_type = SimTypeChar(False)
-        variables_in_use = getattr(codegen.cfunc, "variables_in_use", None)
+        variables_in_use = getattr(self.codegen.cfunc, "variables_in_use", None)
         if isinstance(variables_in_use, dict):
             for variable, cvar in tuple(variables_in_use.items()):
                 if (
@@ -4539,52 +4543,46 @@ def lower_stable_ds_es_linear_global_addresses_8616(
                     if getattr(cvar, "variable_type", None) is None:
                         cvar.variable_type = target_type
                     return cvar
-        variable = SimMemoryVariable(addr, 1, name=name, region=getattr(codegen.cfunc, "addr", None))
-        cvar = structured_c.CVariable(variable, variable_type=target_type, codegen=codegen)
+        variable = SimMemoryVariable(addr, 1, name=name, region=getattr(self.codegen.cfunc, "addr", None))
+        cvar = structured_c.CVariable(variable, variable_type=target_type, codegen=self.codegen)
         if isinstance(variables_in_use, dict):
             variables_in_use[variable] = cvar
-        unified = getattr(codegen.cfunc, "unified_local_vars", None)
+        unified = getattr(self.codegen.cfunc, "unified_local_vars", None)
         if isinstance(unified, dict):
             unified[variable] = {(cvar, getattr(cvar, "variable_type", None))}
         return cvar
 
-    changed = False
-
-    def _reference_expr(displacement: int) -> StructuredAstValue:
-        base_cvar = global_address_cvar(displacement)
+    def reference_expr_8616(self, displacement: int) -> StructuredAstValue:
+        base_cvar = self.global_address_cvar_8616(displacement)
         return structured_c.CUnaryOp(
             "Reference",
             base_cvar,
-            codegen=codegen,
+            codegen=self.codegen,
         )
 
-    def transform(node: StructuredAstValue) -> StructuredAstValue:
-        nonlocal changed
-        access = match_stable_ds_es_linear_global_address_8616(node, project, codegen)
+    def transform(self, node: StructuredAstValue) -> StructuredAstValue:
+        access = match_stable_ds_es_linear_global_address_8616(node, self.project, self.codegen)
         if access is None:
             return node
         if not may_lower_codegen_address_to_entry_ds_object_8616(
-            codegen,
+            self.codegen,
             node,
             segment_register=access.segment_name,
         ):
             return node
-        base_expr = _reference_expr(access.displacement)
+        base_expr = self.reference_expr_8616(access.displacement)
         rebuilt = base_expr
         for sign, term in access.residual_terms:
             rebuilt = structured_c.CBinaryOp(
                 "Add" if sign == 1 else "Sub",
                 rebuilt,
                 term,
-                codegen=codegen,
+                codegen=self.codegen,
             )
-        ptr_type = SimTypePointer(SimTypeChar(False)).with_arch(project.arch)
-        changed = True
-        return structured_c.CTypeCast(ptr_type, ptr_type, rebuilt, codegen=codegen)
-
-    _seen: set[int] = set()
-
-    def replace_children(root_node: StructuredAstValue) -> bool:
+        ptr_type = SimTypePointer(SimTypeChar(False)).with_arch(self.project.arch)
+        self.changed = True
+        return structured_c.CTypeCast(ptr_type, ptr_type, rebuilt, codegen=self.codegen)
+    def replace_children(self, root_node: StructuredAstValue) -> bool:
         if root_node is None:
             return False
         node_stack: list[StructuredAstValue] = [root_node]
@@ -4594,9 +4592,9 @@ def lower_stable_ds_es_linear_global_addresses_8616(
             if node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
                 continue
             node_id = id(node)
-            if node_id in _seen:
+            if node_id in self.seen:
                 continue
-            _seen.add(node_id)
+            self.seen.add(node_id)
 
             for attr in (
                 "statements",
@@ -4620,7 +4618,7 @@ def lower_stable_ds_es_linear_global_addresses_8616(
                     for index, item in enumerate(tuple(value)):
                         if not type(item).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
                             continue
-                        replacement = transform(item)
+                        replacement = self.transform(item)
                         if replacement is not item:
                             value[index] = replacement
                             local_changed = True
@@ -4629,7 +4627,7 @@ def lower_stable_ds_es_linear_global_addresses_8616(
                         if type(item_candidate).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
                             node_stack.append(item_candidate)
                 elif value is not None:
-                    replacement = transform(value)
+                    replacement = self.transform(value)
                     if replacement is not value:
                         setattr(node, attr, replacement)
                         local_changed = True
@@ -4642,7 +4640,7 @@ def lower_stable_ds_es_linear_global_addresses_8616(
                 pair_changed = False
                 for cond, body in condition_and_nodes:
                     new_cond = (
-                        transform(cond)
+                        self.transform(cond)
                         if type(cond).__module__.startswith("angr.analyses.decompiler.structured_codegen")
                         else cond
                     )
@@ -4650,7 +4648,7 @@ def lower_stable_ds_es_linear_global_addresses_8616(
                         pair_changed = True
                         local_changed = True
                     new_body = (
-                        transform(body)
+                        self.transform(body)
                         if type(body).__module__.startswith("angr.analyses.decompiler.structured_codegen")
                         else body
                     )
@@ -4670,16 +4668,30 @@ def lower_stable_ds_es_linear_global_addresses_8616(
                     node.condition_and_nodes = new_pairs
         return local_changed
 
-    new_root = transform(root)
+
+def lower_stable_ds_es_linear_global_addresses_8616(
+    codegen: StructuredCodegenValue, project: AngrProjectValue = None
+) -> bool:
+    """Replace stable DS/ES address-valued expressions with data-space object references."""
+    if project is None:
+        project = getattr(codegen, "project", None)
+    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
+    if project is None or root is None:
+        return False
+
+    run = _DsEsGlobalAddrRun8616(codegen=codegen, project=project)
+    new_root = run.transform(root)
     if new_root is not root:
         codegen.cfunc.statements = new_root
         root = new_root
-        changed = True
-    if replace_children(root):
-        changed = True
+        run.changed = True
+    if run.replace_children(root):
+        run.changed = True
     if _materialize_return_register_assignments_8616(codegen, project):
-        changed = True
-    return changed
+        run.changed = True
+    return run.changed
+
+
 
 
 def _direct_global_update_name_8616(project: AngrProjectValue, func_addr: int | None, displacement: int) -> str:
@@ -8282,6 +8294,480 @@ def _low_byte_field_for_two_byte_aggregate_8616(
     )
 
 
+def _stack_move_source_immediate_8616(
+    codegen: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_cvar: StructuredAstValue | None,
+    target_type: StructuredAstValue,
+    *,
+    reuse_call_result: bool = True,
+) -> StructuredAstValue | None:
+    """Build the MOV source expression for immediate facts."""
+    if not isinstance(fact.source_value, int):
+        return None
+    function_pointer_expr = _direct_stack_near_function_pointer_expr_8616(codegen, fact, dst_cvar)
+    if function_pointer_expr is not None:
+        return function_pointer_expr
+    mask = (1 << (fact.width * 8)) - 1
+    return structured_c.CConstant(fact.source_value & mask, target_type, codegen=codegen)
+
+
+def _stack_move_source_stack_slot_8616(
+    codegen: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_cvar: StructuredAstValue | None,
+    target_type: StructuredAstValue,
+    *,
+    reuse_call_result: bool = True,
+) -> StructuredAstValue | None:
+    """Build the MOV source expression for stack_slot facts."""
+    if not isinstance(fact.source_offset, int):
+        return None
+    source_width = fact.source_access_width if isinstance(fact.source_access_width, int) else fact.width
+    source = _resolve_direct_stack_read_cvar_8616(codegen, fact.source_offset, source_width)
+    if source is None:
+        return None
+    if fact.source_sign_extend and source_width < fact.width:
+        signed_source_type = SimTypeChar(True) if source_width == 1 else SimTypeShort(True)
+        cast_source = (
+            _low_byte_field_for_two_byte_aggregate_8616(codegen, source) if source_width == 1 else None
+        ) or source
+        return CSemanticCast8616(
+            target_type,
+            signed_source_type,
+            cast_source,
+            codegen=codegen,
+        )
+    return source
+
+
+def _stack_move_source_stack_aggregate_element_8616(
+    codegen: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_cvar: StructuredAstValue | None,
+    target_type: StructuredAstValue,
+    *,
+    reuse_call_result: bool = True,
+) -> StructuredAstValue | None:
+    """Build the MOV source expression for stack_aggregate_element facts."""
+    if (
+        not isinstance(fact.source_aggregate_base_offset, int)
+        or not isinstance(fact.source_index_offset, int)
+        or fact.source_access_width != fact.width
+    ):
+        return None
+    raw_facts = getattr(codegen, "_inertia_stack_aggregate_object_facts_8616", ()) or ()
+    candidates = tuple(
+        aggregate
+        for aggregate in raw_facts
+        if isinstance(aggregate, StackAggregateObjectFact8616)
+        and aggregate.base_offset == fact.source_aggregate_base_offset
+        and aggregate.element_width == fact.source_access_width
+        and fact.source_index_byte_scale == aggregate.element_width
+    )
+    if len(candidates) != 1:
+        return None
+    raw_cvars = getattr(codegen, "_inertia_stack_aggregate_cvars_8616", {}) or {}
+    if not isinstance(raw_cvars, dict):
+        return None
+    aggregate_cvar = raw_cvars.get(candidates[0].base_offset)
+    index_cvar = _resolve_direct_stack_update_cvar_8616(
+        codegen,
+        fact.source_index_offset,
+        2,
+    )
+    if not isinstance(aggregate_cvar, structured_c.CVariable) or index_cvar is None:
+        return None
+    return structured_c.CIndexedVariable(aggregate_cvar, index_cvar, codegen=codegen)
+
+
+def _stack_move_source_stack_slot_expr_8616(
+    codegen: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_cvar: StructuredAstValue | None,
+    target_type: StructuredAstValue,
+    *,
+    reuse_call_result: bool = True,
+) -> StructuredAstValue | None:
+    """Build the MOV source expression for stack_slot_expr facts."""
+    if (
+        not isinstance(fact.source_offset, int)
+        or not isinstance(fact.source_immediate, int)
+        or fact.source_op
+        not in {
+            DirectStackMoveExpressionOp8616.ADD,
+            DirectStackMoveExpressionOp8616.SHL,
+            DirectStackMoveExpressionOp8616.SIGNED_DIV2,
+        }
+    ):
+        return None
+    source = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_offset, fact.width)
+    if source is None:
+        return None
+    if fact.source_op is DirectStackMoveExpressionOp8616.ADD:
+        immediate = int(fact.source_immediate)
+        if immediate == 0:
+            return source
+        return structured_c.CBinaryOp(
+            "Add" if immediate > 0 else "Sub",
+            source,
+            structured_c.CConstant(abs(immediate), target_type, codegen=codegen),
+            codegen=codegen,
+        )
+    if fact.source_op is DirectStackMoveExpressionOp8616.SIGNED_DIV2:
+        signed_type = SimTypeShort(True)
+        signed_source = CSemanticCast8616(
+            target_type,
+            signed_type,
+            source,
+            codegen=codegen,
+        )
+        return structured_c.CBinaryOp(
+            fact.source_op.value,
+            signed_source,
+            structured_c.CConstant(fact.source_immediate, signed_type, codegen=codegen),
+            codegen=codegen,
+        )
+    return structured_c.CBinaryOp(
+        fact.source_op.value,
+        source,
+        structured_c.CConstant(fact.source_immediate, target_type, codegen=codegen),
+        codegen=codegen,
+    )
+
+
+def _stack_move_source_stack_slot_binary_expr_8616(
+    codegen: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_cvar: StructuredAstValue | None,
+    target_type: StructuredAstValue,
+    *,
+    reuse_call_result: bool = True,
+) -> StructuredAstValue | None:
+    """Build the MOV source expression for stack_slot_binary_expr facts."""
+    if (
+        not isinstance(fact.source_offset, int)
+        or not isinstance(fact.source_rhs_offset, int)
+        or fact.source_op
+        not in {
+            DirectStackMoveExpressionOp8616.ADD,
+            DirectStackMoveExpressionOp8616.SUB,
+        }
+    ):
+        return None
+    lhs = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_offset, fact.width)
+    rhs = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_rhs_offset, fact.width)
+    if lhs is None or rhs is None:
+        return None
+    if fact.source_op is DirectStackMoveExpressionOp8616.SUB:
+        signed_type = SimTypeShort(True) if fact.width == 2 else SimTypeChar(True)
+        signed_type = _bind_type_to_codegen_arch_8616(codegen, signed_type)
+        lhs = CSemanticCast8616(target_type, signed_type, lhs, codegen=codegen)
+        rhs = CSemanticCast8616(target_type, signed_type, rhs, codegen=codegen)
+    return structured_c.CBinaryOp(fact.source_op.value, lhs, rhs, codegen=codegen)
+
+
+def _stack_move_source_global_expr_8616(
+    codegen: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_cvar: StructuredAstValue | None,
+    target_type: StructuredAstValue,
+    *,
+    reuse_call_result: bool = True,
+) -> StructuredAstValue | None:
+    """Build the MOV source expression for global_expr facts."""
+    if not isinstance(fact.source_global_displacement, int):
+        return None
+    project = getattr(codegen, "project", None)
+    name = _direct_global_update_name_8616(
+        project,
+        getattr(getattr(codegen, "cfunc", None), "addr", None),
+        fact.source_global_displacement,
+    )
+    record_scalar_global_declaration_spec_8616(
+        codegen,
+        ctype=ctype_for_global_width_8616(fact.width),
+        name=name,
+    )
+    global_expr = structured_c.CVariable(
+        SimMemoryVariable(
+            fact.source_global_displacement & 0xFFFF,
+            fact.width,
+            name=name,
+            region=getattr(getattr(codegen, "cfunc", None), "addr", None),
+        ),
+        variable_type=target_type,
+        codegen=codegen,
+    )
+    if fact.source_kind is DirectStackMoveSourceKind8616.GLOBAL_MINUS_STACK_SLOT:
+        if not isinstance(fact.source_offset, int):
+            return None
+        source = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_offset, fact.width)
+        if source is None:
+            return None
+        return structured_c.CBinaryOp("Sub", global_expr, source, codegen=codegen)
+    if fact.source_op is DirectStackMoveExpressionOp8616.ADD and isinstance(fact.source_immediate, int):
+        if fact.source_immediate == 0:
+            return global_expr
+        return structured_c.CBinaryOp(
+            "Add" if fact.source_immediate > 0 else "Sub",
+            global_expr,
+            structured_c.CConstant(
+                abs(fact.source_immediate),
+                target_type,
+                codegen=codegen,
+            ),
+            codegen=codegen,
+        )
+    if fact.source_op is DirectStackMoveExpressionOp8616.SIGNED_DIV2 and isinstance(fact.source_immediate, int):
+        signed_type = SimTypeShort(True)
+        return structured_c.CBinaryOp(
+            fact.source_op.value,
+            CSemanticCast8616(target_type, signed_type, global_expr, codegen=codegen),
+            structured_c.CConstant(fact.source_immediate, signed_type, codegen=codegen),
+            codegen=codegen,
+        )
+    return global_expr
+
+
+
+def _stack_move_source_global_minus_segmented_8616(
+    codegen: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_cvar: StructuredAstValue | None,
+    target_type: StructuredAstValue,
+    *,
+    reuse_call_result: bool = True,
+) -> StructuredAstValue | None:
+    """Build the MOV source expression for global_minus_segmented facts."""
+    if not isinstance(fact.source_global_displacement, int):
+        return None
+    right_expr = _segmented_memory_source_expr_8616(codegen, fact)
+    if right_expr is None:
+        return None
+    project = getattr(codegen, "project", None)
+    name = _direct_global_update_name_8616(
+        project,
+        getattr(getattr(codegen, "cfunc", None), "addr", None),
+        fact.source_global_displacement,
+    )
+    record_scalar_global_declaration_spec_8616(
+        codegen,
+        ctype=ctype_for_global_width_8616(2),
+        name=name,
+    )
+    left_expr = structured_c.CVariable(
+        SimMemoryVariable(
+            fact.source_global_displacement & 0xFFFF,
+            2,
+            name=name,
+            region=getattr(getattr(codegen, "cfunc", None), "addr", None),
+        ),
+        variable_type=_type_for_access_width_8616(2),
+        codegen=codegen,
+    )
+    return structured_c.CBinaryOp("Sub", left_expr, right_expr, codegen=codegen)
+
+
+def _stack_move_source_zero_arg_call_return_8616(
+    codegen: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_cvar: StructuredAstValue | None,
+    target_type: StructuredAstValue,
+    *,
+    reuse_call_result: bool = True,
+) -> StructuredAstValue | None:
+    """Build the MOV source expression for zero_arg_call_return facts."""
+    if not isinstance(fact.source_call_name, str) or not isinstance(fact.source_call_ins_addr, int):
+        return None
+    return structured_c.CFunctionCall(
+        fact.source_call_name,
+        None,
+        [],
+        codegen=codegen,
+        tags={"ins_addr": fact.source_call_ins_addr},
+    )
+
+
+def _stack_move_source_signed_idiv_remainder_8616(
+    codegen: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_cvar: StructuredAstValue | None,
+    target_type: StructuredAstValue,
+    *,
+    reuse_call_result: bool = True,
+) -> StructuredAstValue | None:
+    """Build the MOV source expression for signed_idiv_remainder facts."""
+    if (
+        not isinstance(fact.source_offset, int)
+        or fact.source_op is not DirectStackMoveExpressionOp8616.MOD
+        or not isinstance(fact.source_call_target, int)
+    ):
+        return None
+    project = getattr(codegen, "project", None)
+    call_name = fact.source_call_name
+    callee = None
+    if project is not None:
+        call_name, callee, _resolved_call_target = _callee_name_for_direct_stack_move_8616(
+            project,
+            fact.source_call_target,
+        )
+    if not isinstance(call_name, str) or not call_name:
+        call_name = f"sub_{int(fact.source_call_target):x}"
+    dividend = None
+    if reuse_call_result and project is not None:
+        dividend = _call_result_cvar_at_instruction_8616(
+            codegen,
+            project,
+            fact.source_call_ins_addr,
+            call_name,
+        )
+    if dividend is None:
+        call_tags = (
+            {"ins_addr": fact.source_call_ins_addr}
+            if isinstance(fact.source_call_ins_addr, int)
+            else None
+        )
+        dividend = structured_c.CFunctionCall(
+            call_name,
+            callee,
+            [],
+            codegen=codegen,
+            tags=call_tags,
+        )
+    else:
+        stats = getattr(codegen, "_inertia_direct_stack_move_lowering_8616", None)
+        if isinstance(stats, dict):
+            stats["call_result_reused_count"] = int(stats.get("call_result_reused_count", 0) or 0) + 1
+    divisor = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_offset, fact.width)
+    if divisor is None:
+        return None
+    divisor_expr = divisor
+    if isinstance(fact.source_immediate, int) and fact.source_immediate != 0:
+        divisor_expr = structured_c.CBinaryOp(
+            "Add" if fact.source_immediate > 0 else "Sub",
+            divisor,
+            structured_c.CConstant(abs(int(fact.source_immediate)), target_type, codegen=codegen),
+            codegen=codegen,
+        )
+    signed_type = SimTypeShort(True)
+    return structured_c.CBinaryOp(
+        fact.source_op.value,
+        CSemanticCast8616(target_type, signed_type, dividend, codegen=codegen),
+        CSemanticCast8616(target_type, signed_type, divisor_expr, codegen=codegen),
+        codegen=codegen,
+    )
+
+
+def _stack_move_source_wide_call_return_stack_arith_8616(
+    codegen: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_cvar: StructuredAstValue | None,
+    target_type: StructuredAstValue,
+    *,
+    reuse_call_result: bool = True,
+) -> StructuredAstValue | None:
+    """Build the MOV source expression for wide_call_return_stack_arith facts."""
+    if (
+        not isinstance(fact.source_offset, int)
+        or fact.source_op is not DirectStackMoveExpressionOp8616.ADD
+        or not isinstance(fact.source_call_target, int)
+    ):
+        return None
+    project = getattr(codegen, "project", None)
+    call_name = fact.source_call_name
+    callee = None
+    if project is not None:
+        call_name, callee, _resolved_call_target = _callee_name_for_direct_stack_move_8616(
+            project,
+            fact.source_call_target,
+        )
+    if not isinstance(call_name, str) or not call_name:
+        call_name = f"sub_{int(fact.source_call_target):x}"
+    call_tags = (
+        {"ins_addr": fact.source_call_ins_addr}
+        if isinstance(fact.source_call_ins_addr, int)
+        else None
+    )
+    call_expr = structured_c.CFunctionCall(
+        call_name,
+        callee,
+        [],
+        codegen=codegen,
+        tags=call_tags,
+    )
+    stack_expr = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_offset, 4)
+    if stack_expr is None:
+        return None
+    return structured_c.CBinaryOp(
+        fact.source_op.value,
+        call_expr,
+        stack_expr,
+        codegen=codegen,
+    )
+
+
+def _segmented_memory_source_expr_8616(
+    codegen: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+) -> StructuredAstValue | None:
+    if (
+        not isinstance(fact.source_segment_name, str)
+        or not isinstance(fact.source_displacement, int)
+        or not isinstance(fact.source_index_offset, int)
+        or not isinstance(fact.source_index_shift, int)
+        or fact.source_access_width not in {1, 2}
+    ):
+        return None
+    project = getattr(codegen, "project", None)
+    arch = getattr(project, "arch", None)
+    reg_info = getattr(arch, "registers", {}).get(fact.source_segment_name.lower()) if arch is not None else None
+    if not isinstance(reg_info, tuple) or len(reg_info) < 2:
+        return None
+    segment_type = SimTypeShort(False)
+    with contextlib.suppress(Exception):
+        segment_type = segment_type.with_arch(arch)
+    segment_expr = structured_c.CVariable(
+        SimRegisterVariable(reg_info[0], reg_info[1], name=fact.source_segment_name.lower()),
+        variable_type=segment_type,
+        codegen=codegen,
+    )
+    index_expr = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_index_offset, 2)
+    if index_expr is None:
+        return None
+    offset_type = _type_for_access_width_8616(2)
+    if fact.source_index_shift:
+        index_expr = structured_c.CBinaryOp(
+            "Shl",
+            index_expr,
+            structured_c.CConstant(fact.source_index_shift, offset_type, codegen=codegen),
+            codegen=codegen,
+        )
+    displacement = structured_c.CConstant(fact.source_displacement, offset_type, codegen=codegen)
+    offset_expr = structured_c.CBinaryOp("Add", displacement, index_expr, codegen=codegen)
+    macro_name = "SEG_U8" if int(fact.source_access_width) == 1 else "SEG_U16"
+    return structured_c.CFunctionCall(
+        macro_name,
+        None,
+        [segment_expr, offset_expr],
+        codegen=codegen,
+        tags={"inertia_x86_16_runtime_segment_helper": macro_name},
+    )
+
+
+
+def _stack_move_source_segmented_memory_8616(
+    codegen: StructuredAstValue,
+    fact: DirectStackMoveFact8616,
+    dst_cvar: StructuredAstValue | None,
+    target_type: StructuredAstValue,
+    *,
+    reuse_call_result: bool = True,
+) -> StructuredAstValue | None:
+    """Build the MOV source expression for segmented-memory facts."""
+    return _segmented_memory_source_expr_8616(codegen, fact)
+
+
 def _direct_stack_move_source_expr_8616(
     codegen: StructuredAstValue,
     fact: DirectStackMoveFact8616,
@@ -8291,369 +8777,41 @@ def _direct_stack_move_source_expr_8616(
 ) -> StructuredAstValue | None:
     """Build a C expression for a binary-proven direct stack MOV source."""
     target_type = _type_for_access_width_8616(fact.width)
-    if fact.source_kind is DirectStackMoveSourceKind8616.IMMEDIATE:
-        if not isinstance(fact.source_value, int):
-            return None
-        function_pointer_expr = _direct_stack_near_function_pointer_expr_8616(codegen, fact, dst_cvar)
-        if function_pointer_expr is not None:
-            return function_pointer_expr
-        mask = (1 << (fact.width * 8)) - 1
-        return structured_c.CConstant(fact.source_value & mask, target_type, codegen=codegen)
-    if fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT:
-        if not isinstance(fact.source_offset, int):
-            return None
-        source_width = fact.source_access_width if isinstance(fact.source_access_width, int) else fact.width
-        source = _resolve_direct_stack_read_cvar_8616(codegen, fact.source_offset, source_width)
-        if source is None:
-            return None
-        if fact.source_sign_extend and source_width < fact.width:
-            signed_source_type = SimTypeChar(True) if source_width == 1 else SimTypeShort(True)
-            cast_source = (
-                _low_byte_field_for_two_byte_aggregate_8616(codegen, source) if source_width == 1 else None
-            ) or source
-            return CSemanticCast8616(
-                target_type,
-                signed_source_type,
-                cast_source,
-                codegen=codegen,
-            )
-        return source
-    if fact.source_kind is DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT:
-        if (
-            not isinstance(fact.source_aggregate_base_offset, int)
-            or not isinstance(fact.source_index_offset, int)
-            or fact.source_access_width != fact.width
-        ):
-            return None
-        raw_facts = getattr(codegen, "_inertia_stack_aggregate_object_facts_8616", ()) or ()
-        candidates = tuple(
-            aggregate
-            for aggregate in raw_facts
-            if isinstance(aggregate, StackAggregateObjectFact8616)
-            and aggregate.base_offset == fact.source_aggregate_base_offset
-            and aggregate.element_width == fact.source_access_width
-            and fact.source_index_byte_scale == aggregate.element_width
-        )
-        if len(candidates) != 1:
-            return None
-        raw_cvars = getattr(codegen, "_inertia_stack_aggregate_cvars_8616", {}) or {}
-        if not isinstance(raw_cvars, dict):
-            return None
-        aggregate_cvar = raw_cvars.get(candidates[0].base_offset)
-        index_cvar = _resolve_direct_stack_update_cvar_8616(
-            codegen,
-            fact.source_index_offset,
-            2,
-        )
-        if not isinstance(aggregate_cvar, structured_c.CVariable) or index_cvar is None:
-            return None
-        return structured_c.CIndexedVariable(aggregate_cvar, index_cvar, codegen=codegen)
-    if fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT_EXPR:
-        if (
-            not isinstance(fact.source_offset, int)
-            or not isinstance(fact.source_immediate, int)
-            or fact.source_op
-            not in {
-                DirectStackMoveExpressionOp8616.ADD,
-                DirectStackMoveExpressionOp8616.SHL,
-                DirectStackMoveExpressionOp8616.SIGNED_DIV2,
-            }
-        ):
-            return None
-        source = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_offset, fact.width)
-        if source is None:
-            return None
-        if fact.source_op is DirectStackMoveExpressionOp8616.ADD:
-            immediate = int(fact.source_immediate)
-            if immediate == 0:
-                return source
-            return structured_c.CBinaryOp(
-                "Add" if immediate > 0 else "Sub",
-                source,
-                structured_c.CConstant(abs(immediate), target_type, codegen=codegen),
-                codegen=codegen,
-            )
-        if fact.source_op is DirectStackMoveExpressionOp8616.SIGNED_DIV2:
-            signed_type = SimTypeShort(True)
-            signed_source = CSemanticCast8616(
-                target_type,
-                signed_type,
-                source,
-                codegen=codegen,
-            )
-            return structured_c.CBinaryOp(
-                fact.source_op.value,
-                signed_source,
-                structured_c.CConstant(fact.source_immediate, signed_type, codegen=codegen),
-                codegen=codegen,
-            )
-        return structured_c.CBinaryOp(
-            fact.source_op.value,
-            source,
-            structured_c.CConstant(fact.source_immediate, target_type, codegen=codegen),
-            codegen=codegen,
-        )
-    if fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT_BINARY_EXPR:
-        if (
-            not isinstance(fact.source_offset, int)
-            or not isinstance(fact.source_rhs_offset, int)
-            or fact.source_op
-            not in {
-                DirectStackMoveExpressionOp8616.ADD,
-                DirectStackMoveExpressionOp8616.SUB,
-            }
-        ):
-            return None
-        lhs = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_offset, fact.width)
-        rhs = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_rhs_offset, fact.width)
-        if lhs is None or rhs is None:
-            return None
-        if fact.source_op is DirectStackMoveExpressionOp8616.SUB:
-            signed_type = SimTypeShort(True) if fact.width == 2 else SimTypeChar(True)
-            signed_type = _bind_type_to_codegen_arch_8616(codegen, signed_type)
-            lhs = CSemanticCast8616(target_type, signed_type, lhs, codegen=codegen)
-            rhs = CSemanticCast8616(target_type, signed_type, rhs, codegen=codegen)
-        return structured_c.CBinaryOp(fact.source_op.value, lhs, rhs, codegen=codegen)
-    if fact.source_kind in {
+    dispatch = {
+        DirectStackMoveSourceKind8616.IMMEDIATE: _stack_move_source_immediate_8616,
+        DirectStackMoveSourceKind8616.STACK_SLOT: _stack_move_source_stack_slot_8616,
+        DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT: _stack_move_source_stack_aggregate_element_8616,
+        DirectStackMoveSourceKind8616.STACK_SLOT_EXPR: _stack_move_source_stack_slot_expr_8616,
+        DirectStackMoveSourceKind8616.STACK_SLOT_BINARY_EXPR: _stack_move_source_stack_slot_binary_expr_8616,
+        DirectStackMoveSourceKind8616.GLOBAL_MINUS_SEGMENTED_MEMORY: _stack_move_source_global_minus_segmented_8616,
+        DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN: _stack_move_source_zero_arg_call_return_8616,
+        DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER: _stack_move_source_signed_idiv_remainder_8616,
+        DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH: _stack_move_source_wide_call_return_stack_arith_8616,
+        DirectStackMoveSourceKind8616.SEGMENTED_MEMORY: _stack_move_source_segmented_memory_8616,
+    }
+    global_kinds = {
         DirectStackMoveSourceKind8616.GLOBAL_EXPR,
         DirectStackMoveSourceKind8616.GLOBAL_MINUS_STACK_SLOT,
-    }:
-        if not isinstance(fact.source_global_displacement, int):
-            return None
-        project = getattr(codegen, "project", None)
-        name = _direct_global_update_name_8616(
-            project,
-            getattr(getattr(codegen, "cfunc", None), "addr", None),
-            fact.source_global_displacement,
-        )
-        record_scalar_global_declaration_spec_8616(
+    }
+    if fact.source_kind in global_kinds:
+        return _stack_move_source_global_expr_8616(
             codegen,
-            ctype=ctype_for_global_width_8616(fact.width),
-            name=name,
+            fact,
+            dst_cvar,
+            target_type,
+            reuse_call_result=reuse_call_result,
         )
-        global_expr = structured_c.CVariable(
-            SimMemoryVariable(
-                fact.source_global_displacement & 0xFFFF,
-                fact.width,
-                name=name,
-                region=getattr(getattr(codegen, "cfunc", None), "addr", None),
-            ),
-            variable_type=target_type,
-            codegen=codegen,
-        )
-        if fact.source_kind is DirectStackMoveSourceKind8616.GLOBAL_MINUS_STACK_SLOT:
-            if not isinstance(fact.source_offset, int):
-                return None
-            source = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_offset, fact.width)
-            if source is None:
-                return None
-            return structured_c.CBinaryOp("Sub", global_expr, source, codegen=codegen)
-        if fact.source_op is DirectStackMoveExpressionOp8616.ADD and isinstance(fact.source_immediate, int):
-            if fact.source_immediate == 0:
-                return global_expr
-            return structured_c.CBinaryOp(
-                "Add" if fact.source_immediate > 0 else "Sub",
-                global_expr,
-                structured_c.CConstant(
-                    abs(fact.source_immediate),
-                    target_type,
-                    codegen=codegen,
-                ),
-                codegen=codegen,
-            )
-        if fact.source_op is DirectStackMoveExpressionOp8616.SIGNED_DIV2 and isinstance(fact.source_immediate, int):
-            signed_type = SimTypeShort(True)
-            return structured_c.CBinaryOp(
-                fact.source_op.value,
-                CSemanticCast8616(target_type, signed_type, global_expr, codegen=codegen),
-                structured_c.CConstant(fact.source_immediate, signed_type, codegen=codegen),
-                codegen=codegen,
-            )
-        return global_expr
+    handler = dispatch.get(fact.source_kind)
+    if handler is None:
+        return None
+    return handler(
+        codegen,
+        fact,
+        dst_cvar,
+        target_type,
+        reuse_call_result=reuse_call_result,
+    )
 
-    def _segmented_memory_expr() -> StructuredAstValue | None:
-        if (
-            not isinstance(fact.source_segment_name, str)
-            or not isinstance(fact.source_displacement, int)
-            or not isinstance(fact.source_index_offset, int)
-            or not isinstance(fact.source_index_shift, int)
-            or fact.source_access_width not in {1, 2}
-        ):
-            return None
-        project = getattr(codegen, "project", None)
-        arch = getattr(project, "arch", None)
-        reg_info = getattr(arch, "registers", {}).get(fact.source_segment_name.lower()) if arch is not None else None
-        if not isinstance(reg_info, tuple) or len(reg_info) < 2:
-            return None
-        segment_type = SimTypeShort(False)
-        with contextlib.suppress(Exception):
-            segment_type = segment_type.with_arch(arch)
-        segment_expr = structured_c.CVariable(
-            SimRegisterVariable(reg_info[0], reg_info[1], name=fact.source_segment_name.lower()),
-            variable_type=segment_type,
-            codegen=codegen,
-        )
-        index_expr = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_index_offset, 2)
-        if index_expr is None:
-            return None
-        offset_type = _type_for_access_width_8616(2)
-        if fact.source_index_shift:
-            index_expr = structured_c.CBinaryOp(
-                "Shl",
-                index_expr,
-                structured_c.CConstant(fact.source_index_shift, offset_type, codegen=codegen),
-                codegen=codegen,
-            )
-        displacement = structured_c.CConstant(fact.source_displacement, offset_type, codegen=codegen)
-        offset_expr = structured_c.CBinaryOp("Add", displacement, index_expr, codegen=codegen)
-        macro_name = "SEG_U8" if int(fact.source_access_width) == 1 else "SEG_U16"
-        return structured_c.CFunctionCall(
-            macro_name,
-            None,
-            [segment_expr, offset_expr],
-            codegen=codegen,
-            tags={"inertia_x86_16_runtime_segment_helper": macro_name},
-        )
-
-    if fact.source_kind is DirectStackMoveSourceKind8616.SEGMENTED_MEMORY:
-        return _segmented_memory_expr()
-    if fact.source_kind is DirectStackMoveSourceKind8616.GLOBAL_MINUS_SEGMENTED_MEMORY:
-        if not isinstance(fact.source_global_displacement, int):
-            return None
-        right_expr = _segmented_memory_expr()
-        if right_expr is None:
-            return None
-        project = getattr(codegen, "project", None)
-        name = _direct_global_update_name_8616(
-            project,
-            getattr(getattr(codegen, "cfunc", None), "addr", None),
-            fact.source_global_displacement,
-        )
-        record_scalar_global_declaration_spec_8616(
-            codegen,
-            ctype=ctype_for_global_width_8616(2),
-            name=name,
-        )
-        left_expr = structured_c.CVariable(
-            SimMemoryVariable(
-                fact.source_global_displacement & 0xFFFF,
-                2,
-                name=name,
-                region=getattr(getattr(codegen, "cfunc", None), "addr", None),
-            ),
-            variable_type=_type_for_access_width_8616(2),
-            codegen=codegen,
-        )
-        return structured_c.CBinaryOp("Sub", left_expr, right_expr, codegen=codegen)
-    if fact.source_kind is DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN:
-        if not isinstance(fact.source_call_name, str) or not isinstance(fact.source_call_ins_addr, int):
-            return None
-        return structured_c.CFunctionCall(
-            fact.source_call_name,
-            None,
-            [],
-            codegen=codegen,
-            tags={"ins_addr": fact.source_call_ins_addr},
-        )
-    if fact.source_kind is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
-        if (
-            not isinstance(fact.source_offset, int)
-            or fact.source_op is not DirectStackMoveExpressionOp8616.MOD
-            or not isinstance(fact.source_call_target, int)
-        ):
-            return None
-        project = getattr(codegen, "project", None)
-        call_name = fact.source_call_name
-        callee = None
-        if project is not None:
-            call_name, callee, _resolved_call_target = _callee_name_for_direct_stack_move_8616(
-                project,
-                fact.source_call_target,
-            )
-        if not isinstance(call_name, str) or not call_name:
-            call_name = f"sub_{int(fact.source_call_target):x}"
-        dividend = None
-        if reuse_call_result and project is not None:
-            dividend = _call_result_cvar_at_instruction_8616(
-                codegen,
-                project,
-                fact.source_call_ins_addr,
-                call_name,
-            )
-        if dividend is None:
-            call_tags = (
-                {"ins_addr": fact.source_call_ins_addr}
-                if isinstance(fact.source_call_ins_addr, int)
-                else None
-            )
-            dividend = structured_c.CFunctionCall(
-                call_name,
-                callee,
-                [],
-                codegen=codegen,
-                tags=call_tags,
-            )
-        else:
-            stats = getattr(codegen, "_inertia_direct_stack_move_lowering_8616", None)
-            if isinstance(stats, dict):
-                stats["call_result_reused_count"] = int(stats.get("call_result_reused_count", 0) or 0) + 1
-        divisor = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_offset, fact.width)
-        if divisor is None:
-            return None
-        divisor_expr = divisor
-        if isinstance(fact.source_immediate, int) and fact.source_immediate != 0:
-            divisor_expr = structured_c.CBinaryOp(
-                "Add" if fact.source_immediate > 0 else "Sub",
-                divisor,
-                structured_c.CConstant(abs(int(fact.source_immediate)), target_type, codegen=codegen),
-                codegen=codegen,
-            )
-        signed_type = SimTypeShort(True)
-        return structured_c.CBinaryOp(
-            fact.source_op.value,
-            CSemanticCast8616(target_type, signed_type, dividend, codegen=codegen),
-            CSemanticCast8616(target_type, signed_type, divisor_expr, codegen=codegen),
-            codegen=codegen,
-        )
-    if fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
-        if (
-            not isinstance(fact.source_offset, int)
-            or fact.source_op is not DirectStackMoveExpressionOp8616.ADD
-            or not isinstance(fact.source_call_target, int)
-        ):
-            return None
-        project = getattr(codegen, "project", None)
-        call_name = fact.source_call_name
-        callee = None
-        if project is not None:
-            call_name, callee, _resolved_call_target = _callee_name_for_direct_stack_move_8616(
-                project,
-                fact.source_call_target,
-            )
-        if not isinstance(call_name, str) or not call_name:
-            call_name = f"sub_{int(fact.source_call_target):x}"
-        call_tags = (
-            {"ins_addr": fact.source_call_ins_addr}
-            if isinstance(fact.source_call_ins_addr, int)
-            else None
-        )
-        call_expr = structured_c.CFunctionCall(
-            call_name,
-            callee,
-            [],
-            codegen=codegen,
-            tags=call_tags,
-        )
-        stack_expr = _resolve_direct_stack_update_cvar_8616(codegen, fact.source_offset, 4)
-        if stack_expr is None:
-            return None
-        return structured_c.CBinaryOp(
-            fact.source_op.value,
-            call_expr,
-            stack_expr,
-            codegen=codegen,
-        )
-    return None
 
 
 def _direct_stack_move_assignment_8616(
@@ -15875,6 +16033,1790 @@ def materialize_direct_stack_mov_instructions_8616(
     )
 
 
+@dataclass
+class _DirectStackReloadFrame8616:
+    """Shared per-pass state for register-reload materialization."""
+
+    register_use_missing: set[str] = field(default_factory=set)
+    query_index: StructuredAstValue = None
+    candidate_index: StructuredAstValue = None
+    register_names: frozenset[str] = frozenset()
+    timers: dict[str, float] = field(
+        default_factory=lambda: {
+            "tagged_reload_match": 0.0,
+            "register_use_insert": 0.0,
+            "visible_guard": 0.0,
+        }
+    )
+
+
+@dataclass
+class _DirectStackMovRun8616:
+    """One direct-stack-MOV materialization pass over a structured function.
+
+    Per-fact state lives on ``self`` and follows the original flat block
+    scope: values assigned by one iteration remain visible to the next,
+    exactly as loop-body locals did before the split.
+    """
+
+    codegen: StructuredAstValue
+    project: StructuredAstValue
+    function: StructuredAstValue
+    root: StructuredAstValue
+    stats: dict[str, StructuredAstValue]
+    debug_stack_noise: bool
+    facts: tuple[DirectStackMoveFact8616, ...]
+    allow_stack_slot_fallback: bool
+    materialize_reloads: bool
+    allow_unscoped_fallback_insert: bool
+    signed_idiv_remainder_fact_count: int
+    materialized_fact_keys: set[StructuredAstValue]
+    materialized_facts: list[DirectStackMoveFact8616]
+    source_expr_by_store_ins_addr: dict[int, StructuredAstValue]
+    changed: bool = False
+    lane_stats_before: dict[str, int] = field(default_factory=dict)
+    timers: dict[str, float] = field(default_factory=dict)
+    # Per-fact frame fields (assigned each iteration; not reset).
+    fact: DirectStackMoveFact8616 | None = None
+    fact_key: StructuredAstValue = None
+    indexed_destination: bool = False
+    dst_cvar: StructuredAstValue = None
+    dst_expr: StructuredAstValue = None
+    source_expr: StructuredAstValue = None
+    authoritative_wide_materialized: bool = False
+    materialized: bool = False
+    idiv_visible_guard_inserted: bool = False
+    inverse_pruned: StructuredAstValue = None
+    call_statement_source_expr: StructuredAstValue = None
+    call_order_reconciled: StructuredAstValue = None
+    carrier_pruned: StructuredAstValue = None
+    decomposition_pruned: StructuredAstValue = None
+    current_type: StructuredAstValue = None
+    dst_variable: StructuredAstValue = None
+    fallback_assignment: StructuredAstValue = None
+    relocated_assignment: StructuredAstValue = None
+    relocated_count: int = 0
+    replay_pruned: StructuredAstValue = None
+    source_type: StructuredAstValue = None
+    tags: StructuredAstValue = None
+    unified: StructuredAstValue = None
+    visible_assignment: StructuredAstValue = None
+    auxiliary_insert_count: int = 0
+    signed_idiv_assignment_present: bool = False
+    projected_segmented_source_present: bool = False
+    idiv_call_statement_materialized: bool = False
+
+    def _fact_begin_8616(self) -> bool:
+        """Prepare destination/source expressions for one direct-stack-MOV fact."""
+        self.root._inertia_stack_mov_assignment_already_present_8616 = False
+        self.fact_key = _direct_stack_move_fact_key_8616(self.fact)
+        self.indexed_destination = any(
+            isinstance(index, int)
+            for index in (
+                self.fact.dst_index_global_displacement,
+                self.fact.dst_index_stack_offset,
+                self.fact.dst_index_immediate,
+            )
+        )
+        self.dst_cvar = (
+            _resolve_existing_direct_stack_owner_cvar_8616(
+                self.codegen,
+                self.fact.dst_offset,
+                self.fact.width,
+                require_wider_owner=True,
+            )
+            if self.indexed_destination
+            else None
+        )
+        if self.dst_cvar is None:
+            self.dst_cvar = _resolve_direct_stack_update_cvar_8616(self.codegen, self.fact.dst_offset, self.fact.width)
+        self.dst_expr = (
+            _direct_stack_move_destination_expr_8616(self.codegen, self.fact, self.dst_cvar) if self.dst_cvar is not None else None
+        )
+        self.source_expr = _direct_stack_move_source_expr_8616(self.codegen, self.fact, self.dst_cvar)
+        if self.dst_cvar is None or self.dst_expr is None or self.source_expr is None:
+            self.stats["failure_count"] = int(self.stats.get("failure_count", 0) or 0) + 1
+            return True
+        self.authoritative_wide_materialized = False
+        return False
+
+    def _fact_wide_call_return_arm_8616(self) -> bool:
+        """Materialize the authoritative wide call-return stack-arith arm."""
+        if self.fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
+            required_addresses = (
+                self.fact.source_call_target,
+                self.fact.source_call_ins_addr,
+                self.fact.source_low_arith_ins_addr,
+                self.fact.source_high_arith_ins_addr,
+                self.fact.dst_high_ins_addr,
+                self.fact.source_offset,
+            )
+            if not all(isinstance(address, int) for address in required_addresses):
+                self.stats["failure_count"] = int(self.stats.get("failure_count", 0) or 0) + 1
+                return True
+            ownership = classify_authoritative_wide_call_output_projection_8616(
+
+                self.codegen,
+                callsite_addr=cast(int, self.fact.source_call_ins_addr),
+                target_addr=cast(int, self.fact.source_call_target),
+                kind=CarryBorrowKind8616.ADD_WITH_CARRY,
+                source_offset=cast(int, self.fact.source_offset),
+                destination_offset=self.fact.dst_offset,
+                low_arithmetic_addr=cast(int, self.fact.source_low_arith_ins_addr),
+                high_arithmetic_addr=cast(int, self.fact.source_high_arith_ins_addr),
+                low_store_addr=self.fact.ins_addr,
+                high_store_addr=cast(int, self.fact.dst_high_ins_addr),
+            )
+            if ownership.blocks_legacy_materialization:
+                if not ownership.materialized:
+                    self.stats["failure_count"] = int(self.stats.get("failure_count", 0) or 0) + 1
+                    return True
+                self.stats["authoritative_wide_owner_count"] = (
+                    int(self.stats.get("authoritative_wide_owner_count", 0) or 0) + 1
+                )
+                self.authoritative_wide_materialized = True
+        return False
+
+    def _stack_slot_type_rebind_allowed_8616(self) -> bool:
+        """Shared width/destination gate for short-signed stack-slot type rebinding."""
+        return (
+            self.fact.width == 2
+            and isinstance(self.dst_expr, structured_c.CVariable)
+            and _prototype_arg_type_for_bp_offset_8616(self.codegen, self.fact.dst_offset) is None
+        )
+
+    def _fact_stack_slot_sub_type_rebind_8616(self) -> bool:
+        """Rebind short-signed types for proven stack-slot subtraction stores."""
+        if (
+            self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT_BINARY_EXPR
+            and self.fact.source_op is DirectStackMoveExpressionOp8616.SUB
+            and self.fact.source_offset is not None
+            and self._stack_slot_type_rebind_allowed_8616()
+        ):
+            self.source_type = _prototype_arg_type_for_bp_offset_8616(self.codegen, self.fact.source_offset)
+            if isinstance(self.source_type, SimTypeShort) and bool(self.source_type.signed):
+                self.source_type = _bind_type_to_codegen_arch_8616(self.codegen, self.source_type)
+                if isinstance(self.source_expr, structured_c.CVariable):
+                    self.source_expr.variable_type = self.source_type
+                self.dst_expr.variable_type = self.source_type
+            self.current_type = self.dst_expr.variable_type
+            if not isinstance(self.current_type, SimTypeShort) or not bool(self.current_type.signed):
+                self.dst_expr.variable_type = _bind_type_to_codegen_arch_8616(self.codegen, SimTypeShort(True))
+                self.unified = getattr(getattr(self.codegen, "cfunc", None), "unified_local_vars", None)
+                if isinstance(self.unified, dict):
+                    self.dst_variable = self.dst_expr.variable
+                    if self.dst_variable is not None:
+                        self.unified[self.dst_variable] = {(self.dst_expr, self.dst_expr.variable_type)}
+
+    def _fact_stack_slot_type_rebind_8616(self) -> bool:
+        """Rebind short-signed types for proven stack-slot stores."""
+        if (
+            self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT
+            and self._stack_slot_type_rebind_allowed_8616()
+            and self.fact.source_offset is not None
+            and self.fact.source_offset > 2
+        ):
+            self.source_type = _prototype_arg_type_for_bp_offset_8616(self.codegen, self.fact.source_offset)
+            if isinstance(self.source_type, SimTypeShort) and bool(self.source_type.signed):
+                self.source_type = _bind_type_to_codegen_arch_8616(self.codegen, self.source_type)
+                if isinstance(self.source_expr, structured_c.CVariable):
+                    self.source_expr.variable_type = self.source_type
+                self.current_type = self.dst_expr.variable_type
+                if not isinstance(self.current_type, SimTypeShort) or not bool(self.current_type.signed):
+                    self.dst_expr.variable_type = self.source_type
+                self.unified = getattr(getattr(self.codegen, "cfunc", None), "unified_local_vars", None)
+                if isinstance(self.unified, dict):
+                    self.dst_variable = self.dst_expr.variable
+                    if self.dst_variable is not None:
+                        self.unified[self.dst_variable] = {(self.dst_expr, self.dst_expr.variable_type)}
+
+    def _fact_inverse_prune_8616(self) -> bool:
+        """Prune inverse stack-move artifacts produced by this definition."""
+        self.inverse_pruned = _prune_inverse_stack_move_artifacts_8616(self.root, self.facts, self.fact, self.dst_cvar, self.source_expr)
+        if self.inverse_pruned:
+            self.stats["inverse_artifact_pruned_count"] = (
+                int(self.stats.get("inverse_artifact_pruned_count", 0) or 0) + self.inverse_pruned
+            )
+            self.changed = True
+
+    def _fact_already_materialized_8616(self) -> bool:
+        """Skip or reconcile facts whose materialized form is already present."""
+        if not (self.fact_key in self.materialized_fact_keys and not self.authoritative_wide_materialized):
+            return False
+        if self._fact_zero_arg_call_return_arm_8616():
+            return True
+        if self._fact_wide_return_reconcile_8616():
+            return True
+        if self._fact_signed_idiv_reconcile_8616():
+            return True
+        self._fact_replay_reconcile_8616()
+        self._fact_semantic_cast_reconcile_8616()
+        if self._fact_stale_evidence_recheck_8616():
+            return True
+        self.stats["stale_evidence_rematerialized_count"] = (
+            int(self.stats.get("stale_evidence_rematerialized_count", 0) or 0) + 1
+        )
+        return False
+
+    def _fact_zero_arg_call_return_arm_8616(self) -> bool:
+        """Consume a zero-arg call-return fact already present in the tree."""
+        if (
+            self.fact.source_kind
+            is DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN
+            and _tree_has_zero_arg_call_return_assignment_8616(
+                self.root,
+                self.project,
+                self.fact,
+                self.dst_cvar,
+            )
+        ):
+            self.stats["already_materialized_count"] = (
+                int(self.stats.get("already_materialized_count", 0) or 0) + 1
+            )
+            self.materialized_facts.append(self.fact)
+            self.source_expr_by_store_ins_addr[int(self.fact.ins_addr)] = self.source_expr
+            return True
+        return False
+
+    def _fact_wide_return_reconcile_8616(self) -> bool:
+        """Reconcile an already-materialized wide call-return assignment."""
+        if self.fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
+            reconciled, self.replay_pruned = _reconcile_materialized_wide_call_return_assignment_8616(
+                self.root,
+                self.project,
+                self.fact,
+                self.dst_cvar,
+            )
+            if reconciled:
+                self.stats["already_materialized_count"] = (
+                    int(self.stats.get("already_materialized_count", 0) or 0) + 1
+                )
+                if self.replay_pruned:
+                    self.stats["wide_call_replay_pruned_count"] = (
+                        int(self.stats.get("wide_call_replay_pruned_count", 0) or 0)
+                        + self.replay_pruned
+                    )
+                    self.changed = True
+                self.materialized_facts.append(self.fact)
+                self.source_expr_by_store_ins_addr[int(self.fact.ins_addr)] = self.source_expr
+                return True
+        return False
+
+    def _fact_signed_idiv_reconcile_8616(self) -> bool:
+        """Reconcile an already-materialized signed-idiv call order."""
+        if self.fact.source_kind is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
+            self.call_order_reconciled, self.replay_pruned = (
+                _reconcile_materialized_signed_idiv_call_order_8616(
+                    self.root,
+                    self.project,
+                    self.codegen,
+                    self.fact,
+                    self.dst_cvar,
+                )
+            )
+            if self.call_order_reconciled:
+                self.stats["idiv_call_statement_materialized_count"] = (
+                    int(
+                        self.stats.get(
+                            "idiv_call_statement_materialized_count",
+                            0,
+                        )
+                        or 0
+                    )
+                    + 1
+                )
+                if self.replay_pruned:
+                    self.stats["idiv_duplicate_store_pruned_count"] = (
+                        int(
+                            self.stats.get(
+                                "idiv_duplicate_store_pruned_count",
+                                0,
+                            )
+                            or 0
+                        )
+                        + self.replay_pruned
+                    )
+                self.changed = True
+        return False
+
+    def _fact_replay_reconcile_8616(self) -> None:
+        """Decide whether to replay reconciliation for idiv or segmented sources."""
+        self.signed_idiv_assignment_present = _tree_has_materialized_signed_idiv_remainder_8616(
+            self.root,
+            self.fact,
+            self.dst_cvar,
+        )
+        self.projected_segmented_source_present = bool(
+            self.fact.source_kind is DirectStackMoveSourceKind8616.SEGMENTED_MEMORY
+            and self.fact.source_segment_name == "ds"
+            and isinstance(self.fact.source_displacement, int)
+            and isinstance(self.fact.source_index_offset, int)
+            and isinstance(self.fact.source_index_shift, int)
+            and isinstance(self.fact.source_access_width, int)
+            and projected_segmented_stack_assignment_present_8616(
+                self.codegen,
+                self.root,
+                SegmentedStackSourceProjection8616(
+                    instruction_addr=self.fact.ins_addr,
+                    destination_machine_bp_offset=self.fact.dst_offset,
+                    destination_width=self.fact.width,
+                    source_displacement=self.fact.source_displacement,
+                    source_index_machine_bp_offset=self.fact.source_index_offset,
+                    source_index_byte_scale=1 << self.fact.source_index_shift,
+                    source_access_width=self.fact.source_access_width,
+                ),
+            )
+        )
+        replay_reconciled = False
+        if not self.signed_idiv_assignment_present and not self.projected_segmented_source_present:
+            replay_reconciled = _replace_tagged_statement_assignment_8616(
+                self.root,
+                self.project,
+                self.fact.ins_addr,
+                self.replacement_factory_8616,
+                remove_duplicate_tagged_assignments=True,
+            )
+        if replay_reconciled:
+            self.stats["stale_evidence_rematerialized_count"] = (
+                int(self.stats.get("stale_evidence_rematerialized_count", 0) or 0) + 1
+            )
+            self.changed = True
+
+    def _fact_semantic_cast_reconcile_8616(self) -> None:
+        """Reconcile semantic-cast sources with their materialized forms."""
+        if isinstance(self.source_expr, CSemanticCast8616):
+            cast_result = reconcile_required_assignment_cast_8616(
+                self.root,
+                self.replacement_factory_8616({"ins_addr": self.fact.ins_addr}),
+                same_destination=_same_stack_cvar_8616,
+                same_source=lambda actual, expected: (
+                    _same_stack_move_rhs_8616(actual, expected)
+                    or _same_stack_low_half_cvar_8616(expected, actual)
+                ),
+            )
+            self.stats["semantic_cast_candidate_count"] = (
+                int(self.stats.get("semantic_cast_candidate_count", 0) or 0)
+                + cast_result.candidate_count
+            )
+            self.stats["semantic_cast_assignment_count"] = (
+                int(self.stats.get("semantic_cast_assignment_count", 0) or 0)
+                + cast_result.assignment_count
+            )
+            self.stats["semantic_cast_destination_count"] = (
+                int(self.stats.get("semantic_cast_destination_count", 0) or 0)
+                + cast_result.destination_count
+            )
+            if cast_result.changed:
+                self.stats["semantic_cast_reconciled_count"] = (
+                    int(self.stats.get("semantic_cast_reconciled_count", 0) or 0)
+                    + 1
+                )
+                self.changed = True
+            elif (
+                cast_result.status
+                is RequiredAssignmentCastReconcileStatus8616.ALREADY_PRESENT
+            ):
+                self.stats["semantic_cast_already_present_count"] = (
+                    int(
+                        self.stats.get(
+                            "semantic_cast_already_present_count",
+                            0,
+                        )
+                        or 0
+                    )
+                    + 1
+                )
+            elif (
+                cast_result.status
+                is RequiredAssignmentCastReconcileStatus8616.AMBIGUOUS
+            ):
+                self.stats["semantic_cast_ambiguous_count"] = (
+                    int(self.stats.get("semantic_cast_ambiguous_count", 0) or 0)
+                    + 1
+                )
+            elif (
+                cast_result.status
+                is RequiredAssignmentCastReconcileStatus8616.NO_MATCH
+            ):
+                self.stats["semantic_cast_no_match_count"] = (
+                    int(self.stats.get("semantic_cast_no_match_count", 0) or 0)
+                    + 1
+                )
+
+    def _fact_stale_evidence_recheck_8616(self) -> bool:
+        """Recheck stale evidence and rematerialize when the write vanished."""
+        if _tree_has_stack_move_assignment_8616(
+            self.root,
+            self.dst_expr,
+            self.source_expr,
+        ) or self.signed_idiv_assignment_present or self.projected_segmented_source_present:
+            if (
+                self.fact.source_kind
+                is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER
+            ):
+                self.auxiliary_insert_count = (
+                    _prune_signed_idiv_auxiliary_insert_8616(
+                        self.root,
+                        self.project,
+                        self.fact,
+                    )
+                )
+                if self.auxiliary_insert_count:
+                    self.stats["idiv_auxiliary_insert_pruned_count"] = (
+                        int(
+                            self.stats.get(
+                                "idiv_auxiliary_insert_pruned_count",
+                                0,
+                            )
+                            or 0
+                        )
+                        + self.auxiliary_insert_count
+                    )
+                    self.changed = True
+            if self.fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
+                self.carrier_pruned = _prune_wide_call_return_carriers_8616(
+                    self.root,
+                    self.project,
+                    self.fact,
+                    self.dst_cvar,
+                )
+                if self.carrier_pruned:
+                    self.stats["wide_call_carrier_pruned_count"] = (
+                        int(self.stats.get("wide_call_carrier_pruned_count", 0) or 0) + self.carrier_pruned
+                    )
+                    self.changed = True
+                self.decomposition_pruned = _prune_wide_call_return_decomposition_8616(
+                    self.root,
+                    self.project,
+                    self.fact,
+                )
+                if self.decomposition_pruned:
+                    self.stats["wide_call_decomposition_pruned_count"] = (
+                        int(self.stats.get("wide_call_decomposition_pruned_count", 0) or 0)
+                        + self.decomposition_pruned
+                    )
+                    self.changed = True
+            if (
+                self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT
+                and _restore_same_block_stack_move_order_8616(
+                    self.root,
+                    self.codegen,
+                    self.project,
+                    self.function,
+                    self.fact,
+                    self.dst_expr,
+                    self.source_expr,
+                )
+            ):
+                self.stats["same_block_stack_move_order_restored_count"] = (
+                    int(self.stats.get("same_block_stack_move_order_restored_count", 0) or 0) + 1
+                )
+                self.changed = True
+            self.stats["already_materialized_count"] = int(self.stats.get("already_materialized_count", 0) or 0) + 1
+            self.materialized_facts.append(self.fact)
+            self.source_expr_by_store_ins_addr[int(self.fact.ins_addr)] = self.source_expr
+            return True
+        return False
+
+    def _fact_classified_8616(self) -> bool:
+        """Record the fact as classified and seed materialization state."""
+        self.stats["classified_fact_count"] = int(self.stats.get("classified_fact_count", 0) or 0) + 1
+        self.materialized = self.authoritative_wide_materialized
+
+        self.idiv_visible_guard_inserted = False
+
+    def _fact_stack_slot_expr_arm_8616(self) -> bool:
+        """Materialize STACK_SLOT_EXPR facts into structured stack stores."""
+        if self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT_EXPR:
+            if self.allow_stack_slot_fallback:
+                self.visible_assignment = _direct_stack_move_assignment_8616(
+                    self.codegen,
+                    self.dst_cvar,
+                    self.source_expr,
+                    tags={"ins_addr": self.fact.ins_addr},
+                )
+                placement_service = getattr(
+                    self.codegen,
+                    "_inertia_direct_stack_move_branch_placement_service_8616",
+                    None,
+                )
+                if callable(placement_service):
+                    self.materialized = bool(placement_service(self.fact, self.visible_assignment))
+                if (
+                    not self.materialized
+                    and _direct_stack_move_is_before_known_precontrol_8616(
+                        self.root,
+                        self.project,
+                        self.function,
+                        self.fact.ins_addr,
+                    )
+                ):
+                    self.materialized = _replace_precontrol_stack_assignment_8616(
+                        self.root,
+                        self.dst_cvar,
+                        self.visible_assignment,
+                        insert_before_control_when_no_match=True,
+                    )
+                if not self.materialized and _insert_before_first_stack_cvar_use_8616(
+                    self.root,
+                    self.visible_assignment,
+                    prefer_outer_control_read=True,
+                ):
+                    self.materialized = True
+                    self.changed = True
+            self.materialized = (
+                _replace_tagged_statement_assignment_8616(
+                    self.root,
+                    self.project,
+                    self.fact.ins_addr,
+                    self.replacement_factory_8616,
+                )
+                or self.materialized
+            )
+        elif self.fact.source_kind in {
+            DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN,
+            DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH,
+        }:
+            # A call-return stack store consumes the call carrier. Generic
+            # replacement would retain that carrier and duplicate the call.
+            if not self.materialized:
+                call_assignment = _replace_tagged_call_statement_with_stack_assignment_8616(
+                    self.root,
+                    self.project,
+                    self.fact.source_call_ins_addr,
+                    self.fact.source_call_name,
+                    self.replacement_factory_8616,
+                    call_target=self.fact.source_call_target,
+                )
+                self.materialized = call_assignment is not None
+                if self.materialized:
+                    counter = (
+                        "zero_arg_call_return_statement_materialized_count"
+                        if self.fact.source_kind is DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN
+                        else "wide_call_statement_materialized_count"
+                    )
+                    self.stats[counter] = int(self.stats.get(counter, 0) or 0) + 1
+                    self.changed = True
+        else:
+            self.visible_assignment = self.replacement_factory_8616({"ins_addr": self.fact.ins_addr})
+            placement_service = getattr(
+                self.codegen,
+                "_inertia_direct_stack_move_branch_placement_service_8616",
+                None,
+            )
+            self.materialized = bool(
+                callable(placement_service)
+                and placement_service(self.fact, self.visible_assignment)
+            )
+            tagged_materialized = (
+                False
+                if self.materialized
+                else _replace_tagged_statement_assignment_8616(
+                    self.root,
+                    self.project,
+                    self.fact.ins_addr,
+                    self.replacement_factory_8616,
+                    remove_duplicate_tagged_assignments=True,
+                )
+            )
+            self.materialized = tagged_materialized or self.materialized
+            if (
+                tagged_materialized
+                and self.fact.source_kind
+                in {
+                    DirectStackMoveSourceKind8616.STACK_SLOT,
+                    DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
+                }
+                and _insert_into_conditional_branch_for_direct_stack_move_8616(
+                    self.root,
+                    self.project,
+                    self.function,
+                    self.fact.ins_addr,
+                    self.replacement_factory_8616({"ins_addr": self.fact.ins_addr}),
+                    relocate_tagged_assignment=True,
+                )
+            ):
+                self.stats["conditional_branch_relocated_count"] = (
+                    int(self.stats.get("conditional_branch_relocated_count", 0) or 0) + 1
+                )
+                self.changed = True
+
+    def _fact_signed_idiv_arm_8616(self) -> bool:
+        """Materialize SIGNED_IDIV_REMAINDER facts with call-statement bridging."""
+        if self.fact.source_kind is not DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
+            return False
+        self.call_statement_source_expr = self.source_expr
+        if not _expr_contains_function_call_8616(self.call_statement_source_expr):
+            self.call_statement_source_expr = _direct_stack_move_source_expr_8616(
+                self.codegen,
+                self.fact,
+                self.dst_cvar,
+                reuse_call_result=False,
+            )
+        self.idiv_call_statement_materialized = False
+        self._idiv_call_statement_materialize_8616()
+        self._idiv_direct_materialize_8616()
+        self._idiv_guard_or_recheck_8616()
+        self._idiv_artifact_tail_8616()
+        self._idiv_finalize_8616()
+        return False
+
+    def _idiv_call_statement_materialize_8616(self) -> None:
+        """Bridge the signed-idiv call statement into a stack assignment."""
+        if self.call_statement_source_expr is not None and _expr_contains_function_call_8616(self.call_statement_source_expr):
+            idiv_call_assignment = _replace_tagged_call_statement_with_stack_assignment_8616(
+                self.root,
+                self.project,
+                self.fact.source_call_ins_addr,
+                self.fact.source_call_name,
+                self.call_statement_replacement_factory_8616,
+                call_target=self.fact.source_call_target,
+            )
+            self.idiv_call_statement_materialized = idiv_call_assignment is not None
+            if self.idiv_call_statement_materialized:
+                self.stats["idiv_call_statement_materialized_count"] = (
+                    int(self.stats.get("idiv_call_statement_materialized_count", 0) or 0) + 1
+                )
+                duplicate_store_count = (
+                    _remove_consumed_signed_idiv_store_assignments_8616(
+                        self.root,
+                        self.project,
+                        self.fact,
+                        self.dst_cvar,
+                        idiv_call_assignment,
+                    )
+                )
+                duplicate_store_count += _remove_duplicate_stack_move_assignments_8616(
+                    self.root,
+                    self.project,
+                    self.fact.ins_addr,
+                    self.dst_cvar,
+                    self.call_statement_source_expr,
+                    idiv_call_assignment,
+                )
+                if duplicate_store_count:
+                    self.stats["idiv_duplicate_store_pruned_count"] = (
+                        int(self.stats.get("idiv_duplicate_store_pruned_count", 0) or 0)
+                        + duplicate_store_count
+                    )
+                self.materialized = True
+                self.changed = True
+
+    def _idiv_direct_materialize_8616(self) -> None:
+        """Materialize the signed-idiv remainder when no call statement was bridged."""
+        if not self.idiv_call_statement_materialized:
+            artifact_materialized = _replace_signed_idiv_remainder_artifact_assignment_8616(
+                self.root,
+                self.dst_cvar,
+                self.replacement_factory_8616,
+                allow_unique_stack_lhs_bridge=self.signed_idiv_remainder_fact_count == 1,
+            )
+            if artifact_materialized is not None:
+                self.stats["idiv_artifact_materialized_count"] = (
+                    int(self.stats.get("idiv_artifact_materialized_count", 0) or 0) + 1
+                )
+                if (
+                    artifact_materialized
+                    is DirectStackMoveArtifactReplacementKind8616.UNIQUE_SIGNED_IDIV_STACK_ARTIFACT
+                ):
+                    self.stats["idiv_artifact_stack_lhs_bridge_count"] = (
+                        int(self.stats.get("idiv_artifact_stack_lhs_bridge_count", 0) or 0) + 1
+                    )
+                self.materialized = True
+
+    def _idiv_guard_or_recheck_8616(self) -> None:
+        """Apply the visible-guard placement for the signed-idiv remainder."""
+        if not self.materialized:
+            self.visible_assignment = _direct_stack_move_assignment_8616(
+                self.codegen,
+                self.dst_cvar,
+                self.source_expr,
+                tags={"ins_addr": self.fact.ins_addr},
+            )
+            if _insert_before_first_stack_cvar_use_8616(
+                self.root,
+                self.visible_assignment,
+                ignore_existing_assignment=True,
+            ):
+                self.stats["idiv_remainder_visible_use_guard_count"] = (
+                    int(self.stats.get("idiv_remainder_visible_use_guard_count", 0) or 0) + 1
+                )
+                self.idiv_visible_guard_inserted = True
+                self.materialized = True
+                self.changed = True
+
+    def _idiv_artifact_tail_8616(self) -> None:
+        """Record signed-idiv artifact counters for the materialization arm."""
+        if (
+            self.materialized
+            and not self.idiv_visible_guard_inserted
+            and not self.idiv_call_statement_materialized
+            and not _expr_contains_function_call_8616(self.source_expr)
+        ):
+            self.visible_assignment = _direct_stack_move_assignment_8616(
+                self.codegen,
+                self.dst_cvar,
+                self.source_expr,
+                tags={"ins_addr": self.fact.ins_addr},
+            )
+            if _insert_before_first_stack_cvar_use_8616(
+                self.root,
+                self.visible_assignment,
+                ignore_existing_assignment=True,
+            ):
+                self.stats["idiv_remainder_visible_use_guard_count"] = (
+                    int(self.stats.get("idiv_remainder_visible_use_guard_count", 0) or 0) + 1
+                )
+                self.changed = True
+
+    def _idiv_finalize_8616(self) -> None:
+        """Finalize the signed-idiv arm bookkeeping."""
+        if self.materialized:
+            self.auxiliary_insert_count = _prune_signed_idiv_auxiliary_insert_8616(
+                self.root,
+                self.project,
+                self.fact,
+            )
+            if self.auxiliary_insert_count:
+                self.stats["idiv_auxiliary_insert_pruned_count"] = (
+                    int(self.stats.get("idiv_auxiliary_insert_pruned_count", 0) or 0)
+                    + self.auxiliary_insert_count
+                )
+                self.changed = True
+
+    def _fact_generic_materialize_8616(self) -> bool:
+        """Materialize facts that still need a direct assignment."""
+        if not self.materialized:
+            if self._fact_reconcile_existing_assignment_8616():
+                return True
+            self._fact_tagged_fallback_gate_8616()
+            self._fact_immediate_source_arm_8616()
+            self._fact_kind_fallback_chain_8616()
+        return False
+
+    def _fact_reconcile_existing_assignment_8616(self) -> bool:
+        """Consume a fact whose stack-move assignment already exists in the tree."""
+        if _tree_has_stack_move_assignment_8616(self.root, self.dst_expr, self.source_expr) or (
+            self.fact.source_kind
+            is DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN
+            and _tree_has_zero_arg_call_return_assignment_8616(
+                self.root,
+                self.project,
+                self.fact,
+                self.dst_cvar,
+            )
+        ):
+            if self.fact.source_kind is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
+                self.call_order_reconciled, self.replay_pruned = (
+                    _reconcile_materialized_signed_idiv_call_order_8616(
+                        self.root,
+                        self.project,
+                        self.codegen,
+                        self.fact,
+                        self.dst_cvar,
+                    )
+                )
+                if self.call_order_reconciled:
+                    self.stats["idiv_call_statement_materialized_count"] = (
+                        int(self.stats.get("idiv_call_statement_materialized_count", 0) or 0)
+                        + 1
+                    )
+                    if self.replay_pruned:
+                        self.stats["idiv_duplicate_store_pruned_count"] = (
+                            int(self.stats.get("idiv_duplicate_store_pruned_count", 0) or 0)
+                            + self.replay_pruned
+                        )
+                    self.changed = True
+                self.auxiliary_insert_count = _prune_signed_idiv_auxiliary_insert_8616(
+                    self.root,
+                    self.project,
+                    self.fact,
+                )
+                if self.auxiliary_insert_count:
+                    self.stats["idiv_auxiliary_insert_pruned_count"] = (
+                        int(self.stats.get("idiv_auxiliary_insert_pruned_count", 0) or 0)
+                        + self.auxiliary_insert_count
+                    )
+                    self.changed = True
+            if (
+                self.fact.source_kind
+                in {
+                    DirectStackMoveSourceKind8616.STACK_SLOT,
+                    DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
+                }
+                and _insert_into_conditional_branch_for_direct_stack_move_8616(
+                    self.root,
+                    self.project,
+                    self.function,
+                    self.fact.ins_addr,
+                    self.replacement_factory_8616({"ins_addr": self.fact.ins_addr}),
+                    relocate_tagged_assignment=True,
+                )
+            ):
+                self.stats["conditional_branch_relocated_count"] = (
+                    int(self.stats.get("conditional_branch_relocated_count", 0) or 0) + 1
+                )
+                self.changed = True
+            if (
+                self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT
+                and _restore_same_block_stack_move_order_8616(
+                    self.root,
+                    self.codegen,
+                    self.project,
+                    self.function,
+                    self.fact,
+                    self.dst_expr,
+                    self.source_expr,
+                )
+            ):
+                self.stats["same_block_stack_move_order_restored_count"] = (
+                    int(self.stats.get("same_block_stack_move_order_restored_count", 0) or 0) + 1
+                )
+                self.changed = True
+            if (
+                self.fact.source_kind
+                in {
+                    DirectStackMoveSourceKind8616.IMMEDIATE,
+                    DirectStackMoveSourceKind8616.STACK_SLOT,
+                    DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
+                    DirectStackMoveSourceKind8616.GLOBAL_EXPR,
+                    DirectStackMoveSourceKind8616.SEGMENTED_MEMORY,
+                }
+                and not _function_has_loopback_to_instruction_8616(self.function, self.project, self.fact.ins_addr)
+            ):
+                self.relocated_assignment = _direct_stack_move_assignment_8616(
+                    self.codegen,
+                    self.dst_cvar,
+                    self.source_expr,
+                    tags={"inertia_relocated_from_ins_addr": self.fact.ins_addr},
+                )
+                self.relocated_count = _relocate_tagged_stack_move_before_proven_loop_8616(
+                    self.root,
+                    self.project,
+                    self.function,
+                    self.fact.ins_addr,
+                    self.dst_cvar,
+                    self.source_expr,
+                    self.relocated_assignment,
+                )
+                if self.relocated_count:
+                    self.stats["read_before_tagged_assignment_relocated_count"] = (
+                        int(self.stats.get("read_before_tagged_assignment_relocated_count", 0) or 0)
+                        + self.relocated_count
+                    )
+                    self.changed = True
+            self.root._inertia_stack_mov_assignment_already_present_8616 = True
+            self.stats["already_materialized_count"] = int(self.stats.get("already_materialized_count", 0) or 0) + 1
+            self.materialized_facts.append(self.fact)
+            self.materialized_fact_keys.add(self.fact_key)
+            _record_direct_stack_move_evidence_8616(self.codegen, self.fact)
+            self.source_expr_by_store_ins_addr[int(self.fact.ins_addr)] = self.source_expr
+            return True
+        return False
+
+    def _fact_tagged_fallback_gate_8616(self) -> None:
+        """Apply the tagged-statement placement gate before direct insertion."""
+        if _tree_has_assignment_for_instruction_addr_8616(self.root, self.project, self.fact.ins_addr):
+            self.stats["tagged_non_stack_assignment_conflict_count"] = (
+                int(self.stats.get("tagged_non_stack_assignment_conflict_count", 0) or 0) + 1
+            )
+        self.fallback_assignment = _direct_stack_move_assignment_8616(
+            self.codegen,
+            self.dst_expr,
+            self.source_expr,
+            tags={"ins_addr": self.fact.ins_addr},
+        )
+
+    def _fact_immediate_source_arm_8616(self) -> None:
+        """Place IMMEDIATE-source stores around proven loop/precontrol positions."""
+        if self.fact.source_kind in {
+            DirectStackMoveSourceKind8616.STACK_SLOT,
+            DirectStackMoveSourceKind8616.STACK_SLOT_EXPR,
+            DirectStackMoveSourceKind8616.STACK_SLOT_BINARY_EXPR,
+            DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
+        }:
+            # Dynamic service boundary: Structuring owns CFG placement,
+            # while Lowering owns the exact assignment passed to it.
+            branch_placement_service = getattr(
+                self.codegen,
+                "_inertia_direct_stack_move_branch_placement_service_8616",
+                None,
+            )
+            if callable(branch_placement_service):
+                self.materialized = bool(
+                    branch_placement_service(self.fact, self.fallback_assignment)
+                )
+
+    def _fact_kind_fallback_chain_8616(self) -> None:
+        """Run the per-source-kind fallback placement chain."""
+        if self.fact.source_kind is DirectStackMoveSourceKind8616.IMMEDIATE:
+            repeats_at_loop_entry = _function_has_loopback_to_instruction_8616(
+                self.function, self.project, self.fact.ins_addr
+            )
+            is_proven_precontrol = _direct_stack_move_is_before_known_precontrol_8616(
+                self.root, self.project, self.function, self.fact.ins_addr
+            )
+            if repeats_at_loop_entry:
+                self.materialized = _insert_at_do_while_body_start_8616(
+                    self.root,
+                    self.project,
+                    self.function,
+                    self.fact.ins_addr,
+                    self.fallback_assignment,
+                )
+            elif is_proven_precontrol:
+                self.materialized = _insert_before_first_stack_cvar_use_8616(self.root, self.fallback_assignment)
+                if not self.materialized:
+                    self.materialized = _replace_precontrol_stack_assignment_8616(
+                        self.root,
+                        self.dst_cvar,
+                        self.fallback_assignment,
+                        insert_before_control_when_no_match=True,
+                    )
+            if not self.materialized and not is_proven_precontrol:
+                self.materialized = _insert_into_conditional_branch_for_direct_stack_move_8616(
+                    self.root,
+                    self.project,
+                    self.function,
+                    self.fact.ins_addr,
+                    self.fallback_assignment,
+                )
+            if not self.materialized and _direct_stack_move_is_before_first_control_8616(
+                self.root, self.project, self.fact.ins_addr
+            ):
+                self.materialized = _replace_precontrol_stack_assignment_8616(
+                    self.root,
+                    self.dst_cvar,
+                    self.fallback_assignment,
+                    insert_before_control_when_no_match=is_proven_precontrol,
+                )
+            if not self.materialized:
+                self.materialized = _insert_after_nearest_preceding_tagged_statement_8616(
+                    self.root,
+                    self.project,
+                    self.fact.ins_addr,
+                    self.fallback_assignment,
+                    function=self.function,
+                    require_known_block=True,
+                )
+            if not self.materialized and self.allow_unscoped_fallback_insert:
+                self.materialized = _insert_before_nearest_following_tagged_statement_8616(
+                    self.root,
+                    self.project,
+                    self.fact.ins_addr,
+                    self.fallback_assignment,
+                )
+        elif self.fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
+            self.materialized = _replace_precontrol_stack_assignment_8616(
+                self.root,
+                self.dst_cvar,
+                self.fallback_assignment,
+                allow_low_half_lhs=True,
+            )
+        elif (
+            self.fact.source_kind
+            in {
+                DirectStackMoveSourceKind8616.STACK_SLOT,
+                DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
+            }
+            and self.allow_stack_slot_fallback
+        ):
+            if not self.materialized:
+                self.materialized = _insert_at_do_while_body_start_8616(
+                    self.root,
+                    self.project,
+                    self.function,
+                    self.fact.ins_addr,
+                    self.fallback_assignment,
+                )
+            if _direct_stack_move_is_before_known_precontrol_8616(self.root, self.project, self.function, self.fact.ins_addr):
+                self.materialized = self.materialized or _replace_precontrol_stack_assignment_8616(
+                    self.root, self.dst_cvar, self.fallback_assignment, insert_before_control_when_no_match=True
+                )
+            if not self.materialized:
+                self.materialized = _replace_post_call_cleanup_artifact_before_stack_move_8616(
+                    self.root,
+                    self.project,
+                    self.function,
+                    self.fact.ins_addr,
+                    self.fallback_assignment,
+                )
+            if not self.materialized:
+                self.materialized = _insert_at_guarded_body_start_for_target_stack_move_8616(
+                    self.root,
+                    self.project,
+                    self.fact.ins_addr,
+                    self.fallback_assignment,
+                )
+            if not self.materialized:
+                self.materialized = _insert_after_nearest_preceding_tagged_statement_8616(
+                    self.root,
+                    self.project,
+                    self.fact.ins_addr,
+                    self.fallback_assignment,
+                    function=self.function,
+                    require_known_block=True,
+                    refuse_loop_container_predecessor=True,
+                )
+            if not self.materialized:
+                self.materialized = _insert_before_do_while_condition_8616(
+                    self.root, self.project, self.fact.ins_addr, self.fallback_assignment
+                )
+            if not self.materialized:
+                self.materialized = _insert_before_nearest_following_tagged_statement_8616(
+                    self.root,
+                    self.project,
+                    self.fact.ins_addr,
+                    self.fallback_assignment,
+                    prefer_loop_container=True,
+                )
+            if not self.materialized:
+                self.materialized = _insert_before_first_stack_cvar_use_8616(
+                    self.root,
+                    self.fallback_assignment,
+                )
+            if not self.materialized and self.allow_unscoped_fallback_insert:
+                self.materialized = _insert_after_nearest_preceding_tagged_statement_8616(
+                    self.root,
+                    self.project,
+                    self.fact.ins_addr,
+                    self.fallback_assignment,
+                    function=self.function,
+                )
+        elif self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT_EXPR and self.allow_stack_slot_fallback:
+            if _direct_stack_move_is_before_known_precontrol_8616(self.root, self.project, self.function, self.fact.ins_addr):
+                self.materialized = _replace_precontrol_stack_assignment_8616(
+                    self.root,
+                    self.dst_cvar,
+                    self.fallback_assignment,
+                    insert_before_control_when_no_match=True,
+                )
+            if not self.materialized:
+                self.materialized = _insert_before_first_stack_cvar_use_8616(self.root, self.fallback_assignment)
+            if not self.materialized and self.allow_unscoped_fallback_insert:
+                self.materialized = _insert_before_nearest_following_tagged_statement_8616(
+                    self.root,
+                    self.project,
+                    self.fact.ins_addr,
+                    self.fallback_assignment,
+                )
+        elif (
+            self.fact.source_kind
+            in {
+                DirectStackMoveSourceKind8616.GLOBAL_EXPR,
+                DirectStackMoveSourceKind8616.GLOBAL_MINUS_STACK_SLOT,
+                DirectStackMoveSourceKind8616.GLOBAL_MINUS_SEGMENTED_MEMORY,
+            }
+            and self.allow_stack_slot_fallback
+        ):
+            self.materialized = _insert_between_structured_siblings_8616(
+                self.root,
+                self.project,
+                self.fact.ins_addr,
+                self.fallback_assignment,
+            )
+            if (
+                not self.materialized
+                and _direct_stack_move_is_before_known_precontrol_8616(
+                    self.root,
+                    self.project,
+                    self.function,
+                    self.fact.ins_addr,
+                )
+            ):
+                self.materialized = _replace_precontrol_stack_assignment_8616(
+                    self.root,
+                    self.dst_cvar,
+                    self.fallback_assignment,
+                    insert_before_control_when_no_match=True,
+                )
+            if not self.materialized:
+                self.materialized = _insert_before_first_stack_cvar_use_8616(self.root, self.fallback_assignment)
+            if not self.materialized and self.allow_unscoped_fallback_insert:
+                self.materialized = _insert_before_nearest_following_tagged_statement_8616(
+                    self.root,
+                    self.project,
+                    self.fact.ins_addr,
+                    self.fallback_assignment,
+                )
+        elif self.fact.source_kind is DirectStackMoveSourceKind8616.SEGMENTED_MEMORY:
+            # Structuring owns CFG scope through the placement service above.
+            # Refuse here when no exact owner accepted the Lowering-built value.
+            self.stats["segmented_memory_scope_refused_count"] = (
+                int(self.stats.get("segmented_memory_scope_refused_count", 0) or 0)
+                + int(not self.materialized)
+            )
+
+    def _fact_materialize_fallback_8616(self) -> bool:
+        """Apply the last-resort materialization fallback for a fact."""
+        if not self.materialized:
+            if bool(getattr(self.root, "_inertia_stack_mov_assignment_already_present_8616", False)):
+                self.stats["already_materialized_count"] = int(self.stats.get("already_materialized_count", 0) or 0) + 1
+                self.materialized_facts.append(self.fact)
+                self.source_expr_by_store_ins_addr[int(self.fact.ins_addr)] = self.source_expr
+                return True
+            self.stats["failure_count"] = int(self.stats.get("failure_count", 0) or 0) + 1
+            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+                log.warning(
+                    "[direct-stack-mov] refused ins=%#x dst=%s source_kind=%s source_value=%s "
+                    "source_offset=%s reads_dst=%s reasons=%s",
+                    self.fact.ins_addr,
+                    _stack_cvar_identity_8616(self.dst_cvar),
+                    self.fact.source_kind.name,
+                    self.fact.source_value,
+                    self.fact.source_offset,
+                    _node_reads_stack_cvar_8616(self.root, self.dst_cvar),
+                    getattr(self.root, "_inertia_stack_mov_refused_reasons_8616", ()),
+                )
+            return True
+        return False
+
+    def _fact_aggregate_order_restore_8616(self) -> bool:
+        """Restore same-block stack-move ordering for aggregate elements."""
+        if (
+            self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT
+            and _restore_same_block_stack_move_order_8616(
+                self.root,
+                self.codegen,
+                self.project,
+                self.function,
+                self.fact,
+                self.dst_expr,
+                self.source_expr,
+            )
+        ):
+            self.stats["same_block_stack_move_order_restored_count"] = (
+                int(self.stats.get("same_block_stack_move_order_restored_count", 0) or 0) + 1
+            )
+            self.changed = True
+
+    def _fact_immediate_group_arm_8616(self) -> bool:
+        """Handle immediate and aggregate source-kind materialization details."""
+        if self.fact.source_kind in {
+            DirectStackMoveSourceKind8616.IMMEDIATE,
+            DirectStackMoveSourceKind8616.STACK_SLOT,
+            DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
+            DirectStackMoveSourceKind8616.GLOBAL_EXPR,
+            DirectStackMoveSourceKind8616.SEGMENTED_MEMORY,
+        } and not _function_has_loopback_to_instruction_8616(self.function, self.project, self.fact.ins_addr):
+            self.relocated_assignment = _direct_stack_move_assignment_8616(
+                self.codegen,
+                self.dst_cvar,
+                self.source_expr,
+                tags={"inertia_relocated_from_ins_addr": self.fact.ins_addr},
+            )
+            self.relocated_count = _relocate_tagged_stack_move_before_proven_loop_8616(
+                self.root,
+                self.project,
+                self.function,
+                self.fact.ins_addr,
+                self.dst_cvar,
+                self.source_expr,
+                self.relocated_assignment,
+            )
+            if self.relocated_count:
+                self.stats["read_before_tagged_assignment_relocated_count"] = (
+                    int(self.stats.get("read_before_tagged_assignment_relocated_count", 0) or 0) + self.relocated_count
+                )
+                self.changed = True
+
+    def _fact_sign_extend_guard_8616(self) -> bool:
+        """Insert visible-use guards for sign-extended stack-slot stores."""
+        if (
+            self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT
+            and self.allow_stack_slot_fallback
+            and self.fact.source_sign_extend
+            and isinstance(self.fact.source_access_width, int)
+            and self.fact.source_access_width < self.fact.width
+        ):
+            self.visible_assignment = _direct_stack_move_assignment_8616(
+                self.codegen,
+                self.dst_cvar,
+                self.source_expr,
+                tags={"ins_addr": self.fact.ins_addr},
+            )
+            target_offset = _c_expr_stack_offset_8616(self.dst_cvar)
+            visible_assignment_available = (
+                _insert_before_first_stack_offset_use_8616(self.root, self.visible_assignment, target_offset)
+                if isinstance(target_offset, int) and _expr_reads_stack_offset_8616(self.root, target_offset)
+                else False
+            )
+            if visible_assignment_available:
+                self.stats["visible_use_guard_count"] = int(self.stats.get("visible_use_guard_count", 0) or 0) + 1
+                self.changed = True
+
+    def _fact_wide_arith_carrier_prune_8616(self) -> bool:
+        """Prune obsolete wide call-return carriers after materialization."""
+        if self.fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
+            self.carrier_pruned = _prune_wide_call_return_carriers_8616(
+                self.root,
+                self.project,
+                self.fact,
+                self.dst_cvar,
+            )
+            if self.carrier_pruned:
+                self.stats["wide_call_carrier_pruned_count"] = (
+                    int(self.stats.get("wide_call_carrier_pruned_count", 0) or 0) + self.carrier_pruned
+                )
+                self.changed = True
+            self.decomposition_pruned = _prune_wide_call_return_decomposition_8616(
+                self.root,
+                self.project,
+                self.fact,
+            )
+            if self.decomposition_pruned:
+                self.stats["wide_call_decomposition_pruned_count"] = (
+                    int(self.stats.get("wide_call_decomposition_pruned_count", 0) or 0)
+                    + self.decomposition_pruned
+                )
+                self.changed = True
+            rebound_count = _rebind_low_half_stack_reads_to_wide_cvar_8616(self.root, self.dst_cvar)
+            if rebound_count:
+                self.stats["wide_low_half_read_rebound_count"] = (
+                    int(self.stats.get("wide_low_half_read_rebound_count", 0) or 0) + rebound_count
+                )
+                self.changed = True
+
+    def _fact_finalize_8616(self) -> bool:
+        """Commit materialization counters and evidence for one fact."""
+        self.stats["materialized_count"] = int(self.stats.get("materialized_count", 0) or 0) + 1
+        self.materialized_facts.append(self.fact)
+        self.materialized_fact_keys.add(self.fact_key)
+        self.source_expr_by_store_ins_addr[int(self.fact.ins_addr)] = self.source_expr
+        _record_direct_stack_move_evidence_8616(self.codegen, self.fact)
+        self.changed = True
+
+    def replacement_factory_8616(
+        self,
+        tags: StructuredAstValue,
+        *,
+        _dst_cvar: StructuredAstValue = None,
+        _source_expr: StructuredAstValue = None,
+    ) -> StructuredAstValue:
+        """Build the exact assignment for one binary-proven stack MOV."""
+        return _direct_stack_move_assignment_8616(
+            self.codegen,
+            self.dst_expr if _dst_cvar is None else _dst_cvar,
+            self.source_expr if _source_expr is None else _source_expr,
+            tags=tags,
+        )
+
+    def call_statement_replacement_factory_8616(
+        self,
+        tags: StructuredAstValue,
+        *,
+        _dst_cvar: StructuredAstValue = None,
+        _source_expr: StructuredAstValue = None,
+    ) -> StructuredAstValue:
+        """Build the stack assignment that replaces the signed-idiv call statement."""
+        return _direct_stack_move_assignment_8616(
+            self.codegen,
+            self.dst_cvar if _dst_cvar is None else _dst_cvar,
+            self.call_statement_source_expr if _source_expr is None else _source_expr,
+            tags=tags,
+        )
+
+    def process_facts_8616(self) -> None:
+        """Advance each recovered fact through the materialization arms."""
+        self.timers["fact_loop_started"] = time.perf_counter()
+        for fact in self.facts:
+            self.fact = fact
+            if self._fact_begin_8616():
+                continue
+            if self._fact_wide_call_return_arm_8616():
+                continue
+            self._fact_stack_slot_sub_type_rebind_8616()
+            self._fact_stack_slot_type_rebind_8616()
+            self._fact_inverse_prune_8616()
+            if self._fact_already_materialized_8616():
+                continue
+            self._fact_classified_8616()
+            self._fact_stack_slot_expr_arm_8616()
+            self._fact_signed_idiv_arm_8616()
+            if self._fact_generic_materialize_8616():
+                continue
+            if self._fact_materialize_fallback_8616():
+                continue
+            self._fact_aggregate_order_restore_8616()
+            self._fact_immediate_group_arm_8616()
+            self._fact_sign_extend_guard_8616()
+            self._fact_wide_arith_carrier_prune_8616()
+            self._fact_finalize_8616()
+        self.timers["fact_loop"] = time.perf_counter() - self.timers["fact_loop_started"]
+
+    def _reload_fact_head_8616(
+        self,
+        reload_fact: DirectStackMoveFact8616,
+        frame: _DirectStackReloadFrame8616,
+    ) -> tuple[StructuredAstValue, StructuredAstValue, bool, StructuredAstValue] | None:
+        """Classify one reload fact and resolve its source cvar."""
+        self.stats["reload_classified_fact_count"] = int(self.stats.get("reload_classified_fact_count", 0) or 0) + 1
+        source_fact = _materialized_store_fact_for_reload_8616(
+            reload_fact,
+            tuple(self.materialized_facts),
+        )
+        source_cvar = _resolve_direct_stack_update_cvar_8616(self.codegen, reload_fact.source_offset, reload_fact.width)
+        if source_cvar is None:
+            self.stats["reload_failure_count"] = int(self.stats.get("reload_failure_count", 0) or 0) + 1
+            return None
+        reload_step_started = time.perf_counter()
+        reload_placement = _replace_tagged_register_reload_assignment_8616(
+            self.root,
+            self.project,
+            reload_fact,
+            source_cvar,
+            candidate_index=frame.candidate_index,
+        )
+        frame.timers["tagged_reload_match"] += time.perf_counter() - reload_step_started
+        materialized_reload = reload_placement.present
+        return source_fact, source_cvar, materialized_reload, reload_placement
+
+    def _reload_stack_slot_attempt_8616(
+        self,
+        reload_fact: DirectStackMoveFact8616,
+        source_fact: StructuredAstValue,
+        source_cvar: StructuredAstValue,
+        materialized_reload: bool,
+        reload_placement: StructuredAstValue,
+        frame: _DirectStackReloadFrame8616,
+    ) -> tuple[bool, StructuredAstValue]:
+        """Attempt register-use insertion and visible-guard fallback for a stack-slot reload."""
+        source_expr = self.source_expr_by_store_ins_addr.get(int(reload_fact.source_store_ins_addr))
+        stale_source_expr = _stack_slot_has_intervening_direct_update_8616(
+            self.project,
+            self.function,
+            offset=reload_fact.source_offset,
+            width=reload_fact.width,
+            start_ins_addr=reload_fact.source_store_ins_addr,
+            end_ins_addr=reload_fact.ins_addr,
+        )
+        preserve_stack_identity = reload_fact.source_kind in {
+            DirectStackMoveSourceKind8616.STACK_SLOT,
+            DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
+        }
+        reload_expr = (
+            source_cvar
+            if stale_source_expr or preserve_stack_identity
+            else source_expr
+        )
+        if (
+            reload_expr is not None
+            and isinstance(reload_fact.dst_reg_name, str)
+            and reload_fact.dst_reg_name not in frame.register_use_missing
+        ):
+            if reload_fact.dst_reg_name not in frame.register_names:
+                inserted_reload = False
+                self.stats["reload_register_use_absence_skip_count"] = (
+                    int(self.stats.get("reload_register_use_absence_skip_count", 0) or 0) + 1
+                )
+            else:
+                reload_step_started = time.perf_counter()
+                inserted_reload = _insert_before_first_register_cvar_use_8616(
+                    self.root,
+                    reload_fact.dst_reg_name,
+                    reload_expr,
+                    self.codegen,
+                    project=self.project,
+                    register_width=reload_fact.width,
+                    ins_addr=reload_fact.ins_addr,
+                )
+                frame.timers["register_use_insert"] += time.perf_counter() - reload_step_started
+            if inserted_reload:
+                reload_placement = _DirectStackReloadPlacement8616.MATERIALIZED
+                materialized_reload = True
+            if (
+                not materialized_reload
+                and not stale_source_expr
+                and source_expr is not None
+                and not _expr_contains_function_call_8616(source_expr)
+                and isinstance(reload_fact.source_offset, int)
+            ):
+                reload_step_started = time.perf_counter()
+                visible_guard_present = _tree_has_stack_move_assignment_8616(
+                    self.root,
+                    source_cvar,
+                    source_expr,
+                ) or (
+                    source_fact is not None
+                    and _tree_has_materialized_signed_idiv_remainder_8616(
+                        self.root,
+                        source_fact,
+                        source_cvar,
+                    )
+                )
+                frame.timers["visible_guard"] += time.perf_counter() - reload_step_started
+                if visible_guard_present:
+                    reload_placement = _DirectStackReloadPlacement8616.ALREADY_PRESENT
+                    materialized_reload = True
+                    self.stats["reload_stack_slot_visible_guard_already_present_count"] = (
+                        int(self.stats.get("reload_stack_slot_visible_guard_already_present_count", 0) or 0) + 1
+                    )
+                else:
+                    fallback_assignment = _direct_stack_move_assignment_8616(
+                        self.codegen,
+                        source_cvar,
+                        source_expr,
+                        tags={"ins_addr": reload_fact.source_store_ins_addr},
+                    )
+                    inserted_reload = _insert_before_nearest_following_tagged_statement_8616(
+                        self.root,
+                        self.project,
+                        reload_fact.ins_addr,
+                        fallback_assignment,
+                        ignore_existing_assignment=True,
+                    )
+                    if inserted_reload:
+                        reload_placement = _DirectStackReloadPlacement8616.MATERIALIZED
+                        materialized_reload = True
+                        self.stats["reload_stack_slot_visible_guard_count"] = (
+                            int(self.stats.get("reload_stack_slot_visible_guard_count", 0) or 0) + 1
+                        )
+                    elif bool(getattr(self.root, "_inertia_stack_mov_assignment_already_present_8616", False)):
+                        reload_placement = _DirectStackReloadPlacement8616.ALREADY_PRESENT
+                        materialized_reload = True
+                        self.stats["reload_stack_slot_visible_guard_already_present_count"] = (
+                            int(self.stats.get("reload_stack_slot_visible_guard_already_present_count", 0) or 0) + 1
+                        )
+            if not materialized_reload:
+                frame.register_use_missing.add(reload_fact.dst_reg_name)
+                self.stats["reload_missing_register_use_cached_count"] = (
+                    int(self.stats.get("reload_missing_register_use_cached_count", 0) or 0) + 1
+                )
+        elif isinstance(reload_fact.dst_reg_name, str) and reload_fact.dst_reg_name in frame.register_use_missing:
+            self.stats["reload_missing_register_use_cache_hit_count"] = (
+                int(self.stats.get("reload_missing_register_use_cache_hit_count", 0) or 0) + 1
+            )
+        return materialized_reload, reload_placement
+
+    def _reload_debug_refusal_8616(self, reload_fact: DirectStackMoveFact8616) -> None:
+        """Emit the reload refusal diagnostic when stack noise debugging is on."""
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            candidates = _boundary_tuple_8616(
+                dict.fromkeys(
+                    (
+                        type(getattr(node, "variable", None)).__name__,
+                        getattr(getattr(node, "variable", None), "name", None),
+                        _cvar_register_name_8616(node),
+                        _stack_cvar_identity_8616(node),
+                    )
+                    for node in _iter_structured_c_nodes_8616(self.root)
+                    if isinstance(node, structured_c.CVariable)
+                )
+            )[:16]
+            log.warning(
+                "[direct-stack-mov-reload] refused ins=%#x src_offset=%s width=%s "
+                "dst_reg=%s source_store=%#x candidates=%r",
+                reload_fact.ins_addr,
+                reload_fact.source_offset,
+                reload_fact.width,
+                reload_fact.dst_reg_name,
+                reload_fact.source_store_ins_addr,
+                candidates,
+            )
+
+    def _reload_commit_8616(
+        self,
+        reload_fact: DirectStackMoveFact8616,
+        materialized_reload: bool,
+        reload_placement: StructuredAstValue,
+        frame: _DirectStackReloadFrame8616,
+    ) -> None:
+        """Commit reload placement counters or record the refusal evidence."""
+        if materialized_reload:
+            if frame.candidate_index is not None and reload_placement.changed:
+                frame.candidate_index.record(_candidate_ins_addrs_8616(self.project, reload_fact.ins_addr))
+            if reload_placement.changed:
+                self.stats["reload_materialized_count"] = int(self.stats.get("reload_materialized_count", 0) or 0) + 1
+                self.changed = True
+            else:
+                self.stats["reload_already_materialized_count"] = (
+                    int(self.stats.get("reload_already_materialized_count", 0) or 0) + 1
+                )
+        else:
+            self.stats["reload_failure_count"] = int(self.stats.get("reload_failure_count", 0) or 0) + 1
+            self._reload_debug_refusal_8616(reload_fact)
+
+    def _recover_reload_facts_8616(
+        self,
+    ) -> tuple[tuple[DirectStackMoveFact8616, ...], _DirectStackReloadFrame8616]:
+        """Recover register-reload facts and build the shared reload frame."""
+        reload_recovery_started = time.perf_counter()
+        reload_facts = (
+            _direct_stack_reload_instruction_facts_8616(self.project, self.function, tuple(self.materialized_facts))
+            if self.materialize_reloads
+            else ()
+        )
+        self.timers["reload_recovery"] = time.perf_counter() - reload_recovery_started
+        if not self.materialize_reloads:
+            self.stats["reload_recovery_skipped_count"] = int(self.stats.get("reload_recovery_skipped_count", 0) or 0) + 1
+        self.stats["reload_raw_fact_count"] = int(self.stats.get("reload_raw_fact_count", 0) or 0) + len(reload_facts)
+        frame = _DirectStackReloadFrame8616()
+        frame.query_index = StructuredAstQueryIndex8616.build(self.root) if reload_facts else None
+        frame.candidate_index = (
+            TaggedAssignmentAddressIndex8616.from_query_index(frame.query_index)
+            if frame.query_index is not None
+            else None
+        )
+        frame.register_names = (
+            register_cvar_names_8616(frame.query_index.variables)
+            if frame.query_index is not None
+            else frozenset()
+        )
+        return reload_facts, frame
+
+    def _process_reload_facts_8616(
+        self,
+        reload_facts: tuple[DirectStackMoveFact8616, ...],
+        frame: _DirectStackReloadFrame8616,
+    ) -> None:
+        """Materialize each recovered register-reload fact."""
+        reload_loop_started = time.perf_counter()
+        for reload_fact in reload_facts:
+            head = self._reload_fact_head_8616(reload_fact, frame)
+            if head is None:
+                continue
+            source_fact, source_cvar, materialized_reload, reload_placement = head
+            if (
+                not materialized_reload
+                and reload_fact.source_kind is not DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT
+            ):
+                materialized_reload, reload_placement = self._reload_stack_slot_attempt_8616(
+                    reload_fact,
+                    source_fact,
+                    source_cvar,
+                    materialized_reload,
+                    reload_placement,
+                    frame,
+                )
+            elif not materialized_reload:
+                self.stats["aggregate_reload_unscoped_fallback_refused_count"] = (
+                    int(self.stats.get("aggregate_reload_unscoped_fallback_refused_count", 0) or 0) + 1
+                )
+            self._reload_commit_8616(reload_fact, materialized_reload, reload_placement, frame)
+        self.timers["reload_loop"] = time.perf_counter() - reload_loop_started
+        if frame.candidate_index is not None:
+            # Dynamic angr/codegen boundary: publish immutable optimization accounting.
+            self.codegen._inertia_direct_stack_reload_query_index_stats_8616 = frame.candidate_index.stats()
+
+    def _epilogue_publish_8616(self) -> None:
+        """Replay pending branch-ownership edits and publish the rewritten root."""
+        # Dynamic angr/codegen boundary: Structuring binds this replay so Lowering
+        # can preserve value facts without owning conditional AST placement.
+        branch_ownership_replay = getattr(
+            self.codegen,
+            "_inertia_direct_stack_move_branch_ownership_replay_8616",
+            None,
+        )
+        ownership_replay_started = time.perf_counter()
+        if callable(branch_ownership_replay):
+            self.changed = bool(branch_ownership_replay()) or self.changed
+        self.timers["ownership_replay"] = time.perf_counter() - ownership_replay_started
+        if self.changed:
+            with contextlib.suppress(Exception):
+                self.codegen.cfunc.body = self.root
+            with contextlib.suppress(Exception):
+                self.codegen._inertia_force_codegen_regeneration_8616 = True
+
+    def _epilogue_debug_summary_8616(self) -> None:
+        """Emit the per-function materialization summary when enabled."""
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            fact_summary = _boundary_tuple_8616(
+                (
+                    getattr(fact.source_kind, "name", str(fact.source_kind)),
+                    fact.dst_offset,
+                    fact.width,
+                    fact.source_value,
+                    fact.source_offset,
+                    fact.source_immediate,
+                    fact.source_access_width,
+                    fact.source_sign_extend,
+                    fact.ins_addr,
+                )
+                for fact in self.facts
+            )
+            log.warning(
+                "[direct-stack-mov] function=%#x codegen=%#x facts=%d materialized=%d failures=%d "
+                "call_reused=%d idiv_call_stmt=%d idiv_artifact=%d idiv_bridge=%d "
+                "idiv_seen=%s idiv_candidates=%s idiv_exact=%s "
+                "idiv_rej_dst=%s idiv_rej_mem=%s idiv_rej_used=%s idiv_rej_nokey=%s idiv_refusal=%s "
+                "known=%d stale=%d casts=%d casts_present=%d "
+                "cast_assignments=%d cast_destinations=%d "
+                "cast_candidates=%d cast_no_match=%d cast_ambiguous=%d "
+                "visible_guards=%d reloads=%d "
+                "reload_materialized=%d reload_failures=%d changed=%s fact_summary=%r",
+                getattr(getattr(self.codegen, "cfunc", None), "addr", -1) or -1,
+                id(self.codegen),
+                len(self.facts),
+                int(self.stats.get("materialized_count", 0) or 0),
+                int(self.stats.get("failure_count", 0) or 0),
+                int(self.stats.get("call_result_reused_count", 0) or 0),
+                int(self.stats.get("idiv_call_statement_materialized_count", 0) or 0),
+                int(self.stats.get("idiv_artifact_materialized_count", 0) or 0),
+                int(self.stats.get("idiv_artifact_stack_lhs_bridge_count", 0) or 0),
+                getattr(self.root, "_inertia_signed_idiv_artifact_seen_count_8616", None),
+                getattr(self.root, "_inertia_signed_idiv_artifact_candidate_count_8616", None),
+                getattr(self.root, "_inertia_signed_idiv_artifact_exact_candidate_count_8616", None),
+                getattr(self.root, "_inertia_signed_idiv_artifact_reject_dst_read_count_8616", None),
+                getattr(self.root, "_inertia_signed_idiv_artifact_reject_memory_lhs_count_8616", None),
+                getattr(self.root, "_inertia_signed_idiv_artifact_reject_used_lhs_count_8616", None),
+                getattr(self.root, "_inertia_signed_idiv_artifact_reject_no_lhs_key_count_8616", None),
+                getattr(self.root, "_inertia_signed_idiv_artifact_refusal_8616", None),
+                int(self.stats.get("already_materialized_count", 0) or 0),
+                int(self.stats.get("stale_evidence_rematerialized_count", 0) or 0),
+                int(self.stats.get("semantic_cast_reconciled_count", 0) or 0),
+                int(self.stats.get("semantic_cast_already_present_count", 0) or 0),
+                int(self.stats.get("semantic_cast_assignment_count", 0) or 0),
+                int(self.stats.get("semantic_cast_destination_count", 0) or 0),
+                int(self.stats.get("semantic_cast_candidate_count", 0) or 0),
+                int(self.stats.get("semantic_cast_no_match_count", 0) or 0),
+                int(self.stats.get("semantic_cast_ambiguous_count", 0) or 0),
+                int(self.stats.get("visible_use_guard_count", 0) or 0),
+                int(self.stats.get("reload_raw_fact_count", 0) or 0),
+                int(self.stats.get("reload_materialized_count", 0) or 0),
+                int(self.stats.get("reload_failure_count", 0) or 0),
+                self.changed,
+                fact_summary,
+            )
+
+    def _epilogue_finish_8616(self, reload_fact_count: int) -> None:
+        """Record semantic lanes and emit the optional timing breakdown."""
+        _record_direct_stack_move_lanes_8616(
+            self.codegen,
+            self.stats,
+            prior_stats=self.lane_stats_before,
+            current_raw_fact_count=len(self.facts),
+        )
+        if os.environ.get("INERTIA_DEBUG_TIMING") and os.environ.get("INERTIA_TAIL_VALIDATION_STDERR_JSON") != "1":
+            timers = self.timers
+            print(
+                f"[{time.strftime('%H:%M:%S')}] direct-stack MOV components: "
+                f"facts={len(self.facts)} reloads={reload_fact_count} "
+                f"prepare={timers['prepare']:.3f} recovery={timers['recovery']:.3f} "
+                f"match={timers['fact_loop']:.3f} prune={timers['unsupported_prune']:.3f} "
+                f"reload_recovery={timers['reload_recovery']:.3f} reload_match={timers['reload_loop']:.3f} "
+                f"reload_tagged={timers.get('tagged_reload_match', 0.0):.3f} "
+                f"reload_register_use={timers.get('register_use_insert', 0.0):.3f} "
+                f"reload_visible_guard={timers.get('visible_guard', 0.0):.3f} "
+                f"ownership={timers['ownership_replay']:.3f} "
+                f"cleanup={time.perf_counter() - timers['cleanup_started']:.3f} "
+                f"total={time.perf_counter() - timers['started']:.3f}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    def epilogue_8616(self) -> None:
+        """Prune unsupported stores, recover reloads, and publish results."""
+        cleanup_started = time.perf_counter()
+        self.timers["cleanup_started"] = cleanup_started
+        pruned_unsupported = _prune_unsupported_function_pointer_stack_move_assignments_8616(
+            self.root, self.codegen, self.facts
+        )
+        if pruned_unsupported:
+            self.stats["unsupported_function_pointer_assignment_pruned_count"] = (
+                int(self.stats.get("unsupported_function_pointer_assignment_pruned_count", 0) or 0) + pruned_unsupported
+            )
+            self.changed = True
+        self.timers["unsupported_prune"] = time.perf_counter() - cleanup_started
+        reload_facts, frame = self._recover_reload_facts_8616()
+        self._process_reload_facts_8616(reload_facts, frame)
+        self._epilogue_publish_8616()
+        self._epilogue_debug_summary_8616()
+        self._epilogue_finish_8616(len(reload_facts))
+
+
+def _direct_stack_move_stats_8616(codegen: StructuredAstValue) -> dict[str, StructuredAstValue]:
+    """Return (creating when absent) the direct-stack-MOV counter surface."""
+    stats = getattr(codegen, "_inertia_direct_stack_move_lowering_8616", None)
+    if not isinstance(stats, dict):
+        stats = {
+            "raw_fact_count": 0,
+            "classified_fact_count": 0,
+            "materialized_count": 0,
+            "already_materialized_count": 0,
+            "failure_count": 0,
+            "call_result_reused_count": 0,
+            "idiv_artifact_materialized_count": 0,
+            "idiv_artifact_stack_lhs_bridge_count": 0,
+            "reload_raw_fact_count": 0,
+            "reload_classified_fact_count": 0,
+            "reload_materialized_count": 0,
+            "reload_failure_count": 0,
+        }
+        codegen._inertia_direct_stack_move_lowering_8616 = stats
+    return stats
+
+
+def _prepare_direct_stack_mov_8616(
+    codegen: StructuredAstValue,
+    project: StructuredAstValue,
+    function: StructuredAstValue,
+) -> bool:
+    """Prune prologue writes and materialize stack aggregate objects."""
+    frame_prologue_changed = prune_frame_prologue_stack_assignments_8616(
+        project,
+        codegen,
+        function=function,
+    )
+    aggregate_changed = materialize_stack_aggregate_objects_8616(
+        codegen,
+        project,
+        function,
+        instructions=_direct_global_update_ordered_insns_8616(project, function),
+    )
+    return frame_prologue_changed or aggregate_changed
+
+
+def _recover_direct_stack_move_facts_8616(
+    codegen: StructuredAstValue,
+    project: StructuredAstValue,
+    function: StructuredAstValue,
+    stats: dict[str, StructuredAstValue],
+    source_kinds: frozenset[DirectStackMoveSourceKind8616] | None,
+) -> tuple[tuple[DirectStackMoveFact8616, ...], float]:
+    """Recover, merge, and private-source-filter direct-stack-MOV facts."""
+    fact_recovery_started = time.perf_counter()
+    facts = _direct_stack_move_instruction_facts_for_codegen_8616(
+        codegen,
+        project,
+        function,
+    )
+    if source_kinds is not None:
+        facts = tuple(fact for fact in facts if fact.source_kind in source_kinds)
+    fact_recovery_elapsed = time.perf_counter() - fact_recovery_started
+    existing_typed_facts = tuple(
+        fact
+        for fact in _boundary_tuple_8616(
+            getattr(codegen, "_inertia_direct_stack_move_facts_8616", ()) or ()
+        )
+        if isinstance(fact, DirectStackMoveFact8616)
+    )
+    codegen._inertia_direct_stack_move_facts_8616 = tuple(
+        dict.fromkeys(existing_typed_facts + facts)
+    )
+    stats["raw_fact_count"] = int(stats.get("raw_fact_count", 0) or 0) + len(facts)
+    required_facts = tuple(fact for fact in facts if not alias_proves_private_stack_source_8616(codegen, fact.ins_addr))
+    stats["private_write_elided_count"] = int(stats.get("private_write_elided_count", 0) or 0) + len(facts) - len(required_facts)
+    return required_facts, fact_recovery_elapsed
+
+
+def _direct_stack_mov_empty_facts_8616(
+    codegen: StructuredAstValue,
+    function: StructuredAstValue,
+    stats: dict[str, StructuredAstValue],
+    aggregate_changed: bool,
+    debug_stack_noise: bool,
+) -> bool:
+    """Handle the no-recovered-facts early return with lane accounting."""
+    if debug_stack_noise:
+        log.warning(
+            "[direct-stack-mov] function=%#x facts=0 changed=False stats=%r",
+            getattr(function, "addr", -1) or -1,
+            stats,
+        )
+    _record_direct_stack_move_lanes_8616(codegen, stats)
+    return aggregate_changed
+
+
 def _materialize_direct_stack_mov_instructions_impl_8616(
     codegen: StructuredAstValue,
     project: StructuredAstValue | None = None,
@@ -15903,37 +17845,10 @@ def _materialize_direct_stack_mov_instructions_impl_8616(
             log.warning("[direct-stack-mov] unavailable function changed=False")
         return False
 
-    frame_prologue_changed = prune_frame_prologue_stack_assignments_8616(
-        project,
-        codegen,
-        function=function,
-    )
-    aggregate_changed = materialize_stack_aggregate_objects_8616(
-        codegen,
-        project,
-        function,
-        instructions=_direct_global_update_ordered_insns_8616(project, function),
-    )
-    aggregate_changed = frame_prologue_changed or aggregate_changed
+    aggregate_changed = _prepare_direct_stack_mov_8616(codegen, project, function)
     preparation_elapsed = time.perf_counter() - started
 
-    stats = getattr(codegen, "_inertia_direct_stack_move_lowering_8616", None)
-    if not isinstance(stats, dict):
-        stats = {
-            "raw_fact_count": 0,
-            "classified_fact_count": 0,
-            "materialized_count": 0,
-            "already_materialized_count": 0,
-            "failure_count": 0,
-            "call_result_reused_count": 0,
-            "idiv_artifact_materialized_count": 0,
-            "idiv_artifact_stack_lhs_bridge_count": 0,
-            "reload_raw_fact_count": 0,
-            "reload_classified_fact_count": 0,
-            "reload_materialized_count": 0,
-            "reload_failure_count": 0,
-        }
-        codegen._inertia_direct_stack_move_lowering_8616 = stats
+    stats = _direct_stack_move_stats_8616(codegen)
     lane_stats_before = {
         name: _stat_counter_8616(stats, name)
         for name in (
@@ -15951,43 +17866,22 @@ def _materialize_direct_stack_mov_instructions_impl_8616(
             getattr(function, "addr", -1) or -1,
             type(root).__name__,
         )
-    fact_recovery_started = time.perf_counter()
-    facts = _direct_stack_move_instruction_facts_for_codegen_8616(
+    facts, fact_recovery_elapsed = _recover_direct_stack_move_facts_8616(
         codegen,
         project,
         function,
+        stats,
+        source_kinds,
     )
-    if source_kinds is not None:
-        facts = tuple(fact for fact in facts if fact.source_kind in source_kinds)
-    fact_recovery_elapsed = time.perf_counter() - fact_recovery_started
-    existing_typed_facts = tuple(
-        fact
-        for fact in _boundary_tuple_8616(
-            getattr(codegen, "_inertia_direct_stack_move_facts_8616", ()) or ()
-        )
-        if isinstance(fact, DirectStackMoveFact8616)
-    )
-    codegen._inertia_direct_stack_move_facts_8616 = tuple(
-        dict.fromkeys(existing_typed_facts + facts)
-    )
-    stats["raw_fact_count"] = int(stats.get("raw_fact_count", 0) or 0) + len(facts)
-    required_facts = tuple(fact for fact in facts if not alias_proves_private_stack_source_8616(codegen, fact.ins_addr))
-    stats["private_write_elided_count"] = int(stats.get("private_write_elided_count", 0) or 0) + len(facts) - len(required_facts)
-    facts = required_facts
     if not facts:
-        if debug_stack_noise:
-            log.warning(
-                "[direct-stack-mov] function=%#x facts=0 changed=False stats=%r",
-                getattr(function, "addr", -1) or -1,
-                stats,
-            )
-        _record_direct_stack_move_lanes_8616(codegen, stats)
-        return aggregate_changed
+        return _direct_stack_mov_empty_facts_8616(
+            codegen,
+            function,
+            stats,
+            aggregate_changed,
+            debug_stack_noise,
+        )
 
-    materialized_fact_keys = set(_direct_stack_move_materialized_fact_keys_8616(codegen))
-    changed = aggregate_changed
-    materialized_facts: list[DirectStackMoveFact8616] = []
-    source_expr_by_store_ins_addr: dict[int, StructuredAstValue] = {}
     fallback_decision = _direct_stack_move_fallback_decision_8616(root)
     allow_unscoped_fallback_insert = fallback_decision is DirectStackMoveFallbackDecision8616.SAFE_TO_INSERT
     if not allow_unscoped_fallback_insert:
@@ -15997,1665 +17891,315 @@ def _materialize_direct_stack_mov_instructions_impl_8616(
     signed_idiv_remainder_fact_count = sum(
         1 for candidate in facts if candidate.source_kind is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER
     )
-    fact_loop_started = time.perf_counter()
-    for fact in facts:
-        root._inertia_stack_mov_assignment_already_present_8616 = False
-        fact_key = _direct_stack_move_fact_key_8616(fact)
-        indexed_destination = any(
-            isinstance(index, int)
-            for index in (
-                fact.dst_index_global_displacement,
-                fact.dst_index_stack_offset,
-                fact.dst_index_immediate,
-            )
-        )
-        dst_cvar = (
-            _resolve_existing_direct_stack_owner_cvar_8616(
-                codegen,
-                fact.dst_offset,
-                fact.width,
-                require_wider_owner=True,
-            )
-            if indexed_destination
-            else None
-        )
-        if dst_cvar is None:
-            dst_cvar = _resolve_direct_stack_update_cvar_8616(codegen, fact.dst_offset, fact.width)
-        dst_expr = (
-            _direct_stack_move_destination_expr_8616(codegen, fact, dst_cvar) if dst_cvar is not None else None
-        )
-        source_expr = _direct_stack_move_source_expr_8616(codegen, fact, dst_cvar)
-        if dst_cvar is None or dst_expr is None or source_expr is None:
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
+    run = _DirectStackMovRun8616(
+        codegen=codegen,
+        project=project,
+        function=function,
+        root=root,
+        stats=stats,
+        debug_stack_noise=debug_stack_noise,
+        facts=facts,
+        allow_stack_slot_fallback=allow_stack_slot_fallback,
+        materialize_reloads=materialize_reloads,
+        allow_unscoped_fallback_insert=allow_unscoped_fallback_insert,
+        signed_idiv_remainder_fact_count=signed_idiv_remainder_fact_count,
+        materialized_fact_keys=set(_direct_stack_move_materialized_fact_keys_8616(codegen)),
+        materialized_facts=[],
+        source_expr_by_store_ins_addr={},
+        changed=aggregate_changed,
+        lane_stats_before=lane_stats_before,
+        timers={
+            "started": started,
+            "prepare": preparation_elapsed,
+            "recovery": fact_recovery_elapsed,
+        },
+    )
+    run.process_facts_8616()
+    run.epilogue_8616()
+    return run.changed
+
+
+def _candidate_functions_for_indexed_stack_facts_8616(codegen: StructuredAstValue, project: StructuredAstValue) -> StructuredAstValue:
+    return _candidate_functions_for_stack_facts_8616(codegen, project)
+
+
+def _indexed_bp_stack_fact_sizes_8616(codegen: StructuredAstValue, project: StructuredAstValue) -> dict[int, frozenset[int]]:
+    cached = getattr(codegen, "_inertia_indexed_bp_stack_access_facts_8616", None)
+    if isinstance(cached, dict):
+        return cached
+
+    collected: dict[int, set[int]] = {}
+    for function in _candidate_functions_for_indexed_stack_facts_8616(codegen, project):
+        for block in _boundary_tuple_8616(getattr(function, "blocks", ()) or ()):
+            capstone = getattr(block, "capstone", None)
+            for insn in _boundary_tuple_8616(getattr(capstone, "insns", ()) or ()):
+                for operand in _boundary_tuple_8616(getattr(insn, "operands", ()) or ()):
+                    if int(getattr(operand, "type", -1)) != X86_OP_MEM:
+                        continue
+                    mem = getattr(operand, "mem", None)
+                    if mem is None:
+                        continue
+                    if int(getattr(mem, "base", 0) or 0) != X86_REG_BP:
+                        continue
+                    index_reg = int(getattr(mem, "index", 0) or 0)
+                    if index_reg in {0, X86_REG_INVALID}:
+                        continue
+                    displacement = _canonical_stack_offset_8616(int(getattr(mem, "disp", 0) or 0))
+                    if not isinstance(displacement, int):
+                        continue
+                    size = int(getattr(operand, "size", 0) or 0)
+                    collected.setdefault(displacement, set()).add(size if size > 0 else 0)
+
+    facts = {disp: frozenset(sizes) for disp, sizes in sorted(collected.items())}
+    codegen._inertia_indexed_bp_stack_access_facts_8616 = facts
+    codegen._inertia_indexed_bp_stack_address_raw_fact_count_8616 = len(facts)
+    return facts
+
+
+def _flatten_indexed_stack_address_terms_8616(
+    node: StructuredAstValue,
+) -> tuple[tuple[int, StructuredAstValue], ...] | None:
+    terms: list[tuple[int, StructuredAstValue]] = []
+    pending: list[tuple[StructuredAstValue, int, bool]] = [(node, 1, False)]
+    active: set[int] = set()
+    while pending:
+        current, sign, exiting = pending.pop()
+        current = _strip_casts_8616(current)
+        if current is None:
+            return None
+        if exiting:
+            active.discard(id(current))
             continue
-        authoritative_wide_materialized = False
-        if fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
-            required_addresses = (
-                fact.source_call_target,
-                fact.source_call_ins_addr,
-                fact.source_low_arith_ins_addr,
-                fact.source_high_arith_ins_addr,
-                fact.dst_high_ins_addr,
-                fact.source_offset,
-            )
-            if not all(isinstance(address, int) for address in required_addresses):
-                stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-                continue
-            ownership = classify_authoritative_wide_call_output_projection_8616(
-                codegen,
-                callsite_addr=cast(int, fact.source_call_ins_addr),
-                target_addr=cast(int, fact.source_call_target),
-                kind=CarryBorrowKind8616.ADD_WITH_CARRY,
-                source_offset=cast(int, fact.source_offset),
-                destination_offset=fact.dst_offset,
-                low_arithmetic_addr=cast(int, fact.source_low_arith_ins_addr),
-                high_arithmetic_addr=cast(int, fact.source_high_arith_ins_addr),
-                low_store_addr=fact.ins_addr,
-                high_store_addr=cast(int, fact.dst_high_ins_addr),
-            )
-            if ownership.blocks_legacy_materialization:
-                if not ownership.materialized:
-                    stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-                    continue
-                stats["authoritative_wide_owner_count"] = (
-                    int(stats.get("authoritative_wide_owner_count", 0) or 0) + 1
-                )
-                authoritative_wide_materialized = True
-        if (
-            fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT_BINARY_EXPR
-            and fact.source_op is DirectStackMoveExpressionOp8616.SUB
-            and fact.width == 2
-            and fact.source_offset is not None
-            and isinstance(dst_expr, structured_c.CVariable)
-            and _prototype_arg_type_for_bp_offset_8616(codegen, fact.dst_offset) is None
-        ):
-            source_type = _prototype_arg_type_for_bp_offset_8616(codegen, fact.source_offset)
-            if isinstance(source_type, SimTypeShort) and bool(source_type.signed):
-                source_type = _bind_type_to_codegen_arch_8616(codegen, source_type)
-                if isinstance(source_expr, structured_c.CVariable):
-                    source_expr.variable_type = source_type
-                dst_expr.variable_type = source_type
-            current_type = dst_expr.variable_type
-            if not isinstance(current_type, SimTypeShort) or not bool(current_type.signed):
-                dst_expr.variable_type = _bind_type_to_codegen_arch_8616(codegen, SimTypeShort(True))
-                unified = getattr(getattr(codegen, "cfunc", None), "unified_local_vars", None)
-                if isinstance(unified, dict):
-                    dst_variable = dst_expr.variable
-                    if dst_variable is not None:
-                        unified[dst_variable] = {(dst_expr, dst_expr.variable_type)}
-        if (
-            fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT
-            and fact.width == 2
-            and isinstance(dst_expr, structured_c.CVariable)
-            and _prototype_arg_type_for_bp_offset_8616(codegen, fact.dst_offset) is None
-            and fact.source_offset is not None
-            and fact.source_offset > 2
-        ):
-            source_type = _prototype_arg_type_for_bp_offset_8616(codegen, fact.source_offset)
-            if isinstance(source_type, SimTypeShort) and bool(source_type.signed):
-                source_type = _bind_type_to_codegen_arch_8616(codegen, source_type)
-                if isinstance(source_expr, structured_c.CVariable):
-                    source_expr.variable_type = source_type
-                current_type = dst_expr.variable_type
-                if not isinstance(current_type, SimTypeShort) or not bool(current_type.signed):
-                    dst_expr.variable_type = source_type
-                unified = getattr(getattr(codegen, "cfunc", None), "unified_local_vars", None)
-                if isinstance(unified, dict):
-                    dst_variable = dst_expr.variable
-                    if dst_variable is not None:
-                        unified[dst_variable] = {(dst_expr, dst_expr.variable_type)}
-        def replacement_factory(
-            tags: StructuredAstValue,
-            *,
-            _dst_cvar: StructuredAstValue = dst_expr,
-            _source_expr: StructuredAstValue = source_expr,
-        ) -> StructuredAstValue:
-            """Build the exact assignment for one binary-proven stack MOV."""
-            return _direct_stack_move_assignment_8616(codegen, _dst_cvar, _source_expr, tags=tags)
-
-        inverse_pruned = _prune_inverse_stack_move_artifacts_8616(root, facts, fact, dst_cvar, source_expr)
-        if inverse_pruned:
-            stats["inverse_artifact_pruned_count"] = (
-                int(stats.get("inverse_artifact_pruned_count", 0) or 0) + inverse_pruned
-            )
-            changed = True
-        if fact_key in materialized_fact_keys and not authoritative_wide_materialized:
-            if (
-                fact.source_kind
-                is DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN
-                and _tree_has_zero_arg_call_return_assignment_8616(
-                    root,
-                    project,
-                    fact,
-                    dst_cvar,
-                )
-            ):
-                stats["already_materialized_count"] = (
-                    int(stats.get("already_materialized_count", 0) or 0) + 1
-                )
-                materialized_facts.append(fact)
-                source_expr_by_store_ins_addr[int(fact.ins_addr)] = source_expr
-                continue
-            if fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
-                reconciled, replay_pruned = _reconcile_materialized_wide_call_return_assignment_8616(
-                    root,
-                    project,
-                    fact,
-                    dst_cvar,
-                )
-                if reconciled:
-                    stats["already_materialized_count"] = (
-                        int(stats.get("already_materialized_count", 0) or 0) + 1
-                    )
-                    if replay_pruned:
-                        stats["wide_call_replay_pruned_count"] = (
-                            int(stats.get("wide_call_replay_pruned_count", 0) or 0)
-                            + replay_pruned
-                        )
-                        changed = True
-                    materialized_facts.append(fact)
-                    source_expr_by_store_ins_addr[int(fact.ins_addr)] = source_expr
-                    continue
-            if fact.source_kind is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
-                call_order_reconciled, replay_pruned = (
-                    _reconcile_materialized_signed_idiv_call_order_8616(
-                        root,
-                        project,
-                        codegen,
-                        fact,
-                        dst_cvar,
-                    )
-                )
-                if call_order_reconciled:
-                    stats["idiv_call_statement_materialized_count"] = (
-                        int(
-                            stats.get(
-                                "idiv_call_statement_materialized_count",
-                                0,
-                            )
-                            or 0
-                        )
-                        + 1
-                    )
-                    if replay_pruned:
-                        stats["idiv_duplicate_store_pruned_count"] = (
-                            int(
-                                stats.get(
-                                    "idiv_duplicate_store_pruned_count",
-                                    0,
-                                )
-                                or 0
-                            )
-                            + replay_pruned
-                        )
-                    changed = True
-            signed_idiv_assignment_present = _tree_has_materialized_signed_idiv_remainder_8616(
-                root,
-                fact,
-                dst_cvar,
-            )
-            projected_segmented_source_present = bool(
-                fact.source_kind is DirectStackMoveSourceKind8616.SEGMENTED_MEMORY
-                and fact.source_segment_name == "ds"
-                and isinstance(fact.source_displacement, int)
-                and isinstance(fact.source_index_offset, int)
-                and isinstance(fact.source_index_shift, int)
-                and isinstance(fact.source_access_width, int)
-                and projected_segmented_stack_assignment_present_8616(
-                    codegen,
-                    root,
-                    SegmentedStackSourceProjection8616(
-                        instruction_addr=fact.ins_addr,
-                        destination_machine_bp_offset=fact.dst_offset,
-                        destination_width=fact.width,
-                        source_displacement=fact.source_displacement,
-                        source_index_machine_bp_offset=fact.source_index_offset,
-                        source_index_byte_scale=1 << fact.source_index_shift,
-                        source_access_width=fact.source_access_width,
-                    ),
-                )
-            )
-            replay_reconciled = False
-            if not signed_idiv_assignment_present and not projected_segmented_source_present:
-                replay_reconciled = _replace_tagged_statement_assignment_8616(
-                    root,
-                    project,
-                    fact.ins_addr,
-                    replacement_factory,
-                    remove_duplicate_tagged_assignments=True,
-                )
-            if replay_reconciled:
-                stats["stale_evidence_rematerialized_count"] = (
-                    int(stats.get("stale_evidence_rematerialized_count", 0) or 0) + 1
-                )
-                changed = True
-            if isinstance(source_expr, CSemanticCast8616):
-                cast_result = reconcile_required_assignment_cast_8616(
-                    root,
-                    replacement_factory({"ins_addr": fact.ins_addr}),
-                    same_destination=_same_stack_cvar_8616,
-                    same_source=lambda actual, expected: (
-                        _same_stack_move_rhs_8616(actual, expected)
-                        or _same_stack_low_half_cvar_8616(expected, actual)
-                    ),
-                )
-                stats["semantic_cast_candidate_count"] = (
-                    int(stats.get("semantic_cast_candidate_count", 0) or 0)
-                    + cast_result.candidate_count
-                )
-                stats["semantic_cast_assignment_count"] = (
-                    int(stats.get("semantic_cast_assignment_count", 0) or 0)
-                    + cast_result.assignment_count
-                )
-                stats["semantic_cast_destination_count"] = (
-                    int(stats.get("semantic_cast_destination_count", 0) or 0)
-                    + cast_result.destination_count
-                )
-                if cast_result.changed:
-                    stats["semantic_cast_reconciled_count"] = (
-                        int(stats.get("semantic_cast_reconciled_count", 0) or 0)
-                        + 1
-                    )
-                    changed = True
-                elif (
-                    cast_result.status
-                    is RequiredAssignmentCastReconcileStatus8616.ALREADY_PRESENT
-                ):
-                    stats["semantic_cast_already_present_count"] = (
-                        int(
-                            stats.get(
-                                "semantic_cast_already_present_count",
-                                0,
-                            )
-                            or 0
-                        )
-                        + 1
-                    )
-                elif (
-                    cast_result.status
-                    is RequiredAssignmentCastReconcileStatus8616.AMBIGUOUS
-                ):
-                    stats["semantic_cast_ambiguous_count"] = (
-                        int(stats.get("semantic_cast_ambiguous_count", 0) or 0)
-                        + 1
-                    )
-                elif (
-                    cast_result.status
-                    is RequiredAssignmentCastReconcileStatus8616.NO_MATCH
-                ):
-                    stats["semantic_cast_no_match_count"] = (
-                        int(stats.get("semantic_cast_no_match_count", 0) or 0)
-                        + 1
-                    )
-            if _tree_has_stack_move_assignment_8616(
-                root,
-                dst_expr,
-                source_expr,
-            ) or signed_idiv_assignment_present or projected_segmented_source_present:
-                if (
-                    fact.source_kind
-                    is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER
-                ):
-                    auxiliary_insert_count = (
-                        _prune_signed_idiv_auxiliary_insert_8616(
-                            root,
-                            project,
-                            fact,
-                        )
-                    )
-                    if auxiliary_insert_count:
-                        stats["idiv_auxiliary_insert_pruned_count"] = (
-                            int(
-                                stats.get(
-                                    "idiv_auxiliary_insert_pruned_count",
-                                    0,
-                                )
-                                or 0
-                            )
-                            + auxiliary_insert_count
-                        )
-                        changed = True
-                if fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
-                    carrier_pruned = _prune_wide_call_return_carriers_8616(
-                        root,
-                        project,
-                        fact,
-                        dst_cvar,
-                    )
-                    if carrier_pruned:
-                        stats["wide_call_carrier_pruned_count"] = (
-                            int(stats.get("wide_call_carrier_pruned_count", 0) or 0) + carrier_pruned
-                        )
-                        changed = True
-                    decomposition_pruned = _prune_wide_call_return_decomposition_8616(
-                        root,
-                        project,
-                        fact,
-                    )
-                    if decomposition_pruned:
-                        stats["wide_call_decomposition_pruned_count"] = (
-                            int(stats.get("wide_call_decomposition_pruned_count", 0) or 0)
-                            + decomposition_pruned
-                        )
-                        changed = True
-                if (
-                    fact.source_kind is DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT
-                    and _restore_same_block_stack_move_order_8616(
-                        root,
-                        codegen,
-                        project,
-                        function,
-                        fact,
-                        dst_expr,
-                        source_expr,
-                    )
-                ):
-                    stats["same_block_stack_move_order_restored_count"] = (
-                        int(stats.get("same_block_stack_move_order_restored_count", 0) or 0) + 1
-                    )
-                    changed = True
-                stats["already_materialized_count"] = int(stats.get("already_materialized_count", 0) or 0) + 1
-                materialized_facts.append(fact)
-                source_expr_by_store_ins_addr[int(fact.ins_addr)] = source_expr
-                continue
-            stats["stale_evidence_rematerialized_count"] = (
-                int(stats.get("stale_evidence_rematerialized_count", 0) or 0) + 1
-            )
-        stats["classified_fact_count"] = int(stats.get("classified_fact_count", 0) or 0) + 1
-        materialized = authoritative_wide_materialized
-
-        idiv_visible_guard_inserted = False
-        if fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT_EXPR:
-            if allow_stack_slot_fallback:
-                visible_assignment = _direct_stack_move_assignment_8616(
-                    codegen,
-                    dst_cvar,
-                    source_expr,
-                    tags={"ins_addr": fact.ins_addr},
-                )
-                placement_service = getattr(
-                    codegen,
-                    "_inertia_direct_stack_move_branch_placement_service_8616",
-                    None,
-                )
-                if callable(placement_service):
-                    materialized = bool(placement_service(fact, visible_assignment))
-                if (
-                    not materialized
-                    and _direct_stack_move_is_before_known_precontrol_8616(
-                        root,
-                        project,
-                        function,
-                        fact.ins_addr,
-                    )
-                ):
-                    materialized = _replace_precontrol_stack_assignment_8616(
-                        root,
-                        dst_cvar,
-                        visible_assignment,
-                        insert_before_control_when_no_match=True,
-                    )
-                if not materialized and _insert_before_first_stack_cvar_use_8616(
-                    root,
-                    visible_assignment,
-                    prefer_outer_control_read=True,
-                ):
-                    materialized = True
-                    changed = True
-            materialized = (
-                _replace_tagged_statement_assignment_8616(
-                    root,
-                    project,
-                    fact.ins_addr,
-                    replacement_factory,
-                )
-                or materialized
-            )
-        elif fact.source_kind in {
-            DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN,
-            DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH,
-        }:
-            # A call-return stack store consumes the call carrier. Generic
-            # replacement would retain that carrier and duplicate the call.
-            if not materialized:
-                call_assignment = _replace_tagged_call_statement_with_stack_assignment_8616(
-                    root,
-                    project,
-                    fact.source_call_ins_addr,
-                    fact.source_call_name,
-                    replacement_factory,
-                    call_target=fact.source_call_target,
-                )
-                materialized = call_assignment is not None
-                if materialized:
-                    counter = (
-                        "zero_arg_call_return_statement_materialized_count"
-                        if fact.source_kind is DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN
-                        else "wide_call_statement_materialized_count"
-                    )
-                    stats[counter] = int(stats.get(counter, 0) or 0) + 1
-                    changed = True
-        else:
-            visible_assignment = replacement_factory({"ins_addr": fact.ins_addr})
-            placement_service = getattr(
-                codegen,
-                "_inertia_direct_stack_move_branch_placement_service_8616",
-                None,
-            )
-            materialized = bool(
-                callable(placement_service)
-                and placement_service(fact, visible_assignment)
-            )
-            tagged_materialized = (
-                False
-                if materialized
-                else _replace_tagged_statement_assignment_8616(
-                    root,
-                    project,
-                    fact.ins_addr,
-                    replacement_factory,
-                    remove_duplicate_tagged_assignments=True,
-                )
-            )
-            materialized = tagged_materialized or materialized
-            if (
-                tagged_materialized
-                and fact.source_kind
-                in {
-                    DirectStackMoveSourceKind8616.STACK_SLOT,
-                    DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
-                }
-                and _insert_into_conditional_branch_for_direct_stack_move_8616(
-                    root,
-                    project,
-                    function,
-                    fact.ins_addr,
-                    replacement_factory({"ins_addr": fact.ins_addr}),
-                    relocate_tagged_assignment=True,
-                )
-            ):
-                stats["conditional_branch_relocated_count"] = (
-                    int(stats.get("conditional_branch_relocated_count", 0) or 0) + 1
-                )
-                changed = True
-        if fact.source_kind is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
-            call_statement_source_expr = source_expr
-            if not _expr_contains_function_call_8616(call_statement_source_expr):
-                call_statement_source_expr = _direct_stack_move_source_expr_8616(
-                    codegen,
-                    fact,
-                    dst_cvar,
-                    reuse_call_result=False,
-                )
-
-            def call_statement_replacement_factory(
-                tags: StructuredAstValue,
-                *,
-                _dst_cvar: StructuredAstValue = dst_cvar,
-                _source_expr: StructuredAstValue = call_statement_source_expr,
-            ) -> StructuredAstValue:
-                """Build the stack assignment that replaces the signed-idiv call statement."""
-                return _direct_stack_move_assignment_8616(codegen, _dst_cvar, _source_expr, tags=tags)
-
-            idiv_call_statement_materialized = False
-            if call_statement_source_expr is not None and _expr_contains_function_call_8616(call_statement_source_expr):
-                idiv_call_assignment = _replace_tagged_call_statement_with_stack_assignment_8616(
-                    root,
-                    project,
-                    fact.source_call_ins_addr,
-                    fact.source_call_name,
-                    call_statement_replacement_factory,
-                    call_target=fact.source_call_target,
-                )
-                idiv_call_statement_materialized = idiv_call_assignment is not None
-                if idiv_call_statement_materialized:
-                    stats["idiv_call_statement_materialized_count"] = (
-                        int(stats.get("idiv_call_statement_materialized_count", 0) or 0) + 1
-                    )
-                    duplicate_store_count = (
-                        _remove_consumed_signed_idiv_store_assignments_8616(
-                            root,
-                            project,
-                            fact,
-                            dst_cvar,
-                            idiv_call_assignment,
-                        )
-                    )
-                    duplicate_store_count += _remove_duplicate_stack_move_assignments_8616(
-                        root,
-                        project,
-                        fact.ins_addr,
-                        dst_cvar,
-                        call_statement_source_expr,
-                        idiv_call_assignment,
-                    )
-                    if duplicate_store_count:
-                        stats["idiv_duplicate_store_pruned_count"] = (
-                            int(stats.get("idiv_duplicate_store_pruned_count", 0) or 0)
-                            + duplicate_store_count
-                        )
-                    materialized = True
-                    changed = True
-            if not idiv_call_statement_materialized:
-                artifact_materialized = _replace_signed_idiv_remainder_artifact_assignment_8616(
-                    root,
-                    dst_cvar,
-                    replacement_factory,
-                    allow_unique_stack_lhs_bridge=signed_idiv_remainder_fact_count == 1,
-                )
-                if artifact_materialized is not None:
-                    stats["idiv_artifact_materialized_count"] = (
-                        int(stats.get("idiv_artifact_materialized_count", 0) or 0) + 1
-                    )
-                    if (
-                        artifact_materialized
-                        is DirectStackMoveArtifactReplacementKind8616.UNIQUE_SIGNED_IDIV_STACK_ARTIFACT
-                    ):
-                        stats["idiv_artifact_stack_lhs_bridge_count"] = (
-                            int(stats.get("idiv_artifact_stack_lhs_bridge_count", 0) or 0) + 1
-                        )
-                    materialized = True
-            if not materialized:
-                visible_assignment = _direct_stack_move_assignment_8616(
-                    codegen,
-                    dst_cvar,
-                    source_expr,
-                    tags={"ins_addr": fact.ins_addr},
-                )
-                if _insert_before_first_stack_cvar_use_8616(
-                    root,
-                    visible_assignment,
-                    ignore_existing_assignment=True,
-                ):
-                    stats["idiv_remainder_visible_use_guard_count"] = (
-                        int(stats.get("idiv_remainder_visible_use_guard_count", 0) or 0) + 1
-                    )
-                    idiv_visible_guard_inserted = True
-                    materialized = True
-                    changed = True
-            if (
-                materialized
-                and not idiv_visible_guard_inserted
-                and not idiv_call_statement_materialized
-                and not _expr_contains_function_call_8616(source_expr)
-            ):
-                visible_assignment = _direct_stack_move_assignment_8616(
-                    codegen,
-                    dst_cvar,
-                    source_expr,
-                    tags={"ins_addr": fact.ins_addr},
-                )
-                if _insert_before_first_stack_cvar_use_8616(
-                    root,
-                    visible_assignment,
-                    ignore_existing_assignment=True,
-                ):
-                    stats["idiv_remainder_visible_use_guard_count"] = (
-                        int(stats.get("idiv_remainder_visible_use_guard_count", 0) or 0) + 1
-                    )
-                    changed = True
-            if materialized:
-                auxiliary_insert_count = _prune_signed_idiv_auxiliary_insert_8616(
-                    root,
-                    project,
-                    fact,
-                )
-                if auxiliary_insert_count:
-                    stats["idiv_auxiliary_insert_pruned_count"] = (
-                        int(stats.get("idiv_auxiliary_insert_pruned_count", 0) or 0)
-                        + auxiliary_insert_count
-                    )
-                    changed = True
-        if not materialized:
-            if _tree_has_stack_move_assignment_8616(root, dst_expr, source_expr) or (
-                fact.source_kind
-                is DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN
-                and _tree_has_zero_arg_call_return_assignment_8616(
-                    root,
-                    project,
-                    fact,
-                    dst_cvar,
-                )
-            ):
-                if fact.source_kind is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
-                    call_order_reconciled, replay_pruned = (
-                        _reconcile_materialized_signed_idiv_call_order_8616(
-                            root,
-                            project,
-                            codegen,
-                            fact,
-                            dst_cvar,
-                        )
-                    )
-                    if call_order_reconciled:
-                        stats["idiv_call_statement_materialized_count"] = (
-                            int(stats.get("idiv_call_statement_materialized_count", 0) or 0)
-                            + 1
-                        )
-                        if replay_pruned:
-                            stats["idiv_duplicate_store_pruned_count"] = (
-                                int(stats.get("idiv_duplicate_store_pruned_count", 0) or 0)
-                                + replay_pruned
-                            )
-                        changed = True
-                    auxiliary_insert_count = _prune_signed_idiv_auxiliary_insert_8616(
-                        root,
-                        project,
-                        fact,
-                    )
-                    if auxiliary_insert_count:
-                        stats["idiv_auxiliary_insert_pruned_count"] = (
-                            int(stats.get("idiv_auxiliary_insert_pruned_count", 0) or 0)
-                            + auxiliary_insert_count
-                        )
-                        changed = True
-                if (
-                    fact.source_kind
-                    in {
-                        DirectStackMoveSourceKind8616.STACK_SLOT,
-                        DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
-                    }
-                    and _insert_into_conditional_branch_for_direct_stack_move_8616(
-                        root,
-                        project,
-                        function,
-                        fact.ins_addr,
-                        replacement_factory({"ins_addr": fact.ins_addr}),
-                        relocate_tagged_assignment=True,
-                    )
-                ):
-                    stats["conditional_branch_relocated_count"] = (
-                        int(stats.get("conditional_branch_relocated_count", 0) or 0) + 1
-                    )
-                    changed = True
-                if (
-                    fact.source_kind is DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT
-                    and _restore_same_block_stack_move_order_8616(
-                        root,
-                        codegen,
-                        project,
-                        function,
-                        fact,
-                        dst_expr,
-                        source_expr,
-                    )
-                ):
-                    stats["same_block_stack_move_order_restored_count"] = (
-                        int(stats.get("same_block_stack_move_order_restored_count", 0) or 0) + 1
-                    )
-                    changed = True
-                if (
-                    fact.source_kind
-                    in {
-                        DirectStackMoveSourceKind8616.IMMEDIATE,
-                        DirectStackMoveSourceKind8616.STACK_SLOT,
-                        DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
-                        DirectStackMoveSourceKind8616.GLOBAL_EXPR,
-                        DirectStackMoveSourceKind8616.SEGMENTED_MEMORY,
-                    }
-                    and not _function_has_loopback_to_instruction_8616(function, project, fact.ins_addr)
-                ):
-                    relocated_assignment = _direct_stack_move_assignment_8616(
-                        codegen,
-                        dst_cvar,
-                        source_expr,
-                        tags={"inertia_relocated_from_ins_addr": fact.ins_addr},
-                    )
-                    relocated_count = _relocate_tagged_stack_move_before_proven_loop_8616(
-                        root,
-                        project,
-                        function,
-                        fact.ins_addr,
-                        dst_cvar,
-                        source_expr,
-                        relocated_assignment,
-                    )
-                    if relocated_count:
-                        stats["read_before_tagged_assignment_relocated_count"] = (
-                            int(stats.get("read_before_tagged_assignment_relocated_count", 0) or 0)
-                            + relocated_count
-                        )
-                        changed = True
-                root._inertia_stack_mov_assignment_already_present_8616 = True
-                stats["already_materialized_count"] = int(stats.get("already_materialized_count", 0) or 0) + 1
-                materialized_facts.append(fact)
-                materialized_fact_keys.add(fact_key)
-                _record_direct_stack_move_evidence_8616(codegen, fact)
-                source_expr_by_store_ins_addr[int(fact.ins_addr)] = source_expr
-                continue
-            if _tree_has_assignment_for_instruction_addr_8616(root, project, fact.ins_addr):
-                stats["tagged_non_stack_assignment_conflict_count"] = (
-                    int(stats.get("tagged_non_stack_assignment_conflict_count", 0) or 0) + 1
-                )
-            fallback_assignment = _direct_stack_move_assignment_8616(
-                codegen,
-                dst_expr,
-                source_expr,
-                tags={"ins_addr": fact.ins_addr},
-            )
-            if fact.source_kind in {
-                DirectStackMoveSourceKind8616.STACK_SLOT,
-                DirectStackMoveSourceKind8616.STACK_SLOT_EXPR,
-                DirectStackMoveSourceKind8616.STACK_SLOT_BINARY_EXPR,
-                DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
-            }:
-                # Dynamic service boundary: Structuring owns CFG placement,
-                # while Lowering owns the exact assignment passed to it.
-                branch_placement_service = getattr(
-                    codegen,
-                    "_inertia_direct_stack_move_branch_placement_service_8616",
-                    None,
-                )
-                if callable(branch_placement_service):
-                    materialized = bool(
-                        branch_placement_service(fact, fallback_assignment)
-                    )
-            if fact.source_kind is DirectStackMoveSourceKind8616.IMMEDIATE:
-                repeats_at_loop_entry = _function_has_loopback_to_instruction_8616(
-                    function, project, fact.ins_addr
-                )
-                is_proven_precontrol = _direct_stack_move_is_before_known_precontrol_8616(
-                    root, project, function, fact.ins_addr
-                )
-                if repeats_at_loop_entry:
-                    materialized = _insert_at_do_while_body_start_8616(
-                        root,
-                        project,
-                        function,
-                        fact.ins_addr,
-                        fallback_assignment,
-                    )
-                elif is_proven_precontrol:
-                    materialized = _insert_before_first_stack_cvar_use_8616(root, fallback_assignment)
-                    if not materialized:
-                        materialized = _replace_precontrol_stack_assignment_8616(
-                            root,
-                            dst_cvar,
-                            fallback_assignment,
-                            insert_before_control_when_no_match=True,
-                        )
-                if not materialized and not is_proven_precontrol:
-                    materialized = _insert_into_conditional_branch_for_direct_stack_move_8616(
-                        root,
-                        project,
-                        function,
-                        fact.ins_addr,
-                        fallback_assignment,
-                    )
-                if not materialized and _direct_stack_move_is_before_first_control_8616(
-                    root, project, fact.ins_addr
-                ):
-                    materialized = _replace_precontrol_stack_assignment_8616(
-                        root,
-                        dst_cvar,
-                        fallback_assignment,
-                        insert_before_control_when_no_match=is_proven_precontrol,
-                    )
-                if not materialized:
-                    materialized = _insert_after_nearest_preceding_tagged_statement_8616(
-                        root,
-                        project,
-                        fact.ins_addr,
-                        fallback_assignment,
-                        function=function,
-                        require_known_block=True,
-                    )
-                if not materialized and allow_unscoped_fallback_insert:
-                    materialized = _insert_before_nearest_following_tagged_statement_8616(
-                        root,
-                        project,
-                        fact.ins_addr,
-                        fallback_assignment,
-                    )
-            elif fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
-                materialized = _replace_precontrol_stack_assignment_8616(
-                    root,
-                    dst_cvar,
-                    fallback_assignment,
-                    allow_low_half_lhs=True,
-                )
-            elif (
-                fact.source_kind
-                in {
-                    DirectStackMoveSourceKind8616.STACK_SLOT,
-                    DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
-                }
-                and allow_stack_slot_fallback
-            ):
-                if not materialized:
-                    materialized = _insert_at_do_while_body_start_8616(
-                        root,
-                        project,
-                        function,
-                        fact.ins_addr,
-                        fallback_assignment,
-                    )
-                if _direct_stack_move_is_before_known_precontrol_8616(root, project, function, fact.ins_addr):
-                    materialized = materialized or _replace_precontrol_stack_assignment_8616(
-                        root, dst_cvar, fallback_assignment, insert_before_control_when_no_match=True
-                    )
-                if not materialized:
-                    materialized = _replace_post_call_cleanup_artifact_before_stack_move_8616(
-                        root,
-                        project,
-                        function,
-                        fact.ins_addr,
-                        fallback_assignment,
-                    )
-                if not materialized:
-                    materialized = _insert_at_guarded_body_start_for_target_stack_move_8616(
-                        root,
-                        project,
-                        fact.ins_addr,
-                        fallback_assignment,
-                    )
-                if not materialized:
-                    materialized = _insert_after_nearest_preceding_tagged_statement_8616(
-                        root,
-                        project,
-                        fact.ins_addr,
-                        fallback_assignment,
-                        function=function,
-                        require_known_block=True,
-                        refuse_loop_container_predecessor=True,
-                    )
-                if not materialized:
-                    materialized = _insert_before_do_while_condition_8616(
-                        root, project, fact.ins_addr, fallback_assignment
-                    )
-                if not materialized:
-                    materialized = _insert_before_nearest_following_tagged_statement_8616(
-                        root,
-                        project,
-                        fact.ins_addr,
-                        fallback_assignment,
-                        prefer_loop_container=True,
-                    )
-                if not materialized:
-                    materialized = _insert_before_first_stack_cvar_use_8616(
-                        root,
-                        fallback_assignment,
-                    )
-                if not materialized and allow_unscoped_fallback_insert:
-                    materialized = _insert_after_nearest_preceding_tagged_statement_8616(
-                        root,
-                        project,
-                        fact.ins_addr,
-                        fallback_assignment,
-                        function=function,
-                    )
-            elif fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT_EXPR and allow_stack_slot_fallback:
-                if _direct_stack_move_is_before_known_precontrol_8616(root, project, function, fact.ins_addr):
-                    materialized = _replace_precontrol_stack_assignment_8616(
-                        root,
-                        dst_cvar,
-                        fallback_assignment,
-                        insert_before_control_when_no_match=True,
-                    )
-                if not materialized:
-                    materialized = _insert_before_first_stack_cvar_use_8616(root, fallback_assignment)
-                if not materialized and allow_unscoped_fallback_insert:
-                    materialized = _insert_before_nearest_following_tagged_statement_8616(
-                        root,
-                        project,
-                        fact.ins_addr,
-                        fallback_assignment,
-                    )
-            elif (
-                fact.source_kind
-                in {
-                    DirectStackMoveSourceKind8616.GLOBAL_EXPR,
-                    DirectStackMoveSourceKind8616.GLOBAL_MINUS_STACK_SLOT,
-                    DirectStackMoveSourceKind8616.GLOBAL_MINUS_SEGMENTED_MEMORY,
-                }
-                and allow_stack_slot_fallback
-            ):
-                materialized = _insert_between_structured_siblings_8616(
-                    root,
-                    project,
-                    fact.ins_addr,
-                    fallback_assignment,
-                )
-                if (
-                    not materialized
-                    and _direct_stack_move_is_before_known_precontrol_8616(
-                        root,
-                        project,
-                        function,
-                        fact.ins_addr,
-                    )
-                ):
-                    materialized = _replace_precontrol_stack_assignment_8616(
-                        root,
-                        dst_cvar,
-                        fallback_assignment,
-                        insert_before_control_when_no_match=True,
-                    )
-                if not materialized:
-                    materialized = _insert_before_first_stack_cvar_use_8616(root, fallback_assignment)
-                if not materialized and allow_unscoped_fallback_insert:
-                    materialized = _insert_before_nearest_following_tagged_statement_8616(
-                        root,
-                        project,
-                        fact.ins_addr,
-                        fallback_assignment,
-                    )
-            elif fact.source_kind is DirectStackMoveSourceKind8616.SEGMENTED_MEMORY:
-                # Structuring owns CFG scope through the placement service above.
-                # Refuse here when no exact owner accepted the Lowering-built value.
-                stats["segmented_memory_scope_refused_count"] = (
-                    int(stats.get("segmented_memory_scope_refused_count", 0) or 0)
-                    + int(not materialized)
-                )
-        if not materialized:
-            if bool(getattr(root, "_inertia_stack_mov_assignment_already_present_8616", False)):
-                stats["already_materialized_count"] = int(stats.get("already_materialized_count", 0) or 0) + 1
-                materialized_facts.append(fact)
-                source_expr_by_store_ins_addr[int(fact.ins_addr)] = source_expr
-                continue
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                log.warning(
-                    "[direct-stack-mov] refused ins=%#x dst=%s source_kind=%s source_value=%s "
-                    "source_offset=%s reads_dst=%s reasons=%s",
-                    fact.ins_addr,
-                    _stack_cvar_identity_8616(dst_cvar),
-                    fact.source_kind.name,
-                    fact.source_value,
-                    fact.source_offset,
-                    _node_reads_stack_cvar_8616(root, dst_cvar),
-                    getattr(root, "_inertia_stack_mov_refused_reasons_8616", ()),
-                )
+        current_id = id(current)
+        if current_id in active:
+            return None
+        if len(active) > 1024:
+            return None
+        active.add(current_id)
+        pending.append((current, sign, True))
+        if isinstance(current, structured_c.CBinaryOp) and current.op == "Add":
+            pending.append((current.rhs, sign, False))
+            pending.append((current.lhs, sign, False))
             continue
-        if (
-            fact.source_kind is DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT
-            and _restore_same_block_stack_move_order_8616(
-                root,
-                codegen,
-                project,
-                function,
-                fact,
-                dst_expr,
-                source_expr,
-            )
-        ):
-            stats["same_block_stack_move_order_restored_count"] = (
-                int(stats.get("same_block_stack_move_order_restored_count", 0) or 0) + 1
-            )
-            changed = True
-        if fact.source_kind in {
-            DirectStackMoveSourceKind8616.IMMEDIATE,
-            DirectStackMoveSourceKind8616.STACK_SLOT,
-            DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
-            DirectStackMoveSourceKind8616.GLOBAL_EXPR,
-            DirectStackMoveSourceKind8616.SEGMENTED_MEMORY,
-        } and not _function_has_loopback_to_instruction_8616(function, project, fact.ins_addr):
-            relocated_assignment = _direct_stack_move_assignment_8616(
-                codegen,
-                dst_cvar,
-                source_expr,
-                tags={"inertia_relocated_from_ins_addr": fact.ins_addr},
-            )
-            relocated_count = _relocate_tagged_stack_move_before_proven_loop_8616(
-                root,
-                project,
-                function,
-                fact.ins_addr,
-                dst_cvar,
-                source_expr,
-                relocated_assignment,
-            )
-            if relocated_count:
-                stats["read_before_tagged_assignment_relocated_count"] = (
-                    int(stats.get("read_before_tagged_assignment_relocated_count", 0) or 0) + relocated_count
-                )
-                changed = True
-        if (
-            fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT
-            and allow_stack_slot_fallback
-            and fact.source_sign_extend
-            and isinstance(fact.source_access_width, int)
-            and fact.source_access_width < fact.width
-        ):
-            visible_assignment = _direct_stack_move_assignment_8616(
-                codegen,
-                dst_cvar,
-                source_expr,
-                tags={"ins_addr": fact.ins_addr},
-            )
-            target_offset = _c_expr_stack_offset_8616(dst_cvar)
-            visible_assignment_available = (
-                _insert_before_first_stack_offset_use_8616(root, visible_assignment, target_offset)
-                if isinstance(target_offset, int) and _expr_reads_stack_offset_8616(root, target_offset)
-                else False
-            )
-            if visible_assignment_available:
-                stats["visible_use_guard_count"] = int(stats.get("visible_use_guard_count", 0) or 0) + 1
-                changed = True
-        if fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
-            carrier_pruned = _prune_wide_call_return_carriers_8616(
-                root,
-                project,
-                fact,
-                dst_cvar,
-            )
-            if carrier_pruned:
-                stats["wide_call_carrier_pruned_count"] = (
-                    int(stats.get("wide_call_carrier_pruned_count", 0) or 0) + carrier_pruned
-                )
-                changed = True
-            decomposition_pruned = _prune_wide_call_return_decomposition_8616(
-                root,
-                project,
-                fact,
-            )
-            if decomposition_pruned:
-                stats["wide_call_decomposition_pruned_count"] = (
-                    int(stats.get("wide_call_decomposition_pruned_count", 0) or 0)
-                    + decomposition_pruned
-                )
-                changed = True
-            rebound_count = _rebind_low_half_stack_reads_to_wide_cvar_8616(root, dst_cvar)
-            if rebound_count:
-                stats["wide_low_half_read_rebound_count"] = (
-                    int(stats.get("wide_low_half_read_rebound_count", 0) or 0) + rebound_count
-                )
-                changed = True
-        stats["materialized_count"] = int(stats.get("materialized_count", 0) or 0) + 1
-        materialized_facts.append(fact)
-        materialized_fact_keys.add(fact_key)
-        source_expr_by_store_ins_addr[int(fact.ins_addr)] = source_expr
-        _record_direct_stack_move_evidence_8616(codegen, fact)
-        changed = True
-
-    fact_loop_elapsed = time.perf_counter() - fact_loop_started
-    cleanup_started = time.perf_counter()
-    pruned_unsupported = _prune_unsupported_function_pointer_stack_move_assignments_8616(root, codegen, facts)
-    if pruned_unsupported:
-        stats["unsupported_function_pointer_assignment_pruned_count"] = (
-            int(stats.get("unsupported_function_pointer_assignment_pruned_count", 0) or 0) + pruned_unsupported
-        )
-        changed = True
-    unsupported_prune_elapsed = time.perf_counter() - cleanup_started
-
-    reload_recovery_started = time.perf_counter()
-    reload_facts = (
-        _direct_stack_reload_instruction_facts_8616(project, function, tuple(materialized_facts))
-        if materialize_reloads
-        else ()
-    )
-    reload_recovery_elapsed = time.perf_counter() - reload_recovery_started
-    if not materialize_reloads:
-        stats["reload_recovery_skipped_count"] = int(stats.get("reload_recovery_skipped_count", 0) or 0) + 1
-    stats["reload_raw_fact_count"] = int(stats.get("reload_raw_fact_count", 0) or 0) + len(reload_facts)
-    reload_register_use_missing: set[str] = set()
-    reload_query_index = StructuredAstQueryIndex8616.build(root) if reload_facts else None
-    reload_candidate_index = (
-        TaggedAssignmentAddressIndex8616.from_query_index(reload_query_index)
-        if reload_query_index is not None
-        else None
-    )
-    reload_register_names = (
-        register_cvar_names_8616(reload_query_index.variables)
-        if reload_query_index is not None
-        else frozenset()
-    )
-    tagged_reload_match_elapsed = 0.0
-    register_use_insert_elapsed = 0.0
-    visible_guard_elapsed = 0.0
-    reload_loop_started = time.perf_counter()
-    for reload_fact in reload_facts:
-        stats["reload_classified_fact_count"] = int(stats.get("reload_classified_fact_count", 0) or 0) + 1
-        source_fact = _materialized_store_fact_for_reload_8616(
-            reload_fact,
-            tuple(materialized_facts),
-        )
-        source_cvar = _resolve_direct_stack_update_cvar_8616(codegen, reload_fact.source_offset, reload_fact.width)
-        if source_cvar is None:
-            stats["reload_failure_count"] = int(stats.get("reload_failure_count", 0) or 0) + 1
+        if isinstance(current, structured_c.CBinaryOp) and current.op == "Sub":
+            pending.append((current.rhs, -sign, False))
+            pending.append((current.lhs, sign, False))
             continue
-        reload_step_started = time.perf_counter()
-        reload_placement = _replace_tagged_register_reload_assignment_8616(
-            root,
-            project,
-            reload_fact,
-            source_cvar,
-            candidate_index=reload_candidate_index,
-        )
-        tagged_reload_match_elapsed += time.perf_counter() - reload_step_started
-        materialized_reload = reload_placement.present
-        if (
-            not materialized_reload
-            and reload_fact.source_kind is not DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT
-        ):
-            source_expr = source_expr_by_store_ins_addr.get(int(reload_fact.source_store_ins_addr))
-            stale_source_expr = _stack_slot_has_intervening_direct_update_8616(
-                project,
-                function,
-                offset=reload_fact.source_offset,
-                width=reload_fact.width,
-                start_ins_addr=reload_fact.source_store_ins_addr,
-                end_ins_addr=reload_fact.ins_addr,
-            )
-            preserve_stack_identity = reload_fact.source_kind in {
-                DirectStackMoveSourceKind8616.STACK_SLOT,
-                DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT,
-            }
-            reload_expr = (
-                source_cvar
-                if stale_source_expr or preserve_stack_identity
-                else source_expr
-            )
-            if (
-                reload_expr is not None
-                and isinstance(reload_fact.dst_reg_name, str)
-                and reload_fact.dst_reg_name not in reload_register_use_missing
-            ):
-                if reload_fact.dst_reg_name not in reload_register_names:
-                    inserted_reload = False
-                    stats["reload_register_use_absence_skip_count"] = (
-                        int(stats.get("reload_register_use_absence_skip_count", 0) or 0) + 1
-                    )
-                else:
-                    reload_step_started = time.perf_counter()
-                    inserted_reload = _insert_before_first_register_cvar_use_8616(
-                        root,
-                        reload_fact.dst_reg_name,
-                        reload_expr,
-                        codegen,
-                        project=project,
-                        register_width=reload_fact.width,
-                        ins_addr=reload_fact.ins_addr,
-                    )
-                    register_use_insert_elapsed += time.perf_counter() - reload_step_started
-                if inserted_reload:
-                    reload_placement = _DirectStackReloadPlacement8616.MATERIALIZED
-                    materialized_reload = True
-                if (
-                    not materialized_reload
-                    and not stale_source_expr
-                    and source_expr is not None
-                    and not _expr_contains_function_call_8616(source_expr)
-                    and isinstance(reload_fact.source_offset, int)
-                ):
-                    reload_step_started = time.perf_counter()
-                    visible_guard_present = _tree_has_stack_move_assignment_8616(
-                        root,
-                        source_cvar,
-                        source_expr,
-                    ) or (
-                        source_fact is not None
-                        and _tree_has_materialized_signed_idiv_remainder_8616(
-                            root,
-                            source_fact,
-                            source_cvar,
-                        )
-                    )
-                    visible_guard_elapsed += time.perf_counter() - reload_step_started
-                    if visible_guard_present:
-                        reload_placement = _DirectStackReloadPlacement8616.ALREADY_PRESENT
-                        materialized_reload = True
-                        stats["reload_stack_slot_visible_guard_already_present_count"] = (
-                            int(stats.get("reload_stack_slot_visible_guard_already_present_count", 0) or 0) + 1
-                        )
-                    else:
-                        fallback_assignment = _direct_stack_move_assignment_8616(
-                            codegen,
-                            source_cvar,
-                            source_expr,
-                            tags={"ins_addr": reload_fact.source_store_ins_addr},
-                        )
-                        inserted_reload = _insert_before_nearest_following_tagged_statement_8616(
-                            root,
-                            project,
-                            reload_fact.ins_addr,
-                            fallback_assignment,
-                            ignore_existing_assignment=True,
-                        )
-                        if inserted_reload:
-                            reload_placement = _DirectStackReloadPlacement8616.MATERIALIZED
-                            materialized_reload = True
-                            stats["reload_stack_slot_visible_guard_count"] = (
-                                int(stats.get("reload_stack_slot_visible_guard_count", 0) or 0) + 1
-                            )
-                        elif bool(getattr(root, "_inertia_stack_mov_assignment_already_present_8616", False)):
-                            reload_placement = _DirectStackReloadPlacement8616.ALREADY_PRESENT
-                            materialized_reload = True
-                            stats["reload_stack_slot_visible_guard_already_present_count"] = (
-                                int(stats.get("reload_stack_slot_visible_guard_already_present_count", 0) or 0) + 1
-                            )
-                if not materialized_reload:
-                    reload_register_use_missing.add(reload_fact.dst_reg_name)
-                    stats["reload_missing_register_use_cached_count"] = (
-                        int(stats.get("reload_missing_register_use_cached_count", 0) or 0) + 1
-                    )
-            elif isinstance(reload_fact.dst_reg_name, str) and reload_fact.dst_reg_name in reload_register_use_missing:
-                stats["reload_missing_register_use_cache_hit_count"] = (
-                    int(stats.get("reload_missing_register_use_cache_hit_count", 0) or 0) + 1
-                )
-        elif not materialized_reload:
-            stats["aggregate_reload_unscoped_fallback_refused_count"] = (
-                int(stats.get("aggregate_reload_unscoped_fallback_refused_count", 0) or 0) + 1
-            )
-        if materialized_reload:
-            if reload_candidate_index is not None and reload_placement.changed:
-                reload_candidate_index.record(_candidate_ins_addrs_8616(project, reload_fact.ins_addr))
-            if reload_placement.changed:
-                stats["reload_materialized_count"] = int(stats.get("reload_materialized_count", 0) or 0) + 1
-                changed = True
-            else:
-                stats["reload_already_materialized_count"] = (
-                    int(stats.get("reload_already_materialized_count", 0) or 0) + 1
-                )
-        else:
-            stats["reload_failure_count"] = int(stats.get("reload_failure_count", 0) or 0) + 1
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                candidates = _boundary_tuple_8616(
-                    dict.fromkeys(
-                        (
-                            type(getattr(node, "variable", None)).__name__,
-                            getattr(getattr(node, "variable", None), "name", None),
-                            _cvar_register_name_8616(node),
-                            _stack_cvar_identity_8616(node),
-                        )
-                        for node in _iter_structured_c_nodes_8616(root)
-                        if isinstance(node, structured_c.CVariable)
-                    )
-                )[:16]
-                log.warning(
-                    "[direct-stack-mov-reload] refused ins=%#x src_offset=%s width=%s "
-                    "dst_reg=%s source_store=%#x candidates=%r",
-                    reload_fact.ins_addr,
-                    reload_fact.source_offset,
-                    reload_fact.width,
-                    reload_fact.dst_reg_name,
-                    reload_fact.source_store_ins_addr,
-                    candidates,
-                )
-    reload_loop_elapsed = time.perf_counter() - reload_loop_started
-
-    if reload_candidate_index is not None:
-        # Dynamic angr/codegen boundary: publish immutable optimization accounting.
-        codegen._inertia_direct_stack_reload_query_index_stats_8616 = reload_candidate_index.stats()
-
-    # Dynamic angr/codegen boundary: Structuring binds this replay so Lowering
-    # can preserve value facts without owning conditional AST placement.
-    branch_ownership_replay = getattr(
-        codegen,
-        "_inertia_direct_stack_move_branch_ownership_replay_8616",
-        None,
-    )
-    ownership_replay_started = time.perf_counter()
-    if callable(branch_ownership_replay):
-        changed = bool(branch_ownership_replay()) or changed
-    ownership_replay_elapsed = time.perf_counter() - ownership_replay_started
-    if changed:
-        with contextlib.suppress(Exception):
-            codegen.cfunc.body = root
-        with contextlib.suppress(Exception):
-            codegen._inertia_force_codegen_regeneration_8616 = True
-    if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-        fact_summary = _boundary_tuple_8616(
-            (
-                getattr(fact.source_kind, "name", str(fact.source_kind)),
-                fact.dst_offset,
-                fact.width,
-                fact.source_value,
-                fact.source_offset,
-                fact.source_immediate,
-                fact.source_access_width,
-                fact.source_sign_extend,
-                fact.ins_addr,
-            )
-            for fact in facts
-        )
-        log.warning(
-            "[direct-stack-mov] function=%#x codegen=%#x facts=%d materialized=%d failures=%d "
-            "call_reused=%d idiv_call_stmt=%d idiv_artifact=%d idiv_bridge=%d "
-            "idiv_seen=%s idiv_candidates=%s idiv_exact=%s "
-            "idiv_rej_dst=%s idiv_rej_mem=%s idiv_rej_used=%s idiv_rej_nokey=%s idiv_refusal=%s "
-            "known=%d stale=%d casts=%d casts_present=%d "
-            "cast_assignments=%d cast_destinations=%d "
-            "cast_candidates=%d cast_no_match=%d cast_ambiguous=%d "
-            "visible_guards=%d reloads=%d "
-            "reload_materialized=%d reload_failures=%d changed=%s fact_summary=%r",
-            getattr(getattr(codegen, "cfunc", None), "addr", -1) or -1,
-            id(codegen),
-            len(facts),
-            int(stats.get("materialized_count", 0) or 0),
-            int(stats.get("failure_count", 0) or 0),
-            int(stats.get("call_result_reused_count", 0) or 0),
-            int(stats.get("idiv_call_statement_materialized_count", 0) or 0),
-            int(stats.get("idiv_artifact_materialized_count", 0) or 0),
-            int(stats.get("idiv_artifact_stack_lhs_bridge_count", 0) or 0),
-            getattr(root, "_inertia_signed_idiv_artifact_seen_count_8616", None),
-            getattr(root, "_inertia_signed_idiv_artifact_candidate_count_8616", None),
-            getattr(root, "_inertia_signed_idiv_artifact_exact_candidate_count_8616", None),
-            getattr(root, "_inertia_signed_idiv_artifact_reject_dst_read_count_8616", None),
-            getattr(root, "_inertia_signed_idiv_artifact_reject_memory_lhs_count_8616", None),
-            getattr(root, "_inertia_signed_idiv_artifact_reject_used_lhs_count_8616", None),
-            getattr(root, "_inertia_signed_idiv_artifact_reject_no_lhs_key_count_8616", None),
-            getattr(root, "_inertia_signed_idiv_artifact_refusal_8616", None),
-            int(stats.get("already_materialized_count", 0) or 0),
-            int(stats.get("stale_evidence_rematerialized_count", 0) or 0),
-            int(stats.get("semantic_cast_reconciled_count", 0) or 0),
-            int(stats.get("semantic_cast_already_present_count", 0) or 0),
-            int(stats.get("semantic_cast_assignment_count", 0) or 0),
-            int(stats.get("semantic_cast_destination_count", 0) or 0),
-            int(stats.get("semantic_cast_candidate_count", 0) or 0),
-            int(stats.get("semantic_cast_no_match_count", 0) or 0),
-            int(stats.get("semantic_cast_ambiguous_count", 0) or 0),
-            int(stats.get("visible_use_guard_count", 0) or 0),
-            int(stats.get("reload_raw_fact_count", 0) or 0),
-            int(stats.get("reload_materialized_count", 0) or 0),
-            int(stats.get("reload_failure_count", 0) or 0),
-            changed,
-            fact_summary,
-        )
-    _record_direct_stack_move_lanes_8616(
-        codegen,
-        stats,
-        prior_stats=lane_stats_before,
-        current_raw_fact_count=len(facts),
-    )
-    if os.environ.get("INERTIA_DEBUG_TIMING") and os.environ.get("INERTIA_TAIL_VALIDATION_STDERR_JSON") != "1":
-        print(
-            f"[{time.strftime('%H:%M:%S')}] direct-stack MOV components: "
-            f"facts={len(facts)} reloads={len(reload_facts)} "
-            f"prepare={preparation_elapsed:.3f} recovery={fact_recovery_elapsed:.3f} "
-            f"match={fact_loop_elapsed:.3f} prune={unsupported_prune_elapsed:.3f} "
-            f"reload_recovery={reload_recovery_elapsed:.3f} reload_match={reload_loop_elapsed:.3f} "
-            f"reload_tagged={tagged_reload_match_elapsed:.3f} "
-            f"reload_register_use={register_use_insert_elapsed:.3f} "
-            f"reload_visible_guard={visible_guard_elapsed:.3f} "
-            f"ownership={ownership_replay_elapsed:.3f} "
-            f"cleanup={time.perf_counter() - cleanup_started:.3f} "
-            f"total={time.perf_counter() - started:.3f}",
-            file=sys.stderr,
-            flush=True,
-        )
-    return changed
-
-
-def lower_stable_ss_linear_stack_dereferences_8616(
-    codegen: StructuredAstValue, project: StructuredAstValue | None = None
-) -> bool:
-    """Replace stable SS real-mode linear dereferences with stack variables."""
-    if project is None:
-        project = getattr(codegen, "project", None)
-    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
-    if project is None or root is None:
-        return False
-
-    # Expression caches are local to this rewrite. Carrier deltas are SSA facts
-    # and remain valid until Structuring replaces the root object.
-    codegen._inertia_assignment_maps = None
-    codegen._inertia_stack_offset_cache = None
-
-    def _candidate_functions_for_indexed_stack_facts_8616() -> StructuredAstValue:
-        return _candidate_functions_for_stack_facts_8616(codegen, project)
-
-    def _indexed_bp_stack_fact_sizes_8616() -> dict[int, frozenset[int]]:
-        cached = getattr(codegen, "_inertia_indexed_bp_stack_access_facts_8616", None)
-        if isinstance(cached, dict):
-            return cached
-
-        collected: dict[int, set[int]] = {}
-        for function in _candidate_functions_for_indexed_stack_facts_8616():
-            for block in _boundary_tuple_8616(getattr(function, "blocks", ()) or ()):
-                capstone = getattr(block, "capstone", None)
-                for insn in _boundary_tuple_8616(getattr(capstone, "insns", ()) or ()):
-                    for operand in _boundary_tuple_8616(getattr(insn, "operands", ()) or ()):
-                        if int(getattr(operand, "type", -1)) != X86_OP_MEM:
-                            continue
-                        mem = getattr(operand, "mem", None)
-                        if mem is None:
-                            continue
-                        if int(getattr(mem, "base", 0) or 0) != X86_REG_BP:
-                            continue
-                        index_reg = int(getattr(mem, "index", 0) or 0)
-                        if index_reg in {0, X86_REG_INVALID}:
-                            continue
-                        displacement = _canonical_stack_offset_8616(int(getattr(mem, "disp", 0) or 0))
-                        if not isinstance(displacement, int):
-                            continue
-                        size = int(getattr(operand, "size", 0) or 0)
-                        collected.setdefault(displacement, set()).add(size if size > 0 else 0)
-
-        facts = {disp: frozenset(sizes) for disp, sizes in sorted(collected.items())}
-        codegen._inertia_indexed_bp_stack_access_facts_8616 = facts
-        codegen._inertia_indexed_bp_stack_address_raw_fact_count_8616 = len(facts)
-        return facts
-
-    def _flatten_indexed_stack_address_terms_8616(
-        node: StructuredAstValue,
-    ) -> tuple[tuple[int, StructuredAstValue], ...] | None:
-        terms: list[tuple[int, StructuredAstValue]] = []
-        pending: list[tuple[StructuredAstValue, int, bool]] = [(node, 1, False)]
-        active: set[int] = set()
-        while pending:
-            current, sign, exiting = pending.pop()
-            current = _strip_casts_8616(current)
-            if current is None:
-                return None
-            if exiting:
-                active.discard(id(current))
+        if isinstance(current, structured_c.CUnaryOp) and current.op == "Reference":
+            operand = _strip_casts_8616(current.operand)
+            if isinstance(operand, structured_c.CIndexedVariable):
+                pending.append((operand.index, sign, False))
                 continue
-            current_id = id(current)
-            if current_id in active:
-                return None
-            if len(active) > 1024:
-                return None
-            active.add(current_id)
-            pending.append((current, sign, True))
-            if isinstance(current, structured_c.CBinaryOp) and current.op == "Add":
-                pending.append((current.rhs, sign, False))
-                pending.append((current.lhs, sign, False))
-                continue
-            if isinstance(current, structured_c.CBinaryOp) and current.op == "Sub":
-                pending.append((current.rhs, -sign, False))
-                pending.append((current.lhs, sign, False))
-                continue
-            if isinstance(current, structured_c.CUnaryOp) and current.op == "Reference":
-                operand = _strip_casts_8616(current.operand)
-                if isinstance(operand, structured_c.CIndexedVariable):
-                    pending.append((operand.index, sign, False))
-                    continue
-            terms.append((sign, current))
-        return tuple(terms)
+        terms.append((sign, current))
+    return tuple(terms)
 
-    def _signed_16bit_term_value_8616(sign: int, value: int) -> int:
-        return int(_canonical_stack_offset_8616((int(sign) * int(value)) & 0xFFFF))
 
-    def _stack_cvar_displacement_8616(node: StructuredAstValue) -> int | None:
-        node = _strip_casts_8616(node)
-        if not isinstance(node, structured_c.CVariable):
-            return None
-        variable = node.variable
-        if not isinstance(variable, SimStackVariable):
-            return None
-        offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
-        return _canonical_stack_offset_8616(offset) if isinstance(offset, int) else None
+def _signed_16bit_term_value_8616(sign: int, value: int) -> int:
+    return int(_canonical_stack_offset_8616((int(sign) * int(value)) & 0xFFFF))
 
-    def _match_indexed_bp_stack_address_terms_8616(
-        terms: tuple[tuple[int, StructuredAstValue], ...],
-        *,
-        width: int | None,
-    ) -> RealModeIndexedStackAddress8616 | None:
-        fact_sizes = _indexed_bp_stack_fact_sizes_8616()
-        if not fact_sizes:
-            return None
-        matched_index: int | None = None
-        matched_displacement: int | None = None
-        for index, (sign, term) in enumerate(terms):
-            displacement = None
-            value = _constant_value_8616(term)
-            if value is not None:
-                displacement = _signed_16bit_term_value_8616(sign, value)
-            elif sign == 1:
-                displacement = _stack_cvar_displacement_8616(term)
-            if displacement is None or displacement not in fact_sizes:
-                continue
-            matched_index = index
-            matched_displacement = displacement
-            break
-        if matched_index is None or not isinstance(matched_displacement, int):
-            return None
 
-        residual_terms = tuple(term for index, term in enumerate(terms) if index != matched_index)
-        normalized_terms = consume_indexed_stack_frame_terms_8616(
-            codegen, residual_terms,
-            segment_name=lambda term: _segment_base_name_8616(term, project, codegen),
-        )
-        if normalized_terms is None:
-            return None
-        residual_terms = normalized_terms
-        if width is None:
-            constant_residual = 0
-            for sign, term in residual_terms:
-                value = _constant_value_8616(term)
-                if value is not None:
-                    constant_residual += int(sign) * int(value)
-            sizes = fact_sizes.get(matched_displacement, frozenset())
-            if constant_residual % 2 or 1 in sizes:
-                width = 1
-            elif 2 in sizes:
-                width = 2
-        return RealModeIndexedStackAddress8616(
-            base_displacement=matched_displacement,
-            residual_terms=residual_terms,
-            width=width,
-        )
+def _stack_cvar_displacement_8616(codegen: StructuredAstValue, node: StructuredAstValue) -> int | None:
+    node = _strip_casts_8616(node)
+    if not isinstance(node, structured_c.CVariable):
+        return None
+    variable = node.variable
+    if not isinstance(variable, SimStackVariable):
+        return None
+    offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
+    return _canonical_stack_offset_8616(offset) if isinstance(offset, int) else None
 
-    def _match_indexed_bp_stack_address_8616(node: StructuredAstValue) -> RealModeIndexedStackAddress8616 | None:
-        node = _strip_casts_8616(node)
-        if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
-            return None
-        terms = _flatten_indexed_stack_address_terms_8616(getattr(node, "operand", None))
-        if not terms:
-            return None
-        width = _dereference_access_width_bytes_8616(node)
-        return _match_indexed_bp_stack_address_terms_8616(terms, width=width)
 
-    def _match_indexed_bp_stack_pointer_8616(node: StructuredAstValue) -> RealModeIndexedStackAddress8616 | None:
-        node = _strip_casts_8616(node)
-        if not isinstance(node, structured_c.CFunctionCall):
-            return None
-        call_name = _call_name_from_expr_8616(node)
-        if call_name not in {"SEG_PTR", "MK_FP"}:
-            return None
-        args = _boundary_tuple_8616(node.args or ())
-        if len(args) != 2:
-            return None
-        segment_name = _segment_base_name_8616(args[0], project, codegen)
-        if segment_name not in {"ss", "ds"}:
-            return None
-        terms = _flatten_indexed_stack_address_terms_8616(args[1])
-        if not terms:
-            return None
-        return _match_indexed_bp_stack_address_terms_8616(terms, width=1)
-
-    def _term_expr_with_sign_8616(sign: int, term: StructuredAstValue) -> StructuredAstValue:
+def _match_indexed_bp_stack_address_terms_8616(
+    codegen: StructuredAstValue,
+    project: StructuredAstValue,
+    terms: tuple[tuple[int, StructuredAstValue], ...],
+    *,
+    width: int | None,
+) -> RealModeIndexedStackAddress8616 | None:
+    fact_sizes = _indexed_bp_stack_fact_sizes_8616(codegen, project)
+    if not fact_sizes:
+        return None
+    matched_index: int | None = None
+    matched_displacement: int | None = None
+    for index, (sign, term) in enumerate(terms):
+        displacement = None
         value = _constant_value_8616(term)
         if value is not None:
-            signed_value = int(sign) * int(value)
-            return structured_c.CConstant(
-                signed_value,
-                SimTypeShort(signed=signed_value < 0),
-                codegen=codegen,
-            )
-        if sign == 1:
-            return term
-        return structured_c.CBinaryOp(
-            "Sub",
-            structured_c.CConstant(0, SimTypeShort(False), codegen=codegen),
-            term,
-            codegen=codegen,
-        )
+            displacement = _signed_16bit_term_value_8616(sign, value)
+        elif sign == 1:
+            displacement = _stack_cvar_displacement_8616(codegen, term)
+        if displacement is None or displacement not in fact_sizes:
+            continue
+        matched_index = index
+        matched_displacement = displacement
+        break
+    if matched_index is None or not isinstance(matched_displacement, int):
+        return None
 
-    def _residual_terms_expr_8616(terms: tuple[tuple[int, StructuredAstValue], ...]) -> StructuredAstValue:
-        expr = None
-        for sign, term in terms:
-            term_expr = _term_expr_with_sign_8616(sign, term)
-            expr = term_expr if expr is None else structured_c.CBinaryOp("Add", expr, term_expr, codegen=codegen)
-        return expr
-
-    def _materialize_indexed_bp_stack_pointer_8616(access: RealModeIndexedStackAddress8616) -> StructuredAstValue:
-        """Build an addressable stack pointer whose arithmetic stays byte-scaled."""
-        base_cvar = stack_cvar_for_stable_ss_linear_access_8616(
-            codegen,
-            RealModeLinearStackAccess8616(access.base_displacement, 1),
-            require_lvalue=True,
-        )
-        if base_cvar is None:
-            return None
-        byte_ptr_type = SimTypePointer(SimTypeChar(False, label="unsigned char")).with_arch(project.arch)
-        addr_expr = CSemanticCast8616(
-            None,
-            byte_ptr_type,
-            structured_c.CUnaryOp("Reference", base_cvar, codegen=codegen),
-            codegen=codegen,
-        )
-        residual = _residual_terms_expr_8616(access.residual_terms)
-        if residual is not None:
-            addr_expr = structured_c.CBinaryOp("Add", addr_expr, residual, codegen=codegen)
-        codegen._inertia_indexed_bp_stack_address_materialized_count_8616 = (
-            int(getattr(codegen, "_inertia_indexed_bp_stack_address_materialized_count_8616", 0) or 0) + 1
-        )
-        return addr_expr
-
-    def _materialize_indexed_bp_stack_address_8616(access: RealModeIndexedStackAddress8616) -> StructuredAstValue:
-        """Preserve the proven load width even when cosmetic casts are hidden."""
-        width = access.width if isinstance(access.width, int) and access.width > 0 else 1
-        addr_expr = _materialize_indexed_bp_stack_pointer_8616(access)
-        if addr_expr is None:
-            return None
-        access_type = SimTypeChar(False, label="unsigned char") if width == 1 else _type_for_access_width_8616(width)
-        access_ptr_type = SimTypePointer(access_type).with_arch(project.arch)
-        cast_addr = CSemanticCast8616(None, access_ptr_type, addr_expr, codegen=codegen)
-        deref = structured_c.CUnaryOp("Dereference", cast_addr, codegen=codegen)
-        with contextlib.suppress(Exception):
-            cast(Any, deref).type = access_type
-        return deref
-
-    word_load_result = materialize_stack_word_load_recompositions_8616(
-        codegen,
-        root,
+    residual_terms = tuple(term for index, term in enumerate(terms) if index != matched_index)
+    normalized_terms = consume_indexed_stack_frame_terms_8616(
+        codegen, residual_terms,
+        segment_name=lambda term: _segment_base_name_8616(term, project, codegen),
     )
-    if word_load_result.root is not root:
-        codegen.cfunc.statements = word_load_result.root
-        root = word_load_result.root
-    changed: bool = bool(word_load_result.changed)
-    candidate_count = 0
-    materialized_count = 0
-    refused_count = 0
-    instruction_bp_access_lane = SemanticLaneState(name="instruction_bp_stack_access")
-    codegen._inertia_instruction_bp_stack_access_lane_8616 = instruction_bp_access_lane
-    instruction_bp_access_index: InstructionBpStackAccessIndex8616 | None = None
+    if normalized_terms is None:
+        return None
+    residual_terms = normalized_terms
+    if width is None:
+        constant_residual = 0
+        for sign, term in residual_terms:
+            value = _constant_value_8616(term)
+            if value is not None:
+                constant_residual += int(sign) * int(value)
+        sizes = fact_sizes.get(matched_displacement, frozenset())
+        if constant_residual % 2 or 1 in sizes:
+            width = 1
+        elif 2 in sizes:
+            width = 2
+    return RealModeIndexedStackAddress8616(
+        base_displacement=matched_displacement,
+        residual_terms=residual_terms,
+        width=width,
+    )
 
-    def _instruction_bp_stack_access_8616(
+
+def _match_indexed_bp_stack_address_8616(project: StructuredAstValue, codegen: StructuredAstValue, node: StructuredAstValue) -> RealModeIndexedStackAddress8616 | None:
+    node = _strip_casts_8616(node)
+    if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
+        return None
+    terms = _flatten_indexed_stack_address_terms_8616(getattr(node, "operand", None))
+    if not terms:
+        return None
+    width = _dereference_access_width_bytes_8616(node)
+    return _match_indexed_bp_stack_address_terms_8616(codegen, project, terms, width=width)
+
+
+def _match_indexed_bp_stack_pointer_8616(project: StructuredAstValue, codegen: StructuredAstValue, node: StructuredAstValue) -> RealModeIndexedStackAddress8616 | None:
+    node = _strip_casts_8616(node)
+    if not isinstance(node, structured_c.CFunctionCall):
+        return None
+    call_name = _call_name_from_expr_8616(node)
+    if call_name not in {"SEG_PTR", "MK_FP"}:
+        return None
+    args = _boundary_tuple_8616(node.args or ())
+    if len(args) != 2:
+        return None
+    segment_name = _segment_base_name_8616(args[0], project, codegen)
+    if segment_name not in {"ss", "ds"}:
+        return None
+    terms = _flatten_indexed_stack_address_terms_8616(args[1])
+    if not terms:
+        return None
+    return _match_indexed_bp_stack_address_terms_8616(codegen, project, terms, width=1)
+
+
+def _term_expr_with_sign_8616(codegen: StructuredAstValue, sign: int, term: StructuredAstValue) -> StructuredAstValue:
+    value = _constant_value_8616(term)
+    if value is not None:
+        signed_value = int(sign) * int(value)
+        return structured_c.CConstant(
+            signed_value,
+            SimTypeShort(signed=signed_value < 0),
+            codegen=codegen,
+        )
+    if sign == 1:
+        return term
+    return structured_c.CBinaryOp(
+        "Sub",
+        structured_c.CConstant(0, SimTypeShort(False), codegen=codegen),
+        term,
+        codegen=codegen,
+    )
+
+
+def _residual_terms_expr_8616(codegen: StructuredAstValue, terms: tuple[tuple[int, StructuredAstValue], ...]) -> StructuredAstValue:
+    expr = None
+    for sign, term in terms:
+        term_expr = _term_expr_with_sign_8616(codegen, sign, term)
+        expr = term_expr if expr is None else structured_c.CBinaryOp("Add", expr, term_expr, codegen=codegen)
+    return expr
+
+
+def _materialize_indexed_bp_stack_pointer_8616(project: StructuredAstValue, codegen: StructuredAstValue, access: RealModeIndexedStackAddress8616) -> StructuredAstValue:
+    """Build an addressable stack pointer whose arithmetic stays byte-scaled."""
+    base_cvar = stack_cvar_for_stable_ss_linear_access_8616(
+        codegen,
+        RealModeLinearStackAccess8616(access.base_displacement, 1),
+        require_lvalue=True,
+    )
+    if base_cvar is None:
+        return None
+    byte_ptr_type = SimTypePointer(SimTypeChar(False, label="unsigned char")).with_arch(project.arch)
+    addr_expr = CSemanticCast8616(
+        None,
+        byte_ptr_type,
+        structured_c.CUnaryOp("Reference", base_cvar, codegen=codegen),
+        codegen=codegen,
+    )
+    residual = _residual_terms_expr_8616(codegen, access.residual_terms)
+    if residual is not None:
+        addr_expr = structured_c.CBinaryOp("Add", addr_expr, residual, codegen=codegen)
+    codegen._inertia_indexed_bp_stack_address_materialized_count_8616 = (
+        int(getattr(codegen, "_inertia_indexed_bp_stack_address_materialized_count_8616", 0) or 0) + 1
+    )
+    return addr_expr
+
+
+def _materialize_indexed_bp_stack_address_8616(project: StructuredAstValue, codegen: StructuredAstValue, access: RealModeIndexedStackAddress8616) -> StructuredAstValue:
+    """Preserve the proven load width even when cosmetic casts are hidden."""
+    width = access.width if isinstance(access.width, int) and access.width > 0 else 1
+    addr_expr = _materialize_indexed_bp_stack_pointer_8616(codegen, project, access)
+    if addr_expr is None:
+        return None
+    access_type = SimTypeChar(False, label="unsigned char") if width == 1 else _type_for_access_width_8616(width)
+    access_ptr_type = SimTypePointer(access_type).with_arch(project.arch)
+    cast_addr = CSemanticCast8616(None, access_ptr_type, addr_expr, codegen=codegen)
+    deref = structured_c.CUnaryOp("Dereference", cast_addr, codegen=codegen)
+    with contextlib.suppress(Exception):
+        cast(Any, deref).type = access_type
+    return deref
+
+@dataclass
+class _SSLinearLowerRun8616:
+    """One SS-linear stack-dereference lowering pass over a structured tree.
+
+    Carries the instruction-access index cache, the evidence lane, and the
+    candidate/materialized/refused counters shared by the transform walkers.
+    """
+
+    codegen: StructuredAstValue
+    project: StructuredAstValue
+    instruction_bp_access_lane: SemanticLaneState
+    instruction_bp_access_index: InstructionBpStackAccessIndex8616 | None = None
+    changed: bool = False
+    candidate_count: int = 0
+    materialized_count: int = 0
+    refused_count: int = 0
+    node_count_cell: int = 0
+    seen: set[int] = field(default_factory=set)
+
+
+    def _instruction_bp_stack_access_8616(self, 
         node: StructuredAstValue,
         shaped_access: RealModeLinearStackAccess8616,
         *, require_lvalue: bool,
     ) -> tuple[InstructionBpStackAccess8616, StackValueOwnerHint8616 | None] | None:
         """Bind one SS-shaped access to its exact direct BP instruction operand."""
-        nonlocal instruction_bp_access_index
         source_addrs = instruction_addrs_from_node_8616(node)
         if not source_addrs:
             return None
-        if instruction_bp_access_index is None:
+        if self.instruction_bp_access_index is None:
             try:
-                source_alias = codegen._inertia_stack_memory_ssa_alias_artifact
+                source_alias = self.codegen._inertia_stack_memory_ssa_alias_artifact
             except AttributeError:
                 return None
             if not isinstance(source_alias, StackMemorySSAAliasArtifact8616):
                 return None
-            instruction_bp_access_index = ensure_instruction_bp_stack_access_index_8616(
-                codegen,
+            self.instruction_bp_access_index = ensure_instruction_bp_stack_access_index_8616(
+                self.codegen,
                 source_alias,
             )
         exact = select_instruction_bp_stack_access_8616(
-            instruction_bp_access_index,
+            self.instruction_bp_access_index,
             source_addrs,
             displacement=shaped_access.displacement,
             size=shaped_access.width if isinstance(shaped_access.width, int) else 0,
@@ -17667,7 +18211,7 @@ def lower_stable_ss_linear_stack_dereferences_8616(
         logical_owner_ranges = {
             StackValueOwnerHint8616(candidate.displacement, candidate.size)
             for source_addr in source_addrs
-            for candidate in instruction_bp_access_index.by_instruction_addr.get(
+            for candidate in self.instruction_bp_access_index.by_instruction_addr.get(
                 source_addr,
                 (),
             )
@@ -17692,7 +18236,7 @@ def lower_stable_ss_linear_stack_dereferences_8616(
             and shaped_width > 0
         ):
             entry_sp_offset = entry_sp_offset_for_machine_bp_range_8616(
-                codegen,
+                self.codegen,
                 exact.displacement,
                 exact.size,
             )
@@ -17708,7 +18252,7 @@ def lower_stable_ss_linear_stack_dereferences_8616(
                 projected = {
                     candidate
                     for source_addr in source_addrs
-                    for candidate in instruction_bp_access_index.by_instruction_addr.get(
+                    for candidate in self.instruction_bp_access_index.by_instruction_addr.get(
                         source_addr,
                         (),
                     )
@@ -17721,8 +18265,8 @@ def lower_stable_ss_linear_stack_dereferences_8616(
                 if len(projected) != 1:
                     return None
                 exact = next(iter(projected))
-        instruction_bp_access_lane.raw += 1
-        instruction_bp_access_lane.normalized += 1
+        self.instruction_bp_access_lane.raw += 1
+        self.instruction_bp_access_lane.normalized += 1
         size = exact.size
         width = shaped_access.width if isinstance(shaped_access.width, int) and shaped_access.width > 0 else size
         logical_same_base_owner = bool(
@@ -17731,204 +18275,234 @@ def lower_stable_ss_linear_stack_dereferences_8616(
         )
         if size > 0 and width > 0 and size != width and not logical_same_base_owner:
             return None
-        instruction_bp_access_lane.classified += 1
+        self.instruction_bp_access_lane.classified += 1
         return exact, owner_hint
 
-    def transform(node: StructuredAstValue, *, require_lvalue: bool = False) -> StructuredAstValue:
+    def transform(self, node: StructuredAstValue, *, require_lvalue: bool = False) -> StructuredAstValue:
         """Materialize proven SS accesses without substituting read projections for writes."""
-        nonlocal candidate_count, changed, materialized_count, refused_count
         stripped_node = _strip_casts_8616(node)
+        if isinstance(stripped_node, structured_c.CFunctionCall):
+            self._transform_call_args_8616(stripped_node)
+        if not (
+            (isinstance(stripped_node, structured_c.CUnaryOp) and stripped_node.op == "Dereference")
+            or isinstance(stripped_node, structured_c.CFunctionCall)
+        ):
+            return node
+        self.candidate_count += 1
+        if isinstance(stripped_node, structured_c.CUnaryOp) and stripped_node.op == "Dereference":
+            out = self._transform_deref_8616(node, stripped_node, require_lvalue=require_lvalue)
+            if out is not None:
+                return out
+        elif isinstance(stripped_node, structured_c.CFunctionCall):
+            out = self._transform_indexed_pointer_8616(stripped_node)
+            if out is not None:
+                return out
+        self.refused_count += 1
+        return node
+
+    def _transform_call_args_8616(self, stripped_node: StructuredAstValue) -> None:
+        """Rewrite non-pointer intrinsic call arguments in place."""
         if isinstance(stripped_node, structured_c.CFunctionCall):
             call_name = _call_name_from_expr_8616(stripped_node)
             if call_name not in {"SEG_PTR", "MK_FP"}:
                 args = stripped_node.args
                 if isinstance(args, list):
                     for index, arg in enumerate(tuple(args)):
-                        replacement = transform(arg)
+                        replacement = self.transform(arg)
                         if replacement is not arg:
                             args[index] = replacement
-                            changed = True
+                            self.changed = True
                 elif isinstance(args, tuple):
                     new_args = []
                     args_changed = False
                     for arg in args:
-                        replacement = transform(arg)
+                        replacement = self.transform(arg)
                         if replacement is not arg:
                             args_changed = True
                         new_args.append(replacement)
                     if args_changed:
                         stripped_node.args = tuple(new_args)
-                        changed = True
-        if not (
-            (isinstance(stripped_node, structured_c.CUnaryOp) and stripped_node.op == "Dereference")
-            or isinstance(stripped_node, structured_c.CFunctionCall)
-        ):
-            return node
-        candidate_count += 1
-        if isinstance(stripped_node, structured_c.CUnaryOp) and stripped_node.op == "Dereference":
-            access = match_stable_ss_linear_stack_access_8616(stripped_node, project, codegen)
-            if access is not None:
-                if not _has_stack_storage_evidence_for_displacement_8616(
-                    codegen,
-                    access.displacement,
-                    access.width,
-                ):
-                    indexed_access = _match_indexed_bp_stack_address_8616(stripped_node)
-                    if indexed_access is not None:
-                        materialized = _materialize_indexed_bp_stack_address_8616(indexed_access)
-                        if materialized is not None:
-                            changed = True
-                            materialized_count += 1
-                            return materialized
-                instruction_selection = _instruction_bp_stack_access_8616(
-                    stripped_node,
-                    access,
-                    require_lvalue=require_lvalue,
-                )
-                instruction_access = (
-                    instruction_selection[0]
-                    if instruction_selection is not None
-                    else None
-                )
-                owner_hint = (
-                    instruction_selection[1]
-                    if instruction_selection is not None
-                    else None
-                )
-                if instruction_access is not None:
-                    access = RealModeLinearStackAccess8616(
-                        displacement=instruction_access.displacement,
-                        width=instruction_access.size,
-                    )
-                cvar = stack_cvar_for_stable_ss_linear_access_8616(
-                    codegen,
-                    access,
-                    instruction_access=instruction_access,
-                    owner_hint=owner_hint,
-                    require_lvalue=require_lvalue,
-                )
-                if cvar is None:
-                    if instruction_access is not None:
-                        instruction_bp_access_lane.failures += 1
-                    refused_count += 1
-                    return node
-                if instruction_access is not None:
-                    instruction_bp_access_lane.materialized += 1
-                changed = True
-                materialized_count += 1
-                return cvar
-            indexed_access = _match_indexed_bp_stack_address_8616(stripped_node)
-            if indexed_access is not None:
-                materialized = _materialize_indexed_bp_stack_address_8616(indexed_access)
-                if materialized is not None:
-                    changed = True
-                    materialized_count += 1
-                    return materialized
-        elif isinstance(stripped_node, structured_c.CFunctionCall):
-            indexed_pointer = _match_indexed_bp_stack_pointer_8616(stripped_node)
-            if indexed_pointer is not None:
-                materialized = _materialize_indexed_bp_stack_pointer_8616(indexed_pointer)
-                if materialized is not None:
-                    changed = True
-                    materialized_count += 1
-                    return materialized
-        refused_count += 1
-        return node
+                        self.changed = True
 
-    _node_count = [0]
-    _seen = set()
+    def _transform_deref_8616(
+        self,
+        node: StructuredAstValue,
+        stripped_node: StructuredAstValue,
+        *,
+        require_lvalue: bool,
+    ) -> StructuredAstValue | None:
+        """Materialize a proven ``Dereference`` SS access; ``None`` means fall through."""
+        access = match_stable_ss_linear_stack_access_8616(stripped_node, self.project, self.codegen)
+        if access is not None:
+            if not _has_stack_storage_evidence_for_displacement_8616(
+                self.codegen,
+                access.displacement,
+                access.width,
+            ):
+                indexed_access = _match_indexed_bp_stack_address_8616(self.project, self.codegen, stripped_node)
+                if indexed_access is not None:
+                    materialized = _materialize_indexed_bp_stack_address_8616(self.project, self.codegen, indexed_access)
+                    if materialized is not None:
+                        self.changed = True
+                        self.materialized_count += 1
+                        return materialized
+            instruction_selection = self._instruction_bp_stack_access_8616(
+                stripped_node,
+                access,
+                require_lvalue=require_lvalue,
+            )
+            instruction_access = (
+                instruction_selection[0]
+                if instruction_selection is not None
+                else None
+            )
+            owner_hint = (
+                instruction_selection[1]
+                if instruction_selection is not None
+                else None
+            )
+            if instruction_access is not None:
+                access = RealModeLinearStackAccess8616(
+                    displacement=instruction_access.displacement,
+                    width=instruction_access.size,
+                )
+            cvar = stack_cvar_for_stable_ss_linear_access_8616(
+                self.codegen,
+                access,
+                instruction_access=instruction_access,
+                owner_hint=owner_hint,
+                require_lvalue=require_lvalue,
+            )
+            if cvar is None:
+                if instruction_access is not None:
+                    self.instruction_bp_access_lane.failures += 1
+                self.refused_count += 1
+                return node
+            if instruction_access is not None:
+                self.instruction_bp_access_lane.materialized += 1
+            self.changed = True
+            self.materialized_count += 1
+            return cvar
+        indexed_access = _match_indexed_bp_stack_address_8616(self.project, self.codegen, stripped_node)
+        if indexed_access is not None:
+            materialized = _materialize_indexed_bp_stack_address_8616(self.project, self.codegen, indexed_access)
+            if materialized is not None:
+                self.changed = True
+                self.materialized_count += 1
+                return materialized
+        return None
 
-    def replace_children(node: StructuredAstValue) -> bool:
+    def _transform_indexed_pointer_8616(self, stripped_node: StructuredAstValue) -> StructuredAstValue | None:
+        """Materialize a proven indexed BP stack pointer call; ``None`` means fall through."""
+        indexed_pointer = _match_indexed_bp_stack_pointer_8616(self.project, self.codegen, stripped_node)
+        if indexed_pointer is not None:
+            materialized = _materialize_indexed_bp_stack_pointer_8616(self.project, self.codegen, indexed_pointer)
+            if materialized is not None:
+                self.changed = True
+                self.materialized_count += 1
+                return materialized
+        return None
+
+
+    def replace_children(self, node: StructuredAstValue) -> bool:
         """Visit expression-bearing fields, including loads returned directly."""
         if node is None or not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
             return False
-        _node_count[0] += 1
-        if os.environ.get("INERTIA_DEBUG_STACK_NOISE") and _node_count[0] % 500 == 0:
-            print(f"[lower_ss_linear] tree walk: {_node_count[0]} nodes", file=sys.stderr, flush=True)
-        if id(node) in _seen:
+        self.node_count_cell += 1
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE") and self.node_count_cell % 500 == 0:
+            print(f"[lower_ss_linear] tree walk: {self.node_count_cell} nodes", file=sys.stderr, flush=True)
+        if id(node) in self.seen:
             return False
-        _seen.add(id(node))
+        self.seen.add(id(node))
         local_changed = False
         for attr in (
-            "statements",
-            "lhs",
-            "rhs",
-            "operand",
-            "variable",
-            "index",
-            "expr",
-            "stmts",
-            "init",
-            "initializer",
-            "condition",
-            "cond",
-            "iftrue",
-            "iffalse",
-            "iteration",
-            "iterator",
-            "body",
-            "else_node",
-            "retval",
-            "switch",
-            "cases",
-            "default",
+            "statements", "lhs", "rhs", "operand", "variable", "index", "expr", "stmts",
+            "init", "initializer", "condition", "cond", "iftrue", "iffalse", "iteration",
+            "iterator", "body", "else_node", "retval", "switch", "cases", "default",
         ):
             if not hasattr(node, attr):
                 continue
             value = getattr(node, attr)
             if isinstance(value, dict):
-                for key, item in tuple(value.items()):
-                    replacement = transform(item)
-                    if replacement is not item:
-                        value[key] = replacement
-                        local_changed = True
-                    if replace_children(value[key]):
-                        local_changed = True
+                if self._replace_dict_children_8616(value):
+                    local_changed = True
                 continue
-            if isinstance(value, list):
-                for index, item in enumerate(tuple(value)):
-                    replacement = transform(item)
-                    if replacement is not item:
-                        value[index] = replacement
-                        local_changed = True
-                    if replace_children(value[index]):
-                        local_changed = True
-            elif isinstance(value, tuple):
-                new_items = []
-                tuple_changed = False
-                for item in value:
-                    replacement = transform(item)
-                    if replacement is not item:
-                        tuple_changed = True
-                    if replace_children(replacement):
-                        tuple_changed = True
-                    new_items.append(replacement)
-                if tuple_changed:
-                    setattr(node, attr, tuple(new_items))
+            if isinstance(value, (list, tuple)):
+                if self._replace_seq_children_8616(node, attr, value):
                     local_changed = True
-            elif value is not None:
-                replacement = transform(
-                    value, require_lvalue=isinstance(node, structured_c.CAssignment) and attr == "lhs",
-                )
-                if replacement is not value:
-                    setattr(node, attr, replacement)
-                    local_changed = True
-                    value = replacement
-                if replace_children(value):
-                    local_changed = True
+            elif value is not None and self._replace_scalar_child_8616(node, attr, value):
+                local_changed = True
+        if self._replace_condition_pairs_8616(node):
+            local_changed = True
+        return local_changed
 
+    def _replace_dict_children_8616(self, value: dict) -> bool:
+        """Transform each dict-valued child in place."""
+        local_changed = False
+        for key, item in tuple(value.items()):
+            replacement = self.transform(item)
+            if replacement is not item:
+                value[key] = replacement
+                local_changed = True
+            if self.replace_children(value[key]):
+                local_changed = True
+        return local_changed
+
+    def _replace_seq_children_8616(self, node: StructuredAstValue, attr: str, value: StructuredAstValue) -> bool:
+        """Transform list/tuple-valued children, writing back tuples."""
+        local_changed = False
+        if isinstance(value, list):
+            for index, item in enumerate(tuple(value)):
+                replacement = self.transform(item)
+                if replacement is not item:
+                    value[index] = replacement
+                    local_changed = True
+                if self.replace_children(value[index]):
+                    local_changed = True
+        elif isinstance(value, tuple):
+            new_items = []
+            tuple_changed = False
+            for item in value:
+                replacement = self.transform(item)
+                if replacement is not item:
+                    tuple_changed = True
+                if self.replace_children(replacement):
+                    tuple_changed = True
+                new_items.append(replacement)
+            if tuple_changed:
+                setattr(node, attr, tuple(new_items))
+                local_changed = True
+        return local_changed
+
+    def _replace_scalar_child_8616(self, node: StructuredAstValue, attr: str, value: StructuredAstValue) -> bool:
+        """Transform a scalar child field and recurse into it."""
+        replacement = self.transform(
+            value, require_lvalue=isinstance(node, structured_c.CAssignment) and attr == "lhs",
+        )
+        local_changed = False
+        if replacement is not value:
+            setattr(node, attr, replacement)
+            local_changed = True
+            value = replacement
+        if self.replace_children(value):
+            local_changed = True
+        return local_changed
+
+    def _replace_condition_pairs_8616(self, node: StructuredAstValue) -> bool:
+        """Transform structured condition/body pairs on the node."""
+        local_changed = False
         condition_and_nodes = getattr(node, "condition_and_nodes", None)
         if condition_and_nodes:
             new_pairs = []
             pair_changed = False
             for cond, body in condition_and_nodes:
                 new_cond = (
-                    transform(cond)
+                    self.transform(cond)
                     if type(cond).__module__.startswith("angr.analyses.decompiler.structured_codegen")
                     else cond
                 )
                 new_body = (
-                    transform(body)
+                    self.transform(body)
                     if type(body).__module__.startswith("angr.analyses.decompiler.structured_codegen")
                     else body
                 )
@@ -17938,46 +18512,84 @@ def lower_stable_ss_linear_stack_dereferences_8616(
                 if new_body is not body:
                     pair_changed = True
                     local_changed = True
-                if replace_children(new_cond):
+                if self.replace_children(new_cond):
                     local_changed = True
-                if replace_children(new_body):
+                if self.replace_children(new_body):
                     local_changed = True
                 new_pairs.append((new_cond, new_body))
             if pair_changed:
                 cast(Any, node).condition_and_nodes = new_pairs
         return local_changed
 
-    if replace_children(root):
-        changed = True
+
+    def _publish_counters_8616(self) -> None:
+        """Publish pass counters to the codegen surface and debug stats."""
+        codegen = self.codegen
+        codegen._inertia_ss_linear_candidate_count = (
+            int(getattr(codegen, "_inertia_ss_linear_candidate_count", 0) or 0) + self.candidate_count
+        )
+        codegen._inertia_ss_linear_materialized_count = (
+            int(getattr(codegen, "_inertia_ss_linear_materialized_count", 0) or 0) + self.materialized_count
+        )
+        codegen._inertia_ss_linear_refused_count = (
+            int(getattr(codegen, "_inertia_ss_linear_refused_count", 0) or 0) + self.refused_count
+        )
+        debug_stats = getattr(codegen, "_inertia_stack_lowering_debug", None)
+        if isinstance(debug_stats, dict):
+            debug_stats["ss_linear_candidates"] = int(debug_stats.get("ss_linear_candidates", 0) or 0) + self.candidate_count
+            debug_stats["ss_linear_materialized"] = (
+                int(debug_stats.get("ss_linear_materialized", 0) or 0) + self.materialized_count
+            )
+            debug_stats["ss_linear_refused"] = int(debug_stats.get("ss_linear_refused", 0) or 0) + self.refused_count
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[ss-linear-lowering] function=%#x candidates=%d materialized=%d refused=%d changed=%s",
+                getattr(getattr(codegen, "cfunc", None), "addr", -1) or -1,
+                self.candidate_count,
+                self.materialized_count,
+                self.refused_count,
+                self.changed,
+            )
+
+
+def lower_stable_ss_linear_stack_dereferences_8616(
+    codegen: StructuredAstValue,
+    project: StructuredAstValue | None = None,
+    function: StructuredAstValue | None = None,
+) -> bool:
+    """Replace stable SS real-mode linear dereferences with stack variables."""
+    if project is None:
+        project = getattr(codegen, "project", None)
+    root = getattr(getattr(codegen, "cfunc", None), "statements", None)
+    if project is None or root is None:
+        return False
+
+    codegen._inertia_assignment_maps = None
+    codegen._inertia_stack_offset_cache = None
+
+    word_load_result = materialize_stack_word_load_recompositions_8616(
+        codegen,
+        root,
+    )
+    if word_load_result.root is not root:
+        codegen.cfunc.statements = word_load_result.root
+        root = word_load_result.root
+    instruction_bp_access_lane = SemanticLaneState(name="instruction_bp_stack_access")
+    codegen._inertia_instruction_bp_stack_access_lane_8616 = instruction_bp_access_lane
+
+    run = _SSLinearLowerRun8616(
+        codegen=codegen,
+        project=project,
+        instruction_bp_access_lane=instruction_bp_access_lane,
+        changed=bool(word_load_result.changed),
+    )
+    if run.replace_children(root):
+        run.changed = True
     if _apply_annotation_names_to_existing_stack_cvars_8616(codegen):
-        changed = True
-    codegen._inertia_ss_linear_candidate_count = (
-        int(getattr(codegen, "_inertia_ss_linear_candidate_count", 0) or 0) + candidate_count
-    )
-    codegen._inertia_ss_linear_materialized_count = (
-        int(getattr(codegen, "_inertia_ss_linear_materialized_count", 0) or 0) + materialized_count
-    )
-    codegen._inertia_ss_linear_refused_count = (
-        int(getattr(codegen, "_inertia_ss_linear_refused_count", 0) or 0) + refused_count
-    )
-    debug_stats = getattr(codegen, "_inertia_stack_lowering_debug", None)
-    if isinstance(debug_stats, dict):
-        debug_stats["ss_linear_candidates"] = int(debug_stats.get("ss_linear_candidates", 0) or 0) + candidate_count
-        debug_stats["ss_linear_materialized"] = (
-            int(debug_stats.get("ss_linear_materialized", 0) or 0) + materialized_count
-        )
-        debug_stats["ss_linear_refused"] = int(debug_stats.get("ss_linear_refused", 0) or 0) + refused_count
-    if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-        log.warning(
-            "[ss-linear-lowering] function=%#x candidates=%d materialized=%d refused=%d changed=%s",
-            getattr(getattr(codegen, "cfunc", None), "addr", -1) or -1,
-            candidate_count,
-            materialized_count,
-            refused_count,
-            changed,
-        )
+        run.changed = True
+    run._publish_counters_8616()
     instruction_bp_access_lane.assert_closed_loop(layer="lowering")
-    return changed
+    return run.changed
 
 
 __all__ = (
