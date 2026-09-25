@@ -46,6 +46,15 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   Focused pytest
   needs `PYTHONHASHSEED=0` (make exports it); without it 8
   cache-surface tests fail on `allows_semantic_cache` refusal.
+
+- decompiler_postprocess_stage.py driven to zero ruff findings (was 81
+  complexity sites at batch start): materialization-loop matchers,
+  instruction-window helpers, validation-delta classifiers, clone walkers,
+  and stack-arg/prototype paths split into typed module helpers and
+  run-state dataclasses. One real regression found and fixed during review:
+  the `active_status_flag_lift_context_8616` wrapper around `_decompile_8616`
+  had been dropped by an earlier splice and is restored. Owning postprocess
+  suite: 639 passed, 2 confirmed pre-existing baseline failures.
   Focused mypy needs sibling promoted modules on the command line —
   `follow_imports=skip` makes off-run imports Any and reports false
   no-any-return errors otherwise.
@@ -645,3 +654,39 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Coverage attribution verified: map entries are 1-based start indexes
   into the offsets table; regression test added
   (test_tdinfo_coverage_offsets_attribute_to_their_segment).
+
+### Riptide reconstruction audit driven by recovered types (continued)
+
+- Full struct dump cross-checked against decomp/riptide.h; every recovered
+  struct annotated with original TDINFO names:
+  m_actor (hit_x_step/my_map_width/my_map_height/hit_count/target_distance/
+  aux_char_ptr; signal bitfield = deleting,in_window,dont_erase,hit,
+  new_looping,sleep,aux1..aux9,active — door_open/s_aux2 kept as semantic
+  names with orig-name comments), loop/g cel/pc_snd/voc/snd (all matched
+  recon alias structs; loop_res was missing `name` far* at +0x02 — fixed,
+  frames[] -> cels[16]), game_manager (player2_input/sprite_storage_total/
+  game_flags[20]/sound_on/song/game_speed/player players[2]/loop_count/
+  sound_count/all_loops[150]/all_sounds[40] — recon sounds[0x27]+tail was
+  replaced with the real 40-entry array), tilemap (orig names incl.
+  auxillery_ints[50], t_width/t_height/t_org/t_size/tiles/map_palette/speed/
+  map — recon 'exploded'@0x39C is really 'speed'), ms_mouse, gui_item,
+  vga_display+palette_cycle (speed/cur_shift/cycle_count/how_many/
+  shifted_segments[48][16]/start/end/size/movsd_size), game_cast (size),
+  level_def=game_level, score_entry=score_element (name[9]+pad),
+  msl_def=projectile (sound/left_image/right_image/energy/max_speed/
+  explosion/ego_hit_voc/bubbles), menu_entry=pull_down_item, map_entry=tattr.
+- DERIVED-CLASS member offsets: TDUMP 'New Offset: 0013' marks the
+  derived-part base (gui_item = 0x13; button.alignment@0x13 lives in
+  gui_item's tail pad) — recon GUI layouts verified faithful.
+- BUG FIXED in decomp/game.cpp kill_ego(): the `ego->status` guard was
+  INVERTED (recon `== 2`, original `jnz` => `!= 2`) and the common tail
+  (status=2, aux1=0x3C, kill_jason, control=0) was nested inside the else
+  instead of covering both branches.  Effect: first death ran the gotcha
+  grab path; repeated per-frame calls with status==2 re-ran
+  load_loop("egodie2.l") until the element read failed — the reported
+  `Error looking for loop : egodie2.l` crash.  Restructured to match
+  seg03f9:1A65 flow exactly.
+- check_new_pos return type corrected int -> uint (TDINFO signature).
+- Rebuilt all touched translation units through BC31 -ml -3 -f -O -r- -vi-:
+  actor/game/creature/gamemgr/gui/kbd/menu/scores/tilemap/util/vgadisp all
+  compile with zero errors (only pre-existing warnings).

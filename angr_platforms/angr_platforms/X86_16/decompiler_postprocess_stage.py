@@ -50,7 +50,7 @@ import sys
 import time
 import typing
 from collections.abc import Callable, Iterable, Mapping, MutableMapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 from angr.ailment.statement import Return as AILReturn
@@ -775,63 +775,73 @@ def _normalize_pointer_high_byte_shifts_8616(codegen: StructuredAstValue) -> boo
     return changed
 
 
+def _bind_type_to_arch_8616(type_: StructuredAstValue, arch: StructuredAstValue) -> StructuredAstValue:
+    """Bind a SimType to the project arch, upgrading SimTypeBottom to short."""
+    if type(type_) is SimTypeBottom:
+        try:
+            return SimTypeShort(False).with_arch(arch)
+        except Exception:
+            return SimTypeShort(False)
+    if type_ is None or getattr(type_, "_arch", None) is not None or not hasattr(type_, "with_arch"):
+        return type_
+    try:
+        return type_.with_arch(arch)
+    except Exception:
+        return type_
+
+
+def _rebind_unified_local_types_8616(unified_locals: dict, arch: StructuredAstValue) -> None:
+    """Rebind vartypes inside the unified-local map, dropping stale entries."""
+    for variable, entries in list(unified_locals.items()):
+        if not isinstance(entries, set):
+            continue
+        new_entries = set()
+        changed = False
+        for cvar, vartype in entries:
+            bound = _bind_type_to_arch_8616(vartype, arch)
+            if bound is not vartype:
+                changed = True
+            if bound is not getattr(cvar, "variable_type", None):
+                cvar.variable_type = bound
+            new_entries.add((cvar, bound))
+        if changed:
+            unified_locals[variable] = new_entries
+
+
+def _rebind_cvar_map_types_8616(cfunc: StructuredAstValue, arch: StructuredAstValue) -> None:
+    variables_in_use = getattr(cfunc, "variables_in_use", None)
+    if isinstance(variables_in_use, dict):
+        for cvar in variables_in_use.values():
+            bound = _bind_type_to_arch_8616(getattr(cvar, "variable_type", None), arch)
+            if bound is not getattr(cvar, "variable_type", None):
+                cvar.variable_type = bound
+
+    unified_locals = getattr(cfunc, "unified_local_vars", None)
+    if isinstance(unified_locals, dict):
+        _rebind_unified_local_types_8616(unified_locals, arch)
+
+
 def _bind_codegen_variable_types_to_arch_8616(codegen: StructuredAstValue) -> None:
-    def _impl() -> None:
-        project = getattr(codegen, "project", None)
-        arch = getattr(project, "arch", None)
-        if arch is None:
-            return
+    """Bind every codegen-visible variable type to the project arch."""
+    project = getattr(codegen, "project", None)
+    arch = getattr(project, "arch", None)
+    if arch is None:
+        return
 
-        def _bind_type(type_: StructuredAstValue) -> StructuredAstValue:
-            if type(type_) is SimTypeBottom:
-                try:
-                    return SimTypeShort(False).with_arch(arch)
-                except Exception:
-                    return SimTypeShort(False)
-            if type_ is None or getattr(type_, "_arch", None) is not None or not hasattr(type_, "with_arch"):
-                return type_
-            try:
-                return type_.with_arch(arch)
-            except Exception:
-                return type_
+    cfunc = getattr(codegen, "cfunc", None)
+    if cfunc is None:
+        return
 
-        cfunc = getattr(codegen, "cfunc", None)
-        if cfunc is None:
-            return
+    _rebind_cvar_map_types_8616(cfunc, arch)
 
-        variables_in_use = getattr(cfunc, "variables_in_use", None)
-        if isinstance(variables_in_use, dict):
-            for cvar in variables_in_use.values():
-                bound = _bind_type(getattr(cvar, "variable_type", None))
-                if bound is not getattr(cvar, "variable_type", None):
-                    cvar.variable_type = bound
+    root = getattr(cfunc, "statements", None)
+    if root is None:
+        return
+    for node in _iter_c_nodes_deep_8616(root):
+        bound = _bind_type_to_arch_8616(getattr(node, "variable_type", None), arch)
+        if bound is not getattr(node, "variable_type", None):
+            cast(Any, node).variable_type = bound
 
-        unified_locals = getattr(cfunc, "unified_local_vars", None)
-        if isinstance(unified_locals, dict):
-            for variable, entries in list(unified_locals.items()):
-                if not isinstance(entries, set):
-                    continue
-                new_entries = set()
-                changed = False
-                for cvar, vartype in entries:
-                    bound = _bind_type(vartype)
-                    if bound is not vartype:
-                        changed = True
-                    if bound is not getattr(cvar, "variable_type", None):
-                        cvar.variable_type = bound
-                    new_entries.add((cvar, bound))
-                if changed:
-                    unified_locals[variable] = new_entries
-
-        root = getattr(cfunc, "statements", None)
-        if root is None:
-            return
-        for node in _iter_c_nodes_deep_8616(root):
-            bound = _bind_type(getattr(node, "variable_type", None))
-            if bound is not getattr(node, "variable_type", None):
-                cast(Any, node).variable_type = bound
-
-    return _impl()
 
 
 def _postprocess_exit_goto_repair_delta_8616(validation: Mapping[str, StructuredAstValue]) -> bool:
@@ -863,37 +873,64 @@ def _callsite_materialization_left_no_stack_lowering_input_8616(codegen: Structu
     return _callsite_after_ss_lowering_rematerialization_unneeded_8616(codegen)
 
 
-def _rerun_stack_lowering_consumers_after_calls_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
-    """Rerun bounded stack-lowering consumers through dynamic codegen compatibility state."""
+def _stack_lowering_rerun_refusal_kind_8616(codegen: StructuredAstValue) -> str | None:
+    """Classify the refusal counter key for a post-call stack-lowering rerun."""
     try:
         pointer_memory_materialized = codegen._inertia_pointer_memory_materialized_8616 is not None
     except AttributeError:
         pointer_memory_materialized = False
     if pointer_memory_materialized:
-        try:
-            refused_count = codegen._inertia_stack_lowering_rerun_refused_pointer_memory_8616
-        except AttributeError:
-            refused_count = 0
-        codegen._inertia_stack_lowering_rerun_refused_pointer_memory_8616 = int(refused_count or 0) + 1
-        return False
+        return "_inertia_stack_lowering_rerun_refused_pointer_memory_8616"
     if getattr(codegen, "_inertia_return_selector_materialized_8616", False):
-        codegen._inertia_stack_lowering_rerun_refused_selector_return_8616 = (
-            int(getattr(codegen, "_inertia_stack_lowering_rerun_refused_selector_return_8616", 0) or 0) + 1
-        )
-        return False
+        return "_inertia_stack_lowering_rerun_refused_selector_return_8616"
     if getattr(
         codegen, "_inertia_callsite_materialization_last_decision_8616", None
     ) is _calls.CallsiteMaterializationDecision8616.CACHE_HIT and not getattr(
         codegen, "_inertia_callsite_materialization_last_changed_8616", False
     ):
-        codegen._inertia_stack_lowering_rerun_refused_callsite_cache_hit_8616 = (
-            int(getattr(codegen, "_inertia_stack_lowering_rerun_refused_callsite_cache_hit_8616", 0) or 0) + 1
-        )
-        return False
+        return "_inertia_stack_lowering_rerun_refused_callsite_cache_hit_8616"
     if _callsite_materialization_left_no_stack_lowering_input_8616(codegen):
-        codegen._inertia_stack_lowering_rerun_skipped_callsite_no_input_8616 = (
-            int(getattr(codegen, "_inertia_stack_lowering_rerun_skipped_callsite_no_input_8616", 0) or 0) + 1
-        )
+        return "_inertia_stack_lowering_rerun_skipped_callsite_no_input_8616"
+    return None
+
+
+def _structured_ast_too_large_for_broad_rerun_8616(codegen: StructuredAstValue, max_nodes: int = 1200) -> bool:
+    """Return true when dynamic codegen AST state is too large for broad late reruns."""
+    cfunc = getattr(codegen, "cfunc", None)
+    root = getattr(cfunc, "statements", None) or getattr(cfunc, "body", None)
+    if root is None:
+        return False
+    visited = 0
+    for _node in _iter_c_nodes_deep_8616(root):
+        visited += 1
+        if visited > max_nodes:
+            codegen._inertia_stack_lowering_rerun_ast_node_count_8616 = visited
+            return True
+    codegen._inertia_stack_lowering_rerun_ast_node_count_8616 = visited
+    return False
+
+
+def _byte_offset_only_rerun_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue, counter_key: str
+) -> bool:
+    """Bump the byte-only counter and run only the SS byte-offset rewrite."""
+    setattr(codegen, counter_key, int(getattr(codegen, counter_key, 0) or 0) + 1)
+    from inertia_decompiler.cli_c_ast_rewrites import (
+        _rewrite_ss_stack_byte_offsets as _rewrite_stack_byte_offsets,
+    )
+
+    return require_result_type_8616(
+        _rewrite_stack_byte_offsets(project, codegen),
+        bool,
+        owner="cli_c_ast_rewrites._rewrite_ss_stack_byte_offsets",
+    )
+
+
+def _rerun_stack_lowering_consumers_after_calls_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
+    """Rerun bounded stack-lowering consumers through dynamic codegen compatibility state."""
+    refusal_key = _stack_lowering_rerun_refusal_kind_8616(codegen)
+    if refusal_key is not None:
+        setattr(codegen, refusal_key, int(getattr(codegen, refusal_key, 0) or 0) + 1)
         return False
     from inertia_decompiler.cli_c_ast_rewrites import (
         _canonicalize_stack_cvars as _rewrite_canonicalize_stack_cvars,
@@ -902,38 +939,13 @@ def _rerun_stack_lowering_consumers_after_calls_8616(project: StructuredAstValue
         _rewrite_ss_stack_byte_offsets as _rewrite_stack_byte_offsets,
     )
 
-    def _structured_ast_too_large_for_broad_rerun_8616(max_nodes: int = 1200) -> bool:
-        """Return true when dynamic codegen AST state is too large for broad late reruns."""
-        cfunc = getattr(codegen, "cfunc", None)
-        root = getattr(cfunc, "statements", None) or getattr(cfunc, "body", None)
-        if root is None:
-            return False
-        visited = 0
-        for _node in _iter_c_nodes_deep_8616(root):
-            visited += 1
-            if visited > max_nodes:
-                codegen._inertia_stack_lowering_rerun_ast_node_count_8616 = visited
-                return True
-        codegen._inertia_stack_lowering_rerun_ast_node_count_8616 = visited
-        return False
-
     if getattr(codegen, "_inertia_skip_per_pass_validation_large_function", False):
-        codegen._inertia_stack_lowering_large_function_byte_only_8616 = (
-            int(getattr(codegen, "_inertia_stack_lowering_large_function_byte_only_8616", 0) or 0) + 1
+        return _byte_offset_only_rerun_8616(
+            project, codegen, "_inertia_stack_lowering_large_function_byte_only_8616"
         )
-        return require_result_type_8616(
-            _rewrite_stack_byte_offsets(project, codegen),
-            bool,
-            owner="cli_c_ast_rewrites._rewrite_ss_stack_byte_offsets",
-        )
-    if _structured_ast_too_large_for_broad_rerun_8616():
-        codegen._inertia_stack_lowering_rerun_ast_large_byte_only_8616 = (
-            int(getattr(codegen, "_inertia_stack_lowering_rerun_ast_large_byte_only_8616", 0) or 0) + 1
-        )
-        return require_result_type_8616(
-            _rewrite_stack_byte_offsets(project, codegen),
-            bool,
-            owner="cli_c_ast_rewrites._rewrite_ss_stack_byte_offsets",
+    if _structured_ast_too_large_for_broad_rerun_8616(codegen):
+        return _byte_offset_only_rerun_8616(
+            project, codegen, "_inertia_stack_lowering_rerun_ast_large_byte_only_8616"
         )
 
     previous_budget_exists = hasattr(codegen, "_inertia_stack_lowering_canonicalize_max_depth_8616")
@@ -966,6 +978,7 @@ def _rerun_stack_lowering_consumers_after_calls_8616(project: StructuredAstValue
             codegen._inertia_stack_lowering_canonicalize_max_depth_8616 = previous_budget
         elif hasattr(codegen, "_inertia_stack_lowering_canonicalize_max_depth_8616"):
             delattr(codegen, "_inertia_stack_lowering_canonicalize_max_depth_8616")
+
 
 
 def _normalize_fact_backed_stack_accesses_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
@@ -1187,48 +1200,19 @@ def _clone_c_expr_8616(expr: StructuredAstValue) -> StructuredAstValue:
     return expr
 
 
-def _terminal_stack_arg_expr_8616(
-    project: StructuredAstValue, codegen: StructuredAstValue, disp: int, size: int
-) -> StructuredAstValue:
-    """Consume Lowering's stack views before legacy dynamic slot compatibility."""
+def _record_terminal_stack_arg_decision_8616(
+    codegen: StructuredAstValue, decision: StructuredAstValue
+) -> None:
+    if codegen is None:
+        return
+    history = _boundary_tuple_8616(getattr(codegen, "_inertia_terminal_stack_arg_decisions_8616", ()) or ())
+    codegen._inertia_terminal_stack_arg_decisions_8616 = (*history, decision.value)
 
-    def _record_stack_arg_decision(decision: _TerminalStackArgDecision8616) -> None:
-        if codegen is None:
-            return
-        history = _boundary_tuple_8616(getattr(codegen, "_inertia_terminal_stack_arg_decisions_8616", ()) or ())
-        codegen._inertia_terminal_stack_arg_decisions_8616 = (*history, decision.value)
 
-    if int(disp) <= 2:
-        _record_stack_arg_decision(_TerminalStackArgDecision8616.FALLBACK)
-        return _clone_c_expr_8616(_jcc._stack_slot_expr_8616(codegen, int(disp), int(size) or 2))
-
-    cfunc = getattr(codegen, "cfunc", None) if codegen is not None else None
-    if cfunc is None:
-        _record_stack_arg_decision(_TerminalStackArgDecision8616.FALLBACK)
-        return _clone_c_expr_8616(_jcc._stack_slot_expr_8616(codegen, int(disp), int(size) or 2))
-    assert codegen is not None
-    project_arch = getattr(project, "arch", None)
-
-    # ABI slot rounding does not change the width of a machine load.
-    width = int(size) or 2
-    canonical_disp = _canonical_stack_offset_8616(int(disp))
-    if canonical_disp is None:
-        _record_stack_arg_decision(_TerminalStackArgDecision8616.FALLBACK)
-        return _clone_c_expr_8616(_jcc._stack_slot_expr_8616(codegen, int(disp), width))
-
-    projection = project_stack_value_range_8616(codegen, canonical_disp, width)
-    if projection.status is StackValueProjectionStatus8616.CONTAINED_VALUE:
-        _record_stack_arg_decision(_TerminalStackArgDecision8616.EXISTING_STACK_SLOT)
-        return projection.expression
-    if projection.status not in {
-        StackValueProjectionStatus8616.NO_OWNER,
-        StackValueProjectionStatus8616.EXACT_VALUE,
-    }:
-        # A proven conflict or out-of-value access must not create competing storage.
-        return None
-
-    # Exact reads retain their existing interface identity and prototype binding.
-
+def _terminal_prototype_arg_map_8616(
+    project: StructuredAstValue, cfunc: StructuredAstValue, canonical_disp: int, width: int
+) -> tuple[StructuredAstValue, dict[int, tuple[StructuredAstValue, str | None]]]:
+    """Resolve the function prototype and map canonical_disp to (arg_type, name)."""
     prototype = getattr(cfunc, "functy", None) or getattr(cfunc, "prototype", None)
     if prototype is None:
         try:
@@ -1254,22 +1238,138 @@ def _terminal_stack_arg_expr_8616(
             if not isinstance(arg_width, int) or arg_width <= 0:
                 arg_width = max(2, width)
             arg_offset += max(2, arg_width)
-    prototype_arg_info = prototype_arg_map.get(canonical_disp)
+    return prototype, prototype_arg_map
 
-    def _apply_prototype_arg_identity(cvar: StructuredAstValue) -> None:
-        """Attach prototype identity through dynamic angr/codegen compatibility objects."""
-        if prototype_arg_info is None or not isinstance(cvar, CVariable):
-            return
-        arg_type, prototype_arg_name = prototype_arg_info
-        variable = getattr(cvar, "variable", None)
-        if not isinstance(variable, SimStackVariable):
-            return
-        if isinstance(prototype_arg_name, str) and prototype_arg_name:
-            variable.name = prototype_arg_name
-            with contextlib.suppress(Exception):
-                cast(Any, cvar).name = prototype_arg_name
-        if arg_type is not None:
-            cvar.variable_type = arg_type.with_arch(project_arch) if project_arch is not None else arg_type
+
+def _terminal_existing_stack_slot_expr_8616(
+    codegen: StructuredAstValue,
+    variables_in_use: StructuredAstValue,
+    canonical_disp: int,
+    prototype_arg_info: tuple[StructuredAstValue, str | None] | None,
+    project_arch: StructuredAstValue,
+) -> StructuredAstValue:
+    """Return an existing variables_in_use slot expression for canonical_disp."""
+    if not isinstance(variables_in_use, Mapping):
+        return None
+    for var, candidate in variables_in_use.items():
+        if (
+            isinstance(var, SimStackVariable)
+            and machine_bp_offset_for_stack_variable_8616(codegen, var) == canonical_disp
+            and candidate is not None
+        ):
+            _apply_prototype_arg_identity_8616(candidate, prototype_arg_info, project_arch)
+            _record_terminal_stack_arg_decision_8616(codegen, _TerminalStackArgDecision8616.EXISTING_STACK_SLOT)
+            return _clone_c_expr_8616(candidate)
+    return None
+
+
+def _apply_prototype_arg_identity_8616(
+    cvar: StructuredAstValue,
+    prototype_arg_info: tuple[StructuredAstValue, str | None] | None,
+    project_arch: StructuredAstValue,
+) -> None:
+    """Attach prototype identity through dynamic angr/codegen compatibility objects."""
+    if prototype_arg_info is None or not isinstance(cvar, CVariable):
+        return
+    arg_type, prototype_arg_name = prototype_arg_info
+    variable = getattr(cvar, "variable", None)
+    if not isinstance(variable, SimStackVariable):
+        return
+    if isinstance(prototype_arg_name, str) and prototype_arg_name:
+        variable.name = prototype_arg_name
+        with contextlib.suppress(Exception):
+            cast(Any, cvar).name = prototype_arg_name
+    if arg_type is not None:
+        cvar.variable_type = arg_type.with_arch(project_arch) if project_arch is not None else arg_type
+
+
+def _materialize_terminal_arg_from_prototype_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    cfunc: StructuredAstValue,
+    canonical_disp: int,
+    width: int,
+    prototype: StructuredAstValue,
+    prototype_arg_map: dict[int, tuple[StructuredAstValue, str | None]],
+    arg_list: list,
+    variables_in_use: StructuredAstValue,
+    project_arch: StructuredAstValue,
+) -> StructuredAstValue:
+    """Materialize a new CVariable arg from prototype evidence for canonical_disp."""
+    arg_type, prototype_arg_name = prototype_arg_map[canonical_disp]
+    arg_type = arg_type if arg_type is not None else SimTypeShort(False)
+    arg_type = arg_type.with_arch(project_arch) if project_arch is not None else arg_type
+    arg_name = prototype_arg_name or f"arg_{canonical_disp:x}"
+    variable = SimStackVariable(
+        canonical_disp,
+        width,
+        base="bp",
+        name=arg_name,
+        region=getattr(cfunc, "addr", None),
+    )
+    cvar = CVariable(variable, variable_type=arg_type, codegen=codegen)
+    arg_list.append(cvar)
+    arg_list.sort(
+        key=lambda item: _canonical_stack_offset_8616(getattr(getattr(item, "variable", None), "offset", 0) or 0)
+    )
+    cfunc.arg_list = arg_list
+    if isinstance(variables_in_use, dict):
+        variables_in_use[variable] = cvar
+    unified = getattr(cfunc, "unified_local_vars", None)
+    if isinstance(unified, dict):
+        unified[variable] = {(cvar, arg_type)}
+    return_type = (
+        getattr(prototype, "returnty", None) if isinstance(prototype, SimTypeFunction) else SimTypeShort(False)
+    )
+    arg_types = [getattr(arg, "variable_type", None) or SimTypeShort(False) for arg in arg_list]
+    arg_names = [
+        getattr(getattr(arg, "variable", None), "name", None) or f"arg_{index}"
+        for index, arg in enumerate(arg_list)
+    ]
+    with contextlib.suppress(Exception):
+        if project_arch is not None:
+            new_proto = SimTypeFunction(arg_types, return_type, arg_names=arg_names).with_arch(project_arch)
+            cfunc.functy = new_proto
+            cfunc.prototype = new_proto
+    codegen._inertia_missing_terminal_ax_return_stack_args_materialized_8616 = (
+        int(getattr(codegen, "_inertia_missing_terminal_ax_return_stack_args_materialized_8616", 0) or 0) + 1
+    )
+    return _clone_c_expr_8616(cvar)
+
+
+def _terminal_stack_arg_expr_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue, disp: int, size: int
+) -> StructuredAstValue:
+    """Consume Lowering's stack views before legacy dynamic slot compatibility."""
+    cfunc = getattr(codegen, "cfunc", None) if codegen is not None else None
+    if int(disp) <= 2 or cfunc is None:
+        _record_terminal_stack_arg_decision_8616(codegen, _TerminalStackArgDecision8616.FALLBACK)
+        return _clone_c_expr_8616(_jcc._stack_slot_expr_8616(codegen, int(disp), int(size) or 2))
+    assert codegen is not None
+    project_arch = getattr(project, "arch", None)
+
+    # ABI slot rounding does not change the width of a machine load.
+    width = int(size) or 2
+    canonical_disp = _canonical_stack_offset_8616(int(disp))
+    if canonical_disp is None:
+        _record_terminal_stack_arg_decision_8616(codegen, _TerminalStackArgDecision8616.FALLBACK)
+        return _clone_c_expr_8616(_jcc._stack_slot_expr_8616(codegen, int(disp), width))
+
+    projection = project_stack_value_range_8616(codegen, canonical_disp, width)
+    if projection.status is StackValueProjectionStatus8616.CONTAINED_VALUE:
+        _record_terminal_stack_arg_decision_8616(codegen, _TerminalStackArgDecision8616.EXISTING_STACK_SLOT)
+        return projection.expression
+    if projection.status not in {
+        StackValueProjectionStatus8616.NO_OWNER,
+        StackValueProjectionStatus8616.EXACT_VALUE,
+    }:
+        # A proven conflict or out-of-value access must not create competing storage.
+        return None
+
+    # Exact reads retain their existing interface identity and prototype binding.
+
+    prototype, prototype_arg_map = _terminal_prototype_arg_map_8616(project, cfunc, canonical_disp, width)
+    prototype_arg_info = prototype_arg_map.get(canonical_disp)
 
     arg_list = _boundary_list_8616(getattr(cfunc, "arg_list", ()) or ())
     for arg in arg_list:
@@ -1278,63 +1378,24 @@ def _terminal_stack_arg_expr_8616(
             isinstance(variable, SimStackVariable)
             and machine_bp_offset_for_stack_variable_8616(codegen, variable) == canonical_disp
         ):
-            _apply_prototype_arg_identity(arg)
-            _record_stack_arg_decision(_TerminalStackArgDecision8616.EXISTING_ARG)
+            _apply_prototype_arg_identity_8616(arg, prototype_arg_info, project_arch)
+            _record_terminal_stack_arg_decision_8616(codegen, _TerminalStackArgDecision8616.EXISTING_ARG)
             return _clone_c_expr_8616(arg)
 
     variables_in_use = getattr(cfunc, "variables_in_use", None)
-    if isinstance(variables_in_use, Mapping):
-        for var, candidate in variables_in_use.items():
-            if (
-                isinstance(var, SimStackVariable)
-                and machine_bp_offset_for_stack_variable_8616(codegen, var) == canonical_disp
-                and candidate is not None
-            ):
-                _apply_prototype_arg_identity(candidate)
-                _record_stack_arg_decision(_TerminalStackArgDecision8616.EXISTING_STACK_SLOT)
-                return _clone_c_expr_8616(candidate)
+    existing = _terminal_existing_stack_slot_expr_8616(
+        codegen, variables_in_use, canonical_disp, prototype_arg_info, project_arch
+    )
+    if existing is not None:
+        return existing
 
     if canonical_disp in prototype_arg_map:
-        arg_type, prototype_arg_name = prototype_arg_map[canonical_disp]
-        arg_type = arg_type if arg_type is not None else SimTypeShort(False)
-        arg_type = arg_type.with_arch(project_arch) if project_arch is not None else arg_type
-        arg_name = prototype_arg_name or f"arg_{canonical_disp:x}"
-        variable = SimStackVariable(
-            canonical_disp,
-            width,
-            base="bp",
-            name=arg_name,
-            region=getattr(cfunc, "addr", None),
+        result = _materialize_terminal_arg_from_prototype_8616(
+            project, codegen, cfunc, canonical_disp, width, prototype, prototype_arg_map,
+            arg_list, variables_in_use, project_arch,
         )
-        cvar = CVariable(variable, variable_type=arg_type, codegen=codegen)
-        arg_list.append(cvar)
-        arg_list.sort(
-            key=lambda item: _canonical_stack_offset_8616(getattr(getattr(item, "variable", None), "offset", 0) or 0)
-        )
-        cfunc.arg_list = arg_list
-        if isinstance(variables_in_use, dict):
-            variables_in_use[variable] = cvar
-        unified = getattr(cfunc, "unified_local_vars", None)
-        if isinstance(unified, dict):
-            unified[variable] = {(cvar, arg_type)}
-        return_type = (
-            getattr(prototype, "returnty", None) if isinstance(prototype, SimTypeFunction) else SimTypeShort(False)
-        )
-        arg_types = [getattr(arg, "variable_type", None) or SimTypeShort(False) for arg in arg_list]
-        arg_names = [
-            getattr(getattr(arg, "variable", None), "name", None) or f"arg_{index}"
-            for index, arg in enumerate(arg_list)
-        ]
-        with contextlib.suppress(Exception):
-            if project_arch is not None:
-                new_proto = SimTypeFunction(arg_types, return_type, arg_names=arg_names).with_arch(project_arch)
-                cfunc.functy = new_proto
-                cfunc.prototype = new_proto
-        codegen._inertia_missing_terminal_ax_return_stack_args_materialized_8616 = (
-            int(getattr(codegen, "_inertia_missing_terminal_ax_return_stack_args_materialized_8616", 0) or 0) + 1
-        )
-        _record_stack_arg_decision(_TerminalStackArgDecision8616.MATERIALIZED_ARG)
-        return _clone_c_expr_8616(cvar)
+        _record_terminal_stack_arg_decision_8616(codegen, _TerminalStackArgDecision8616.MATERIALIZED_ARG)
+        return result
 
     local_expr = materialize_stack_cvar_at_offset_from_facts_8616(
         codegen,
@@ -1343,11 +1404,12 @@ def _terminal_stack_arg_expr_8616(
         preferred_name=_stack_object_name(canonical_disp, codegen=codegen),
     )
     if local_expr is not None:
-        _record_stack_arg_decision(_TerminalStackArgDecision8616.MATERIALIZED_STACK_SLOT)
+        _record_terminal_stack_arg_decision_8616(codegen, _TerminalStackArgDecision8616.MATERIALIZED_STACK_SLOT)
         return _clone_c_expr_8616(local_expr)
 
-    _record_stack_arg_decision(_TerminalStackArgDecision8616.FALLBACK)
+    _record_terminal_stack_arg_decision_8616(codegen, _TerminalStackArgDecision8616.FALLBACK)
     return _clone_c_expr_8616(_jcc._stack_slot_expr_8616(codegen, canonical_disp, width))
+
 
 
 def _terminal_direct_global_expr_8616(
@@ -1556,6 +1618,24 @@ def _cod_instruction_address_delta_8616(
     return 0
 
 
+def _cod_entry_modrm_disp16_match_8616(cod_bytes: bytes, insn_bytes: bytes, prefix_len: int) -> bool:
+    """Match a COD entry whose modrm targets a disp16 field that may have been relocated."""
+    if prefix_len + 3 >= len(cod_bytes):
+        return False
+    modrm = cod_bytes[prefix_len + 1]
+    if insn_bytes[prefix_len + 1] != modrm:
+        return False
+    mod = (modrm >> 6) & 0x3
+    rm = modrm & 0x7
+    has_disp16 = mod == 2 or (mod == 0 and rm == 6)
+    if not has_disp16:
+        return False
+    return (
+        cod_bytes[: prefix_len + 2] == insn_bytes[: prefix_len + 2]
+        and cod_bytes[prefix_len + 4 :] == insn_bytes[prefix_len + 4 :]
+    )
+
+
 def _cod_entry_bytes_match_binary_insn_8616(cod_bytes: bytes, insn_bytes: bytes) -> bool:
     if not cod_bytes or len(cod_bytes) != len(insn_bytes):
         return False
@@ -1573,20 +1653,7 @@ def _cod_entry_bytes_match_binary_insn_8616(cod_bytes: bytes, insn_bytes: bytes)
         return False
     if opcode in {0xA0, 0xA1, 0xA2, 0xA3} and len(cod_bytes) == prefix_len + 3:
         return True
-    if prefix_len + 3 >= len(cod_bytes):
-        return False
-    modrm = cod_bytes[prefix_len + 1]
-    if insn_bytes[prefix_len + 1] != modrm:
-        return False
-    mod = (modrm >> 6) & 0x3
-    rm = modrm & 0x7
-    has_disp16 = mod == 2 or (mod == 0 and rm == 6)
-    if not has_disp16:
-        return False
-    return (
-        cod_bytes[: prefix_len + 2] == insn_bytes[: prefix_len + 2]
-        and cod_bytes[prefix_len + 4 :] == insn_bytes[prefix_len + 4 :]
-    )
+    return _cod_entry_modrm_disp16_match_8616(cod_bytes, insn_bytes, prefix_len)
 
 
 def _capstone_insn_address_8616(insn: StructuredAstValue) -> int | None:
@@ -1721,6 +1788,58 @@ def _branch_target_return_value_8616(project: StructuredAstValue, target_addr: i
     )
 
 
+def _scan_branch_target_return_block_8616(
+    block: StructuredAstValue, project: StructuredAstValue, codegen: StructuredAstValue
+) -> BranchTargetReturnBlockResult8616:
+    """Scan one lifted block for a provable return expression."""
+
+    def _combined_return_expr(
+        ax_value: StructuredAstValue | None, dx_value: StructuredAstValue | None
+    ) -> StructuredAstValue | None:
+        return _structuring_combine_dx_ax_return_expr_8616(
+            ax_value,
+            dx_value,
+            codegen,
+            _terminal_ax_stack_offset_8616,
+            lambda offset, size: _jcc._stack_slot_expr_8616(codegen, offset, size),
+        )
+
+    def _reg_imm(raw_imm: int) -> StructuredAstValue | None:
+        return CConstant(
+            _signed_i16_immediate_8616(raw_imm),
+            SimTypeShort(False),
+            codegen=codegen,
+        )
+
+    def _direct_global(offset: int, size: int) -> StructuredAstValue | None:
+        return _terminal_direct_global_expr_8616(project, codegen, offset, size)
+
+    def _ax_alu_imm(ax_value: StructuredAstValue, op: str, raw_imm: int) -> StructuredAstValue | None:
+        imm = CConstant(
+            _signed_i16_immediate_8616(raw_imm),
+            SimTypeShort(False),
+            codegen=codegen,
+        )
+        return CBinaryOp(op, ax_value, imm, codegen=codegen)
+
+    def _ax_incdec(ax_value: StructuredAstValue, op: str) -> StructuredAstValue | None:
+        one = CConstant(1, SimTypeShort(False), codegen=codegen)
+        return CBinaryOp(op, ax_value, one, codegen=codegen)
+
+    return _structuring_scan_branch_target_return_block_8616(
+        block,
+        BranchTargetReturnScanCallbacks8616(
+            branch_target_imm=_jcc._branch_target_imm_8616,
+            combine_return_expr=_combined_return_expr,
+            materialize_reg_imm=_reg_imm,
+            materialize_stack_load=lambda offset, size: _jcc._stack_slot_expr_8616(codegen, offset, size),
+            materialize_direct_global_load=_direct_global,
+            materialize_ax_alu_imm=_ax_alu_imm,
+            materialize_ax_incdec=_ax_incdec,
+        ),
+    )
+
+
 def _branch_target_return_expr_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
@@ -1731,73 +1850,17 @@ def _branch_target_return_expr_8616(
 ) -> StructuredAstValue | None:
     """Recover a branch-target return expression through legacy compatibility state."""
 
-    def _stack_offset(expr: StructuredAstValue) -> int | None:
-        """Read a stack offset from a dynamic codegen variable compatibility object."""
-        if not isinstance(expr, CVariable):
-            return None
-        variable = expr.variable
-        if not isinstance(variable, SimStackVariable):
-            return None
-        offset = variable.offset
-        return offset if isinstance(offset, int) else None
-
     def _load_block(block_addr: int) -> StructuredAstValue | None:
         return project.factory.block(block_addr, opt_level=0)
-
-    def _scan_block(block: StructuredAstValue) -> BranchTargetReturnBlockResult8616:
-        def _combined_return_expr(
-            ax_value: StructuredAstValue | None, dx_value: StructuredAstValue | None
-        ) -> StructuredAstValue | None:
-            return _structuring_combine_dx_ax_return_expr_8616(
-                ax_value,
-                dx_value,
-                codegen,
-                _stack_offset,
-                lambda offset, size: _jcc._stack_slot_expr_8616(codegen, offset, size),
-            )
-
-        def _reg_imm(raw_imm: int) -> StructuredAstValue | None:
-            return CConstant(
-                _signed_i16_immediate_8616(raw_imm),
-                SimTypeShort(False),
-                codegen=codegen,
-            )
-
-        def _direct_global(offset: int, size: int) -> StructuredAstValue | None:
-            return _terminal_direct_global_expr_8616(project, codegen, offset, size)
-
-        def _ax_alu_imm(ax_value: StructuredAstValue, op: str, raw_imm: int) -> StructuredAstValue | None:
-            imm = CConstant(
-                _signed_i16_immediate_8616(raw_imm),
-                SimTypeShort(False),
-                codegen=codegen,
-            )
-            return CBinaryOp(op, ax_value, imm, codegen=codegen)
-
-        def _ax_incdec(ax_value: StructuredAstValue, op: str) -> StructuredAstValue | None:
-            one = CConstant(1, SimTypeShort(False), codegen=codegen)
-            return CBinaryOp(op, ax_value, one, codegen=codegen)
-
-        return _structuring_scan_branch_target_return_block_8616(
-            block,
-            BranchTargetReturnScanCallbacks8616(
-                branch_target_imm=_jcc._branch_target_imm_8616,
-                combine_return_expr=_combined_return_expr,
-                materialize_reg_imm=_reg_imm,
-                materialize_stack_load=lambda offset, size: _jcc._stack_slot_expr_8616(codegen, offset, size),
-                materialize_direct_global_load=_direct_global,
-                materialize_ax_alu_imm=_ax_alu_imm,
-                materialize_ax_incdec=_ax_incdec,
-            ),
-        )
 
     return _structuring_branch_target_return_expr_8616(
         target_addr,
         _load_block,
-        _scan_block,
+        lambda block: _scan_branch_target_return_block_8616(block, project, codegen),
         _depth=_depth,
         _seen=_seen,
     )
+
 
 
 def _terminal_ax_stack_offset_8616(expr: StructuredAstValue) -> int | None:
@@ -2726,13 +2789,8 @@ def _selector_function_has_unsafe_effects_8616(
     )
 
 
-def _target_is_stack_probe_helper_8616(
-    project: StructuredAstValue, target_addr: int | None, name: str | None = None
-) -> bool:
-    if is_x86_16_stack_probe_name_8616(name):
-        return True
-    if not isinstance(target_addr, int):
-        return False
+def _stack_probe_candidate_addrs_8616(project: StructuredAstValue, target_addr: int) -> list[int]:
+    """Build the deduped target-address candidates including linear-delta rebases."""
     candidate_addrs = [int(target_addr)]
     delta = getattr(project, "_inertia_original_linear_delta", None)
     if isinstance(delta, int):
@@ -2744,6 +2802,17 @@ def _target_is_stack_probe_helper_8616(
     for addr in candidate_addrs:
         if addr not in deduped_addrs:
             deduped_addrs.append(addr)
+    return deduped_addrs
+
+
+def _target_is_stack_probe_helper_8616(
+    project: StructuredAstValue, target_addr: int | None, name: str | None = None
+) -> bool:
+    if is_x86_16_stack_probe_name_8616(name):
+        return True
+    if not isinstance(target_addr, int):
+        return False
+    deduped_addrs = _stack_probe_candidate_addrs_8616(project, target_addr)
     for candidate_project in (project, getattr(project, "_inertia_original_project", None)):
         if candidate_project is None:
             continue
@@ -2963,6 +3032,83 @@ def _resolve_one_hop_jmp_target_8616(project: StructuredAstValue, target: int | 
     )
 
 
+def _is_dynamic_c_node_8616(obj: StructuredAstValue) -> bool:
+    """Return True for angr structured-C nodes, identified through dynamic module state."""
+    return hasattr(obj, "__slots__") and obj.__class__.__module__.startswith("angr.analyses.decompiler")
+
+
+_CLONE_NOT_CONTAINER_8616 = object()
+
+
+def _clone_c_container_8616(
+    obj: StructuredAstValue, memo: dict[int, StructuredAstValue], *, preserve_cvariables: bool
+) -> StructuredAstValue:
+    """Clone builtin containers elementwise; returns the sentinel for non-containers."""
+    if isinstance(obj, list):
+        return [_clone_c_tree_8616(item, memo, preserve_cvariables=preserve_cvariables) for item in obj]
+    if isinstance(obj, tuple):
+        return tuple(_clone_c_tree_8616(item, memo, preserve_cvariables=preserve_cvariables) for item in obj)
+    if isinstance(obj, dict):
+        return {
+            _clone_c_tree_8616(key, memo, preserve_cvariables=preserve_cvariables): _clone_c_tree_8616(
+                item, memo, preserve_cvariables=preserve_cvariables
+            )
+            for key, item in obj.items()
+        }
+    return _CLONE_NOT_CONTAINER_8616
+
+
+def _clone_c_slots_into_8616(
+    obj: StructuredAstValue,
+    cloned: StructuredAstValue,
+    memo: dict[int, StructuredAstValue],
+    *,
+    preserve_cvariables: bool,
+) -> None:
+    """Clone each __slots__ attribute of obj into cloned."""
+    slot_names: list[str] = []
+    for cls in type(obj).__mro__:
+        slots = getattr(cls, "__slots__", ())
+        if isinstance(slots, str):
+            slots = (slots,)
+        slot_names.extend(str(slot) for slot in slots)
+    for attr in dict.fromkeys(slot_names):
+        if attr == "codegen" or not hasattr(obj, attr):
+            continue
+        try:
+            child = getattr(obj, attr)
+        except Exception:
+            continue
+        cloned_child = _clone_c_tree_8616(child, memo, preserve_cvariables=preserve_cvariables)
+        if cloned_child is not child:
+            with contextlib.suppress(Exception):
+                setattr(cloned, attr, cloned_child)
+
+
+def _clone_c_tree_8616(
+    obj: StructuredAstValue, memo: dict[int, StructuredAstValue], *, preserve_cvariables: bool
+) -> StructuredAstValue:
+    """Deep-clone a structured C node tree, memoizing shared subobjects."""
+    if obj is None:
+        return None
+    if preserve_cvariables and isinstance(obj, CVariable):
+        return obj
+    if isinstance(obj, (str, bytes, int, float, bool)):
+        return obj
+    container = _clone_c_container_8616(obj, memo, preserve_cvariables=preserve_cvariables)
+    if container is not _CLONE_NOT_CONTAINER_8616:
+        return container
+    if not _is_dynamic_c_node_8616(obj):
+        return obj
+    obj_id = id(obj)
+    if obj_id in memo:
+        return memo[obj_id]
+    cloned = copy.copy(obj)
+    memo[obj_id] = cloned
+    _clone_c_slots_into_8616(obj, cloned, memo, preserve_cvariables=preserve_cvariables)
+    return cloned
+
+
 def _clone_c_value_for_codegen_tree_8616(value: StructuredAstValue) -> StructuredAstValue:
     """Clone a structured C node before inserting it into a new C tree.
 
@@ -2971,98 +3117,13 @@ def _clone_c_value_for_codegen_tree_8616(value: StructuredAstValue) -> Structure
     expressions in several branches, so clone on insertion to keep the final
     C AST acyclic and deterministic.
     """
-
-    def _is_c_node(obj: StructuredAstValue) -> bool:
-        return hasattr(obj, "__slots__") and obj.__class__.__module__.startswith("angr.analyses.decompiler")
-
-    def _clone(obj: StructuredAstValue, memo: dict[int, StructuredAstValue]) -> StructuredAstValue:
-        if obj is None:
-            return None
-        if isinstance(obj, (str, bytes, int, float, bool)):
-            return obj
-        if isinstance(obj, list):
-            return [_clone(item, memo) for item in obj]
-        if isinstance(obj, tuple):
-            return tuple(_clone(item, memo) for item in obj)
-        if isinstance(obj, dict):
-            return {_clone(key, memo): _clone(item, memo) for key, item in obj.items()}
-        if not _is_c_node(obj):
-            return obj
-        obj_id = id(obj)
-        if obj_id in memo:
-            return memo[obj_id]
-        cloned = copy.copy(obj)
-        memo[obj_id] = cloned
-        slot_names: list[str] = []
-        for cls in type(obj).__mro__:
-            slots = getattr(cls, "__slots__", ())
-            if isinstance(slots, str):
-                slots = (slots,)
-            slot_names.extend(str(slot) for slot in slots)
-        for attr in dict.fromkeys(slot_names):
-            if attr == "codegen" or not hasattr(obj, attr):
-                continue
-            try:
-                child = getattr(obj, attr)
-            except Exception:
-                continue
-            cloned_child = _clone(child, memo)
-            if cloned_child is not child:
-                try:
-                    setattr(cloned, attr, cloned_child)
-                except Exception:
-                    continue
-        return cloned
-
-    return _clone(value, {})
+    return _clone_c_tree_8616(value, {}, preserve_cvariables=False)
 
 
 def _clone_c_value_preserving_cvariables_8616(value: StructuredAstValue) -> StructuredAstValue:
     """Clone expression structure while preserving canonical CVariable leaves."""
+    return _clone_c_tree_8616(value, {}, preserve_cvariables=True)
 
-    def _is_c_node(obj: StructuredAstValue) -> bool:
-        return hasattr(obj, "__slots__") and obj.__class__.__module__.startswith("angr.analyses.decompiler")
-
-    def _clone(obj: StructuredAstValue, memo: dict[int, StructuredAstValue]) -> StructuredAstValue:
-        if obj is None:
-            return None
-        if isinstance(obj, CVariable):
-            return obj
-        if isinstance(obj, (str, bytes, int, float, bool)):
-            return obj
-        if isinstance(obj, list):
-            return [_clone(item, memo) for item in obj]
-        if isinstance(obj, tuple):
-            return tuple(_clone(item, memo) for item in obj)
-        if isinstance(obj, dict):
-            return {_clone(key, memo): _clone(item, memo) for key, item in obj.items()}
-        if not _is_c_node(obj):
-            return obj
-        obj_id = id(obj)
-        if obj_id in memo:
-            return memo[obj_id]
-        cloned = copy.copy(obj)
-        memo[obj_id] = cloned
-        slot_names: list[str] = []
-        for cls in type(obj).__mro__:
-            slots = getattr(cls, "__slots__", ())
-            if isinstance(slots, str):
-                slots = (slots,)
-            slot_names.extend(str(slot) for slot in slots)
-        for attr in dict.fromkeys(slot_names):
-            if attr == "codegen" or not hasattr(obj, attr):
-                continue
-            try:
-                child = getattr(obj, attr)
-            except Exception:
-                continue
-            cloned_child = _clone(child, memo)
-            if cloned_child is not child:
-                with contextlib.suppress(Exception):
-                    setattr(cloned, attr, cloned_child)
-        return cloned
-
-    return _clone(value, {})
 
 
 def _materialize_decrement_switch_return_chain_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
@@ -3203,6 +3264,290 @@ def _global_cvar_8616(
     )
 
 
+@dataclass
+class _GlobalByteSumMatch8616:
+    """Matched instruction-window evidence for the global byte sum loop."""
+
+    word_global: tuple
+    total_disp: int
+    i_disp: int
+    limit: int
+    exit_addr: int
+    mov_global: StructuredAstValue
+    mov_al: StructuredAstValue
+    byte_global: tuple
+
+
+def _global_byte_sum_fail_8616(stats: dict) -> None:
+    stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
+
+
+def _global_byte_sum_init_window_8616(
+    insns: tuple[StructuredAstValue, ...], init_idx: int
+) -> tuple[tuple, int, int] | None:
+    """Match the three-instruction init window; returns (word_global, total_disp, i_disp)."""
+    mov_global = insns[init_idx]
+    if str(getattr(mov_global, "mnemonic", "")).lower() != "mov":
+        return None
+    mov_global_ops = _boundary_tuple_8616(getattr(mov_global, "operands", ()) or ())
+    if len(mov_global_ops) != 2 or _reg_name_from_operand_8616(mov_global, mov_global_ops[0]) != "ax":
+        return None
+    word_global = _absolute_mem_disp_size_8616(mov_global_ops[1])
+    if word_global is None or int(word_global[1]) != 2:
+        return None
+
+    mov_total = insns[init_idx + 1]
+    if str(getattr(mov_total, "mnemonic", "")).lower() != "mov":
+        return None
+    mov_total_ops = _boundary_tuple_8616(getattr(mov_total, "operands", ()) or ())
+    if len(mov_total_ops) != 2 or _reg_name_from_operand_8616(mov_total, mov_total_ops[1]) != "ax":
+        return None
+    total_slot = _stack_mem_disp_size_8616(mov_total, mov_total_ops[0])
+    if total_slot is None or int(total_slot[0]) >= 0:
+        return None
+
+    mov_i_zero = insns[init_idx + 2]
+    i_disp = _match_stack_zero_init_8616(mov_i_zero)
+    if i_disp is None or int(i_disp) >= 0 or int(i_disp) == int(total_slot[0]):
+        return None
+    return word_global, int(total_slot[0]), int(i_disp), mov_global
+
+
+def _global_byte_sum_loop_match_8616(
+    project: StructuredAstValue,
+    insns: tuple[StructuredAstValue, ...],
+    index_by_addr: dict[int, int],
+    init_idx: int,
+    stats: dict,
+) -> _GlobalByteSumMatch8616 | None:
+    """Match the mov/cmp/jl/body instruction window for the byte sum loop."""
+    window = _global_byte_sum_init_window_8616(insns, init_idx)
+    if window is None:
+        return None
+    word_global, total_disp0, i_disp, mov_global = window
+    total_slot = (total_disp0,)
+    stats["raw_fact_count"] = int(stats.get("raw_fact_count", 0) or 0) + 1
+
+    jmp_to_cmp = insns[init_idx + 3]
+    if str(getattr(jmp_to_cmp, "mnemonic", "")).lower() not in {"jmp", "ljmp"}:
+        _global_byte_sum_fail_8616(stats)
+        return None
+    cmp_addr = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(jmp_to_cmp))
+    cmp_idx = index_by_addr.get(int(cmp_addr)) if cmp_addr is not None else None
+    if cmp_idx is None or cmp_idx + 2 >= len(insns):
+        _global_byte_sum_fail_8616(stats)
+        return None
+
+    inc_idx = init_idx + 4
+    if not _match_stack_inc_8616(insns[inc_idx], int(i_disp)):
+        _global_byte_sum_fail_8616(stats)
+        return None
+    cmp_i = insns[cmp_idx]
+    cmp_ops = _boundary_tuple_8616(getattr(cmp_i, "operands", ()) or ())
+    cmp_slot = _stack_mem_disp_size_8616(cmp_i, cmp_ops[0]) if len(cmp_ops) == 2 else None
+    limit = _imm_from_operand_8616(cmp_ops[1]) if len(cmp_ops) == 2 else None
+    if (
+        str(getattr(cmp_i, "mnemonic", "")).lower() != "cmp"
+        or cmp_slot is None
+        or int(cmp_slot[0]) != int(i_disp)
+        or limit is None
+    ):
+        _global_byte_sum_fail_8616(stats)
+        return None
+    jl = insns[cmp_idx + 1]
+    if str(getattr(jl, "mnemonic", "")).lower() not in {"jl", "jnge"}:
+        _global_byte_sum_fail_8616(stats)
+        return None
+    body_addr = _jcc._branch_target_imm_8616(jl)
+    exit_addr = _resolve_one_hop_jmp_target_8616(project, _next_linear_jmp_target_8616(insns, cmp_idx + 1))
+    body_idx = index_by_addr.get(int(body_addr)) if body_addr is not None else None
+    if body_idx is None or body_idx + 4 >= len(insns) or exit_addr is None:
+        _global_byte_sum_fail_8616(stats)
+        return None
+
+    body = _global_byte_sum_body_match_8616(project, insns, body_idx, inc_idx, i_disp, total_slot, stats)
+    if body is None:
+        return None
+    mov_al, byte_global = body
+    return _GlobalByteSumMatch8616(
+        word_global=word_global,
+        total_disp=int(total_slot[0]),
+        i_disp=int(i_disp),
+        limit=int(limit),
+        exit_addr=int(exit_addr),
+        mov_global=mov_global,
+        mov_al=mov_al,
+        byte_global=byte_global,
+    )
+
+
+def _global_byte_sum_body_match_8616(
+    project: StructuredAstValue,
+    insns: tuple[StructuredAstValue, ...],
+    body_idx: int,
+    inc_idx: int,
+    i_disp: int,
+    total_slot: tuple,
+    stats: dict,
+) -> tuple[StructuredAstValue, tuple] | None:
+    """Match the five-instruction accumulation body; returns (mov_al, byte_global)."""
+    mov_bx = insns[body_idx]
+    mov_bx_ops = _boundary_tuple_8616(getattr(mov_bx, "operands", ()) or ())
+    if (
+        str(getattr(mov_bx, "mnemonic", "")).lower() != "mov"
+        or len(mov_bx_ops) != 2
+        or _reg_name_from_operand_8616(mov_bx, mov_bx_ops[0]) != "bx"
+    ):
+        _global_byte_sum_fail_8616(stats)
+        return None
+    bx_slot = _stack_mem_disp_size_8616(mov_bx, mov_bx_ops[1])
+    if bx_slot is None or int(bx_slot[0]) != int(i_disp):
+        _global_byte_sum_fail_8616(stats)
+        return None
+
+    mov_al = insns[body_idx + 1]
+    mov_al_ops = _boundary_tuple_8616(getattr(mov_al, "operands", ()) or ())
+    if (
+        str(getattr(mov_al, "mnemonic", "")).lower() != "mov"
+        or len(mov_al_ops) != 2
+        or _reg_name_from_operand_8616(mov_al, mov_al_ops[0]) != "al"
+    ):
+        _global_byte_sum_fail_8616(stats)
+        return None
+    byte_global = _indexed_mem_disp_size_8616(mov_al, mov_al_ops[1], base_reg="bx")
+    if byte_global is None or int(byte_global[1]) != 1:
+        _global_byte_sum_fail_8616(stats)
+        return None
+
+    clear_ah = insns[body_idx + 2]
+    clear_ops = _boundary_tuple_8616(getattr(clear_ah, "operands", ()) or ())
+    if (
+        str(getattr(clear_ah, "mnemonic", "")).lower() not in {"sub", "xor"}
+        or len(clear_ops) != 2
+        or _reg_name_from_operand_8616(clear_ah, clear_ops[0]) != "ah"
+        or _reg_name_from_operand_8616(clear_ah, clear_ops[1]) != "ah"
+    ):
+        _global_byte_sum_fail_8616(stats)
+        return None
+
+    add_total = insns[body_idx + 3]
+    add_ops = _boundary_tuple_8616(getattr(add_total, "operands", ()) or ())
+    add_slot = _stack_mem_disp_size_8616(add_total, add_ops[0]) if len(add_ops) == 2 else None
+    if (
+        str(getattr(add_total, "mnemonic", "")).lower() != "add"
+        or add_slot is None
+        or int(add_slot[0]) != int(total_slot[0])
+        or _reg_name_from_operand_8616(add_total, add_ops[1]) != "ax"
+    ):
+        _global_byte_sum_fail_8616(stats)
+        return None
+
+    back_jmp = insns[body_idx + 4]
+    back_target = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(back_jmp))
+    if str(getattr(back_jmp, "mnemonic", "")).lower() not in {"jmp", "ljmp"} or int(back_target or -1) != int(
+        getattr(insns[inc_idx], "address", -1)
+    ):
+        _global_byte_sum_fail_8616(stats)
+        return None
+    return mov_al, byte_global
+
+
+def _emit_global_byte_sum_loop_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    match: _GlobalByteSumMatch8616,
+    total_expr: StructuredAstValue,
+    i_expr: StructuredAstValue,
+    cod_direct_refs: dict,
+    cod_indexed_refs: dict,
+) -> None:
+    """Emit the recovered global byte sum for-loop into the function body."""
+    word_addr = int(match.word_global[0]) & 0xFFFF
+    byte_addr = int(match.byte_global[0]) & 0xFFFF
+    word_ref = _cod_global_name_ref_for_insn_8616(cod_direct_refs, match.mov_global)
+    byte_ref = _cod_global_name_ref_for_insn_8616(cod_indexed_refs, match.mov_al)
+    counter_name = (
+        word_ref.name if word_ref is not None and int(word_ref.width) == 2 else f"global_word_{word_addr:04x}"
+    )
+    table_name = (
+        byte_ref.name if byte_ref is not None and int(byte_ref.width) == 1 else f"global_u8_{byte_addr:04x}"
+    )
+    counter_base_addr = (word_addr - int(word_ref.relative_disp)) & 0xFFFF if word_ref is not None else word_addr
+    table_base_addr = (byte_addr - int(byte_ref.relative_disp)) & 0xFFFF if byte_ref is not None else byte_addr
+    counter_expr = _global_cvar_8616(
+        project, codegen, addr=counter_base_addr, size=2, name=counter_name, signed=True
+    )
+    table_expr = _global_cvar_8616(project, codegen, addr=table_base_addr, size=1, name=table_name, signed=False)
+    indexed_byte = CIndexedVariable(
+        table_expr,
+        i_expr,
+        variable_type=_bind_type_to_project_arch_8616(project, SimTypeChar(False)),
+        codegen=codegen,
+    )
+    init_total = CAssignment(
+        total_expr,
+        counter_expr,
+        codegen=codegen,
+    )
+    init_i = CAssignment(
+        i_expr,
+        CConstant(0, SimTypeShort(True), codegen=codegen),
+        codegen=codegen,
+    )
+    condition = CBinaryOp(
+        "CmpLT",
+        i_expr,
+        CConstant(int(match.limit), SimTypeShort(True), codegen=codegen),
+        codegen=codegen,
+    )
+    iterator = _inc_assignment_8616(i_expr, codegen)
+    body = CStatements(
+        statements=[
+            CAssignment(
+                total_expr,
+                CBinaryOp(
+                    "Add",
+                    total_expr,
+                    indexed_byte,
+                    codegen=codegen,
+                ),
+                codegen=codegen,
+            )
+        ],
+        codegen=codegen,
+    )
+    codegen.cfunc.statements = CStatements(
+        statements=[
+            init_total,
+            CForLoop(init_i, condition, iterator, body, codegen=codegen),
+            CReturn(total_expr, codegen=codegen),
+        ],
+        codegen=codegen,
+    )
+    codegen._inertia_global_byte_sum_loop_materialized_8616 = True
+    codegen._inertia_global_byte_sum_loop_evidence_8616 = {
+        "total_disp": int(match.total_disp),
+        "index_disp": int(match.i_disp),
+        "word_global": int(match.word_global[0]),
+        "byte_global": int(match.byte_global[0]),
+        "limit": int(match.limit),
+        "counter_name": counter_name,
+        "table_name": table_name,
+    }
+    record_global_declaration_spec_8616(
+        codegen,
+        ctype="short",
+        name=counter_name,
+        array_len=None,
+    )
+    record_global_declaration_spec_8616(
+        codegen,
+        ctype="unsigned char",
+        name=table_name,
+        array_len=int(match.limit),
+    )
+
+
 def _materialize_global_byte_index_sum_loop_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
     """Recover a word accumulator loop through dynamic angr/codegen compatibility objects.
 
@@ -3249,232 +3594,32 @@ def _materialize_global_byte_index_sum_loop_8616(project: StructuredAstValue, co
         codegen._inertia_global_byte_sum_loop_stats_8616 = stats
 
     for init_idx in range(len(insns) - 8):
-        mov_global = insns[init_idx]
-        if str(getattr(mov_global, "mnemonic", "")).lower() != "mov":
-            continue
-        mov_global_ops = _boundary_tuple_8616(getattr(mov_global, "operands", ()) or ())
-        if len(mov_global_ops) != 2 or _reg_name_from_operand_8616(mov_global, mov_global_ops[0]) != "ax":
-            continue
-        word_global = _absolute_mem_disp_size_8616(mov_global_ops[1])
-        if word_global is None or int(word_global[1]) != 2:
+        match = _global_byte_sum_loop_match_8616(project, insns, index_by_addr, init_idx, stats)
+        if match is None:
             continue
 
-        mov_total = insns[init_idx + 1]
-        if str(getattr(mov_total, "mnemonic", "")).lower() != "mov":
-            continue
-        mov_total_ops = _boundary_tuple_8616(getattr(mov_total, "operands", ()) or ())
-        if len(mov_total_ops) != 2 or _reg_name_from_operand_8616(mov_total, mov_total_ops[1]) != "ax":
-            continue
-        total_slot = _stack_mem_disp_size_8616(mov_total, mov_total_ops[0])
-        if total_slot is None or int(total_slot[0]) >= 0:
-            continue
-
-        mov_i_zero = insns[init_idx + 2]
-        i_disp = _match_stack_zero_init_8616(mov_i_zero)
-        if i_disp is None or int(i_disp) >= 0 or int(i_disp) == int(total_slot[0]):
-            continue
-        stats["raw_fact_count"] = int(stats.get("raw_fact_count", 0) or 0) + 1
-
-        jmp_to_cmp = insns[init_idx + 3]
-        if str(getattr(jmp_to_cmp, "mnemonic", "")).lower() not in {"jmp", "ljmp"}:
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-        cmp_addr = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(jmp_to_cmp))
-        cmp_idx = index_by_addr.get(int(cmp_addr)) if cmp_addr is not None else None
-        if cmp_idx is None or cmp_idx + 2 >= len(insns):
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-
-        inc_idx = init_idx + 4
-        if not _match_stack_inc_8616(insns[inc_idx], int(i_disp)):
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-        cmp_i = insns[cmp_idx]
-        cmp_ops = _boundary_tuple_8616(getattr(cmp_i, "operands", ()) or ())
-        cmp_slot = _stack_mem_disp_size_8616(cmp_i, cmp_ops[0]) if len(cmp_ops) == 2 else None
-        limit = _imm_from_operand_8616(cmp_ops[1]) if len(cmp_ops) == 2 else None
-        if (
-            str(getattr(cmp_i, "mnemonic", "")).lower() != "cmp"
-            or cmp_slot is None
-            or int(cmp_slot[0]) != int(i_disp)
-            or limit is None
-        ):
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-        jl = insns[cmp_idx + 1]
-        if str(getattr(jl, "mnemonic", "")).lower() not in {"jl", "jnge"}:
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-        body_addr = _jcc._branch_target_imm_8616(jl)
-        exit_addr = _resolve_one_hop_jmp_target_8616(project, _next_linear_jmp_target_8616(insns, cmp_idx + 1))
-        body_idx = index_by_addr.get(int(body_addr)) if body_addr is not None else None
-        if body_idx is None or body_idx + 4 >= len(insns) or exit_addr is None:
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-
-        mov_bx = insns[body_idx]
-        mov_bx_ops = _boundary_tuple_8616(getattr(mov_bx, "operands", ()) or ())
-        if (
-            str(getattr(mov_bx, "mnemonic", "")).lower() != "mov"
-            or len(mov_bx_ops) != 2
-            or _reg_name_from_operand_8616(mov_bx, mov_bx_ops[0]) != "bx"
-        ):
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-        bx_slot = _stack_mem_disp_size_8616(mov_bx, mov_bx_ops[1])
-        if bx_slot is None or int(bx_slot[0]) != int(i_disp):
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-
-        mov_al = insns[body_idx + 1]
-        mov_al_ops = _boundary_tuple_8616(getattr(mov_al, "operands", ()) or ())
-        if (
-            str(getattr(mov_al, "mnemonic", "")).lower() != "mov"
-            or len(mov_al_ops) != 2
-            or _reg_name_from_operand_8616(mov_al, mov_al_ops[0]) != "al"
-        ):
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-        byte_global = _indexed_mem_disp_size_8616(mov_al, mov_al_ops[1], base_reg="bx")
-        if byte_global is None or int(byte_global[1]) != 1:
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-
-        clear_ah = insns[body_idx + 2]
-        clear_ops = _boundary_tuple_8616(getattr(clear_ah, "operands", ()) or ())
-        if (
-            str(getattr(clear_ah, "mnemonic", "")).lower() not in {"sub", "xor"}
-            or len(clear_ops) != 2
-            or _reg_name_from_operand_8616(clear_ah, clear_ops[0]) != "ah"
-            or _reg_name_from_operand_8616(clear_ah, clear_ops[1]) != "ah"
-        ):
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-
-        add_total = insns[body_idx + 3]
-        add_ops = _boundary_tuple_8616(getattr(add_total, "operands", ()) or ())
-        add_slot = _stack_mem_disp_size_8616(add_total, add_ops[0]) if len(add_ops) == 2 else None
-        if (
-            str(getattr(add_total, "mnemonic", "")).lower() != "add"
-            or add_slot is None
-            or int(add_slot[0]) != int(total_slot[0])
-            or _reg_name_from_operand_8616(add_total, add_ops[1]) != "ax"
-        ):
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-
-        back_jmp = insns[body_idx + 4]
-        back_target = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(back_jmp))
-        if str(getattr(back_jmp, "mnemonic", "")).lower() not in {"jmp", "ljmp"} or int(back_target or -1) != int(
-            getattr(insns[inc_idx], "address", -1)
-        ):
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
-            continue
-
-        exit_expr = _branch_target_return_expr_8616(project, codegen, int(exit_addr))
-        total_expr = _named_stack_expr_from_evidence_8616(project, codegen, int(total_slot[0]), 2)
-        i_expr = _named_stack_expr_from_evidence_8616(project, codegen, int(i_disp), 2)
+        exit_expr = _branch_target_return_expr_8616(project, codegen, int(match.exit_addr))
+        total_expr = _named_stack_expr_from_evidence_8616(project, codegen, int(match.total_disp), 2)
+        i_expr = _named_stack_expr_from_evidence_8616(project, codegen, int(match.i_disp), 2)
         if exit_expr is None or total_expr is None or i_expr is None:
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
+            _global_byte_sum_fail_8616(stats)
             continue
         if _expr_fingerprint(exit_expr, project) != _expr_fingerprint(total_expr, project):
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
+            _global_byte_sum_fail_8616(stats)
             continue
 
         if storage_reconstruction_has_unconsumed_effects_8616(codegen.cfunc.statements, (total_expr, i_expr)):
             # Optional reconstruction cannot consume unrelated effects; keep the native body.
-            stats["failure_count"] = int(stats.get("failure_count", 0) or 0) + 1
+            _global_byte_sum_fail_8616(stats)
             continue
 
         stats["classified_fact_count"] = int(stats.get("classified_fact_count", 0) or 0) + 1
-        word_addr = int(word_global[0]) & 0xFFFF
-        byte_addr = int(byte_global[0]) & 0xFFFF
-        word_ref = _cod_global_name_ref_for_insn_8616(cod_direct_refs, mov_global)
-        byte_ref = _cod_global_name_ref_for_insn_8616(cod_indexed_refs, mov_al)
-        counter_name = (
-            word_ref.name if word_ref is not None and int(word_ref.width) == 2 else f"global_word_{word_addr:04x}"
-        )
-        table_name = (
-            byte_ref.name if byte_ref is not None and int(byte_ref.width) == 1 else f"global_u8_{byte_addr:04x}"
-        )
-        counter_base_addr = (word_addr - int(word_ref.relative_disp)) & 0xFFFF if word_ref is not None else word_addr
-        table_base_addr = (byte_addr - int(byte_ref.relative_disp)) & 0xFFFF if byte_ref is not None else byte_addr
-        counter_expr = _global_cvar_8616(
-            project, codegen, addr=counter_base_addr, size=2, name=counter_name, signed=True
-        )
-        table_expr = _global_cvar_8616(project, codegen, addr=table_base_addr, size=1, name=table_name, signed=False)
-        indexed_byte = CIndexedVariable(
-            table_expr,
-            i_expr,
-            variable_type=_bind_type_to_project_arch_8616(project, SimTypeChar(False)),
-            codegen=codegen,
-        )
-        init_total = CAssignment(
-            total_expr,
-            counter_expr,
-            codegen=codegen,
-        )
-        init_i = CAssignment(
-            i_expr,
-            CConstant(0, SimTypeShort(True), codegen=codegen),
-            codegen=codegen,
-        )
-        condition = CBinaryOp(
-            "CmpLT",
-            i_expr,
-            CConstant(int(limit), SimTypeShort(True), codegen=codegen),
-            codegen=codegen,
-        )
-        iterator = _inc_assignment_8616(i_expr, codegen)
-        body = CStatements(
-            statements=[
-                CAssignment(
-                    total_expr,
-                    CBinaryOp(
-                        "Add",
-                        total_expr,
-                        indexed_byte,
-                        codegen=codegen,
-                    ),
-                    codegen=codegen,
-                )
-            ],
-            codegen=codegen,
-        )
-        codegen.cfunc.statements = CStatements(
-            statements=[
-                init_total,
-                CForLoop(init_i, condition, iterator, body, codegen=codegen),
-                CReturn(total_expr, codegen=codegen),
-            ],
-            codegen=codegen,
-        )
-        codegen._inertia_global_byte_sum_loop_materialized_8616 = True
-        codegen._inertia_global_byte_sum_loop_evidence_8616 = {
-            "total_disp": int(total_slot[0]),
-            "index_disp": int(i_disp),
-            "word_global": int(word_global[0]),
-            "byte_global": int(byte_global[0]),
-            "limit": int(limit),
-            "counter_name": counter_name,
-            "table_name": table_name,
-        }
-        record_global_declaration_spec_8616(
-            codegen,
-            ctype="short",
-            name=counter_name,
-            array_len=None,
-        )
-        record_global_declaration_spec_8616(
-            codegen,
-            ctype="unsigned char",
-            name=table_name,
-            array_len=int(limit),
+        _emit_global_byte_sum_loop_8616(
+            project, codegen, match, total_expr, i_expr, cod_direct_refs, cod_indexed_refs
         )
         stats["materialized_count"] = int(stats.get("materialized_count", 0) or 0) + 1
         return True
     return False
-
 
 
 
@@ -3694,32 +3839,36 @@ def _fallback_stack_arg_name_8616(disp: int) -> str:
     )
 
 
-def _iter_stack_cvars_for_cfunc_8616(cfunc: StructuredAstValue) -> StructuredAstValue:
-    yielded: set[int] = set()
-    for expr in _boundary_tuple_8616(getattr(cfunc, "arg_list", ()) or ()):
+def _yield_unseen_cvars_8616(exprs: StructuredAstValue, yielded: set[int]) -> StructuredAstValue:
+    """Yield each CVariable once across all cfunc surfaces."""
+    for expr in exprs:
         if isinstance(expr, CVariable) and id(expr) not in yielded:
             yielded.add(id(expr))
             yield expr
+
+
+def _iter_stack_cvars_for_cfunc_8616(cfunc: StructuredAstValue) -> StructuredAstValue:
+    yielded: set[int] = set()
+    yield from _yield_unseen_cvars_8616(
+        _boundary_tuple_8616(getattr(cfunc, "arg_list", ()) or ()), yielded
+    )
     variables_in_use = getattr(cfunc, "variables_in_use", None)
     if isinstance(variables_in_use, dict):
-        for expr in variables_in_use.values():
-            if isinstance(expr, CVariable) and id(expr) not in yielded:
-                yielded.add(id(expr))
-                yield expr
+        yield from _yield_unseen_cvars_8616(variables_in_use.values(), yielded)
     unified = getattr(cfunc, "unified_local_vars", None)
     if isinstance(unified, dict):
-        for entries in unified.values():
-            for item in entries or ():
-                expr = item[0] if isinstance(item, tuple) and item else None
-                if isinstance(expr, CVariable) and id(expr) not in yielded:
-                    yielded.add(id(expr))
-                    yield expr
+        yield from _yield_unseen_cvars_8616(
+            (
+                item[0]
+                for entries in unified.values()
+                for item in entries or ()
+                if isinstance(item, tuple) and item
+            ),
+            yielded,
+        )
     root = getattr(cfunc, "statements", None)
     if root is not None:
-        for node in _iter_c_nodes_deep_8616(root):
-            if isinstance(node, CVariable) and id(node) not in yielded:
-                yielded.add(id(node))
-                yield node
+        yield from _yield_unseen_cvars_8616(_iter_c_nodes_deep_8616(root), yielded)
 
 
 def _canonical_stack_cvar_at_offset_8616(cfunc: StructuredAstValue, offset: int) -> StructuredAstValue:
@@ -3742,6 +3891,18 @@ def _canonical_stack_cvar_at_offset_8616(cfunc: StructuredAstValue, offset: int)
     return best
 
 
+def _replace_stack_variable_entry_8616(
+    table: dict, variable: SimStackVariable, offset: int, value: StructuredAstValue
+) -> None:
+    """Drop stale stack entries at the same offset and install the canonical one."""
+    for existing_variable in tuple(table.keys()):
+        if not isinstance(existing_variable, SimStackVariable):
+            continue
+        if existing_variable.offset == offset and existing_variable is not variable:
+            del table[existing_variable]
+    table[variable] = value
+
+
 def _install_canonical_stack_cvar_8616(
     cfunc: StructuredAstValue, cvar: StructuredAstValue, variable_type: StructuredAstValue = None
 ) -> None:
@@ -3755,43 +3916,16 @@ def _install_canonical_stack_cvar_8616(
         variable_type = getattr(cvar, "variable_type", None)
     variables = getattr(cfunc, "variables_in_use", None)
     if isinstance(variables, dict):
-        for existing_variable in tuple(variables.keys()):
-            if not isinstance(existing_variable, SimStackVariable):
-                continue
-            if existing_variable.offset == offset and existing_variable is not variable:
-                del variables[existing_variable]
-        variables[variable] = cvar
+        _replace_stack_variable_entry_8616(variables, variable, offset, cvar)
     unified = getattr(cfunc, "unified_local_vars", None)
     if isinstance(unified, dict):
-        for existing_variable in tuple(unified.keys()):
-            if not isinstance(existing_variable, SimStackVariable):
-                continue
-            if existing_variable.offset == offset and existing_variable is not variable:
-                del unified[existing_variable]
-        unified[variable] = {(cvar, variable_type)}
+        _replace_stack_variable_entry_8616(unified, variable, offset, {(cvar, variable_type)})
 
 
-def _ensure_typed_stack_arg_expr_8616(
-    project: StructuredAstValue,
-    codegen: StructuredAstValue,
-    disp: int,
-    arg_type: StructuredAstValue,
-    *,
-    fallback_name: str | None = None,
+def _stack_arg_prototype_8616(
+    project: StructuredAstValue, cfunc: StructuredAstValue, word_type: StructuredAstValue
 ) -> StructuredAstValue:
-    """Materialize one typed argument using its authoritative machine-BP identity."""
-    cfunc = getattr(codegen, "cfunc", None)
-    first_argument_bp_offset = proven_first_argument_machine_bp_offset_8616(codegen)
-    if cfunc is None or int(disp) < first_argument_bp_offset:
-        return None
-    disp = int(disp)
-    word_type = _word_type_for_project_8616(project)
-    arg_name = (
-        _stack_alias_name_from_optional_cod_8616(project, codegen, disp)
-        or fallback_name
-        or _fallback_stack_arg_name_8616(disp)
-    )
-
+    """Return the function prototype, synthesizing a word-typed default when absent."""
     prototype = getattr(cfunc, "functy", None) or getattr(cfunc, "prototype", None)
     if prototype is None:
         func_addr = getattr(cfunc, "addr", None)
@@ -3802,10 +3936,20 @@ def _ensure_typed_stack_arg_expr_8616(
             project,
             SimTypeFunction([], word_type, arg_names=(), variadic=False),
         )
+    return prototype
 
-    arg_type = _bind_type_to_project_arch_8616(project, arg_type)
-    args = _boundary_list_8616(getattr(prototype, "args", ()) or ())
-    arg_names = _boundary_list_8616(getattr(prototype, "arg_names", None) or ())
+
+def _stack_arg_target_index_8616(
+    project: StructuredAstValue,
+    args: list,
+    arg_names: list,
+    disp: int,
+    first_argument_bp_offset: int,
+    arg_type: StructuredAstValue,
+    word_type: StructuredAstValue,
+    arg_name: str,
+) -> int | None:
+    """Locate or extend the prototype arg list so that disp has a slot."""
     cursor = first_argument_bp_offset
     target_index = None
     for idx, existing_type in enumerate(args):
@@ -3821,14 +3965,19 @@ def _ensure_typed_stack_arg_expr_8616(
             target_index = len(args) - 1
             break
         cursor += max(2, _type_size_bytes_for_stack_arg_8616(project, new_type))
-    if target_index is None:
-        return None
+    return target_index
 
-    args[target_index] = arg_type
-    while len(arg_names) < len(args):
-        arg_names.append(_fallback_stack_arg_name_8616(first_argument_bp_offset + len(arg_names) * 2))
-    arg_names[target_index] = arg_name
 
+def _build_desired_stack_args_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    cfunc: StructuredAstValue,
+    args: list,
+    arg_names: list,
+    disp: int,
+    first_argument_bp_offset: int,
+) -> tuple[list, StructuredAstValue]:
+    """Build the desired CVariable arg list; returns (args, target_cvar)."""
     desired_args: list[CVariable] = []
     func_addr = getattr(cfunc, "addr", None)
     cursor = first_argument_bp_offset
@@ -3869,8 +4018,20 @@ def _ensure_typed_stack_arg_expr_8616(
         if cursor == disp:
             target_cvar = cvar
         cursor += width
+    return desired_args, target_cvar
 
-    cfunc.arg_list = desired_args
+
+def _publish_stack_arg_prototype_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    cfunc: StructuredAstValue,
+    prototype: StructuredAstValue,
+    args: list,
+    arg_names: list,
+    word_type: StructuredAstValue,
+    first_argument_bp_offset: int,
+) -> None:
+    """Install the rebuilt prototype on cfunc and the KB function."""
     normalized_arg_names = tuple(
         name
         if isinstance(name, str)
@@ -3898,7 +4059,55 @@ def _ensure_typed_stack_arg_expr_8616(
     if callable(refresh):
         with contextlib.suppress(Exception):
             refresh()
+
+
+def _ensure_typed_stack_arg_expr_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    disp: int,
+    arg_type: StructuredAstValue,
+    *,
+    fallback_name: str | None = None,
+) -> StructuredAstValue:
+    """Materialize one typed argument using its authoritative machine-BP identity."""
+    cfunc = getattr(codegen, "cfunc", None)
+    first_argument_bp_offset = proven_first_argument_machine_bp_offset_8616(codegen)
+    if cfunc is None or int(disp) < first_argument_bp_offset:
+        return None
+    disp = int(disp)
+    word_type = _word_type_for_project_8616(project)
+    arg_name = (
+        _stack_alias_name_from_optional_cod_8616(project, codegen, disp)
+        or fallback_name
+        or _fallback_stack_arg_name_8616(disp)
+    )
+
+    prototype = _stack_arg_prototype_8616(project, cfunc, word_type)
+
+    arg_type = _bind_type_to_project_arch_8616(project, arg_type)
+    args = _boundary_list_8616(getattr(prototype, "args", ()) or ())
+    arg_names = _boundary_list_8616(getattr(prototype, "arg_names", None) or ())
+    target_index = _stack_arg_target_index_8616(
+        project, args, arg_names, disp, first_argument_bp_offset, arg_type, word_type, arg_name
+    )
+    if target_index is None:
+        return None
+
+    args[target_index] = arg_type
+    while len(arg_names) < len(args):
+        arg_names.append(_fallback_stack_arg_name_8616(first_argument_bp_offset + len(arg_names) * 2))
+    arg_names[target_index] = arg_name
+
+    desired_args, target_cvar = _build_desired_stack_args_8616(
+        project, codegen, cfunc, args, arg_names, disp, first_argument_bp_offset
+    )
+
+    cfunc.arg_list = desired_args
+    _publish_stack_arg_prototype_8616(
+        project, codegen, cfunc, prototype, args, arg_names, word_type, first_argument_bp_offset
+    )
     return target_cvar
+
 
 
 def _ensure_pointer_stack_arg_expr_8616(
@@ -4072,6 +4281,183 @@ def _set_codegen_return_type_8616(
 
 
 
+def _pair_accum_header_match_8616(
+    project: StructuredAstValue,
+    insns: tuple[StructuredAstValue, ...],
+    index_by_addr: dict[int, int],
+    init_idx: int,
+    i_disp: int,
+    stats: dict[str, int],
+) -> tuple[int, int, int] | None:
+    """Match the accumulation loop header; returns (inc_addr, body_target, exit_target)."""
+    first_jmp = insns[init_idx + 2]
+    if str(getattr(first_jmp, "mnemonic", "")).lower() not in {"jmp", "ljmp"}:
+        stats["failure_count"] += 1
+        return None
+    inc_addr = int(getattr(insns[init_idx + 3], "address", -1))
+    if not _match_stack_inc_8616(insns[init_idx + 3], i_disp):
+        stats["failure_count"] += 1
+        return None
+    cond_target = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(first_jmp))
+    if cond_target is None or int(cond_target) != int(getattr(insns[init_idx + 4], "address", -1)):
+        stats["failure_count"] += 1
+        return None
+    if not _match_stack_mov_to_reg_8616(insns[init_idx + 4], "ax", 6):
+        stats["failure_count"] += 1
+        return None
+    if not _match_cmp_stack_ax_8616(insns[init_idx + 5], i_disp):
+        stats["failure_count"] += 1
+        return None
+    jcc = insns[init_idx + 6]
+    if str(getattr(jcc, "mnemonic", "")).lower() not in {"jl", "jnge"}:
+        stats["failure_count"] += 1
+        return None
+    body_target = _jcc._branch_target_imm_8616(jcc)
+    exit_target = _resolve_one_hop_jmp_target_8616(
+        project,
+        _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(jcc, "address", -1)), -1)),
+    )
+    if body_target is None or exit_target is None:
+        stats["failure_count"] += 1
+        return None
+    return inc_addr, int(body_target), int(exit_target)
+
+
+def _pair_accum_body_match_8616(
+    project: StructuredAstValue,
+    body: StructuredAstValue,
+    i_disp: int,
+    total_disp: int,
+    inc_addr: int,
+    stats: dict[str, int],
+) -> bool:
+    """Match the 14-instruction accumulation body; records a failure on mismatch."""
+    if len(body) < 14:
+        stats["failure_count"] += 1
+        return False
+    if not (
+        _match_stack_mov_to_reg_8616(body[0], "bx", i_disp)
+        and _match_reg_shl1_8616(body[1], "bx")
+        and _match_reg_shl1_8616(body[2], "bx")
+        and _match_stack_mov_to_reg_8616(body[3], "si", 4)
+        and _match_indexed_reg_load_8616(body[4], dst_reg="ax", base_reg="bx", index_reg="si", size=2)
+        and _match_reg_shl1_8616(body[5], "ax")
+    ):
+        stats["failure_count"] += 1
+        return False
+    add_left_ops = _boundary_tuple_8616(getattr(body[6], "operands", ()) or ())
+    add_left_slot = _stack_mem_disp_size_8616(body[6], add_left_ops[0]) if len(add_left_ops) == 2 else None
+    if (
+        str(getattr(body[6], "mnemonic", "")).lower() != "add"
+        or add_left_slot is None
+        or int(add_left_slot[0]) != int(total_disp)
+        or _reg_name_from_operand_8616(body[6], add_left_ops[1]) != "ax"
+    ):
+        stats["failure_count"] += 1
+        return False
+    if not (
+        _match_stack_mov_to_reg_8616(body[7], "si", i_disp)
+        and _match_reg_shl1_8616(body[8], "si")
+        and _match_reg_shl1_8616(body[9], "si")
+        and _match_stack_mov_to_reg_8616(body[10], "bx", 4)
+        and _match_indexed_reg_load_8616(body[11], dst_reg="ax", base_reg="bx", index_reg="si", size=2, disp=2)
+    ):
+        stats["failure_count"] += 1
+        return False
+    add_right_ops = _boundary_tuple_8616(getattr(body[12], "operands", ()) or ())
+    add_right_slot = _stack_mem_disp_size_8616(body[12], add_right_ops[0]) if len(add_right_ops) == 2 else None
+    if (
+        str(getattr(body[12], "mnemonic", "")).lower() != "add"
+        or add_right_slot is None
+        or int(add_right_slot[0]) != int(total_disp)
+        or _reg_name_from_operand_8616(body[12], add_right_ops[1]) != "ax"
+    ):
+        stats["failure_count"] += 1
+        return False
+    if _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(body[13])) != inc_addr:
+        stats["failure_count"] += 1
+        return False
+    return True
+
+
+def _pair_accum_exprs_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue, i_disp: int
+) -> tuple[StructuredAstValue, StructuredAstValue, StructuredAstValue] | None:
+    pairs_expr = _ensure_pointer_stack_arg_expr_8616(
+        project,
+        codegen,
+        4,
+        pointee_size=2,
+        fallback_name="pairs",
+    ) or _stack_expr_8616(codegen, 4, 2)
+    count_expr = _ensure_typed_stack_arg_expr_8616(
+        project,
+        codegen,
+        6,
+        _word_type_for_project_8616(project),
+        fallback_name="count",
+    ) or _stack_expr_8616(codegen, 6, 2)
+    i_expr = _named_stack_expr_from_evidence_8616(project, codegen, int(i_disp), 2)
+    if any(expr is None for expr in (pairs_expr, count_expr, i_expr)):
+        return None
+    return pairs_expr, count_expr, i_expr
+
+
+def _emit_word_pair_accumulation_loop_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    total_expr: StructuredAstValue,
+    i_expr: StructuredAstValue,
+    pairs_expr: StructuredAstValue,
+    count_expr: StructuredAstValue,
+) -> None:
+    """Emit the recovered pair-accumulation while loop into the function body."""
+    word_type = _word_type_for_project_8616(project)
+    word_index = _mul_expr_8616(i_expr, _const_short_8616(codegen, 2), codegen)
+    next_word_index = _add_expr_8616(word_index, _const_short_8616(codegen, 1), codegen)
+    left_word = _indexed_word_pointer_expr_8616(pairs_expr, word_index, codegen, variable_type=word_type)
+    right_word = _indexed_word_pointer_expr_8616(pairs_expr, next_word_index, codegen, variable_type=word_type)
+    left_twice = _mul_expr_8616(left_word, _const_short_8616(codegen, 2), codegen)
+    pair_total = _add_expr_8616(left_twice, right_word, codegen)
+    body_node = CStatements(
+        statements=[
+            CAssignment(
+                _clone_c_value_preserving_cvariables_8616(total_expr),
+                _add_expr_8616(total_expr, pair_total, codegen),
+                codegen=codegen,
+            ),
+            _inc_assignment_preserving_cvariables_8616(i_expr, codegen),
+        ],
+        codegen=codegen,
+    )
+    codegen.cfunc.statements = CStatements(
+        statements=[
+            CAssignment(
+                _clone_c_value_preserving_cvariables_8616(total_expr),
+                CConstant(0, SimTypeShort(False), codegen=codegen),
+                codegen=codegen,
+            ),
+            CAssignment(
+                _clone_c_value_preserving_cvariables_8616(i_expr),
+                CConstant(0, SimTypeShort(False), codegen=codegen),
+                codegen=codegen,
+            ),
+            CWhileLoop(
+                CBinaryOp(
+                    "CmpLT",
+                    _clone_c_value_preserving_cvariables_8616(i_expr),
+                    _clone_c_value_preserving_cvariables_8616(count_expr),
+                    codegen=codegen,
+                ),
+                body_node,
+                codegen=codegen,
+            ),
+            CReturn(_clone_c_value_preserving_cvariables_8616(total_expr), codegen=codegen),
+        ],
+        codegen=codegen,
+    )
+
+
 def _materialize_word_pair_pointer_accumulation_loop_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
@@ -4105,36 +4491,10 @@ def _materialize_word_pair_pointer_accumulation_loop_8616(
             continue
         stats["raw_fact_count"] += 1
 
-        first_jmp = insns[init_idx + 2]
-        if str(getattr(first_jmp, "mnemonic", "")).lower() not in {"jmp", "ljmp"}:
-            stats["failure_count"] += 1
+        match = _pair_accum_header_match_8616(project, insns, index_by_addr, init_idx, i_disp, stats)
+        if match is None:
             continue
-        inc_addr = int(getattr(insns[init_idx + 3], "address", -1))
-        if not _match_stack_inc_8616(insns[init_idx + 3], i_disp):
-            stats["failure_count"] += 1
-            continue
-        cond_target = _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(first_jmp))
-        if cond_target is None or int(cond_target) != int(getattr(insns[init_idx + 4], "address", -1)):
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[init_idx + 4], "ax", 6):
-            stats["failure_count"] += 1
-            continue
-        if not _match_cmp_stack_ax_8616(insns[init_idx + 5], i_disp):
-            stats["failure_count"] += 1
-            continue
-        jcc = insns[init_idx + 6]
-        if str(getattr(jcc, "mnemonic", "")).lower() not in {"jl", "jnge"}:
-            stats["failure_count"] += 1
-            continue
-        body_target = _jcc._branch_target_imm_8616(jcc)
-        exit_target = _resolve_one_hop_jmp_target_8616(
-            project,
-            _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(jcc, "address", -1)), -1)),
-        )
-        if body_target is None or exit_target is None:
-            stats["failure_count"] += 1
-            continue
+        inc_addr, body_target, exit_target = match
 
         exit_expr = _branch_target_return_expr_8616(project, codegen, int(exit_target))
         total_expr = _named_stack_expr_from_evidence_8616(project, codegen, int(total_disp), 2)
@@ -4147,129 +4507,197 @@ def _materialize_word_pair_pointer_accumulation_loop_8616(
             continue
 
         body = _block_insns_8616(project, int(body_target))
-        if len(body) < 14:
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(body[0], "bx", i_disp):
-            stats["failure_count"] += 1
-            continue
-        if not (_match_reg_shl1_8616(body[1], "bx") and _match_reg_shl1_8616(body[2], "bx")):
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(body[3], "si", 4):
-            stats["failure_count"] += 1
-            continue
-        if not _match_indexed_reg_load_8616(body[4], dst_reg="ax", base_reg="bx", index_reg="si", size=2):
-            stats["failure_count"] += 1
-            continue
-        if not _match_reg_shl1_8616(body[5], "ax"):
-            stats["failure_count"] += 1
-            continue
-        add_left_ops = _boundary_tuple_8616(getattr(body[6], "operands", ()) or ())
-        add_left_slot = _stack_mem_disp_size_8616(body[6], add_left_ops[0]) if len(add_left_ops) == 2 else None
-        if (
-            str(getattr(body[6], "mnemonic", "")).lower() != "add"
-            or add_left_slot is None
-            or int(add_left_slot[0]) != int(total_disp)
-            or _reg_name_from_operand_8616(body[6], add_left_ops[1]) != "ax"
-        ):
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(body[7], "si", i_disp):
-            stats["failure_count"] += 1
-            continue
-        if not (_match_reg_shl1_8616(body[8], "si") and _match_reg_shl1_8616(body[9], "si")):
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(body[10], "bx", 4):
-            stats["failure_count"] += 1
-            continue
-        if not _match_indexed_reg_load_8616(body[11], dst_reg="ax", base_reg="bx", index_reg="si", size=2, disp=2):
-            stats["failure_count"] += 1
-            continue
-        add_right_ops = _boundary_tuple_8616(getattr(body[12], "operands", ()) or ())
-        add_right_slot = _stack_mem_disp_size_8616(body[12], add_right_ops[0]) if len(add_right_ops) == 2 else None
-        if (
-            str(getattr(body[12], "mnemonic", "")).lower() != "add"
-            or add_right_slot is None
-            or int(add_right_slot[0]) != int(total_disp)
-            or _reg_name_from_operand_8616(body[12], add_right_ops[1]) != "ax"
-        ):
-            stats["failure_count"] += 1
-            continue
-        if _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(body[13])) != inc_addr:
-            stats["failure_count"] += 1
+        if not _pair_accum_body_match_8616(project, body, i_disp, total_disp, inc_addr, stats):
             continue
 
-        pairs_expr = _ensure_pointer_stack_arg_expr_8616(
-            project,
-            codegen,
-            4,
-            pointee_size=2,
-            fallback_name="pairs",
-        ) or _stack_expr_8616(codegen, 4, 2)
-        count_expr = _ensure_typed_stack_arg_expr_8616(
-            project,
-            codegen,
-            6,
-            _word_type_for_project_8616(project),
-            fallback_name="count",
-        ) or _stack_expr_8616(codegen, 6, 2)
-        i_expr = _named_stack_expr_from_evidence_8616(project, codegen, int(i_disp), 2)
-        if any(expr is None for expr in (pairs_expr, count_expr, i_expr)):
+        exprs = _pair_accum_exprs_8616(project, codegen, i_disp)
+        if exprs is None:
             stats["failure_count"] += 1
             continue
+        pairs_expr, count_expr, i_expr = exprs
 
         stats["classified_fact_count"] += 1
-        word_type = _word_type_for_project_8616(project)
-        word_index = _mul_expr_8616(i_expr, _const_short_8616(codegen, 2), codegen)
-        next_word_index = _add_expr_8616(word_index, _const_short_8616(codegen, 1), codegen)
-        left_word = _indexed_word_pointer_expr_8616(pairs_expr, word_index, codegen, variable_type=word_type)
-        right_word = _indexed_word_pointer_expr_8616(pairs_expr, next_word_index, codegen, variable_type=word_type)
-        left_twice = _mul_expr_8616(left_word, _const_short_8616(codegen, 2), codegen)
-        pair_total = _add_expr_8616(left_twice, right_word, codegen)
-        body_node = CStatements(
-            statements=[
-                CAssignment(
-                    _clone_c_value_preserving_cvariables_8616(total_expr),
-                    _add_expr_8616(total_expr, pair_total, codegen),
-                    codegen=codegen,
-                ),
-                _inc_assignment_preserving_cvariables_8616(i_expr, codegen),
-            ],
-            codegen=codegen,
-        )
-        codegen.cfunc.statements = CStatements(
-            statements=[
-                CAssignment(
-                    _clone_c_value_preserving_cvariables_8616(total_expr),
-                    CConstant(0, SimTypeShort(False), codegen=codegen),
-                    codegen=codegen,
-                ),
-                CAssignment(
-                    _clone_c_value_preserving_cvariables_8616(i_expr),
-                    CConstant(0, SimTypeShort(False), codegen=codegen),
-                    codegen=codegen,
-                ),
-                CWhileLoop(
-                    CBinaryOp(
-                        "CmpLT",
-                        _clone_c_value_preserving_cvariables_8616(i_expr),
-                        _clone_c_value_preserving_cvariables_8616(count_expr),
-                        codegen=codegen,
-                    ),
-                    body_node,
-                    codegen=codegen,
-                ),
-                CReturn(_clone_c_value_preserving_cvariables_8616(total_expr), codegen=codegen),
-            ],
-            codegen=codegen,
-        )
+        _emit_word_pair_accumulation_loop_8616(project, codegen, total_expr, i_expr, pairs_expr, count_expr)
         stats["materialized_count"] += 1
         codegen._inertia_pointer_memory_materialized_8616 = "word_pair_accumulation_loop"
         _mark_codegen_signature_authoritative_8616(project, codegen, "word_pair_pointer_accumulation_loop")
         return True
     return False
+
+
+
+def _first_gt_loop_body_match_8616(
+    project: StructuredAstValue,
+    insns: tuple[StructuredAstValue, ...],
+    index_by_addr: dict[int, int],
+    i_disp: int,
+    cond_addr: int,
+    body_target: int,
+    stats: dict[str, int],
+) -> int | None:
+    """Match the loop body window; returns return_i_target or None."""
+    body = _block_insns_8616(project, int(body_target))
+    if len(body) < 6:
+        stats["failure_count"] += 1
+        return None
+    if not (
+        _match_stack_mov_to_reg_8616(body[0], "bx", i_disp)
+        and _match_reg_shl1_8616(body[1], "bx")
+        and _match_stack_mov_to_reg_8616(body[2], "si", 4)
+        and _match_stack_mov_to_reg_8616(body[3], "ax", 8)
+        and _match_cmp_indexed_reg_8616(body[4], base_reg="bx", index_reg="si", rhs_reg="ax", size=2)
+    ):
+        stats["failure_count"] += 1
+        return None
+    value_jcc = body[5]
+    if str(getattr(value_jcc, "mnemonic", "")).lower() not in {"jg", "jnle"}:
+        stats["failure_count"] += 1
+        return None
+    return_i_target = _jcc._branch_target_imm_8616(value_jcc)
+    inc_target = _resolve_one_hop_jmp_target_8616(
+        project,
+        _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(value_jcc, "address", -1)), -1)),
+    )
+    if return_i_target is None or inc_target is None:
+        stats["failure_count"] += 1
+        return None
+
+    inc_block = _block_insns_8616(project, int(inc_target))
+    if len(inc_block) < 2 or not _match_stack_inc_8616(inc_block[0], i_disp):
+        stats["failure_count"] += 1
+        return None
+    if _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(inc_block[1])) != cond_addr:
+        stats["failure_count"] += 1
+        return None
+    return int(return_i_target)
+
+
+def _first_gt_loop_window_match_8616(
+    project: StructuredAstValue,
+    insns: tuple[StructuredAstValue, ...],
+    index_by_addr: dict[int, int],
+    init_idx: int,
+    i_disp: int,
+    stats: dict[str, int],
+) -> tuple[int, int, int] | None:
+    """Match the first-greater-than loop window; returns (cond_addr, exit_target, return_i_target)."""
+    cond_addr = int(getattr(insns[init_idx + 1], "address", -1))
+    if not _match_stack_mov_to_reg_8616(insns[init_idx + 1], "ax", i_disp):
+        stats["failure_count"] += 1
+        return None
+    if not _match_cmp_stack_ax_8616(insns[init_idx + 2], 6):
+        stats["failure_count"] += 1
+        return None
+    count_jcc = insns[init_idx + 3]
+    if str(getattr(count_jcc, "mnemonic", "")).lower() not in {"jg", "jnle"}:
+        stats["failure_count"] += 1
+        return None
+    body_target = _jcc._branch_target_imm_8616(count_jcc)
+    exit_target = _resolve_one_hop_jmp_target_8616(
+        project,
+        _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(count_jcc, "address", -1)), -1)),
+    )
+    if body_target is None or exit_target is None:
+        stats["failure_count"] += 1
+        return None
+
+    return_i_target = _first_gt_loop_body_match_8616(
+        project, insns, index_by_addr, i_disp, cond_addr, body_target, stats
+    )
+    if return_i_target is None:
+        return None
+    return cond_addr, int(exit_target), return_i_target
+
+
+def _first_gt_loop_exprs_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    i_disp: int,
+    signed_word: StructuredAstValue,
+) -> tuple[StructuredAstValue, StructuredAstValue, StructuredAstValue, StructuredAstValue] | None:
+    """Resolve the loop's C expressions from stack evidence, or None."""
+    i_expr = _named_stack_expr_from_evidence_8616(project, codegen, int(i_disp), 2)
+    values_expr = _ensure_typed_stack_arg_expr_8616(
+        project,
+        codegen,
+        4,
+        _pointer_type_for_project_8616(project, 2, signed=True),
+        fallback_name="values",
+    ) or _stack_expr_8616(codegen, 4, 2)
+    count_expr = _ensure_typed_stack_arg_expr_8616(
+        project, codegen, 6, signed_word, fallback_name="count"
+    ) or _stack_expr_8616(codegen, 6, 2)
+    threshold_expr = _ensure_typed_stack_arg_expr_8616(
+        project,
+        codegen,
+        8,
+        signed_word,
+        fallback_name="threshold",
+    ) or _stack_expr_8616(codegen, 8, 2)
+    if any(expr is None for expr in (i_expr, values_expr, count_expr, threshold_expr)):
+        return None
+    return i_expr, values_expr, count_expr, threshold_expr
+
+
+def _emit_word_pointer_first_gt_loop_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    i_expr: StructuredAstValue,
+    values_expr: StructuredAstValue,
+    count_expr: StructuredAstValue,
+    threshold_expr: StructuredAstValue,
+    signed_word: StructuredAstValue,
+    minus_one: StructuredAstValue,
+) -> None:
+    """Emit the recovered first-greater-than while loop into the function body."""
+    indexed_value = _indexed_word_pointer_expr_8616(values_expr, i_expr, codegen, variable_type=signed_word)
+    if_body = CStatements(
+        statements=[CReturn(_clone_c_value_preserving_cvariables_8616(i_expr), codegen=codegen)],
+        codegen=codegen,
+    )
+    loop_body = CStatements(
+        statements=[
+            CIfElse(
+                [
+                    (
+                        CBinaryOp(
+                            "CmpGT",
+                            _clone_c_value_preserving_cvariables_8616(indexed_value),
+                            _clone_c_value_preserving_cvariables_8616(threshold_expr),
+                            codegen=codegen,
+                        ),
+                        if_body,
+                    )
+                ],
+                else_node=None,
+                cstyle_ifs=True,
+                codegen=codegen,
+            ),
+            _inc_assignment_preserving_cvariables_8616(i_expr, codegen),
+        ],
+        codegen=codegen,
+    )
+    codegen.cfunc.statements = CStatements(
+        statements=[
+            CAssignment(
+                _clone_c_value_preserving_cvariables_8616(i_expr),
+                CConstant(0, signed_word, codegen=codegen),
+                codegen=codegen,
+            ),
+            CWhileLoop(
+                CBinaryOp(
+                    "CmpLT",
+                    _clone_c_value_preserving_cvariables_8616(i_expr),
+                    _clone_c_value_preserving_cvariables_8616(count_expr),
+                    codegen=codegen,
+                ),
+                loop_body,
+                codegen=codegen,
+            ),
+            CReturn(minus_one, codegen=codegen),
+        ],
+        codegen=codegen,
+    )
 
 
 def _materialize_word_pointer_first_gt_loop_8616(
@@ -4293,87 +4721,16 @@ def _materialize_word_pointer_first_gt_loop_8616(
         if i_disp is None or i_disp >= 0:
             continue
         stats["raw_fact_count"] += 1
-        cond_addr = int(getattr(insns[init_idx + 1], "address", -1))
-        if not _match_stack_mov_to_reg_8616(insns[init_idx + 1], "ax", i_disp):
-            stats["failure_count"] += 1
+        match = _first_gt_loop_window_match_8616(project, insns, index_by_addr, init_idx, i_disp, stats)
+        if match is None:
             continue
-        if not _match_cmp_stack_ax_8616(insns[init_idx + 2], 6):
-            stats["failure_count"] += 1
-            continue
-        count_jcc = insns[init_idx + 3]
-        if str(getattr(count_jcc, "mnemonic", "")).lower() not in {"jg", "jnle"}:
-            stats["failure_count"] += 1
-            continue
-        body_target = _jcc._branch_target_imm_8616(count_jcc)
-        exit_target = _resolve_one_hop_jmp_target_8616(
-            project,
-            _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(count_jcc, "address", -1)), -1)),
-        )
-        if body_target is None or exit_target is None:
-            stats["failure_count"] += 1
-            continue
+        _cond_addr, exit_target, return_i_target = match
 
-        body = _block_insns_8616(project, int(body_target))
-        if len(body) < 6:
+        exprs = _first_gt_loop_exprs_8616(project, codegen, i_disp, signed_word)
+        if exprs is None:
             stats["failure_count"] += 1
             continue
-        if not _match_stack_mov_to_reg_8616(body[0], "bx", i_disp):
-            stats["failure_count"] += 1
-            continue
-        if not _match_reg_shl1_8616(body[1], "bx"):
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(body[2], "si", 4):
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(body[3], "ax", 8):
-            stats["failure_count"] += 1
-            continue
-        if not _match_cmp_indexed_reg_8616(body[4], base_reg="bx", index_reg="si", rhs_reg="ax", size=2):
-            stats["failure_count"] += 1
-            continue
-        value_jcc = body[5]
-        if str(getattr(value_jcc, "mnemonic", "")).lower() not in {"jg", "jnle"}:
-            stats["failure_count"] += 1
-            continue
-        return_i_target = _jcc._branch_target_imm_8616(value_jcc)
-        inc_target = _resolve_one_hop_jmp_target_8616(
-            project,
-            _next_linear_jmp_target_8616(insns, index_by_addr.get(int(getattr(value_jcc, "address", -1)), -1)),
-        )
-        if return_i_target is None or inc_target is None:
-            stats["failure_count"] += 1
-            continue
-
-        inc_block = _block_insns_8616(project, int(inc_target))
-        if len(inc_block) < 2 or not _match_stack_inc_8616(inc_block[0], i_disp):
-            stats["failure_count"] += 1
-            continue
-        if _resolve_one_hop_jmp_target_8616(project, _jcc._branch_target_imm_8616(inc_block[1])) != cond_addr:
-            stats["failure_count"] += 1
-            continue
-
-        i_expr = _named_stack_expr_from_evidence_8616(project, codegen, int(i_disp), 2)
-        values_expr = _ensure_typed_stack_arg_expr_8616(
-            project,
-            codegen,
-            4,
-            _pointer_type_for_project_8616(project, 2, signed=True),
-            fallback_name="values",
-        ) or _stack_expr_8616(codegen, 4, 2)
-        count_expr = _ensure_typed_stack_arg_expr_8616(
-            project, codegen, 6, signed_word, fallback_name="count"
-        ) or _stack_expr_8616(codegen, 6, 2)
-        threshold_expr = _ensure_typed_stack_arg_expr_8616(
-            project,
-            codegen,
-            8,
-            signed_word,
-            fallback_name="threshold",
-        ) or _stack_expr_8616(codegen, 8, 2)
-        if any(expr is None for expr in (i_expr, values_expr, count_expr, threshold_expr)):
-            stats["failure_count"] += 1
-            continue
+        i_expr, values_expr, count_expr, threshold_expr = exprs
         if isinstance(i_expr, CVariable):
             i_expr.variable_type = signed_word
             _install_canonical_stack_cvar_8616(codegen.cfunc, i_expr, signed_word)
@@ -4391,53 +4748,8 @@ def _materialize_word_pointer_first_gt_loop_8616(
             continue
 
         stats["classified_fact_count"] += 1
-        indexed_value = _indexed_word_pointer_expr_8616(values_expr, i_expr, codegen, variable_type=signed_word)
-        if_body = CStatements(
-            statements=[CReturn(_clone_c_value_preserving_cvariables_8616(i_expr), codegen=codegen)],
-            codegen=codegen,
-        )
-        loop_body = CStatements(
-            statements=[
-                CIfElse(
-                    [
-                        (
-                            CBinaryOp(
-                                "CmpGT",
-                                _clone_c_value_preserving_cvariables_8616(indexed_value),
-                                _clone_c_value_preserving_cvariables_8616(threshold_expr),
-                                codegen=codegen,
-                            ),
-                            if_body,
-                        )
-                    ],
-                    else_node=None,
-                    cstyle_ifs=True,
-                    codegen=codegen,
-                ),
-                _inc_assignment_preserving_cvariables_8616(i_expr, codegen),
-            ],
-            codegen=codegen,
-        )
-        codegen.cfunc.statements = CStatements(
-            statements=[
-                CAssignment(
-                    _clone_c_value_preserving_cvariables_8616(i_expr),
-                    CConstant(0, signed_word, codegen=codegen),
-                    codegen=codegen,
-                ),
-                CWhileLoop(
-                    CBinaryOp(
-                        "CmpLT",
-                        _clone_c_value_preserving_cvariables_8616(i_expr),
-                        _clone_c_value_preserving_cvariables_8616(count_expr),
-                        codegen=codegen,
-                    ),
-                    loop_body,
-                    codegen=codegen,
-                ),
-                CReturn(minus_one, codegen=codegen),
-            ],
-            codegen=codegen,
+        _emit_word_pointer_first_gt_loop_8616(
+            project, codegen, i_expr, values_expr, count_expr, threshold_expr, signed_word, minus_one
         )
         _set_codegen_return_type_8616(project, codegen, signed_word)
         stats["materialized_count"] += 1
@@ -4445,6 +4757,86 @@ def _materialize_word_pointer_first_gt_loop_8616(
         _mark_codegen_signature_authoritative_8616(project, codegen, "word_pointer_first_gt_loop")
         return True
     return False
+
+
+
+def _rotate3_match_or_fail_8616(stats: dict[str, int], matched: bool) -> int | None:
+    """Shared rotate3 window gate: record a failure and return None when unmatched."""
+    if not matched:
+        stats["failure_count"] += 1
+    return None
+
+
+def _word_pointer_rotate3_tmp_disp_8616(
+    insns: tuple[StructuredAstValue, ...], idx: int, stats: dict[str, int]
+) -> int | None:
+    """Match the 14-instruction rotate3 window; returns the tmp slot disp or None."""
+    tmp_ops = _boundary_tuple_8616(getattr(insns[idx + 2], "operands", ()) or ())
+    tmp_slot = _stack_mem_disp_size_8616(insns[idx + 2], tmp_ops[0]) if len(tmp_ops) == 2 else None
+    if str(getattr(insns[idx + 2], "mnemonic", "")).lower() != "mov" or tmp_slot is None:
+        return _rotate3_match_or_fail_8616(stats, False)
+    tmp_disp = int(tmp_slot[0])
+    if tmp_disp >= 0 or _reg_name_from_operand_8616(insns[idx + 2], tmp_ops[1]) != "ax":
+        return _rotate3_match_or_fail_8616(stats, False)
+    if not (
+        _match_stack_mov_to_reg_8616(insns[idx + 3], "bx", 4)
+        and _match_reg_indirect_load_8616(insns[idx + 4], dst_reg="ax", base_reg="bx", size=2, disp=2)
+        and _match_stack_mov_to_reg_8616(insns[idx + 5], "bx", 4)
+        and _match_reg_indirect_store_8616(insns[idx + 6], base_reg="bx", src_reg="ax", size=2)
+        and _match_stack_mov_to_reg_8616(insns[idx + 7], "bx", 4)
+        and _match_reg_indirect_load_8616(insns[idx + 8], dst_reg="ax", base_reg="bx", size=2, disp=4)
+        and _match_stack_mov_to_reg_8616(insns[idx + 9], "bx", 4)
+        and _match_reg_indirect_store_8616(insns[idx + 10], base_reg="bx", src_reg="ax", size=2, disp=2)
+        and _match_stack_mov_to_reg_8616(insns[idx + 11], "ax", tmp_disp)
+        and _match_stack_mov_to_reg_8616(insns[idx + 12], "bx", 4)
+        and _match_reg_indirect_store_8616(insns[idx + 13], base_reg="bx", src_reg="ax", size=2, disp=4)
+    ):
+        return _rotate3_match_or_fail_8616(stats, False)
+    return tmp_disp
+
+
+def _emit_word_pointer_rotate3_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    values_expr: StructuredAstValue,
+    tmp_expr: StructuredAstValue,
+) -> None:
+    """Emit the rotate3 assignment chain into the function body."""
+    word_type = _word_type_for_project_8616(project)
+    value_0 = _indexed_word_pointer_expr_8616(
+        values_expr, _const_short_8616(codegen, 0), codegen, variable_type=word_type
+    )
+    value_1 = _indexed_word_pointer_expr_8616(
+        values_expr, _const_short_8616(codegen, 1), codegen, variable_type=word_type
+    )
+    value_2 = _indexed_word_pointer_expr_8616(
+        values_expr, _const_short_8616(codegen, 2), codegen, variable_type=word_type
+    )
+    codegen.cfunc.statements = CStatements(
+        statements=[
+            CAssignment(
+                _clone_c_value_preserving_cvariables_8616(tmp_expr),
+                _clone_c_value_preserving_cvariables_8616(value_0),
+                codegen=codegen,
+            ),
+            CAssignment(
+                _clone_c_value_preserving_cvariables_8616(value_0),
+                _clone_c_value_preserving_cvariables_8616(value_1),
+                codegen=codegen,
+            ),
+            CAssignment(
+                _clone_c_value_preserving_cvariables_8616(value_1),
+                _clone_c_value_preserving_cvariables_8616(value_2),
+                codegen=codegen,
+            ),
+            CAssignment(
+                _clone_c_value_preserving_cvariables_8616(value_2),
+                _clone_c_value_preserving_cvariables_8616(tmp_expr),
+                codegen=codegen,
+            ),
+        ],
+        codegen=codegen,
+    )
 
 
 def _materialize_word_pointer_rotate3_8616(
@@ -4468,47 +4860,8 @@ def _materialize_word_pointer_rotate3_8616(
         if not _match_reg_indirect_load_8616(insns[idx + 1], dst_reg="ax", base_reg="bx", size=2):
             stats["failure_count"] += 1
             continue
-        tmp_ops = _boundary_tuple_8616(getattr(insns[idx + 2], "operands", ()) or ())
-        tmp_slot = _stack_mem_disp_size_8616(insns[idx + 2], tmp_ops[0]) if len(tmp_ops) == 2 else None
-        if str(getattr(insns[idx + 2], "mnemonic", "")).lower() != "mov" or tmp_slot is None:
-            stats["failure_count"] += 1
-            continue
-        tmp_disp = int(tmp_slot[0])
-        if tmp_disp >= 0 or _reg_name_from_operand_8616(insns[idx + 2], tmp_ops[1]) != "ax":
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[idx + 3], "bx", 4):
-            stats["failure_count"] += 1
-            continue
-        if not _match_reg_indirect_load_8616(insns[idx + 4], dst_reg="ax", base_reg="bx", size=2, disp=2):
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[idx + 5], "bx", 4):
-            stats["failure_count"] += 1
-            continue
-        if not _match_reg_indirect_store_8616(insns[idx + 6], base_reg="bx", src_reg="ax", size=2):
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[idx + 7], "bx", 4):
-            stats["failure_count"] += 1
-            continue
-        if not _match_reg_indirect_load_8616(insns[idx + 8], dst_reg="ax", base_reg="bx", size=2, disp=4):
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[idx + 9], "bx", 4):
-            stats["failure_count"] += 1
-            continue
-        if not _match_reg_indirect_store_8616(insns[idx + 10], base_reg="bx", src_reg="ax", size=2, disp=2):
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[idx + 11], "ax", tmp_disp):
-            stats["failure_count"] += 1
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[idx + 12], "bx", 4):
-            stats["failure_count"] += 1
-            continue
-        if not _match_reg_indirect_store_8616(insns[idx + 13], base_reg="bx", src_reg="ax", size=2, disp=4):
-            stats["failure_count"] += 1
+        tmp_disp = _word_pointer_rotate3_tmp_disp_8616(insns, idx, stats)
+        if tmp_disp is None:
             continue
 
         values_expr = _ensure_pointer_stack_arg_expr_8616(
@@ -4524,47 +4877,64 @@ def _materialize_word_pointer_rotate3_8616(
             continue
 
         stats["classified_fact_count"] += 1
-        word_type = _word_type_for_project_8616(project)
-        value_0 = _indexed_word_pointer_expr_8616(
-            values_expr, _const_short_8616(codegen, 0), codegen, variable_type=word_type
-        )
-        value_1 = _indexed_word_pointer_expr_8616(
-            values_expr, _const_short_8616(codegen, 1), codegen, variable_type=word_type
-        )
-        value_2 = _indexed_word_pointer_expr_8616(
-            values_expr, _const_short_8616(codegen, 2), codegen, variable_type=word_type
-        )
-        codegen.cfunc.statements = CStatements(
-            statements=[
-                CAssignment(
-                    _clone_c_value_preserving_cvariables_8616(tmp_expr),
-                    _clone_c_value_preserving_cvariables_8616(value_0),
-                    codegen=codegen,
-                ),
-                CAssignment(
-                    _clone_c_value_preserving_cvariables_8616(value_0),
-                    _clone_c_value_preserving_cvariables_8616(value_1),
-                    codegen=codegen,
-                ),
-                CAssignment(
-                    _clone_c_value_preserving_cvariables_8616(value_1),
-                    _clone_c_value_preserving_cvariables_8616(value_2),
-                    codegen=codegen,
-                ),
-                CAssignment(
-                    _clone_c_value_preserving_cvariables_8616(value_2),
-                    _clone_c_value_preserving_cvariables_8616(tmp_expr),
-                    codegen=codegen,
-                ),
-            ],
-            codegen=codegen,
-        )
+        _emit_word_pointer_rotate3_8616(project, codegen, values_expr, tmp_expr)
         _set_codegen_return_type_8616(project, codegen, _void_type_for_project_8616(project))
         stats["materialized_count"] += 1
         codegen._inertia_pointer_memory_materialized_8616 = "word_pointer_rotate3"
         _mark_codegen_signature_authoritative_8616(project, codegen, "word_pointer_rotate3")
         return True
     return False
+
+
+
+def _pointer_swap_pattern_tmp_disp_8616(insns: tuple[StructuredAstValue, ...], idx: int) -> int | None:
+    """Match the 10-instruction pointer-swap window; returns the tmp slot disp or None."""
+    if not _match_stack_mov_to_reg_8616(insns[idx], "bx", 4):
+        return None
+    if not _match_reg_indirect_load_8616(insns[idx + 1], dst_reg="ax", base_reg="bx", size=2):
+        return None
+    tmp_slot = _stack_mem_disp_size_8616(
+        insns[idx + 2], _boundary_tuple_8616(getattr(insns[idx + 2], "operands", ()) or ())[0]
+    )
+    if str(getattr(insns[idx + 2], "mnemonic", "")).lower() != "mov" or tmp_slot is None:
+        return None
+    tmp_disp = int(tmp_slot[0])
+    if tmp_disp >= 0:
+        return None
+    if not (
+        _match_stack_mov_to_reg_8616(insns[idx + 3], "bx", 6)
+        and _match_reg_indirect_load_8616(insns[idx + 4], dst_reg="ax", base_reg="bx", size=2)
+        and _match_stack_mov_to_reg_8616(insns[idx + 5], "bx", 4)
+        and _match_reg_indirect_store_8616(insns[idx + 6], base_reg="bx", src_reg="ax", size=2)
+        and _match_stack_mov_to_reg_8616(insns[idx + 7], "ax", tmp_disp)
+        and _match_stack_mov_to_reg_8616(insns[idx + 8], "bx", 6)
+        and _match_reg_indirect_store_8616(insns[idx + 9], base_reg="bx", src_reg="ax", size=2)
+    ):
+        return None
+    return tmp_disp
+
+
+def _pointer_swap_exprs_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue, tmp_disp: int
+) -> tuple[StructuredAstValue, StructuredAstValue, StructuredAstValue] | None:
+    left_expr = _ensure_pointer_stack_arg_expr_8616(
+        project,
+        codegen,
+        4,
+        pointee_size=2,
+        fallback_name="left",
+    ) or _stack_expr_8616(codegen, 4, 2)
+    right_expr = _ensure_pointer_stack_arg_expr_8616(
+        project,
+        codegen,
+        6,
+        pointee_size=2,
+        fallback_name="right",
+    ) or _stack_expr_8616(codegen, 6, 2)
+    tmp_expr = _named_stack_expr_from_evidence_8616(project, codegen, int(tmp_disp), 2)
+    if any(expr is None for expr in (left_expr, right_expr, tmp_expr)):
+        return None
+    return left_expr, right_expr, tmp_expr
 
 
 def _materialize_pointer_swap_8616(
@@ -4581,49 +4951,13 @@ def _materialize_pointer_swap_8616(
 ) -> bool:
     debug_pointer_memory = os.environ.get("INERTIA_DEBUG_POINTER_MEMORY_IDIOMS") == "1"
     for idx in range(max(0, len(insns) - 9)):
-        if not _match_stack_mov_to_reg_8616(insns[idx], "bx", 4):
+        tmp_disp = _pointer_swap_pattern_tmp_disp_8616(insns, idx)
+        if tmp_disp is None:
             continue
-        if not _match_reg_indirect_load_8616(insns[idx + 1], dst_reg="ax", base_reg="bx", size=2):
+        exprs = _pointer_swap_exprs_8616(project, codegen, tmp_disp)
+        if exprs is None:
             continue
-        tmp_slot = _stack_mem_disp_size_8616(
-            insns[idx + 2], _boundary_tuple_8616(getattr(insns[idx + 2], "operands", ()) or ())[0]
-        )
-        if str(getattr(insns[idx + 2], "mnemonic", "")).lower() != "mov" or tmp_slot is None:
-            continue
-        tmp_disp = int(tmp_slot[0])
-        if tmp_disp >= 0:
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[idx + 3], "bx", 6):
-            continue
-        if not _match_reg_indirect_load_8616(insns[idx + 4], dst_reg="ax", base_reg="bx", size=2):
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[idx + 5], "bx", 4):
-            continue
-        if not _match_reg_indirect_store_8616(insns[idx + 6], base_reg="bx", src_reg="ax", size=2):
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[idx + 7], "ax", tmp_disp):
-            continue
-        if not _match_stack_mov_to_reg_8616(insns[idx + 8], "bx", 6):
-            continue
-        if not _match_reg_indirect_store_8616(insns[idx + 9], base_reg="bx", src_reg="ax", size=2):
-            continue
-        left_expr = _ensure_pointer_stack_arg_expr_8616(
-            project,
-            codegen,
-            4,
-            pointee_size=2,
-            fallback_name="left",
-        ) or _stack_expr_8616(codegen, 4, 2)
-        right_expr = _ensure_pointer_stack_arg_expr_8616(
-            project,
-            codegen,
-            6,
-            pointee_size=2,
-            fallback_name="right",
-        ) or _stack_expr_8616(codegen, 6, 2)
-        tmp_expr = _named_stack_expr_from_evidence_8616(project, codegen, int(tmp_disp), 2)
-        if any(expr is None for expr in (left_expr, right_expr, tmp_expr)):
-            continue
+        left_expr, right_expr, tmp_expr = exprs
         if debug_pointer_memory:
             logging.getLogger(__name__).warning(
                 "[pointer-memory] materialize pointer_swap function=%#x idx=%d tmp=%r left=%r right=%r",
@@ -4674,6 +5008,7 @@ def _materialize_pointer_swap_8616(
         _mark_codegen_signature_authoritative_8616(project, codegen, "pointer_swap_args")
         return True
     return False
+
 
 
 def _codegen_instruction_window_addrs_8616(
@@ -5360,6 +5695,277 @@ def _c_statement_shape_8616(stmt: StructuredAstValue, *, max_depth: int = 3) -> 
     return _structuring_c_statement_shape_8616(stmt, max_depth=max_depth)
 
 
+@dataclass
+class _VoidTailCallGuardRun8616:
+    """Run state for void tail-call guard materialization from CFG proofs."""
+
+    project: StructuredAstValue
+    codegen: StructuredAstValue
+    stats: dict[str, int]
+    proofs: list
+    has_explicit_void_return: bool
+    debug: StructuredAstValue
+    log: StructuredAstValue
+    changed: bool = False
+
+    def _materialize_suffix_diamond_8616(
+        self,
+        *,
+        stmt: CIfElse,
+        statements: list[StructuredAstValue],
+        index: int,
+        cond: StructuredAstValue,
+        false_body: StructuredAstValue,
+        cond_keys: frozenset[StructuredAstValue],
+    ) -> bool:
+        result = _structuring_materialize_void_tail_call_suffix_diamond_8616(
+            stmt=stmt,
+            statements=statements,
+            index=index,
+            cond=cond,
+            false_body=false_body,
+            cond_keys=cond_keys,
+            proofs=((proof.condition_keys, proof.true_fingerprint) for proof in self.proofs),
+            codegen=self.codegen,
+            callbacks=_void_tail_call_suffix_diamond_callbacks_8616(self.project),
+        )
+        if result.status is not VoidTailCallSuffixDiamondStatus8616.MATERIALIZED:
+            if self.debug:
+                self.log.warning(
+                    "[void-tail-call-guard] suffix-diamond refused status=%s fp=%r matches=%d suffix_types=%r "
+                    "cond_keys=%r",
+                    result.status.value,
+                    result.match_fingerprint,
+                    result.match_count,
+                    result.suffix_types,
+                    cond_keys,
+                )
+            return False
+        self.stats["materialized"] += 1
+        self.codegen._inertia_void_tail_call_guard_decision_8616 = (
+            _VoidTailCallGuardDecision8616.MATERIALIZE_SUFFIX_DIAMOND.value
+        )
+        self.codegen._inertia_void_tail_call_guard_materialized_8616 = (
+            int(getattr(self.codegen, "_inertia_void_tail_call_guard_materialized_8616", 0) or 0) + 1
+        )
+        if self.debug:
+            self.log.warning(
+                "[void-tail-call-guard] materialized suffix diamond index=%d match=%r",
+                index,
+                result.match_fingerprint,
+            )
+        return True
+
+    def _guard_arm(
+        self,
+        block: StructuredAstValue,
+        statements: list,
+        index: int,
+        stmt: CIfElse,
+        cond: StructuredAstValue,
+        body: StructuredAstValue,
+    ) -> int:
+        """Handle the ``if (cond) guard; ...`` arm. Returns the next index."""
+        self.stats["candidates"] += 1
+        if not self.has_explicit_void_return:
+            self.stats["refused"] += 1
+            self.codegen._inertia_void_tail_call_guard_decision_8616 = (
+                _VoidTailCallGuardDecision8616.KEEP_NOT_VOID.value
+            )
+            return index + 1
+        cond_keys = _condition_identity_keys_8616(self.project, cond)
+        if self._materialize_suffix_diamond_8616(
+            stmt=stmt,
+            statements=statements,
+            index=index,
+            cond=cond,
+            false_body=body,
+            cond_keys=cond_keys,
+        ):
+            block.statements = statements
+            self.changed = True
+            return index + 1
+        self.stats["refused"] += 1
+        return index + 1
+
+    def _match_unique_proof(
+        self,
+        cond_keys: frozenset,
+        call_arg_fps: StructuredAstValue,
+    ) -> StructuredAstValue | None:
+        """Return the single matched proof, recording refusals; None when unmatched."""
+        exact_proofs = [proof for proof in self.proofs if cond_keys & proof.condition_keys]
+        argument_proofs = [proof for proof in self.proofs if proof.true_fingerprint in call_arg_fps]
+        if not exact_proofs and len(argument_proofs) == 1:
+            exact_proofs = argument_proofs
+        if not exact_proofs:
+            self.stats["refused"] += 1
+            self.codegen._inertia_void_tail_call_guard_decision_8616 = (
+                _VoidTailCallGuardDecision8616.KEEP_NO_BRANCH_MATCH.value
+            )
+            if self.debug:
+                self.log.warning("[void-tail-call-guard] refused no-branch-match")
+            return None
+        unique_proofs = {
+            (proof.condition_keys, proof.true_fingerprint): proof for proof in exact_proofs
+        }
+        if len(unique_proofs) != 1:
+            self.stats["refused"] += 1
+            self.codegen._inertia_void_tail_call_guard_decision_8616 = (
+                _VoidTailCallGuardDecision8616.KEEP_AMBIGUOUS_BRANCH_MATCH.value
+            )
+            if self.debug:
+                self.log.warning(
+                    "[void-tail-call-guard] refused ambiguous-match matches=%r",
+                    tuple(unique_proofs),
+                )
+            return None
+        return next(iter(unique_proofs.values()))
+
+    def _apply_guard_materialization(
+        self,
+        block: StructuredAstValue,
+        statements: list,
+        index: int,
+        stmt: CIfElse,
+        matched_proof: StructuredAstValue,
+        tail_from_else: bool,
+        tail_payload: StructuredAstValue,
+    ) -> None:
+        """Apply the structuring-owned guard materialization and record stats."""
+        result = _structuring_materialize_void_tail_call_guard_8616(
+            stmt=stmt,
+            statements=statements,
+            index=index,
+            proof=matched_proof,
+            tail_from_else=tail_from_else,
+            tail_payload=tail_payload,
+            codegen=self.codegen,
+        )
+        if result.status is not VoidTailCallGuardStatus8616.MATERIALIZED:
+            self.stats["refused"] += 1
+            self.codegen._inertia_void_tail_call_guard_decision_8616 = (
+                _VoidTailCallGuardDecision8616.KEEP_NO_TAIL_CALL.value
+            )
+            if self.debug:
+                self.log.warning(
+                    "[void-tail-call-guard] refused materialization status=%s payload=%r",
+                    result.status.value,
+                    result.payload_type,
+                )
+            return
+        if result.removed_following_tail:
+            block.statements = statements
+        self.stats["materialized"] += 1
+        self.codegen._inertia_void_tail_call_guard_decision_8616 = _VoidTailCallGuardDecision8616.MATERIALIZE.value
+        self.codegen._inertia_void_tail_call_guard_materialized_8616 = (
+            int(getattr(self.codegen, "_inertia_void_tail_call_guard_materialized_8616", 0) or 0) + 1
+        )
+        if self.debug:
+            self.log.warning(
+                "[void-tail-call-guard] materialized index=%d condition_keys=%r match=%r",
+                index,
+                matched_proof.condition_keys,
+                matched_proof.true_fingerprint,
+            )
+        self.changed = True
+
+    def _tail_call_arm(
+        self,
+        block: StructuredAstValue,
+        statements: list,
+        index: int,
+        stmt: CIfElse,
+        cond: StructuredAstValue,
+    ) -> int:
+        """Handle the tail-call arm. Returns the next index."""
+        else_node = stmt.else_node
+        tail_from_else = else_node is not None
+        if not tail_from_else and index + 1 >= len(statements):
+            return index + 1
+        tail_stmt = else_node if tail_from_else else statements[index + 1]
+        tail_payload = _tail_call_payload_from_statement_8616(tail_stmt, self.codegen)
+        if self.debug:
+            self.log.warning(
+                "[void-tail-call-guard] candidate index=%d cond_keys=%r tail=%s",
+                index,
+                _condition_identity_keys_8616(self.project, cond),
+                type(tail_stmt).__name__,
+            )
+        if tail_payload is None:
+            self.stats["candidates"] += 1
+            self.stats["refused"] += 1
+            self.codegen._inertia_void_tail_call_guard_decision_8616 = (
+                _VoidTailCallGuardDecision8616.KEEP_NO_TAIL_CALL.value
+            )
+            if self.debug:
+                self.log.warning(
+                    "[void-tail-call-guard] refused no-tail-call shape=%r", _c_statement_shape_8616(tail_stmt)
+                )
+            return index + 1
+        tail_call = tail_payload[0]
+        if isinstance(tail_stmt, CFunctionCall) and not self.has_explicit_void_return:
+            self.stats["candidates"] += 1
+            self.stats["refused"] += 1
+            self.codegen._inertia_void_tail_call_guard_decision_8616 = _VoidTailCallGuardDecision8616.KEEP_NOT_VOID.value
+            return index + 1
+
+        self.stats["candidates"] += 1
+        cond_keys = _condition_identity_keys_8616(self.project, cond)
+        call_arg_fps = _call_argument_fingerprints_8616(self.project, tail_call)
+        if self.debug:
+            self.log.warning(
+                "[void-tail-call-guard] candidate args=%r proofs=%r",
+                call_arg_fps,
+                self.proofs,
+            )
+        matched_proof = self._match_unique_proof(cond_keys, call_arg_fps)
+        if matched_proof is None:
+            return index + 1
+        self._apply_guard_materialization(
+            block, statements, index, stmt, matched_proof, tail_from_else, tail_payload
+        )
+        return index + 1
+
+    def _scan_block(self, block: StructuredAstValue) -> None:
+        statements = _boundary_list_8616(getattr(block, "statements", ()) or ())
+        if not statements:
+            return
+        index = 0
+        while index < len(statements):
+            stmt = statements[index]
+            if not isinstance(stmt, CIfElse):
+                index += 1
+                continue
+            if self.debug:
+                self.log.warning(
+                    "[void-tail-call-guard] inspect block_len=%d index=%d next=%s all=%r",
+                    len(statements),
+                    index,
+                    type(statements[index + 1]).__name__ if index + 1 < len(statements) else None,
+                    tuple(type(item).__name__ for item in statements),
+                )
+            cond_nodes = _boundary_tuple_8616(stmt.condition_and_nodes or ())
+            if len(cond_nodes) != 1:
+                index += 1
+                continue
+            cond, body = cond_nodes[0]
+            if not _is_empty_return_statement_8616(body):
+                index = self._guard_arm(block, statements, index, stmt, cond, body)
+            else:
+                index = self._tail_call_arm(block, statements, index, stmt, cond)
+
+    def run(self, root: StructuredAstValue) -> bool:
+        seen_blocks: set[int] = set()
+        for block in [root, *[node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CStatements)]]:
+            block_id = id(block)
+            if block_id in seen_blocks:
+                continue
+            seen_blocks.add(block_id)
+            self._scan_block(block)
+        return self.changed
+
+
 def _materialize_void_tail_call_guard_from_cfg_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
     """Repair ``if (cond) return; return call();`` when CFG proves the call is the true branch.
 
@@ -5403,221 +6009,16 @@ def _materialize_void_tail_call_guard_from_cfg_8616(project: StructuredAstValue,
         codegen._inertia_void_tail_call_guard_decision_8616 = _VoidTailCallGuardDecision8616.KEEP_NO_CFG_PROOF.value
         return False
 
-    changed = False
-    seen_blocks: set[int] = set()
+    return _VoidTailCallGuardRun8616(
+        project=project,
+        codegen=codegen,
+        stats=stats,
+        proofs=proofs,
+        has_explicit_void_return=has_explicit_void_return,
+        debug=debug,
+        log=log,
+    ).run(root)
 
-    def _materialize_suffix_diamond_8616(
-        *,
-        stmt: CIfElse,
-        statements: list[StructuredAstValue],
-        index: int,
-        cond: StructuredAstValue,
-        false_body: StructuredAstValue,
-        cond_keys: frozenset[StructuredAstValue],
-    ) -> bool:
-        result = _structuring_materialize_void_tail_call_suffix_diamond_8616(
-            stmt=stmt,
-            statements=statements,
-            index=index,
-            cond=cond,
-            false_body=false_body,
-            cond_keys=cond_keys,
-            proofs=((proof.condition_keys, proof.true_fingerprint) for proof in proofs),
-            codegen=codegen,
-            callbacks=_void_tail_call_suffix_diamond_callbacks_8616(project),
-        )
-        if result.status is not VoidTailCallSuffixDiamondStatus8616.MATERIALIZED:
-            if debug:
-                log.warning(
-                    "[void-tail-call-guard] suffix-diamond refused status=%s fp=%r matches=%d suffix_types=%r "
-                    "cond_keys=%r",
-                    result.status.value,
-                    result.match_fingerprint,
-                    result.match_count,
-                    result.suffix_types,
-                    cond_keys,
-                )
-            return False
-        stats["materialized"] += 1
-        codegen._inertia_void_tail_call_guard_decision_8616 = (
-            _VoidTailCallGuardDecision8616.MATERIALIZE_SUFFIX_DIAMOND.value
-        )
-        codegen._inertia_void_tail_call_guard_materialized_8616 = (
-            int(getattr(codegen, "_inertia_void_tail_call_guard_materialized_8616", 0) or 0) + 1
-        )
-        if debug:
-            log.warning(
-                "[void-tail-call-guard] materialized suffix diamond index=%d match=%r",
-                index,
-                result.match_fingerprint,
-            )
-        return True
-
-    for block in [root, *[node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CStatements)]]:
-        block_id = id(block)
-        if block_id in seen_blocks:
-            continue
-        seen_blocks.add(block_id)
-        statements = _boundary_list_8616(getattr(block, "statements", ()) or ())
-        if not statements:
-            continue
-        index = 0
-        while index < len(statements):
-            stmt = statements[index]
-            if not isinstance(stmt, CIfElse):
-                index += 1
-                continue
-            if debug:
-                log.warning(
-                    "[void-tail-call-guard] inspect block_len=%d index=%d next=%s all=%r",
-                    len(statements),
-                    index,
-                    type(statements[index + 1]).__name__ if index + 1 < len(statements) else None,
-                    tuple(type(item).__name__ for item in statements),
-                )
-            cond_nodes = _boundary_tuple_8616(stmt.condition_and_nodes or ())
-            if len(cond_nodes) != 1:
-                index += 1
-                continue
-            cond, body = cond_nodes[0]
-            if not _is_empty_return_statement_8616(body):
-                stats["candidates"] += 1
-                if not has_explicit_void_return:
-                    stats["refused"] += 1
-                    codegen._inertia_void_tail_call_guard_decision_8616 = (
-                        _VoidTailCallGuardDecision8616.KEEP_NOT_VOID.value
-                    )
-                    index += 1
-                    continue
-                cond_keys = _condition_identity_keys_8616(project, cond)
-                if _materialize_suffix_diamond_8616(
-                    stmt=stmt,
-                    statements=statements,
-                    index=index,
-                    cond=cond,
-                    false_body=body,
-                    cond_keys=cond_keys,
-                ):
-                    block.statements = statements
-                    changed = True
-                    index += 1
-                    continue
-                stats["refused"] += 1
-                index += 1
-                continue
-            else_node = stmt.else_node
-            tail_from_else = else_node is not None
-            if not tail_from_else and index + 1 >= len(statements):
-                index += 1
-                continue
-            tail_stmt = else_node if tail_from_else else statements[index + 1]
-            tail_payload = _tail_call_payload_from_statement_8616(tail_stmt, codegen)
-            if debug:
-                log.warning(
-                    "[void-tail-call-guard] candidate index=%d cond_keys=%r tail=%s",
-                    index,
-                    _condition_identity_keys_8616(project, cond),
-                    type(tail_stmt).__name__,
-                )
-            if tail_payload is None:
-                stats["candidates"] += 1
-                stats["refused"] += 1
-                codegen._inertia_void_tail_call_guard_decision_8616 = (
-                    _VoidTailCallGuardDecision8616.KEEP_NO_TAIL_CALL.value
-                )
-                if debug:
-                    log.warning(
-                        "[void-tail-call-guard] refused no-tail-call shape=%r", _c_statement_shape_8616(tail_stmt)
-                    )
-                index += 1
-                continue
-            tail_call = tail_payload[0]
-            if isinstance(tail_stmt, CFunctionCall) and not has_explicit_void_return:
-                stats["candidates"] += 1
-                stats["refused"] += 1
-                codegen._inertia_void_tail_call_guard_decision_8616 = _VoidTailCallGuardDecision8616.KEEP_NOT_VOID.value
-                index += 1
-                continue
-
-            stats["candidates"] += 1
-            cond_keys = _condition_identity_keys_8616(project, cond)
-            call_arg_fps = _call_argument_fingerprints_8616(project, tail_call)
-            if debug:
-                log.warning(
-                    "[void-tail-call-guard] candidate args=%r proofs=%r",
-                    call_arg_fps,
-                    proofs,
-                )
-            exact_proofs = [proof for proof in proofs if cond_keys & proof.condition_keys]
-            argument_proofs = [proof for proof in proofs if proof.true_fingerprint in call_arg_fps]
-            if not exact_proofs and len(argument_proofs) == 1:
-                exact_proofs = argument_proofs
-            if not exact_proofs:
-                stats["refused"] += 1
-                codegen._inertia_void_tail_call_guard_decision_8616 = (
-                    _VoidTailCallGuardDecision8616.KEEP_NO_BRANCH_MATCH.value
-                )
-                if debug:
-                    log.warning("[void-tail-call-guard] refused no-branch-match")
-                index += 1
-                continue
-            unique_proofs = {
-                (proof.condition_keys, proof.true_fingerprint): proof for proof in exact_proofs
-            }
-            if len(unique_proofs) != 1:
-                stats["refused"] += 1
-                codegen._inertia_void_tail_call_guard_decision_8616 = (
-                    _VoidTailCallGuardDecision8616.KEEP_AMBIGUOUS_BRANCH_MATCH.value
-                )
-                if debug:
-                    log.warning(
-                        "[void-tail-call-guard] refused ambiguous-match matches=%r",
-                        tuple(unique_proofs),
-                    )
-                index += 1
-                continue
-            matched_proof = next(iter(unique_proofs.values()))
-
-            result = _structuring_materialize_void_tail_call_guard_8616(
-                stmt=stmt,
-                statements=statements,
-                index=index,
-                proof=matched_proof,
-                tail_from_else=tail_from_else,
-                tail_payload=tail_payload,
-                codegen=codegen,
-            )
-            if result.status is not VoidTailCallGuardStatus8616.MATERIALIZED:
-                stats["refused"] += 1
-                codegen._inertia_void_tail_call_guard_decision_8616 = (
-                    _VoidTailCallGuardDecision8616.KEEP_NO_TAIL_CALL.value
-                )
-                if debug:
-                    log.warning(
-                        "[void-tail-call-guard] refused materialization status=%s payload=%r",
-                        result.status.value,
-                        result.payload_type,
-                    )
-                index += 1
-                continue
-            if result.removed_following_tail:
-                block.statements = statements
-            stats["materialized"] += 1
-            codegen._inertia_void_tail_call_guard_decision_8616 = _VoidTailCallGuardDecision8616.MATERIALIZE.value
-            codegen._inertia_void_tail_call_guard_materialized_8616 = (
-                int(getattr(codegen, "_inertia_void_tail_call_guard_materialized_8616", 0) or 0) + 1
-            )
-            if debug:
-                log.warning(
-                    "[void-tail-call-guard] materialized index=%d condition_keys=%r match=%r",
-                    index,
-                    matched_proof.condition_keys,
-                    matched_proof.true_fingerprint,
-                )
-            changed = True
-            index += 1
-            continue
-    return changed
 
 
 def _materialize_void_tail_call_guard_from_cfg_pass_8616(
@@ -5725,60 +6126,87 @@ def _condition_has_jcc_evidence_8616(project: StructuredAstValue, cond: Structur
     )
 
 
-def _prune_surplus_void_empty_return_guards_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
-    """Replay structuring-owned surplus-branch proofs at the compatibility boundary.
-
-    Empty-return and identical-assignment branch classification belongs in
-    ``structuring/return_chains.py``. This legacy pass only adapts dynamic angr
-    AST callbacks after regeneration; do not add a new proof or semantic
-    mutation here. Migrate each remaining branch kind into Structuring, then
-    reduce this function to replay or remove it.
-    """
-    debug = os.environ.get("INERTIA_DEBUG_RETURN_BRANCH")
-    log = logging.getLogger(__name__)
-    cfunc = getattr(codegen, "cfunc", None)
-    root = getattr(cfunc, "statements", None) if cfunc is not None else None
-    if root is None:
-        return False
-
-    if not _codegen_has_explicit_void_return_8616(project, codegen):
-        codegen._inertia_void_empty_return_guard_refused_not_void_8616 = (
-            int(getattr(codegen, "_inertia_void_empty_return_guard_refused_not_void_8616", 0) or 0) + 1
+def _debug_guard_shape_refusal_8616(stmt: StructuredAstValue, project: StructuredAstValue, log: StructuredAstValue) -> None:
+    """Dump the refused guard shape evidence for branch-prune debugging."""
+    cond_nodes = _boundary_tuple_8616(stmt.condition_and_nodes or ())
+    log.warning(
+        "[void-empty-return-guard] shape-refusal cond_nodes=%d "
+        "body_types=%s body_empty=%s else_type=%s else_empty=%s",
+        len(cond_nodes),
+        tuple(type(body).__name__ for _cond, body in cond_nodes),
+        tuple(_c_node_semantically_empty_8616(body) for _cond, body in cond_nodes),
+        type(stmt.else_node).__name__,
+        _c_node_semantically_empty_8616(stmt.else_node),
+    )
+    log.warning(
+        "[void-empty-return-guard] shape-children bodies=%s else=%s",
+        tuple(
+            tuple(type(child).__name__ for child in _boundary_tuple_8616(body.statements))
+            if isinstance(body, CStatements)
+            else ()
+            for _cond, body in cond_nodes
+        ),
+        tuple(
+            type(child).__name__
+            for child in _boundary_tuple_8616(stmt.else_node.statements)
         )
-        codegen._inertia_void_empty_return_guard_decision_8616 = _VoidEmptyReturnGuardDecision8616.KEEP_NOT_VOID.value
-        if debug:
-            log.warning("[void-empty-return-guard] refused reason=not-void")
-        return False
-
-    branch_count = _real_conditional_branch_count_for_codegen_8616(project, codegen)
-    if branch_count is None:
-        codegen._inertia_void_empty_return_guard_refused_no_branch_proof_8616 = (
-            int(getattr(codegen, "_inertia_void_empty_return_guard_refused_no_branch_proof_8616", 0) or 0) + 1
+        if isinstance(stmt.else_node, CStatements)
+        else (),
+    )
+    assignments = tuple(
+        child
+        for _cond, body in cond_nodes
+        if isinstance(body, CStatements)
+        for child in _boundary_tuple_8616(body.statements)
+        if isinstance(child, CAssignment)
+    ) + tuple(
+        child
+        for child in (
+            _boundary_tuple_8616(stmt.else_node.statements)
+            if isinstance(stmt.else_node, CStatements)
+            else ()
         )
-        codegen._inertia_void_empty_return_guard_decision_8616 = (
-            _VoidEmptyReturnGuardDecision8616.KEEP_NO_BRANCH_PROOF.value
-        )
-        if debug:
-            log.warning("[void-empty-return-guard] refused reason=no-branch-proof")
-        return False
-
-    total_if_nodes = sum(1 for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CIfElse))
-    surplus = total_if_nodes - int(branch_count)
-    if surplus <= 0:
-        codegen._inertia_void_empty_return_guard_refused_within_branch_budget_8616 = (
-            int(getattr(codegen, "_inertia_void_empty_return_guard_refused_within_branch_budget_8616", 0) or 0) + 1
-        )
-        codegen._inertia_void_empty_return_guard_decision_8616 = (
-            _VoidEmptyReturnGuardDecision8616.KEEP_WITHIN_BRANCH_BUDGET.value
-        )
-        if debug:
-            log.warning(
-                "[void-empty-return-guard] refused reason=within-budget ifs=%d branches=%d",
-                total_if_nodes,
-                int(branch_count),
+        if isinstance(child, CAssignment)
+    )
+    log.warning(
+        "[void-empty-return-guard] shape-assignment-fingerprints=%s",
+        tuple(
+            (
+                _expr_fingerprint(assignment.lhs, project),
+                _expr_fingerprint(assignment.rhs, project),
             )
-        return False
+            for assignment in assignments
+        ),
+    )
 
+
+def _surplus_guard_candidate_8616(
+    stmt: StructuredAstValue, project: StructuredAstValue
+) -> tuple[StructuredAstValue, _SurplusIfGuardKind8616, tuple[StructuredAstValue, ...]] | None:
+    """Return (cond, kind, replacement) for a surplus-guard statement, or None."""
+    candidate = _surplus_empty_guard_condition_8616(stmt)
+    if candidate is not None:
+        cond, kind = candidate
+        return cond, kind, ()
+    identical_arms = _structuring_identical_assignment_arm_condition_8616(
+        stmt,
+        project,
+        _expression_fingerprint_callbacks_8616(),
+    )
+    if identical_arms is None:
+        return None
+    cond, replacement = identical_arms
+    return cond, _SurplusIfGuardKind8616.IDENTICAL_ASSIGNMENT_ARMS, replacement
+
+
+def _collect_surplus_guard_candidates_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    root: StructuredAstValue,
+    debug: StructuredAstValue,
+    log: StructuredAstValue,
+) -> tuple[list, int, int]:
+    """Collect eligible surplus guards; returns (candidates, refused_shape, refused_branch_backed)."""
     candidates: list[
         tuple[
             CStatements,
@@ -5797,76 +6225,14 @@ def _prune_surplus_void_empty_return_guards_8616(project: StructuredAstValue, co
             continue
         seen_blocks.add(block_id)
         for index, stmt in enumerate(_boundary_list_8616(getattr(block, "statements", ()) or ())):
-            candidate = _surplus_empty_guard_condition_8616(stmt)
-            replacement: tuple[StructuredAstValue, ...] = ()
-            if candidate is None:
-                identical_arms = _structuring_identical_assignment_arm_condition_8616(
-                    stmt,
-                    project,
-                    _expression_fingerprint_callbacks_8616(),
-                )
-                if identical_arms is not None:
-                    cond, replacement = identical_arms
-                    candidate = (
-                        cond,
-                        _SurplusIfGuardKind8616.IDENTICAL_ASSIGNMENT_ARMS,
-                    )
-            if candidate is None:
+            resolved = _surplus_guard_candidate_8616(stmt, project)
+            if resolved is None:
                 if isinstance(stmt, CIfElse):
                     refused_shape += 1
                     if debug:
-                        cond_nodes = _boundary_tuple_8616(stmt.condition_and_nodes or ())
-                        log.warning(
-                            "[void-empty-return-guard] shape-refusal cond_nodes=%d "
-                            "body_types=%s body_empty=%s else_type=%s else_empty=%s",
-                            len(cond_nodes),
-                            tuple(type(body).__name__ for _cond, body in cond_nodes),
-                            tuple(_c_node_semantically_empty_8616(body) for _cond, body in cond_nodes),
-                            type(stmt.else_node).__name__,
-                            _c_node_semantically_empty_8616(stmt.else_node),
-                        )
-                        log.warning(
-                            "[void-empty-return-guard] shape-children bodies=%s else=%s",
-                            tuple(
-                                tuple(type(child).__name__ for child in _boundary_tuple_8616(body.statements))
-                                if isinstance(body, CStatements)
-                                else ()
-                                for _cond, body in cond_nodes
-                            ),
-                            tuple(
-                                type(child).__name__
-                                for child in _boundary_tuple_8616(stmt.else_node.statements)
-                            )
-                            if isinstance(stmt.else_node, CStatements)
-                            else (),
-                        )
-                        assignments = tuple(
-                            child
-                            for _cond, body in cond_nodes
-                            if isinstance(body, CStatements)
-                            for child in _boundary_tuple_8616(body.statements)
-                            if isinstance(child, CAssignment)
-                        ) + tuple(
-                            child
-                            for child in (
-                                _boundary_tuple_8616(stmt.else_node.statements)
-                                if isinstance(stmt.else_node, CStatements)
-                                else ()
-                            )
-                            if isinstance(child, CAssignment)
-                        )
-                        log.warning(
-                            "[void-empty-return-guard] shape-assignment-fingerprints=%s",
-                            tuple(
-                                (
-                                    _expr_fingerprint(assignment.lhs, project),
-                                    _expr_fingerprint(assignment.rhs, project),
-                                )
-                                for assignment in assignments
-                            ),
-                        )
+                        _debug_guard_shape_refusal_8616(stmt, project, log)
                 continue
-            cond, kind = candidate
+            cond, kind, replacement = resolved
             codegen._inertia_void_empty_return_guard_candidates_8616 = (
                 int(getattr(codegen, "_inertia_void_empty_return_guard_candidates_8616", 0) or 0) + 1
             )
@@ -5878,38 +6244,11 @@ def _prune_surplus_void_empty_return_guards_8616(project: StructuredAstValue, co
                     int(getattr(codegen, "_inertia_void_empty_return_guard_noop_candidates_8616", 0) or 0) + 1
                 )
             candidates.append((block, index, kind, replacement))
+    return candidates, refused_shape, refused_branch_backed
 
-    if refused_shape:
-        codegen._inertia_void_empty_return_guard_refused_non_empty_shape_8616 = (
-            int(getattr(codegen, "_inertia_void_empty_return_guard_refused_non_empty_shape_8616", 0) or 0)
-            + refused_shape
-        )
-    if refused_branch_backed:
-        codegen._inertia_void_empty_return_guard_refused_branch_backed_8616 = (
-            int(getattr(codegen, "_inertia_void_empty_return_guard_refused_branch_backed_8616", 0) or 0)
-            + refused_branch_backed
-        )
-    if not candidates:
-        codegen._inertia_void_empty_return_guard_decision_8616 = (
-            _VoidEmptyReturnGuardDecision8616.KEEP_BRANCH_BACKED_CONDITION.value
-        )
-        if debug:
-            log.warning(
-                "[void-empty-return-guard] refused reason=no-eligible-candidates ifs=%d branches=%d "
-                "surplus=%d refused_shape=%d refused_branch_backed=%d",
-                total_if_nodes,
-                int(branch_count),
-                int(surplus),
-                refused_shape,
-                refused_branch_backed,
-            )
-        return False
 
-    prune_budget = min(int(surplus), len(candidates))
-    prune_by_block: dict[
-        int,
-        tuple[CStatements, dict[int, tuple[StructuredAstValue, ...]]],
-    ] = {}
+def _surplus_guard_kind_counts_8616(candidates: list, prune_budget: int) -> tuple[int, int, int]:
+    """Count the pruned candidates by guard kind."""
     pruned_noop = sum(
         1
         for _block, _index, kind, _replacement in candidates[:prune_budget]
@@ -5925,6 +6264,15 @@ def _prune_surplus_void_empty_return_guards_8616(project: StructuredAstValue, co
         for _block, _index, kind, _replacement in candidates[:prune_budget]
         if kind is _SurplusIfGuardKind8616.IDENTICAL_ASSIGNMENT_ARMS
     )
+    return pruned_noop, pruned_empty_return, collapsed_identical_arms
+
+
+def _apply_surplus_guard_prune_8616(candidates: list, prune_budget: int) -> int:
+    """Rewrite each candidate block with its replacements; returns the pruned count."""
+    prune_by_block: dict[
+        int,
+        tuple[CStatements, dict[int, tuple[StructuredAstValue, ...]]],
+    ] = {}
     for block, index, _kind, replacement in candidates[:prune_budget]:
         block_id = id(block)
         if block_id not in prune_by_block:
@@ -5943,9 +6291,22 @@ def _prune_surplus_void_empty_return_guards_8616(project: StructuredAstValue, co
                 rebuilt.extend(statement_replacement)
                 pruned += 1
         block.statements = rebuilt
+    return pruned
 
-    if pruned <= 0:
-        return False
+
+def _record_surplus_guard_prune_8616(
+    codegen: StructuredAstValue,
+    branch_count: int,
+    total_if_nodes: int,
+    surplus: int,
+    candidates: list,
+    pruned: int,
+    pruned_noop: int,
+    pruned_empty_return: int,
+    collapsed_identical_arms: int,
+    debug: StructuredAstValue,
+    log: StructuredAstValue,
+) -> None:
     codegen._inertia_void_empty_return_guard_pruned_8616 = (
         int(getattr(codegen, "_inertia_void_empty_return_guard_pruned_8616", 0) or 0) + pruned
     )
@@ -5994,16 +6355,185 @@ def _prune_surplus_void_empty_return_guards_8616(project: StructuredAstValue, co
             int(surplus),
             len(candidates),
         )
+
+
+def _surplus_guard_branch_budget_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    root: StructuredAstValue,
+    debug: StructuredAstValue,
+    log: StructuredAstValue,
+) -> tuple[int, int] | None:
+    """Return (branch_count, total_if_nodes) when surplus guards exist, or None on refusal."""
+    if not _codegen_has_explicit_void_return_8616(project, codegen):
+        codegen._inertia_void_empty_return_guard_refused_not_void_8616 = (
+            int(getattr(codegen, "_inertia_void_empty_return_guard_refused_not_void_8616", 0) or 0) + 1
+        )
+        codegen._inertia_void_empty_return_guard_decision_8616 = _VoidEmptyReturnGuardDecision8616.KEEP_NOT_VOID.value
+        if debug:
+            log.warning("[void-empty-return-guard] refused reason=not-void")
+        return None
+
+    branch_count = _real_conditional_branch_count_for_codegen_8616(project, codegen)
+    if branch_count is None:
+        codegen._inertia_void_empty_return_guard_refused_no_branch_proof_8616 = (
+            int(getattr(codegen, "_inertia_void_empty_return_guard_refused_no_branch_proof_8616", 0) or 0) + 1
+        )
+        codegen._inertia_void_empty_return_guard_decision_8616 = (
+            _VoidEmptyReturnGuardDecision8616.KEEP_NO_BRANCH_PROOF.value
+        )
+        if debug:
+            log.warning("[void-empty-return-guard] refused reason=no-branch-proof")
+        return None
+
+    total_if_nodes = sum(1 for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CIfElse))
+    surplus = total_if_nodes - int(branch_count)
+    if surplus <= 0:
+        codegen._inertia_void_empty_return_guard_refused_within_branch_budget_8616 = (
+            int(getattr(codegen, "_inertia_void_empty_return_guard_refused_within_branch_budget_8616", 0) or 0) + 1
+        )
+        codegen._inertia_void_empty_return_guard_decision_8616 = (
+            _VoidEmptyReturnGuardDecision8616.KEEP_WITHIN_BRANCH_BUDGET.value
+        )
+        if debug:
+            log.warning(
+                "[void-empty-return-guard] refused reason=within-budget ifs=%d branches=%d",
+                total_if_nodes,
+                int(branch_count),
+            )
+        return None
+    return int(branch_count), total_if_nodes
+
+
+def _record_surplus_guard_refusals_8616(
+    codegen: StructuredAstValue,
+    branch_count: int,
+    total_if_nodes: int,
+    surplus: int,
+    refused_shape: int,
+    refused_branch_backed: int,
+    debug: StructuredAstValue,
+    log: StructuredAstValue,
+) -> None:
+    """Record refused-shape/branch-backed counters and the no-candidate decision."""
+    if refused_shape:
+        codegen._inertia_void_empty_return_guard_refused_non_empty_shape_8616 = (
+            int(getattr(codegen, "_inertia_void_empty_return_guard_refused_non_empty_shape_8616", 0) or 0)
+            + refused_shape
+        )
+    if refused_branch_backed:
+        codegen._inertia_void_empty_return_guard_refused_branch_backed_8616 = (
+            int(getattr(codegen, "_inertia_void_empty_return_guard_refused_branch_backed_8616", 0) or 0)
+            + refused_branch_backed
+        )
+    codegen._inertia_void_empty_return_guard_decision_8616 = (
+        _VoidEmptyReturnGuardDecision8616.KEEP_BRANCH_BACKED_CONDITION.value
+    )
+    if debug:
+        log.warning(
+            "[void-empty-return-guard] refused reason=no-eligible-candidates ifs=%d branches=%d "
+            "surplus=%d refused_shape=%d refused_branch_backed=%d",
+            total_if_nodes,
+            int(branch_count),
+            int(surplus),
+            refused_shape,
+            refused_branch_backed,
+        )
+
+
+def _prune_surplus_void_empty_return_guards_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
+    """Replay structuring-owned surplus-branch proofs at the compatibility boundary.
+
+    Empty-return and identical-assignment branch classification belongs in
+    ``structuring/return_chains.py``. This legacy pass only adapts dynamic angr
+    AST callbacks after regeneration; do not add a new proof or semantic
+    mutation here. Migrate each remaining branch kind into Structuring, then
+    reduce this function to replay or remove it.
+    """
+    debug = os.environ.get("INERTIA_DEBUG_RETURN_BRANCH")
+    log = logging.getLogger(__name__)
+    cfunc = getattr(codegen, "cfunc", None)
+    root = getattr(cfunc, "statements", None) if cfunc is not None else None
+    if root is None:
+        return False
+
+    budget = _surplus_guard_branch_budget_8616(project, codegen, root, debug, log)
+    if budget is None:
+        return False
+    branch_count, total_if_nodes = budget
+    surplus = total_if_nodes - branch_count
+
+    candidates, refused_shape, refused_branch_backed = _collect_surplus_guard_candidates_8616(
+        project, codegen, root, debug, log
+    )
+
+    if not candidates:
+        _record_surplus_guard_refusals_8616(
+            codegen, branch_count, total_if_nodes, surplus, refused_shape, refused_branch_backed, debug, log
+        )
+        return False
+
+    # Refusal counters are recorded even on the accepted path.
+    if refused_shape:
+        codegen._inertia_void_empty_return_guard_refused_non_empty_shape_8616 = (
+            int(getattr(codegen, "_inertia_void_empty_return_guard_refused_non_empty_shape_8616", 0) or 0)
+            + refused_shape
+        )
+    if refused_branch_backed:
+        codegen._inertia_void_empty_return_guard_refused_branch_backed_8616 = (
+            int(getattr(codegen, "_inertia_void_empty_return_guard_refused_branch_backed_8616", 0) or 0)
+            + refused_branch_backed
+        )
+
+    prune_budget = min(int(surplus), len(candidates))
+    pruned_noop, pruned_empty_return, collapsed_identical_arms = _surplus_guard_kind_counts_8616(
+        candidates, prune_budget
+    )
+    pruned = _apply_surplus_guard_prune_8616(candidates, prune_budget)
+
+    if pruned <= 0:
+        return False
+    _record_surplus_guard_prune_8616(
+        codegen,
+        branch_count,
+        total_if_nodes,
+        surplus,
+        candidates,
+        pruned,
+        pruned_noop,
+        pruned_empty_return,
+        collapsed_identical_arms,
+        debug,
+        log,
+    )
     return True
 
 
-def _prune_duplicate_empty_return_guard_before_cfg_suffix_8616(
-    project: StructuredAstValue, codegen: StructuredAstValue
-) -> bool:
-    """Prune duplicate empty-return guards using structuring-owned prune planning."""
-    debug = os.environ.get("INERTIA_DEBUG_RETURN_BRANCH")
-    log = logging.getLogger(__name__)
-    has_materialized_return_chain = any(
+
+def _debug_duplicate_empty_prune_refusal_8616(log: StructuredAstValue, statements: list, values: tuple) -> None:
+    """Dump the nearby statement shapes when the duplicate-empty prune refuses."""
+    nearby = []
+    for index, stmt in enumerate(statements[: min(len(statements), 12)]):
+        item = _single_if_return_8616(stmt)
+        nearby.append(
+            (
+                index,
+                type(stmt).__name__,
+                None if item is None else type(item[1]).__name__,
+                None if item is None else _const_return_value_8616(item[1]),
+            )
+        )
+    log.warning(
+        "[cfg-return-chain] duplicate-empty prune refused: statements=%d values=%d nearby=%r",
+        len(statements),
+        len(values),
+        nearby,
+    )
+
+
+def _codegen_has_materialized_return_chain_8616(codegen: StructuredAstValue) -> bool:
+    """Return True when any return-chain materialization flag is set on codegen."""
+    return any(
         bool(getattr(codegen, attr, False))
         for attr in (
             "_inertia_return_chain_suffix_materialized_8616",
@@ -6012,23 +6542,50 @@ def _prune_duplicate_empty_return_guard_before_cfg_suffix_8616(
             "_inertia_decrement_switch_return_materialized_8616",
         )
     )
+
+
+def _cfg_derived_return_chain_values_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue
+) -> tuple[int, ...] | None:
+    """Derive return-chain values from CFG evidence when no chain was materialized."""
+    cfg_values = _ordered_conditional_return_values_8616(project, codegen)
+    final_value = _last_ax_return_value_8616(project, codegen)
+    if not cfg_values or final_value is None:
+        return None
+    return (*tuple(int(value) for value in cfg_values), int(final_value))
+
+
+def _duplicate_empty_prune_values_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue, log: StructuredAstValue, debug: StructuredAstValue
+) -> tuple | None:
+    """Resolve the return-chain value tuple for the duplicate-empty prune, or refuse."""
+    has_materialized_return_chain = _codegen_has_materialized_return_chain_8616(codegen)
     values = _boundary_tuple_8616(
         int(value)
         for value in _boundary_tuple_8616(getattr(codegen, "_inertia_return_chain_materialized_values_8616", ()) or ())
     )
     if not has_materialized_return_chain:
-        cfg_values = _ordered_conditional_return_values_8616(project, codegen)
-        final_value = _last_ax_return_value_8616(project, codegen)
-        if cfg_values and final_value is not None:
-            values = (*tuple(int(value) for value in cfg_values), int(final_value))
-            has_materialized_return_chain = True
-        else:
+        derived = _cfg_derived_return_chain_values_8616(project, codegen)
+        if derived is None:
             if debug:
                 log.warning("[cfg-return-chain] duplicate-empty prune refused: return chain not materialized")
-            return False
+            return None
+        values = derived
     if not values:
         if debug:
             log.warning("[cfg-return-chain] duplicate-empty prune refused: no values")
+        return None
+    return values
+
+
+def _prune_duplicate_empty_return_guard_before_cfg_suffix_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue
+) -> bool:
+    """Prune duplicate empty-return guards using structuring-owned prune planning."""
+    debug = os.environ.get("INERTIA_DEBUG_RETURN_BRANCH")
+    log = logging.getLogger(__name__)
+    values = _duplicate_empty_prune_values_8616(project, codegen, log, debug)
+    if values is None:
         return False
     # Dynamic codegen/C AST compatibility boundary.
     cfunc = getattr(codegen, "cfunc", None)
@@ -6044,23 +6601,7 @@ def _prune_duplicate_empty_return_guard_before_cfg_suffix_8616(
     )
     if plan is None:
         if debug:
-            nearby = []
-            for index, stmt in enumerate(statements[: min(len(statements), 12)]):
-                item = _single_if_return_8616(stmt)
-                nearby.append(
-                    (
-                        index,
-                        type(stmt).__name__,
-                        None if item is None else type(item[1]).__name__,
-                        None if item is None else _const_return_value_8616(item[1]),
-                    )
-                )
-            log.warning(
-                "[cfg-return-chain] duplicate-empty prune refused: statements=%d values=%d nearby=%r",
-                len(statements),
-                len(values),
-                nearby,
-            )
+            _debug_duplicate_empty_prune_refusal_8616(log, statements, values)
         return False
     del statements[plan.index]
     codegen.cfunc.statements = CStatements(statements=statements, codegen=codegen)
@@ -6310,6 +6851,55 @@ def _materialize_stable_stack_semantics_postprocess_8616(
     return changed
 
 
+def _statement_ends_in_return_8616(stmt: StructuredAstValue) -> bool:
+    if isinstance(stmt, CReturn):
+        return True
+    if not isinstance(stmt, CStatements):
+        return False
+    nested = _boundary_list_8616(stmt.statements or ())
+    while nested and isinstance(nested[-1], CStatements):
+        nested = _boundary_list_8616(getattr(nested[-1], "statements", ()) or ())
+    return bool(nested and isinstance(nested[-1], CReturn))
+
+
+def _prune_block_after_return_8616(node: StructuredAstValue) -> int:
+    """Drop statements after a terminating return in one block; returns removed count."""
+    statements = _boundary_list_8616(node.statements or ())
+    if not statements:
+        return 0
+    kept = []
+    removed = 0
+    terminated = False
+    for stmt in statements:
+        if terminated:
+            removed += 1
+            continue
+        kept.append(stmt)
+        if _statement_ends_in_return_8616(stmt):
+            terminated = True
+    if len(kept) != len(statements):
+        node.statements = kept
+    return removed
+
+
+def _debug_unreachable_prune_8616(root: StructuredAstValue, scanned_blocks: int, removed: int, changed: bool) -> None:
+    if not os.environ.get("INERTIA_DEBUG_UNREACHABLE_PRUNE"):
+        return
+    top_types = ()
+    with contextlib.suppress(Exception):
+        top_types = _boundary_tuple_8616(
+            type(stmt).__name__ for stmt in _boundary_tuple_8616(getattr(root, "statements", ()) or ())
+        )
+    logging.getLogger(__name__).warning(
+        "[unreachable-prune] blocks=%d removed=%d changed=%s root_type=%s top=%r",
+        scanned_blocks,
+        removed,
+        changed,
+        type(root).__name__,
+        top_types,
+    )
+
+
 def _prune_unreachable_after_return_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
     cfunc = getattr(codegen, "cfunc", None)
     if cfunc is None:
@@ -6318,162 +6908,85 @@ def _prune_unreachable_after_return_8616(project: StructuredAstValue, codegen: S
     if root is None:
         return False
 
-    def _statement_ends_in_return(stmt: StructuredAstValue) -> bool:
-        if isinstance(stmt, CReturn):
-            return True
-        if not isinstance(stmt, CStatements):
-            return False
-        nested = _boundary_list_8616(stmt.statements or ())
-        while nested and isinstance(nested[-1], CStatements):
-            nested = _boundary_list_8616(getattr(nested[-1], "statements", ()) or ())
-        return bool(nested and isinstance(nested[-1], CReturn))
-
-    changed = False
     removed = 0
     scanned_blocks = 0
     seen: set[int] = set()
     blocks = [node for node in (root, *_iter_c_nodes_deep_8616(root)) if isinstance(node, CStatements)]
     for node in reversed(blocks):
-        if not isinstance(node, CStatements):
-            continue
         node_id = id(node)
         if node_id in seen:
             continue
         seen.add(node_id)
         scanned_blocks += 1
-        statements = _boundary_list_8616(node.statements or ())
-        if not statements:
-            continue
-        kept = []
-        terminated = False
-        for stmt in statements:
-            if terminated:
-                removed += 1
-                continue
-            kept.append(stmt)
-            if _statement_ends_in_return(stmt):
-                terminated = True
-        if len(kept) != len(statements):
-            node.statements = kept
-            changed = True
+        removed += _prune_block_after_return_8616(node)
 
+    changed = bool(removed)
     if removed:
         codegen._inertia_unreachable_after_return_pruned_8616 = (
             int(getattr(codegen, "_inertia_unreachable_after_return_pruned_8616", 0) or 0) + removed
         )
-    if os.environ.get("INERTIA_DEBUG_UNREACHABLE_PRUNE"):
-        top_types = ()
-        with contextlib.suppress(Exception):
-            top_types = _boundary_tuple_8616(
-                type(stmt).__name__ for stmt in _boundary_tuple_8616(getattr(root, "statements", ()) or ())
-            )
-        logging.getLogger(__name__).warning(
-            "[unreachable-prune] blocks=%d removed=%d changed=%s root_type=%s top=%r",
-            scanned_blocks,
-            removed,
-            changed,
-            type(root).__name__,
-            top_types,
-        )
+    _debug_unreachable_prune_8616(root, scanned_blocks, removed, changed)
     return changed
 
 
-def _materialize_missing_terminal_ax_return_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
-    """Materialize a proven terminal AX return as a guarded compatibility fallback."""
-    # Dynamic angr/codegen compatibility boundary: structuring owner flags are attached during staged codegen.
-    if getattr(codegen, "_inertia_missing_terminal_ax_return_structuring_pass_ran_8616", False):
-        return False
-    cfunc = getattr(codegen, "cfunc", None)
-    if cfunc is None:
-        return False
-    root = getattr(cfunc, "statements", None) or getattr(cfunc, "body", None)
-    if root is None:
-        return False
-    statements = getattr(root, "statements", None)
-    if not isinstance(statements, (list, tuple)):
-        return False
-    return_nodes = [node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CReturn)]
-    unsupported_return_nodes = [
-        stmt
-        for container in (root, *_iter_c_nodes_deep_8616(root))
-        if isinstance(container, CStatements)
-        for stmt in _boundary_tuple_8616(container.statements or ())
-        if isinstance(stmt, CUnsupportedStatement) and isinstance(stmt.stmt, AILReturn)
-    ]
-    if os.environ.get("INERTIA_DEBUG_MISSING_AX_RETURN"):
-        logging.getLogger(__name__).warning(
-            "[missing-ax-return] pass-entry func=%#x return_nodes=%d root=%s",
-            getattr(cfunc, "addr", -1) or -1,
-            len(return_nodes),
-            type(root).__name__,
-        )
-    wide_return_nodes = [
+
+def _select_artifact_return_8616(
+    root: StructuredAstValue, return_nodes: list[StructuredAstValue]
+) -> tuple[str, StructuredAstValue]:
+    """Return ("none"|"replace"|"refuse", node) for the artifact-return selection gate."""
+    debug = bool(os.environ.get("INERTIA_DEBUG_MISSING_AX_RETURN"))
+    log = logging.getLogger(__name__)
+    if not return_nodes:
+        return "none", None
+    artifact_returns = [
         node
         for node in return_nodes
-        if return_expression_has_wide_word_composition_8616(getattr(node, "retval", None))
+        if _return_expr_has_insert_artifact_8616(getattr(node, "retval", None))
+        or _return_depends_on_insert_artifact_8616(root, node)
+        or _return_expr_has_untyped_dereference_artifact_8616(getattr(node, "retval", None))
+        or _return_expr_has_dirty_carrier_artifact_8616(getattr(node, "retval", None))
     ]
-    if wide_return_nodes:
-        codegen._inertia_missing_terminal_ax_return_refused_wide_8616 = (
-            int(getattr(codegen, "_inertia_missing_terminal_ax_return_refused_wide_8616", 0) or 0) + 1
-        )
-        return False
-    replace_artifact_return = False
-    artifact_return = None
-    if return_nodes:
-        artifact_returns = [
-            node
-            for node in return_nodes
-            if _return_expr_has_insert_artifact_8616(getattr(node, "retval", None))
-            or _return_depends_on_insert_artifact_8616(root, node)
-            or _return_expr_has_untyped_dereference_artifact_8616(getattr(node, "retval", None))
-            or _return_expr_has_dirty_carrier_artifact_8616(getattr(node, "retval", None))
-        ]
-        if len(artifact_returns) > 1:
-            if os.environ.get("INERTIA_DEBUG_MISSING_AX_RETURN"):
-                logging.getLogger(__name__).warning(
-                    "[missing-ax-return] refused artifact_count=%d return_nodes=%d",
-                    len(artifact_returns),
-                    len(return_nodes),
-                )
-            return False
-        if artifact_returns:
-            artifact_return = artifact_returns[0]
-        else:
-            segmented_artifact_returns = [
-                node
-                for node in return_nodes
-                if _return_expr_has_segmented_linear_artifact_8616(getattr(node, "retval", None))
-            ]
-            if len(segmented_artifact_returns) == 1:
-                artifact_return = segmented_artifact_returns[0]
-            else:
-                generic_artifact_returns = [
-                    node
-                    for node in return_nodes
-                    if _return_expr_has_generic_register_artifact_8616(getattr(node, "retval", None))
-                ]
-                if len(generic_artifact_returns) != 1 or not _generic_return_replacement_is_side_effect_free_8616(
-                    root, generic_artifact_returns[0]
-                ):
-                    if os.environ.get("INERTIA_DEBUG_MISSING_AX_RETURN"):
-                        logging.getLogger(__name__).warning(
-                            "[missing-ax-return] refused segmented_artifact_count=%d "
-                            "generic_artifact_count=%d return_nodes=%d",
-                            len(segmented_artifact_returns),
-                            len(generic_artifact_returns),
-                            len(return_nodes),
-                        )
-                    return False
-                artifact_return = generic_artifact_returns[0]
-            if artifact_return is None:
-                if os.environ.get("INERTIA_DEBUG_MISSING_AX_RETURN"):
-                    logging.getLogger(__name__).warning(
-                        "[missing-ax-return] refused segmented_artifact_count=%d return_nodes=%d",
-                        len(segmented_artifact_returns),
-                        len(return_nodes),
-                    )
-                return False
-        replace_artifact_return = True
+    if len(artifact_returns) > 1:
+        if debug:
+            log.warning(
+                "[missing-ax-return] refused artifact_count=%d return_nodes=%d",
+                len(artifact_returns),
+                len(return_nodes),
+            )
+        return "refuse", None
+    if artifact_returns:
+        return "replace", artifact_returns[0]
+    segmented_artifact_returns = [
+        node
+        for node in return_nodes
+        if _return_expr_has_segmented_linear_artifact_8616(getattr(node, "retval", None))
+    ]
+    if len(segmented_artifact_returns) == 1:
+        return "replace", segmented_artifact_returns[0]
+    generic_artifact_returns = [
+        node
+        for node in return_nodes
+        if _return_expr_has_generic_register_artifact_8616(getattr(node, "retval", None))
+    ]
+    if len(generic_artifact_returns) != 1 or not _generic_return_replacement_is_side_effect_free_8616(
+        root, generic_artifact_returns[0]
+    ):
+        if debug:
+            log.warning(
+                "[missing-ax-return] refused segmented_artifact_count=%d "
+                "generic_artifact_count=%d return_nodes=%d",
+                len(segmented_artifact_returns),
+                len(generic_artifact_returns),
+                len(return_nodes),
+            )
+        return "refuse", None
+    return "replace", generic_artifact_returns[0]
+
+
+def _terminal_ax_return_function_context_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue, cfunc: StructuredAstValue
+) -> tuple[int | None, StructuredAstValue, StructuredAstValue] | None:
+    """Return (func_addr, function, concrete_return_types) when the return type gate passes."""
     func_addr = getattr(cfunc, "addr", None)
     function = getattr(codegen, "_inertia_current_function_8616", None)
     if isinstance(func_addr, int) and function is None:
@@ -6494,10 +7007,10 @@ def _materialize_missing_terminal_ax_return_8616(project: StructuredAstValue, co
         codegen._inertia_missing_terminal_ax_return_refused_void_8616 = (
             int(getattr(codegen, "_inertia_missing_terminal_ax_return_refused_void_8616", 0) or 0) + 1
         )
-        return False
+        return None
     concrete_return_types = tuple(return_type for return_type in return_types if type(return_type) is not SimTypeBottom)
     if not concrete_return_types:
-        return False
+        return None
     return_widths: list[int | None] = []
     for return_type in concrete_return_types:
         try:
@@ -6508,75 +7021,38 @@ def _materialize_missing_terminal_ax_return_8616(project: StructuredAstValue, co
         codegen._inertia_missing_terminal_ax_return_refused_width_8616 = (
             int(getattr(codegen, "_inertia_missing_terminal_ax_return_refused_width_8616", 0) or 0) + 1
         )
-        return False
-    if not isinstance(func_addr, int):
-        return False
-    if function is not None:
-        retval = _linear_terminal_ax_return_expr_8616(project, codegen, function)
-    else:
-        retval = _branch_target_return_expr_8616(project, codegen, func_addr)
-    if retval is None:
-        if os.environ.get("INERTIA_DEBUG_MISSING_AX_RETURN"):
-            logging.getLogger(__name__).warning(
-                "[missing-ax-return] refused no terminal AX proof func=%#x function=%r",
-                func_addr,
-                function,
-            )
-        codegen._inertia_missing_terminal_ax_return_refused_8616 = (
-            int(getattr(codegen, "_inertia_missing_terminal_ax_return_refused_8616", 0) or 0) + 1
-        )
-        return False
-    replaced_fingerprint = None
-    replaced_return_keys: frozenset[StructuredAstValue] = frozenset()
-    if replace_artifact_return and artifact_return is not None:
-        replaced_return_keys = _c_variables_read_by_expr_8616(getattr(artifact_return, "retval", None))
-        with contextlib.suppress(Exception):
-            replaced_fingerprint = _expr_fingerprint(getattr(artifact_return, "retval", None), project)
-        artifact_return.retval = retval
-        cfunc.statements = root
-        if hasattr(cfunc, "body"):
-            cfunc.body = root
-        _prune_replaced_insert_artifact_assignments_8616(root, replaced_return_keys, codegen)
-    elif len(unsupported_return_nodes) == 1:
-        unsupported_return = unsupported_return_nodes[0]
-        replacement = CReturn(retval, codegen=codegen)
-        replaced = False
-        for container in (root, *_iter_c_nodes_deep_8616(root)):
-            if not isinstance(container, CStatements):
+        return None
+    return func_addr, function, concrete_return_types
+
+
+def _replace_unsupported_ail_return_8616(
+    root: StructuredAstValue, codegen: StructuredAstValue, retval: StructuredAstValue, unsupported_return: StructuredAstValue
+) -> bool:
+    """Replace the single unsupported AIL return statement with a typed C return."""
+    replacement = CReturn(retval, codegen=codegen)
+    replaced = False
+    for container in (root, *_iter_c_nodes_deep_8616(root)):
+        if not isinstance(container, CStatements):
+            continue
+        container_statements = _boundary_list_8616(container.statements or ())
+        for index, stmt in enumerate(container_statements):
+            if stmt is not unsupported_return:
                 continue
-            container_statements = _boundary_list_8616(container.statements or ())
-            for index, stmt in enumerate(container_statements):
-                if stmt is not unsupported_return:
-                    continue
-                container_statements[index] = replacement
-                container.statements = container_statements
-                replaced = True
-                break
-            if replaced:
-                break
-        if not replaced:
-            return False
-        cfunc.statements = root
-        if hasattr(cfunc, "body"):
-            cfunc.body = root
-        codegen._inertia_missing_terminal_ax_return_replaced_unsupported_ail_return_8616 = (
-            int(
-                getattr(
-                    codegen,
-                    "_inertia_missing_terminal_ax_return_replaced_unsupported_ail_return_8616",
-                    0,
-                )
-                or 0
-            )
-            + 1
-        )
-    else:
-        updated = list(statements)
-        updated.append(CReturn(retval, codegen=codegen))
-        root.statements = updated if isinstance(statements, list) else tuple(updated)
-        cfunc.statements = root
-        if hasattr(cfunc, "body"):
-            cfunc.body = root
+            container_statements[index] = replacement
+            container.statements = container_statements
+            replaced = True
+            break
+        if replaced:
+            break
+    return replaced
+
+
+def _record_terminal_ax_materialization_8616(
+    codegen: StructuredAstValue,
+    project: StructuredAstValue,
+    retval: StructuredAstValue,
+    replaced_fingerprint: StructuredAstValue,
+) -> None:
     fingerprint = None
     with contextlib.suppress(Exception):
         fingerprint = _expr_fingerprint(retval, project)
@@ -6595,7 +7071,177 @@ def _materialize_missing_terminal_ax_return_8616(project: StructuredAstValue, co
             ),
             replaced_fingerprint,
         )
+
+
+def _terminal_ax_return_surface_8616(
+    codegen: StructuredAstValue, cfunc: StructuredAstValue
+) -> tuple[StructuredAstValue, StructuredAstValue, list, list] | None:
+    """Return (root, statements, return_nodes, unsupported_return_nodes), or None."""
+    root = getattr(cfunc, "statements", None) or getattr(cfunc, "body", None)
+    if root is None:
+        return None
+    statements = getattr(root, "statements", None)
+    if not isinstance(statements, (list, tuple)):
+        return None
+    return_nodes = [node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CReturn)]
+    unsupported_return_nodes = [
+        stmt
+        for container in (root, *_iter_c_nodes_deep_8616(root))
+        if isinstance(container, CStatements)
+        for stmt in _boundary_tuple_8616(container.statements or ())
+        if isinstance(stmt, CUnsupportedStatement) and isinstance(stmt.stmt, AILReturn)
+    ]
+    if os.environ.get("INERTIA_DEBUG_MISSING_AX_RETURN"):
+        logging.getLogger(__name__).warning(
+            "[missing-ax-return] pass-entry func=%#x return_nodes=%d root=%s",
+            getattr(cfunc, "addr", -1) or -1,
+            len(return_nodes),
+            type(root).__name__,
+        )
+    return root, statements, return_nodes, unsupported_return_nodes
+
+
+def _terminal_ax_wide_gate_8616(codegen: StructuredAstValue, return_nodes: list) -> bool:
+    """Return True when a wide-composition return refuses the fallback."""
+    wide_return_nodes = [
+        node
+        for node in return_nodes
+        if return_expression_has_wide_word_composition_8616(getattr(node, "retval", None))
+    ]
+    if not wide_return_nodes:
+        return False
+    codegen._inertia_missing_terminal_ax_return_refused_wide_8616 = (
+        int(getattr(codegen, "_inertia_missing_terminal_ax_return_refused_wide_8616", 0) or 0) + 1
+    )
     return True
+
+
+def _terminal_ax_proven_retval_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue, func_addr: int, function: StructuredAstValue
+) -> StructuredAstValue:
+    """Return the proven terminal AX return expression, or None (recording refusal)."""
+    if function is not None:
+        retval = _linear_terminal_ax_return_expr_8616(project, codegen, function)
+    else:
+        retval = _branch_target_return_expr_8616(project, codegen, func_addr)
+    if retval is None:
+        if os.environ.get("INERTIA_DEBUG_MISSING_AX_RETURN"):
+            logging.getLogger(__name__).warning(
+                "[missing-ax-return] refused no terminal AX proof func=%#x function=%r",
+                func_addr,
+                function,
+            )
+        codegen._inertia_missing_terminal_ax_return_refused_8616 = (
+            int(getattr(codegen, "_inertia_missing_terminal_ax_return_refused_8616", 0) or 0) + 1
+        )
+    return retval
+
+
+def _replace_artifact_return_8616(
+    root: StructuredAstValue,
+    cfunc: StructuredAstValue,
+    codegen: StructuredAstValue,
+    project: StructuredAstValue,
+    artifact_return: StructuredAstValue,
+    retval: StructuredAstValue,
+) -> StructuredAstValue:
+    """Rewrite the artifact return in place; returns the replaced fingerprint."""
+    replaced_return_keys = _c_variables_read_by_expr_8616(getattr(artifact_return, "retval", None))
+    replaced_fingerprint = None
+    with contextlib.suppress(Exception):
+        replaced_fingerprint = _expr_fingerprint(getattr(artifact_return, "retval", None), project)
+    artifact_return.retval = retval
+    cfunc.statements = root
+    if hasattr(cfunc, "body"):
+        cfunc.body = root
+    _prune_replaced_insert_artifact_assignments_8616(root, replaced_return_keys, codegen)
+    return replaced_fingerprint
+
+
+def _publish_cfunc_root_8616(cfunc: StructuredAstValue, root: StructuredAstValue) -> None:
+    cfunc.statements = root
+    if hasattr(cfunc, "body"):
+        cfunc.body = root
+
+
+def _apply_terminal_ax_replacement_8616(
+    root: StructuredAstValue,
+    cfunc: StructuredAstValue,
+    codegen: StructuredAstValue,
+    statements: StructuredAstValue,
+    unsupported_return_nodes: list,
+    retval: StructuredAstValue,
+) -> bool:
+    """Apply the unsupported-AIL-return or append-terminal-return replacement."""
+    if len(unsupported_return_nodes) == 1:
+        if not _replace_unsupported_ail_return_8616(root, codegen, retval, unsupported_return_nodes[0]):
+            return False
+        _publish_cfunc_root_8616(cfunc, root)
+        codegen._inertia_missing_terminal_ax_return_replaced_unsupported_ail_return_8616 = (
+            int(
+                getattr(
+                    codegen,
+                    "_inertia_missing_terminal_ax_return_replaced_unsupported_ail_return_8616",
+                    0,
+                )
+                or 0
+            )
+            + 1
+        )
+        return True
+    updated = list(statements)
+    updated.append(CReturn(retval, codegen=codegen))
+    root.statements = updated if isinstance(statements, list) else tuple(updated)
+    _publish_cfunc_root_8616(cfunc, root)
+    return True
+
+
+def _terminal_ax_proven_retval_or_none_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue, cfunc: StructuredAstValue
+) -> StructuredAstValue:
+    """Resolve the function context and proven retval, or None on refusal."""
+    context = _terminal_ax_return_function_context_8616(project, codegen, cfunc)
+    if context is None:
+        return None
+    func_addr, function, _concrete_return_types = context
+    if not isinstance(func_addr, int):
+        return None
+    return _terminal_ax_proven_retval_8616(project, codegen, func_addr, function)
+
+
+def _materialize_missing_terminal_ax_return_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
+    """Materialize a proven terminal AX return as a guarded compatibility fallback."""
+    # Dynamic angr/codegen compatibility boundary: structuring owner flags are attached during staged codegen.
+    if getattr(codegen, "_inertia_missing_terminal_ax_return_structuring_pass_ran_8616", False):
+        return False
+    cfunc = getattr(codegen, "cfunc", None)
+    if cfunc is None:
+        return False
+    surface = _terminal_ax_return_surface_8616(codegen, cfunc)
+    if surface is None:
+        return False
+    root, statements, return_nodes, unsupported_return_nodes = surface
+    if _terminal_ax_wide_gate_8616(codegen, return_nodes):
+        return False
+    artifact_verdict, artifact_return = _select_artifact_return_8616(root, return_nodes)
+    if artifact_verdict == "refuse":
+        return False
+
+    retval = _terminal_ax_proven_retval_or_none_8616(project, codegen, cfunc)
+    if retval is None:
+        return False
+    replaced_fingerprint = None
+    if artifact_return is not None:
+        replaced_fingerprint = _replace_artifact_return_8616(
+            root, cfunc, codegen, project, artifact_return, retval
+        )
+    elif not _apply_terminal_ax_replacement_8616(
+        root, cfunc, codegen, statements, unsupported_return_nodes, retval
+    ):
+        return False
+    _record_terminal_ax_materialization_8616(codegen, project, retval, replaced_fingerprint)
+    return True
+
 
 
 def _return_expr_has_insert_artifact_8616(expr: StructuredAstValue) -> bool:
@@ -6623,48 +7269,52 @@ def _return_expr_has_insert_artifact_8616(expr: StructuredAstValue) -> bool:
     return False
 
 
+def _call_callee_name_8616(node: StructuredAstValue) -> str | None:
+    callee = getattr(node, "callee_target", None)
+    if callee is None:
+        callee = getattr(node, "callee", None)
+    name = getattr(callee, "name", None)
+    if isinstance(name, str):
+        return name
+    if isinstance(callee, str):
+        return callee
+    return None
+
+
+def _c_const_int_value_8616(node: StructuredAstValue) -> int | None:
+    return (
+        int(getattr(node, "value", 0))
+        if isinstance(node, CConstant) and isinstance(getattr(node, "value", None), int)
+        else None
+    )
+
+
+def _expr_has_segment_scale_8616(node: StructuredAstValue) -> bool:
+    for child in _iter_c_nodes_deep_8616(node):
+        if not isinstance(child, CBinaryOp):
+            continue
+        op = child.op
+        lhs_const = _c_const_int_value_8616(child.lhs)
+        rhs_const = _c_const_int_value_8616(child.rhs)
+        if op == "Mul" and (lhs_const == 16 or rhs_const == 16):
+            return True
+        if op == "Shl" and rhs_const == 4:
+            return True
+    return False
+
+
 def _return_expr_has_segmented_linear_artifact_8616(expr: StructuredAstValue) -> bool:
     if expr is None:
         return False
 
-    def _callee_name(node: StructuredAstValue) -> str | None:
-        callee = getattr(node, "callee_target", None)
-        if callee is None:
-            callee = getattr(node, "callee", None)
-        name = getattr(callee, "name", None)
-        if isinstance(name, str):
-            return name
-        if isinstance(callee, str):
-            return callee
-        return None
-
-    def _const_value(node: StructuredAstValue) -> int | None:
-        return (
-            int(getattr(node, "value", 0))
-            if isinstance(node, CConstant) and isinstance(getattr(node, "value", None), int)
-            else None
-        )
-
-    def _has_segment_scale(node: StructuredAstValue) -> bool:
-        for child in _iter_c_nodes_deep_8616(node):
-            if not isinstance(child, CBinaryOp):
-                continue
-            op = child.op
-            lhs_const = _const_value(child.lhs)
-            rhs_const = _const_value(child.rhs)
-            if op == "Mul" and (lhs_const == 16 or rhs_const == 16):
-                return True
-            if op == "Shl" and rhs_const == 4:
-                return True
-        return False
-
     for node in _iter_c_nodes_deep_8616(expr):
-        if isinstance(node, CFunctionCall) and _callee_name(node) in {"SEG_U8", "SEG_U16", "SEG_U32"}:
+        if isinstance(node, CFunctionCall) and _call_callee_name_8616(node) in {"SEG_U8", "SEG_U16", "SEG_U32"}:
             return True
         if isinstance(node, CUnaryOp) and getattr(node, "op", None) == "Dereference":  # noqa: SIM102
-            if _has_segment_scale(node.operand):
+            if _expr_has_segment_scale_8616(node.operand):
                 return True
     return False
+
 
 
 def _return_expr_has_generic_register_artifact_8616(expr: StructuredAstValue) -> bool:
@@ -6699,43 +7349,115 @@ def _return_expr_has_generic_register_artifact_8616(expr: StructuredAstValue) ->
     return False
 
 
+def _return_expr_node_is_pointer_typed_8616(node: StructuredAstValue) -> bool:
+    node_type = getattr(node, "variable_type", None)
+    if isinstance(node_type, SimTypePointer):
+        return True
+    if isinstance(node, CTypeCast):
+        dst_type = node.dst_type
+        return isinstance(dst_type, SimTypePointer)
+    return False
+
+
+def _untyped_deref_artifact_node_8616(node: StructuredAstValue) -> bool:
+    """Return True when this node is a dereference through an untyped/dirty operand."""
+    if not isinstance(node, CUnaryOp) or getattr(node, "op", None) != "Dereference":
+        return False
+    operand = getattr(node, "operand", None)
+    if any(isinstance(child, CDirtyExpression) for child in _iter_c_nodes_deep_8616(operand)):
+        return True
+    while isinstance(operand, CTypeCast) and not _return_expr_node_is_pointer_typed_8616(operand):
+        operand = getattr(operand, "expr", None)
+    return not _return_expr_node_is_pointer_typed_8616(operand)
+
+
 def _return_expr_has_untyped_dereference_artifact_8616(expr: StructuredAstValue) -> bool:
     if expr is None:
         return False
     debug = bool(os.environ.get("INERTIA_DEBUG_MISSING_AX_RETURN"))
     seen_debug: list[tuple[str, StructuredAstValue, StructuredAstValue]] = []
 
-    def _is_pointer_typed(node: StructuredAstValue) -> bool:
-        node_type = getattr(node, "variable_type", None)
-        if isinstance(node_type, SimTypePointer):
-            return True
-        if isinstance(node, CTypeCast):
-            dst_type = node.dst_type
-            return isinstance(dst_type, SimTypePointer)
-        return False
-
     for node in _iter_c_nodes_deep_8616(expr):
         if debug:
             seen_debug.append((type(node).__name__, getattr(node, "op", None), getattr(node, "name", None)))
-        if not isinstance(node, CUnaryOp) or getattr(node, "op", None) != "Dereference":
-            continue
-        operand = getattr(node, "operand", None)
-        if any(isinstance(child, CDirtyExpression) for child in _iter_c_nodes_deep_8616(operand)):
+        if _untyped_deref_artifact_node_8616(node):
             return True
-        while isinstance(operand, CTypeCast) and not _is_pointer_typed(operand):
-            operand = getattr(operand, "expr", None)
-        if _is_pointer_typed(operand):
-            continue
-        return True
     if debug and seen_debug:
         logging.getLogger(__name__).warning("[missing-ax-return] deref-artifact nodes=%r", tuple(seen_debug))
     return False
+
 
 
 def _return_expr_has_dirty_carrier_artifact_8616(expr: StructuredAstValue) -> bool:
     if expr is None:
         return False
     return any(isinstance(node, CDirtyExpression) for node in _iter_c_nodes_deep_8616(expr))
+
+
+def _return_safety_has_call_or_memory_effect_8616(node: StructuredAstValue) -> bool:
+    for child in _iter_c_nodes_deep_8616(node):
+        if isinstance(child, CFunctionCall):
+            return True
+        if isinstance(child, CUnaryOp) and getattr(child, "op", None) == "Dereference":
+            return True
+    return False
+
+
+def _return_safety_contains_return_node_8616(node: StructuredAstValue, return_node: CReturn) -> bool:
+    if node is return_node:
+        return True
+    return any(child is return_node for child in _iter_c_nodes_deep_8616(node))
+
+
+def _return_safety_is_control_node_8616(node: StructuredAstValue) -> bool:
+    return type(node).__name__ in {
+        "CBreak",
+        "CContinue",
+        "CDoWhileLoop",
+        "CForLoop",
+        "CGoto",
+        "CIfElse",
+        "CSwitchCase",
+        "CWhileLoop",
+    }
+
+
+def _return_safety_refuse_8616(debug: bool, log: StructuredAstValue, kind: str, stmt: StructuredAstValue) -> bool:
+    if debug:
+        if kind:
+            log.warning(
+                "[missing-ax-return] generic artifact replacement refused %s stmt=%s",
+                kind,
+                type(stmt).__name__,
+            )
+        else:
+            log.warning(
+                "[missing-ax-return] generic artifact replacement refused stmt=%s", type(stmt).__name__
+            )
+    return False
+
+
+def _return_safety_stmt_verdict_8616(
+    stmt: StructuredAstValue, return_node: CReturn, debug: bool, log: StructuredAstValue
+) -> bool | None:
+    """Return True/False verdict for this statement, or None to keep scanning."""
+    if stmt is return_node:
+        return True
+    if isinstance(stmt, CAssignment):
+        if _return_safety_has_call_or_memory_effect_8616(stmt.lhs):
+            return _return_safety_refuse_8616(debug, log, "lhs-effect", stmt)
+        if _return_safety_has_call_or_memory_effect_8616(stmt.rhs):
+            return _return_safety_refuse_8616(debug, log, "rhs-effect", stmt)
+        return None
+    if isinstance(stmt, CReturn):
+        return stmt is return_node
+    if _return_safety_contains_return_node_8616(stmt, return_node):
+        return not _return_safety_is_control_node_8616(stmt) and not _return_safety_has_call_or_memory_effect_8616(stmt)
+    if _return_safety_is_control_node_8616(stmt):
+        return _return_safety_refuse_8616(debug, log, "control", stmt)
+    if not _return_safety_has_call_or_memory_effect_8616(stmt):
+        return None
+    return _return_safety_refuse_8616(debug, log, "", stmt)
 
 
 def _generic_return_replacement_is_side_effect_free_8616(root: StructuredAstValue, return_node: CReturn) -> bool:
@@ -6745,66 +7467,12 @@ def _generic_return_replacement_is_side_effect_free_8616(root: StructuredAstValu
     debug = bool(os.environ.get("INERTIA_DEBUG_MISSING_AX_RETURN"))
     log = logging.getLogger(__name__)
 
-    def _has_call_or_memory_effect(node: StructuredAstValue) -> bool:
-        for child in _iter_c_nodes_deep_8616(node):
-            if isinstance(child, CFunctionCall):
-                return True
-            if isinstance(child, CUnaryOp) and getattr(child, "op", None) == "Dereference":
-                return True
-        return False
-
-    def _contains_return_node(node: StructuredAstValue) -> bool:
-        if node is return_node:
-            return True
-        return any(child is return_node for child in _iter_c_nodes_deep_8616(node))
-
-    def _is_control_node(node: StructuredAstValue) -> bool:
-        return type(node).__name__ in {
-            "CBreak",
-            "CContinue",
-            "CDoWhileLoop",
-            "CForLoop",
-            "CGoto",
-            "CIfElse",
-            "CSwitchCase",
-            "CWhileLoop",
-        }
-
     for stmt in statements:
-        if stmt is return_node:
-            return True
-        if isinstance(stmt, CAssignment):
-            if _has_call_or_memory_effect(stmt.lhs):
-                if debug:
-                    log.warning(
-                        "[missing-ax-return] generic artifact replacement refused lhs-effect stmt=%s",
-                        type(stmt).__name__,
-                    )
-                return False
-            if _has_call_or_memory_effect(stmt.rhs):
-                if debug:
-                    log.warning(
-                        "[missing-ax-return] generic artifact replacement refused rhs-effect stmt=%s",
-                        type(stmt).__name__,
-                    )
-                return False
-            continue
-        if isinstance(stmt, CReturn):
-            return stmt is return_node
-        if _contains_return_node(stmt):
-            return not _is_control_node(stmt) and not _has_call_or_memory_effect(stmt)
-        if _is_control_node(stmt):
-            if debug:
-                log.warning(
-                    "[missing-ax-return] generic artifact replacement refused control stmt=%s", type(stmt).__name__
-                )
-            return False
-        if not _has_call_or_memory_effect(stmt):
-            continue
-        if debug:
-            log.warning("[missing-ax-return] generic artifact replacement refused stmt=%s", type(stmt).__name__)
-        return False
+        verdict = _return_safety_stmt_verdict_8616(stmt, return_node, debug, log)
+        if verdict is not None:
+            return verdict
     return False
+
 
 
 def _c_variable_key_8616(expr: StructuredAstValue) -> tuple[StructuredAstValue, ...] | None:
@@ -6929,23 +7597,24 @@ def _prune_replaced_insert_artifact_assignments_8616(
     return pruned
 
 
-def _materialize_stack_byte_pair_return_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
-    """Recover word returns built by storing adjacent stack bytes then loading the word."""
-    insns = _linear_function_insns_for_codegen_8616(project, codegen)
-    if not insns:
-        return False
+@dataclass
+class _StackBytePairScan8616:
+    """Instruction scan collecting byte-store facts for the pair-return materializer."""
 
-    byte_stores: dict[int, StructuredAstValue] = {}
-    al_source = None
+    codegen: StructuredAstValue
+    byte_stores: dict[int, StructuredAstValue] = field(default_factory=dict)
+    al_source: StructuredAstValue = None
     returned_base: int | None = None
-    raw_fact_count = 0
-    classified_fact_count = 0
+    raw_fact_count: int = 0
+    classified_fact_count: int = 0
 
+    @staticmethod
     def _reg_name(insn: StructuredAstValue, operand: StructuredAstValue) -> str | None:
         with contextlib.suppress(Exception):
             return str(insn.reg_name(operand.reg)).lower()
         return None
 
+    @staticmethod
     def _bp_mem_disp(insn: StructuredAstValue, operand: StructuredAstValue, *, size: int | None = None) -> int | None:
         if int(getattr(operand, "type", -1)) != 3:
             return None
@@ -6957,52 +7626,75 @@ def _materialize_stack_byte_pair_return_8616(project: StructuredAstValue, codege
         disp = getattr(mem, "disp", None)
         return int(disp) if isinstance(disp, int) else None
 
-    def _stack_byte_expr(disp: int) -> StructuredAstValue:
-        return _jcc._stack_slot_expr_8616(codegen, int(disp), 1)
+    def _stack_byte_expr(self, disp: int) -> StructuredAstValue:
+        return _jcc._stack_slot_expr_8616(self.codegen, int(disp), 1)
 
-    for insn in insns:
+    def scan(self, insns: StructuredAstValue) -> None:
+        for insn in insns:
+            self._classify(insn)
+
+    def _classify(self, insn: StructuredAstValue) -> None:
         mnemonic = str(getattr(insn, "mnemonic", "")).lower()
         operands = _boundary_tuple_8616(getattr(insn, "operands", ()) or ())
         if mnemonic != "mov" or len(operands) != 2:
-            continue
+            return
         dst, src = operands
-        if int(getattr(dst, "type", -1)) == 1 and _reg_name(insn, dst) == "al":
-            src_disp = _bp_mem_disp(insn, src, size=1)
-            if src_disp is not None:
-                raw_fact_count += 1
-                al_source = _stack_byte_expr(src_disp)
-                if al_source is not None:
-                    classified_fact_count += 1
-            continue
+        if int(getattr(dst, "type", -1)) == 1 and self._reg_name(insn, dst) == "al":
+            self._classify_al_load(insn, src)
+            return
         if int(getattr(dst, "type", -1)) == 3 and int(getattr(dst, "size", 0) or 0) == 1:
-            dst_disp = _bp_mem_disp(insn, dst, size=1)
-            if dst_disp is not None and int(getattr(src, "type", -1)) == 1 and _reg_name(insn, src) == "al":
-                raw_fact_count += 1
-                if al_source is not None:
-                    byte_stores[int(dst_disp)] = _clone_c_value_for_codegen_tree_8616(al_source)
-                    classified_fact_count += 1
-            continue
-        if int(getattr(dst, "type", -1)) == 1 and _reg_name(insn, dst) == "ax":
-            src_disp = _bp_mem_disp(insn, src, size=2)
-            if src_disp is not None and src_disp in byte_stores and src_disp + 1 in byte_stores:
-                raw_fact_count += 1
-                returned_base = int(src_disp)
-                classified_fact_count += 1
+            self._classify_byte_store(insn, dst, src)
+            return
+        if int(getattr(dst, "type", -1)) == 1 and self._reg_name(insn, dst) == "ax":
+            self._classify_ax_load(insn, src)
+
+    def _classify_al_load(self, insn: StructuredAstValue, src: StructuredAstValue) -> None:
+        src_disp = self._bp_mem_disp(insn, src, size=1)
+        if src_disp is not None:
+            self.raw_fact_count += 1
+            self.al_source = self._stack_byte_expr(src_disp)
+            if self.al_source is not None:
+                self.classified_fact_count += 1
+
+    def _classify_byte_store(self, insn: StructuredAstValue, dst: StructuredAstValue, src: StructuredAstValue) -> None:
+        dst_disp = self._bp_mem_disp(insn, dst, size=1)
+        if dst_disp is not None and int(getattr(src, "type", -1)) == 1 and self._reg_name(insn, src) == "al":
+            self.raw_fact_count += 1
+            if self.al_source is not None:
+                self.byte_stores[int(dst_disp)] = _clone_c_value_for_codegen_tree_8616(self.al_source)
+                self.classified_fact_count += 1
+
+    def _classify_ax_load(self, insn: StructuredAstValue, src: StructuredAstValue) -> None:
+        src_disp = self._bp_mem_disp(insn, src, size=2)
+        if src_disp is not None and src_disp in self.byte_stores and src_disp + 1 in self.byte_stores:
+            self.raw_fact_count += 1
+            self.returned_base = int(src_disp)
+            self.classified_fact_count += 1
+
+
+def _materialize_stack_byte_pair_return_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
+    """Recover word returns built by storing adjacent stack bytes then loading the word."""
+    insns = _linear_function_insns_for_codegen_8616(project, codegen)
+    if not insns:
+        return False
+
+    scan = _StackBytePairScan8616(codegen)
+    scan.scan(insns)
 
     stats = {
-        "raw_fact_count": raw_fact_count,
-        "classified_fact_count": classified_fact_count,
+        "raw_fact_count": scan.raw_fact_count,
+        "classified_fact_count": scan.classified_fact_count,
         "materialized_count": 0,
         "failure_count": 0,
     }
     codegen._inertia_stack_byte_pair_return_stats_8616 = stats
-    if returned_base is None:
-        if raw_fact_count:
+    if scan.returned_base is None:
+        if scan.raw_fact_count:
             stats["failure_count"] = 1
         return False
 
-    low_expr = byte_stores.get(returned_base)
-    high_expr = byte_stores.get(returned_base + 1)
+    low_expr = scan.byte_stores.get(scan.returned_base)
+    high_expr = scan.byte_stores.get(scan.returned_base + 1)
     if low_expr is None or high_expr is None:
         stats["failure_count"] = 1
         return False
@@ -7026,6 +7718,7 @@ def _materialize_stack_byte_pair_return_8616(project: StructuredAstValue, codege
     stats["materialized_count"] = 1
     codegen._inertia_stack_byte_pair_return_materialized_8616 = True
     return True
+
 
 
 def _materialize_stack_byte_pair_return_pass_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
@@ -7898,87 +8591,106 @@ def _wrapper_passes_8616() -> tuple[DecompilerPostprocessPassSpec, ...]:
     )
 
 
+def _postprocess_skip_names_8616(codegen: StructuredAstValue) -> set[str]:
+    """Collect the environment/priming-driven postprocess pass skip set."""
+    skip_names = _env_postprocess_skip_names_8616()
+    _add_primed_skip_names_8616(codegen, skip_names)
+    _add_gated_skip_names_8616(skip_names)
+    return skip_names
+
+
+def _env_postprocess_skip_names_8616() -> set[str]:
+    skip_env = os.environ.get("INERTIA_SKIP_POSTPROCESS_PASSES")
+    skip_names: set[str] = set()
+    if isinstance(skip_env, str) and skip_env.strip():
+        skip_names = {name.strip() for name in skip_env.split(",") if name.strip()}
+    if not _fact_backed_stack_normalize_enabled_8616():
+        skip_names.add("_normalize_fact_backed_stack_accesses_8616")
+    return skip_names
+
+
+def _add_primed_skip_names_8616(codegen: StructuredAstValue, skip_names: set[str]) -> None:
+    """Skip passes whose pre-validation priming already consumed their work."""
+    if getattr(codegen, "_inertia_pre_validation_callsite_summaries_primed", False):
+        skip_names.add("_attach_callsite_summaries_8616")
+    if getattr(codegen, "_inertia_pre_validation_typed_conditions_primed", False):
+        skip_names.update(
+            {
+                "_apply_typed_conditions_to_codegen_8616",
+                "_rewrite_decoded_jcc_conditions_8616",
+                "_rewrite_decoded_jcc_conditions_after_calls_8616",
+            }
+        )
+    if getattr(codegen, "_inertia_pre_validation_return_address_pruned_8616", False):
+        skip_names.add("_prune_return_address_stack_arguments_8616")
+    if getattr(codegen, "_inertia_pre_validation_stack_prototype_primed", False):
+        skip_names.add("_promote_stack_prototype_from_bp_loads_8616")
+
+
+def _add_gated_skip_names_8616(skip_names: set[str]) -> None:
+    """Skip feature-gated passes: callsite rewrite, floor recovery, simplifies."""
+    # Evidence-driven default: keep callsite summary/materialization enabled.
+    # Disabling it drops proven call-argument facts and can erase semantics.
+    callsite_rewrite_enabled = _truthy_env_8616("INERTIA_ENABLE_CALLSITE_REWRITE", default=True)
+    if not callsite_rewrite_enabled:
+        skip_names.update(
+            {
+                "_attach_callsite_summaries_8616",
+                "_materialize_callsite_stack_arguments_8616",
+                "_materialize_recovered_callsite_stack_arguments_8616",
+                "_materialize_callsite_prototypes_8616",
+                "_normalize_call_target_names_8616",
+                "_normalize_recovered_call_target_names_8616",
+            }
+        )
+    # Legacy rescue only: this pass synthesizes calls after Structuring and
+    # cannot prove their placement from the structured AST.  Normal recovery
+    # must preserve the original tagged call nodes in the owning earlier layer.
+    direct_call_floor_recovery_enabled = _truthy_env_8616(
+        "INERTIA_ENABLE_DIRECT_CALL_FLOOR_RECOVERY",
+        default=False,
+    )
+    if not direct_call_floor_recovery_enabled:
+        skip_names.update(
+            {
+                "_recover_missing_direct_calls_from_evidence_8616",
+                "_recover_missing_direct_calls_from_evidence_early_8616",
+                "_recover_missing_direct_calls_final_8616",
+                "_materialize_recovered_callsite_stack_arguments_8616",
+                "_materialize_callsite_stack_arguments_final_8616",
+                "_normalize_recovered_call_target_names_8616",
+                "_normalize_call_target_names_final_8616",
+            }
+        )
+    if not _truthy_env_8616("INERTIA_ENABLE_STRUCTURED_SIMPLIFY_REWRITE"):
+        skip_names.add("_simplify_structured_expressions_8616")
+    if not _truthy_env_8616("INERTIA_ENABLE_BOOLEAN_SIMPLIFY_REWRITE"):
+        skip_names.add("_simplify_boolean_cites_8616")
+
+
 def _decompiler_postprocess_passes_for_function(
     project: StructuredAstValue, codegen: StructuredAstValue
 ) -> StructuredAstValue:
-    def _impl() -> StructuredAstValue:
-        skip_env = os.environ.get("INERTIA_SKIP_POSTPROCESS_PASSES")
-        skip_names: set[str] = set()
-        if isinstance(skip_env, str) and skip_env.strip():
-            skip_names = {name.strip() for name in skip_env.split(",") if name.strip()}
-        if not _fact_backed_stack_normalize_enabled_8616():
-            skip_names.add("_normalize_fact_backed_stack_accesses_8616")
-        if getattr(codegen, "_inertia_pre_validation_callsite_summaries_primed", False):
-            skip_names.add("_attach_callsite_summaries_8616")
-        if getattr(codegen, "_inertia_pre_validation_typed_conditions_primed", False):
-            skip_names.update(
-                {
-                    "_apply_typed_conditions_to_codegen_8616",
-                    "_rewrite_decoded_jcc_conditions_8616",
-                    "_rewrite_decoded_jcc_conditions_after_calls_8616",
-                }
-            )
-        if getattr(codegen, "_inertia_pre_validation_return_address_pruned_8616", False):
-            skip_names.add("_prune_return_address_stack_arguments_8616")
-        if getattr(codegen, "_inertia_pre_validation_stack_prototype_primed", False):
-            skip_names.add("_promote_stack_prototype_from_bp_loads_8616")
-        # Evidence-driven default: keep callsite summary/materialization enabled.
-        # Disabling it drops proven call-argument facts and can erase semantics.
-        callsite_rewrite_enabled = _truthy_env_8616("INERTIA_ENABLE_CALLSITE_REWRITE", default=True)
-        if not callsite_rewrite_enabled:
-            skip_names.update(
-                {
-                    "_attach_callsite_summaries_8616",
-                    "_materialize_callsite_stack_arguments_8616",
-                    "_materialize_recovered_callsite_stack_arguments_8616",
-                    "_materialize_callsite_prototypes_8616",
-                    "_normalize_call_target_names_8616",
-                    "_normalize_recovered_call_target_names_8616",
-                }
-            )
-        # Legacy rescue only: this pass synthesizes calls after Structuring and
-        # cannot prove their placement from the structured AST.  Normal recovery
-        # must preserve the original tagged call nodes in the owning earlier layer.
-        direct_call_floor_recovery_enabled = _truthy_env_8616(
-            "INERTIA_ENABLE_DIRECT_CALL_FLOOR_RECOVERY",
-            default=False,
-        )
-        if not direct_call_floor_recovery_enabled:
-            skip_names.update(
-                {
-                    "_recover_missing_direct_calls_from_evidence_8616",
-                    "_recover_missing_direct_calls_from_evidence_early_8616",
-                    "_recover_missing_direct_calls_final_8616",
-                    "_materialize_recovered_callsite_stack_arguments_8616",
-                    "_materialize_callsite_stack_arguments_final_8616",
-                    "_normalize_recovered_call_target_names_8616",
-                    "_normalize_call_target_names_final_8616",
-                }
-            )
-        if not _truthy_env_8616("INERTIA_ENABLE_STRUCTURED_SIMPLIFY_REWRITE"):
-            skip_names.add("_simplify_structured_expressions_8616")
-        if not _truthy_env_8616("INERTIA_ENABLE_BOOLEAN_SIMPLIFY_REWRITE"):
-            skip_names.add("_simplify_boolean_cites_8616")
+    skip_names = _postprocess_skip_names_8616(codegen)
 
-        func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
-        if func_addr is None:
-            return _apply_skip_names_8616(DECOMPILER_POSTPROCESS_PASSES, skip_names)
-
-        func = project.kb.functions.function(addr=func_addr, create=False)
-        if func is None:
-            return _apply_skip_names_8616(DECOMPILER_POSTPROCESS_PASSES, skip_names)
-
-        info = getattr(func, "info", None)
-        if not isinstance(info, dict):
-            return _apply_skip_names_8616(DECOMPILER_POSTPROCESS_PASSES, skip_names)
-
-        profile = info.get("x86_16_decompilation_profile", {})
-        if isinstance(profile, dict) and profile.get("wrapper_like"):
-            return _apply_skip_names_8616(_wrapper_passes_8616(), skip_names)
-
+    func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
+    if func_addr is None:
         return _apply_skip_names_8616(DECOMPILER_POSTPROCESS_PASSES, skip_names)
 
-    return _impl()
+    func = project.kb.functions.function(addr=func_addr, create=False)
+    if func is None:
+        return _apply_skip_names_8616(DECOMPILER_POSTPROCESS_PASSES, skip_names)
+
+    info = getattr(func, "info", None)
+    if not isinstance(info, dict):
+        return _apply_skip_names_8616(DECOMPILER_POSTPROCESS_PASSES, skip_names)
+
+    profile = info.get("x86_16_decompilation_profile", {})
+    if isinstance(profile, dict) and profile.get("wrapper_like"):
+        return _apply_skip_names_8616(_wrapper_passes_8616(), skip_names)
+
+    return _apply_skip_names_8616(DECOMPILER_POSTPROCESS_PASSES, skip_names)
+
 
 
 def describe_x86_16_decompiler_postprocess_stage() -> tuple[tuple[str, bool], ...]:
@@ -8189,6 +8901,55 @@ def _snapshot_codegen_inertia_metadata_8616(codegen: StructuredAstValue) -> dict
     return snapshot
 
 
+def _metadata_snapshot_tuple_8616(
+    value: tuple, value_id: int, memo: dict[int, StructuredAstValue | None], depth: int
+) -> StructuredAstValue:
+    if len(value) > _POSTPROCESS_METADATA_SNAPSHOT_MAX_ITEMS_8616:
+        return tuple(value)
+    cloned_tuple = tuple(_snapshot_inertia_metadata_value_8616(item, memo, depth=depth + 1) for item in value)
+    memo[value_id] = cloned_tuple
+    return cloned_tuple
+
+
+def _metadata_snapshot_list_8616(
+    value: list, value_id: int, memo: dict[int, StructuredAstValue | None], depth: int
+) -> StructuredAstValue:
+    cloned_list: list[StructuredAstValue] = []
+    memo[value_id] = cloned_list
+    if len(value) > _POSTPROCESS_METADATA_SNAPSHOT_MAX_ITEMS_8616:
+        cloned_list.extend(value)
+    else:
+        cloned_list.extend(_snapshot_inertia_metadata_value_8616(item, memo, depth=depth + 1) for item in value)
+    return cloned_list
+
+
+def _metadata_snapshot_dict_8616(
+    value: dict, value_id: int, memo: dict[int, StructuredAstValue | None], depth: int
+) -> StructuredAstValue:
+    cloned_dict: dict[StructuredAstValue, StructuredAstValue] = {}
+    memo[value_id] = cloned_dict
+    items = tuple(value.items())
+    if len(items) > _POSTPROCESS_METADATA_SNAPSHOT_MAX_ITEMS_8616:
+        cloned_dict.update(value)
+    else:
+        for key, item in items:
+            cloned_key = _snapshot_inertia_metadata_value_8616(key, memo, depth=depth + 1)
+            cloned_dict[cloned_key] = _snapshot_inertia_metadata_value_8616(item, memo, depth=depth + 1)
+    return cloned_dict
+
+
+def _metadata_snapshot_set_8616(
+    value: StructuredAstValue, value_id: int, memo: dict[int, StructuredAstValue | None], depth: int
+) -> StructuredAstValue:
+    if len(value) > _POSTPROCESS_METADATA_SNAPSHOT_MAX_ITEMS_8616:
+        cloned_items = set(value)
+    else:
+        cloned_items = {_snapshot_inertia_metadata_value_8616(item, memo, depth=depth + 1) for item in value}
+    cloned_set = frozenset(cloned_items) if isinstance(value, frozenset) else cloned_items
+    memo[value_id] = cloned_set
+    return cloned_set
+
+
 def _snapshot_inertia_metadata_value_8616(
     value: StructuredAstValue, memo: dict[int, StructuredAstValue | None], *, depth: int = 0
 ) -> StructuredAstValue:
@@ -8204,41 +8965,13 @@ def _snapshot_inertia_metadata_value_8616(
         return value
 
     if isinstance(value, tuple):
-        if len(value) > _POSTPROCESS_METADATA_SNAPSHOT_MAX_ITEMS_8616:
-            return tuple(value)
-        cloned_tuple = tuple(_snapshot_inertia_metadata_value_8616(item, memo, depth=depth + 1) for item in value)
-        memo[value_id] = cloned_tuple
-        return cloned_tuple
-
+        return _metadata_snapshot_tuple_8616(value, value_id, memo, depth)
     if isinstance(value, list):
-        cloned_list: list[StructuredAstValue] = []
-        memo[value_id] = cloned_list
-        if len(value) > _POSTPROCESS_METADATA_SNAPSHOT_MAX_ITEMS_8616:
-            cloned_list.extend(value)
-        else:
-            cloned_list.extend(_snapshot_inertia_metadata_value_8616(item, memo, depth=depth + 1) for item in value)
-        return cloned_list
-
+        return _metadata_snapshot_list_8616(value, value_id, memo, depth)
     if isinstance(value, dict):
-        cloned_dict: dict[StructuredAstValue, StructuredAstValue] = {}
-        memo[value_id] = cloned_dict
-        items = tuple(value.items())
-        if len(items) > _POSTPROCESS_METADATA_SNAPSHOT_MAX_ITEMS_8616:
-            cloned_dict.update(value)
-        else:
-            for key, item in items:
-                cloned_key = _snapshot_inertia_metadata_value_8616(key, memo, depth=depth + 1)
-                cloned_dict[cloned_key] = _snapshot_inertia_metadata_value_8616(item, memo, depth=depth + 1)
-        return cloned_dict
-
+        return _metadata_snapshot_dict_8616(value, value_id, memo, depth)
     if isinstance(value, (set, frozenset)):
-        if len(value) > _POSTPROCESS_METADATA_SNAPSHOT_MAX_ITEMS_8616:
-            cloned_items = set(value)
-        else:
-            cloned_items = {_snapshot_inertia_metadata_value_8616(item, memo, depth=depth + 1) for item in value}
-        cloned_set = frozenset(cloned_items) if isinstance(value, frozenset) else cloned_items
-        memo[value_id] = cloned_set
-        return cloned_set
+        return _metadata_snapshot_set_8616(value, value_id, memo, depth)
 
     # Do not recursively copy arbitrary angr/AIL/codegen objects here. The C AST
     # is snapshotted separately; metadata rollback only needs stable top-level
@@ -8277,25 +9010,53 @@ _CTYPES_POINTER_PICKLE_ERROR_8616 = "ctypes objects containing pointers cannot b
 _SNAPSHOT_IDENTITY_ATTRS_8616 = frozenset({"codegen", "project", "arch"})
 
 
+def _deepcopy_itertools_count_8616(value: StructuredAstValue, memo: StructuredAstValue) -> StructuredAstValue:
+    match = re.fullmatch(r"count\(([-+]?\d+)(?:,\s*([-+]?\d+))?\)", repr(value))
+    if match is None:
+        raise TypeError(f"Unsupported itertools.count repr during validation clone: {value!r}")
+    start = int(match.group(1))
+    step = int(match.group(2)) if match.group(2) is not None else 1
+    cloned = itertools.count(start, step)
+    memo[id(value)] = cloned
+    return cloned
+
+
+def _manual_validation_fallback_clone_8616(cfunc: StructuredAstValue) -> StructuredAstValue:
+    """Best-effort manual clone used when the primary snapshot path fails."""
+    with contextlib.suppress(Exception):
+        fallback = copy.copy(cfunc)
+        memo = _validation_snapshot_identity_memo_8616(cfunc)
+        statements = getattr(cfunc, "statements", None)
+        with contextlib.suppress(Exception):
+            fallback.statements = _snapshot_c_ast_value_for_validation_8616(statements, memo)
+        next_counter = getattr(cfunc, "_next_counter", None)
+        if isinstance(next_counter, _IT_COUNT_TYPE):
+            fallback._next_counter = _snapshot_c_ast_value_for_validation_8616(next_counter, memo)
+        _clone_cfunc_validation_fields_8616(cfunc, fallback, memo)
+        with contextlib.suppress(Exception):
+            fallback._inertia_validation_snapshot_fallback = "manual"
+        return fallback
+    return None
+
+
+def _restore_deepcopy_dispatch_8616(dispatch: StructuredAstValue, previous: StructuredAstValue, sentinel: object) -> None:
+    if not isinstance(dispatch, dict):
+        return
+    if previous is sentinel:
+        with contextlib.suppress(Exception):
+            del dispatch[_IT_COUNT_TYPE]
+    else:
+        dispatch[_IT_COUNT_TYPE] = previous
+
+
 def _deepcopy_cfunc_for_validation_8616(cfunc: StructuredAstValue) -> StructuredAstValue:
-    """Clone a dynamic codegen C function compatibility object for validation rollback."""
     dispatch = getattr(copy, "_deepcopy_dispatch", None)
     sentinel = object()
     previous = sentinel
 
-    def _deepcopy_count(value: StructuredAstValue, memo: StructuredAstValue) -> StructuredAstValue:
-        match = re.fullmatch(r"count\(([-+]?\d+)(?:,\s*([-+]?\d+))?\)", repr(value))
-        if match is None:
-            raise TypeError(f"Unsupported itertools.count repr during validation clone: {value!r}")
-        start = int(match.group(1))
-        step = int(match.group(2)) if match.group(2) is not None else 1
-        cloned = itertools.count(start, step)
-        memo[id(value)] = cloned
-        return cloned
-
     if isinstance(dispatch, dict):
         previous = dispatch.get(_IT_COUNT_TYPE, sentinel)
-        dispatch[_IT_COUNT_TYPE] = _deepcopy_count
+        dispatch[_IT_COUNT_TYPE] = _deepcopy_itertools_count_8616
     try:
         cloned = copy.copy(cfunc)
         # A postprocess validation snapshot is only evidence if statement
@@ -8327,27 +9088,13 @@ def _deepcopy_cfunc_for_validation_8616(cfunc: StructuredAstValue) -> Structured
         _clone_cfunc_validation_fields_8616(cfunc, cloned, memo)
         return cloned
     except Exception:
-        with contextlib.suppress(Exception):
-            fallback = copy.copy(cfunc)
-            memo = _validation_snapshot_identity_memo_8616(cfunc)
-            statements = getattr(cfunc, "statements", None)
-            with contextlib.suppress(Exception):
-                fallback.statements = _snapshot_c_ast_value_for_validation_8616(statements, memo)
-            next_counter = getattr(cfunc, "_next_counter", None)
-            if isinstance(next_counter, _IT_COUNT_TYPE):
-                fallback._next_counter = _snapshot_c_ast_value_for_validation_8616(next_counter, memo)
-            _clone_cfunc_validation_fields_8616(cfunc, fallback, memo)
-            with contextlib.suppress(Exception):
-                fallback._inertia_validation_snapshot_fallback = "manual"
+        fallback = _manual_validation_fallback_clone_8616(cfunc)
+        if fallback is not None:
             return fallback
         raise
     finally:
-        if isinstance(dispatch, dict):
-            if previous is sentinel:
-                with contextlib.suppress(Exception):
-                    del dispatch[_IT_COUNT_TYPE]
-            else:
-                dispatch[_IT_COUNT_TYPE] = previous
+        _restore_deepcopy_dispatch_8616(dispatch, previous, sentinel)
+
 
 
 def _validation_snapshot_identity_memo_8616(cfunc: StructuredAstValue) -> dict[int, StructuredAstValue]:
@@ -8369,52 +9116,24 @@ def _validation_snapshot_identity_memo_8616(cfunc: StructuredAstValue) -> dict[i
     return memo
 
 
-def _snapshot_c_ast_value_for_validation_8616(
-    value: StructuredAstValue, memo: dict[int, StructuredAstValue]
+def _snapshot_itertools_count_8616(
+    value: StructuredAstValue, value_id: int, memo: dict[int, StructuredAstValue]
 ) -> StructuredAstValue:
-    if value is None or isinstance(value, (str, bytes, int, float, bool)):
+    match = re.fullmatch(r"count\(([-+]?\d+)(?:,\s*([-+]?\d+))?\)", repr(value))
+    if match is None:
+        memo[value_id] = value
         return value
+    start = int(match.group(1))
+    step = int(match.group(2)) if match.group(2) is not None else 1
+    cloned_count = itertools.count(start, step)
+    memo[value_id] = cloned_count
+    return cloned_count
 
-    value_id = id(value)
-    if value_id in memo:
-        return memo[value_id]
 
-    if isinstance(value, _IT_COUNT_TYPE):
-        match = re.fullmatch(r"count\(([-+]?\d+)(?:,\s*([-+]?\d+))?\)", repr(value))
-        if match is None:
-            memo[value_id] = value
-            return value
-        start = int(match.group(1))
-        step = int(match.group(2)) if match.group(2) is not None else 1
-        cloned_count = itertools.count(start, step)
-        memo[value_id] = cloned_count
-        return cloned_count
-
-    if isinstance(value, list):
-        cloned_list: list[StructuredAstValue] = []
-        memo[value_id] = cloned_list
-        cloned_list.extend(_snapshot_c_ast_value_for_validation_8616(item, memo) for item in value)
-        return cloned_list
-
-    if isinstance(value, tuple):
-        cloned_tuple = tuple(_snapshot_c_ast_value_for_validation_8616(item, memo) for item in value)
-        memo[value_id] = cloned_tuple
-        return cloned_tuple
-
-    if isinstance(value, dict):
-        cloned_dict: dict[StructuredAstValue, StructuredAstValue] = {}
-        memo[value_id] = cloned_dict
-        for key, item in value.items():
-            cloned_key = _snapshot_c_ast_value_for_validation_8616(key, memo)
-            cloned_dict[cloned_key] = _snapshot_c_ast_value_for_validation_8616(item, memo)
-        return cloned_dict
-
-    if isinstance(value, (set, frozenset)):
-        cloned_items = {_snapshot_c_ast_value_for_validation_8616(item, memo) for item in value}
-        cloned_set = frozenset(cloned_items) if isinstance(value, frozenset) else cloned_items
-        memo[value_id] = cloned_set
-        return cloned_set
-
+def _snapshot_c_ast_object_8616(
+    value: StructuredAstValue, value_id: int, memo: dict[int, StructuredAstValue]
+) -> StructuredAstValue:
+    """Shallow-clone an object and snapshot its dict/slot attribute values."""
     try:
         cloned = copy.copy(value)
     except Exception:
@@ -8442,6 +9161,47 @@ def _snapshot_c_ast_value_for_validation_8616(
             setattr(cloned, attr, _snapshot_c_ast_value_for_validation_8616(getattr(value, attr), memo))
 
     return cloned
+
+
+def _snapshot_c_ast_value_for_validation_8616(
+    value: StructuredAstValue, memo: dict[int, StructuredAstValue]
+) -> StructuredAstValue:
+    if value is None or isinstance(value, (str, bytes, int, float, bool)):
+        return value
+
+    value_id = id(value)
+    if value_id in memo:
+        return memo[value_id]
+
+    if isinstance(value, _IT_COUNT_TYPE):
+        return _snapshot_itertools_count_8616(value, value_id, memo)
+
+    if isinstance(value, list):
+        cloned_list: list[StructuredAstValue] = []
+        memo[value_id] = cloned_list
+        cloned_list.extend(_snapshot_c_ast_value_for_validation_8616(item, memo) for item in value)
+        return cloned_list
+
+    if isinstance(value, tuple):
+        cloned_tuple = tuple(_snapshot_c_ast_value_for_validation_8616(item, memo) for item in value)
+        memo[value_id] = cloned_tuple
+        return cloned_tuple
+
+    if isinstance(value, dict):
+        cloned_dict: dict[StructuredAstValue, StructuredAstValue] = {}
+        memo[value_id] = cloned_dict
+        for key, item in value.items():
+            cloned_key = _snapshot_c_ast_value_for_validation_8616(key, memo)
+            cloned_dict[cloned_key] = _snapshot_c_ast_value_for_validation_8616(item, memo)
+        return cloned_dict
+
+    if isinstance(value, (set, frozenset)):
+        cloned_items = {_snapshot_c_ast_value_for_validation_8616(item, memo) for item in value}
+        cloned_set = frozenset(cloned_items) if isinstance(value, frozenset) else cloned_items
+        memo[value_id] = cloned_set
+        return cloned_set
+
+    return _snapshot_c_ast_object_8616(value, value_id, memo)
 
 
 def _clone_codegen_for_validation_summary_8616(codegen: StructuredAstValue) -> StructuredAstValue:
@@ -8564,6 +9324,187 @@ def _restore_codegen_text_state_8616(
             setattr(codegen, attr, value)
 
 
+def _wc_name_candidates_8616(variable: StructuredAstValue, cvar: StructuredAstValue) -> tuple[str, ...]:
+    names: list[str] = []
+    for candidate in (
+        getattr(cvar, "name", None),
+        getattr(variable, "name", None),
+    ):
+        if isinstance(candidate, str) and candidate and candidate not in names:
+            names.append(candidate)
+    return tuple(names)
+
+
+def _wc_parse_stack_slot_fingerprint_8616(
+    fingerprint: str,
+) -> tuple[int, int | None, str | None] | None:
+    if not isinstance(fingerprint, str):
+        return None
+    if fingerprint.startswith("Reference(") and fingerprint.endswith(")"):
+        fingerprint = fingerprint[len("Reference(") : -1]
+    match = re.fullmatch(r"stack_slot:SS:BP([+-]0x[0-9a-fA-F]+)(?::size(\d+))?", fingerprint)
+    if match is None:
+        return None
+    try:
+        offset = int(match.group(1), 16)
+    except Exception as ex:
+        logging.getLogger(__name__).debug(
+            "stack slot fingerprint offset parse failed: %s",
+            ex,
+        )
+        return None
+    size_text = match.group(2)
+    size = int(size_text) if isinstance(size_text, str) else None
+    return offset, size, fingerprint
+
+
+def _wc_proof_for_slot_8616(
+    slot_offset: int, slot_size: int, carrier_size: int, source: str
+) -> dict[str, StructuredAstValue]:
+    return {"offset": slot_offset, "size": slot_size, "carrier_size": carrier_size, "source": source}
+
+
+def _wc_record_proof_8616(
+    carrier_map: dict[StructuredAstValue, StructuredAstValue],
+    variable: StructuredAstValue,
+    cvar: StructuredAstValue,
+    carrier_size: int,
+    proof: dict[str, StructuredAstValue],
+) -> None:
+    variable_offset = getattr(variable, "offset", None)
+    if cvar is not None:
+        carrier_map[id(cvar)] = proof
+    carrier_map[id(variable)] = proof
+    for name in _wc_name_candidates_8616(variable, cvar or variable):
+        carrier_map[name] = proof
+        carrier_map[(name, carrier_size)] = proof
+    if isinstance(variable_offset, int):
+        carrier_map[(variable_offset, carrier_size)] = proof
+
+
+def _wc_collect_recurrence_proofs_8616(
+    codegen: StructuredAstValue,
+    cfunc: StructuredAstValue,
+    carrier_map: dict[StructuredAstValue, StructuredAstValue],
+    *,
+    c_variable_type: StructuredAstValue,
+    sim_stack_variable_type: StructuredAstValue,
+    expr_fingerprint: StructuredAstValue,
+) -> None:
+    recurrence_state = getattr(codegen, "_inertia_recurrence_state", None)
+    if recurrence_state is None or not hasattr(recurrence_state, "resolve_known_copy_alias_expr"):
+        return
+    for walk_node in _iter_c_nodes_deep_8616(getattr(cfunc, "statements", None)):
+        if not isinstance(walk_node, c_variable_type):
+            continue
+        variable = walk_node.variable
+        if not isinstance(variable, sim_stack_variable_type):
+            continue
+        carrier_size = variable.size
+        if not isinstance(carrier_size, int) or carrier_size >= 2:
+            continue
+        try:
+            resolved_expr = recurrence_state.resolve_known_copy_alias_expr(walk_node)
+            resolved_fp = expr_fingerprint(resolved_expr, codegen.project)
+        except Exception as ex:
+            logging.getLogger(__name__).debug("stack slot fingerprint via recurrence state failed: %s", ex)
+            continue
+        slot_info = _wc_parse_stack_slot_fingerprint_8616(resolved_fp)
+        if slot_info is None:
+            continue
+        slot_offset, slot_size, _display = slot_info
+        if not isinstance(slot_size, int) or slot_size <= carrier_size:
+            continue
+        _wc_record_proof_8616(
+            carrier_map,
+            variable,
+            walk_node,
+            carrier_size,
+            _wc_proof_for_slot_8616(slot_offset, slot_size, carrier_size, "recurrence_state_resolved_expr"),
+        )
+
+
+def _wc_assignment_proof_for_name_8616(
+    codegen: StructuredAstValue,
+    carrier_map: dict[StructuredAstValue, StructuredAstValue],
+    variable: StructuredAstValue,
+    cvar: StructuredAstValue,
+    carrier_size: int,
+    name: str,
+    var_id_map: StructuredAstValue,
+    name_map: StructuredAstValue,
+    first_name_map: StructuredAstValue,
+    expr_fingerprint: StructuredAstValue,
+) -> None:
+    """Record a widened-carrier proof when the name's first assignment resolves to a wider slot."""
+    if re.fullmatch(r"(?:arg_\d+|local_\d+|s_[0-9a-fA-F]+|v\d+|vvar_\d+|ir_\d+)", name) is None:
+        return
+    rhs = first_name_map.get(name) or var_id_map.get(id(variable)) or name_map.get(name)
+    if rhs is None:
+        return
+    try:
+        rhs_fp = expr_fingerprint(rhs, codegen.project)
+    except Exception as ex:
+        logging.getLogger(__name__).debug("rhs fingerprint via name map failed name=%s: %s", name, ex)
+        return
+    slot_info = _wc_parse_stack_slot_fingerprint_8616(rhs_fp)
+    if slot_info is None:
+        return
+    slot_offset, slot_size, _display = slot_info
+    if not isinstance(slot_size, int) or slot_size <= carrier_size:
+        return
+    _wc_record_proof_8616(
+        carrier_map,
+        variable,
+        cvar,
+        carrier_size,
+        _wc_proof_for_slot_8616(slot_offset, slot_size, carrier_size, "first_assignment_stack_slot"),
+    )
+
+
+def _wc_collect_assignment_map_proofs_8616(
+    codegen: StructuredAstValue,
+    carrier_map: dict[StructuredAstValue, StructuredAstValue],
+    variables_in_use: dict[StructuredAstValue, StructuredAstValue],
+    *,
+    function_addr: int,
+    sim_stack_variable_type: StructuredAstValue,
+    ensure_assignment_maps: StructuredAstValue,
+    expr_fingerprint: StructuredAstValue,
+) -> None:
+    try:
+        var_id_map, name_map, _reg_map, _multi_var, _multi_name, _multi_reg, first_name_map, _first_reg_map = (
+            ensure_assignment_maps(codegen)
+        )
+    except Exception as ex:
+        logging.getLogger(__name__).debug(
+            "Tail-validation widened-carrier provenance assignment-map build failed at function=%#x "
+            "stage=baseline-canonicalization: %s",
+            function_addr,
+            ex,
+        )
+        return
+    for variable, cvar in variables_in_use.items():
+        if not isinstance(variable, sim_stack_variable_type) or getattr(variable, "base", None) != "bp":
+            continue
+        carrier_size = getattr(variable, "size", None)
+        if not isinstance(carrier_size, int) or carrier_size >= 2:
+            continue
+        for name in _wc_name_candidates_8616(variable, cvar):
+            _wc_assignment_proof_for_name_8616(
+                codegen,
+                carrier_map,
+                variable,
+                cvar,
+                carrier_size,
+                name,
+                var_id_map,
+                name_map,
+                first_name_map,
+                expr_fingerprint,
+            )
+
+
 def _attach_tail_validation_widened_carrier_provenance_8616(
     codegen: StructuredAstValue, cfunc: StructuredAstValue, *, function_addr: int
 ) -> None:
@@ -8589,146 +9530,27 @@ def _attach_tail_validation_widened_carrier_provenance_8616(
         )
         return
 
-    def _name_candidates(variable: StructuredAstValue, cvar: StructuredAstValue) -> tuple[str, ...]:
-        names: list[str] = []
-        for candidate in (
-            getattr(cvar, "name", None),
-            getattr(variable, "name", None),
-        ):
-            if isinstance(candidate, str) and candidate and candidate not in names:
-                names.append(candidate)
-        return tuple(names)
-
-    def _parse_stack_slot_fingerprint(
-        fingerprint: str,
-    ) -> tuple[int, int | None, str | None] | None:
-        if not isinstance(fingerprint, str):
-            return None
-        if fingerprint.startswith("Reference(") and fingerprint.endswith(")"):
-            fingerprint = fingerprint[len("Reference(") : -1]
-        match = re.fullmatch(r"stack_slot:SS:BP([+-]0x[0-9a-fA-F]+)(?::size(\d+))?", fingerprint)
-        if match is None:
-            return None
-        try:
-            offset = int(match.group(1), 16)
-        except Exception as ex:
-            logging.getLogger(__name__).debug(
-                "stack slot fingerprint offset parse failed: %s",
-                ex,
-            )
-            return None
-        size_text = match.group(2)
-        size = int(size_text) if isinstance(size_text, str) else None
-        return offset, size, fingerprint
-
-    def _proof_for_slot(
-        slot_offset: int, slot_size: int, carrier_size: int, source: str
-    ) -> dict[str, StructuredAstValue]:
-        return {"offset": slot_offset, "size": slot_size, "carrier_size": carrier_size, "source": source}
-
-    def _record_proof(
-        carrier_map: dict[StructuredAstValue, StructuredAstValue],
-        variable: StructuredAstValue,
-        cvar: StructuredAstValue,
-        carrier_size: int,
-        proof: dict[str, StructuredAstValue],
-    ) -> None:
-        variable_offset = getattr(variable, "offset", None)
-        if cvar is not None:
-            carrier_map[id(cvar)] = proof
-        carrier_map[id(variable)] = proof
-        for name in _name_candidates(variable, cvar or variable):
-            carrier_map[name] = proof
-            carrier_map[(name, carrier_size)] = proof
-        if isinstance(variable_offset, int):
-            carrier_map[(variable_offset, carrier_size)] = proof
-
-    def _collect_recurrence_proofs(carrier_map: dict[StructuredAstValue, StructuredAstValue]) -> None:
-        recurrence_state = getattr(codegen, "_inertia_recurrence_state", None)
-        if recurrence_state is None or not hasattr(recurrence_state, "resolve_known_copy_alias_expr"):
-            return
-        for walk_node in _iter_c_nodes_deep_8616(getattr(cfunc, "statements", None)):
-            if not isinstance(walk_node, CVariable):
-                continue
-            variable = walk_node.variable
-            if not isinstance(variable, SimStackVariable):
-                continue
-            carrier_size = variable.size
-            if not isinstance(carrier_size, int) or carrier_size >= 2:
-                continue
-            try:
-                resolved_expr = recurrence_state.resolve_known_copy_alias_expr(walk_node)
-                resolved_fp = _expr_fingerprint(resolved_expr, codegen.project)
-            except Exception as ex:
-                logging.getLogger(__name__).debug("stack slot fingerprint via recurrence state failed: %s", ex)
-                continue
-            slot_info = _parse_stack_slot_fingerprint(resolved_fp)
-            if slot_info is None:
-                continue
-            slot_offset, slot_size, _display = slot_info
-            if not isinstance(slot_size, int) or slot_size <= carrier_size:
-                continue
-            _record_proof(
-                carrier_map,
-                variable,
-                walk_node,
-                carrier_size,
-                _proof_for_slot(slot_offset, slot_size, carrier_size, "recurrence_state_resolved_expr"),
-            )
-
-    def _collect_assignment_map_proofs(
-        carrier_map: dict[StructuredAstValue, StructuredAstValue],
-        variables_in_use: dict[StructuredAstValue, StructuredAstValue],
-    ) -> None:
-        try:
-            var_id_map, name_map, _reg_map, _multi_var, _multi_name, _multi_reg, first_name_map, _first_reg_map = (
-                _ensure_assignment_maps_8616(codegen)
-            )
-        except Exception as ex:
-            logging.getLogger(__name__).debug(
-                "Tail-validation widened-carrier provenance assignment-map build failed at function=%#x "
-                "stage=baseline-canonicalization: %s",
-                function_addr,
-                ex,
-            )
-            return
-        for variable, cvar in variables_in_use.items():
-            if not isinstance(variable, SimStackVariable) or getattr(variable, "base", None) != "bp":
-                continue
-            carrier_size = getattr(variable, "size", None)
-            if not isinstance(carrier_size, int) or carrier_size >= 2:
-                continue
-            for name in _name_candidates(variable, cvar):
-                if re.fullmatch(r"(?:arg_\d+|local_\d+|s_[0-9a-fA-F]+|v\d+|vvar_\d+|ir_\d+)", name) is None:
-                    continue
-                rhs = first_name_map.get(name) or var_id_map.get(id(variable)) or name_map.get(name)
-                if rhs is None:
-                    continue
-                try:
-                    rhs_fp = _expr_fingerprint(rhs, codegen.project)
-                except Exception as ex:
-                    logging.getLogger(__name__).debug("rhs fingerprint via name map failed name=%s: %s", name, ex)
-                    continue
-                slot_info = _parse_stack_slot_fingerprint(rhs_fp)
-                if slot_info is None:
-                    continue
-                slot_offset, slot_size, _display = slot_info
-                if not isinstance(slot_size, int) or slot_size <= carrier_size:
-                    continue
-                _record_proof(
-                    carrier_map,
-                    variable,
-                    cvar,
-                    carrier_size,
-                    _proof_for_slot(slot_offset, slot_size, carrier_size, "first_assignment_stack_slot"),
-                )
-
     variables_in_use = getattr(cfunc, "variables_in_use", None)
     if not isinstance(variables_in_use, dict):
         return
     carrier_map: dict[str, dict[str, StructuredAstValue]] = {}
-    _collect_recurrence_proofs(carrier_map)
-    _collect_assignment_map_proofs(carrier_map, variables_in_use)
+    _wc_collect_recurrence_proofs_8616(
+        codegen,
+        cfunc,
+        carrier_map,
+        c_variable_type=CVariable,
+        sim_stack_variable_type=SimStackVariable,
+        expr_fingerprint=_expr_fingerprint,
+    )
+    _wc_collect_assignment_map_proofs_8616(
+        codegen,
+        carrier_map,
+        variables_in_use,
+        function_addr=function_addr,
+        sim_stack_variable_type=SimStackVariable,
+        ensure_assignment_maps=_ensure_assignment_maps_8616,
+        expr_fingerprint=_expr_fingerprint,
+    )
 
     if carrier_map:
         codegen._inertia_tail_validation_widened_carriers = carrier_map
@@ -8745,133 +9567,146 @@ def _attach_tail_validation_widened_carrier_provenance_8616(
         )
 
 
+
+def _tv_clone_debug_enabled_8616() -> bool:
+    return bool(os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"))
+
+
+def _tv_clone_debug_write_8616(message: str) -> None:
+    sys.stderr.write(message)
+    sys.stderr.flush()
+
+
+def _baseline_clone_skip_reason_8616(
+    spec: DecompilerPostprocessPassSpec, cloned_codegen: StructuredAstValue
+) -> str | None:
+    """Return the skip reason for a baseline-clone pass, or None when it must run."""
+    if spec.name == "_normalize_fact_backed_stack_accesses_8616":
+        return "already applied"
+    if spec.name in _selector_return_contract_skip_passes_8616() and _selector_return_contract_active_8616(
+        cloned_codegen
+    ):
+        return "skipped selector-return contract"
+    if spec.name == "_rerun_stack_lowering_consumers_after_calls_8616":
+        return "skipped validation-clone replay"
+    return None
+
+
+def _replay_baseline_clone_passes_8616(project: StructuredAstValue, cloned_codegen: StructuredAstValue) -> None:
+    debug = _tv_clone_debug_enabled_8616()
+    pass_start = time.perf_counter() if debug else 0.0
+    for spec in _decompiler_postprocess_passes_for_function(project, cloned_codegen):
+        skip_reason = _baseline_clone_skip_reason_8616(spec, cloned_codegen)
+        if skip_reason is not None:
+            if debug:
+                _tv_clone_debug_write_8616(f"[dbg] tv-baseline clone pass: {spec.name} {skip_reason}\n")
+            continue
+        try:
+            with analysis_timeout(3):
+                _run_decompiler_postprocess_pass_spec_8616(project, cloned_codegen, spec)
+        except AnalysisTimeout as ex:
+            raise PipelineHardError(
+                f"validation baseline clone pass timed out: {spec.name}",
+                layer="tail_validation",
+            ) from ex
+        if debug:
+            _tv_clone_debug_write_8616(
+                f"[dbg] tv-baseline clone pass: {spec.name} ({time.perf_counter() - pass_start:.3f}s)\n"
+            )
+            pass_start = time.perf_counter()
+
+
+def _baseline_clone_stack_lowering_8616(
+    project: StructuredAstValue, cloned_codegen: StructuredAstValue, debug_stats: dict[str, int]
+) -> None:
+    transfer_semantic_alias_facts_to_codegen_8616(project, cloned_codegen)
+    alias_facts = getattr(cloned_codegen, "_inertia_semantic_alias_facts", None)
+    if isinstance(alias_facts, list):
+        debug_stats["validation_clone_stack_alias_facts"] = len(alias_facts)
+        if alias_facts:
+            lower_stack_accesses_from_alias_facts_8616(cloned_codegen, alias_facts)
+    from .lowering.real_mode_linear import lower_stable_ss_linear_stack_dereferences_8616
+
+    lower_stable_ss_linear_stack_dereferences_8616(cloned_codegen, project=project)
+    if _fact_backed_stack_normalize_enabled_8616():
+        _normalize_fact_backed_stack_accesses_8616(project, cloned_codegen)
+    bindings = getattr(cloned_codegen, "_inertia_stack_variable_bindings", None)
+    if isinstance(bindings, tuple | list):
+        debug_stats["validation_clone_stack_bindings"] = len(bindings)
+
+
+def _baseline_clone_finalize_stats_8616(
+    cloned_codegen: StructuredAstValue, debug_stats: dict[str, int], function_addr: int
+) -> None:
+    _attach_tail_validation_widened_carrier_provenance_8616(
+        cloned_codegen,
+        cloned_codegen.cfunc,
+        function_addr=function_addr,
+    )
+    clone_debug = getattr(cloned_codegen, "_inertia_stack_lowering_debug", None)
+    if isinstance(clone_debug, dict):
+        debug_stats["validation_clone_stack_materialized"] = int(
+            clone_debug.get("stack_slot_materialized", 0) or 0
+        )
+        debug_stats["validation_clone_recurrence_materialized"] = int(
+            clone_debug.get("recurrence_bound_to_materialized_local", 0) or 0
+        )
+    if (
+        debug_stats["validation_clone_stack_bindings"] > 0
+        and debug_stats["validation_clone_stack_materialized"] == 0
+    ):
+        raise PipelineHardError(
+            "validation baseline clone stack bindings not materialized",
+            layer="tail_validation",
+        )
+
+
 def _prepare_tail_validation_baseline_clone_8616(
     project: StructuredAstValue, codegen: StructuredAstValue, *, function_addr: int
 ) -> StructuredAstValue:
-    def _impl() -> StructuredAstValue:
-        if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
-            import sys as _v_sys
+    clone_debug = _tv_clone_debug_enabled_8616()
+    if clone_debug:
+        _tv_clone_debug_write_8616(
+            f"[dbg] tv-baseline clone start: func={function_addr:#x} clone_id={id(codegen)}\n"
+        )
+        clone_start = time.perf_counter()
 
-            _v_sys.stderr.write(f"[dbg] tv-baseline clone start: func={function_addr:#x} clone_id={id(codegen)}\n")
-            _v_sys.stderr.flush()
-            import time as _tv_time
-
-            _tv_clone_start = _tv_time.perf_counter()
-
-        cloned_codegen = _clone_codegen_for_validation_summary_8616(codegen)
-        if cloned_codegen is None:
-            if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
-                logging.getLogger(__name__).warning(
-                    "Tail-validation baseline clone unavailable at function=%#x stage=baseline-canonicalization",
-                    function_addr,
-                )
-            return None
-        _repair_cfunc_statements_wrapper(cloned_codegen)
-        debug_stats = {
-            "validation_clone_stack_alias_facts": 0,
-            "validation_clone_stack_bindings": 0,
-            "validation_clone_stack_materialized": 0,
-            "validation_clone_recurrence_materialized": 0,
-            "validation_clone_failure_count": 0,
-        }
-        try:
-            transfer_semantic_alias_facts_to_codegen_8616(project, cloned_codegen)
-            alias_facts = getattr(cloned_codegen, "_inertia_semantic_alias_facts", None)
-            if isinstance(alias_facts, list):
-                debug_stats["validation_clone_stack_alias_facts"] = len(alias_facts)
-                if alias_facts:
-                    lower_stack_accesses_from_alias_facts_8616(cloned_codegen, alias_facts)
-            from .lowering.real_mode_linear import lower_stable_ss_linear_stack_dereferences_8616
-
-            lower_stable_ss_linear_stack_dereferences_8616(cloned_codegen, project=project)
-            if _fact_backed_stack_normalize_enabled_8616():
-                _normalize_fact_backed_stack_accesses_8616(project, cloned_codegen)
-            bindings = getattr(cloned_codegen, "_inertia_stack_variable_bindings", None)
-            if isinstance(bindings, tuple | list):
-                debug_stats["validation_clone_stack_bindings"] = len(bindings)
-            if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
-                import time as _tv_time
-
-                _pass_start = _tv_time.perf_counter()
-            for spec in _decompiler_postprocess_passes_for_function(project, cloned_codegen):
-                if spec.name == "_normalize_fact_backed_stack_accesses_8616":
-                    if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
-                        _v_sys.stderr.write(f"[dbg] tv-baseline clone pass: {spec.name} already applied\n")
-                        _v_sys.stderr.flush()
-                    continue
-                if spec.name in _selector_return_contract_skip_passes_8616() and _selector_return_contract_active_8616(
-                    cloned_codegen
-                ):
-                    if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
-                        _v_sys.stderr.write(
-                            f"[dbg] tv-baseline clone pass: {spec.name} skipped selector-return contract\n"
-                        )
-                        _v_sys.stderr.flush()
-                    continue
-                if spec.name == "_rerun_stack_lowering_consumers_after_calls_8616":
-                    if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
-                        _v_sys.stderr.write(
-                            f"[dbg] tv-baseline clone pass: {spec.name} skipped validation-clone replay\n"
-                        )
-                        _v_sys.stderr.flush()
-                    continue
-                try:
-                    with analysis_timeout(3):
-                        _run_decompiler_postprocess_pass_spec_8616(project, cloned_codegen, spec)
-                except AnalysisTimeout as ex:
-                    raise PipelineHardError(
-                        f"validation baseline clone pass timed out: {spec.name}",
-                        layer="tail_validation",
-                    ) from ex
-                if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
-                    _v_sys.stderr.write(
-                        f"[dbg] tv-baseline clone pass: {spec.name} ({_tv_time.perf_counter() - _pass_start:.3f}s)\n"
-                    )
-                    _v_sys.stderr.flush()
-                    _pass_start = _tv_time.perf_counter()
-            _attach_tail_validation_widened_carrier_provenance_8616(
-                cloned_codegen,
-                cloned_codegen.cfunc,
-                function_addr=function_addr,
+    cloned_codegen = _clone_codegen_for_validation_summary_8616(codegen)
+    if cloned_codegen is None:
+        if clone_debug:
+            logging.getLogger(__name__).warning(
+                "Tail-validation baseline clone unavailable at function=%#x stage=baseline-canonicalization",
+                function_addr,
             )
-            clone_debug = getattr(cloned_codegen, "_inertia_stack_lowering_debug", None)
-            if isinstance(clone_debug, dict):
-                debug_stats["validation_clone_stack_materialized"] = int(
-                    clone_debug.get("stack_slot_materialized", 0) or 0
-                )
-                debug_stats["validation_clone_recurrence_materialized"] = int(
-                    clone_debug.get("recurrence_bound_to_materialized_local", 0) or 0
-                )
-            if (
-                debug_stats["validation_clone_stack_bindings"] > 0
-                and debug_stats["validation_clone_stack_materialized"] == 0
-            ):
-                raise PipelineHardError(
-                    "validation baseline clone stack bindings not materialized",
-                    layer="tail_validation",
-                )
-        except Exception:
-            debug_stats["validation_clone_failure_count"] += 1
-            cloned_codegen._inertia_validation_clone_debug = debug_stats
-            if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
-                import sys as _v_sys
-
-                _v_sys.stderr.write(f"[dbg] tv-baseline clone failed: func={function_addr:#x} err={debug_stats!r}\n")
-                _v_sys.stderr.flush()
-            raise
+        return None
+    _repair_cfunc_statements_wrapper(cloned_codegen)
+    debug_stats = {
+        "validation_clone_stack_alias_facts": 0,
+        "validation_clone_stack_bindings": 0,
+        "validation_clone_stack_materialized": 0,
+        "validation_clone_recurrence_materialized": 0,
+        "validation_clone_failure_count": 0,
+    }
+    try:
+        _baseline_clone_stack_lowering_8616(project, cloned_codegen, debug_stats)
+        _replay_baseline_clone_passes_8616(project, cloned_codegen)
+        _baseline_clone_finalize_stats_8616(cloned_codegen, debug_stats, function_addr)
+    except Exception:
+        debug_stats["validation_clone_failure_count"] += 1
         cloned_codegen._inertia_validation_clone_debug = debug_stats
-        if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
-            import sys as _v_sys
-            import time as _tv_time
-
-            _v_sys.stderr.write(
-                f"[dbg] tv-baseline clone done: func={function_addr:#x} "
-                f"elapsed={_tv_time.perf_counter() - _tv_clone_start:.3f}s\n"
+        if clone_debug:
+            _tv_clone_debug_write_8616(
+                f"[dbg] tv-baseline clone failed: func={function_addr:#x} err={debug_stats!r}\n"
             )
-            _v_sys.stderr.flush()
-        return cloned_codegen
+        raise
+    cloned_codegen._inertia_validation_clone_debug = debug_stats
+    if clone_debug:
+        _tv_clone_debug_write_8616(
+            f"[dbg] tv-baseline clone done: func={function_addr:#x} "
+            f"elapsed={time.perf_counter() - clone_start:.3f}s\n"
+        )
+    return cloned_codegen
 
-    return _impl()
 
 
 def _debug_tail_validation_baseline_condition_8616(
@@ -9100,6 +9935,77 @@ def _postprocess_function_complexity_8616(
     return _PostprocessFunctionComplexity8616()
 
 
+def _collect_direct_tail_summary_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    *,
+    mode: str,
+    boundary_fingerprint: str | None = None,
+) -> X86_16TailValidationSummary:
+    return collect_x86_16_tail_validation_summary(
+        project,
+        codegen,
+        mode=mode,
+        boundary_fingerprint=boundary_fingerprint,
+    )
+
+
+def _prepare_baseline_clone_or_none_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    *,
+    function_addr: int,
+) -> StructuredAstValue | None:
+    """Canonicalize a baseline clone within a bounded timeout, or return None."""
+    try:
+        with analysis_timeout(3):
+            return _prepare_tail_validation_baseline_clone_8616(
+                project,
+                codegen,
+                function_addr=function_addr,
+            )
+    except AnalysisTimeout:
+        logging.getLogger(__name__).warning(
+            "Tail-validation baseline canonicalization timed out at function=%#x; "
+            "falling back to direct summary collection",
+            function_addr,
+        )
+        return None
+    except Exception as ex:
+        logging.getLogger(__name__).debug(
+            "Tail-validation baseline canonicalization failed at function=%#x "
+            "stage=baseline-canonicalization: %s",
+            function_addr,
+            ex,
+        )
+        return None
+
+
+def _debug_baseline_clone_witnesses_8616(cloned_codegen: StructuredAstValue, function_addr: int) -> None:
+    if not os.environ.get("INERTIA_DEBUG_TV_BASELINE"):
+        return
+    logger = logging.getLogger(__name__)
+    rs = getattr(cloned_codegen, "_inertia_recurrence_state", None)
+    wc = getattr(cloned_codegen, "_inertia_tail_validation_widened_carriers", None)
+    logger.warning(
+        "[baseline-debug] func=%#x recurrence_state=%s widened_carriers=%s entries=%s",
+        function_addr,
+        rs is not None,
+        bool(wc),
+        len(wc) if isinstance(wc, dict) else "N/A",
+    )
+    if isinstance(wc, dict) and wc:
+        for key, proof in list(wc.items())[:6]:
+            logger.warning(
+                "[baseline-debug] proof key=%r offset=%r size=%r carrier_size=%r source=%r",
+                key,
+                proof.get("offset"),
+                proof.get("size"),
+                proof.get("carrier_size"),
+                proof.get("source"),
+            )
+
+
 def _collect_tail_validation_summary_with_baseline_canonicalization_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
@@ -9109,140 +10015,70 @@ def _collect_tail_validation_summary_with_baseline_canonicalization_8616(
     force_baseline_canonicalization: bool = False,
 ) -> X86_16TailValidationSummary:
     """Collect the canonical typed baseline without erasing validation evidence."""
-    def _impl() -> X86_16TailValidationSummary:
-        """Choose the existing clone or direct collection policy."""
-        canonicalization_setting = os.environ.get("INERTIA_ENABLE_TV_BASELINE_CANONICALIZATION", "1").strip().lower()
-        if canonicalization_setting in {"0", "false", "no", "off"}:
-            return collect_x86_16_tail_validation_summary(
-                project,
-                codegen,
-                mode=mode,
-                boundary_fingerprint=boundary_fingerprint,
-            )
-        function_addr = getattr(getattr(codegen, "cfunc", None), "addr", -1) or -1
-        if hasattr(codegen, "_inertia_postprocess_mutation_generation_8616") and not force_baseline_canonicalization:
-            codegen._inertia_tail_validation_direct_final_summary_count_8616 = (
-                int(getattr(codegen, "_inertia_tail_validation_direct_final_summary_count_8616", 0) or 0) + 1
-            )
-            return collect_x86_16_tail_validation_summary(
-                project,
-                codegen,
-                mode=mode,
-                boundary_fingerprint=boundary_fingerprint,
-            )
-        # Large functions frequently time out in baseline clone canonicalization.
-        # For those, use direct summary collection to keep validation deterministic
-        # and avoid repeated timeout churn.
-        complexity = _postprocess_function_complexity_8616(project, codegen, function_addr)
-        if complexity.is_expensive_for_local_validation:
-            return collect_x86_16_tail_validation_summary(
-                project,
-                codegen,
-                mode=mode,
-                boundary_fingerprint=boundary_fingerprint,
-            )
-
-        cloned_codegen = None
-        if cloned_codegen is None:
-            try:
-                with analysis_timeout(3):
-                    cloned_codegen = _prepare_tail_validation_baseline_clone_8616(
-                        project,
-                        codegen,
-                        function_addr=function_addr,
-                    )
-            except AnalysisTimeout:
-                logging.getLogger(__name__).warning(
-                    "Tail-validation baseline canonicalization timed out at function=%#x; "
-                    "falling back to direct summary collection",
-                    function_addr,
-                )
-                return collect_x86_16_tail_validation_summary(
-                    project,
-                    codegen,
-                    mode=mode,
-                    boundary_fingerprint=boundary_fingerprint,
-                )
-            except Exception as ex:
-                logging.getLogger(__name__).debug(
-                    "Tail-validation baseline canonicalization failed at function=%#x "
-                    "stage=baseline-canonicalization: %s",
-                    function_addr,
-                    ex,
-                )
-                return collect_x86_16_tail_validation_summary(
-                    project,
-                    codegen,
-                    mode=mode,
-                    boundary_fingerprint=boundary_fingerprint,
-                )
-        if cloned_codegen is None:
-            return collect_x86_16_tail_validation_summary(
-                project,
-                codegen,
-                mode=mode,
-                boundary_fingerprint=boundary_fingerprint,
-            )
-        try:
-            _repair_cfunc_statements_wrapper(cloned_codegen)
-        except Exception as ex:
-            logging.getLogger(__name__).debug(
-                "Tail-validation baseline clone final repair failed at function=%#x "
-                "stage=baseline-canonicalization: %s",
-                function_addr,
-                ex,
-            )
-        try:
-            _post._repair_unresolved_function_exit_gotos_8616(project, cloned_codegen)
-        except Exception as ex:
-            logging.getLogger(__name__).debug(
-                "Tail-validation baseline clone unresolved-exit repair failed at function=%#x "
-                "stage=baseline-canonicalization: %s",
-                function_addr,
-                ex,
-            )
-        if os.environ.get("INERTIA_DEBUG_TV_BASELINE"):
-            rs = getattr(cloned_codegen, "_inertia_recurrence_state", None)
-            wc = getattr(cloned_codegen, "_inertia_tail_validation_widened_carriers", None)
-            logging.getLogger(__name__).warning(
-                "[baseline-debug] func=%#x recurrence_state=%s widened_carriers=%s entries=%s",
-                function_addr,
-                rs is not None,
-                bool(wc),
-                len(wc) if isinstance(wc, dict) else "N/A",
-            )
-            if isinstance(wc, dict) and wc:
-                for key, proof in list(wc.items())[:6]:
-                    logging.getLogger(__name__).warning(
-                        "[baseline-debug] proof key=%r offset=%r size=%r carrier_size=%r source=%r",
-                        key,
-                        proof.get("offset"),
-                        proof.get("size"),
-                        proof.get("carrier_size"),
-                        proof.get("source"),
-                    )
-        _debug_tail_validation_baseline_condition_8616(
-            project,
-            cloned_codegen,
-            function_addr=function_addr,
-            label="baseline-clone",
+    canonicalization_setting = os.environ.get("INERTIA_ENABLE_TV_BASELINE_CANONICALIZATION", "1").strip().lower()
+    if canonicalization_setting in {"0", "false", "no", "off"}:
+        return _collect_direct_tail_summary_8616(
+            project, codegen, mode=mode, boundary_fingerprint=boundary_fingerprint
         )
-        try:
-            with analysis_timeout(3):
-                return collect_x86_16_tail_validation_summary(project, cloned_codegen, mode=mode)
-        except AnalysisTimeout:
-            logging.getLogger(__name__).warning(
-                "Tail-validation baseline summary timed out at function=%#x; falling back to direct summary collection",
-                function_addr,
-            )
-            return collect_x86_16_tail_validation_summary(
-                project,
-                codegen,
-                mode=mode,
-                boundary_fingerprint=boundary_fingerprint,
-            )
+    function_addr = getattr(getattr(codegen, "cfunc", None), "addr", -1) or -1
+    if hasattr(codegen, "_inertia_postprocess_mutation_generation_8616") and not force_baseline_canonicalization:
+        codegen._inertia_tail_validation_direct_final_summary_count_8616 = (
+            int(getattr(codegen, "_inertia_tail_validation_direct_final_summary_count_8616", 0) or 0) + 1
+        )
+        return _collect_direct_tail_summary_8616(
+            project, codegen, mode=mode, boundary_fingerprint=boundary_fingerprint
+        )
+    # Large functions frequently time out in baseline clone canonicalization.
+    # For those, use direct summary collection to keep validation deterministic
+    # and avoid repeated timeout churn.
+    complexity = _postprocess_function_complexity_8616(project, codegen, function_addr)
+    if complexity.is_expensive_for_local_validation:
+        return _collect_direct_tail_summary_8616(
+            project, codegen, mode=mode, boundary_fingerprint=boundary_fingerprint
+        )
 
-    return _impl()
+    cloned_codegen = _prepare_baseline_clone_or_none_8616(project, codegen, function_addr=function_addr)
+    if cloned_codegen is None:
+        return _collect_direct_tail_summary_8616(
+            project, codegen, mode=mode, boundary_fingerprint=boundary_fingerprint
+        )
+    try:
+        _repair_cfunc_statements_wrapper(cloned_codegen)
+    except Exception as ex:
+        logging.getLogger(__name__).debug(
+            "Tail-validation baseline clone final repair failed at function=%#x "
+            "stage=baseline-canonicalization: %s",
+            function_addr,
+            ex,
+        )
+    try:
+        _post._repair_unresolved_function_exit_gotos_8616(project, cloned_codegen)
+    except Exception as ex:
+        logging.getLogger(__name__).debug(
+            "Tail-validation baseline clone unresolved-exit repair failed at function=%#x "
+            "stage=baseline-canonicalization: %s",
+            function_addr,
+            ex,
+        )
+    _debug_baseline_clone_witnesses_8616(cloned_codegen, function_addr)
+    _debug_tail_validation_baseline_condition_8616(
+        project,
+        cloned_codegen,
+        function_addr=function_addr,
+        label="baseline-clone",
+    )
+    try:
+        with analysis_timeout(3):
+            return collect_x86_16_tail_validation_summary(project, cloned_codegen, mode=mode)
+    except AnalysisTimeout:
+        logging.getLogger(__name__).warning(
+            "Tail-validation baseline summary timed out at function=%#x; falling back to direct summary collection",
+            function_addr,
+        )
+        return _collect_direct_tail_summary_8616(
+            project, codegen, mode=mode, boundary_fingerprint=boundary_fingerprint
+        )
+
 
 
 def _structuring_tail_validation_baseline_summary_8616(
@@ -9663,6 +10499,40 @@ def _selector_return_contract_skip_passes_8616() -> frozenset[str]:
     )
 
 
+def _local_stack_fact_evidence_8616(
+    codegen: StructuredAstValue,
+    facts_fn: Callable[[StructuredAstValue, StructuredAstValue], StructuredAstValue],
+    evidence_attr: str,
+) -> bool:
+    """Compute local stack-fact evidence for a validation pass and record its count."""
+    project = getattr(codegen, "project", None)
+    function = _current_postprocess_function_for_codegen_8616(project, codegen) if project is not None else None
+    if function is None:
+        setattr(codegen, evidence_attr, 0)
+        return False
+    facts = facts_fn(project, function)
+    setattr(codegen, evidence_attr, len(facts))
+    return bool(facts)
+
+
+def _callsite_stack_arg_local_evidence_8616(codegen: StructuredAstValue) -> bool:
+    """Return whether callsite summaries carry push-argument evidence for local validation."""
+    complexity = getattr(codegen, "_inertia_postprocess_function_complexity_8616", None)
+    if isinstance(complexity, Mapping):
+        block_count = _coerce_nonnegative_int_8616(complexity.get("blocks"))
+        byte_count = _coerce_nonnegative_int_8616(complexity.get("bytes"))
+        if block_count >= 64 or byte_count >= 0x200:
+            return False
+    summary_map = getattr(codegen, "_inertia_callsite_summaries", None)
+    if not isinstance(summary_map, dict):
+        return False
+    for summary in summary_map.values():
+        push_sources = getattr(summary, "push_arg_sources", None)
+        if isinstance(push_sources, tuple) and any(source is not None for source in push_sources):
+            return True
+    return False
+
+
 def _postprocess_pass_has_local_evidence_8616(pass_name: str, codegen: StructuredAstValue) -> bool:
     if pass_name in {
         "optimization:adjacent_temporary_copy_prune",
@@ -9679,39 +10549,20 @@ def _postprocess_pass_has_local_evidence_8616(pass_name: str, codegen: Structure
     }:
         return False
     if pass_name in _DIRECT_STACK_MOVE_VALIDATION_PASS_NAMES_8616:
-        project = getattr(codegen, "project", None)
-        function = _current_postprocess_function_for_codegen_8616(project, codegen) if project is not None else None
-        if function is None:
-            codegen._inertia_direct_stack_move_local_evidence_count_8616 = 0
-            return False
-        facts = _direct_stack_move_instruction_facts_8616(project, function)
-        codegen._inertia_direct_stack_move_local_evidence_count_8616 = len(facts)
-        return bool(facts)
+        return _local_stack_fact_evidence_8616(
+            codegen,
+            _direct_stack_move_instruction_facts_8616,
+            "_inertia_direct_stack_move_local_evidence_count_8616",
+        )
     if pass_name in _DIRECT_STACK_UPDATE_VALIDATION_PASS_NAMES_8616:
-        project = getattr(codegen, "project", None)
-        function = _current_postprocess_function_for_codegen_8616(project, codegen) if project is not None else None
-        if function is None:
-            codegen._inertia_direct_stack_update_local_evidence_count_8616 = 0
-            return False
-        update_facts = _direct_stack_update_instruction_facts_8616(project, function)
-        codegen._inertia_direct_stack_update_local_evidence_count_8616 = len(update_facts)
-        return bool(update_facts)
+        return _local_stack_fact_evidence_8616(
+            codegen,
+            _direct_stack_update_instruction_facts_8616,
+            "_inertia_direct_stack_update_local_evidence_count_8616",
+        )
     if pass_name not in _CALLSITE_STACK_ARGUMENT_PASS_NAMES_8616:
         return False
-    complexity = getattr(codegen, "_inertia_postprocess_function_complexity_8616", None)
-    if isinstance(complexity, Mapping):
-        block_count = _coerce_nonnegative_int_8616(complexity.get("blocks"))
-        byte_count = _coerce_nonnegative_int_8616(complexity.get("bytes"))
-        if block_count >= 64 or byte_count >= 0x200:
-            return False
-    summary_map = getattr(codegen, "_inertia_callsite_summaries", None)
-    if not isinstance(summary_map, dict):
-        return False
-    for summary in summary_map.values():
-        push_sources = getattr(summary, "push_arg_sources", None)
-        if isinstance(push_sources, tuple) and any(source is not None for source in push_sources):
-            return True
-    return False
+    return _callsite_stack_arg_local_evidence_8616(codegen)
 
 
 def _postprocess_local_validation_refusal_reason_8616(
@@ -9874,6 +10725,67 @@ def _postprocess_run_optimization_step_8616(
     return not codegen._inertia_postprocess_validation_failed
 
 
+def _selector_return_skip_spec_8616(spec: DecompilerPostprocessPassSpec, codegen: StructuredAstValue) -> bool:
+    """Return True when the selector-return contract requires skipping this pass."""
+    if spec.name not in _selector_return_contract_skip_passes_8616() or not _selector_return_contract_active_8616(
+        codegen
+    ):
+        return False
+    skipped = _boundary_list_8616(
+        getattr(codegen, "_inertia_postprocess_selector_return_skipped_passes_8616", ()) or ()
+    )
+    skipped.append(spec.name)
+    codegen._inertia_postprocess_selector_return_skipped_passes_8616 = tuple(skipped)
+    return True
+
+
+def _apply_spec_with_callsite_gate_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    spec: DecompilerPostprocessPassSpec,
+    apply_step: Callable[[str, Callable[[], bool]], bool],
+) -> bool:
+    def step(current_spec: DecompilerPostprocessPassSpec = spec) -> bool:
+        """Run the current pass with its declared postconditions."""
+        return _run_decompiler_postprocess_pass_spec_8616(project, codegen, current_spec)
+
+    had_callsite_final_gate = hasattr(codegen, "_inertia_callsite_final_gate_active_8616")
+    previous_callsite_final_gate = getattr(codegen, "_inertia_callsite_final_gate_active_8616", None)
+    codegen._inertia_callsite_final_gate_active_8616 = bool(spec.callsite_final_gate)
+    try:
+        return apply_step(spec.name, step)
+    finally:
+        if had_callsite_final_gate:
+            codegen._inertia_callsite_final_gate_active_8616 = previous_callsite_final_gate
+        else:
+            with contextlib.suppress(Exception):
+                delattr(codegen, "_inertia_callsite_final_gate_active_8616")
+
+
+def _post_spec_debug_traces_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    spec: DecompilerPostprocessPassSpec,
+    trace_func_addr: StructuredAstValue,
+    trace_after_callsite: bool,
+) -> bool:
+    """Emit post-pass debug traces; returns updated trace_after_callsite flag."""
+    if isinstance(trace_func_addr, int):
+        _debug_condition_progress_8616(project, codegen, function_addr=trace_func_addr, label=spec.name)
+    if spec.name == "_materialize_callsite_stack_arguments_8616":
+        trace_after_callsite = True
+    if (
+        trace_after_callsite
+        and os.environ.get("INERTIA_DEBUG_CALL_MUTATION")
+        and isinstance(trace_func_addr, int)
+    ) and _regenerate_text_safely(codegen, context=f"{trace_func_addr:#x} trace:{spec.name}"):
+        _debug_dump_calls_8616(spec.name, getattr(codegen, "text", ""), trace_func_addr)
+    if trace_after_callsite and isinstance(trace_func_addr, int) and _heap_postprocess_debug_enabled_8616():  # noqa: SIM102
+        if _regenerate_text_safely(codegen, context=f"{trace_func_addr:#x} stack-noise-trace:{spec.name}"):
+            _debug_stack_noise_8616(spec.name, getattr(codegen, "text", ""), trace_func_addr)
+    return trace_after_callsite
+
+
 def _postprocess_run_pass_specs_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
@@ -9881,66 +10793,32 @@ def _postprocess_run_pass_specs_8616(
     trace_func_addr: StructuredAstValue,
     apply_step: Callable[[str, Callable[[], bool]], bool],
 ) -> None:
-    def _impl() -> None:
-        import time as _ppt
+    import time as _ppt
 
-        _t_pp_start = _ppt.perf_counter()
-        trace_after_callsite = False
-        for spec in pass_specs:
-            if not _postprocess_spec_enabled_8616(spec.name):
-                continue
-            if spec.name in _selector_return_contract_skip_passes_8616() and _selector_return_contract_active_8616(
-                codegen
-            ):
-                skipped = _boundary_list_8616(
-                    getattr(codegen, "_inertia_postprocess_selector_return_skipped_passes_8616", ()) or ()
-                )
-                skipped.append(spec.name)
-                codegen._inertia_postprocess_selector_return_skipped_passes_8616 = tuple(skipped)
-                continue
-            project._inertia_decompiler_stage = f"postprocess:{spec.name}"
-            _t_pass = _ppt.perf_counter()
-            if timing_output_enabled() and os.environ.get("INERTIA_TAIL_VALIDATION_STDERR_JSON") != "1":
-                import sys as _ppsys
+    _t_pp_start = _ppt.perf_counter()
+    trace_after_callsite = False
+    for spec in pass_specs:
+        if not _postprocess_spec_enabled_8616(spec.name):
+            continue
+        if _selector_return_skip_spec_8616(spec, codegen):
+            continue
+        project._inertia_decompiler_stage = f"postprocess:{spec.name}"
+        _t_pass = _ppt.perf_counter()
+        if timing_output_enabled() and os.environ.get("INERTIA_TAIL_VALIDATION_STDERR_JSON") != "1":
+            import sys as _ppsys
 
-                _ppsys.stderr.write(
-                    f"[{_ppt.strftime('%H:%M:%S')}] postprocess pass: {spec.name} (+{_t_pass - _t_pp_start:.1f}s)\n"
-                )
-                _ppsys.stderr.flush()
-            def step(current_spec: DecompilerPostprocessPassSpec = spec) -> bool:
-                """Run the current pass with its declared postconditions."""
-                return _run_decompiler_postprocess_pass_spec_8616(project, codegen, current_spec)
+            _ppsys.stderr.write(
+                f"[{_ppt.strftime('%H:%M:%S')}] postprocess pass: {spec.name} (+{_t_pass - _t_pp_start:.1f}s)\n"
+            )
+            _ppsys.stderr.flush()
+        if not _apply_spec_with_callsite_gate_8616(project, codegen, spec, apply_step):
+            break
+        if codegen._inertia_postprocess_validation_failed:
+            break
+        trace_after_callsite = _post_spec_debug_traces_8616(
+            project, codegen, spec, trace_func_addr, trace_after_callsite
+        )
 
-            had_callsite_final_gate = hasattr(codegen, "_inertia_callsite_final_gate_active_8616")
-            previous_callsite_final_gate = getattr(codegen, "_inertia_callsite_final_gate_active_8616", None)
-            codegen._inertia_callsite_final_gate_active_8616 = bool(spec.callsite_final_gate)
-            try:
-                keep_running = apply_step(spec.name, step)
-            finally:
-                if had_callsite_final_gate:
-                    codegen._inertia_callsite_final_gate_active_8616 = previous_callsite_final_gate
-                else:
-                    with contextlib.suppress(Exception):
-                        delattr(codegen, "_inertia_callsite_final_gate_active_8616")
-            if not keep_running:
-                break
-            if codegen._inertia_postprocess_validation_failed:
-                break
-            if isinstance(trace_func_addr, int):
-                _debug_condition_progress_8616(project, codegen, function_addr=trace_func_addr, label=spec.name)
-            if spec.name == "_materialize_callsite_stack_arguments_8616":
-                trace_after_callsite = True
-            if (
-                trace_after_callsite
-                and os.environ.get("INERTIA_DEBUG_CALL_MUTATION")
-                and isinstance(trace_func_addr, int)
-            ) and _regenerate_text_safely(codegen, context=f"{trace_func_addr:#x} trace:{spec.name}"):
-                _debug_dump_calls_8616(spec.name, getattr(codegen, "text", ""), trace_func_addr)
-            if trace_after_callsite and isinstance(trace_func_addr, int) and _heap_postprocess_debug_enabled_8616():  # noqa: SIM102
-                if _regenerate_text_safely(codegen, context=f"{trace_func_addr:#x} stack-noise-trace:{spec.name}"):
-                    _debug_stack_noise_8616(spec.name, getattr(codegen, "text", ""), trace_func_addr)
-
-    return _impl()
 
 
 @dataclass
@@ -11074,6 +11952,21 @@ def _regenerate_final_postprocess_text_8616(
     )
 
 
+def _debug_pointer_surface_8616(codegen: StructuredAstValue, label: str) -> None:
+    """Log the typed pointer surface at the angr C-AST boundary."""
+    if os.environ.get("INERTIA_DEBUG_POINTER_MEMORY_IDIOMS") != "1":
+        return
+    try:
+        pointer_text = str(codegen.cfunc.c_repr())
+    except (AttributeError, TypeError):
+        return
+    logging.getLogger(__name__).warning(
+        "[pointer-memory-postprocess-surface] label=%s lines=%r",
+        label,
+        tuple(line.strip() for line in pointer_text.splitlines() if "[0]" in line or "SEG_U16" in line),
+    )
+
+
 def _postprocess_codegen_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> bool:
     """Run guarded cleanup over an already structured and semantically primed C AST."""
 
@@ -11082,21 +11975,7 @@ def _postprocess_codegen_8616(project: StructuredAstValue, codegen: StructuredAs
         if getattr(codegen, "cfunc", None) is None:
             return False
 
-        def _debug_pointer_surface_8616(label: str) -> None:
-            """Log the typed pointer surface at the angr C-AST boundary."""
-            if os.environ.get("INERTIA_DEBUG_POINTER_MEMORY_IDIOMS") != "1":
-                return
-            try:
-                pointer_text = str(codegen.cfunc.c_repr())
-            except (AttributeError, TypeError):
-                return
-            logging.getLogger(__name__).warning(
-                "[pointer-memory-postprocess-surface] label=%s lines=%r",
-                label,
-                tuple(line.strip() for line in pointer_text.splitlines() if "[0]" in line or "SEG_U16" in line),
-            )
-
-        _debug_pointer_surface_8616("entry")
+        _debug_pointer_surface_8616(codegen, "entry")
 
         _reset_postprocess_run_flags_8616(codegen)
         pass_specs = _decompiler_postprocess_passes_for_function(project, codegen)
@@ -11110,7 +11989,7 @@ def _postprocess_codegen_8616(project: StructuredAstValue, codegen: StructuredAs
                 file=sys.stderr,
                 flush=True,
             )
-        _debug_pointer_surface_8616("after-runtime-config")
+        _debug_pointer_surface_8616(codegen, "after-runtime-config")
         trace_func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
         delta = getattr(project, "_inertia_original_linear_delta", None)
         if isinstance(trace_func_addr, int) and isinstance(delta, int):
@@ -11179,41 +12058,42 @@ def _postprocess_codegen_8616(project: StructuredAstValue, codegen: StructuredAs
     return _impl()
 
 
+def _debug_first_condition_8616(codegen: StructuredAstValue, cfunc: StructuredAstValue, label: str) -> None:
+    """Log the first rendered condition fingerprint for selector-return debugging."""
+    if not os.environ.get("INERTIA_DEBUG_RETURN_BRANCH"):
+        return
+    logger = logging.getLogger(__name__)
+    project = getattr(codegen, "project", None)
+    root = getattr(cfunc, "statements", None) if cfunc is not None else None
+    first_stmt = next(iter(getattr(root, "statements", ()) or ()), None)
+    first_cond = None
+    if isinstance(first_stmt, CIfElse):
+        cond_nodes = first_stmt.condition_and_nodes or ()
+        if cond_nodes:
+            first_cond = cond_nodes[0][0]
+    if first_cond is None or project is None:
+        return
+    logger.warning(
+        "[cfg-selector-return] regen %s cond_fp=%r lhs_offset=%r rhs_offset=%r args=%r",
+        label,
+        _expr_fingerprint(first_cond, project),
+        getattr(getattr(getattr(first_cond, "lhs", None), "variable", None), "offset", None),
+        getattr(getattr(getattr(first_cond, "rhs", None), "variable", None), "offset", None),
+        [
+            (
+                getattr(getattr(arg, "variable", None), "offset", None),
+                getattr(arg, "name", None),
+                getattr(getattr(arg, "variable", None), "name", None),
+            )
+            for arg in (getattr(cfunc, "arg_list", ()) or ())
+        ],
+    )
+
+
 def _regenerate_text_safely(codegen: StructuredAstValue, *, context: str) -> bool:
     logger = logging.getLogger(__name__)
     cfunc = getattr(codegen, "cfunc", None)
     func_addr = getattr(cfunc, "addr", None) if cfunc is not None else None
-    debug_return_branch = os.environ.get("INERTIA_DEBUG_RETURN_BRANCH")
-
-    def _debug_first_condition(label: str) -> None:
-        if not debug_return_branch:
-            return
-        project = getattr(codegen, "project", None)
-        root = getattr(cfunc, "statements", None) if cfunc is not None else None
-        first_stmt = next(iter(getattr(root, "statements", ()) or ()), None)
-        first_cond = None
-        if isinstance(first_stmt, CIfElse):
-            cond_nodes = first_stmt.condition_and_nodes or ()
-            if cond_nodes:
-                first_cond = cond_nodes[0][0]
-        if first_cond is None or project is None:
-            return
-        logger.warning(
-            "[cfg-selector-return] regen %s cond_fp=%r lhs_offset=%r rhs_offset=%r args=%r",
-            label,
-            _expr_fingerprint(first_cond, project),
-            getattr(getattr(getattr(first_cond, "lhs", None), "variable", None), "offset", None),
-            getattr(getattr(getattr(first_cond, "rhs", None), "variable", None), "offset", None),
-            [
-                (
-                    getattr(getattr(arg, "variable", None), "offset", None),
-                    getattr(arg, "name", None),
-                    getattr(getattr(arg, "variable", None), "name", None),
-                )
-                for arg in (getattr(cfunc, "arg_list", ()) or ())
-            ],
-        )
-
     if getattr(codegen, "_inertia_postprocess_regeneration_disabled", False):
         codegen._inertia_regeneration_failed = True
         codegen._inertia_regeneration_error = "suppressed by earlier recursion guard"
@@ -11234,18 +12114,18 @@ def _regenerate_text_safely(codegen: StructuredAstValue, *, context: str) -> boo
                 repair_cfunctioncall_render_targets_8616(codegen)
             with span("x86_16.postprocess.regenerate.normalize_stack_identifiers", function=func_addr):
                 _normalize_stack_variable_identifiers_8616(codegen)
-            _debug_first_condition("after-normalize-stack-identifiers")
+            _debug_first_condition_8616(codegen, cfunc, "after-normalize-stack-identifiers")
             with span("x86_16.postprocess.regenerate.replay_stack_aggregates", function=func_addr):
                 reapply_stack_aggregate_object_facts_8616(codegen)
             with span("x86_16.postprocess.regenerate.replay_stack_coordinate_names", function=func_addr):
                 reapply_stack_variable_projection_names_8616(codegen)
             with span("x86_16.postprocess.regenerate.bind_types", function=func_addr):
                 _bind_codegen_variable_types_to_arch_8616(codegen)
-            _debug_first_condition("after-bind-types")
+            _debug_first_condition_8616(codegen, cfunc, "after-bind-types")
             if cfunc is not None:
                 with span("x86_16.postprocess.regenerate.render_text", function=func_addr):
                     rendered = codegen.render_text(cfunc)
-                _debug_first_condition("after-render-text")
+                _debug_first_condition_8616(codegen, cfunc, "after-render-text")
                 if isinstance(rendered, tuple):
                     rendered = rendered[0] if rendered and isinstance(rendered[0], str) else ""
                 if isinstance(rendered, str) and rendered.strip():
@@ -11310,46 +12190,72 @@ def _dump_postprocess_trace_text_8616(
             fp.write(getattr(codegen, "text", "") or "")
 
 
-def _repair_missing_cnode_codegen_metadata_8616(root: StructuredAstValue, codegen: StructuredAstValue) -> int:
-    """Repair rendering metadata only; Types/Lowering owns declarations."""
-    repaired = 0
-    seen: set[int] = set()
+@dataclass
+class _CNodeMetadataRepair8616:
+    """Walker that backfills missing C-node codegen rendering metadata."""
 
-    def _walk(node: StructuredAstValue) -> None:
-        nonlocal repaired
+    codegen: StructuredAstValue
+    repaired: int = 0
+    seen: set[int] = field(default_factory=set)
+
+    def run(self, root: StructuredAstValue) -> int:
+        self._walk(root)
+        return self.repaired
+
+    def _walk(self, node: StructuredAstValue) -> None:
         if node is None or isinstance(node, (str, bytes, int, float, bool)):
             return
         if isinstance(node, dict):
             for key, value in tuple(node.items()):
-                _walk(key)
-                _walk(value)
+                self._walk(key)
+                self._walk(value)
             return
         if isinstance(node, (list, tuple, set, frozenset)):
             for item in tuple(node):
-                _walk(item)
+                self._walk(item)
             return
 
         node_id = id(node)
-        if node_id in seen:
+        if node_id in self.seen:
             return
-        seen.add(node_id)
+        self.seen.add(node_id)
 
         if hasattr(node, "codegen") and getattr(node, "codegen", None) is None:
             with contextlib.suppress(Exception):
-                node.codegen = codegen
-                repaired += 1
+                node.codegen = self.codegen
+                self.repaired += 1
 
         for attr in _C_AST_CHILD_ATTRS_8616:
             if hasattr(node, attr):
                 with contextlib.suppress(Exception):
-                    _walk(getattr(node, attr))
+                    self._walk(getattr(node, attr))
 
-    _walk(root)
+
+def _repair_missing_cnode_codegen_metadata_8616(root: StructuredAstValue, codegen: StructuredAstValue) -> int:
+    """Repair rendering metadata only; Types/Lowering owns declarations."""
+    repaired = _CNodeMetadataRepair8616(codegen).run(root)
     if repaired:
         codegen._inertia_codegen_metadata_repaired = (
             int(getattr(codegen, "_inertia_codegen_metadata_repaired", 0) or 0) + repaired
         )
     return repaired
+
+
+def _terminal_ax_returns_delta_ok_8616(
+    codegen: StructuredAstValue, delta: dict, expected_returns: StructuredAstValue
+) -> bool:
+    """Return whether the returns delta only adds evidenced terminal AX returns."""
+    returns_delta = delta.get("returns")
+    if not isinstance(returns_delta, dict):
+        return False
+    added_returns = _boundary_set_8616(returns_delta.get("added") or ())
+    removed_returns = _boundary_set_8616(returns_delta.get("removed") or ())
+    if not added_returns or added_returns - expected_returns:
+        return False
+    replaced_returns = _boundary_set_8616(
+        getattr(codegen, "_inertia_missing_terminal_ax_return_replaced_fingerprints_8616", ()) or ()
+    )
+    return not (removed_returns - ({"none", "const:0"} | replaced_returns))
 
 
 def _is_missing_terminal_ax_return_delta_8616(
@@ -11370,17 +12276,7 @@ def _is_missing_terminal_ax_return_delta_8616(
     touched_fields = _validation_delta_touched_fields_8616(delta)
     if not touched_fields or touched_fields - {"returns", "control_flow_effects"} or "returns" not in touched_fields:
         return False
-    returns_delta = delta.get("returns")
-    if not isinstance(returns_delta, dict):
-        return False
-    added_returns = _boundary_set_8616(returns_delta.get("added") or ())
-    removed_returns = _boundary_set_8616(returns_delta.get("removed") or ())
-    if not added_returns or added_returns - expected_returns:
-        return False
-    replaced_returns = _boundary_set_8616(
-        getattr(codegen, "_inertia_missing_terminal_ax_return_replaced_fingerprints_8616", ()) or ()
-    )
-    if removed_returns - ({"none", "const:0"} | replaced_returns):
+    if not _terminal_ax_returns_delta_ok_8616(codegen, delta, expected_returns):
         return False
     control_delta = delta.get("control_flow_effects")
     if isinstance(control_delta, dict):
@@ -11389,6 +12285,50 @@ def _is_missing_terminal_ax_return_delta_8616(
         if added_control - {"return"} or removed_control:
             return False
     return True
+
+
+def _surplus_empty_guard_census_8616(codegen: StructuredAstValue) -> tuple[int, int, int] | None:
+    """Return (pruned, branch_count, total_if_count) for a proven surplus cleanup, or None."""
+    artifact = getattr(codegen, "_inertia_surplus_empty_guard_cleanup_artifact_8616", None)
+    if isinstance(artifact, SurplusGuardCleanupEvidence8616):
+        if not artifact.complete:
+            return None
+        pruned = artifact.stats.materialized_count
+        noop_pruned = artifact.noop_materialized_count
+        empty_return_pruned = artifact.empty_return_materialized_count
+        identical_arms_collapsed = artifact.identical_arms_materialized_count
+        branch_count: object = artifact.branch_count
+        total_if_count: object = artifact.total_if_count
+    else:
+        if (
+            getattr(codegen, "_inertia_void_empty_return_guard_decision_8616", None)
+            != _VoidEmptyReturnGuardDecision8616.PRUNE.value
+        ):
+            return None
+        pruned = int(getattr(codegen, "_inertia_void_empty_return_guard_pruned_8616", 0) or 0)
+        noop_pruned = int(getattr(codegen, "_inertia_void_empty_return_guard_noop_pruned_8616", 0) or 0)
+        empty_return_pruned = int(
+            getattr(codegen, "_inertia_void_empty_return_guard_empty_return_pruned_8616", 0) or 0
+        )
+        identical_arms_collapsed = int(
+            getattr(codegen, "_inertia_void_empty_return_guard_identical_arms_collapsed_8616", 0) or 0
+        )
+        branch_count = getattr(codegen, "_inertia_void_empty_return_guard_branch_count_8616", None)
+        total_if_count = getattr(codegen, "_inertia_void_empty_return_guard_total_ifs_8616", None)
+    counts_ok = (
+        pruned > 0
+        and noop_pruned == pruned
+        and empty_return_pruned == 0
+        and identical_arms_collapsed == 0
+    )
+    census_ok = (
+        isinstance(branch_count, int)
+        and isinstance(total_if_count, int)
+        and total_if_count - branch_count >= pruned
+    )
+    if not (counts_ok and census_ok):
+        return None
+    return pruned, branch_count, total_if_count
 
 
 def _is_proven_surplus_empty_guard_cleanup_delta_8616(
@@ -11403,42 +12343,10 @@ def _is_proven_surplus_empty_guard_cleanup_delta_8616(
     """
     if not isinstance(validation, dict):
         return False
-    artifact = getattr(codegen, "_inertia_surplus_empty_guard_cleanup_artifact_8616", None)
-    if isinstance(artifact, SurplusGuardCleanupEvidence8616):
-        if not artifact.complete:
-            return False
-        pruned = artifact.stats.materialized_count
-        noop_pruned = artifact.noop_materialized_count
-        empty_return_pruned = artifact.empty_return_materialized_count
-        identical_arms_collapsed = artifact.identical_arms_materialized_count
-        branch_count: object = artifact.branch_count
-        total_if_count: object = artifact.total_if_count
-    else:
-        if (
-            getattr(codegen, "_inertia_void_empty_return_guard_decision_8616", None)
-            != _VoidEmptyReturnGuardDecision8616.PRUNE.value
-        ):
-            return False
-        pruned = int(getattr(codegen, "_inertia_void_empty_return_guard_pruned_8616", 0) or 0)
-        noop_pruned = int(getattr(codegen, "_inertia_void_empty_return_guard_noop_pruned_8616", 0) or 0)
-        empty_return_pruned = int(
-            getattr(codegen, "_inertia_void_empty_return_guard_empty_return_pruned_8616", 0) or 0
-        )
-        identical_arms_collapsed = int(
-            getattr(codegen, "_inertia_void_empty_return_guard_identical_arms_collapsed_8616", 0) or 0
-        )
-        branch_count = getattr(codegen, "_inertia_void_empty_return_guard_branch_count_8616", None)
-        total_if_count = getattr(codegen, "_inertia_void_empty_return_guard_total_ifs_8616", None)
-    if (
-        pruned <= 0
-        or noop_pruned != pruned
-        or empty_return_pruned != 0
-        or identical_arms_collapsed != 0
-        or not isinstance(branch_count, int)
-        or not isinstance(total_if_count, int)
-        or total_if_count - branch_count < pruned
-    ):
+    census = _surplus_empty_guard_census_8616(codegen)
+    if census is None:
         return False
+    pruned, _branch_count, _total_if_count = census
 
     delta = validation.get("delta")
     if not isinstance(delta, dict):
@@ -11501,6 +12409,28 @@ def _is_default_scalar_void_return_classification_delta_8616(
     return True
 
 
+def _write_delta_adds_only_8616(write_delta: dict, added_token_ok: StructuredAstValue) -> bool:
+    """Return True when a write delta removes nothing and all added tokens satisfy the predicate."""
+    removed = _boundary_tuple_8616(write_delta.get("removed") or ())
+    added = _boundary_tuple_8616(write_delta.get("added") or ())
+    if removed:
+        return False
+    return not any(not added_token_ok(token) for token in added)
+
+
+def _returns_delta_is_unobserved_synthetic_8616(returns_delta: StructuredAstValue) -> bool:
+    """Return True when removed returns are all call reads and added ones are synthetic."""
+    if not isinstance(returns_delta, dict):
+        return False
+    added_returns = _boundary_tuple_8616(returns_delta.get("added") or ())
+    removed_returns = _boundary_tuple_8616(returns_delta.get("removed") or ())
+    if not added_returns or not removed_returns:
+        return False
+    if not all(isinstance(token, str) and token.startswith("call:") for token in removed_returns):
+        return False
+    return all(_is_unresolved_synthetic_return_delta_token_8616(token) for token in added_returns)
+
+
 def _is_unobserved_default_scalar_synthetic_return_delta_8616(
     function: StructuredAstValue,
     validation: dict[str, StructuredAstValue],
@@ -11520,37 +12450,18 @@ def _is_unobserved_default_scalar_synthetic_return_delta_8616(
     touched_fields = _validation_delta_touched_fields_8616(delta)
     if touched_fields - {"returns", "stack_writes", "segmented_writes"} or "returns" not in touched_fields:
         return False
-    returns_delta = delta.get("returns")
-    if not isinstance(returns_delta, dict):
-        return False
-    added_returns = _boundary_tuple_8616(returns_delta.get("added") or ())
-    removed_returns = _boundary_tuple_8616(returns_delta.get("removed") or ())
-    if not added_returns or not removed_returns:
-        return False
-    if not all(isinstance(token, str) and token.startswith("call:") for token in removed_returns):
-        return False
-    if not all(_is_unresolved_synthetic_return_delta_token_8616(token) for token in added_returns):
+    if not _returns_delta_is_unobserved_synthetic_8616(delta.get("returns")):
         return False
     stack_delta = delta.get("stack_writes")
-    if isinstance(stack_delta, dict):
-        removed_stack = _boundary_tuple_8616(stack_delta.get("removed") or ())
-        added_stack = _boundary_tuple_8616(stack_delta.get("added") or ())
-        if removed_stack:
-            return False
-        if any(not isinstance(token, str) or not token.startswith("stack_slot:SS:") for token in added_stack):
-            return False
+    if isinstance(stack_delta, dict) and not _write_delta_adds_only_8616(
+        stack_delta, lambda token: isinstance(token, str) and token.startswith("stack_slot:SS:")
+    ):
+        return False
     segmented_delta = delta.get("segmented_writes")
-    if isinstance(segmented_delta, dict):
-        removed_segmented = _boundary_tuple_8616(segmented_delta.get("removed") or ())
-        added_segmented = _boundary_tuple_8616(segmented_delta.get("added") or ())
-        if removed_segmented:
-            return False
-        if any(
-            not isinstance(token, str) or "reg:ss" not in token or "stack_slot:SS:" not in token
-            for token in added_segmented
-        ):
-            return False
-    return True
+    return not isinstance(segmented_delta, dict) or _write_delta_adds_only_8616(
+        segmented_delta,
+        lambda token: isinstance(token, str) and "reg:ss" in token and "stack_slot:SS:" in token,
+    )
 
 
 def _is_exposed_nonvoid_stack_arg_scalar_return_delta_8616(
@@ -11621,6 +12532,68 @@ def _is_unresolved_synthetic_return_delta_token_8616(token: StructuredAstValue) 
     return any(marker in token for marker in synthetic_markers)
 
 
+def _callsite_expected_target_tokens_8616(project: StructuredAstValue, function: StructuredAstValue) -> set[str]:
+    """Build the normalized helper-target token set justified by direct callsite evidence."""
+    expected_targets: set[str] = set()
+    callsites = _boundary_tuple_8616(sorted(getattr(function, "get_call_sites", list)() or ()))
+    for callsite_addr in callsites:
+        target = getattr(function, "get_call_target", lambda _addr: None)(callsite_addr)
+        if isinstance(target, int):
+            addr_fp = f"addr:{target:#x}"
+            expected_targets.add(addr_fp)
+            expected_targets.add(f"name:{addr_fp}")
+            if target > 0xFFFF:
+                unbased = target & 0xFFFF
+                unbased_fp = f"addr:{unbased:#x}"
+                expected_targets.add(unbased_fp)
+                expected_targets.add(f"name:{unbased_fp}")
+            elif target >= 0x1000:
+                # rebased exact-slice call targets may appear normalized to low 16-bit addresses.
+                unbased = target - 0x1000
+                if unbased >= 0:
+                    unbased_fp = f"addr:{unbased:#x}"
+                    expected_targets.add(unbased_fp)
+                    expected_targets.add(f"name:{unbased_fp}")
+            callee = project.kb.functions.function(addr=target, create=False)
+            callee_name = getattr(callee, "name", None)
+            if isinstance(callee_name, str) and callee_name:
+                expected_targets.add(f"name:{callee_name}")
+                normalized = normalize_callee_name_8616(callee_name)
+                if isinstance(normalized, str) and normalized:
+                    expected_targets.add(f"name:{normalized}")
+                    expected_targets.add(f"name:_{normalized}")
+    return expected_targets
+
+
+def _accept_callsite_helper_delta_8616(
+    project: StructuredAstValue,
+    function: StructuredAstValue,
+    added: tuple,
+    removed: tuple,
+) -> bool:
+    """Accept helper-call deltas justified by direct callsite evidence."""
+    expected_targets = _callsite_expected_target_tokens_8616(project, function)
+    # Accept helper-call deltas when every added helper target can be justified
+    # by direct callsite evidence after normalization.
+    if not expected_targets:
+        expected_targets = set()
+    if not expected_targets:
+        _debug_call_recover_reject_8616("no-expected-targets")
+        return False
+    delta_targets = set(added or removed)
+    if delta_targets and all(isinstance(tok, str) and tok.startswith("name:addr:0x") for tok in delta_targets):
+        _debug_call_recover_accept_8616("addr-only-helper-tokens", delta_targets=sorted(delta_targets))
+        return True
+    accepted = delta_targets.issubset(expected_targets)
+    _debug_call_recover_accept_8616(
+        str(accepted),
+        delta_targets=sorted(delta_targets),
+        expected_targets_sample=sorted(expected_targets)[:12],
+    )
+    return accepted
+
+
+
 def _is_direct_callsite_helper_delta_only_8616(
     project: StructuredAstValue, function: StructuredAstValue, validation: dict[str, StructuredAstValue]
 ) -> bool:
@@ -11642,52 +12615,7 @@ def _is_direct_callsite_helper_delta_only_8616(
             return False
         if added or removed:
             return True
-        expected_targets: set[str] = set()
-        callsites = _boundary_tuple_8616(sorted(getattr(function, "get_call_sites", list)() or ()))
-        for callsite_addr in callsites:
-            target = getattr(function, "get_call_target", lambda _addr: None)(callsite_addr)
-            if isinstance(target, int):
-                addr_fp = f"addr:{target:#x}"
-                expected_targets.add(addr_fp)
-                expected_targets.add(f"name:{addr_fp}")
-                if target > 0xFFFF:
-                    unbased = target & 0xFFFF
-                    unbased_fp = f"addr:{unbased:#x}"
-                    expected_targets.add(unbased_fp)
-                    expected_targets.add(f"name:{unbased_fp}")
-                elif target >= 0x1000:
-                    # rebased exact-slice call targets may appear normalized to low 16-bit addresses.
-                    unbased = target - 0x1000
-                    if unbased >= 0:
-                        unbased_fp = f"addr:{unbased:#x}"
-                        expected_targets.add(unbased_fp)
-                        expected_targets.add(f"name:{unbased_fp}")
-                callee = project.kb.functions.function(addr=target, create=False)
-                callee_name = getattr(callee, "name", None)
-                if isinstance(callee_name, str) and callee_name:
-                    expected_targets.add(f"name:{callee_name}")
-                    normalized = normalize_callee_name_8616(callee_name)
-                    if isinstance(normalized, str) and normalized:
-                        expected_targets.add(f"name:{normalized}")
-                        expected_targets.add(f"name:_{normalized}")
-        # Accept helper-call deltas when every added helper target can be justified
-        # by direct callsite evidence after normalization.
-        if not expected_targets:
-            expected_targets = set()
-        if not expected_targets:
-            _debug_call_recover_reject_8616("no-expected-targets")
-            return False
-        delta_targets = set(added or removed)
-        if delta_targets and all(isinstance(tok, str) and tok.startswith("name:addr:0x") for tok in delta_targets):
-            _debug_call_recover_accept_8616("addr-only-helper-tokens", delta_targets=sorted(delta_targets))
-            return True
-        accepted = delta_targets.issubset(expected_targets)
-        _debug_call_recover_accept_8616(
-            str(accepted),
-            delta_targets=sorted(delta_targets),
-            expected_targets_sample=sorted(expected_targets)[:12],
-        )
-        return accepted
+        return _accept_callsite_helper_delta_8616(project, function, added, removed)
 
     return _impl()
 
@@ -11875,6 +12803,49 @@ def _is_virtual_carrier_segmented_write_delta_token_8616(token: StructuredAstVal
     return not any(marker in token for marker in ("reg:", "stack_slot:", "global:", "call:"))
 
 
+def _jcc_rebinding_condition_tokens_8616(condition_delta: StructuredAstValue) -> tuple | None:
+    """Return (added, removed) condition tokens when the delta has the rebinding shape."""
+    if not isinstance(condition_delta, dict):
+        return None
+    added_conditions = _boundary_tuple_8616(condition_delta.get("added") or ())
+    removed_conditions = _boundary_tuple_8616(condition_delta.get("removed") or ())
+    if not added_conditions or not removed_conditions:
+        return None
+    if not any(isinstance(item, str) and "reg:ax" in item for item in removed_conditions):
+        return None
+    if any(isinstance(item, str) and "reg:ax" in item for item in added_conditions):
+        return None
+    if any(
+        not isinstance(item, str) or ("virtual:vvar_" not in item and not item.startswith("Cmp"))
+        for item in added_conditions
+    ):
+        return None
+    return added_conditions, removed_conditions
+
+
+def _jcc_rebinding_control_delta_ok_8616(
+    control_delta: dict, added_conditions: tuple, removed_conditions: tuple
+) -> bool:
+    """Return True when control-flow deltas are only the rebound if-effects."""
+    added_control = _boundary_tuple_8616(control_delta.get("added") or ())
+    removed_control = _boundary_tuple_8616(control_delta.get("removed") or ())
+    expected_added = {f"if:{item}" for item in added_conditions}
+    expected_removed = {f"if:{item}" for item in removed_conditions}
+    if set(added_control) - expected_added:
+        return False
+    return not (set(removed_control) - expected_removed)
+
+
+def _segmented_delta_all_virtual_carriers_8616(segmented_delta: dict) -> bool:
+    """Return True when every segmented-write token is a virtual carrier."""
+    segmented_tokens = _boundary_tuple_8616(segmented_delta.get("added") or ()) + _boundary_tuple_8616(
+        segmented_delta.get("removed") or ()
+    )
+    return not segmented_tokens or all(
+        _is_virtual_carrier_segmented_write_delta_token_8616(tok) for tok in segmented_tokens
+    )
+
+
 def _is_jcc_call_return_condition_rebinding_delta_8616(
     codegen: StructuredAstValue, validation: dict[str, StructuredAstValue]
 ) -> bool:
@@ -11890,45 +12861,19 @@ def _is_jcc_call_return_condition_rebinding_delta_8616(
     if not touched_fields or touched_fields - allowed_fields:
         return False
 
-    condition_delta = delta.get("conditions")
-    if not isinstance(condition_delta, dict):
+    condition_tokens = _jcc_rebinding_condition_tokens_8616(delta.get("conditions"))
+    if condition_tokens is None:
         return False
-    added_conditions = _boundary_tuple_8616(condition_delta.get("added") or ())
-    removed_conditions = _boundary_tuple_8616(condition_delta.get("removed") or ())
-    if not added_conditions or not removed_conditions:
-        return False
-    if not any(isinstance(item, str) and "reg:ax" in item for item in removed_conditions):
-        return False
-    if any(isinstance(item, str) and "reg:ax" in item for item in added_conditions):
-        return False
-    if any(
-        not isinstance(item, str) or ("virtual:vvar_" not in item and not item.startswith("Cmp"))
-        for item in added_conditions
+    added_conditions, removed_conditions = condition_tokens
+
+    control_delta = delta.get("control_flow_effects")
+    if isinstance(control_delta, dict) and not _jcc_rebinding_control_delta_ok_8616(
+        control_delta, added_conditions, removed_conditions
     ):
         return False
 
-    control_delta = delta.get("control_flow_effects")
-    if isinstance(control_delta, dict):
-        added_control = _boundary_tuple_8616(control_delta.get("added") or ())
-        removed_control = _boundary_tuple_8616(control_delta.get("removed") or ())
-        expected_added = {f"if:{item}" for item in added_conditions}
-        expected_removed = {f"if:{item}" for item in removed_conditions}
-        if set(added_control) - expected_added:
-            return False
-        if set(removed_control) - expected_removed:
-            return False
-
     segmented_delta = delta.get("segmented_writes")
-    if isinstance(segmented_delta, dict):
-        segmented_tokens = _boundary_tuple_8616(segmented_delta.get("added") or ()) + _boundary_tuple_8616(
-            segmented_delta.get("removed") or ()
-        )
-        if segmented_tokens and not all(
-            _is_virtual_carrier_segmented_write_delta_token_8616(tok) for tok in segmented_tokens
-        ):
-            return False
-
-    return True
+    return not isinstance(segmented_delta, dict) or _segmented_delta_all_virtual_carriers_8616(segmented_delta)
 
 
 def _tail_validation_summary_tokens_8616(
@@ -12221,6 +13166,76 @@ def _control_flow_delta_is_covered_by_direct_global_update_evidence_8616(
     return saw_token and saw_added_evidence
 
 
+def _direct_global_memory_tokens_checked_count_8616(delta: dict, spans: StructuredAstValue) -> int | None:
+    """Return checked token count, or None on a rejected token."""
+    checked = 0
+    for field_name in ("global_writes", "segmented_writes"):
+        field_delta = delta.get(field_name)
+        if not isinstance(field_delta, dict):
+            continue
+        for token in _boundary_tuple_8616(field_delta.get("added") or ()) + _boundary_tuple_8616(
+            field_delta.get("removed") or ()
+        ):
+            if not _global_addr_token_matches_direct_global_evidence_8616(token, spans):
+                return None
+            checked += 1
+    return checked
+
+
+def _direct_global_return_delta_ok_8616(
+    delta: dict, touched_fields: StructuredAstValue, spans: StructuredAstValue
+) -> bool | None:
+    """Return True when checked, False on rejection, None when the field is absent."""
+    return_delta = delta.get("returns")
+    if isinstance(return_delta, dict):
+        for token in _boundary_tuple_8616(return_delta.get("added") or ()) + _boundary_tuple_8616(
+            return_delta.get("removed") or ()
+        ):
+            if not _return_token_matches_direct_global_evidence_8616(token, spans):
+                return False
+        return True
+    if "returns" in touched_fields:
+        return False
+    return None
+
+
+def _direct_global_register_delta_ok_8616(delta: dict, touched_fields: StructuredAstValue) -> bool | None:
+    """Return True when checked, False on rejection, None when the field is absent."""
+    register_delta = delta.get("register_writes")
+    if isinstance(register_delta, dict):
+        added_registers = _boundary_tuple_8616(register_delta.get("added") or ())
+        removed_registers = _boundary_tuple_8616(register_delta.get("removed") or ())
+        if added_registers:
+            return False
+        if any(not isinstance(token, str) or not token.startswith("reg:") for token in removed_registers):
+            return False
+        return None
+    return None
+
+
+def _direct_global_control_delta_ok_8616(
+    delta: dict, touched_fields: StructuredAstValue, spans: StructuredAstValue
+) -> bool | None:
+    """Return True when checked, False on rejection, None when the field is absent."""
+    control_flow_delta = delta.get("control_flow_effects")
+    if isinstance(control_flow_delta, dict):
+        control_tokens = _boundary_tuple_8616(control_flow_delta.get("added") or ()) + _boundary_tuple_8616(
+            control_flow_delta.get("removed") or ()
+        )
+        if any(
+            isinstance(token, str) and _direct_global_update_control_write_locations_include_stack_8616(token)
+            for token in control_tokens
+        ):
+            return False
+        return (
+            _control_flow_delta_matches_direct_global_update_evidence_8616(control_flow_delta, spans)
+            or _control_flow_delta_is_covered_by_direct_global_update_evidence_8616(control_flow_delta, spans)
+        )
+    if "control_flow_effects" in touched_fields:
+        return False
+    return None
+
+
 def _is_direct_global_update_materialization_delta_8616(
     codegen: StructuredAstValue, validation: dict[str, StructuredAstValue]
 ) -> bool:
@@ -12240,59 +13255,21 @@ def _is_direct_global_update_materialization_delta_8616(
     if not touched_fields or touched_fields - allowed_fields:
         return False
 
-    checked_evidence_token = False
-    for field_name in ("global_writes", "segmented_writes"):
-        field_delta = delta.get(field_name)
-        if not isinstance(field_delta, dict):
-            continue
-        for token in _boundary_tuple_8616(field_delta.get("added") or ()) + _boundary_tuple_8616(
-            field_delta.get("removed") or ()
-        ):
-            if not _global_addr_token_matches_direct_global_evidence_8616(token, spans):
-                return False
-            checked_evidence_token = True
-
-    return_delta = delta.get("returns")
-    if isinstance(return_delta, dict):
-        for token in _boundary_tuple_8616(return_delta.get("added") or ()) + _boundary_tuple_8616(
-            return_delta.get("removed") or ()
-        ):
-            if not _return_token_matches_direct_global_evidence_8616(token, spans):
-                return False
-            checked_evidence_token = True
-    elif "returns" in touched_fields:
+    memory_checked = _direct_global_memory_tokens_checked_count_8616(delta, spans)
+    if memory_checked is None:
         return False
+    checked_evidence_token = memory_checked > 0
 
-    register_delta = delta.get("register_writes")
-    if isinstance(register_delta, dict):
-        added_registers = _boundary_tuple_8616(register_delta.get("added") or ())
-        removed_registers = _boundary_tuple_8616(register_delta.get("removed") or ())
-        if added_registers:
+    for field_result in (
+        _direct_global_return_delta_ok_8616(delta, touched_fields, spans),
+        _direct_global_register_delta_ok_8616(delta, touched_fields),
+        _direct_global_control_delta_ok_8616(delta, touched_fields, spans),
+    ):
+        if field_result is False:
             return False
-        if any(not isinstance(token, str) or not token.startswith("reg:") for token in removed_registers):
-            return False
-
-    control_flow_delta = delta.get("control_flow_effects")
-    if isinstance(control_flow_delta, dict):
-        control_tokens = _boundary_tuple_8616(control_flow_delta.get("added") or ()) + _boundary_tuple_8616(
-            control_flow_delta.get("removed") or ()
-        )
-        if any(
-            isinstance(token, str) and _direct_global_update_control_write_locations_include_stack_8616(token)
-            for token in control_tokens
-        ):
-            return False
-        if not (
-            _control_flow_delta_matches_direct_global_update_evidence_8616(control_flow_delta, spans)
-            or _control_flow_delta_is_covered_by_direct_global_update_evidence_8616(control_flow_delta, spans)
-        ):
-            return False
-        checked_evidence_token = True
-    elif "control_flow_effects" in touched_fields:
-        return False
+        checked_evidence_token = checked_evidence_token or bool(field_result)
 
     return checked_evidence_token
-
 
 def _direct_global_update_control_write_locations_include_stack_8616(token: str) -> bool:
     if "-body-writes:" not in token:
@@ -12314,26 +13291,26 @@ def _stack_slot_token_from_disp_8616(disp: int, size: int) -> str:
     return f"stack_slot:SS:BP{sign}0x{abs(int(disp)):x}:size{int(size)}"
 
 
-def _is_global_byte_sum_loop_materialization_delta_8616(
-    codegen: StructuredAstValue, validation: dict[str, StructuredAstValue]
-) -> bool:
-    if not isinstance(validation, dict):
-        return False
+def _global_byte_sum_loop_evidence_tokens_8616(
+    codegen: StructuredAstValue,
+) -> tuple[str, str, int] | None:
+    """Return (index_token, total_token, limit) from byte-sum evidence, or None."""
     stats = getattr(codegen, "_inertia_global_byte_sum_loop_stats_8616", None)
     if not isinstance(stats, dict) or int(stats.get("materialized_count", 0) or 0) <= 0:
-        return False
+        return None
     evidence = getattr(codegen, "_inertia_global_byte_sum_loop_evidence_8616", None)
     if not isinstance(evidence, Mapping):
-        return False
+        return None
     try:
         index_token = _stack_slot_token_from_disp_8616(int(evidence["index_disp"]), 2)
         total_token = _stack_slot_token_from_disp_8616(int(evidence["total_disp"]), 2)
         limit = int(evidence["limit"])
     except (KeyError, TypeError, ValueError):
-        return False
-    delta = validation.get("delta")
-    if not isinstance(delta, dict):
-        return False
+        return None
+    return index_token, total_token, limit
+
+
+def _global_byte_sum_delta_body_ok_8616(delta: dict, index_token: str, total_token: str, limit: int) -> bool:
     touched_fields = _validation_delta_touched_fields_8616(delta)
     if not touched_fields or touched_fields - {"stack_writes", "control_flow_effects"}:
         return False
@@ -12352,6 +13329,20 @@ def _is_global_byte_sum_loop_materialization_delta_8616(
     expected_control = f"for-body-writes:CmpLT({index_token},const:{limit}):{total_token}"
     return _boundary_tuple_8616(control_delta.get("added") or ()) == (expected_control,)
 
+
+def _is_global_byte_sum_loop_materialization_delta_8616(
+    codegen: StructuredAstValue, validation: dict[str, StructuredAstValue]
+) -> bool:
+    if not isinstance(validation, dict):
+        return False
+    evidence_tokens = _global_byte_sum_loop_evidence_tokens_8616(codegen)
+    if evidence_tokens is None:
+        return False
+    index_token, total_token, limit = evidence_tokens
+    delta = validation.get("delta")
+    if not isinstance(delta, dict):
+        return False
+    return _global_byte_sum_delta_body_ok_8616(delta, index_token, total_token, limit)
 
 def _direct_global_symbol_spans_8616(
     project: StructuredAstValue, codegen: StructuredAstValue
@@ -12374,51 +13365,49 @@ def _direct_global_symbol_spans_8616(
     return frozenset(spans)
 
 
-def _is_segmented_global_symbol_materialization_delta_8616(
-    project: StructuredAstValue, codegen: StructuredAstValue, validation: dict[str, StructuredAstValue]
-) -> bool:
-    debug = bool(os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_SALVAGE"))
+def _segmented_global_salvage_debug_refuse_8616(
+    debug: bool, reason: str, **fields: StructuredAstValue
+) -> None:
+    if debug:
+        logging.getLogger(__name__).warning(
+            "[segmented-global-salvage] refused reason=%s fields=%r",
+            reason,
+            fields,
+        )
 
-    def _debug_refuse(reason: str, **fields: StructuredAstValue) -> None:
-        if debug:
-            logging.getLogger(__name__).warning(
-                "[segmented-global-salvage] refused reason=%s fields=%r",
-                reason,
-                fields,
-            )
 
-    if not isinstance(validation, dict):
-        _debug_refuse("validation-not-dict", validation_type=type(validation).__name__)
-        return False
+def _segmented_global_salvage_spans_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue, debug: bool
+) -> StructuredAstValue | None:
+    """Return direct-global-symbol spans for salvage, or None when evidence is absent."""
     stats = getattr(codegen, "_inertia_segmented_global_load_stats_8616", None)
     direct_materialized = int(getattr(stats, "direct_symbol_materialized_count", 0) or 0)
     store_materialized = int(getattr(stats, "direct_symbol_store_materialized_count", 0) or 0)
     if direct_materialized <= 0 and store_materialized <= 0:
-        _debug_refuse(
+        _segmented_global_salvage_debug_refuse_8616(
+            debug,
             "no-direct-symbol-materialization",
             stats_type=type(stats).__name__,
             direct_materialized=direct_materialized,
             store_materialized=store_materialized,
         )
-        return False
+        return None
     spans = _direct_global_symbol_spans_8616(project, codegen)
     if not spans:
-        _debug_refuse(
+        _segmented_global_salvage_debug_refuse_8616(
+            debug,
             "no-spans",
             recorded_spans=getattr(codegen, "_inertia_direct_global_symbol_store_spans_8616", None),
         )
-        return False
-    delta = validation.get("delta")
-    if not isinstance(delta, dict):
-        _debug_refuse("delta-not-dict", delta_type=type(delta).__name__)
-        return False
-    touched_fields = _validation_delta_touched_fields_8616(delta)
-    allowed_fields = {"global_writes", "segmented_writes", "control_flow_effects"}
-    if not touched_fields or touched_fields - allowed_fields:
-        _debug_refuse("unexpected-fields", touched_fields=sorted(touched_fields), spans=sorted(spans))
-        return False
+        return None
+    return spans
 
-    checked_evidence_token = False
+
+def _segmented_global_memory_tokens_evidence_8616(
+    delta: dict, spans: StructuredAstValue, debug: bool
+) -> bool | None:
+    """Return True when evidence tokens were checked, False on refusal, None when absent."""
+    checked = False
     for field_name in ("global_writes", "segmented_writes"):
         field_delta = delta.get(field_name)
         if not isinstance(field_delta, dict):
@@ -12427,24 +13416,60 @@ def _is_segmented_global_symbol_materialization_delta_8616(
             field_delta.get("removed") or ()
         ):
             if not _global_addr_token_matches_direct_global_evidence_8616(token, spans):
-                _debug_refuse("unmatched-memory-token", field=field_name, token=token, spans=sorted(spans))
+                _segmented_global_salvage_debug_refuse_8616(
+                    debug, "unmatched-memory-token", field=field_name, token=token, spans=sorted(spans)
+                )
                 return False
-            checked_evidence_token = True
+            checked = True
+    return checked
+
+
+def _is_segmented_global_symbol_materialization_delta_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue, validation: dict[str, StructuredAstValue]
+) -> bool:
+    debug = bool(os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_SALVAGE"))
+    if not isinstance(validation, dict):
+        _segmented_global_salvage_debug_refuse_8616(
+            debug, "validation-not-dict", validation_type=type(validation).__name__
+        )
+        return False
+    spans = _segmented_global_salvage_spans_8616(project, codegen, debug)
+    if spans is None:
+        return False
+    delta = validation.get("delta")
+    if not isinstance(delta, dict):
+        _segmented_global_salvage_debug_refuse_8616(debug, "delta-not-dict", delta_type=type(delta).__name__)
+        return False
+    touched_fields = _validation_delta_touched_fields_8616(delta)
+    allowed_fields = {"global_writes", "segmented_writes", "control_flow_effects"}
+    if not touched_fields or touched_fields - allowed_fields:
+        _segmented_global_salvage_debug_refuse_8616(
+            debug, "unexpected-fields", touched_fields=sorted(touched_fields), spans=sorted(spans)
+        )
+        return False
+
+    memory_checked = _segmented_global_memory_tokens_evidence_8616(delta, spans, debug)
+    if memory_checked is False:
+        return False
+    checked_evidence_token = bool(memory_checked)
 
     control_flow_delta = delta.get("control_flow_effects")
     if isinstance(control_flow_delta, dict):
         if not _control_flow_delta_matches_direct_global_update_evidence_8616(control_flow_delta, spans):
-            _debug_refuse("control-flow-mismatch", control_flow_delta=control_flow_delta, spans=sorted(spans))
+            _segmented_global_salvage_debug_refuse_8616(
+                debug, "control-flow-mismatch", control_flow_delta=control_flow_delta, spans=sorted(spans)
+            )
             return False
         checked_evidence_token = True
     elif "control_flow_effects" in touched_fields:
-        _debug_refuse("control-flow-not-dict", control_flow_type=type(control_flow_delta).__name__)
+        _segmented_global_salvage_debug_refuse_8616(
+            debug, "control-flow-not-dict", control_flow_type=type(control_flow_delta).__name__
+        )
         return False
 
     if not checked_evidence_token:
-        _debug_refuse("no-evidence-token", spans=sorted(spans))
+        _segmented_global_salvage_debug_refuse_8616(debug, "no-evidence-token", spans=sorted(spans))
     return checked_evidence_token
-
 
 def _direct_stack_update_evidence_offsets_8616(codegen: StructuredAstValue) -> frozenset[int]:
     offsets: set[int] = set()
@@ -12458,6 +13483,174 @@ def _direct_stack_update_evidence_offsets_8616(codegen: StructuredAstValue) -> f
             if key == "offset" and isinstance(value, int):
                 offsets.add(value)
     return frozenset(offsets)
+
+
+def _added_condition_introduces_raw_register_8616(token: StructuredAstValue) -> bool:
+    if not isinstance(token, str):
+        return False
+    condition_token = token
+    for prefix in ("for:", "if:", "ifbreak:", "while:"):
+        if condition_token.startswith(prefix):
+            condition_token = condition_token[len(prefix) :]
+            break
+    raw_register_markers = (
+        "reg:ax",
+        "reg:bx",
+        "reg:cx",
+        "reg:dx",
+        "reg:si",
+        "reg:di",
+        "reg:sp",
+        "reg:bp",
+        "reg:flags",
+        "reg:eflags",
+    )
+    return any(marker in condition_token for marker in raw_register_markers)
+
+
+def _without_evidenced_stack_writes_8616(effect: str, evidence_markers: StructuredAstValue) -> str:
+    """Remove only exact evidenced stack-write items from a validation effect."""
+    canonical = effect
+    for marker in evidence_markers:
+        needle = f"stack_slot:SS:{marker}:"
+        while (start := canonical.find(needle)) >= 0:
+            end = canonical.find(",", start)
+            if end >= 0:
+                canonical = canonical[:start] + canonical[end + 1 :]
+                continue
+            previous_comma = canonical.rfind(",", 0, start)
+            canonical = canonical[:previous_comma] if previous_comma >= 0 else canonical[:start]
+    return canonical
+
+
+def _control_delta_matches_stack_update_evidence_8616(
+    token: StructuredAstValue,
+    evidence_markers: StructuredAstValue,
+    *,
+    paired_added: tuple[StructuredAstValue, ...] = (),
+) -> bool:
+    if not isinstance(token, str):
+        return False
+    if token.startswith(("for-body-writes:", "while-body-writes:", "dowhile-body-writes:")):
+        if any(marker in token for marker in evidence_markers):
+            return True
+        return bool(paired_added) and any(
+            isinstance(added, str)
+            and any(marker in added for marker in evidence_markers)
+            and _without_evidenced_stack_writes_8616(added, evidence_markers)
+            == _without_evidenced_stack_writes_8616(token, evidence_markers)
+            for added in paired_added
+        )
+    if token.startswith("ifbreak:") and paired_added:
+        condition = token[len("ifbreak:") :]
+        loop_prefixes = (
+            f"for-body-writes:{condition}:",
+            f"while-body-writes:{condition}:",
+            f"dowhile-body-writes:{condition}:",
+            f"do-while-body-writes:{condition}:",
+        )
+        return any(
+            isinstance(added, str)
+            and added.startswith(loop_prefixes)
+            and any(marker in added for marker in evidence_markers)
+            for added in paired_added
+        )
+    return False
+
+
+def _stack_offset_condition_delta_8616(
+    delta: dict,
+) -> tuple[tuple[StructuredAstValue, ...], tuple[StructuredAstValue, ...]] | None:
+    """Return (added, removed) condition tokens, or None on a rejected delta."""
+    condition_delta = delta.get("conditions")
+    added_conditions: tuple[StructuredAstValue, ...] = ()
+    removed_conditions: tuple[StructuredAstValue, ...] = ()
+    if isinstance(condition_delta, dict):
+        added_conditions = _boundary_tuple_8616(condition_delta.get("added") or ())
+        removed_conditions = _boundary_tuple_8616(condition_delta.get("removed") or ())
+        if any(
+            not isinstance(item, str) or not item.startswith("Cmp") for item in added_conditions + removed_conditions
+        ):
+            return None
+        added_ops = sorted({item.split("(", 1)[0] for item in added_conditions if isinstance(item, str)})
+        removed_ops = sorted({item.split("(", 1)[0] for item in removed_conditions if isinstance(item, str)})
+        if added_ops != removed_ops:
+            return None
+        if any(_added_condition_introduces_raw_register_8616(item) for item in added_conditions):
+            return None
+    return added_conditions, removed_conditions
+
+
+def _stack_offset_control_delta_ok_8616(
+    delta: dict,
+    added_conditions: tuple[StructuredAstValue, ...],
+    removed_conditions: tuple[StructuredAstValue, ...],
+    evidence_markers: StructuredAstValue,
+) -> bool:
+    control_delta = delta.get("control_flow_effects")
+    if not isinstance(control_delta, dict):
+        return True
+    added_control = _boundary_tuple_8616(control_delta.get("added") or ())
+    removed_control = _boundary_tuple_8616(control_delta.get("removed") or ())
+    expected_added = {f"for:{item}" for item in added_conditions} | {f"if:{item}" for item in added_conditions}
+    expected_removed = {f"for:{item}" for item in removed_conditions} | {
+        f"if:{item}" for item in removed_conditions
+    }
+    unexpected_added = set(added_control) - expected_added
+    unexpected_removed = set(removed_control) - expected_removed
+    if unexpected_added and not all(
+        _control_delta_matches_stack_update_evidence_8616(item, evidence_markers) for item in unexpected_added
+    ):
+        return False
+    if unexpected_removed and not all(
+        _control_delta_matches_stack_update_evidence_8616(
+            item, evidence_markers, paired_added=tuple(unexpected_added)
+        )
+        for item in unexpected_removed
+    ):
+        return False
+    return not any(
+        _added_condition_introduces_raw_register_8616(item)
+        and not any(
+            isinstance(item, str)
+            and isinstance(removed, str)
+            and _without_evidenced_stack_writes_8616(item, evidence_markers)
+            == _without_evidenced_stack_writes_8616(removed, evidence_markers)
+            for removed in removed_control
+        )
+        for item in added_control
+    )
+
+
+def _stack_offset_delta_tokens_8616(delta: dict) -> list[str] | None:
+    """Return all added/removed tokens, or None when a non-string token appears."""
+    tokens: list[str] = []
+    for field_name in ("segmented_writes", "stack_writes", "conditions", "control_flow_effects"):
+        field_delta = delta.get(field_name)
+        if not isinstance(field_delta, dict):
+            continue
+        for item in _boundary_tuple_8616(field_delta.get("added") or ()) + _boundary_tuple_8616(
+            field_delta.get("removed") or ()
+        ):
+            if not isinstance(item, str):
+                return None
+            tokens.append(item)
+    return tokens
+
+
+def _added_indexed_segmented_write_ok_8616(delta: dict) -> bool:
+    segmented_delta = delta.get("segmented_writes")
+    if not isinstance(segmented_delta, dict):
+        return False
+    added = _boundary_tuple_8616(segmented_delta.get("added") or ())
+    removed = _boundary_tuple_8616(segmented_delta.get("removed") or ())
+    return (
+        bool(added)
+        and not removed
+        and all(
+            isinstance(item, str) and item.startswith("deref:") and "CIndexedVariable" in item for item in added
+        )
+    )
 
 
 def _is_stack_offset_materialization_delta_8616(
@@ -12479,139 +13672,18 @@ def _is_stack_offset_materialization_delta_8616(
         return False
     evidence_markers = {_stack_offset_marker_8616(offset) for offset in evidence_offsets}
 
-    def _added_condition_introduces_raw_register_8616(token: StructuredAstValue) -> bool:
-        if not isinstance(token, str):
-            return False
-        condition_token = token
-        for prefix in ("for:", "if:", "ifbreak:", "while:"):
-            if condition_token.startswith(prefix):
-                condition_token = condition_token[len(prefix) :]
-                break
-        raw_register_markers = (
-            "reg:ax",
-            "reg:bx",
-            "reg:cx",
-            "reg:dx",
-            "reg:si",
-            "reg:di",
-            "reg:sp",
-            "reg:bp",
-            "reg:flags",
-            "reg:eflags",
-        )
-        return any(marker in condition_token for marker in raw_register_markers)
-
-    condition_delta = delta.get("conditions")
-    added_conditions: tuple[StructuredAstValue, ...] = ()
-    removed_conditions: tuple[StructuredAstValue, ...] = ()
-    if isinstance(condition_delta, dict):
-        added_conditions = _boundary_tuple_8616(condition_delta.get("added") or ())
-        removed_conditions = _boundary_tuple_8616(condition_delta.get("removed") or ())
-        if any(
-            not isinstance(item, str) or not item.startswith("Cmp") for item in added_conditions + removed_conditions
-        ):
-            return False
-        added_ops = sorted({item.split("(", 1)[0] for item in added_conditions if isinstance(item, str)})
-        removed_ops = sorted({item.split("(", 1)[0] for item in removed_conditions if isinstance(item, str)})
-        if added_ops != removed_ops:
-            return False
-        if any(_added_condition_introduces_raw_register_8616(item) for item in added_conditions):
-            return False
-
-    def _without_evidenced_stack_writes_8616(effect: str) -> str:
-        """Remove only exact evidenced stack-write items from a validation effect."""
-        canonical = effect
-        for marker in evidence_markers:
-            needle = f"stack_slot:SS:{marker}:"
-            while (start := canonical.find(needle)) >= 0:
-                end = canonical.find(",", start)
-                if end >= 0:
-                    canonical = canonical[:start] + canonical[end + 1 :]
-                    continue
-                previous_comma = canonical.rfind(",", 0, start)
-                canonical = canonical[:previous_comma] if previous_comma >= 0 else canonical[:start]
-        return canonical
-
-    def _control_delta_matches_stack_update_evidence_8616(
-        token: StructuredAstValue,
-        *,
-        paired_added: tuple[StructuredAstValue, ...] = (),
-    ) -> bool:
-
-        if not isinstance(token, str):
-            return False
-        if token.startswith(("for-body-writes:", "while-body-writes:", "dowhile-body-writes:")):
-            if any(marker in token for marker in evidence_markers):
-                return True
-            return bool(paired_added) and any(
-                isinstance(added, str)
-                and any(marker in added for marker in evidence_markers)
-                and _without_evidenced_stack_writes_8616(added)
-                == _without_evidenced_stack_writes_8616(token)
-                for added in paired_added
-            )
-        if token.startswith("ifbreak:") and paired_added:
-            condition = token[len("ifbreak:") :]
-            loop_prefixes = (
-                f"for-body-writes:{condition}:",
-                f"while-body-writes:{condition}:",
-                f"dowhile-body-writes:{condition}:",
-                f"do-while-body-writes:{condition}:",
-            )
-            return any(
-                isinstance(added, str)
-                and added.startswith(loop_prefixes)
-                and any(marker in added for marker in evidence_markers)
-                for added in paired_added
-            )
+    conditions = _stack_offset_condition_delta_8616(delta)
+    if conditions is None:
+        return False
+    added_conditions, removed_conditions = conditions
+    if not _stack_offset_control_delta_ok_8616(
+        delta, added_conditions, removed_conditions, evidence_markers
+    ):
         return False
 
-    control_delta = delta.get("control_flow_effects")
-    if isinstance(control_delta, dict):
-        added_control = _boundary_tuple_8616(control_delta.get("added") or ())
-        removed_control = _boundary_tuple_8616(control_delta.get("removed") or ())
-        expected_added = {f"for:{item}" for item in added_conditions} | {f"if:{item}" for item in added_conditions}
-        expected_removed = {f"for:{item}" for item in removed_conditions} | {
-            f"if:{item}" for item in removed_conditions
-        }
-        unexpected_added = set(added_control) - expected_added
-        unexpected_removed = set(removed_control) - expected_removed
-        if unexpected_added and not all(
-            _control_delta_matches_stack_update_evidence_8616(item) for item in unexpected_added
-        ):
-            return False
-        if unexpected_removed and not all(
-            _control_delta_matches_stack_update_evidence_8616(item, paired_added=tuple(unexpected_added))
-            for item in unexpected_removed
-        ):
-            return False
-        if any(
-            _added_condition_introduces_raw_register_8616(item)
-            and not any(
-                isinstance(item, str)
-                and isinstance(removed, str)
-                and _without_evidenced_stack_writes_8616(item)
-                == _without_evidenced_stack_writes_8616(removed)
-                for removed in removed_control
-            )
-            for item in added_control
-        ):
-            return False
-
-    tokens: list[str] = []
-    for field_name in ("segmented_writes", "stack_writes", "conditions", "control_flow_effects"):
-        field_delta = delta.get(field_name)
-        if not isinstance(field_delta, dict):
-            continue
-        for item in _boundary_tuple_8616(field_delta.get("added") or ()) + _boundary_tuple_8616(
-            field_delta.get("removed") or ()
-        ):
-            if not isinstance(item, str):
-                return False
-            tokens.append(item)
+    tokens = _stack_offset_delta_tokens_8616(delta)
     if not tokens:
         return False
-
     if any(marker in token for marker in evidence_markers for token in tokens):
         return True
 
@@ -12619,21 +13691,8 @@ def _is_stack_offset_materialization_delta_8616(
     # stack update fact has been consumed. Keep this limited to direct updates,
     # added segmented-write precision, and consumed direct stack-update evidence.
     if allow_added_indexed_segmented_write and touched_fields == {"segmented_writes"}:
-        segmented_delta = delta.get("segmented_writes")
-        if not isinstance(segmented_delta, dict):
-            return False
-        added = _boundary_tuple_8616(segmented_delta.get("added") or ())
-        removed = _boundary_tuple_8616(segmented_delta.get("removed") or ())
-        return (
-            bool(added)
-            and not removed
-            and all(
-                isinstance(item, str) and item.startswith("deref:") and "CIndexedVariable" in item for item in added
-            )
-        )
-
+        return _added_indexed_segmented_write_ok_8616(delta)
     return False
-
 
 def _is_direct_stack_update_materialization_delta_8616(
     codegen: StructuredAstValue, validation: dict[str, StructuredAstValue]
@@ -12714,51 +13773,18 @@ def _is_direct_stack_and_global_update_materialization_delta_8616(
     if not touched_fields or touched_fields - allowed_fields:
         return False
 
-    stack_validation = _validation_without_delta_fields_8616(
+    if not _stack_move_update_delta_accepted_8616(
         validation,
-        {"global_writes", "register_writes", "returns"},
-    )
-    stack_delta_accepted = _is_stack_offset_materialization_delta_8616(
-        stack_validation,
         _direct_stack_update_evidence_offsets_8616(codegen),
-        allow_added_indexed_segmented_write=True,
-    )
-    if not stack_delta_accepted:
-        stack_validation = _validation_without_delta_fields_8616(
-            validation,
-            {"control_flow_effects", "global_writes", "register_writes", "returns"},
-        )
-        stack_delta_accepted = _is_stack_offset_materialization_delta_8616(
-            stack_validation,
-            _direct_stack_update_evidence_offsets_8616(codegen),
-            allow_added_indexed_segmented_write=True,
-        )
-    if not stack_delta_accepted:
+        allow_indexed=True,
+    ):
         return False
-
-    global_delta = {
-        field_name: field_delta
-        for field_name, field_delta in delta.items()
-        if field_name in {"global_writes", "register_writes", "returns"}
-        and isinstance(field_delta, dict)
-        and ((field_delta.get("added") or ()) or (field_delta.get("removed") or ()))
-    }
-    if not global_delta:
-        return False
-    global_validation = dict(validation)
-    global_validation["delta"] = global_delta
-    if global_materialized:
-        return _is_direct_global_update_materialization_delta_8616(codegen, global_validation)
-    if set(global_delta) != {"global_writes"}:
-        return False
-    field_delta = global_delta.get("global_writes")
-    if not isinstance(field_delta, dict):
-        return False
-    tokens = _boundary_tuple_8616(field_delta.get("added") or ()) + _boundary_tuple_8616(
-        field_delta.get("removed") or ()
-    )
-    return bool(tokens) and all(
-        _global_addr_token_matches_direct_global_evidence_8616(token, global_spans) for token in tokens
+    return _stack_move_global_delta_accepted_8616(
+        codegen,
+        validation,
+        delta,
+        global_materialized,
+        global_spans,
     )
 
 
@@ -12866,6 +13892,69 @@ def _direct_stack_move_immediate_function_pointer_offsets_8616(codegen: Structur
     return frozenset(offsets)
 
 
+def _stack_move_update_delta_accepted_8616(
+    validation: dict,
+    evidence_offsets: StructuredAstValue,
+    allow_indexed: bool = False,
+) -> bool:
+    """Return whether the stack-write portion is an evidenced stack-offset delta."""
+    stack_validation = _validation_without_delta_fields_8616(
+        validation,
+        {"global_writes", "register_writes", "returns"},
+    )
+    if _is_stack_offset_materialization_delta_8616(
+        stack_validation,
+        evidence_offsets,
+        allow_added_indexed_segmented_write=False,
+    ):
+        return True
+    stack_validation = _validation_without_delta_fields_8616(
+        validation,
+        {"control_flow_effects", "global_writes", "register_writes", "returns"},
+    )
+    return bool(
+        _is_stack_offset_materialization_delta_8616(
+            stack_validation,
+            evidence_offsets,
+            allow_added_indexed_segmented_write=allow_indexed,
+        )
+    )
+
+
+def _stack_move_global_delta_accepted_8616(
+    codegen: StructuredAstValue,
+    validation: dict,
+    delta: dict,
+    global_materialized: bool,
+    global_spans: StructuredAstValue,
+) -> bool:
+    """Return whether the global/register/returns residue is evidenced."""
+    global_delta = {
+        field_name: field_delta
+        for field_name, field_delta in delta.items()
+        if field_name in {"global_writes", "register_writes", "returns"}
+        and isinstance(field_delta, dict)
+        and ((field_delta.get("added") or ()) or (field_delta.get("removed") or ()))
+    }
+    if not global_delta:
+        return False
+    global_validation = dict(validation)
+    global_validation["delta"] = global_delta
+    if global_materialized:
+        return _is_direct_global_update_materialization_delta_8616(codegen, global_validation)
+    if set(global_delta) != {"global_writes"}:
+        return False
+    field_delta = global_delta.get("global_writes")
+    if not isinstance(field_delta, dict):
+        return False
+    tokens = _boundary_tuple_8616(field_delta.get("added") or ()) + _boundary_tuple_8616(
+        field_delta.get("removed") or ()
+    )
+    return bool(tokens) and all(
+        _global_addr_token_matches_direct_global_evidence_8616(token, global_spans) for token in tokens
+    )
+
+
 def _is_direct_stack_move_and_global_update_materialization_delta_8616(
     codegen: StructuredAstValue,
     validation: dict[str, StructuredAstValue],
@@ -12900,52 +13989,97 @@ def _is_direct_stack_move_and_global_update_materialization_delta_8616(
     if not validation_stack_write_delta_offsets_are_evidenced_8616(validation, evidence_offsets):
         return False
 
-    stack_validation = _validation_without_delta_fields_8616(
+    if not _stack_move_update_delta_accepted_8616(validation, evidence_offsets):
+        return False
+    return _stack_move_global_delta_accepted_8616(
+        codegen,
         validation,
-        {"global_writes", "register_writes", "returns"},
+        delta,
+        global_materialized,
+        global_spans,
     )
-    stack_delta_accepted = _is_stack_offset_materialization_delta_8616(
-        stack_validation,
-        evidence_offsets,
-        allow_added_indexed_segmented_write=False,
-    )
-    if not stack_delta_accepted:
-        stack_validation = _validation_without_delta_fields_8616(
-            validation,
-            {"control_flow_effects", "global_writes", "register_writes", "returns"},
-        )
-        stack_delta_accepted = _is_stack_offset_materialization_delta_8616(
-            stack_validation,
-            evidence_offsets,
-            allow_added_indexed_segmented_write=False,
-        )
-    if not stack_delta_accepted:
-        return False
 
-    global_delta = {
-        field_name: field_delta
-        for field_name, field_delta in delta.items()
-        if field_name in {"global_writes", "register_writes", "returns"}
-        and isinstance(field_delta, dict)
-        and ((field_delta.get("added") or ()) or (field_delta.get("removed") or ()))
-    }
-    if not global_delta:
-        return False
-    global_validation = dict(validation)
-    global_validation["delta"] = global_delta
-    if global_materialized:
-        return _is_direct_global_update_materialization_delta_8616(codegen, global_validation)
-    if set(global_delta) != {"global_writes"}:
-        return False
-    field_delta = global_delta.get("global_writes")
-    if not isinstance(field_delta, dict):
-        return False
-    tokens = _boundary_tuple_8616(field_delta.get("added") or ()) + _boundary_tuple_8616(
-        field_delta.get("removed") or ()
-    )
-    return bool(tokens) and all(
-        _global_addr_token_matches_direct_global_evidence_8616(token, global_spans) for token in tokens
-    )
+
+def _stack_move_precision_conditions_ok_8616(
+    codegen: StructuredAstValue,
+    delta: dict,
+    touched_fields: set,
+) -> tuple[bool, tuple[str, ...]]:
+    """Return whether removed conditions are Cmp tokens over proven offsets."""
+    if "conditions" not in touched_fields:
+        return True, ()
+    condition_delta = delta.get("conditions")
+    if not isinstance(condition_delta, dict):
+        return False, ()
+    added_conditions = _boundary_tuple_8616(condition_delta.get("added") or ())
+    removed_condition_values = _boundary_tuple_8616(condition_delta.get("removed") or ())
+    if added_conditions or not removed_condition_values:
+        return False, ()
+    evidence_offsets = _direct_stack_move_evidence_offsets_8616(codegen)
+    if not evidence_offsets:
+        return False, ()
+    removed_conditions = tuple(item for item in removed_condition_values if isinstance(item, str))
+    if len(removed_conditions) != len(removed_condition_values):
+        return False, ()
+    if not all(item.startswith("Cmp") for item in removed_conditions):
+        return False, ()
+    if not all(validation_stack_offsets_in_token_8616(item) <= evidence_offsets for item in removed_conditions):
+        return False, ()
+    return True, removed_conditions
+
+
+def _stack_move_precision_globals_ok_8616(
+    delta: dict,
+    global_spans: StructuredAstValue,
+    touched_fields: set,
+) -> tuple[bool, bool]:
+    """Return whether global tokens match direct-global evidence; (ok, checked)."""
+    global_delta = delta.get("global_writes")
+    if isinstance(global_delta, dict):
+        global_tokens = _boundary_tuple_8616(global_delta.get("added") or ()) + _boundary_tuple_8616(
+            global_delta.get("removed") or ()
+        )
+        if not global_tokens:
+            return False, False
+        if not all(
+            _global_addr_token_matches_direct_global_evidence_8616(token, global_spans) for token in global_tokens
+        ):
+            return False, False
+        return True, True
+    if "global_writes" in touched_fields:
+        return False, False
+    return True, False
+
+
+def _stack_move_precision_control_ok_8616(
+    delta: dict,
+    global_spans: StructuredAstValue,
+    touched_fields: set,
+    removed_conditions: tuple[str, ...],
+) -> tuple[bool, bool]:
+    """Return whether control deltas are covered by direct-global evidence."""
+    control_flow_delta = delta.get("control_flow_effects")
+    if isinstance(control_flow_delta, dict):
+        removed_ifbreaks = {f"ifbreak:{condition}" for condition in removed_conditions}
+        removed_control = _boundary_tuple_8616(control_flow_delta.get("removed") or ())
+        if removed_ifbreaks and not removed_ifbreaks <= {item for item in removed_control if isinstance(item, str)}:
+            return False, False
+        global_control_delta = {
+            "added": _boundary_tuple_8616(control_flow_delta.get("added") or ()),
+            "removed": tuple(item for item in removed_control if item not in removed_ifbreaks),
+        }
+        if not (
+            _control_flow_delta_matches_direct_global_update_evidence_8616(global_control_delta, global_spans)
+            or _control_flow_delta_is_covered_by_direct_global_update_evidence_8616(
+                global_control_delta,
+                global_spans,
+            )
+        ):
+            return False, False
+        return True, True
+    if "control_flow_effects" in touched_fields or removed_conditions:
+        return False, False
+    return True, False
 
 
 def _is_direct_stack_move_global_precision_delta_8616(
@@ -12966,62 +14100,22 @@ def _is_direct_stack_move_global_precision_delta_8616(
     touched_fields = _validation_delta_touched_fields_8616(delta)
     if not touched_fields or touched_fields - {"global_writes", "control_flow_effects", "conditions"}:
         return False
-    removed_conditions: tuple[str, ...] = ()
-    if "conditions" in touched_fields:
-        condition_delta = delta.get("conditions")
-        if not isinstance(condition_delta, dict):
-            return False
-        added_conditions = _boundary_tuple_8616(condition_delta.get("added") or ())
-        removed_condition_values = _boundary_tuple_8616(condition_delta.get("removed") or ())
-        if added_conditions or not removed_condition_values:
-            return False
-        evidence_offsets = _direct_stack_move_evidence_offsets_8616(codegen)
-        if not evidence_offsets:
-            return False
-        removed_conditions = tuple(item for item in removed_condition_values if isinstance(item, str))
-        if len(removed_conditions) != len(removed_condition_values):
-            return False
-        if not all(item.startswith("Cmp") for item in removed_conditions):
-            return False
-        if not all(validation_stack_offsets_in_token_8616(item) <= evidence_offsets for item in removed_conditions):
-            return False
-    checked_evidence_token = False
-    global_delta = delta.get("global_writes")
-    if isinstance(global_delta, dict):
-        global_tokens = _boundary_tuple_8616(global_delta.get("added") or ()) + _boundary_tuple_8616(
-            global_delta.get("removed") or ()
-        )
-        if not global_tokens:
-            return False
-        if not all(
-            _global_addr_token_matches_direct_global_evidence_8616(token, global_spans) for token in global_tokens
-        ):
-            return False
-        checked_evidence_token = True
-    elif "global_writes" in touched_fields:
+    conditions_ok, removed_conditions = _stack_move_precision_conditions_ok_8616(
+        codegen, delta, touched_fields
+    )
+    if not conditions_ok:
         return False
-    control_flow_delta = delta.get("control_flow_effects")
-    if isinstance(control_flow_delta, dict):
-        removed_ifbreaks = {f"ifbreak:{condition}" for condition in removed_conditions}
-        removed_control = _boundary_tuple_8616(control_flow_delta.get("removed") or ())
-        if removed_ifbreaks and not removed_ifbreaks <= {item for item in removed_control if isinstance(item, str)}:
-            return False
-        global_control_delta = {
-            "added": _boundary_tuple_8616(control_flow_delta.get("added") or ()),
-            "removed": tuple(item for item in removed_control if item not in removed_ifbreaks),
-        }
-        if not (
-            _control_flow_delta_matches_direct_global_update_evidence_8616(global_control_delta, global_spans)
-            or _control_flow_delta_is_covered_by_direct_global_update_evidence_8616(
-                global_control_delta,
-                global_spans,
-            )
-        ):
-            return False
-        checked_evidence_token = True
-    elif "control_flow_effects" in touched_fields or removed_conditions:
+    globals_ok, checked_global = _stack_move_precision_globals_ok_8616(
+        delta, global_spans, touched_fields
+    )
+    if not globals_ok:
         return False
-    return checked_evidence_token
+    control_ok, checked_control = _stack_move_precision_control_ok_8616(
+        delta, global_spans, touched_fields, removed_conditions
+    )
+    if not control_ok:
+        return False
+    return checked_global or checked_control
 
 
 def _is_conditional_continue_guard_repair_delta_8616(
@@ -13367,6 +14461,23 @@ def _jcc_condition_delta_is_evidenced_8616(
     return _jcc_condition_delta_matches_structuring_evidence_8616(codegen, normalized_delta)
 
 
+def _normalized_delta_token_set_8616(
+    field_delta: StructuredAstValue,
+    key: str,
+    normalize: Callable,
+) -> set[str] | None:
+    """Normalize one added/removed token set, or None on an unparseable token."""
+    result: set[str] = set()
+    if not isinstance(field_delta, dict):
+        return result
+    for token in _boundary_tuple_8616(field_delta.get(key) or ()):
+        normalized = normalize(token)
+        if normalized is None:
+            return None
+        result.add(normalized)
+    return result
+
+
 def _normalized_jcc_condition_delta_sets_8616(
     condition_delta: StructuredAstValue, control_delta: StructuredAstValue
 ) -> (
@@ -13378,33 +14489,26 @@ def _normalized_jcc_condition_delta_sets_8616(
     ]
     | None
 ):
-    added_conditions: set[str] = set()
-    removed_conditions: set[str] = set()
-    if isinstance(condition_delta, dict):
-        for token in _boundary_tuple_8616(condition_delta.get("added") or ()):
-            normalized = _normalize_validation_condition_token_8616(token)
-            if normalized is None:
-                return None
-            added_conditions.add(normalized)
-        for token in _boundary_tuple_8616(condition_delta.get("removed") or ()):
-            normalized = _normalize_validation_condition_token_8616(token)
-            if normalized is None:
-                return None
-            removed_conditions.add(normalized)
-
-    added_control_conditions: set[str] = set()
-    removed_control_conditions: set[str] = set()
-    if isinstance(control_delta, dict):
-        for token in _boundary_tuple_8616(control_delta.get("added") or ()):
-            normalized = _condition_token_from_control_effect_8616(token)
-            if normalized is None:
-                return None
-            added_control_conditions.add(normalized)
-        for token in _boundary_tuple_8616(control_delta.get("removed") or ()):
-            normalized = _condition_token_from_control_effect_8616(token)
-            if normalized is None:
-                return None
-            removed_control_conditions.add(normalized)
+    added_conditions = _normalized_delta_token_set_8616(
+        condition_delta, "added", _normalize_validation_condition_token_8616
+    )
+    if added_conditions is None:
+        return None
+    removed_conditions = _normalized_delta_token_set_8616(
+        condition_delta, "removed", _normalize_validation_condition_token_8616
+    )
+    if removed_conditions is None:
+        return None
+    added_control_conditions = _normalized_delta_token_set_8616(
+        control_delta, "added", _condition_token_from_control_effect_8616
+    )
+    if added_control_conditions is None:
+        return None
+    removed_control_conditions = _normalized_delta_token_set_8616(
+        control_delta, "removed", _condition_token_from_control_effect_8616
+    )
+    if removed_control_conditions is None:
+        return None
     return added_conditions, removed_conditions, added_control_conditions, removed_control_conditions
 
 
@@ -13498,6 +14602,132 @@ def _jcc_condition_delta_is_complement_rewrite_8616(
     return added_conditions == inverted_removed_control
 
 
+def _jcc_condition_field_deltas_ok_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    function: StructuredAstValue,
+    validation: dict,
+    delta: dict,
+) -> bool:
+    """Return whether all non-condition field deltas are proven benign."""
+    return (
+        _jcc_helper_delta_ok_8616(project, codegen, function, delta)
+        and _jcc_register_delta_ok_8616(delta)
+        and _jcc_global_delta_ok_8616(delta, validation)
+        and _jcc_stack_delta_ok_8616(codegen, validation, delta)
+    )
+
+
+def _jcc_materialization_evidence_present_8616(
+    codegen: StructuredAstValue,
+    complement_rewrite: bool,
+) -> bool:
+    """Return whether any JCC condition materialization evidence exists."""
+    return bool(
+        int(getattr(codegen, "_inertia_semantic_condition_materialized_count", 0) or 0) > 0
+        or int(getattr(codegen, "_inertia_structuring_jcc_condition_validation_accepts_8616", 0) or 0) > 0
+        or _boundary_tuple_8616(getattr(codegen, "_inertia_jcc_decoded_condition_fingerprints_8616", ()) or ())
+        or complement_rewrite
+    )
+
+
+def _jcc_body_write_evidence_gate_8616(
+    codegen: StructuredAstValue,
+    control_flow_delta: StructuredAstValue,
+) -> tuple[StructuredAstValue, bool]:
+    """Strip a proven body-write delta; return the reduced delta and verdict."""
+    body_write_delta = _control_flow_body_write_delta_8616(control_flow_delta)
+    if body_write_delta is None:
+        return control_flow_delta, True
+    evidence_offsets = frozenset(
+        set(_direct_stack_move_evidence_offsets_8616(codegen))
+        | set(_direct_stack_update_evidence_offsets_8616(codegen))
+    )
+    body_write_validation = {"delta": {"control_flow_effects": body_write_delta}}
+    if not _is_stack_offset_materialization_delta_8616(
+        body_write_validation,
+        evidence_offsets,
+        allow_added_indexed_segmented_write=True,
+    ):
+        return control_flow_delta, False
+    return _control_flow_without_body_write_delta_8616(control_flow_delta), True
+
+
+def _jcc_helper_delta_ok_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    function: StructuredAstValue,
+    delta: dict,
+) -> bool:
+    """Return whether added/removed helper calls are evidenced."""
+    helper_delta = delta.get("helper_calls")
+    if not isinstance(helper_delta, dict):
+        return True
+    added_helpers = _boundary_tuple_8616(helper_delta.get("added") or ())
+    removed_helpers = _boundary_tuple_8616(helper_delta.get("removed") or ())
+    if removed_helpers and not _jcc_removed_helpers_are_consumed_pretest_carriers_8616(
+        codegen,
+        helper_delta,
+        delta.get("control_flow_effects"),
+    ):
+        return False
+    helper_evidenced = (
+        all(_helper_call_token_is_stack_probe_evidenced_8616(project, codegen, token) for token in added_helpers)
+        if added_helpers
+        else True
+    )
+    if added_helpers and not helper_evidenced:
+        helper_evidenced = _helper_delta_added_targets_are_function_callsite_evidenced_8616(
+            function,
+            helper_delta,
+        )
+    return not added_helpers or helper_evidenced
+
+
+def _jcc_register_delta_ok_8616(delta: dict) -> bool:
+    """Return whether register-write deltas only remove proven removable writes."""
+    register_delta = delta.get("register_writes")
+    if not isinstance(register_delta, dict):
+        return True
+    added_registers = _boundary_tuple_8616(register_delta.get("added") or ())
+    removed_registers = _boundary_tuple_8616(register_delta.get("removed") or ())
+    if added_registers:
+        return False
+    return not removed_registers or set(removed_registers).issubset(
+        _JCC_CONDITION_MATERIALIZATION_REMOVABLE_REG_WRITES_8616
+    )
+
+
+def _jcc_global_delta_ok_8616(delta: dict, validation: dict) -> bool:
+    """Return whether global-write deltas only add adjacent high-byte precision."""
+    global_delta = delta.get("global_writes")
+    if not isinstance(global_delta, dict):
+        return True
+    added_globals = _boundary_tuple_8616(global_delta.get("added") or ())
+    removed_globals = _boundary_tuple_8616(global_delta.get("removed") or ())
+    if removed_globals:
+        return False
+    return not added_globals or all(
+        _is_adjacent_global_high_byte_precision_delta_8616(token, validation) for token in added_globals
+    )
+
+
+def _jcc_stack_delta_ok_8616(
+    codegen: StructuredAstValue,
+    validation: dict,
+    delta: dict,
+) -> bool:
+    """Return whether stack-write deltas are covered by direct stack evidence."""
+    stack_delta = delta.get("stack_writes")
+    if not isinstance(stack_delta, dict):
+        return True
+    evidence_offsets = frozenset(
+        set(_direct_stack_move_evidence_offsets_8616(codegen))
+        | set(_direct_stack_update_evidence_offsets_8616(codegen))
+    )
+    return validation_stack_write_delta_offsets_are_evidenced_8616(validation, evidence_offsets)
+
+
 def _is_jcc_condition_materialization_validation_delta_8616(
     project: StructuredAstValue,
     codegen: StructuredAstValue,
@@ -13519,12 +14749,7 @@ def _is_jcc_condition_materialization_validation_delta_8616(
     complement_rewrite = normalized_delta is not None and _jcc_condition_delta_is_complement_rewrite_8616(
         normalized_delta
     )
-    if (
-        int(getattr(codegen, "_inertia_semantic_condition_materialized_count", 0) or 0) <= 0
-        and int(getattr(codegen, "_inertia_structuring_jcc_condition_validation_accepts_8616", 0) or 0) <= 0
-        and not _boundary_tuple_8616(getattr(codegen, "_inertia_jcc_decoded_condition_fingerprints_8616", ()) or ())
-        and not complement_rewrite
-    ):
+    if not _jcc_materialization_evidence_present_8616(codegen, complement_rewrite):
         return False
     returns_delta = delta.get("returns")
     empty_void_return_removed = False
@@ -13547,23 +14772,12 @@ def _is_jcc_condition_materialization_validation_delta_8616(
     if not touched_fields or touched_fields - allowed_touched_fields:
         return False
 
-    control_delta_for_condition_evidence = control_flow_delta
-    body_write_delta = _control_flow_body_write_delta_8616(control_delta_for_condition_evidence)
-    if body_write_delta is not None:
-        evidence_offsets = frozenset(
-            set(_direct_stack_move_evidence_offsets_8616(codegen))
-            | set(_direct_stack_update_evidence_offsets_8616(codegen))
-        )
-        body_write_validation = {"delta": {"control_flow_effects": body_write_delta}}
-        if not _is_stack_offset_materialization_delta_8616(
-            body_write_validation,
-            evidence_offsets,
-            allow_added_indexed_segmented_write=True,
-        ):
-            return False
-        control_delta_for_condition_evidence = _control_flow_without_body_write_delta_8616(
-            control_delta_for_condition_evidence
-        )
+    control_delta_for_condition_evidence, body_write_ok = _jcc_body_write_evidence_gate_8616(
+        codegen,
+        control_flow_delta,
+    )
+    if not body_write_ok:
+        return False
 
     if not _jcc_condition_delta_is_evidenced_8616(
         codegen,
@@ -13572,61 +14786,7 @@ def _is_jcc_condition_materialization_validation_delta_8616(
     ) and not complement_rewrite:
         return False
 
-    helper_delta = delta.get("helper_calls")
-    if isinstance(helper_delta, dict):
-        added_helpers = _boundary_tuple_8616(helper_delta.get("added") or ())
-        removed_helpers = _boundary_tuple_8616(helper_delta.get("removed") or ())
-        if removed_helpers and not _jcc_removed_helpers_are_consumed_pretest_carriers_8616(
-            codegen,
-            helper_delta,
-            delta.get("control_flow_effects"),
-        ):
-            return False
-        helper_evidenced = (
-            all(_helper_call_token_is_stack_probe_evidenced_8616(project, codegen, token) for token in added_helpers)
-            if added_helpers
-            else True
-        )
-        if added_helpers and not helper_evidenced:
-            helper_evidenced = _helper_delta_added_targets_are_function_callsite_evidenced_8616(
-                function,
-                helper_delta,
-            )
-        if added_helpers and not helper_evidenced:
-            return False
-
-    register_delta = delta.get("register_writes")
-    if isinstance(register_delta, dict):
-        added_registers = _boundary_tuple_8616(register_delta.get("added") or ())
-        removed_registers = _boundary_tuple_8616(register_delta.get("removed") or ())
-        if added_registers:
-            return False
-        if removed_registers and not set(removed_registers).issubset(
-            _JCC_CONDITION_MATERIALIZATION_REMOVABLE_REG_WRITES_8616
-        ):
-            return False
-
-    global_delta = delta.get("global_writes")
-    if isinstance(global_delta, dict):
-        added_globals = _boundary_tuple_8616(global_delta.get("added") or ())
-        removed_globals = _boundary_tuple_8616(global_delta.get("removed") or ())
-        if removed_globals:
-            return False
-        if added_globals and not all(
-            _is_adjacent_global_high_byte_precision_delta_8616(token, validation) for token in added_globals
-        ):
-            return False
-
-    stack_delta = delta.get("stack_writes")
-    if isinstance(stack_delta, dict):
-        evidence_offsets = frozenset(
-            set(_direct_stack_move_evidence_offsets_8616(codegen))
-            | set(_direct_stack_update_evidence_offsets_8616(codegen))
-        )
-        if not validation_stack_write_delta_offsets_are_evidenced_8616(validation, evidence_offsets):
-            return False
-
-    return True
+    return _jcc_condition_field_deltas_ok_8616(project, codegen, function, validation, delta)
 
 
 def _is_combined_jcc_callsite_stack_validation_delta_8616(
@@ -13828,23 +14988,19 @@ def _is_callsite_helper_control_target_delta_8616(
     return True
 
 
-def _is_callsite_stack_argument_materialization_delta_8616(
-    codegen: StructuredAstValue, validation: dict[str, StructuredAstValue]
-) -> bool:
-    """Classify callsite stack-argument deltas using dynamic codegen evidence state."""
+def _debug_callsite_arg_delta_refusal_8616(reason: str, **fields: StructuredAstValue) -> None:
+    """Emit the env-gated refusal diagnostic for callsite stack-arg deltas."""
+    if not os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
+        return
+    logging.getLogger(__name__).warning(
+        "callsite materialization validation delta refused reason=%s fields=%r",
+        reason,
+        fields,
+    )
 
-    def _debug_refusal(reason: str, **fields: StructuredAstValue) -> None:
-        if not os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
-            return
-        logging.getLogger(__name__).warning(
-            "callsite materialization validation delta refused reason=%s fields=%r",
-            reason,
-            fields,
-        )
 
-    if not isinstance(validation, dict):
-        _debug_refusal("validation_not_dict")
-        return False
+def _callsite_arg_materialization_evidence_8616(codegen: StructuredAstValue) -> bool:
+    """Return whether any callsite-argument materialization evidence exists."""
     callsite_stats = getattr(codegen, "_inertia_callsite_materialization_stats", None)
     materialized_args = int(getattr(callsite_stats, "call_arg_materialized_count", 0) or 0)
     if materialized_args <= 0:
@@ -13857,71 +15013,120 @@ def _is_callsite_stack_argument_materialization_delta_8616(
     scalar_high_byte_pruned = int(
         getattr(codegen, "_inertia_callsite_pre_call_scalar_high_byte_remnants_pruned_8616", 0) or 0
     )
-    if materialized_args <= 0 and materialized_fnptr_branches <= 0 and scalar_high_byte_pruned <= 0:
-        _debug_refusal("no_materialization_counter", callsite_stats=repr(callsite_stats))
+    return materialized_args > 0 or materialized_fnptr_branches > 0 or scalar_high_byte_pruned > 0
+
+
+def _callsite_global_writes_delta_ok_8616(
+    codegen: StructuredAstValue,
+    delta: dict,
+    validation: dict,
+) -> bool:
+    """Return whether added global writes are only adjacent high-byte precision."""
+    global_delta = delta.get("global_writes")
+    if not isinstance(global_delta, dict):
+        _debug_callsite_arg_delta_refusal_8616("global_writes_not_dict")
         return False
-    delta = validation.get("delta")
-    if not isinstance(delta, dict):
-        _debug_refusal("delta_not_dict", keys=tuple(validation.keys()))
+    added_globals = _boundary_tuple_8616(global_delta.get("added") or ())
+    removed_globals = _boundary_tuple_8616(global_delta.get("removed") or ())
+    if removed_globals:
+        _debug_callsite_arg_delta_refusal_8616("global_writes_removed", removed=removed_globals[:6])
         return False
-    touched_fields = _validation_delta_touched_fields_8616(delta)
-    if _is_stack_arg_slot_alias_condition_delta_8616(codegen, delta):
-        codegen._inertia_callsite_stack_arg_alias_delta_accepts_8616 = (
-            int(getattr(codegen, "_inertia_callsite_stack_arg_alias_delta_accepts_8616", 0) or 0) + 1
-        )
-        return True
-    if _is_callsite_far_pointer_remnant_prune_delta_8616(codegen, delta):
-        codegen._inertia_callsite_farptr_high_byte_remnant_delta_accepts_8616 = (
-            int(getattr(codegen, "_inertia_callsite_farptr_high_byte_remnant_delta_accepts_8616", 0) or 0) + 1
-        )
-        return True
-    if _is_callsite_resolved_indirect_helper_stack_delta_8616(codegen, delta):
-        return True
-    if _is_callsite_mixed_helper_stack_control_delta_8616(codegen, delta):
-        return True
-    if _is_callsite_helper_control_target_delta_8616(codegen, delta):
-        return True
-    if _is_callsite_consumed_stack_store_prune_delta_8616(codegen, delta):
-        codegen._inertia_callsite_consumed_stack_store_prune_delta_accepts_8616 = (
-            int(getattr(codegen, "_inertia_callsite_consumed_stack_store_prune_delta_accepts_8616", 0) or 0) + 1
-        )
-        return True
-    if touched_fields and touched_fields <= {"global_writes", "segmented_writes"}:
-        global_delta = delta.get("global_writes")
-        if isinstance(global_delta, dict):
-            added_globals = _boundary_tuple_8616(global_delta.get("added") or ())
-            removed_globals = _boundary_tuple_8616(global_delta.get("removed") or ())
-            if removed_globals:
-                _debug_refusal("global_writes_removed", removed=removed_globals[:6])
-                return False
-            if added_globals and not all(
-                _is_adjacent_global_high_byte_precision_delta_8616(token, validation) for token in added_globals
-            ):
-                _debug_refusal("global_writes_not_adjacent_high_byte", added=added_globals[:6])
-                return False
-        for field_name in (
-            "helper_calls",
-            "register_writes",
-            "stack_writes",
-            "returns",
-            "conditions",
-            "control_flow_effects",
+    if added_globals and not all(
+        _is_adjacent_global_high_byte_precision_delta_8616(token, validation) for token in added_globals
+    ):
+        _debug_callsite_arg_delta_refusal_8616("global_writes_not_adjacent_high_byte", added=added_globals[:6])
+        return False
+    return True
+
+
+def _callsite_global_precision_delta_8616(
+    codegen: StructuredAstValue,
+    delta: dict,
+    validation: dict,
+    touched_fields: set,
+) -> bool | None:
+    """Classify global/segmented-only precision deltas; None when not applicable."""
+    if not touched_fields or not touched_fields <= {"global_writes", "segmented_writes"}:
+        return None
+    global_delta = delta.get("global_writes")
+    if isinstance(global_delta, dict) and not _callsite_global_writes_delta_ok_8616(
+        codegen, delta, validation
+    ):
+        return False
+    for field_name in (
+        "helper_calls",
+        "register_writes",
+        "stack_writes",
+        "returns",
+        "conditions",
+        "control_flow_effects",
+    ):
+        field_delta = delta.get(field_name)
+        if not isinstance(field_delta, dict):
+            continue
+        if _boundary_tuple_8616(field_delta.get("added") or ()) or _boundary_tuple_8616(
+            field_delta.get("removed") or ()
         ):
-            field_delta = delta.get(field_name)
-            if not isinstance(field_delta, dict):
-                continue
-            if _boundary_tuple_8616(field_delta.get("added") or ()) or _boundary_tuple_8616(
-                field_delta.get("removed") or ()
-            ):
-                _debug_refusal("non_memory_precision_delta", field=field_name)
-                return False
-        codegen._inertia_callsite_stack_arg_validation_precision_delta_accepts = (
-            int(getattr(codegen, "_inertia_callsite_stack_arg_validation_precision_delta_accepts", 0) or 0) + 1
+            _debug_callsite_arg_delta_refusal_8616("non_memory_precision_delta", field=field_name)
+            return False
+    codegen._inertia_callsite_stack_arg_validation_precision_delta_accepts = (
+        int(getattr(codegen, "_inertia_callsite_stack_arg_validation_precision_delta_accepts", 0) or 0) + 1
+    )
+    return True
+
+
+def _callsite_return_token_pair_ok_8616(
+    codegen: StructuredAstValue,
+    added_token: StructuredAstValue,
+    removed_token: StructuredAstValue,
+) -> bool:
+    """Return whether one added/removed return token pair is a proven rewrite."""
+    added_args = _call_fingerprint_args_text_8616(added_token)
+    removed_args = _call_fingerprint_args_text_8616(removed_token)
+    if not added_args or added_args != removed_args:
+        added_without_stack_arg_sizes = _strip_stack_arg_size_annotations_8616(added_token)
+        removed_without_stack_arg_sizes = _strip_stack_arg_size_annotations_8616(removed_token)
+        if (
+            added_without_stack_arg_sizes is not None
+            and removed_without_stack_arg_sizes is not None
+            and added_without_stack_arg_sizes == removed_without_stack_arg_sizes
+            and _has_direct_push_source_evidence_8616(codegen)
+        ):
+            codegen._inertia_callsite_stack_arg_size_precision_delta_accepts_8616 = (
+                int(getattr(codegen, "_inertia_callsite_stack_arg_size_precision_delta_accepts_8616", 0) or 0) + 1
+            )
+            return True
+        _debug_callsite_arg_delta_refusal_8616("arg_text_mismatch", added=added_token, removed=removed_token)
+        return False
+    if "stack_slot:" not in added_args:
+        _debug_callsite_arg_delta_refusal_8616("no_stack_slot", added=added_token, removed=removed_token)
+        return False
+    if not isinstance(added_token, str) or not isinstance(removed_token, str):
+        _debug_callsite_arg_delta_refusal_8616(
+            "token_not_str",
+            added_type=type(added_token).__name__,
+            removed_type=type(removed_token).__name__,
         )
-        return True
+        return False
+    if not added_token.startswith("call:<indirect>("):
+        _debug_callsite_arg_delta_refusal_8616("added_not_indirect", added=added_token)
+        return False
+    if not removed_token.startswith("call:addr:"):
+        _debug_callsite_arg_delta_refusal_8616("removed_not_addr", removed=removed_token)
+        return False
+    return True
+
+
+def _callsite_return_global_delta_ok_8616(
+    codegen: StructuredAstValue,
+    delta: dict,
+    validation: dict,
+    touched_fields: set,
+) -> bool:
+    """Check the returns/global-writes field gates for callsite arg deltas."""
     if not touched_fields or touched_fields - {"returns", "global_writes"}:
         helper_delta = delta.get("helper_calls")
-        _debug_refusal(
+        _debug_callsite_arg_delta_refusal_8616(
             "touched_fields",
             touched_fields=tuple(sorted(touched_fields)),
             helper_added=_boundary_tuple_8616((helper_delta or {}).get("added") or ())[:8]
@@ -13932,67 +15137,67 @@ def _is_callsite_stack_argument_materialization_delta_8616(
             else (),
         )
         return False
-    if "global_writes" in touched_fields:
-        global_delta = delta.get("global_writes")
-        if not isinstance(global_delta, dict):
-            _debug_refusal("global_writes_not_dict")
-            return False
-        added_globals = _boundary_tuple_8616(global_delta.get("added") or ())
-        removed_globals = _boundary_tuple_8616(global_delta.get("removed") or ())
-        if removed_globals:
-            _debug_refusal("global_writes_removed", removed=removed_globals[:6])
-            return False
-        if added_globals and not all(
-            _is_adjacent_global_high_byte_precision_delta_8616(token, validation) for token in added_globals
-        ):
-            _debug_refusal("global_writes_not_adjacent_high_byte", added=added_globals[:6])
-            return False
+    if "global_writes" in touched_fields and not _callsite_global_writes_delta_ok_8616(
+        codegen, delta, validation
+    ):
+        return False
     if "returns" in touched_fields:
         returns_delta = delta.get("returns")
         if not isinstance(returns_delta, dict):
-            _debug_refusal("returns_not_dict")
+            _debug_callsite_arg_delta_refusal_8616("returns_not_dict")
             return False
         added = _boundary_tuple_8616(returns_delta.get("added") or ())
         removed = _boundary_tuple_8616(returns_delta.get("removed") or ())
         if not added or len(added) != len(removed):
-            _debug_refusal("returns_count", added=added[:6], removed=removed[:6])
+            _debug_callsite_arg_delta_refusal_8616("returns_count", added=added[:6], removed=removed[:6])
             return False
         for added_token, removed_token in zip(added, removed, strict=False):
-            added_args = _call_fingerprint_args_text_8616(added_token)
-            removed_args = _call_fingerprint_args_text_8616(removed_token)
-            if not added_args or added_args != removed_args:
-                added_without_stack_arg_sizes = _strip_stack_arg_size_annotations_8616(added_token)
-                removed_without_stack_arg_sizes = _strip_stack_arg_size_annotations_8616(removed_token)
-                if (
-                    added_without_stack_arg_sizes is not None
-                    and removed_without_stack_arg_sizes is not None
-                    and added_without_stack_arg_sizes == removed_without_stack_arg_sizes
-                    and _has_direct_push_source_evidence_8616(codegen)
-                ):
-                    codegen._inertia_callsite_stack_arg_size_precision_delta_accepts_8616 = (
-                        int(getattr(codegen, "_inertia_callsite_stack_arg_size_precision_delta_accepts_8616", 0) or 0)
-                        + 1
-                    )
-                    continue
-                _debug_refusal("arg_text_mismatch", added=added_token, removed=removed_token)
-                return False
-            if "stack_slot:" not in added_args:
-                _debug_refusal("no_stack_slot", added=added_token, removed=removed_token)
-                return False
-            if not isinstance(added_token, str) or not isinstance(removed_token, str):
-                _debug_refusal(
-                    "token_not_str",
-                    added_type=type(added_token).__name__,
-                    removed_type=type(removed_token).__name__,
-                )
-                return False
-            if not added_token.startswith("call:<indirect>("):
-                _debug_refusal("added_not_indirect", added=added_token)
-                return False
-            if not removed_token.startswith("call:addr:"):
-                _debug_refusal("removed_not_addr", removed=removed_token)
+            if not _callsite_return_token_pair_ok_8616(codegen, added_token, removed_token):
                 return False
     return True
+
+
+def _is_callsite_stack_argument_materialization_delta_8616(
+    codegen: StructuredAstValue, validation: dict[str, StructuredAstValue]
+) -> bool:
+    """Classify callsite stack-argument deltas using dynamic codegen evidence state."""
+
+    if not isinstance(validation, dict):
+        _debug_callsite_arg_delta_refusal_8616("validation_not_dict")
+        return False
+    if not _callsite_arg_materialization_evidence_8616(codegen):
+        _debug_callsite_arg_delta_refusal_8616(
+            "no_materialization_counter",
+            callsite_stats=repr(getattr(codegen, "_inertia_callsite_materialization_stats", None)),
+        )
+        return False
+    delta = validation.get("delta")
+    if not isinstance(delta, dict):
+        _debug_callsite_arg_delta_refusal_8616("delta_not_dict", keys=tuple(validation.keys()))
+        return False
+    touched_fields = _validation_delta_touched_fields_8616(delta)
+    for predicate, counter_attr in (
+        (_is_stack_arg_slot_alias_condition_delta_8616, "_inertia_callsite_stack_arg_alias_delta_accepts_8616"),
+        (
+            _is_callsite_far_pointer_remnant_prune_delta_8616,
+            "_inertia_callsite_farptr_high_byte_remnant_delta_accepts_8616",
+        ),
+        (_is_callsite_resolved_indirect_helper_stack_delta_8616, None),
+        (_is_callsite_mixed_helper_stack_control_delta_8616, None),
+        (_is_callsite_helper_control_target_delta_8616, None),
+        (
+            _is_callsite_consumed_stack_store_prune_delta_8616,
+            "_inertia_callsite_consumed_stack_store_prune_delta_accepts_8616",
+        ),
+    ):
+        if predicate(codegen, delta):
+            if counter_attr is not None:
+                _bump_postprocess_validation_accept_counter_8616(codegen, counter_attr)
+            return True
+    precision_accepted = _callsite_global_precision_delta_8616(codegen, delta, validation, touched_fields)
+    if precision_accepted is not None:
+        return precision_accepted
+    return _callsite_return_global_delta_ok_8616(codegen, delta, validation, touched_fields)
 
 
 def _stack_probe_helper_call_fingerprints_8616(codegen: StructuredAstValue) -> set[str]:
@@ -14057,36 +15262,38 @@ def _removed_helper_tokens_are_source_evidenced_stack_probe_helpers_8616(
     return False
 
 
+def _debug_probe_cleanup_refusal_8616(reason: str, **fields: StructuredAstValue) -> None:
+    """Emit the env-gated refusal diagnostic for stack-probe cleanup deltas."""
+    if not os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
+        return
+    logging.getLogger(__name__).warning(
+        "stack probe helper cleanup validation delta refused reason=%s fields=%r",
+        reason,
+        fields,
+    )
+
+
 def _is_stack_probe_helper_cleanup_delta_8616(
     codegen: StructuredAstValue, validation: dict[str, StructuredAstValue]
 ) -> bool:
-    def _debug_refusal(reason: str, **fields: StructuredAstValue) -> None:
-        if not os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
-            return
-        logging.getLogger(__name__).warning(
-            "stack probe helper cleanup validation delta refused reason=%s fields=%r",
-            reason,
-            fields,
-        )
-
     if not isinstance(validation, dict):
-        _debug_refusal("validation_not_dict")
+        _debug_probe_cleanup_refusal_8616("validation_not_dict")
         return False
     delta = validation.get("delta")
     if not isinstance(delta, dict):
-        _debug_refusal("delta_not_dict")
+        _debug_probe_cleanup_refusal_8616("delta_not_dict")
         return False
     if _validation_delta_touched_fields_8616(delta) != {"helper_calls"}:
-        _debug_refusal("touched_fields", touched=tuple(sorted(_validation_delta_touched_fields_8616(delta))))
+        _debug_probe_cleanup_refusal_8616("touched_fields", touched=tuple(sorted(_validation_delta_touched_fields_8616(delta))))
         return False
     helper_delta = delta.get("helper_calls")
     if not isinstance(helper_delta, dict):
-        _debug_refusal("helper_not_dict")
+        _debug_probe_cleanup_refusal_8616("helper_not_dict")
         return False
     added = _boundary_tuple_8616(helper_delta.get("added") or ())
     removed = _boundary_tuple_8616(helper_delta.get("removed") or ())
     if added or not removed:
-        _debug_refusal("added_or_empty_removed", added=added[:6], removed=removed[:6])
+        _debug_probe_cleanup_refusal_8616("added_or_empty_removed", added=added[:6], removed=removed[:6])
         return False
     expected = _stack_probe_helper_call_fingerprints_8616(codegen)
     if not _has_stack_probe_cleanup_evidence_8616(
@@ -14094,13 +15301,13 @@ def _is_stack_probe_helper_cleanup_delta_8616(
     ) and _removed_helper_tokens_are_named_stack_probe_helpers_8616(codegen, removed):
         return True
     if not _has_stack_probe_cleanup_evidence_8616(codegen):
-        _debug_refusal("no_stack_probe_cleanup_evidence")
+        _debug_probe_cleanup_refusal_8616("no_stack_probe_cleanup_evidence")
         return False
     if not expected:
-        _debug_refusal("no_expected_fingerprints", removed=removed[:6])
+        _debug_probe_cleanup_refusal_8616("no_expected_fingerprints", removed=removed[:6])
         return False
     if not all(isinstance(token, str) and token in expected for token in removed):
-        _debug_refusal("unexpected_removed", expected=tuple(sorted(expected))[:12], removed=removed[:6])
+        _debug_probe_cleanup_refusal_8616("unexpected_removed", expected=tuple(sorted(expected))[:12], removed=removed[:6])
         return False
     return True
 
@@ -14124,6 +15331,102 @@ def _has_stack_probe_cleanup_evidence_8616(codegen: StructuredAstValue) -> bool:
             return True
 
     return False
+
+
+def _return_chain_values_agree_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+) -> tuple[tuple[int, ...], StructuredAstValue] | None:
+    """Return proven conditional/final AX values when CFG and codegen agree."""
+    materialized_values = _boundary_tuple_8616(
+        int(value) for value in getattr(codegen, "_inertia_return_chain_materialized_values_8616", ()) or ()
+    )
+    conditional_values = tuple(int(value) for value in _ordered_conditional_return_values_8616(project, codegen))
+    if conditional_values != materialized_values:
+        cfg_values = tuple(
+            int(value) for _cond, value in _ordered_conditional_return_pairs_from_cfg_8616(project, codegen)
+        )
+        if cfg_values == materialized_values:
+            conditional_values = cfg_values
+    if conditional_values != materialized_values:
+        return None
+    final_value = _last_ax_return_value_8616(project, codegen)
+    if final_value is None or int(getattr(codegen, "_inertia_return_chain_final_value_8616", -1)) != int(final_value):
+        return None
+    return conditional_values, final_value
+
+
+def _return_chain_returns_delta_ok_8616(
+    returns_delta: StructuredAstValue,
+    conditional_values: tuple[int, ...],
+    final_value: StructuredAstValue,
+) -> bool:
+    """Return whether the returns delta only adds/removes proven chain values."""
+    if not isinstance(returns_delta, dict):
+        return False
+    added_returns = _boundary_set_8616(returns_delta.get("added") or ())
+    removed_returns = _boundary_set_8616(returns_delta.get("removed") or ())
+    expected_added = {f"const:{value}" for value in conditional_values}
+    expected_added.add(f"const:{int(final_value)}")
+    if added_returns - expected_added:
+        return False
+    allowed_removed_returns = {"CDirtyExpression", "none"}
+    for value in (*conditional_values, int(final_value)):
+        if int(value) < 0:
+            allowed_removed_returns.add(f"const:{int(value) & 0xFFFF}")
+    return not (removed_returns - allowed_removed_returns)
+
+
+def _return_chain_tail_deltas_ok_8616(
+    codegen: StructuredAstValue,
+    delta: dict,
+) -> bool:
+    """Return whether condition/control/segmented deltas match the chain evidence."""
+    materialized_condition_fps = _boundary_set_8616(
+        getattr(codegen, "_inertia_return_chain_materialized_condition_fingerprints_8616", ()) or ()
+    )
+    return _return_chain_condition_control_deltas_ok_8616(
+        delta,
+        materialized_condition_fps,
+    ) and _return_chain_segmented_delta_ok_8616(codegen, delta)
+
+
+def _return_chain_condition_control_deltas_ok_8616(
+    delta: dict,
+    materialized_condition_fps: set,
+) -> bool:
+    """Return whether conditions/control deltas only touch materialized chain conditions."""
+    condition_delta = delta.get("conditions")
+    if isinstance(condition_delta, dict):
+        added_conditions = _boundary_set_8616(condition_delta.get("added") or ())
+        if not materialized_condition_fps or added_conditions - materialized_condition_fps:
+            return False
+    control_flow_delta = delta.get("control_flow_effects")
+    if isinstance(control_flow_delta, dict):
+        added_control = _boundary_set_8616(control_flow_delta.get("added") or ())
+        expected_added_control = {f"if:{fp}" for fp in materialized_condition_fps}
+        if added_control - expected_added_control:
+            return False
+    return True
+
+
+def _return_chain_segmented_delta_ok_8616(
+    codegen: StructuredAstValue,
+    delta: dict,
+) -> bool:
+    """Return whether the segmented-writes delta is explained by callsite cleanup."""
+    segmented_delta = delta.get("segmented_writes")
+    if not isinstance(segmented_delta, dict):
+        return True
+    if _boundary_tuple_8616(segmented_delta.get("added") or ()):
+        return False
+    removed_segmented = _boundary_tuple_8616(segmented_delta.get("removed") or ())
+    if not removed_segmented:
+        return True
+    callsite_stats = getattr(codegen, "_inertia_callsite_materialization_stats", None)
+    consumed = int(getattr(callsite_stats, "consumed_outgoing_stack_placeholder_count", 0) or 0)
+    arg_materialized = int(getattr(callsite_stats, "call_arg_materialized_count", 0) or 0)
+    return consumed > 0 or arg_materialized > 0 or _has_stack_probe_cleanup_evidence_8616(codegen)
 
 
 def _is_cfg_return_chain_callsite_materialization_delta_8616(
@@ -14159,85 +15462,25 @@ def _is_cfg_return_chain_callsite_materialization_delta_8616(
     if not touched_fields or touched_fields - allowed_fields:
         return False
 
-    materialized_values = _boundary_tuple_8616(
-        int(value) for value in getattr(codegen, "_inertia_return_chain_materialized_values_8616", ()) or ()
-    )
-    conditional_values = tuple(int(value) for value in _ordered_conditional_return_values_8616(project, codegen))
-    if conditional_values != materialized_values:
-        cfg_values = tuple(
-            int(value) for _cond, value in _ordered_conditional_return_pairs_from_cfg_8616(project, codegen)
-        )
-        if cfg_values == materialized_values:
-            conditional_values = cfg_values
-    if conditional_values != materialized_values:
+    agreed = _return_chain_values_agree_8616(project, codegen)
+    if agreed is None:
         return False
-    final_value = _last_ax_return_value_8616(project, codegen)
-    if final_value is None or int(getattr(codegen, "_inertia_return_chain_final_value_8616", -1)) != int(final_value):
-        return False
+    conditional_values, final_value = agreed
 
     returns_delta = delta.get("returns")
-    if not isinstance(returns_delta, dict):
-        return False
-    added_returns = _boundary_set_8616(returns_delta.get("added") or ())
-    removed_returns = _boundary_set_8616(returns_delta.get("removed") or ())
-    expected_added = {f"const:{value}" for value in conditional_values}
-    expected_added.add(f"const:{int(final_value)}")
-    if added_returns - expected_added:
-        return False
-    allowed_removed_returns = {"CDirtyExpression", "none"}
-    for value in (*conditional_values, int(final_value)):
-        if int(value) < 0:
-            allowed_removed_returns.add(f"const:{int(value) & 0xFFFF}")
-    if removed_returns - allowed_removed_returns:
+    if not _return_chain_returns_delta_ok_8616(returns_delta, conditional_values, final_value):
         return False
 
-    condition_delta = delta.get("conditions")
-    materialized_condition_fps = _boundary_set_8616(
-        getattr(codegen, "_inertia_return_chain_materialized_condition_fingerprints_8616", ()) or ()
-    )
-    if isinstance(condition_delta, dict):
-        added_conditions = _boundary_set_8616(condition_delta.get("added") or ())
-        if not materialized_condition_fps or added_conditions - materialized_condition_fps:
-            return False
-
-    control_flow_delta = delta.get("control_flow_effects")
-    if isinstance(control_flow_delta, dict):
-        added_control = _boundary_set_8616(control_flow_delta.get("added") or ())
-        expected_added_control = {f"if:{fp}" for fp in materialized_condition_fps}
-        if added_control - expected_added_control:
-            return False
-
-    segmented_delta = delta.get("segmented_writes")
-    if isinstance(segmented_delta, dict):
-        if _boundary_tuple_8616(segmented_delta.get("added") or ()):
-            return False
-        removed_segmented = _boundary_tuple_8616(segmented_delta.get("removed") or ())
-        if removed_segmented:
-            callsite_stats = getattr(codegen, "_inertia_callsite_materialization_stats", None)
-            consumed = int(getattr(callsite_stats, "consumed_outgoing_stack_placeholder_count", 0) or 0)
-            arg_materialized = int(getattr(callsite_stats, "call_arg_materialized_count", 0) or 0)
-            if consumed <= 0 and arg_materialized <= 0 and not _has_stack_probe_cleanup_evidence_8616(codegen):
-                return False
-
-    return True
+    return _return_chain_tail_deltas_ok_8616(codegen, delta)
 
 
-def _selector_return_expected_raw_stack_slots_8616(
-    project: StructuredAstValue, codegen: StructuredAstValue, expected_returns: set[str]
+def _selector_return_stack_slots_from_arg_list_8616(
+    project: StructuredAstValue,
+    cfunc: StructuredAstValue,
+    expected_returns: set[str],
 ) -> set[str]:
-    """Map expected selector-return arguments back to their raw BP stack slots."""
-    cfunc = getattr(codegen, "cfunc", None)
-    if not expected_returns:
-        return set()
+    """Collect raw stack-slot fingerprints for selector args on the cfunc."""
     raw_slots: set[str] = set()
-    selector_aliases = getattr(codegen, "_inertia_return_selector_raw_stack_slot_aliases_8616", None)
-    if isinstance(selector_aliases, dict):
-        for arg_fingerprint, slots in selector_aliases.items():
-            if not isinstance(arg_fingerprint, str) or not any(arg_fingerprint in item for item in expected_returns):
-                continue
-            raw_slots.update(slot for slot in tuple(slots or ()) if isinstance(slot, str))
-    if cfunc is None:
-        return raw_slots
     for arg in _boundary_tuple_8616(getattr(cfunc, "arg_list", ()) or ()):
         variable = getattr(arg, "variable", None)
         if not isinstance(variable, SimStackVariable) or getattr(variable, "base", None) != "bp":
@@ -14259,6 +15502,49 @@ def _selector_return_expected_raw_stack_slots_8616(
     return raw_slots
 
 
+def _selector_return_expected_raw_stack_slots_8616(
+    project: StructuredAstValue, codegen: StructuredAstValue, expected_returns: set[str]
+) -> set[str]:
+    """Map expected selector-return arguments back to their raw BP stack slots."""
+    cfunc = getattr(codegen, "cfunc", None)
+    if not expected_returns:
+        return set()
+    raw_slots: set[str] = set()
+    selector_aliases = getattr(codegen, "_inertia_return_selector_raw_stack_slot_aliases_8616", None)
+    if isinstance(selector_aliases, dict):
+        for arg_fingerprint, slots in selector_aliases.items():
+            if not isinstance(arg_fingerprint, str) or not any(arg_fingerprint in item for item in expected_returns):
+                continue
+            raw_slots.update(slot for slot in tuple(slots or ()) if isinstance(slot, str))
+    if cfunc is None:
+        return raw_slots
+    raw_slots |= _selector_return_stack_slots_from_arg_list_8616(project, cfunc, expected_returns)
+    return raw_slots
+
+
+def _selector_return_aliases_for_expected_8616(
+    expected: str,
+    raw_slots: set[str],
+) -> set[str]:
+    """Expand one expected selector-return fingerprint into raw-slot aliases."""
+    aliases: set[str] = set()
+    if "stack_arg:" in expected:
+        for raw_slot in raw_slots:
+            for arg_token in tuple(expected.split("stack_arg:"))[1:]:
+                arg_name = arg_token.split(",", 1)[0].split(")", 1)[0]
+                if not arg_name:
+                    continue
+                stack_arg_token = f"stack_arg:{arg_name}"
+                aliases.add(expected.replace(stack_arg_token, raw_slot))
+    if expected.startswith("Shl(") and expected.endswith(",const:1)"):
+        inner = expected[len("Shl(") : -len(",const:1)")]
+        if inner.startswith("stack_arg:"):
+            for raw_slot in raw_slots:
+                aliases.add(f"Mul({raw_slot},const:2)")
+                aliases.add(f"Add({inner},const:-1)")
+    return aliases
+
+
 def _selector_return_expected_raw_return_aliases_8616(
     project: StructuredAstValue, codegen: StructuredAstValue, expected_returns: set[str]
 ) -> set[str]:
@@ -14269,21 +15555,7 @@ def _selector_return_expected_raw_return_aliases_8616(
     for expected in expected_returns:
         if not isinstance(expected, str):
             continue
-        for raw_slot in raw_slots:
-            if "stack_arg:" not in expected:
-                continue
-            for arg_token in tuple(expected.split("stack_arg:"))[1:]:
-                arg_name = arg_token.split(",", 1)[0].split(")", 1)[0]
-                if not arg_name:
-                    continue
-                stack_arg_token = f"stack_arg:{arg_name}"
-                aliases.add(expected.replace(stack_arg_token, raw_slot))
-        if expected.startswith("Shl(") and expected.endswith(",const:1)"):
-            inner = expected[len("Shl(") : -len(",const:1)")]
-            for raw_slot in raw_slots:
-                if inner.startswith("stack_arg:"):
-                    aliases.add(f"Mul({raw_slot},const:2)")
-                    aliases.add(f"Add({inner},const:-1)")
+        aliases |= _selector_return_aliases_for_expected_8616(expected, raw_slots)
     return aliases
 
 
@@ -14306,14 +15578,10 @@ def _selector_return_current_condition_fingerprints_8616(
     return fingerprints
 
 
-def _is_cfg_return_expr_chain_materialization_delta_8616(
-    project: StructuredAstValue,
-    function: StructuredAstValue,
+def _cfg_return_expr_reject_8616(
     codegen: StructuredAstValue,
-    validation: dict[str, StructuredAstValue],
-) -> bool:
-    """Classify CFG selector-return deltas using dynamic codegen evidence state."""
-    _ = function
+) -> Callable[..., bool]:
+    """Return a refusal recorder for CFG selector-return delta classification."""
 
     def _reject(reason: _CfgReturnExprDeltaRefusal8616, **details: StructuredAstValue) -> bool:
         refusals = _boundary_list_8616(getattr(codegen, "_inertia_cfg_return_expr_delta_refusals_8616", ()) or ())
@@ -14327,6 +15595,142 @@ def _is_cfg_return_expr_chain_materialization_delta_8616(
             )
         return False
 
+    return _reject
+
+
+def _check_return_chain_returns_delta_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    returns_delta: dict,
+    expected_returns: set,
+    full_return_chain_materialized: bool,
+) -> bool:
+    """Return whether the returns delta only reflects proven selector returns."""
+    _reject = _cfg_return_expr_reject_8616(codegen)
+    added_returns = (
+        _boundary_set_8616(returns_delta.get("added") or ()) if isinstance(returns_delta, dict) else set()
+    )
+    removed_returns = (
+        _boundary_set_8616(returns_delta.get("removed") or ()) if isinstance(returns_delta, dict) else set()
+    )
+    if not expected_returns or added_returns - expected_returns:
+        return _reject(
+            _CfgReturnExprDeltaRefusal8616.UNEXPECTED_ADDED_RETURNS,
+            added=tuple(sorted(added_returns)),
+            expected=tuple(sorted(expected_returns)),
+        )
+    expected_raw_return_aliases = _selector_return_expected_raw_return_aliases_8616(
+        project, codegen, expected_returns
+    )
+    unexpected_removed = tuple(
+        sorted(
+            item
+            for item in removed_returns
+            if item not in {"CDirtyExpression", "none"}
+            and not (full_return_chain_materialized and item == "reg:ax")
+            and item not in expected_raw_return_aliases
+            and "CDirtyExpression" not in item
+            and not item.startswith(("Concat(", "Or("))
+        )
+    )
+    if unexpected_removed:
+        return _reject(
+            _CfgReturnExprDeltaRefusal8616.UNEXPECTED_REMOVED_RETURNS,
+            removed=unexpected_removed,
+            expected_raw_stack_slots=tuple(sorted(expected_raw_return_aliases)),
+            expected=tuple(sorted(expected_returns)),
+        )
+    return True
+
+
+def _check_full_return_chain_deltas_8616(
+    project: StructuredAstValue,
+    codegen: StructuredAstValue,
+    delta: dict,
+    validation: dict,
+    returns_delta: StructuredAstValue,
+    touched_fields: set,
+    allowed_fields: set,
+    expected_returns: set,
+) -> bool:
+    """Check segmented/condition/control/helper deltas for a full selector return chain."""
+    _reject = _cfg_return_expr_reject_8616(codegen)
+    selector_full_return_chain = bool(expected_returns) and bool(
+        "returns" in touched_fields
+        and isinstance(returns_delta, dict)
+        and expected_returns <= _boundary_set_8616(returns_delta.get("added") or ())
+    )
+    segmented_delta = delta.get("segmented_writes")
+    if isinstance(segmented_delta, dict):
+        added_segmented = _boundary_tuple_8616(
+            str(item) for item in _boundary_tuple_8616(segmented_delta.get("added", ()) or ())
+        )
+        removed_segmented = _boundary_tuple_8616(
+            str(item) for item in _boundary_tuple_8616(segmented_delta.get("removed", ()) or ())
+        )
+        if added_segmented or any(
+            not item.startswith("deref:Add(Mul(reg:ss,const:16),reg:sp,const:-") for item in removed_segmented
+        ):
+            return _reject(
+                _CfgReturnExprDeltaRefusal8616.UNEXPECTED_FIELDS,
+                touched_fields=tuple(sorted(touched_fields)),
+                allowed_fields=tuple(sorted(allowed_fields)),
+                segmented_writes=segmented_delta,
+            )
+    expected_conditions = _boundary_set_8616(
+        getattr(codegen, "_inertia_return_chain_materialized_condition_fingerprints_8616", ()) or ()
+    )
+    expected_conditions |= _selector_return_current_condition_fingerprints_8616(project, codegen)
+    condition_delta = delta.get("conditions")
+    if isinstance(condition_delta, dict):
+        added_conditions = _boundary_set_8616(condition_delta.get("added") or ())
+        if not selector_full_return_chain and (not expected_conditions or added_conditions - expected_conditions):
+            return _reject(
+                _CfgReturnExprDeltaRefusal8616.UNEXPECTED_ADDED_CONDITIONS,
+                added=tuple(sorted(added_conditions)),
+                expected=tuple(sorted(expected_conditions)),
+            )
+    control_delta = delta.get("control_flow_effects")
+    if isinstance(control_delta, dict):
+        added_control = _boundary_set_8616(control_delta.get("added") or ())
+        expected_control = {f"if:{fp}" for fp in expected_conditions}
+        if not selector_full_return_chain and added_control - expected_control:
+            return _reject(
+                _CfgReturnExprDeltaRefusal8616.UNEXPECTED_ADDED_CONTROL,
+                added=tuple(sorted(added_control)),
+                expected=tuple(sorted(expected_control)),
+            )
+    helper_delta = delta.get("helper_calls")
+    if not (
+        isinstance(helper_delta, dict)
+        and ((helper_delta.get("added") or ()) or (helper_delta.get("removed") or ()))
+    ):
+        return True
+    if _boundary_tuple_8616(helper_delta.get("added") or ()):
+        return _reject(
+            _CfgReturnExprDeltaRefusal8616.UNEXPECTED_HELPER_DELTA,
+            helper_delta=helper_delta,
+        )
+    helper_validation = dict(validation)
+    helper_validation["delta"] = {"helper_calls": helper_delta}
+    if not _is_stack_probe_helper_cleanup_delta_8616(codegen, helper_validation):
+        return _reject(
+            _CfgReturnExprDeltaRefusal8616.UNEXPECTED_HELPER_DELTA,
+            helper_delta=helper_delta,
+        )
+    return True
+
+
+def _is_cfg_return_expr_chain_materialization_delta_8616(
+    project: StructuredAstValue,
+    function: StructuredAstValue,
+    codegen: StructuredAstValue,
+    validation: dict[str, StructuredAstValue],
+) -> bool:
+    """Classify CFG selector-return deltas using dynamic codegen evidence state."""
+    _ = function
+
+    _reject = _cfg_return_expr_reject_8616(codegen)
     if not isinstance(validation, dict):
         return _reject(_CfgReturnExprDeltaRefusal8616.MISSING_DELTA, validation_type=type(validation).__name__)
     multi_arm_return_expressions = _boundary_tuple_8616(
@@ -14376,103 +15780,83 @@ def _is_cfg_return_expr_chain_materialization_delta_8616(
         for expression in multi_arm_return_expressions
         if isinstance(expression, CExpression)
     )
-    if "returns" in touched_fields:
-        added_returns = (
-            _boundary_set_8616(returns_delta.get("added") or ()) if isinstance(returns_delta, dict) else set()
-        )
-        removed_returns = (
-            _boundary_set_8616(returns_delta.get("removed") or ()) if isinstance(returns_delta, dict) else set()
-        )
-        if not expected_returns or added_returns - expected_returns:
-            return _reject(
-                _CfgReturnExprDeltaRefusal8616.UNEXPECTED_ADDED_RETURNS,
-                added=tuple(sorted(added_returns)),
-                expected=tuple(sorted(expected_returns)),
-            )
-        expected_raw_return_aliases = _selector_return_expected_raw_return_aliases_8616(
-            project, codegen, expected_returns
-        )
-        unexpected_removed = tuple(
-            sorted(
-                item
-                for item in removed_returns
-                if item not in {"CDirtyExpression", "none"}
-                and not (full_return_chain_materialized and item == "reg:ax")
-                and item not in expected_raw_return_aliases
-                and "CDirtyExpression" not in item
-                and not item.startswith(("Concat(", "Or("))
-            )
-        )
-        if unexpected_removed:
-            return _reject(
-                _CfgReturnExprDeltaRefusal8616.UNEXPECTED_REMOVED_RETURNS,
-                removed=unexpected_removed,
-                expected_raw_stack_slots=tuple(sorted(expected_raw_return_aliases)),
-                expected=tuple(sorted(expected_returns)),
-            )
+    if "returns" in touched_fields and not _check_return_chain_returns_delta_8616(
+        project,
+        codegen,
+        returns_delta,
+        expected_returns,
+        full_return_chain_materialized,
+    ):
+        return False
     if full_return_chain_materialized:
-        selector_full_return_chain = bool(expected_returns) and bool(
-            "returns" in touched_fields
-            and isinstance(returns_delta, dict)
-            and expected_returns <= _boundary_set_8616(returns_delta.get("added") or ())
+        return _check_full_return_chain_deltas_8616(
+            project,
+            codegen,
+            delta,
+            validation,
+            returns_delta,
+            touched_fields,
+            allowed_fields,
+            expected_returns,
         )
-        segmented_delta = delta.get("segmented_writes")
-        if isinstance(segmented_delta, dict):
-            added_segmented = _boundary_tuple_8616(
-                str(item) for item in _boundary_tuple_8616(segmented_delta.get("added", ()) or ())
-            )
-            removed_segmented = _boundary_tuple_8616(
-                str(item) for item in _boundary_tuple_8616(segmented_delta.get("removed", ()) or ())
-            )
-            if added_segmented or any(
-                not item.startswith("deref:Add(Mul(reg:ss,const:16),reg:sp,const:-") for item in removed_segmented
-            ):
-                return _reject(
-                    _CfgReturnExprDeltaRefusal8616.UNEXPECTED_FIELDS,
-                    touched_fields=tuple(sorted(touched_fields)),
-                    allowed_fields=tuple(sorted(allowed_fields)),
-                    segmented_writes=segmented_delta,
-                )
-        expected_conditions = _boundary_set_8616(
-            getattr(codegen, "_inertia_return_chain_materialized_condition_fingerprints_8616", ()) or ()
-        )
-        expected_conditions |= _selector_return_current_condition_fingerprints_8616(project, codegen)
-        condition_delta = delta.get("conditions")
-        if isinstance(condition_delta, dict):
-            added_conditions = _boundary_set_8616(condition_delta.get("added") or ())
-            if not selector_full_return_chain and (not expected_conditions or added_conditions - expected_conditions):
-                return _reject(
-                    _CfgReturnExprDeltaRefusal8616.UNEXPECTED_ADDED_CONDITIONS,
-                    added=tuple(sorted(added_conditions)),
-                    expected=tuple(sorted(expected_conditions)),
-                )
-        control_delta = delta.get("control_flow_effects")
-        if isinstance(control_delta, dict):
-            added_control = _boundary_set_8616(control_delta.get("added") or ())
-            expected_control = {f"if:{fp}" for fp in expected_conditions}
-            if not selector_full_return_chain and added_control - expected_control:
-                return _reject(
-                    _CfgReturnExprDeltaRefusal8616.UNEXPECTED_ADDED_CONTROL,
-                    added=tuple(sorted(added_control)),
-                    expected=tuple(sorted(expected_control)),
-                )
-        helper_delta = delta.get("helper_calls")
-        if isinstance(helper_delta, dict) and (
-            (helper_delta.get("added") or ()) or (helper_delta.get("removed") or ())
-        ):
-            if _boundary_tuple_8616(helper_delta.get("added") or ()):
-                return _reject(
-                    _CfgReturnExprDeltaRefusal8616.UNEXPECTED_HELPER_DELTA,
-                    helper_delta=helper_delta,
-                )
-            helper_validation = dict(validation)
-            helper_validation["delta"] = {"helper_calls": helper_delta}
-            if not _is_stack_probe_helper_cleanup_delta_8616(codegen, helper_validation):
-                return _reject(
-                    _CfgReturnExprDeltaRefusal8616.UNEXPECTED_HELPER_DELTA,
-                    helper_delta=helper_delta,
-                )
     return True
+
+
+
+def _mask_accumulator_conditions_delta_ok_8616(
+    delta: dict[str, StructuredAstValue],
+    expected_conditions: set,
+) -> bool:
+    """Return whether the conditions delta only touches proven accumulator conditions."""
+    condition_delta = delta.get("conditions")
+    if not isinstance(condition_delta, dict):
+        return True
+    added_conditions = _boundary_set_8616(condition_delta.get("added") or ())
+    if added_conditions - expected_conditions:
+        return False
+    removed_conditions = _boundary_set_8616(condition_delta.get("removed") or ())
+    if removed_conditions and not (added_conditions & expected_conditions):
+        return False
+    return not (removed_conditions & expected_conditions)
+
+
+def _mask_accumulator_control_delta_ok_8616(
+    delta: dict[str, StructuredAstValue],
+    expected_conditions: set,
+) -> bool:
+    """Return whether the control-flow delta only touches accumulator branches."""
+    control_delta = delta.get("control_flow_effects")
+    if not isinstance(control_delta, dict):
+        return True
+    added_control = _boundary_set_8616(control_delta.get("added") or ())
+    expected_control = {f"if:{fp}" for fp in expected_conditions}
+    expected_control.add("return")
+    if added_control - expected_control:
+        return False
+    removed_control = _boundary_set_8616(control_delta.get("removed") or ())
+    expected_branch_control = expected_control - {"return"}
+    if removed_control and not (added_control & expected_branch_control):
+        return False
+    return not (removed_control & expected_control)
+
+
+def _mask_accumulator_returns_delta_ok_8616(
+    codegen: StructuredAstValue,
+    delta: dict[str, StructuredAstValue],
+) -> bool:
+    """Return whether the returns delta only reflects the proven accumulator return."""
+    returns_delta = delta.get("returns")
+    if not isinstance(returns_delta, dict):
+        return True
+    added_returns = _boundary_set_8616(returns_delta.get("added") or ())
+    removed_returns = _boundary_set_8616(returns_delta.get("removed") or ())
+    expected_return = getattr(codegen, "_inertia_mask_accumulator_return_fingerprint_8616", None)
+    if added_returns and expected_return is not None and added_returns - {expected_return}:
+        return False
+    return not any(
+        item not in {"CDirtyExpression", "none"} and "CDirtyExpression" not in item and item != "CIndexedVariable"
+        for item in removed_returns
+    )
 
 
 def _is_cfg_mask_accumulator_materialization_delta_8616(
@@ -14501,41 +15885,12 @@ def _is_cfg_mask_accumulator_materialization_delta_8616(
     )
     if not expected_conditions:
         return False
-    condition_delta = delta.get("conditions")
-    if isinstance(condition_delta, dict):
-        added_conditions = _boundary_set_8616(condition_delta.get("added") or ())
-        if added_conditions - expected_conditions:
-            return False
-        removed_conditions = _boundary_set_8616(condition_delta.get("removed") or ())
-        if removed_conditions and not (added_conditions & expected_conditions):
-            return False
-        if removed_conditions & expected_conditions:
-            return False
-    control_delta = delta.get("control_flow_effects")
-    if isinstance(control_delta, dict):
-        added_control = _boundary_set_8616(control_delta.get("added") or ())
-        expected_control = {f"if:{fp}" for fp in expected_conditions}
-        expected_control.add("return")
-        if added_control - expected_control:
-            return False
-        removed_control = _boundary_set_8616(control_delta.get("removed") or ())
-        expected_branch_control = expected_control - {"return"}
-        if removed_control and not (added_control & expected_branch_control):
-            return False
-        if removed_control & expected_control:
-            return False
-    returns_delta = delta.get("returns")
-    if isinstance(returns_delta, dict):
-        added_returns = _boundary_set_8616(returns_delta.get("added") or ())
-        removed_returns = _boundary_set_8616(returns_delta.get("removed") or ())
-        expected_return = getattr(codegen, "_inertia_mask_accumulator_return_fingerprint_8616", None)
-        if added_returns and expected_return is not None and added_returns - {expected_return}:
-            return False
-        if any(
-            item not in {"CDirtyExpression", "none"} and "CDirtyExpression" not in item and item != "CIndexedVariable"
-            for item in removed_returns
-        ):
-            return False
+    if not _mask_accumulator_conditions_delta_ok_8616(delta, expected_conditions):
+        return False
+    if not _mask_accumulator_control_delta_ok_8616(delta, expected_conditions):
+        return False
+    if not _mask_accumulator_returns_delta_ok_8616(codegen, delta):
+        return False
     helper_delta = delta.get("helper_calls")
     return not (isinstance(helper_delta, dict) and _boundary_tuple_8616(helper_delta.get("added") or ()))
 
@@ -14675,6 +16030,240 @@ def _expected_kb_call_score_from_cfunc_8616(
     return (score, total)
 
 
+def _collect_annotation_stack_names_8616(
+    project: StructuredAstValue,
+    func_addr: int,
+) -> tuple[dict[int, str], dict[int, str]]:
+    """Collect arg/local display names from sidecar annotations for a function."""
+    arg_name_by_offset: dict[int, str] = {}
+    local_name_by_offset: dict[int, str] = {}
+    with contextlib.suppress(Exception):
+        function = project.kb.functions.function(addr=func_addr, create=False)
+        info = getattr(function, "info", None)
+        annotations = info.get(ANNOTATION_KEY) if isinstance(info, MutableMapping) else None
+        stack_vars = annotations.get("stack_vars") if isinstance(annotations, dict) else None
+        if isinstance(stack_vars, dict):
+            arg_name_by_offset.update(
+                {
+                    bp_offset: name
+                    for bp_offset, name in positive_stack_specs_8616(function)
+                    if isinstance(name, str) and name
+                }
+            )
+            for offset, spec in stack_vars.items():
+                if not isinstance(offset, int):
+                    continue
+                name = spec if isinstance(spec, str) else None
+                if isinstance(spec, dict):
+                    spec_name = spec.get("name")
+                    if isinstance(spec_name, str):
+                        name = spec_name
+                if isinstance(name, str) and name:
+                    if offset > 0:
+                        continue
+                    canonical_offset = _canonical_stack_offset_8616(offset)
+                    if isinstance(canonical_offset, int):
+                        local_name_by_offset[canonical_offset] = name
+    return arg_name_by_offset, local_name_by_offset
+
+
+def _collect_prototype_arg_names_8616(
+    prototype: StructuredAstValue,
+    arg_name_by_offset: dict[int, str],
+) -> None:
+    """Seed argument names from the typed prototype when no earlier evidence exists."""
+    proto_arg_names = _boundary_tuple_8616(getattr(prototype, "arg_names", ()) or ())
+    proto_args = _boundary_tuple_8616(getattr(prototype, "args", ()) or ())
+    if not (proto_arg_names and len(proto_arg_names) == len(proto_args)):
+        return
+    next_offset = 4
+    for arg_name, arg_type in zip(proto_arg_names, proto_args, strict=False):
+        if isinstance(arg_name, str) and arg_name and next_offset not in arg_name_by_offset:
+            arg_name_by_offset[next_offset] = arg_name
+        bits = getattr(arg_type, "size", None)
+        try:
+            width = int(bits // 8) if isinstance(bits, int) and bits > 0 else 2
+        except Exception:
+            width = 2
+        if width <= 0:
+            width = 2
+        next_offset += max(2, width)
+
+
+def _collect_arg_list_names_8616(
+    codegen: StructuredAstValue,
+    arg_list: StructuredAstValue,
+    arg_name_by_offset: dict[int, str],
+) -> None:
+    """Seed argument names from the structured arg list for unmapped offsets."""
+    for arg in arg_list:
+        arg_var = getattr(arg, "variable", None)
+        if not isinstance(arg_var, SimStackVariable):
+            continue
+        arg_offset = machine_bp_offset_for_stack_variable_8616(codegen, arg_var)
+        if not isinstance(arg_offset, int):
+            continue
+        arg_name = getattr(arg, "name", None)
+        arg_var_name = arg_var.name
+        preferred_name = next(
+            (
+                name
+                for name in (arg_name, arg_var_name)
+                if isinstance(name, str) and name and not name.startswith("arg_")
+            ),
+            None,
+        )
+        if preferred_name is None and isinstance(arg_var_name, str) and arg_var_name:
+            preferred_name = arg_var_name
+        if preferred_name is None and isinstance(arg_name, str) and arg_name:
+            preferred_name = arg_name
+        if preferred_name is not None and arg_offset not in arg_name_by_offset:
+            arg_name_by_offset[arg_offset] = preferred_name
+
+
+def _install_live_stack_local_8616(
+    codegen: StructuredAstValue,
+    cfunc: StructuredAstValue,
+    node: StructuredAstValue,
+    var: StructuredAstValue,
+    offset: int,
+    arg_name_by_offset: dict[int, str],
+) -> None:
+    """Register a renamed stack carrier in the live local-variable maps."""
+    if offset in arg_name_by_offset:
+        return
+    variables_in_use = getattr(cfunc, "variables_in_use", None)
+    if isinstance(variables_in_use, dict) and var not in variables_in_use:
+        variables_in_use[var] = node
+    unified_locals = getattr(cfunc, "unified_local_vars", None)
+    if not isinstance(unified_locals, dict):
+        unified_locals = {}
+        with contextlib.suppress(Exception):
+            cfunc.unified_local_vars = unified_locals
+    if isinstance(unified_locals, dict) and var not in unified_locals:
+        unified_locals[var] = {(node, getattr(node, "variable_type", None))}
+        codegen._inertia_stack_identifier_live_node_declarations_8616 = (
+            int(getattr(codegen, "_inertia_stack_identifier_live_node_declarations_8616", 0) or 0) + 1
+        )
+
+
+def _rename_local_map_stack_var_8616(
+    codegen: StructuredAstValue,
+    var: StructuredAstValue,
+    cvar: StructuredAstValue,
+    arg_name_by_offset: dict[int, str],
+    local_name_by_offset: dict[int, str],
+    stack_name_pat: StructuredAstValue,
+) -> None:
+    """Rename one stack carrier entry in a local-variable map when evidence exists."""
+    if var.__class__.__name__ != "SimStackVariable":
+        return
+    ident = getattr(var, "ident", None)
+    if ident is None:
+        try:
+            var.ident = ""
+        except Exception:
+            return
+    # Normalize unresolved stack carrier names to stable stack semantics.
+    # This is typed/name materialization from stack offsets, not text cleanup.
+    name = getattr(var, "name", None)
+    offset = machine_bp_offset_for_stack_variable_8616(codegen, var)
+    if not isinstance(offset, int):
+        return
+    new_name = arg_name_by_offset.get(offset) or local_name_by_offset.get(offset)
+    if new_name is None and isinstance(name, str) and stack_name_pat.match(name):
+        new_name = _stack_object_name(offset, codegen=codegen)
+    if new_name is None:
+        return
+    try:
+        var.name = new_name
+    except Exception:
+        return
+    if cvar.__class__.__name__ == "CVariable":
+        with contextlib.suppress(Exception):
+            cvar.name = new_name
+
+
+def _rename_stack_vars_in_local_maps_8616(
+    codegen: StructuredAstValue,
+    local_maps: list[StructuredAstValue],
+    arg_name_by_offset: dict[int, str],
+    local_name_by_offset: dict[int, str],
+    stack_name_pat: StructuredAstValue,
+) -> None:
+    """Rename unresolved stack carriers in the cfunc local-variable maps."""
+    for mapping in local_maps:
+        for var, cvar in tuple(mapping.items()):
+            _rename_local_map_stack_var_8616(
+                codegen,
+                var,
+                cvar,
+                arg_name_by_offset,
+                local_name_by_offset,
+                stack_name_pat,
+            )
+
+
+def _rename_stack_var_node_attr_8616(
+    codegen: StructuredAstValue,
+    cfunc: StructuredAstValue,
+    node: StructuredAstValue,
+    attr: str,
+    arg_name_by_offset: dict[int, str],
+    local_name_by_offset: dict[int, str],
+    stack_name_pat: StructuredAstValue,
+) -> None:
+    """Rename one stack carrier attribute on a CVariable node when evidence exists."""
+    var = getattr(node, attr, None)
+    if var is None or var.__class__.__name__ != "SimStackVariable":
+        return
+    offset = machine_bp_offset_for_stack_variable_8616(codegen, var)
+    if not isinstance(offset, int):
+        return
+    new_name = arg_name_by_offset.get(offset) or local_name_by_offset.get(offset)
+    if new_name is None:
+        current_name = getattr(node, "name", None) or getattr(var, "name", None)
+        if isinstance(current_name, str) and stack_name_pat.match(current_name):
+            new_name = _stack_object_name(offset, codegen=codegen)
+    if new_name is None:
+        return
+    try:
+        cast(Any, var).name = new_name
+    except Exception:
+        return
+    with contextlib.suppress(Exception):
+        cast(Any, node).name = new_name
+    _install_live_stack_local_8616(codegen, cfunc, node, var, offset, arg_name_by_offset)
+
+
+def _rename_stack_var_nodes_8616(
+    codegen: StructuredAstValue,
+    cfunc: StructuredAstValue,
+    arg_name_by_offset: dict[int, str],
+    local_name_by_offset: dict[int, str],
+    stack_name_pat: StructuredAstValue,
+) -> None:
+    """Rename stack carriers on every CVariable node under the cfunc roots."""
+    node_roots = [cfunc]
+    statements_root = getattr(cfunc, "statements", None)
+    if statements_root is not None:
+        node_roots.append(statements_root)
+    for root in node_roots:
+        nodes = (root, *_iter_c_nodes_deep_8616(root))
+        for node in nodes:
+            if node.__class__.__name__ != "CVariable":
+                continue
+            for attr in ("variable", "unified_variable"):
+                _rename_stack_var_node_attr_8616(
+                    codegen,
+                    cfunc,
+                    node,
+                    attr,
+                    arg_name_by_offset,
+                    local_name_by_offset,
+                    stack_name_pat,
+                )
+
 def _normalize_stack_variable_identifiers_8616(codegen: StructuredAstValue) -> None:
     def _impl() -> None:
         cfunc = getattr(codegen, "cfunc", None)
@@ -14686,73 +16275,14 @@ def _normalize_stack_variable_identifiers_8616(codegen: StructuredAstValue) -> N
         project = getattr(codegen, "project", None)
         func_addr = getattr(cfunc, "addr", None)
         if project is not None and isinstance(func_addr, int):
-            with contextlib.suppress(Exception):
-                function = project.kb.functions.function(addr=func_addr, create=False)
-                info = getattr(function, "info", None)
-                annotations = info.get(ANNOTATION_KEY) if isinstance(info, MutableMapping) else None
-                stack_vars = annotations.get("stack_vars") if isinstance(annotations, dict) else None
-                if isinstance(stack_vars, dict):
-                    arg_name_by_offset.update(
-                        {
-                            bp_offset: name
-                            for bp_offset, name in positive_stack_specs_8616(function)
-                            if isinstance(name, str) and name
-                        }
-                    )
-                    for offset, spec in stack_vars.items():
-                        if not isinstance(offset, int):
-                            continue
-                        name = spec if isinstance(spec, str) else None
-                        if isinstance(spec, dict):
-                            spec_name = spec.get("name")
-                            if isinstance(spec_name, str):
-                                name = spec_name
-                        if isinstance(name, str) and name:
-                            if offset > 0:
-                                continue
-                            canonical_offset = _canonical_stack_offset_8616(offset)
-                            if isinstance(canonical_offset, int):
-                                local_name_by_offset[canonical_offset] = name
+            arg_name_by_offset, local_name_by_offset = _collect_annotation_stack_names_8616(
+                project,
+                func_addr,
+            )
         publish_stack_variable_projection_display_names_8616(codegen, local_name_by_offset)
         prototype = getattr(cfunc, "functy", None)
-        proto_arg_names = _boundary_tuple_8616(getattr(prototype, "arg_names", ()) or ())
-        proto_args = _boundary_tuple_8616(getattr(prototype, "args", ()) or ())
-        if proto_arg_names and len(proto_arg_names) == len(proto_args):
-            next_offset = 4
-            for arg_name, arg_type in zip(proto_arg_names, proto_args, strict=False):
-                if isinstance(arg_name, str) and arg_name and next_offset not in arg_name_by_offset:
-                    arg_name_by_offset[next_offset] = arg_name
-                bits = getattr(arg_type, "size", None)
-                try:
-                    width = int(bits // 8) if isinstance(bits, int) and bits > 0 else 2
-                except Exception:
-                    width = 2
-                if width <= 0:
-                    width = 2
-                next_offset += max(2, width)
-        for arg in arg_list:
-            arg_var = getattr(arg, "variable", None)
-            if not isinstance(arg_var, SimStackVariable):
-                continue
-            arg_offset = machine_bp_offset_for_stack_variable_8616(codegen, arg_var)
-            if not isinstance(arg_offset, int):
-                continue
-            arg_name = getattr(arg, "name", None)
-            arg_var_name = arg_var.name
-            preferred_name = next(
-                (
-                    name
-                    for name in (arg_name, arg_var_name)
-                    if isinstance(name, str) and name and not name.startswith("arg_")
-                ),
-                None,
-            )
-            if preferred_name is None and isinstance(arg_var_name, str) and arg_var_name:
-                preferred_name = arg_var_name
-            if preferred_name is None and isinstance(arg_name, str) and arg_name:
-                preferred_name = arg_name
-            if preferred_name is not None and arg_offset not in arg_name_by_offset:
-                arg_name_by_offset[arg_offset] = preferred_name
+        _collect_prototype_arg_names_8616(prototype, arg_name_by_offset)
+        _collect_arg_list_names_8616(codegen, arg_list, arg_name_by_offset)
         local_maps = []
         unified = getattr(cfunc, "unified_local_vars", None)
         if isinstance(unified, dict):
@@ -14761,82 +16291,20 @@ def _normalize_stack_variable_identifiers_8616(codegen: StructuredAstValue) -> N
         if isinstance(vars_in_use, dict):
             local_maps.append(vars_in_use)
         stack_name_pat = re.compile(r"^(?:s_[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*|arg_[0-9a-fA-F]+|local_[0-9a-fA-F]+)$")
-
-        def _install_live_stack_local(node: StructuredAstValue, var: StructuredAstValue, offset: int) -> None:
-            if offset in arg_name_by_offset:
-                return
-            variables_in_use = getattr(cfunc, "variables_in_use", None)
-            if isinstance(variables_in_use, dict) and var not in variables_in_use:
-                variables_in_use[var] = node
-            unified_locals = getattr(cfunc, "unified_local_vars", None)
-            if not isinstance(unified_locals, dict):
-                unified_locals = {}
-                with contextlib.suppress(Exception):
-                    cfunc.unified_local_vars = unified_locals
-            if isinstance(unified_locals, dict) and var not in unified_locals:
-                unified_locals[var] = {(node, getattr(node, "variable_type", None))}
-                codegen._inertia_stack_identifier_live_node_declarations_8616 = (
-                    int(getattr(codegen, "_inertia_stack_identifier_live_node_declarations_8616", 0) or 0) + 1
-                )
-
-        for mapping in local_maps:
-            for var, cvar in tuple(mapping.items()):
-                if var.__class__.__name__ != "SimStackVariable":
-                    continue
-                ident = getattr(var, "ident", None)
-                if ident is None:
-                    try:
-                        var.ident = ""
-                    except Exception:
-                        continue
-                # Normalize unresolved stack carrier names to stable stack semantics.
-                # This is typed/name materialization from stack offsets, not text cleanup.
-                name = getattr(var, "name", None)
-                offset = machine_bp_offset_for_stack_variable_8616(codegen, var)
-                if not isinstance(offset, int):
-                    continue
-                new_name = arg_name_by_offset.get(offset) or local_name_by_offset.get(offset)
-                if new_name is None and isinstance(name, str) and stack_name_pat.match(name):
-                    new_name = _stack_object_name(offset, codegen=codegen)
-                if new_name is None:
-                    continue
-                try:
-                    var.name = new_name
-                except Exception:
-                    continue
-                if cvar.__class__.__name__ == "CVariable":
-                    with contextlib.suppress(Exception):
-                        cvar.name = new_name
-        node_roots = [cfunc]
-        statements_root = getattr(cfunc, "statements", None)
-        if statements_root is not None:
-            node_roots.append(statements_root)
-        for root in node_roots:
-            nodes = (root, *_iter_c_nodes_deep_8616(root))
-            for node in nodes:
-                if node.__class__.__name__ != "CVariable":
-                    continue
-                for attr in ("variable", "unified_variable"):
-                    var = getattr(node, attr, None)
-                    if var is None or var.__class__.__name__ != "SimStackVariable":
-                        continue
-                    offset = machine_bp_offset_for_stack_variable_8616(codegen, var)
-                    if not isinstance(offset, int):
-                        continue
-                    new_name = arg_name_by_offset.get(offset) or local_name_by_offset.get(offset)
-                    if new_name is None:
-                        current_name = getattr(node, "name", None) or getattr(var, "name", None)
-                        if isinstance(current_name, str) and stack_name_pat.match(current_name):
-                            new_name = _stack_object_name(offset, codegen=codegen)
-                    if new_name is None:
-                        continue
-                    try:
-                        cast(Any, var).name = new_name
-                    except Exception:
-                        continue
-                    with contextlib.suppress(Exception):
-                        cast(Any, node).name = new_name
-                    _install_live_stack_local(node, var, offset)
+        _rename_stack_vars_in_local_maps_8616(
+            codegen,
+            local_maps,
+            arg_name_by_offset,
+            local_name_by_offset,
+            stack_name_pat,
+        )
+        _rename_stack_var_nodes_8616(
+            codegen,
+            cfunc,
+            arg_name_by_offset,
+            local_name_by_offset,
+            stack_name_pat,
+        )
 
     return _impl()
 
@@ -14967,26 +16435,10 @@ class LateEmptyNoopGuardCleanupStats8616:
         return self.materialized_count > 0
 
 
-def _prune_late_semantically_empty_noop_guards_8616(
-    codegen: StructuredAstValue,
-) -> LateEmptyNoopGuardCleanupStats8616:
-    """Remove only side-effect-free empty branch shells exposed by evidence DCE.
-
-    Structuring owns the semantic-empty classifier. This late compatibility
-    consumer removes only ``EMPTY_NOOP`` guards whose condition has no call and
-    whose true and false arms contain no semantic statements. It does not use
-    rendered text, machine-branch counts, condition meaning, or JCC polarity.
-    Empty-return and non-empty branch shapes remain untouched.
-    """
-    # Dynamic angr codegen boundary: the generated C function may be absent.
-    cfunc = getattr(codegen, "cfunc", None)
-    # Dynamic angr C-AST boundary: statement roots vary across codegen versions.
-    root = getattr(cfunc, "statements", None) if cfunc is not None else None
-    if root is None:
-        stats = LateEmptyNoopGuardCleanupStats8616(0, 0, 0, 0, 0)
-        codegen._inertia_late_empty_noop_guard_cleanup_stats_8616 = stats
-        return stats
-
+def _collect_empty_noop_guard_prune_indices_8616(
+    root: StructuredAstValue,
+) -> tuple[int, int, int, dict[int, tuple[StructuredAstValue, set[int]]]]:
+    """Collect outermost EMPTY_NOOP guard prune indices grouped by block."""
     seen_blocks: set[int] = set()
     blocks = [node for node in (root, *_iter_c_nodes_deep_8616(root)) if isinstance(node, CStatements)]
     raw_fact_count = 0
@@ -15029,6 +16481,32 @@ def _prune_late_semantically_empty_noop_guards_8616(
         if block_id not in prune_by_block:
             prune_by_block[block_id] = (block, set())
         prune_by_block[block_id][1].add(index)
+    return raw_fact_count, normalized_fact_count, len(classified), prune_by_block
+
+
+def _prune_late_semantically_empty_noop_guards_8616(
+    codegen: StructuredAstValue,
+) -> LateEmptyNoopGuardCleanupStats8616:
+    """Remove only side-effect-free empty branch shells exposed by evidence DCE.
+
+    Structuring owns the semantic-empty classifier. This late compatibility
+    consumer removes only ``EMPTY_NOOP`` guards whose condition has no call and
+    whose true and false arms contain no semantic statements. It does not use
+    rendered text, machine-branch counts, condition meaning, or JCC polarity.
+    Empty-return and non-empty branch shapes remain untouched.
+    """
+    # Dynamic angr codegen boundary: the generated C function may be absent.
+    cfunc = getattr(codegen, "cfunc", None)
+    # Dynamic angr C-AST boundary: statement roots vary across codegen versions.
+    root = getattr(cfunc, "statements", None) if cfunc is not None else None
+    if root is None:
+        stats = LateEmptyNoopGuardCleanupStats8616(0, 0, 0, 0, 0)
+        codegen._inertia_late_empty_noop_guard_cleanup_stats_8616 = stats
+        return stats
+
+    raw_fact_count, normalized_fact_count, classified_fact_count, prune_by_block = (
+        _collect_empty_noop_guard_prune_indices_8616(root)
+    )
 
     materialized_count = 0
     for block, prune_indices in prune_by_block.values():
@@ -15040,7 +16518,6 @@ def _prune_late_semantically_empty_noop_guards_8616(
         ]
         materialized_count += len(prune_indices)
 
-    classified_fact_count = len(classified)
     failure_count = classified_fact_count - materialized_count
     stats = LateEmptyNoopGuardCleanupStats8616(
         raw_fact_count=raw_fact_count,
@@ -15164,6 +16641,141 @@ def finalize_post_switch_cleanup_after_seqnode_replacement_8616(
     return result
 
 
+def _gate_transfer_alias_facts_once_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> None:
+    """Transfer semantic alias facts from lifter to codegen exactly once."""
+    if getattr(codegen, "_inertia_semantic_facts_transferred", False):
+        return
+    try:
+        transfer_semantic_alias_facts_to_codegen_8616(project, codegen)
+    except Exception as ex:
+        codegen._inertia_semantic_facts_transfer_error = str(ex)
+    finally:
+        codegen._inertia_semantic_facts_transferred = True
+
+
+def _gate_materialize_stack_facts_once_8616(codegen: StructuredAstValue) -> None:
+    """Materialize stack accesses from alias facts exactly once."""
+    if getattr(codegen, "_inertia_stack_lowered_from_facts", False):
+        return
+    alias_facts = getattr(codegen, "_inertia_semantic_alias_facts", None)
+    if isinstance(alias_facts, list) and alias_facts:
+        try:
+            lower_stack_accesses_from_alias_facts_8616(codegen, alias_facts)
+        except Exception as ex:
+            codegen._inertia_stack_lowering_error = str(ex)
+    codegen._inertia_stack_lowered_from_facts = True
+
+
+def _gate_transfer_typed_conditions_once_8616(project: StructuredAstValue, codegen: StructuredAstValue) -> None:
+    """Transfer typed conditions to codegen exactly once at the invariant gate."""
+    if getattr(codegen, "_inertia_typed_conditions_transferred", False):
+        return
+    cfunc = getattr(codegen, "cfunc", None)
+    func_addr = getattr(cfunc, "addr", None) if cfunc is not None else None
+    if func_addr is not None:
+        try:
+            transfer_typed_conditions_to_codegen_8616(project, func_addr, codegen)
+        except Exception as ex:
+            logging.getLogger(__name__).debug(
+                "Typed condition transfer failed at function=%#x stage=invariant-gate: %s",
+                func_addr,
+                ex,
+            )
+    codegen._inertia_typed_conditions_transferred = True
+
+
+def _record_invariant_report_8616(codegen: StructuredAstValue, function: StructuredAstValue, report: StructuredAstValue) -> None:
+    """Record the invariant report on the function info and codegen."""
+    if function is not None:
+        info = getattr(function, "info", None)
+        if isinstance(info, MutableMapping):
+            info["x86_16_pre_rewrite_invariant_report"] = report.to_dict()
+    codegen._inertia_invariant_report = report
+    codegen._inertia_invariant_checked = True
+
+
+def _record_dead_setup_counters_8616(codegen: StructuredAstValue, function: StructuredAstValue) -> None:
+    """Record dead-setup counters on the function info mapping."""
+    if function is None:
+        return
+    info = getattr(function, "info", None)
+    if not isinstance(info, MutableMapping):
+        return
+    info["x86_16_dead_setup"] = {
+        "dead_setup_candidates": int(getattr(codegen, "dead_setup_candidates", 0)),
+        "dead_setup_pruned": int(getattr(codegen, "dead_setup_pruned", 0)),
+        "dead_setup_refused": int(getattr(codegen, "dead_setup_refused", 0)),
+    }
+    info["x86_16_loop_exit_guard"] = dict(getattr(codegen, "_inertia_loop_exit_guard_stats_8616", {}))
+
+
+def _enforce_dead_setup_gate_8616(codegen: StructuredAstValue, function: StructuredAstValue) -> None:
+    """Raise PipelineHardError when dead-setup artifacts escaped final C."""
+    dead_setup_escaped = _count_dead_setup_escaped_8616(codegen)
+    codegen.dead_setup_escaped = int(dead_setup_escaped)
+    if function is not None:
+        info = getattr(function, "info", None)
+        if isinstance(info, MutableMapping):
+            dead_setup_info = info.setdefault("x86_16_dead_setup", {})
+            if isinstance(dead_setup_info, MutableMapping):
+                dead_setup_info["dead_setup_escaped"] = int(dead_setup_escaped)
+    if dead_setup_escaped <= 0:
+        return
+    raise PipelineHardError(
+        "dead setup artifacts escaped final C",
+        layer="codegen",
+        function_addr=getattr(function, "addr", None),
+        details={
+            "dead_setup_candidates": int(getattr(codegen, "dead_setup_candidates", 0)),
+            "dead_setup_pruned": int(getattr(codegen, "dead_setup_pruned", 0)),
+            "dead_setup_refused": int(getattr(codegen, "dead_setup_refused", 0)),
+            "dead_setup_escaped": int(dead_setup_escaped),
+        },
+    )
+
+
+def _run_pipeline_contract_gate_8616(codegen: StructuredAstValue, function: StructuredAstValue) -> None:
+    """Run the pipeline contract assertions with lane diagnostics."""
+    try:
+        assert_pipeline_contracts_8616(codegen)
+    except Exception as ex:
+        stack_lane = getattr(codegen, "_inertia_stack_lane", None)
+        cond_lane = getattr(codegen, "_inertia_condition_lane", None)
+        logging.getLogger(__name__).warning(
+            "Pipeline contract gate failed at function=%#x stage=invariant-gate: %s "
+            "stack_lane=%s condition_lane=%s",
+            getattr(function, "addr", -1) or -1,
+            ex,
+            stack_lane.summary_line()
+            if stack_lane is not None and hasattr(stack_lane, "summary_line")
+            else stack_lane,
+            cond_lane.summary_line() if cond_lane is not None and hasattr(cond_lane, "summary_line") else cond_lane,
+        )
+        raise
+
+
+def _log_rewrite_gate_result_8616(codegen: StructuredAstValue, function: StructuredAstValue, report: StructuredAstValue) -> None:
+    """Log the invariant gate verdict and mark codegen failure when blocked."""
+    log = logging.getLogger(__name__)
+    if report.rewrite_blocked:
+        codegen._inertia_rewrite_failed = True
+        codegen._inertia_rewrite_failure_pass = "invariant_gate"
+        codegen._inertia_rewrite_failure_error = report.skip_reason
+        formatted = format_invariant_report_8616(report)
+        log.warning(
+            "Pre-rewrite invariant gate BLOCKED rewrite for %#x (%s): %s",
+            getattr(function, "addr", 0),
+            getattr(function, "name", "?"),
+            report.skip_reason,
+        )
+        log.warning("Invariant report:\n%s", formatted)
+        return
+    log.debug(
+        "Pre-rewrite invariant gate passed for %#x (%s)",
+        getattr(function, "addr", 0),
+        getattr(function, "name", "?"),
+    )
+
 def _inertia_run_pre_rewrite_invariant_gate(
     project: StructuredAstValue, codegen: StructuredAstValue, function: StructuredAstValue
 ) -> None:
@@ -15175,130 +16787,9 @@ def _inertia_run_pre_rewrite_invariant_gate(
     CRITICAL: transfer semantic alias facts from lifter/emulator to codegen
     BEFORE running invariants, so the invariant checks can see them.
     """
-
-    def _transfer_alias_facts_once() -> None:
-        if getattr(codegen, "_inertia_semantic_facts_transferred", False):
-            return
-        try:
-            transfer_semantic_alias_facts_to_codegen_8616(project, codegen)
-        except Exception as ex:
-            codegen._inertia_semantic_facts_transfer_error = str(ex)
-        finally:
-            codegen._inertia_semantic_facts_transferred = True
-
-    def _materialize_stack_facts_once() -> None:
-        if getattr(codegen, "_inertia_stack_lowered_from_facts", False):
-            return
-        alias_facts = getattr(codegen, "_inertia_semantic_alias_facts", None)
-        if isinstance(alias_facts, list) and alias_facts:
-            try:
-                lower_stack_accesses_from_alias_facts_8616(codegen, alias_facts)
-            except Exception as ex:
-                codegen._inertia_stack_lowering_error = str(ex)
-        codegen._inertia_stack_lowered_from_facts = True
-
-    def _transfer_typed_conditions_once() -> None:
-        if getattr(codegen, "_inertia_typed_conditions_transferred", False):
-            return
-        cfunc = getattr(codegen, "cfunc", None)
-        func_addr = getattr(cfunc, "addr", None) if cfunc is not None else None
-        if func_addr is not None:
-            try:
-                transfer_typed_conditions_to_codegen_8616(project, func_addr, codegen)
-            except Exception as ex:
-                logging.getLogger(__name__).debug(
-                    "Typed condition transfer failed at function=%#x stage=invariant-gate: %s",
-                    func_addr,
-                    ex,
-                )
-        codegen._inertia_typed_conditions_transferred = True
-
-    def _record_invariant_report(report: StructuredAstValue) -> None:
-        if function is not None:
-            info = getattr(function, "info", None)
-            if isinstance(info, MutableMapping):
-                info["x86_16_pre_rewrite_invariant_report"] = report.to_dict()
-        codegen._inertia_invariant_report = report
-        codegen._inertia_invariant_checked = True
-
-    def _record_dead_setup_counters() -> None:
-        if function is None:
-            return
-        info = getattr(function, "info", None)
-        if not isinstance(info, MutableMapping):
-            return
-        info["x86_16_dead_setup"] = {
-            "dead_setup_candidates": int(getattr(codegen, "dead_setup_candidates", 0)),
-            "dead_setup_pruned": int(getattr(codegen, "dead_setup_pruned", 0)),
-            "dead_setup_refused": int(getattr(codegen, "dead_setup_refused", 0)),
-        }
-        info["x86_16_loop_exit_guard"] = dict(getattr(codegen, "_inertia_loop_exit_guard_stats_8616", {}))
-
-    def _enforce_dead_setup_gate() -> None:
-        dead_setup_escaped = _count_dead_setup_escaped_8616(codegen)
-        codegen.dead_setup_escaped = int(dead_setup_escaped)
-        if function is not None:
-            info = getattr(function, "info", None)
-            if isinstance(info, MutableMapping):
-                dead_setup_info = info.setdefault("x86_16_dead_setup", {})
-                if isinstance(dead_setup_info, MutableMapping):
-                    dead_setup_info["dead_setup_escaped"] = int(dead_setup_escaped)
-        if dead_setup_escaped <= 0:
-            return
-        raise PipelineHardError(
-            "dead setup artifacts escaped final C",
-            layer="codegen",
-            function_addr=getattr(function, "addr", None),
-            details={
-                "dead_setup_candidates": int(getattr(codegen, "dead_setup_candidates", 0)),
-                "dead_setup_pruned": int(getattr(codegen, "dead_setup_pruned", 0)),
-                "dead_setup_refused": int(getattr(codegen, "dead_setup_refused", 0)),
-                "dead_setup_escaped": int(dead_setup_escaped),
-            },
-        )
-
-    def _run_pipeline_contract_gate() -> None:
-        try:
-            assert_pipeline_contracts_8616(codegen)
-        except Exception as ex:
-            stack_lane = getattr(codegen, "_inertia_stack_lane", None)
-            cond_lane = getattr(codegen, "_inertia_condition_lane", None)
-            logging.getLogger(__name__).warning(
-                "Pipeline contract gate failed at function=%#x stage=invariant-gate: %s "
-                "stack_lane=%s condition_lane=%s",
-                getattr(function, "addr", -1) or -1,
-                ex,
-                stack_lane.summary_line()
-                if stack_lane is not None and hasattr(stack_lane, "summary_line")
-                else stack_lane,
-                cond_lane.summary_line() if cond_lane is not None and hasattr(cond_lane, "summary_line") else cond_lane,
-            )
-            raise
-
-    def _log_rewrite_gate_result(report: StructuredAstValue) -> None:
-        log = logging.getLogger(__name__)
-        if report.rewrite_blocked:
-            codegen._inertia_rewrite_failed = True
-            codegen._inertia_rewrite_failure_pass = "invariant_gate"
-            codegen._inertia_rewrite_failure_error = report.skip_reason
-            formatted = format_invariant_report_8616(report)
-            log.warning(
-                "Pre-rewrite invariant gate BLOCKED rewrite for %#x (%s): %s",
-                getattr(function, "addr", 0),
-                getattr(function, "name", "?"),
-                report.skip_reason,
-            )
-            log.warning("Invariant report:\n%s", formatted)
-            return
-        log.debug(
-            "Pre-rewrite invariant gate passed for %#x (%s)",
-            getattr(function, "addr", 0),
-            getattr(function, "name", "?"),
-        )
-
-    _transfer_alias_facts_once()
-    _materialize_stack_facts_once()
-    _transfer_typed_conditions_once()
+    _gate_transfer_alias_facts_once_8616(project, codegen)
+    _gate_materialize_stack_facts_once_8616(codegen)
+    _gate_transfer_typed_conditions_once_8616(project, codegen)
 
     # Repair statements wrapper before invariant check (last pass may have corrupted it)
     _repair_cfunc_statements_wrapper(codegen)
@@ -15323,359 +16814,756 @@ def _inertia_run_pre_rewrite_invariant_gate(
 
     report = validate_before_rewrite_8616(codegen, c_text=c_text, project=project)
 
-    _record_invariant_report(report)
-    _record_dead_setup_counters()
-    _enforce_dead_setup_gate()
-    _run_pipeline_contract_gate()
-    _log_rewrite_gate_result(report)
+    _record_invariant_report_8616(codegen, function, report)
+    _record_dead_setup_counters_8616(codegen, function)
+    _enforce_dead_setup_gate_8616(codegen, function)
+    _run_pipeline_contract_gate_8616(codegen, function)
+    _log_rewrite_gate_result_8616(codegen, function, report)
 
+
+
+def _debug_decompile_validation_entry_8616(self: StructuredAstValue, func_addr: StructuredAstValue) -> None:
+    """Emit the validation-path entry diagnostic."""
+    import sys as _tv_sys3
+
+    _tv_sys3.stderr.write(f"[dbg] _decompile_8616 ENTER validation path: addr={func_addr} id={id(self.codegen)}\n")
+    _tv_sys3.stderr.flush()
+
+
+def _debug_decompile_done_8616(self: StructuredAstValue, func_addr: StructuredAstValue) -> None:
+    """Emit the validation-path completion diagnostic."""
+    import sys as _tv_sys4
+
+    tv_snap = getattr(self.codegen, "_inertia_tail_validation_snapshot", None)
+    tv_stages = list(tv_snap) if isinstance(tv_snap, dict) else "NONE"
+    project_tv_snap = getattr(self.project, "_inertia_last_tail_validation_snapshot", None)
+    project_tv_stages = list(project_tv_snap) if isinstance(project_tv_snap, dict) else "NONE"
+    _tv_sys4.stderr.write(
+        f"[dbg] _decompile_8616 DONE: addr={func_addr} codegen_id={id(self.codegen)} "
+        f"snapshot_stages={tv_stages} proj_fb_stages={project_tv_stages}\n"
+    )
+    _tv_sys4.stderr.flush()
+
+
+def _run_decompile_core_8616(self: StructuredAstValue) -> float:
+    """Run the original core decompile under profiling and span instrumentation."""
+    _orig_decompiler_decompile = getattr(_decompile_8616, "_orig_decompiler_decompile", None)
+    if _orig_decompiler_decompile is None:
+        _orig_decompiler_decompile = Decompiler._decompile
+        cast(Any, _decompile_8616)._orig_decompiler_decompile = _orig_decompiler_decompile
+    core_started = time.perf_counter()
+    self.project._inertia_decompiler_stage = "core"
+    core_profile_path = os.environ.get("INERTIA_CORE_CPROFILE_PATH", "").strip()
+    core_profiler: cProfile.Profile | None = cProfile.Profile() if core_profile_path else None
+    if core_profiler is not None:
+        core_profiler.enable()
+    try:
+        with span(
+            "x86_16.decompile.core",
+            function=getattr(getattr(self, "function", None) or getattr(self, "func", None), "addr", None),
+        ):
+            _orig_decompiler_decompile(self)
+    finally:
+        if core_profiler is not None:
+            core_profiler.disable()
+            core_profiler.dump_stats(core_profile_path)
+    core_elapsed = time.perf_counter() - core_started
+    return core_elapsed
+
+
+def _debug_decompile_entry_8616(
+    self: StructuredAstValue,
+    func_addr: StructuredAstValue,
+    func_name: StructuredAstValue,
+    tv_enabled: bool,
+) -> None:
+    """Emit the env-gated entry diagnostic for the validation path."""
+    if not os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
+        return
+    import sys as _tv_sys
+
+    _tv_sys.stderr.write(
+        f"[dbg] _decompile_8616: addr={func_addr} name={func_name} "
+        f"codegen_is_none={self.codegen is None} tv_enabled={tv_enabled}\n"
+    )
+    _tv_sys.stderr.flush()
+
+
+def _debug_prevalidation_pointer_surface_8616(self: StructuredAstValue, label: str) -> None:
+    """Log pointer expressions while postprocess validation is prepared."""
+    if os.environ.get("INERTIA_DEBUG_POINTER_MEMORY_IDIOMS") != "1":
+        return
+    try:
+        pointer_text = str(self.codegen.cfunc.c_repr())
+    except (AttributeError, TypeError):
+        return
+    logging.getLogger(__name__).warning(
+        "[pointer-memory-prevalidation-surface] label=%s lines=%r",
+        label,
+        tuple(line.strip() for line in pointer_text.splitlines() if "[0]" in line or "SEG_U16" in line),
+    )
+
+
+def _run_no_tv_postprocess_path_8616(self: StructuredAstValue, core_elapsed: float) -> None:
+    """Run the postprocess-only path when tail validation is disabled."""
+    postprocess_started = time.perf_counter()
+    changed = _postprocess_codegen_8616(self.project, self.codegen)
+    postprocess_elapsed = time.perf_counter() - postprocess_started
+    function = getattr(self, "function", None) or getattr(self, "func", None)
+    if function is not None:
+        info = getattr(function, "info", None)
+        if isinstance(info, MutableMapping):
+            postprocess_info = info.setdefault("x86_16_decompiler_postprocess", {})
+            postprocess_info["core_elapsed"] = core_elapsed
+            postprocess_info["elapsed"] = postprocess_elapsed
+            postprocess_info["last_pass"] = getattr(self.codegen, "_inertia_last_postprocess_pass", None)
+            postprocess_info["changed"] = bool(changed)
+            postprocess_info["failed"] = bool(getattr(self.codegen, "_inertia_rewrite_failed", False))
+            postprocess_info["failure_pass"] = getattr(self.codegen, "_inertia_rewrite_failure_pass", None)
+            postprocess_info["failure_error"] = getattr(self.codegen, "_inertia_rewrite_failure_error", None)
+            postprocess_info["validation_failed"] = bool(
+                getattr(self.codegen, "_inertia_postprocess_validation_failed", False)
+            )
+            postprocess_info["validation_failure_pass"] = getattr(
+                self.codegen, "_inertia_postprocess_validation_failure_pass", None
+            )
+            postprocess_info["validation_failure_error"] = getattr(
+                self.codegen, "_inertia_postprocess_validation_failure_error", None
+            )
+            postprocess_info["pass_names"] = getattr(self.codegen, "_inertia_postprocess_passes", ())
+    self.codegen._inertia_tail_validation_snapshot = None
+    self.project._inertia_decompiler_stage = "postprocess_done"
+
+
+def _run_pre_validation_prime_step_8616(
+    name: str,
+    operation: Callable[[], bool],
+) -> bool:
+    import sys as _tv_sys
+    """Run one semantic priming owner and optionally report its exact cost."""
+    started = time.perf_counter()
+    step_changed = bool(operation())
+    if timing_output_enabled():
+        _tv_sys.stderr.write(
+            f"[dbg] pre-validation prime: {name} "
+            f"changed={step_changed} elapsed={time.perf_counter() - started:.3f}s\n"
+        )
+        _tv_sys.stderr.flush()
+    return step_changed
+
+
+def _measure_pre_validation_value_8616(
+    name: str,
+    operation: Callable[[], StructuredAstValue],
+) -> StructuredAstValue:
+    import sys as _tv_sys
+    """Evaluate one rollback/validation value and optionally report its cost."""
+    started = time.perf_counter()
+    value = operation()
+    if timing_output_enabled():
+        _tv_sys.stderr.write(
+            f"[dbg] pre-validation value: {name} "
+            f"elapsed={time.perf_counter() - started:.3f}s\n"
+        )
+        _tv_sys.stderr.flush()
+    return value
+
+
+def _run_pre_validation_prime_8616(self: StructuredAstValue, func_addr: StructuredAstValue) -> None:
+    """Run every semantic priming owner before the validation baseline."""
+    with span("x86_16.decompile.pre_validation_prime", function=func_addr):
+        _debug_prevalidation_pointer_surface_8616(self, "before-prime")
+        _run_pre_validation_prime_step_8616(
+            "stack_semantics",
+            lambda: _prime_stack_semantics_before_validation_baseline_8616(self.project, self.codegen),
+        )
+        _debug_prevalidation_pointer_surface_8616(self, "after-stack-semantics")
+        _run_pre_validation_prime_step_8616(
+            "stack_prototype",
+            lambda: _prime_stack_prototype_before_validation_baseline_8616(self.project, self.codegen),
+        )
+        _debug_prevalidation_pointer_surface_8616(self, "after-stack-prototype")
+        _run_pre_validation_prime_step_8616(
+            "callsite_summaries",
+            lambda: _prime_callsite_summaries_before_validation_baseline_8616(self.project, self.codegen),
+        )
+        _debug_prevalidation_pointer_surface_8616(self, "after-callsites")
+        _run_pre_validation_prime_step_8616(
+            "return_shape",
+            lambda: _prime_return_shape_before_validation_baseline_8616(self.project, self.codegen),
+        )
+        _debug_prevalidation_pointer_surface_8616(self, "after-return-shape")
+        _run_pre_validation_prime_step_8616(
+            "return_chains",
+            lambda: _prime_return_chains_before_validation_baseline_8616(self.project, self.codegen),
+        )
+        _debug_prevalidation_pointer_surface_8616(self, "after-return-chains")
+        _run_pre_validation_prime_step_8616(
+            "typed_conditions",
+            lambda: _prime_typed_conditions_before_validation_baseline_8616(self.project, self.codegen),
+        )
+        _debug_prevalidation_pointer_surface_8616(self, "after-typed-conditions")
+        _repair_cfunc_statements_wrapper(self.codegen)
+        _debug_prevalidation_pointer_surface_8616(self, "after-wrapper-repair")
+        _run_pre_validation_prime_step_8616(
+            "ir_segmented_load_carriers",
+            lambda: materialize_ir_segmented_load_carriers_8616(self.codegen),
+        )
+        _run_pre_validation_prime_step_8616(
+            "segment_global_lowering",
+            lambda: _replay_segment_global_lowering_before_validation_baseline_8616(
+                self.project,
+                self.codegen,
+            ),
+        )
+        _run_pre_validation_prime_step_8616(
+            "ir_segmented_load_carriers_after_segment_globals",
+            lambda: materialize_ir_segmented_load_carriers_8616(self.codegen),
+        )
+        _debug_prevalidation_pointer_surface_8616(self, "after-segmented-memory-replay")
+        _run_pre_validation_prime_step_8616(
+            "stack_word_loads_final",
+            lambda: lower_stable_ss_linear_stack_dereferences_8616(
+                self.codegen,
+                project=self.project,
+            ),
+        )
+
+
+def _collect_validation_baseline_8616(
+    self: StructuredAstValue,
+    func_addr: StructuredAstValue,
+    validation_mode: str,
+) -> tuple[StructuredAstValue, StructuredAstValue, StructuredAstValue, float]:
+    """Collect the pre-postprocess baseline summaries and restore the snapshot."""
+    baseline_cfunc_snapshot = _measure_pre_validation_value_8616(
+        "baseline_cfunc_snapshot",
+        lambda: _snapshot_codegen_cfunc(self.codegen),
+    )
+    baseline_metadata_snapshot = (
+        _measure_pre_validation_value_8616(
+            "baseline_metadata_snapshot",
+            lambda: _snapshot_codegen_inertia_metadata_8616(self.codegen),
+        )
+        if baseline_cfunc_snapshot is not None
+        else None
+    )
+    baseline_text_snapshot = (
+        _snapshot_codegen_text_state_8616(self.codegen) if baseline_cfunc_snapshot is not None else None
+    )
+    baseline_project_function_snapshot = (
+        _measure_pre_validation_value_8616(
+            "baseline_project_function_snapshot",
+            lambda: _snapshot_project_function_metadata_8616(self.project, func_addr),
+        )
+        if baseline_cfunc_snapshot is not None
+        else None
+    )
+    before_fingerprint_started = time.perf_counter()
+    with span("x86_16.decompile.validation.before_fingerprint", function=func_addr):
+        before_fingerprint = _measure_pre_validation_value_8616(
+            "before_fingerprint",
+            lambda: fingerprint_x86_16_tail_validation_boundary(
+                self.project,
+                self.codegen,
+                mode=validation_mode,
+            ),
+        )
+    before_fingerprint_elapsed = time.perf_counter() - before_fingerprint_started
+    before_collect_started = time.perf_counter()
+    with span("x86_16.decompile.validation.before_summary", function=func_addr):
+        before_summary = _structuring_tail_validation_baseline_summary_8616(
+            self.codegen,
+            mode=validation_mode,
+            before_fingerprint=before_fingerprint,
+        )
+        annotate_current_span(reused_structuring_baseline=before_summary is not None)
+        if before_summary is None:
+            before_summary = _measure_pre_validation_value_8616(
+                "before_summary",
+                lambda: _collect_tail_validation_summary_with_baseline_canonicalization_8616(
+                    self.project,
+                    self.codegen,
+                    mode=validation_mode,
+                    boundary_fingerprint=before_fingerprint,
+                ),
+            )
+    before_collect_elapsed = time.perf_counter() - before_collect_started
+    self.codegen._inertia_postprocess_pre_validation_cost_ms_8616 = round(
+        (before_fingerprint_elapsed + before_collect_elapsed) * 1000.0,
+        3,
+    )
+    if baseline_cfunc_snapshot is not None:
+        _measure_pre_validation_value_8616(
+            "baseline_project_function_restore",
+            lambda: _restore_project_function_metadata_8616(baseline_project_function_snapshot),
+        )
+        _measure_pre_validation_value_8616(
+            "baseline_cfunc_restore",
+            lambda: _restore_codegen_cfunc(self.codegen, baseline_cfunc_snapshot),
+        )
+        _measure_pre_validation_value_8616(
+            "baseline_metadata_restore",
+            lambda: _restore_codegen_inertia_metadata_8616(self.codegen, baseline_metadata_snapshot),
+        )
+        _measure_pre_validation_value_8616(
+            "baseline_text_restore",
+            lambda: _restore_codegen_text_state_8616(self.codegen, baseline_text_snapshot),
+        )
+    _debug_prevalidation_pointer_surface_8616(self, "after-baseline-restore")
+    self.codegen._inertia_postprocess_pre_validation_summary = before_summary
+    materialized_condition_storage_before = capture_materialized_condition_storage_surface_8616(self.codegen)
+    return (
+        before_fingerprint,
+        before_summary,
+        materialized_condition_storage_before,
+        before_collect_elapsed,
+    )
+
+
+def _snapshot_pre_postprocess_state_8616(
+    self: StructuredAstValue,
+    func_addr: StructuredAstValue,
+) -> tuple[StructuredAstValue, StructuredAstValue, StructuredAstValue, StructuredAstValue]:
+    """Snapshot cfunc, metadata, text, and project-function state before postprocess."""
+    # Snapshot pre-postprocess codegen for the semantic gate. In the
+    # validation-enabled path, mutating postprocess is only safe when a
+    # rejected result can be restored.
+    pre_postprocess_cfunc_snapshot = _measure_pre_validation_value_8616(
+        "pre_postprocess_cfunc_snapshot",
+        lambda: _snapshot_codegen_cfunc(self.codegen),
+    )
+    pre_postprocess_metadata_snapshot = (
+        _measure_pre_validation_value_8616(
+            "pre_postprocess_metadata_snapshot",
+            lambda: _snapshot_codegen_inertia_metadata_8616(self.codegen),
+        )
+        if pre_postprocess_cfunc_snapshot is not None
+        else None
+    )
+    pre_postprocess_text_snapshot = (
+        _snapshot_codegen_text_state_8616(self.codegen) if pre_postprocess_cfunc_snapshot is not None else None
+    )
+    pre_postprocess_project_function_snapshot = (
+        _measure_pre_validation_value_8616(
+            "pre_postprocess_project_function_snapshot",
+            lambda: _snapshot_project_function_metadata_8616(self.project, func_addr),
+        )
+        if pre_postprocess_cfunc_snapshot is not None
+        else None
+    )
+    return (
+        pre_postprocess_cfunc_snapshot,
+        pre_postprocess_metadata_snapshot,
+        pre_postprocess_text_snapshot,
+        pre_postprocess_project_function_snapshot,
+    )
+
+
+def _run_postprocess_guarded_8616(
+    self: StructuredAstValue,
+    func_addr: StructuredAstValue,
+    pre_postprocess_cfunc_snapshot: StructuredAstValue,
+    pre_postprocess_metadata_snapshot: StructuredAstValue,
+    pre_postprocess_text_snapshot: StructuredAstValue,
+    pre_postprocess_project_function_snapshot: StructuredAstValue,
+) -> tuple[bool, float, Exception | None]:
+    """Run the mutating postprocess under a snapshot guard and time it."""
+    postprocess_started = time.perf_counter()
+    postprocess_exception: Exception | None = None
+    if pre_postprocess_cfunc_snapshot is None:
+        changed = False
+        self.codegen._inertia_postprocess_skipped_missing_snapshot = True
+        snapshot_error = getattr(self.codegen, "_inertia_postprocess_snapshot_error", None)
+        logging.getLogger(__name__).error(
+            "86_16 validation postprocess skipped for function=%#x: pre-postprocess snapshot unavailable: %s",
+            int(func_addr) if isinstance(func_addr, int) else -1,
+            snapshot_error or "unknown",
+        )
+    else:
+        try:
+            with span("x86_16.decompile.postprocess", function=func_addr):
+                changed = _postprocess_codegen_8616(self.project, self.codegen)
+                annotate_current_span(
+                    changed=bool(changed),
+                    last_pass=getattr(self.codegen, "_inertia_last_postprocess_pass", None),
+                )
+        except Exception as ex:  # pragma: no cover - defensive stage-finalization path
+            postprocess_exception = ex
+            changed = False
+            logging.getLogger(__name__).warning(
+                "86_16 postprocess pipeline raised; restoring pre-postprocess snapshot for function=%#x: %s",
+                int(func_addr) if isinstance(func_addr, int) else -1,
+                ex,
+                exc_info=True,
+            )
+            with contextlib.suppress(Exception):
+                _restore_project_function_metadata_8616(pre_postprocess_project_function_snapshot)
+                _restore_codegen_cfunc(self.codegen, pre_postprocess_cfunc_snapshot)
+                _restore_codegen_inertia_metadata_8616(self.codegen, pre_postprocess_metadata_snapshot)
+                _restore_codegen_text_state_8616(self.codegen, pre_postprocess_text_snapshot)
+            self.codegen._inertia_postprocess_exception = repr(ex)
+            self.codegen._inertia_postprocess_exception_pass = getattr(self.codegen, "_inertia_last_postprocess_pass", None)
+    postprocess_elapsed = time.perf_counter() - postprocess_started
+    return changed, postprocess_elapsed, postprocess_exception
+
+
+def _reconcile_condition_storage_integrity_8616(
+    self: StructuredAstValue,
+    materialized_condition_storage_before: StructuredAstValue,
+    changed: bool,
+    pre_postprocess_cfunc_snapshot: StructuredAstValue,
+    pre_postprocess_metadata_snapshot: StructuredAstValue,
+    pre_postprocess_text_snapshot: StructuredAstValue,
+    pre_postprocess_project_function_snapshot: StructuredAstValue,
+) -> bool:
+    """Compare condition-storage surfaces and roll back a drifting postprocess."""
+    materialized_condition_storage_after = capture_materialized_condition_storage_surface_8616(self.codegen)
+    materialized_condition_storage_integrity = compare_materialized_condition_storage_surfaces_8616(
+        materialized_condition_storage_before,
+        materialized_condition_storage_after,
+    )
+    if materialized_condition_storage_integrity.drifted:
+        changed = False
+    if not changed and pre_postprocess_cfunc_snapshot is not None:
+        _restore_project_function_metadata_8616(pre_postprocess_project_function_snapshot)
+        _restore_codegen_cfunc(self.codegen, pre_postprocess_cfunc_snapshot)
+        _restore_codegen_inertia_metadata_8616(self.codegen, pre_postprocess_metadata_snapshot)
+        _restore_codegen_text_state_8616(self.codegen, pre_postprocess_text_snapshot)
+    record_materialized_condition_storage_failure_8616(
+        self.codegen,
+        materialized_condition_storage_integrity,
+    )
+    return changed
+
+
+def _resolve_stage_function_8616(self: StructuredAstValue) -> StructuredAstValue:
+    """Resolve the angr Function for this decompile, falling back to the CFG."""
+    function = getattr(self, "function", None) or getattr(self, "func", None)
+    if function is None and getattr(getattr(self, "codegen", None), "cfunc", None) is not None:
+        addr = getattr(self.codegen.cfunc, "addr", None)
+        kb_functions = getattr(getattr(self, "project", None), "kb", None)
+        kb_functions = getattr(kb_functions, "functions", None)
+        if isinstance(addr, int) and kb_functions is not None:
+            with contextlib.suppress(Exception):
+                function = kb_functions.function(addr, create=False)
+    return function
+
+
+def _collect_after_validation_summary_8616(
+    self: StructuredAstValue,
+    func_addr: StructuredAstValue,
+    validation_mode: str,
+    changed: bool,
+    pre_postprocess_cfunc_snapshot: StructuredAstValue,
+    before_fingerprint: StructuredAstValue,
+    before_summary: StructuredAstValue,
+) -> tuple[StructuredAstValue, StructuredAstValue, float]:
+    """Collect the post boundary summary, reusing the baseline on identity restore."""
+    if not changed and pre_postprocess_cfunc_snapshot is not None:
+        with span("x86_16.decompile.validation.after_fingerprint", function=func_addr, identity_restore=True):
+            after_fingerprint = before_fingerprint
+        after_collect_started = time.perf_counter()
+        with span("x86_16.decompile.validation.after_summary", function=func_addr, identity_restore=True):
+            after_summary = before_summary
+        after_collect_elapsed = time.perf_counter() - after_collect_started
+    else:
+        with span("x86_16.decompile.validation.after_fingerprint", function=func_addr):
+            after_fingerprint = fingerprint_x86_16_tail_validation_boundary(
+                self.project,
+                self.codegen,
+                mode=validation_mode,
+            )
+        after_collect_started = time.perf_counter()
+        with span("x86_16.decompile.validation.after_summary", function=func_addr):
+            after_summary = _collect_tail_validation_summary_with_baseline_canonicalization_8616(
+                self.project,
+                self.codegen,
+                mode=validation_mode,
+                boundary_fingerprint=after_fingerprint,
+            )
+        after_collect_elapsed = time.perf_counter() - after_collect_started
+    return after_fingerprint, after_summary, after_collect_elapsed
+
+
+def _build_postprocess_validation_8616(
+    self: StructuredAstValue,
+    function: StructuredAstValue,
+    func_addr: StructuredAstValue,
+    validation_mode: str,
+    before_fingerprint: StructuredAstValue,
+    after_fingerprint: StructuredAstValue,
+    before_summary: StructuredAstValue,
+    after_summary: StructuredAstValue,
+    postprocess_exception: StructuredAstValue,
+    before_collect_elapsed: float,
+    after_collect_elapsed: float,
+) -> tuple[dict, dict, int, bool]:
+    """Build the cached postprocess validation result with forced-failure marks."""
+    owner = getattr(function, "info", None) if function is not None else None
+    validation_started = time.perf_counter()
+    with span("x86_16.decompile.validation.compare", function=func_addr):
+        validation = build_x86_16_tail_validation_cached_result(
+            owner=owner if isinstance(owner, MutableMapping) else None,
+            stage="postprocess",
+            mode=validation_mode,
+            before_fingerprint=before_fingerprint,
+            after_fingerprint=after_fingerprint,
+            before_summary=before_summary,
+            after_summary=after_summary,
+        )
+    if postprocess_exception is not None:
+        validation["changed"] = True
+        validation["status"] = "changed"
+        validation["summary_text"] = f"postprocess exception: {type(postprocess_exception).__name__}"
+    callsite_stats = getattr(self.codegen, "_inertia_callsite_materialization_stats", None)
+    callsite_mismatch_count = int(getattr(callsite_stats, "known_prototype_arg_mismatch_count", 0) or 0)
+    if callsite_mismatch_count > 0:
+        validation["changed"] = True
+        validation["status"] = "changed"
+        validation["summary_text"] = (
+            f"callsite materialization failed: known prototype argument mismatch count={callsite_mismatch_count}"
+        )
+    postprocess_validation_failed = bool(getattr(self.codegen, "_inertia_postprocess_validation_failed", False))
+    if postprocess_validation_failed:
+        _mark_destructive_postprocess_validation_failure_8616(
+            self.project,
+            self.codegen,
+            validation,
+            pass_name=getattr(self.codegen, "_inertia_postprocess_validation_failure_pass", None),
+            summary_text=getattr(self.codegen, "_inertia_postprocess_validation_failure_error", None),
+        )
+    validation_compare_elapsed = time.perf_counter() - validation_started
+    validation_timings = {
+        "collect_before_ms": round(before_collect_elapsed * 1000.0, 3),
+        "collect_after_ms": round(after_collect_elapsed * 1000.0, 3),
+        "compare_ms": round(validation_compare_elapsed * 1000.0, 3),
+        "total_ms": round(
+            (before_collect_elapsed + after_collect_elapsed + validation_compare_elapsed) * 1000.0, 3
+        ),
+    }
+    validation["timings"] = validation_timings
+    validation["verdict"] = build_x86_16_tail_validation_verdict("postprocess", validation)
+    return validation, validation_timings, callsite_mismatch_count, postprocess_validation_failed
+
+
+def _debug_decompile_summaries_8616(
+    before_summary: StructuredAstValue,
+    after_summary: StructuredAstValue,
+) -> None:
+    """Emit the env-gated before/after summary diagnostic."""
+    if not os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
+        return
+    import sys as _tv_sys4
+
+    _tv_sys4.stderr.write(
+        "[dbg] _decompile_8616 summaries: "
+        f"before_conditions={_boundary_tuple_8616(getattr(before_summary, 'conditions', ()) or ())!r} "
+        f"after_conditions={_boundary_tuple_8616(getattr(after_summary, 'conditions', ()) or ())!r} "
+        f"before_control={_boundary_tuple_8616(getattr(before_summary, 'control_flow_effects', ()) or ())!r} "
+        f"after_control={_boundary_tuple_8616(getattr(after_summary, 'control_flow_effects', ()) or ())!r}\n"
+    )
+    _tv_sys4.stderr.flush()
+
+
+def _record_postprocess_run_info_8616(
+    self: StructuredAstValue,
+    function: StructuredAstValue,
+    core_elapsed: float,
+    postprocess_elapsed: float,
+    validation_timings: StructuredAstValue,
+    validation: dict,
+) -> StructuredAstValue:
+    """Record per-function postprocess timings and failure fields; return info owner."""
+    snapshot_function_info = None
+    if function is not None:
+        info = getattr(function, "info", None)
+        if isinstance(info, MutableMapping):
+            snapshot_function_info = info
+            postprocess_info = info.setdefault("x86_16_decompiler_postprocess", {})
+            postprocess_info["core_elapsed"] = core_elapsed
+            postprocess_info["postprocess_elapsed"] = postprocess_elapsed
+            postprocess_info["tail_validation_timings"] = validation_timings
+            postprocess_info["last_pass"] = getattr(self.codegen, "_inertia_last_postprocess_pass", None)
+            postprocess_info["rewrite_failed"] = bool(getattr(self.codegen, "_inertia_rewrite_failed", False))
+            postprocess_info["rewrite_failure_pass"] = getattr(self.codegen, "_inertia_rewrite_failure_pass", None)
+            postprocess_info["rewrite_failure_error"] = getattr(
+                self.codegen, "_inertia_rewrite_failure_error", None
+            )
+            postprocess_info["validation_failed"] = bool(
+                getattr(self.codegen, "_inertia_postprocess_validation_failed", False)
+            )
+            postprocess_info["validation_failure_pass"] = getattr(
+                self.codegen,
+                "_inertia_postprocess_validation_failure_pass",
+                None,
+            )
+            postprocess_info["validation_failure_error"] = getattr(
+                self.codegen,
+                "_inertia_postprocess_validation_failure_error",
+                None,
+            )
+            postprocess_info["regeneration_failed"] = bool(
+                getattr(self.codegen, "_inertia_regeneration_failed", False)
+            )
+            postprocess_info["regeneration_failure_pass"] = getattr(
+                self.codegen,
+                "_inertia_regeneration_last_pass",
+                None,
+            )
+            postprocess_info["regeneration_failure_error"] = getattr(
+                self.codegen,
+                "_inertia_regeneration_error",
+                None,
+            )
+            postprocess_info["pass_names"] = getattr(self.codegen, "_inertia_postprocess_passes", ())
+            postprocess_info["last_stage"] = getattr(self.project, "_inertia_decompiler_stage", None)
+            postprocess_info["tail_validation_verdict"] = validation["verdict"]
+            postprocess_info["tail_validation_cache_hit"] = bool(validation.get("cache_hit", False))
+    return snapshot_function_info
+
+
+def _persist_postprocess_validation_8616(
+    self: StructuredAstValue,
+    snapshot_function_info: StructuredAstValue,
+    validation: dict,
+    func_addr: StructuredAstValue,
+    func_name: StructuredAstValue,
+) -> None:
+    """Persist the validation snapshot and emit the condition-trace diagnostics."""
+    persist_x86_16_tail_validation_snapshot(
+        function_info=snapshot_function_info,
+        codegen=self.codegen,
+        stage="postprocess",
+        validation=validation,
+    )
+    record_tail_validation_condition_trace_8616(self.project, self.codegen, validation)
+    materialized_condition_drift_detected_8616(self.project, self.codegen)
+    dump_condition_trace_8616(self.project, self.codegen, label="postprocess")
+    snapshot = getattr(self.codegen, "_inertia_tail_validation_snapshot", None)
+    if isinstance(snapshot, dict):
+        self.project._inertia_last_tail_validation_snapshot = dict(snapshot)
+    if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
+        import sys as _tv_sys2
+
+        snapshot_stages = list(snapshot) if isinstance(snapshot, dict) else "NONE"
+        _tv_sys2.stderr.write(
+            f"[dbg] _decompile_8616 persist: addr={func_addr} name={func_name} "
+            f"snapshot_stages={snapshot_stages} codegen_id={id(self.codegen)}\n"
+        )
+        _tv_sys2.stderr.flush()
+
+
+def _finalize_failed_postprocess_validation_8616(
+    self: StructuredAstValue,
+    *,
+    validation: dict,
+    log: StructuredAstValue,
+    validation_mode: str,
+    function: StructuredAstValue,
+    snapshot_function_info: StructuredAstValue,
+    before_fingerprint: StructuredAstValue,
+    before_summary: StructuredAstValue,
+    pre_postprocess_cfunc_snapshot: StructuredAstValue,
+    pre_postprocess_metadata_snapshot: StructuredAstValue,
+    validation_timings: StructuredAstValue,
+    func_addr: StructuredAstValue,
+    postprocess_exception: StructuredAstValue,
+    callsite_mismatch_count: int,
+    postprocess_validation_failed: bool,
+) -> bool:
+    """Handle a failed postprocess validation; return True when the caller must return."""
+    _postprocess_ctx = {
+        "validation_mode": validation_mode,
+        "function": function,
+        "snapshot_function_info": snapshot_function_info,
+        "before_fingerprint": before_fingerprint,
+        "before_summary": before_summary,
+        "pre_postprocess_cfunc_snapshot": pre_postprocess_cfunc_snapshot,
+        "pre_postprocess_metadata_snapshot": pre_postprocess_metadata_snapshot,
+        "validation_timings": validation_timings,
+        "func_addr": func_addr,
+        "postprocess_exception": postprocess_exception,
+        "callsite_mismatch_count": callsite_mismatch_count,
+    }
+    if postprocess_exception is not None or callsite_mismatch_count > 0 or postprocess_validation_failed:
+        self.codegen._inertia_postprocess_validation_failed = True
+        if not postprocess_validation_failed:
+            self.codegen._inertia_postprocess_validation_failure_pass = getattr(
+                self.codegen,
+                "_inertia_last_postprocess_pass",
+                None,
+            )
+            self.codegen._inertia_postprocess_validation_failure_error = (
+                repr(postprocess_exception)
+                if postprocess_exception is not None
+                else f"known prototype argument mismatch count={callsite_mismatch_count}"
+            )
+        log.error(
+            "Postprocess validation failed due to final invariant; refusing stable fallback: %s",
+            validation["verdict"],
+        )
+        self.project._inertia_decompiler_stage = "postprocess_failed"
+        return
+    _should_return = _handle_failed_postprocess_validation_8616(
+        self,
+        validation=validation,
+        log=log,
+        context=_postprocess_ctx,
+    )
+    return _should_return
 
 def _decompile_8616(self: StructuredAstValue) -> None:
     """Run the x86-16 core, structuring, postprocess, and validation pipeline."""
 
     def _impl() -> None:
-        _orig_decompiler_decompile = getattr(_decompile_8616, "_orig_decompiler_decompile", None)
-        if _orig_decompiler_decompile is None:
-            _orig_decompiler_decompile = Decompiler._decompile
-            cast(Any, _decompile_8616)._orig_decompiler_decompile = _orig_decompiler_decompile
-        core_started = time.perf_counter()
-        self.project._inertia_decompiler_stage = "core"
-        core_profile_path = os.environ.get("INERTIA_CORE_CPROFILE_PATH", "").strip()
-        core_profiler: cProfile.Profile | None = cProfile.Profile() if core_profile_path else None
-        if core_profiler is not None:
-            core_profiler.enable()
-        try:
-            with span(
-                "x86_16.decompile.core",
-                function=getattr(getattr(self, "function", None) or getattr(self, "func", None), "addr", None),
-            ):
-                _orig_decompiler_decompile(self)
-        finally:
-            if core_profiler is not None:
-                core_profiler.disable()
-                core_profiler.dump_stats(core_profile_path)
-        core_elapsed = time.perf_counter() - core_started
+        core_elapsed = _run_decompile_core_8616(self)
         cfunc = getattr(self.codegen, "cfunc", None)
         func_addr = getattr(cfunc, "addr", None) if cfunc is not None else None
         func_name = getattr(cfunc, "name", None) if cfunc is not None else None
         tv_enabled = bool(getattr(self.project, "_inertia_tail_validation_enabled", True))
-        if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
-            import sys as _tv_sys
-
-            _tv_sys.stderr.write(
-                f"[dbg] _decompile_8616: addr={func_addr} name={func_name} "
-                f"codegen_is_none={self.codegen is None} tv_enabled={tv_enabled}\n"
-            )
-            _tv_sys.stderr.flush()
+        _debug_decompile_entry_8616(self, func_addr, func_name, tv_enabled)
         if self.project.arch.name != "86_16" or self.codegen is None:
             return
         stage_function = getattr(self, "function", None) or getattr(self, "func", None)
         if stage_function is not None:
             self.codegen._inertia_current_function_8616 = stage_function
-
-        def _debug_prevalidation_pointer_surface_8616(label: str) -> None:
-            """Log pointer expressions while postprocess validation is prepared."""
-            if os.environ.get("INERTIA_DEBUG_POINTER_MEMORY_IDIOMS") != "1":
-                return
-            try:
-                pointer_text = str(self.codegen.cfunc.c_repr())
-            except (AttributeError, TypeError):
-                return
-            logging.getLogger(__name__).warning(
-                "[pointer-memory-prevalidation-surface] label=%s lines=%r",
-                label,
-                tuple(line.strip() for line in pointer_text.splitlines() if "[0]" in line or "SEG_U16" in line),
-            )
-
-        def _run_no_tv_path() -> StructuredAstValue:
-            postprocess_started = time.perf_counter()
-            changed = _postprocess_codegen_8616(self.project, self.codegen)
-            postprocess_elapsed = time.perf_counter() - postprocess_started
-            function = getattr(self, "function", None) or getattr(self, "func", None)
-            if function is not None:
-                info = getattr(function, "info", None)
-                if isinstance(info, MutableMapping):
-                    postprocess_info = info.setdefault("x86_16_decompiler_postprocess", {})
-                    postprocess_info["core_elapsed"] = core_elapsed
-                    postprocess_info["elapsed"] = postprocess_elapsed
-                    postprocess_info["last_pass"] = getattr(self.codegen, "_inertia_last_postprocess_pass", None)
-                    postprocess_info["changed"] = bool(changed)
-                    postprocess_info["failed"] = bool(getattr(self.codegen, "_inertia_rewrite_failed", False))
-                    postprocess_info["failure_pass"] = getattr(self.codegen, "_inertia_rewrite_failure_pass", None)
-                    postprocess_info["failure_error"] = getattr(self.codegen, "_inertia_rewrite_failure_error", None)
-                    postprocess_info["validation_failed"] = bool(
-                        getattr(self.codegen, "_inertia_postprocess_validation_failed", False)
-                    )
-                    postprocess_info["validation_failure_pass"] = getattr(
-                        self.codegen, "_inertia_postprocess_validation_failure_pass", None
-                    )
-                    postprocess_info["validation_failure_error"] = getattr(
-                        self.codegen, "_inertia_postprocess_validation_failure_error", None
-                    )
-                    postprocess_info["pass_names"] = getattr(self.codegen, "_inertia_postprocess_passes", ())
-            self.codegen._inertia_tail_validation_snapshot = None
-            self.project._inertia_decompiler_stage = "postprocess_done"
-
         if not tv_enabled:
-            _run_no_tv_path()
+            _run_no_tv_postprocess_path_8616(self, core_elapsed)
             return
-
         validation_mode = "live_out"
-        import sys as _tv_sys3
-
-        _tv_sys3.stderr.write(f"[dbg] _decompile_8616 ENTER validation path: addr={func_addr} id={id(self.codegen)}\n")
-        _tv_sys3.stderr.flush()
-
-        def _run_pre_validation_prime_step_8616(
-            name: str,
-            operation: Callable[[], bool],
-        ) -> bool:
-            """Run one semantic priming owner and optionally report its exact cost."""
-            started = time.perf_counter()
-            step_changed = bool(operation())
-            if timing_output_enabled():
-                _tv_sys3.stderr.write(
-                    f"[dbg] pre-validation prime: {name} "
-                    f"changed={step_changed} elapsed={time.perf_counter() - started:.3f}s\n"
-                )
-                _tv_sys3.stderr.flush()
-            return step_changed
-
-        def _measure_pre_validation_value_8616(
-            name: str,
-            operation: Callable[[], StructuredAstValue],
-        ) -> StructuredAstValue:
-            """Evaluate one rollback/validation value and optionally report its cost."""
-            started = time.perf_counter()
-            value = operation()
-            if timing_output_enabled():
-                _tv_sys3.stderr.write(
-                    f"[dbg] pre-validation value: {name} "
-                    f"elapsed={time.perf_counter() - started:.3f}s\n"
-                )
-                _tv_sys3.stderr.flush()
-            return value
-
-        with span("x86_16.decompile.pre_validation_prime", function=func_addr):
-            _debug_prevalidation_pointer_surface_8616("before-prime")
-            _run_pre_validation_prime_step_8616(
-                "stack_semantics",
-                lambda: _prime_stack_semantics_before_validation_baseline_8616(self.project, self.codegen),
-            )
-            _debug_prevalidation_pointer_surface_8616("after-stack-semantics")
-            _run_pre_validation_prime_step_8616(
-                "stack_prototype",
-                lambda: _prime_stack_prototype_before_validation_baseline_8616(self.project, self.codegen),
-            )
-            _debug_prevalidation_pointer_surface_8616("after-stack-prototype")
-            _run_pre_validation_prime_step_8616(
-                "callsite_summaries",
-                lambda: _prime_callsite_summaries_before_validation_baseline_8616(self.project, self.codegen),
-            )
-            _debug_prevalidation_pointer_surface_8616("after-callsites")
-            _run_pre_validation_prime_step_8616(
-                "return_shape",
-                lambda: _prime_return_shape_before_validation_baseline_8616(self.project, self.codegen),
-            )
-            _debug_prevalidation_pointer_surface_8616("after-return-shape")
-            _run_pre_validation_prime_step_8616(
-                "return_chains",
-                lambda: _prime_return_chains_before_validation_baseline_8616(self.project, self.codegen),
-            )
-            _debug_prevalidation_pointer_surface_8616("after-return-chains")
-            _run_pre_validation_prime_step_8616(
-                "typed_conditions",
-                lambda: _prime_typed_conditions_before_validation_baseline_8616(self.project, self.codegen),
-            )
-            _debug_prevalidation_pointer_surface_8616("after-typed-conditions")
-            _repair_cfunc_statements_wrapper(self.codegen)
-            _debug_prevalidation_pointer_surface_8616("after-wrapper-repair")
-            _run_pre_validation_prime_step_8616(
-                "ir_segmented_load_carriers",
-                lambda: materialize_ir_segmented_load_carriers_8616(self.codegen),
-            )
-            _run_pre_validation_prime_step_8616(
-                "segment_global_lowering",
-                lambda: _replay_segment_global_lowering_before_validation_baseline_8616(
-                    self.project,
-                    self.codegen,
-                ),
-            )
-            _run_pre_validation_prime_step_8616(
-                "ir_segmented_load_carriers_after_segment_globals",
-                lambda: materialize_ir_segmented_load_carriers_8616(self.codegen),
-            )
-            _debug_prevalidation_pointer_surface_8616("after-segmented-memory-replay")
-            _run_pre_validation_prime_step_8616(
-                "stack_word_loads_final",
-                lambda: lower_stable_ss_linear_stack_dereferences_8616(
-                    self.codegen,
-                    project=self.project,
-                ),
-            )
-        baseline_cfunc_snapshot = _measure_pre_validation_value_8616(
-            "baseline_cfunc_snapshot",
-            lambda: _snapshot_codegen_cfunc(self.codegen),
-        )
-        baseline_metadata_snapshot = (
-            _measure_pre_validation_value_8616(
-                "baseline_metadata_snapshot",
-                lambda: _snapshot_codegen_inertia_metadata_8616(self.codegen),
-            )
-            if baseline_cfunc_snapshot is not None
-            else None
-        )
-        baseline_text_snapshot = (
-            _snapshot_codegen_text_state_8616(self.codegen) if baseline_cfunc_snapshot is not None else None
-        )
-        baseline_project_function_snapshot = (
-            _measure_pre_validation_value_8616(
-                "baseline_project_function_snapshot",
-                lambda: _snapshot_project_function_metadata_8616(self.project, func_addr),
-            )
-            if baseline_cfunc_snapshot is not None
-            else None
-        )
-        before_fingerprint_started = time.perf_counter()
-        with span("x86_16.decompile.validation.before_fingerprint", function=func_addr):
-            before_fingerprint = _measure_pre_validation_value_8616(
-                "before_fingerprint",
-                lambda: fingerprint_x86_16_tail_validation_boundary(
-                    self.project,
-                    self.codegen,
-                    mode=validation_mode,
-                ),
-            )
-        before_fingerprint_elapsed = time.perf_counter() - before_fingerprint_started
-        before_collect_started = time.perf_counter()
-        with span("x86_16.decompile.validation.before_summary", function=func_addr):
-            before_summary = _structuring_tail_validation_baseline_summary_8616(
-                self.codegen,
-                mode=validation_mode,
-                before_fingerprint=before_fingerprint,
-            )
-            annotate_current_span(reused_structuring_baseline=before_summary is not None)
-            if before_summary is None:
-                before_summary = _measure_pre_validation_value_8616(
-                    "before_summary",
-                    lambda: _collect_tail_validation_summary_with_baseline_canonicalization_8616(
-                        self.project,
-                        self.codegen,
-                        mode=validation_mode,
-                        boundary_fingerprint=before_fingerprint,
-                    ),
-                )
-        before_collect_elapsed = time.perf_counter() - before_collect_started
-        self.codegen._inertia_postprocess_pre_validation_cost_ms_8616 = round(
-            (before_fingerprint_elapsed + before_collect_elapsed) * 1000.0,
-            3,
-        )
-        if baseline_cfunc_snapshot is not None:
-            _measure_pre_validation_value_8616(
-                "baseline_project_function_restore",
-                lambda: _restore_project_function_metadata_8616(baseline_project_function_snapshot),
-            )
-            _measure_pre_validation_value_8616(
-                "baseline_cfunc_restore",
-                lambda: _restore_codegen_cfunc(self.codegen, baseline_cfunc_snapshot),
-            )
-            _measure_pre_validation_value_8616(
-                "baseline_metadata_restore",
-                lambda: _restore_codegen_inertia_metadata_8616(self.codegen, baseline_metadata_snapshot),
-            )
-            _measure_pre_validation_value_8616(
-                "baseline_text_restore",
-                lambda: _restore_codegen_text_state_8616(self.codegen, baseline_text_snapshot),
-            )
-        _debug_prevalidation_pointer_surface_8616("after-baseline-restore")
-        self.codegen._inertia_postprocess_pre_validation_summary = before_summary
-        materialized_condition_storage_before = capture_materialized_condition_storage_surface_8616(self.codegen)
-        # Snapshot pre-postprocess codegen for the semantic gate. In the
-        # validation-enabled path, mutating postprocess is only safe when a
-        # rejected result can be restored.
-        pre_postprocess_cfunc_snapshot = _measure_pre_validation_value_8616(
-            "pre_postprocess_cfunc_snapshot",
-            lambda: _snapshot_codegen_cfunc(self.codegen),
-        )
-        pre_postprocess_metadata_snapshot = (
-            _measure_pre_validation_value_8616(
-                "pre_postprocess_metadata_snapshot",
-                lambda: _snapshot_codegen_inertia_metadata_8616(self.codegen),
-            )
-            if pre_postprocess_cfunc_snapshot is not None
-            else None
-        )
-        pre_postprocess_text_snapshot = (
-            _snapshot_codegen_text_state_8616(self.codegen) if pre_postprocess_cfunc_snapshot is not None else None
-        )
-        pre_postprocess_project_function_snapshot = (
-            _measure_pre_validation_value_8616(
-                "pre_postprocess_project_function_snapshot",
-                lambda: _snapshot_project_function_metadata_8616(self.project, func_addr),
-            )
-            if pre_postprocess_cfunc_snapshot is not None
-            else None
-        )
-        postprocess_started = time.perf_counter()
-        postprocess_exception: Exception | None = None
-        if pre_postprocess_cfunc_snapshot is None:
-            changed = False
-            self.codegen._inertia_postprocess_skipped_missing_snapshot = True
-            snapshot_error = getattr(self.codegen, "_inertia_postprocess_snapshot_error", None)
-            logging.getLogger(__name__).error(
-                "86_16 validation postprocess skipped for function=%#x: pre-postprocess snapshot unavailable: %s",
-                int(func_addr) if isinstance(func_addr, int) else -1,
-                snapshot_error or "unknown",
-            )
-        else:
-            try:
-                with span("x86_16.decompile.postprocess", function=func_addr):
-                    changed = _postprocess_codegen_8616(self.project, self.codegen)
-                    annotate_current_span(
-                        changed=bool(changed),
-                        last_pass=getattr(self.codegen, "_inertia_last_postprocess_pass", None),
-                    )
-            except Exception as ex:  # pragma: no cover - defensive stage-finalization path
-                postprocess_exception = ex
-                changed = False
-                logging.getLogger(__name__).warning(
-                    "86_16 postprocess pipeline raised; restoring pre-postprocess snapshot for function=%#x: %s",
-                    int(func_addr) if isinstance(func_addr, int) else -1,
-                    ex,
-                    exc_info=True,
-                )
-                with contextlib.suppress(Exception):
-                    _restore_project_function_metadata_8616(pre_postprocess_project_function_snapshot)
-                    _restore_codegen_cfunc(self.codegen, pre_postprocess_cfunc_snapshot)
-                    _restore_codegen_inertia_metadata_8616(self.codegen, pre_postprocess_metadata_snapshot)
-                    _restore_codegen_text_state_8616(self.codegen, pre_postprocess_text_snapshot)
-                self.codegen._inertia_postprocess_exception = repr(ex)
-                self.codegen._inertia_postprocess_exception_pass = getattr(self.codegen, "_inertia_last_postprocess_pass", None)
-        postprocess_elapsed = time.perf_counter() - postprocess_started
-        materialized_condition_storage_after = capture_materialized_condition_storage_surface_8616(self.codegen)
-        materialized_condition_storage_integrity = compare_materialized_condition_storage_surfaces_8616(
+        _debug_decompile_validation_entry_8616(self, func_addr)
+        _run_pre_validation_prime_8616(self, func_addr)
+        (
+            before_fingerprint,
+            before_summary,
             materialized_condition_storage_before,
-            materialized_condition_storage_after,
+            before_collect_elapsed,
+        ) = _collect_validation_baseline_8616(self, func_addr, validation_mode)
+        (
+            pre_postprocess_cfunc_snapshot,
+            pre_postprocess_metadata_snapshot,
+            pre_postprocess_text_snapshot,
+            pre_postprocess_project_function_snapshot,
+        ) = _snapshot_pre_postprocess_state_8616(self, func_addr)
+        changed, postprocess_elapsed, postprocess_exception = _run_postprocess_guarded_8616(
+            self,
+            func_addr,
+            pre_postprocess_cfunc_snapshot,
+            pre_postprocess_metadata_snapshot,
+            pre_postprocess_text_snapshot,
+            pre_postprocess_project_function_snapshot,
         )
-        if materialized_condition_storage_integrity.drifted:
-            changed = False
-        if not changed and pre_postprocess_cfunc_snapshot is not None:
-            _restore_project_function_metadata_8616(pre_postprocess_project_function_snapshot)
-            _restore_codegen_cfunc(self.codegen, pre_postprocess_cfunc_snapshot)
-            _restore_codegen_inertia_metadata_8616(self.codegen, pre_postprocess_metadata_snapshot)
-            _restore_codegen_text_state_8616(self.codegen, pre_postprocess_text_snapshot)
-        record_materialized_condition_storage_failure_8616(
-            self.codegen,
-            materialized_condition_storage_integrity,
+        changed = _reconcile_condition_storage_integrity_8616(
+            self,
+            materialized_condition_storage_before,
+            changed,
+            pre_postprocess_cfunc_snapshot,
+            pre_postprocess_metadata_snapshot,
+            pre_postprocess_text_snapshot,
+            pre_postprocess_project_function_snapshot,
         )
-        function = getattr(self, "function", None) or getattr(self, "func", None)
-        if function is None and getattr(getattr(self, "codegen", None), "cfunc", None) is not None:
-            addr = getattr(self.codegen.cfunc, "addr", None)
-            kb_functions = getattr(getattr(self, "project", None), "kb", None)
-            kb_functions = getattr(kb_functions, "functions", None)
-            if isinstance(addr, int) and kb_functions is not None:
-                with contextlib.suppress(Exception):
-                    function = kb_functions.function(addr, create=False)
+        function = _resolve_stage_function_8616(self)
         context = f"{getattr(function, 'addr', 'unknown')!r} {getattr(function, 'name', 'unknown')}"
         if changed:
             _regenerate_text_safely(self.codegen, context=context)
@@ -15692,210 +17580,78 @@ def _decompile_8616(self: StructuredAstValue) -> None:
         }:
             _inertia_run_pre_rewrite_invariant_gate(self.project, self.codegen, function)
         _invalidate_tail_validation_derived_caches_8616(self.codegen)
-        if not changed and pre_postprocess_cfunc_snapshot is not None:
-            with span("x86_16.decompile.validation.after_fingerprint", function=func_addr, identity_restore=True):
-                after_fingerprint = before_fingerprint
-            after_collect_started = time.perf_counter()
-            with span("x86_16.decompile.validation.after_summary", function=func_addr, identity_restore=True):
-                after_summary = before_summary
-            after_collect_elapsed = time.perf_counter() - after_collect_started
-        else:
-            with span("x86_16.decompile.validation.after_fingerprint", function=func_addr):
-                after_fingerprint = fingerprint_x86_16_tail_validation_boundary(
-                    self.project,
-                    self.codegen,
-                    mode=validation_mode,
-                )
-            after_collect_started = time.perf_counter()
-            with span("x86_16.decompile.validation.after_summary", function=func_addr):
-                after_summary = _collect_tail_validation_summary_with_baseline_canonicalization_8616(
-                    self.project,
-                    self.codegen,
-                    mode=validation_mode,
-                    boundary_fingerprint=after_fingerprint,
-                )
-            after_collect_elapsed = time.perf_counter() - after_collect_started
-        owner = getattr(function, "info", None) if function is not None else None
-        validation_started = time.perf_counter()
-        with span("x86_16.decompile.validation.compare", function=func_addr):
-            validation = build_x86_16_tail_validation_cached_result(
-                owner=owner if isinstance(owner, MutableMapping) else None,
-                stage="postprocess",
-                mode=validation_mode,
-                before_fingerprint=before_fingerprint,
-                after_fingerprint=after_fingerprint,
-                before_summary=before_summary,
-                after_summary=after_summary,
-            )
-        if postprocess_exception is not None:
-            validation["changed"] = True
-            validation["status"] = "changed"
-            validation["summary_text"] = f"postprocess exception: {type(postprocess_exception).__name__}"
-        callsite_stats = getattr(self.codegen, "_inertia_callsite_materialization_stats", None)
-        callsite_mismatch_count = int(getattr(callsite_stats, "known_prototype_arg_mismatch_count", 0) or 0)
-        if callsite_mismatch_count > 0:
-            validation["changed"] = True
-            validation["status"] = "changed"
-            validation["summary_text"] = (
-                f"callsite materialization failed: known prototype argument mismatch count={callsite_mismatch_count}"
-            )
-        postprocess_validation_failed = bool(getattr(self.codegen, "_inertia_postprocess_validation_failed", False))
-        if postprocess_validation_failed:
-            _mark_destructive_postprocess_validation_failure_8616(
-                self.project,
-                self.codegen,
-                validation,
-                pass_name=getattr(self.codegen, "_inertia_postprocess_validation_failure_pass", None),
-                summary_text=getattr(self.codegen, "_inertia_postprocess_validation_failure_error", None),
-            )
-        validation_compare_elapsed = time.perf_counter() - validation_started
-        validation_timings = {
-            "collect_before_ms": round(before_collect_elapsed * 1000.0, 3),
-            "collect_after_ms": round(after_collect_elapsed * 1000.0, 3),
-            "compare_ms": round(validation_compare_elapsed * 1000.0, 3),
-            "total_ms": round(
-                (before_collect_elapsed + after_collect_elapsed + validation_compare_elapsed) * 1000.0, 3
-            ),
-        }
-        validation["timings"] = validation_timings
-        validation["verdict"] = build_x86_16_tail_validation_verdict("postprocess", validation)
-        if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
-            import sys as _tv_sys4
-
-            _tv_sys4.stderr.write(
-                "[dbg] _decompile_8616 summaries: "
-                f"before_conditions={_boundary_tuple_8616(getattr(before_summary, 'conditions', ()) or ())!r} "
-                f"after_conditions={_boundary_tuple_8616(getattr(after_summary, 'conditions', ()) or ())!r} "
-                f"before_control={_boundary_tuple_8616(getattr(before_summary, 'control_flow_effects', ()) or ())!r} "
-                f"after_control={_boundary_tuple_8616(getattr(after_summary, 'control_flow_effects', ()) or ())!r}\n"
-            )
-            _tv_sys4.stderr.flush()
-        snapshot_function_info = None
-        if function is not None:
-            info = getattr(function, "info", None)
-            if isinstance(info, MutableMapping):
-                snapshot_function_info = info
-                postprocess_info = info.setdefault("x86_16_decompiler_postprocess", {})
-                postprocess_info["core_elapsed"] = core_elapsed
-                postprocess_info["postprocess_elapsed"] = postprocess_elapsed
-                postprocess_info["tail_validation_timings"] = validation_timings
-                postprocess_info["last_pass"] = getattr(self.codegen, "_inertia_last_postprocess_pass", None)
-                postprocess_info["rewrite_failed"] = bool(getattr(self.codegen, "_inertia_rewrite_failed", False))
-                postprocess_info["rewrite_failure_pass"] = getattr(self.codegen, "_inertia_rewrite_failure_pass", None)
-                postprocess_info["rewrite_failure_error"] = getattr(
-                    self.codegen, "_inertia_rewrite_failure_error", None
-                )
-                postprocess_info["validation_failed"] = bool(
-                    getattr(self.codegen, "_inertia_postprocess_validation_failed", False)
-                )
-                postprocess_info["validation_failure_pass"] = getattr(
-                    self.codegen,
-                    "_inertia_postprocess_validation_failure_pass",
-                    None,
-                )
-                postprocess_info["validation_failure_error"] = getattr(
-                    self.codegen,
-                    "_inertia_postprocess_validation_failure_error",
-                    None,
-                )
-                postprocess_info["regeneration_failed"] = bool(
-                    getattr(self.codegen, "_inertia_regeneration_failed", False)
-                )
-                postprocess_info["regeneration_failure_pass"] = getattr(
-                    self.codegen,
-                    "_inertia_regeneration_last_pass",
-                    None,
-                )
-                postprocess_info["regeneration_failure_error"] = getattr(
-                    self.codegen,
-                    "_inertia_regeneration_error",
-                    None,
-                )
-                postprocess_info["pass_names"] = getattr(self.codegen, "_inertia_postprocess_passes", ())
-                postprocess_info["last_stage"] = getattr(self.project, "_inertia_decompiler_stage", None)
-                postprocess_info["tail_validation_verdict"] = validation["verdict"]
-                postprocess_info["tail_validation_cache_hit"] = bool(validation.get("cache_hit", False))
-        persist_x86_16_tail_validation_snapshot(
-            function_info=snapshot_function_info,
-            codegen=self.codegen,
-            stage="postprocess",
-            validation=validation,
+        (
+            after_fingerprint,
+            after_summary,
+            after_collect_elapsed,
+        ) = _collect_after_validation_summary_8616(
+            self,
+            func_addr,
+            validation_mode,
+            changed,
+            pre_postprocess_cfunc_snapshot,
+            before_fingerprint,
+            before_summary,
         )
-        record_tail_validation_condition_trace_8616(self.project, self.codegen, validation)
-        materialized_condition_drift_detected_8616(self.project, self.codegen)
-        dump_condition_trace_8616(self.project, self.codegen, label="postprocess")
-        snapshot = getattr(self.codegen, "_inertia_tail_validation_snapshot", None)
-        if isinstance(snapshot, dict):
-            self.project._inertia_last_tail_validation_snapshot = dict(snapshot)
-        if os.environ.get("INERTIA_DEBUG_TV_POSTPROCESS"):
-            import sys as _tv_sys2
-
-            snapshot_stages = list(snapshot) if isinstance(snapshot, dict) else "NONE"
-            _tv_sys2.stderr.write(
-                f"[dbg] _decompile_8616 persist: addr={func_addr} name={func_name} "
-                f"snapshot_stages={snapshot_stages} codegen_id={id(self.codegen)}\n"
-            )
-            _tv_sys2.stderr.flush()
+        (
+            validation,
+            validation_timings,
+            callsite_mismatch_count,
+            postprocess_validation_failed,
+        ) = _build_postprocess_validation_8616(
+            self,
+            function,
+            func_addr,
+            validation_mode,
+            before_fingerprint,
+            after_fingerprint,
+            before_summary,
+            after_summary,
+            postprocess_exception,
+            before_collect_elapsed,
+            after_collect_elapsed,
+        )
+        _debug_decompile_summaries_8616(before_summary, after_summary)
+        snapshot_function_info = _record_postprocess_run_info_8616(
+            self,
+            function,
+            core_elapsed,
+            postprocess_elapsed,
+            validation_timings,
+            validation,
+        )
+        _persist_postprocess_validation_8616(
+            self,
+            snapshot_function_info,
+            validation,
+            func_addr,
+            func_name,
+        )
         log = logging.getLogger(__name__)
         if not x86_16_tail_validation_result_passed(validation):
-            _postprocess_ctx = {
-                "validation_mode": validation_mode,
-                "function": function,
-                "snapshot_function_info": snapshot_function_info,
-                "before_fingerprint": before_fingerprint,
-                "before_summary": before_summary,
-                "pre_postprocess_cfunc_snapshot": pre_postprocess_cfunc_snapshot,
-                "pre_postprocess_metadata_snapshot": pre_postprocess_metadata_snapshot,
-                "validation_timings": validation_timings,
-                "func_addr": func_addr,
-                "postprocess_exception": postprocess_exception,
-                "callsite_mismatch_count": callsite_mismatch_count,
-            }
-            if postprocess_exception is not None or callsite_mismatch_count > 0 or postprocess_validation_failed:
-                self.codegen._inertia_postprocess_validation_failed = True
-                if not postprocess_validation_failed:
-                    self.codegen._inertia_postprocess_validation_failure_pass = getattr(
-                        self.codegen,
-                        "_inertia_last_postprocess_pass",
-                        None,
-                    )
-                    self.codegen._inertia_postprocess_validation_failure_error = (
-                        repr(postprocess_exception)
-                        if postprocess_exception is not None
-                        else f"known prototype argument mismatch count={callsite_mismatch_count}"
-                    )
-                log.error(
-                    "Postprocess validation failed due to final invariant; refusing stable fallback: %s",
-                    validation["verdict"],
-                )
-                self.project._inertia_decompiler_stage = "postprocess_failed"
-                return
-            _should_return = _handle_failed_postprocess_validation_8616(
+            if _finalize_failed_postprocess_validation_8616(
                 self,
                 validation=validation,
                 log=log,
-                context=_postprocess_ctx,
-            )
-            if _should_return:
+                validation_mode=validation_mode,
+                function=function,
+                snapshot_function_info=snapshot_function_info,
+                before_fingerprint=before_fingerprint,
+                before_summary=before_summary,
+                pre_postprocess_cfunc_snapshot=pre_postprocess_cfunc_snapshot,
+                pre_postprocess_metadata_snapshot=pre_postprocess_metadata_snapshot,
+                validation_timings=validation_timings,
+                func_addr=func_addr,
+                postprocess_exception=postprocess_exception,
+                callsite_mismatch_count=callsite_mismatch_count,
+                postprocess_validation_failed=postprocess_validation_failed,
+            ):
                 return
         else:
             log.info("%s", validation["verdict"])
         self.project._inertia_decompiler_stage = "done"
-        import sys as _tv_sys4
+        _debug_decompile_done_8616(self, func_addr)
 
-        tv_snap = getattr(self.codegen, "_inertia_tail_validation_snapshot", None)
-        tv_stages = list(tv_snap) if isinstance(tv_snap, dict) else "NONE"
-        project_tv_snap = getattr(self.project, "_inertia_last_tail_validation_snapshot", None)
-        project_tv_stages = list(project_tv_snap) if isinstance(project_tv_snap, dict) else "NONE"
-        _tv_sys4.stderr.write(
-            f"[dbg] _decompile_8616 DONE: addr={func_addr} codegen_id={id(self.codegen)} "
-            f"snapshot_stages={tv_stages} proj_fb_stages={project_tv_stages}\n"
-        )
-        _tv_sys4.stderr.flush()
-
-    function = getattr(self, "function", None) or getattr(self, "func", None)
-    with active_status_flag_lift_context_8616(self.project, function):
-        return _impl()
 
 
 def _handle_failed_postprocess_validation_8616(
@@ -16020,6 +17776,147 @@ def _rescue_missing_source_calls_8616(
     return str(validation.get("verdict") or validation.get("summary_text") or "")
 
 
+def _bump_postprocess_validation_accept_counter_8616(codegen: StructuredAstValue, attr: str) -> None:
+    """Increment a validation-acceptance counter on the dynamic codegen surface."""
+    setattr(codegen, attr, int(getattr(codegen, attr, 0) or 0) + 1)
+
+
+def _postprocess_validation_accept_arms_8616(
+    self: StructuredAstValue,
+    *,
+    function: StructuredAstValue,
+    validation: dict[str, StructuredAstValue],
+) -> tuple:
+    """Return the ordered uniform validation-delta acceptance arms.
+
+    Each entry is ``(predicate, log_message, counter_attr)``; the first arm whose
+    predicate proves the delta benign is accepted in evaluation order.
+    """
+    codegen = self.codegen
+    project = self.project
+    return (
+        (
+            lambda: _is_direct_callsite_helper_and_return_delta_8616(project, function, codegen, validation),
+            "Postprocess validation helper-call/return delta accepted from CFG evidence",
+            None,
+        ),
+        (
+            lambda: _is_proven_surplus_empty_guard_cleanup_delta_8616(codegen, validation),
+            "Postprocess validation surplus empty-guard cleanup accepted from Structuring branch-count evidence",
+            "_inertia_surplus_empty_guard_validation_accepts_8616",
+        ),
+        (
+            lambda: _is_cfg_return_chain_callsite_materialization_delta_8616(project, function, codegen, validation),
+            "Postprocess validation CFG return-chain/callsite delta accepted from consumed evidence",
+            None,
+        ),
+        (
+            lambda: _is_cfg_return_expr_chain_materialization_delta_8616(project, function, codegen, validation),
+            "Postprocess validation CFG return-expression delta accepted from consumed evidence",
+            None,
+        ),
+        (
+            lambda: _is_default_scalar_void_return_classification_delta_8616(codegen, validation),
+            "Postprocess validation default-scalar void return classification accepted",
+            "_inertia_default_scalar_void_return_validation_accepts_8616",
+        ),
+        (
+            lambda: _is_unobserved_default_scalar_synthetic_return_delta_8616(function, validation),
+            "Postprocess validation unobserved default-scalar synthetic return accepted",
+            "_inertia_unobserved_default_scalar_synthetic_return_validation_accepts_8616",
+        ),
+        (
+            lambda: _is_exposed_nonvoid_stack_arg_scalar_return_delta_8616(function, validation),
+            "Postprocess validation exposed nonvoid stack-arg scalar return accepted",
+            "_inertia_exposed_nonvoid_stack_arg_scalar_return_validation_accepts_8616",
+        ),
+        (
+            lambda: _is_cfg_mask_accumulator_materialization_delta_8616(project, function, codegen, validation),
+            "Postprocess validation CFG mask-accumulator delta accepted from consumed evidence",
+            None,
+        ),
+        (
+            lambda: _is_jcc_call_return_condition_rebinding_delta_8616(codegen, validation),
+            "Postprocess validation JCC call-return condition delta accepted from consumed evidence",
+            "_inertia_jcc_call_return_condition_validation_accepts",
+        ),
+        (
+            lambda: _is_combined_jcc_callsite_stack_validation_delta_8616(project, function, codegen, validation),
+            "Postprocess validation combined JCC/callsite delta accepted from consumed evidence",
+            "_inertia_combined_jcc_callsite_validation_accepts_8616",
+        ),
+        (
+            lambda: _is_jcc_condition_materialization_validation_delta_8616(
+                project, codegen, validation, function=function
+            ),
+            "Postprocess validation JCC condition materialization delta accepted from consumed evidence",
+            "_inertia_jcc_condition_materialization_validation_accepts",
+        ),
+        (
+            lambda: _is_conditional_continue_guard_repair_delta_8616(codegen, validation),
+            "Postprocess validation conditional-continue guard repair delta accepted from consumed evidence",
+            None,
+        ),
+        (
+            lambda: _is_stack_prototype_width_reconciliation_delta_8616(codegen, validation),
+            "Postprocess validation stack-prototype width reconciliation accepted from typed push-source evidence",
+            None,
+        ),
+        (
+            lambda: _is_segmented_stack_slot_size_precision_delta_8616(validation),
+            "Postprocess validation segmented stack-slot size precision delta accepted",
+            "_inertia_segmented_stack_slot_size_precision_validation_accepts",
+        ),
+        (
+            lambda: _is_direct_global_update_materialization_delta_8616(codegen, validation),
+            "Postprocess validation direct global update materialization delta accepted from consumed evidence",
+            "_inertia_direct_global_update_validation_accepts_8616",
+        ),
+        (
+            lambda: _is_direct_stack_update_materialization_delta_8616(codegen, validation),
+            "Postprocess validation direct stack update materialization delta accepted from consumed evidence",
+            "_inertia_direct_stack_update_validation_accepts_8616",
+        ),
+        (
+            lambda: _is_callsite_stack_argument_materialization_delta_8616(codegen, validation),
+            "Postprocess validation callsite stack-argument materialization delta accepted from consumed evidence",
+            "_inertia_callsite_stack_arg_validation_accepts_8616",
+        ),
+        (
+            lambda: _is_direct_stack_move_materialization_delta_8616(codegen, validation)
+            or _is_direct_stack_move_idiv_remainder_materialization_delta_8616(codegen, validation),
+            "Postprocess validation direct stack move materialization delta accepted from consumed evidence",
+            "_inertia_direct_stack_move_validation_accepts_8616",
+        ),
+        (
+            lambda: _is_direct_callsite_helper_delta_only_8616(project, function, validation),
+            "Postprocess validation helper-call delta accepted from direct callsite evidence",
+            None,
+        ),
+    )
+
+
+def _accept_exit_goto_repair_delta_8616(
+    self: StructuredAstValue,
+    *,
+    validation: dict[str, StructuredAstValue],
+    snapshot_function_info: StructuredAstValue,
+    log: StructuredAstValue,
+) -> bool:
+    """Accept the exit-goto canonicalization delta when no unresolved gotos remain."""
+    if _postprocess_has_unresolved_gotos_8616(self.codegen):
+        log.warning(
+            "Postprocess validation changed but unresolved function-exit gotos remain: %s",
+            validation.get("verdict"),
+        )
+        return False
+    log.warning(
+        "Postprocess validation changed but accepting unresolved-exit-goto canonicalization: %s",
+        validation.get("verdict"),
+    )
+    _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
+    return True
+
 def _try_accept_failed_postprocess_validation_8616(
     self: StructuredAstValue,
     *,
@@ -16040,223 +17937,26 @@ def _try_accept_failed_postprocess_validation_8616(
             "yes",
             "on",
         }
-        if _is_direct_callsite_helper_and_return_delta_8616(self.project, function, self.codegen, validation):
-            log.warning(
-                "Postprocess validation helper-call/return delta accepted from CFG evidence: %s",
-                validation.get("verdict"),
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_proven_surplus_empty_guard_cleanup_delta_8616(self.codegen, validation):
-            log.warning(
-                "Postprocess validation surplus empty-guard cleanup accepted from "
-                "Structuring branch-count evidence: %s",
-                validation.get("verdict"),
-            )
-            self.codegen._inertia_surplus_empty_guard_validation_accepts_8616 = (
-                int(
-                    getattr(
-                        self.codegen,
-                        "_inertia_surplus_empty_guard_validation_accepts_8616",
-                        0,
-                    )
-                    or 0
-                )
-                + 1
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_cfg_return_chain_callsite_materialization_delta_8616(self.project, function, self.codegen, validation):
-            log.warning(
-                "Postprocess validation CFG return-chain/callsite delta accepted from consumed evidence: %s",
-                validation.get("verdict"),
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_cfg_return_expr_chain_materialization_delta_8616(self.project, function, self.codegen, validation):
-            log.warning(
-                "Postprocess validation CFG return-expression delta accepted from consumed evidence: %s",
-                validation.get("verdict"),
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_default_scalar_void_return_classification_delta_8616(self.codegen, validation):
-            log.warning(
-                "Postprocess validation default-scalar void return classification accepted: %s",
-                validation.get("verdict"),
-            )
-            self.codegen._inertia_default_scalar_void_return_validation_accepts_8616 = (
-                int(getattr(self.codegen, "_inertia_default_scalar_void_return_validation_accepts_8616", 0) or 0) + 1
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_unobserved_default_scalar_synthetic_return_delta_8616(function, validation):
-            log.warning(
-                "Postprocess validation unobserved default-scalar synthetic return accepted: %s",
-                validation.get("verdict"),
-            )
-            self.codegen._inertia_unobserved_default_scalar_synthetic_return_validation_accepts_8616 = (
-                int(
-                    getattr(
-                        self.codegen,
-                        "_inertia_unobserved_default_scalar_synthetic_return_validation_accepts_8616",
-                        0,
-                    )
-                    or 0
-                )
-                + 1
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_exposed_nonvoid_stack_arg_scalar_return_delta_8616(function, validation):
-            log.warning(
-                "Postprocess validation exposed nonvoid stack-arg scalar return accepted: %s",
-                validation.get("verdict"),
-            )
-            self.codegen._inertia_exposed_nonvoid_stack_arg_scalar_return_validation_accepts_8616 = (
-                int(
-                    getattr(
-                        self.codegen,
-                        "_inertia_exposed_nonvoid_stack_arg_scalar_return_validation_accepts_8616",
-                        0,
-                    )
-                    or 0
-                )
-                + 1
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_cfg_mask_accumulator_materialization_delta_8616(self.project, function, self.codegen, validation):
-            log.warning(
-                "Postprocess validation CFG mask-accumulator delta accepted from consumed evidence: %s",
-                validation.get("verdict"),
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_jcc_call_return_condition_rebinding_delta_8616(self.codegen, validation):
-            log.warning(
-                "Postprocess validation JCC call-return condition delta accepted from consumed evidence: %s",
-                validation.get("verdict"),
-            )
-            self.codegen._inertia_jcc_call_return_condition_validation_accepts = (
-                int(getattr(self.codegen, "_inertia_jcc_call_return_condition_validation_accepts", 0) or 0) + 1
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_combined_jcc_callsite_stack_validation_delta_8616(self.project, function, self.codegen, validation):
-            log.warning(
-                "Postprocess validation combined JCC/callsite delta accepted from consumed evidence: %s",
-                validation.get("verdict"),
-            )
-            self.codegen._inertia_combined_jcc_callsite_validation_accepts_8616 = (
-                int(getattr(self.codegen, "_inertia_combined_jcc_callsite_validation_accepts_8616", 0) or 0) + 1
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_jcc_condition_materialization_validation_delta_8616(
-            self.project,
-            self.codegen,
-            validation,
+        uniform_arms = _postprocess_validation_accept_arms_8616(
+            self,
             function=function,
-        ):
-            log.warning(
-                "Postprocess validation JCC condition materialization delta accepted from consumed evidence: %s",
-                validation.get("verdict"),
-            )
-            self.codegen._inertia_jcc_condition_materialization_validation_accepts = (
-                int(getattr(self.codegen, "_inertia_jcc_condition_materialization_validation_accepts", 0) or 0) + 1
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_conditional_continue_guard_repair_delta_8616(self.codegen, validation):
-            log.warning(
-                "Postprocess validation conditional-continue guard repair delta accepted from consumed evidence: %s",
-                validation.get("verdict"),
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_stack_prototype_width_reconciliation_delta_8616(self.codegen, validation):
-            log.warning(
-                "Postprocess validation stack-prototype width reconciliation accepted "
-                "from typed push-source evidence: %s",
-                validation.get("verdict"),
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_segmented_stack_slot_size_precision_delta_8616(validation):
-            log.warning(
-                "Postprocess validation segmented stack-slot size precision delta accepted: %s",
-                validation.get("verdict"),
-            )
-            self.codegen._inertia_segmented_stack_slot_size_precision_validation_accepts = (
-                int(getattr(self.codegen, "_inertia_segmented_stack_slot_size_precision_validation_accepts", 0) or 0)
-                + 1
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_direct_global_update_materialization_delta_8616(self.codegen, validation):
-            log.warning(
-                "Postprocess validation direct global update materialization delta accepted from consumed evidence: %s",
-                validation.get("verdict"),
-            )
-            self.codegen._inertia_direct_global_update_validation_accepts_8616 = (
-                int(getattr(self.codegen, "_inertia_direct_global_update_validation_accepts_8616", 0) or 0) + 1
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_direct_stack_update_materialization_delta_8616(self.codegen, validation):
-            log.warning(
-                "Postprocess validation direct stack update materialization delta accepted from consumed evidence: %s",
-                validation.get("verdict"),
-            )
-            self.codegen._inertia_direct_stack_update_validation_accepts_8616 = (
-                int(getattr(self.codegen, "_inertia_direct_stack_update_validation_accepts_8616", 0) or 0) + 1
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_callsite_stack_argument_materialization_delta_8616(self.codegen, validation):
-            log.warning(
-                "Postprocess validation callsite stack-argument materialization delta accepted "
-                "from consumed evidence: %s",
-                validation.get("verdict"),
-            )
-            self.codegen._inertia_callsite_stack_arg_validation_accepts_8616 = (
-                int(getattr(self.codegen, "_inertia_callsite_stack_arg_validation_accepts_8616", 0) or 0) + 1
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_direct_stack_move_materialization_delta_8616(
-            self.codegen, validation
-        ) or _is_direct_stack_move_idiv_remainder_materialization_delta_8616(self.codegen, validation):
-            log.warning(
-                "Postprocess validation direct stack move materialization delta accepted from consumed evidence: %s",
-                validation.get("verdict"),
-            )
-            self.codegen._inertia_direct_stack_move_validation_accepts_8616 = (
-                int(getattr(self.codegen, "_inertia_direct_stack_move_validation_accepts_8616", 0) or 0) + 1
-            )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
-        if _is_direct_callsite_helper_delta_only_8616(self.project, function, validation):
-            log.warning(
-                "Postprocess validation helper-call delta accepted from direct callsite evidence: %s",
-                validation.get("verdict"),
-            )
+            validation=validation,
+        )
+        for predicate, message, counter_attr in uniform_arms:
+            if not predicate():
+                continue
+            log.warning("%s: %s", message, validation.get("verdict"))
+            if counter_attr is not None:
+                _bump_postprocess_validation_accept_counter_8616(self.codegen, counter_attr)
             _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
             return True
         if _postprocess_exit_goto_repair_delta_8616(validation):
-            if _postprocess_has_unresolved_gotos_8616(self.codegen):
-                log.warning(
-                    "Postprocess validation changed but unresolved function-exit gotos remain: %s",
-                    validation.get("verdict"),
-                )
-                return False
-            log.warning(
-                "Postprocess validation changed but accepting unresolved-exit-goto canonicalization: %s",
-                validation.get("verdict"),
+            return _accept_exit_goto_repair_delta_8616(
+                self,
+                validation=validation,
+                snapshot_function_info=snapshot_function_info,
+                log=log,
             )
-            _postprocess_stable_accept_8616(self, validation, snapshot_function_info)
-            return True
         if _is_switch_loop_exit_return_repair_delta_8616(self.codegen, validation):
             log.warning(
                 "Postprocess validation switch loop-exit return delta accepted from CFG evidence: %s",
@@ -16304,7 +18004,9 @@ def _try_accept_failed_postprocess_validation_8616(
                 return True
         return False
 
-    return _impl()
+    function = getattr(self, "function", None) or getattr(self, "func", None)
+    with active_status_flag_lift_context_8616(self.project, function):
+        return _impl()
 
 
 def _salvage_signed_idiv_stack_move_after_discard_8616(
@@ -17049,6 +18751,195 @@ def _salvage_flag_cleanup_after_discard_8616(
         return False
 
 
+def _log_discard_validation_debug_8616(
+    function: StructuredAstValue,
+    validation: dict[str, StructuredAstValue],
+    log: StructuredAstValue,
+) -> None:
+    """Emit the env-gated postprocess validation diagnostic for a discard."""
+    delta = validation.get("delta") if isinstance(validation, dict) else None
+    log.warning(
+        "[postprocess-validation] final function=%#x verdict=%s delta=%s "
+        "semantic_failures=%s stack_delta=%s before=%s after=%s "
+        "def_use_before=%s def_use_after=%s",
+        getattr(function, "addr", -1) if function is not None else -1,
+        validation.get("verdict"),
+        delta,
+        validation.get("semantic_failures"),
+        (delta or {}).get("stack_writes"),
+        (validation.get("before") or {}).get("stack_writes"),
+        (validation.get("after") or {}).get("stack_writes"),
+        (validation.get("before") or {}).get("def_use_issues"),
+        (validation.get("after") or {}).get("def_use_issues"),
+    )
+
+
+@dataclass
+class _DiscardSalvageResult8616:
+    """Salvage outcomes collected while rebuilding the pre-postprocess C."""
+
+    direct_stack_updates: bool = False
+    direct_global_updates: bool = False
+    signed_idiv: bool = False
+    direct_stack_moves: bool = False
+    callsite_args: bool = False
+
+
+def _collect_discard_salvages_8616(
+    self: StructuredAstValue,
+    *,
+    validation_mode: str,
+    snapshot_function_info: StructuredAstValue,
+    destructive_discard_delta: bool,
+    destructive_salvage_family: StructuredAstValue,
+    function: StructuredAstValue,
+    log: StructuredAstValue,
+) -> _DiscardSalvageResult8616:
+    """Run the bounded salvage passes allowed after a postprocess discard."""
+    salvages = _DiscardSalvageResult8616()
+    if self.codegen._inertia_structuring_validation_failed:
+        log.warning(
+            "Skipped postprocess rollback salvage because Structuring validation already failed"
+        )
+        return salvages
+    if not destructive_discard_delta:
+        salvages.direct_stack_updates = _salvage_direct_stack_update_after_discard_8616(
+            self,
+            validation_mode=validation_mode,
+            snapshot_function_info=snapshot_function_info,
+            function=function,
+            log=log,
+        )
+        salvages.direct_global_updates = _salvage_direct_global_update_after_discard_8616(
+            self,
+            validation_mode=validation_mode,
+            snapshot_function_info=snapshot_function_info,
+            function=function,
+            log=log,
+        )
+        _salvage_segmented_global_materialization_after_discard_8616(
+            self,
+            validation_mode=validation_mode,
+            snapshot_function_info=snapshot_function_info,
+            function=function,
+            log=log,
+        )
+        salvages.signed_idiv = _salvage_signed_idiv_stack_move_after_discard_8616(
+            self,
+            validation_mode=validation_mode,
+            snapshot_function_info=snapshot_function_info,
+            function=function,
+            log=log,
+        )
+        salvages.direct_stack_moves = _salvage_direct_stack_move_after_discard_8616(
+            self,
+            validation_mode=validation_mode,
+            snapshot_function_info=snapshot_function_info,
+            function=function,
+            log=log,
+        )
+        salvages.callsite_args = _salvage_callsite_stack_args_after_discard_8616(
+            self,
+            validation_mode=validation_mode,
+            snapshot_function_info=snapshot_function_info,
+            function=function,
+            log=log,
+        )
+        _salvage_flag_cleanup_after_discard_8616(
+            self,
+            validation_mode=validation_mode,
+            snapshot_function_info=snapshot_function_info,
+            function=function,
+            log=log,
+        )
+        _salvage_dce_after_discard_8616(
+            self,
+            validation_mode=validation_mode,
+            snapshot_function_info=snapshot_function_info,
+            log=log,
+        )
+        return salvages
+    if _postprocess_destructive_salvage_family_allowed_8616(
+        destructive_salvage_family,
+        _PostprocessDestructiveSalvageFamily8616.DIRECT_STACK_UPDATE,
+    ):
+        salvages.direct_stack_updates = _salvage_direct_stack_update_after_discard_8616(
+            self,
+            validation_mode=validation_mode,
+            snapshot_function_info=snapshot_function_info,
+            function=function,
+            log=log,
+        )
+    else:
+        assert destructive_salvage_family is not None
+        log.warning(
+            "Skipped direct stack update salvage after destructive postprocess validation delta: family=%s",
+            destructive_salvage_family.value,
+        )
+    if _postprocess_destructive_salvage_family_allowed_8616(
+        destructive_salvage_family,
+        _PostprocessDestructiveSalvageFamily8616.DIRECT_STACK_MOVE,
+    ):
+        salvages.signed_idiv = _salvage_signed_idiv_stack_move_after_discard_8616(
+            self,
+            validation_mode=validation_mode,
+            snapshot_function_info=snapshot_function_info,
+            function=function,
+            log=log,
+        )
+        salvages.direct_stack_moves = _salvage_direct_stack_move_after_discard_8616(
+            self,
+            validation_mode=validation_mode,
+            snapshot_function_info=snapshot_function_info,
+            function=function,
+            log=log,
+        )
+    else:
+        assert destructive_salvage_family is not None
+        log.warning(
+            "Skipped direct stack move salvage after destructive postprocess validation delta: family=%s",
+            destructive_salvage_family.value,
+        )
+    _salvage_dce_after_discard_8616(
+        self,
+        validation_mode=validation_mode,
+        snapshot_function_info=snapshot_function_info,
+        log=log,
+    )
+    log.warning("Skipped unsafe rollback salvage after destructive postprocess validation delta")
+    return salvages
+
+
+def _apply_destructive_discard_identity_gate_8616(
+    self: StructuredAstValue,
+    restored_validation: dict[str, StructuredAstValue],
+    destructive_discard_delta: bool,
+) -> None:
+    """Require a final-C identity proof when the discard delta was destructive."""
+    if not destructive_discard_delta:
+        return
+    if x86_16_tail_validation_result_passed(restored_validation):
+        self.codegen._inertia_postprocess_final_c_identity_proven_8616 = True
+        restored_validation["destructive_discard_identity_proven"] = True
+    elif not bool(getattr(self.codegen, "_inertia_postprocess_final_c_identity_proven_8616", False)):
+        restored_validation["changed"] = True
+        restored_validation["status"] = "changed"
+        restored_validation["summary_text"] = "destructive postprocess rollback requires final C identity proof"
+        restored_validation["destructive_discard_requires_identity_proof"] = True
+
+
+def _accept_salvaged_restored_validation_8616(
+    restored_validation: dict[str, StructuredAstValue],
+    salvage_key: str,
+) -> None:
+    """Mark a salvaged restored validation as semantically stable."""
+    restored_validation["changed"] = False
+    restored_validation["status"] = "stable"
+    restored_validation["summary_text"] = "no observable whole-tail changes"
+    restored_validation.pop("delta", None)
+    restored_validation[salvage_key] = True
+
+
 def _discard_failed_postprocess_result_8616(
     self: StructuredAstValue,
     *,
@@ -17065,21 +18956,7 @@ def _discard_failed_postprocess_result_8616(
     log: StructuredAstValue,
 ) -> None:
     if os.environ.get("INERTIA_DEBUG_POSTPROCESS_VALIDATION"):
-        delta = validation.get("delta") if isinstance(validation, dict) else None
-        log.warning(
-            "[postprocess-validation] final function=%#x verdict=%s delta=%s "
-            "semantic_failures=%s stack_delta=%s before=%s after=%s "
-            "def_use_before=%s def_use_after=%s",
-            getattr(function, "addr", -1) if function is not None else -1,
-            validation.get("verdict"),
-            delta,
-            validation.get("semantic_failures"),
-            (delta or {}).get("stack_writes"),
-            (validation.get("before") or {}).get("stack_writes"),
-            (validation.get("after") or {}).get("stack_writes"),
-            (validation.get("before") or {}).get("def_use_issues"),
-            (validation.get("after") or {}).get("def_use_issues"),
-        )
+        _log_discard_validation_debug_8616(function, validation, log)
     if pre_postprocess_cfunc_snapshot is None:
         self.codegen._inertia_postprocess_discard_failed_no_snapshot = True
         log.error(
@@ -17112,123 +18989,15 @@ def _discard_failed_postprocess_result_8616(
     self.codegen._inertia_postprocess_destructive_discard_recovery_8616 = destructive_discard_delta
     _invalidate_tail_validation_derived_caches_8616(self.codegen)
     _regenerate_text_safely(self.codegen, context="postprocess:discard-restore-baseline")
-    salvaged_direct_stack_updates = False
-    salvaged_direct_global_updates = False
-    salvaged_signed_idiv = False
-    salvaged_direct_stack_moves = False
-    salvaged_callsite_args = False
-    if self.codegen._inertia_structuring_validation_failed:
-        log.warning(
-            "Skipped postprocess rollback salvage because Structuring validation already failed"
-        )
-    elif destructive_discard_delta:
-        if _postprocess_destructive_salvage_family_allowed_8616(
-            destructive_salvage_family,
-            _PostprocessDestructiveSalvageFamily8616.DIRECT_STACK_UPDATE,
-        ):
-            salvaged_direct_stack_updates = _salvage_direct_stack_update_after_discard_8616(
-                self,
-                validation_mode=validation_mode,
-                snapshot_function_info=snapshot_function_info,
-                function=function,
-                log=log,
-            )
-        else:
-            salvaged_direct_stack_updates = False
-            assert destructive_salvage_family is not None
-            log.warning(
-                "Skipped direct stack update salvage after destructive postprocess validation delta: family=%s",
-                destructive_salvage_family.value,
-            )
-        if _postprocess_destructive_salvage_family_allowed_8616(
-            destructive_salvage_family,
-            _PostprocessDestructiveSalvageFamily8616.DIRECT_STACK_MOVE,
-        ):
-            salvaged_signed_idiv = _salvage_signed_idiv_stack_move_after_discard_8616(
-                self,
-                validation_mode=validation_mode,
-                snapshot_function_info=snapshot_function_info,
-                function=function,
-                log=log,
-            )
-            salvaged_direct_stack_moves = _salvage_direct_stack_move_after_discard_8616(
-                self,
-                validation_mode=validation_mode,
-                snapshot_function_info=snapshot_function_info,
-                function=function,
-                log=log,
-            )
-        else:
-            salvaged_signed_idiv = False
-            salvaged_direct_stack_moves = False
-            assert destructive_salvage_family is not None
-            log.warning(
-                "Skipped direct stack move salvage after destructive postprocess validation delta: family=%s",
-                destructive_salvage_family.value,
-            )
-        _salvage_dce_after_discard_8616(
-            self,
-            validation_mode=validation_mode,
-            snapshot_function_info=snapshot_function_info,
-            log=log,
-        )
-        log.warning("Skipped unsafe rollback salvage after destructive postprocess validation delta")
-    else:
-        salvaged_direct_stack_updates = _salvage_direct_stack_update_after_discard_8616(
-            self,
-            validation_mode=validation_mode,
-            snapshot_function_info=snapshot_function_info,
-            function=function,
-            log=log,
-        )
-        salvaged_direct_global_updates = _salvage_direct_global_update_after_discard_8616(
-            self,
-            validation_mode=validation_mode,
-            snapshot_function_info=snapshot_function_info,
-            function=function,
-            log=log,
-        )
-        _salvage_segmented_global_materialization_after_discard_8616(
-            self,
-            validation_mode=validation_mode,
-            snapshot_function_info=snapshot_function_info,
-            function=function,
-            log=log,
-        )
-        salvaged_signed_idiv = _salvage_signed_idiv_stack_move_after_discard_8616(
-            self,
-            validation_mode=validation_mode,
-            snapshot_function_info=snapshot_function_info,
-            function=function,
-            log=log,
-        )
-        salvaged_direct_stack_moves = _salvage_direct_stack_move_after_discard_8616(
-            self,
-            validation_mode=validation_mode,
-            snapshot_function_info=snapshot_function_info,
-            function=function,
-            log=log,
-        )
-        salvaged_callsite_args = _salvage_callsite_stack_args_after_discard_8616(
-            self,
-            validation_mode=validation_mode,
-            snapshot_function_info=snapshot_function_info,
-            function=function,
-            log=log,
-        )
-        _salvage_flag_cleanup_after_discard_8616(
-            self,
-            validation_mode=validation_mode,
-            snapshot_function_info=snapshot_function_info,
-            function=function,
-            log=log,
-        )
-        _salvage_dce_after_discard_8616(
-            self,
-            validation_mode=validation_mode,
-            snapshot_function_info=snapshot_function_info,
-            log=log,
-        )
+    salvages = _collect_discard_salvages_8616(
+        self,
+        validation_mode=validation_mode,
+        snapshot_function_info=snapshot_function_info,
+        destructive_discard_delta=destructive_discard_delta,
+        destructive_salvage_family=destructive_salvage_family,
+        function=function,
+        log=log,
+    )
     self.codegen._inertia_postprocess_discarded = True
     self.codegen._inertia_postprocess_discard_verdict = validation_verdict_text
     restored_after_summary = _collect_tail_validation_summary_with_baseline_canonicalization_8616(
@@ -17247,85 +19016,70 @@ def _discard_failed_postprocess_result_8616(
         "mode": validation_mode,
     }
     restored_validation["timings"] = validation_timings
-    if destructive_discard_delta:
-        if x86_16_tail_validation_result_passed(restored_validation):
-            self.codegen._inertia_postprocess_final_c_identity_proven_8616 = True
-            restored_validation["destructive_discard_identity_proven"] = True
-        elif not bool(getattr(self.codegen, "_inertia_postprocess_final_c_identity_proven_8616", False)):
-            restored_validation["changed"] = True
-            restored_validation["status"] = "changed"
-            restored_validation["summary_text"] = "destructive postprocess rollback requires final C identity proof"
-            restored_validation["destructive_discard_requires_identity_proof"] = True
-    if (
-        salvaged_direct_stack_updates
-        and salvaged_direct_global_updates
-        and _is_direct_stack_and_global_update_materialization_delta_8616(
-            self.codegen,
-            restored_validation,
-        )
-    ):
-        restored_validation["changed"] = False
-        restored_validation["status"] = "stable"
-        restored_validation["summary_text"] = "no observable whole-tail changes"
-        restored_validation.pop("delta", None)
-        restored_validation["direct_stack_global_update_salvage_after_discard"] = True
-    if salvaged_signed_idiv and _is_direct_stack_move_idiv_remainder_materialization_delta_8616(
-        self.codegen,
-        restored_validation,
-    ):
-        restored_validation["changed"] = False
-        restored_validation["status"] = "stable"
-        restored_validation["summary_text"] = "no observable whole-tail changes"
-        restored_validation.pop("delta", None)
-        restored_validation["signed_idiv_salvage_after_discard"] = True
-    if salvaged_direct_stack_updates and _is_direct_stack_update_materialization_delta_8616(
-        self.codegen,
-        restored_validation,
-    ):
-        restored_validation["changed"] = False
-        restored_validation["status"] = "stable"
-        restored_validation["summary_text"] = "no observable whole-tail changes"
-        restored_validation.pop("delta", None)
-        restored_validation["direct_stack_update_salvage_after_discard"] = True
-    if salvaged_direct_global_updates and _is_direct_global_update_materialization_delta_8616(
-        self.codegen,
-        restored_validation,
-    ):
-        restored_validation["changed"] = False
-        restored_validation["status"] = "stable"
-        restored_validation["summary_text"] = "no observable whole-tail changes"
-        restored_validation.pop("delta", None)
-        restored_validation["direct_global_update_salvage_after_discard"] = True
-    if salvaged_direct_stack_moves and (
-        _is_direct_stack_move_materialization_delta_8616(
-            self.codegen,
-            restored_validation,
-        )
-        or _is_jcc_condition_materialization_validation_delta_8616(
-            self.project,
-            self.codegen,
-            restored_validation,
-            function=function,
-        )
-    ):
-        restored_validation["changed"] = False
-        restored_validation["status"] = "stable"
-        restored_validation["summary_text"] = "no observable whole-tail changes"
-        restored_validation.pop("delta", None)
-        restored_validation["direct_stack_move_salvage_after_discard"] = True
-    if (
-        not destructive_discard_delta
-        and salvaged_callsite_args
-        and _is_callsite_stack_argument_materialization_delta_8616(
-            self.codegen,
-            restored_validation,
-        )
-    ):
-        restored_validation["changed"] = False
-        restored_validation["status"] = "stable"
-        restored_validation["summary_text"] = "no observable whole-tail changes"
-        restored_validation.pop("delta", None)
-        restored_validation["callsite_arg_salvage_after_discard"] = True
+    _apply_destructive_discard_identity_gate_8616(self, restored_validation, destructive_discard_delta)
+    salvage_overrides = (
+        (
+            "direct_stack_global_update_salvage_after_discard",
+            salvages.direct_stack_updates
+            and salvages.direct_global_updates
+            and _is_direct_stack_and_global_update_materialization_delta_8616(
+                self.codegen,
+                restored_validation,
+            ),
+        ),
+        (
+            "signed_idiv_salvage_after_discard",
+            salvages.signed_idiv
+            and _is_direct_stack_move_idiv_remainder_materialization_delta_8616(
+                self.codegen,
+                restored_validation,
+            ),
+        ),
+        (
+            "direct_stack_update_salvage_after_discard",
+            salvages.direct_stack_updates
+            and _is_direct_stack_update_materialization_delta_8616(
+                self.codegen,
+                restored_validation,
+            ),
+        ),
+        (
+            "direct_global_update_salvage_after_discard",
+            salvages.direct_global_updates
+            and _is_direct_global_update_materialization_delta_8616(
+                self.codegen,
+                restored_validation,
+            ),
+        ),
+        (
+            "direct_stack_move_salvage_after_discard",
+            salvages.direct_stack_moves
+            and (
+                _is_direct_stack_move_materialization_delta_8616(
+                    self.codegen,
+                    restored_validation,
+                )
+                or _is_jcc_condition_materialization_validation_delta_8616(
+                    self.project,
+                    self.codegen,
+                    restored_validation,
+                    function=function,
+                )
+            ),
+        ),
+        (
+            "callsite_arg_salvage_after_discard",
+            not destructive_discard_delta
+            and salvages.callsite_args
+            and _is_callsite_stack_argument_materialization_delta_8616(
+                self.codegen,
+                restored_validation,
+            ),
+        ),
+    )
+    for salvage_key, accepted in salvage_overrides:
+        if accepted:
+            _accept_salvaged_restored_validation_8616(restored_validation, salvage_key)
     restored_validation["verdict"] = build_x86_16_tail_validation_verdict("postprocess", restored_validation)
     persist_x86_16_tail_validation_snapshot(
         function_info=snapshot_function_info,
