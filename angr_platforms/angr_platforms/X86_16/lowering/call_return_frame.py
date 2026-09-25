@@ -15,7 +15,7 @@ stack expressions are refusal cases rather than ownership evidence.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -193,6 +193,55 @@ def _producer_relations_are_exact_8616(
     )
 
 
+def _assignment_prune_verdict_8616(
+    project: object,
+    codegen: object,
+    statement: structured_c.CAssignment,
+    semantic_keys: frozenset[CallReturnFrameEffectKey8616],
+    producer_relations: dict[
+        CallReturnFrameEffectKey8616,
+        list[CallReturnFrameProjectionFact8616],
+    ],
+    refused_producer_keys: Collection[CallReturnFrameEffectKey8616],
+    effects: dict[CallReturnFrameEffectKey8616, CallReturnFrameEffectRole8616],
+) -> tuple[int, int, int]:
+    """Classify one assignment; return ``(raw, normalized, drop)`` flags."""
+    key = _assignment_effect_key_8616(statement)
+    semantic_matches = (
+        _semantic_key_candidates_8616(project, key, semantic_keys)
+        if key is not None
+        else ()
+    )
+    if not semantic_matches:
+        return 0, 0, 0
+    if len(semantic_matches) != 1:
+        return 1, 0, 0
+    semantic_key = semantic_matches[0]
+    relations = tuple(producer_relations.get(semantic_key, ()))
+    if semantic_key in refused_producer_keys:
+        return 1, 0, 0
+    exact_effect = effects.get(semantic_key)
+    relation_matches = _producer_relations_are_exact_8616(
+        semantic_key,
+        relations,
+        effects,
+    )
+    if exact_effect is not None:
+        lvalue_matches = _lvalue_matches_role_8616(
+            project,
+            codegen,
+            statement.lhs,
+            exact_effect,
+        )
+    else:
+        lvalue_matches = relation_matches and _is_exact_value_producer_lhs_8616(
+            statement.lhs
+        )
+    if not lvalue_matches:
+        return 1, 1, 0
+    return 1, 1, 1
+
+
 def prune_exact_call_return_frame_projections_8616(
     project: object,
     codegen: StructuredAstValue,
@@ -237,43 +286,18 @@ def prune_exact_call_return_frame_projections_8616(
             if not isinstance(statement, structured_c.CAssignment):
                 retained.append(statement)
                 continue
-            key = _assignment_effect_key_8616(statement)
-            semantic_matches = (
-                _semantic_key_candidates_8616(project, key, semantic_keys)
-                if key is not None
-                else ()
-            )
-            if not semantic_matches:
-                retained.append(statement)
-                continue
-            raw_count += 1
-            if len(semantic_matches) != 1:
-                retained.append(statement)
-                continue
-            semantic_key = semantic_matches[0]
-            relations = tuple(producer_relations.get(semantic_key, ()))
-            if semantic_key in refused_producer_keys:
-                retained.append(statement)
-                continue
-            normalized_count += 1
-            exact_effect = effects.get(semantic_key)
-            relation_matches = _producer_relations_are_exact_8616(
-                semantic_key,
-                relations,
+            raw_hit, normalized_hit, drop = _assignment_prune_verdict_8616(
+                project,
+                codegen,
+                statement,
+                semantic_keys,
+                producer_relations,
+                refused_producer_keys,
                 effects,
             )
-            if exact_effect is not None:
-                lvalue_matches = _lvalue_matches_role_8616(
-                    project,
-                    codegen,
-                    statement.lhs,
-                    exact_effect,
-                )
-            else:
-                lvalue_matches = relation_matches and _is_exact_value_producer_lhs_8616(
-                    statement.lhs
-                )
-            if not lvalue_matches:
+            raw_count += raw_hit
+            normalized_count += normalized_hit
+            if not drop:
                 retained.append(statement)
                 continue
             classified_count += 1

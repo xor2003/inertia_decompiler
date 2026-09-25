@@ -112,6 +112,144 @@ def _loaded_image_bounds_8616(project: object) -> tuple[int, int] | None:
     return (start, end) if 0 <= start < end else None
 
 
+@dataclass(slots=True)
+class _FlagReadScan8616:
+    """Mutable worklist state for the prefix-CFG flag-read scan."""
+
+    pending: dict[int, StatusFlag8616]
+    queue: deque[int]
+    processed: dict[int, StatusFlag8616]
+    prefixes: dict[int, StatusFlagCFGBlock8616]
+    visited: set[int]
+    failed: set[int]
+    reads: StatusFlag8616 = StatusFlag8616.NONE
+    instruction_count: int = 0
+
+    def mark_read_failed(self, address: int, carried: StatusFlag8616) -> StatusFlag8616:
+        """Record every still-carried bit as read and drop it from the carry."""
+        self.reads |= carried
+        self.failed.add(address)
+        return StatusFlag8616.NONE
+
+    def scan_instructions(
+        self,
+        address: int,
+        carried: StatusFlag8616,
+        wrapped_instructions: tuple[object, ...],
+        instruction_effect: InstructionEffectProjector8616,
+        max_instructions: int,
+    ) -> tuple[StatusFlag8616, list[StatusFlagCFGInstruction8616]]:
+        """Decode one block prefix; unknown effects refuse the carried bits."""
+        instructions: list[StatusFlagCFGInstruction8616] = []
+        for wrapped in wrapped_instructions:
+            if self.instruction_count >= max_instructions:
+                carried = self.mark_read_failed(address, carried)
+                break
+            self.instruction_count += 1
+            effect = instruction_effect(wrapped)
+            instructions.append(StatusFlagCFGInstruction8616(
+                address=int(cast(_InstructionBoundary8616, wrapped).address),
+                effect=effect,
+            ))
+            if effect is None:
+                carried = self.mark_read_failed(address, carried)
+                break
+            self.reads |= effect.reads & carried
+            carried &= ~effect.overwrites
+            if int(carried) == 0:
+                break
+        return carried, instructions
+
+    def record_prefix(
+        self,
+        address: int,
+        instructions: list[StatusFlagCFGInstruction8616],
+        successors: set[int],
+        successor_unresolved: bool,
+    ) -> tuple[set[int], bool]:
+        """Retain the longest decoded prefix and merge repeat-visit edges."""
+        previous = self.prefixes.get(address)
+        # A later visit may carry fewer bits and stop earlier at the same block.
+        if previous is not None and len(instructions) == len(previous.instructions):
+            successors.update(previous.successor_addresses)
+            successor_unresolved |= not previous.successors_complete
+        if previous is None or len(instructions) >= len(previous.instructions):
+            self.prefixes[address] = StatusFlagCFGBlock8616(
+                address=address,
+                instructions=tuple(instructions),
+                successor_addresses=tuple(sorted(successors)),
+                successors_complete=not successor_unresolved,
+            )
+        return successors, successor_unresolved
+
+    def propagate_successors(
+        self,
+        carried: StatusFlag8616,
+        successors: set[int],
+    ) -> None:
+        """Enqueue unseen carried bits to each reachable successor."""
+        for successor in sorted(successors):
+            unseen = carried & ~self.processed.get(successor, StatusFlag8616.NONE)
+            if int(unseen) == 0:
+                continue
+            self.pending[successor] = (
+                self.pending.get(successor, StatusFlag8616.NONE) | unseen
+            )
+            if successor not in self.queue:
+                self.queue.append(successor)
+
+    def visit_block(
+        self,
+        boundary: _ProjectBoundary8616,
+        instruction_effect: InstructionEffectProjector8616,
+        region_start: int,
+        region_end: int,
+        max_instructions: int,
+    ) -> None:
+        """Consume one queued block and propagate its surviving flags."""
+        address = self.queue.popleft()
+        incoming = self.pending.pop(address, StatusFlag8616.NONE)
+        new_incoming = incoming & ~self.processed.get(address, StatusFlag8616.NONE)
+        if int(new_incoming) == 0:
+            return
+        self.processed[address] = (
+            self.processed.get(address, StatusFlag8616.NONE) | new_incoming
+        )
+        self.visited.add(address)
+        try:
+            block = boundary.factory.block(address, opt_level=0)
+            wrapped_instructions = tuple(block.capstone.insns)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            self.reads |= new_incoming
+            self.failed.add(address)
+            return
+        if not wrapped_instructions or int(block.size) <= 0:
+            self.reads |= new_incoming
+            self.failed.add(address)
+            return
+        carried, instructions = self.scan_instructions(
+            address,
+            new_incoming,
+            wrapped_instructions,
+            instruction_effect,
+            max_instructions,
+        )
+        successors, successor_unresolved = (
+            x86_16_block_successors_from_capstone_8616(block, region_start, region_end)
+            if carried else (set(), False)
+        )
+        successors, successor_unresolved = self.record_prefix(
+            address, instructions, successors, successor_unresolved
+        )
+        if int(carried) == 0:
+            return
+        if successor_unresolved:
+            self.reads |= carried
+            self.failed.add(address)
+            return
+        self.propagate_successors(carried, successors)
+
+
 def summarize_binary_status_flag_entry_reads_8616(
     project: object,
     *,
@@ -138,96 +276,36 @@ def summarize_binary_status_flag_entry_reads_8616(
         return BinaryStatusFlagReadSummary8616(STATUS_FLAGS_8616, 0, 0, 0, 0, 1)
     region_start, region_end = bounds
     boundary = cast(_ProjectBoundary8616, project)
-    pending: dict[int, StatusFlag8616] = {entry_address: STATUS_FLAGS_8616}
-    queue: deque[int] = deque((entry_address,))
-    processed: dict[int, StatusFlag8616] = {}
-    prefixes: dict[int, StatusFlagCFGBlock8616] = {}
-    reads = StatusFlag8616.NONE
-    visited: set[int] = set()
-    failed: set[int] = set()
-    instruction_count = 0
+    scan = _FlagReadScan8616(
+        pending={entry_address: STATUS_FLAGS_8616},
+        queue=deque((entry_address,)),
+        processed={},
+        prefixes={},
+        visited=set(),
+        failed=set(),
+    )
 
-    while queue and len(visited) < max_blocks and instruction_count < max_instructions:
-        address = queue.popleft()
-        incoming = pending.pop(address, StatusFlag8616.NONE)
-        new_incoming = incoming & ~processed.get(address, StatusFlag8616.NONE)
-        if int(new_incoming) == 0:
-            continue
-        processed[address] = processed.get(address, StatusFlag8616.NONE) | new_incoming
-        visited.add(address)
-        try:
-            block = boundary.factory.block(address, opt_level=0)
-            wrapped_instructions = tuple(block.capstone.insns)
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            reads |= new_incoming
-            failed.add(address)
-            continue
-        if not wrapped_instructions or int(block.size) <= 0:
-            reads |= new_incoming
-            failed.add(address)
-            continue
-
-        carried: StatusFlag8616 = new_incoming
-        instructions: list[StatusFlagCFGInstruction8616] = []
-        for wrapped in wrapped_instructions:
-            if instruction_count >= max_instructions:
-                reads |= carried
-                carried = StatusFlag8616.NONE
-                failed.add(address)
-                break
-            instruction_count += 1
-            effect = instruction_effect(wrapped)
-            instructions.append(StatusFlagCFGInstruction8616(
-                address=int(cast(_InstructionBoundary8616, wrapped).address),
-                effect=effect,
-            ))
-            if effect is None:
-                reads |= carried
-                carried = StatusFlag8616.NONE
-                failed.add(address)
-                break
-            reads |= effect.reads & carried
-            carried &= ~effect.overwrites
-            if int(carried) == 0:
-                break
-        successors, successor_unresolved = (
-            x86_16_block_successors_from_capstone_8616(block, region_start, region_end)
-            if carried else (set(), False)
+    while (
+        scan.queue
+        and len(scan.visited) < max_blocks
+        and scan.instruction_count < max_instructions
+    ):
+        scan.visit_block(
+            boundary,
+            instruction_effect,
+            region_start,
+            region_end,
+            max_instructions,
         )
-        previous = prefixes.get(address)
-        # A later visit may carry fewer bits and stop earlier at the same block.
-        if previous is not None and len(instructions) == len(previous.instructions):
-            successors.update(previous.successor_addresses)
-            successor_unresolved |= not previous.successors_complete
-        if previous is None or len(instructions) >= len(previous.instructions):
-            prefixes[address] = StatusFlagCFGBlock8616(
-                address=address,
-                instructions=tuple(instructions),
-                successor_addresses=tuple(sorted(successors)),
-                successors_complete=not successor_unresolved,
-            )
-        if int(carried) == 0:
-            continue
-        if successor_unresolved:
-            reads |= carried
-            failed.add(address)
-            continue
-        for successor in sorted(successors):
-            unseen = carried & ~processed.get(successor, StatusFlag8616.NONE)
-            if int(unseen) == 0:
-                continue
-            pending[successor] = pending.get(successor, StatusFlag8616.NONE) | unseen
-            if successor not in queue:
-                queue.append(successor)
 
-    if queue:
-        for remaining in pending.values():
-            reads |= remaining
-        failed.add(min(visited) if visited else entry_address)
-    classified_count = len(visited)
-    failure_count = min(classified_count, len(failed))
+    if scan.queue:
+        for remaining in scan.pending.values():
+            scan.reads |= remaining
+        scan.failed.add(min(scan.visited) if scan.visited else entry_address)
+    classified_count = len(scan.visited)
+    failure_count = min(classified_count, len(scan.failed))
     return BinaryStatusFlagReadSummary8616(
-        reads=reads & STATUS_FLAGS_8616,
+        reads=scan.reads & STATUS_FLAGS_8616,
         raw_fact_count=classified_count,
         normalized_fact_count=classified_count,
         classified_fact_count=classified_count,
@@ -235,8 +313,8 @@ def summarize_binary_status_flag_entry_reads_8616(
         failure_count=failure_count,
         overwrites=(
             summarize_status_flag_cfg_effect_8616(
-                tuple(prefixes.values()), entry_address=entry_address,
-            ).overwrites if not failed else StatusFlag8616.NONE
+                tuple(scan.prefixes.values()), entry_address=entry_address,
+            ).overwrites if not scan.failed else StatusFlag8616.NONE
         ),
     )
 

@@ -64,9 +64,7 @@ def _first_unsafe_scalar_node_8616(
     if isinstance(expression, structured_c.CConstant):
         return None
     if isinstance(expression, structured_c.CVariable):
-        if isinstance(expression.variable, SimTemporaryVariable) or physical_register_view_8616(expression) is not None:
-            return cast(object, expression)
-        return None
+        return _unsafe_variable_8616(expression)
     if isinstance(expression, structured_c.CBinaryOp):
         unsafe_lhs = _first_unsafe_scalar_node_8616(expression.lhs, child_path)
         return unsafe_lhs or _first_unsafe_scalar_node_8616(expression.rhs, child_path)
@@ -77,14 +75,29 @@ def _first_unsafe_scalar_node_8616(
             return cast(object, expression)
         return _first_unsafe_scalar_node_8616(expression.operand, child_path)
     if isinstance(expression, structured_c.CFunctionCall):
-        if _call_is_effectful_8616(expression):
-            return cast(object, expression)
-        for argument in tuple(expression.args or ()):
-            unsafe_argument = _first_unsafe_scalar_node_8616(argument, child_path)
-            if unsafe_argument is not None:
-                return unsafe_argument
-        return None
+        return _unsafe_call_node_8616(expression, child_path)
     return expression
+
+
+def _unsafe_variable_8616(expression: structured_c.CVariable) -> object | None:
+    """Reject unresolved temporary or physical-register carriers."""
+    if isinstance(expression.variable, SimTemporaryVariable) or physical_register_view_8616(expression) is not None:
+        return cast(object, expression)
+    return None
+
+
+def _unsafe_call_node_8616(
+    expression: structured_c.CFunctionCall,
+    child_path: frozenset[int],
+) -> object | None:
+    """Reject effectful calls; recurse into pure call arguments."""
+    if _call_is_effectful_8616(expression):
+        return cast(object, expression)
+    for argument in tuple(expression.args or ()):
+        unsafe_argument = _first_unsafe_scalar_node_8616(argument, child_path)
+        if unsafe_argument is not None:
+            return unsafe_argument
+    return None
 
 
 def _safe_scalar_expression_8616(expression: object) -> bool:

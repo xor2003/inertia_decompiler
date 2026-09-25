@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import networkx as nx
 
@@ -108,6 +108,82 @@ def _instruction_addresses_8616(
     return tuple(sorted(addresses))
 
 
+def _snapshot_nodes_8616(
+    graph_nodes: tuple[object, ...],
+    block_set: frozenset[int],
+    project: object,
+    reference_addr: int,
+) -> dict[int, object] | None:
+    """Index transition-graph nodes by their unique in-function block."""
+    node_by_addr: dict[int, object] = {}
+    for node in graph_nodes:
+        address = _node_address_8616(node)
+        if address is None:
+            continue
+        comparable = comparable_address_8616(project, address, reference_addr)
+        if comparable not in block_set:
+            continue
+        if comparable in node_by_addr:
+            return None
+        node_by_addr[comparable] = node
+    return node_by_addr if frozenset(node_by_addr) == block_set else None
+
+
+def _snapshot_graph_8616(
+    block_set: frozenset[int],
+    node_by_addr: dict[int, object],
+    source_graph: Any,
+    project: object,
+    reference_addr: int,
+) -> nx.DiGraph | None:
+    """Project the transition graph onto in-function block addresses."""
+    graph = nx.DiGraph()
+    graph.add_nodes_from(sorted(block_set))
+    try:
+        for source_addr, source_node in sorted(node_by_addr.items()):
+            for target_node in source_graph.successors(source_node):
+                target_addr = _node_address_8616(target_node)
+                if target_addr is None:
+                    continue
+                comparable_target = comparable_address_8616(
+                    project,
+                    target_addr,
+                    reference_addr,
+                )
+                if comparable_target in block_set:
+                    graph.add_edge(source_addr, comparable_target)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+    return graph
+
+
+def _snapshot_block_instructions_8616(
+    blocks: tuple[object, ...],
+    block_set: frozenset[int],
+    project: object,
+    reference_addr: int,
+) -> dict[int, tuple[int, ...]] | None:
+    """Decode instruction addresses for each unique in-function block."""
+    instructions_by_block: dict[int, tuple[int, ...]] = {}
+    for block in blocks:
+        raw_block_addr = _node_address_8616(block)
+        if raw_block_addr is None:
+            return None
+        block_addr = comparable_address_8616(project, raw_block_addr, reference_addr)
+        if block_addr not in block_set or block_addr in instructions_by_block:
+            return None
+        instructions_by_block[block_addr] = _instruction_addresses_8616(
+            project,
+            block,
+            reference_addr,
+        )
+    return (
+        instructions_by_block
+        if frozenset(instructions_by_block) == block_set
+        else None
+    )
+
+
 def _function_cfg_snapshot_8616(
     project: object,
     function: object,
@@ -136,52 +212,20 @@ def _function_cfg_snapshot_8616(
     if len(set(block_addrs)) != len(block_addrs):
         return None
     block_set = frozenset(block_addrs)
-    node_by_addr: dict[int, object] = {}
-    for node in graph_nodes:
-        address = _node_address_8616(node)
-        if address is None:
-            continue
-        comparable = comparable_address_8616(project, address, reference_addr)
-        if comparable not in block_set:
-            continue
-        if comparable in node_by_addr:
-            return None
-        node_by_addr[comparable] = node
-    if frozenset(node_by_addr) != block_set:
+    node_by_addr = _snapshot_nodes_8616(graph_nodes, block_set, project, reference_addr)
+    if node_by_addr is None:
         return None
 
-    graph = nx.DiGraph()
-    graph.add_nodes_from(sorted(block_set))
-    try:
-        for source_addr, source_node in sorted(node_by_addr.items()):
-            for target_node in source_graph.successors(source_node):
-                target_addr = _node_address_8616(target_node)
-                if target_addr is None:
-                    continue
-                comparable_target = comparable_address_8616(
-                    project,
-                    target_addr,
-                    reference_addr,
-                )
-                if comparable_target in block_set:
-                    graph.add_edge(source_addr, comparable_target)
-    except (AttributeError, KeyError, TypeError, ValueError):
+    graph = _snapshot_graph_8616(
+        block_set, node_by_addr, source_graph, project, reference_addr,
+    )
+    if graph is None:
         return None
 
-    instructions_by_block: dict[int, tuple[int, ...]] = {}
-    for block in blocks:
-        raw_block_addr = _node_address_8616(block)
-        if raw_block_addr is None:
-            return None
-        block_addr = comparable_address_8616(project, raw_block_addr, reference_addr)
-        if block_addr not in block_set or block_addr in instructions_by_block:
-            return None
-        instructions_by_block[block_addr] = _instruction_addresses_8616(
-            project,
-            block,
-            reference_addr,
-        )
-    if frozenset(instructions_by_block) != block_set:
+    instructions_by_block = _snapshot_block_instructions_8616(
+        blocks, block_set, project, reference_addr,
+    )
+    if instructions_by_block is None:
         return None
     return _FunctionCfgSnapshot8616(graph, instructions_by_block)
 
@@ -211,70 +255,80 @@ def recover_direct_stack_move_pretest_body_evidence_8616(
             and not snapshot.graph.has_edge(move_block, move_block)
         ):
             continue
-        entry_edges = tuple(
-            sorted(
-                (source, target)
-                for source, target in snapshot.graph.edges
-                if source not in component and target in component
-            )
+        fact = _component_evidence_8616(snapshot, move_block, move_addr, component)
+        if fact is not None:
+            evidence.append(fact)
+    return tuple(evidence)
+
+
+def _component_evidence_8616(
+    snapshot: _FunctionCfgSnapshot8616,
+    move_block: int,
+    move_addr: int,
+    component: frozenset[int],
+) -> DirectStackMovePretestBodyEvidence8616 | None:
+    """Prove one SCC's unique header/body-entry/latch structure, or refuse."""
+    entry_edges = tuple(
+        sorted(
+            (source, target)
+            for source, target in snapshot.graph.edges
+            if source not in component and target in component
         )
-        entry_targets = tuple(sorted({target for _, target in entry_edges}))
-        if len(entry_targets) != 1:
-            continue
-        header = entry_targets[0]
-        internal_successors = tuple(
-            sorted(
-                target
-                for target in snapshot.graph.successors(header)
-                if target in component and target != header
-            )
-        )
-        external_successors = tuple(
+    )
+    entry_targets = tuple(sorted({target for _, target in entry_edges}))
+    if len(entry_targets) != 1:
+        return None
+    header = entry_targets[0]
+    internal_successors = tuple(
+        sorted(
             target
             for target in snapshot.graph.successors(header)
-            if target not in component
+            if target in component and target != header
         )
-        if len(internal_successors) != 1 or not external_successors:
-            continue
-        body_entry = internal_successors[0]
-        if body_entry != move_block:
-            continue
-        internal_body_predecessors = frozenset(
+    )
+    external_successors = tuple(
+        target
+        for target in snapshot.graph.successors(header)
+        if target not in component
+    )
+    if len(internal_successors) != 1 or not external_successors:
+        return None
+    body_entry = internal_successors[0]
+    if body_entry != move_block:
+        return None
+    internal_body_predecessors = frozenset(
+        source
+        for source in snapshot.graph.predecessors(body_entry)
+        if source in component
+    )
+    if internal_body_predecessors != {header}:
+        return None
+    latches = tuple(
+        sorted(
             source
-            for source in snapshot.graph.predecessors(body_entry)
+            for source in snapshot.graph.predecessors(header)
             if source in component
         )
-        if internal_body_predecessors != {header}:
-            continue
-        latches = tuple(
-            sorted(
-                source
-                for source in snapshot.graph.predecessors(header)
-                if source in component
-            )
+    )
+    if len(latches) != 1:
+        return None
+    exit_edges = tuple(
+        sorted(
+            (source, target)
+            for source, target in snapshot.graph.edges
+            if source in component and target not in component
         )
-        if len(latches) != 1:
-            continue
-        exit_edges = tuple(
-            sorted(
-                (source, target)
-                for source, target in snapshot.graph.edges
-                if source in component and target not in component
-            )
-        )
-        if not exit_edges:
-            continue
-        evidence.append(
-            DirectStackMovePretestBodyEvidence8616(
-                move_addr=move_addr,
-                header_addr=header,
-                body_entry_addr=body_entry,
-                latch_addr=latches[0],
-                body_block_addrs=tuple(sorted(component)),
-                entry_edges=entry_edges,
-                exit_edges=exit_edges,
-                header_instruction_addrs=snapshot.instructions_by_block[header],
-                body_entry_instruction_addrs=snapshot.instructions_by_block[body_entry],
-            )
-        )
-    return tuple(evidence)
+    )
+    if not exit_edges:
+        return None
+    return DirectStackMovePretestBodyEvidence8616(
+        move_addr=move_addr,
+        header_addr=header,
+        body_entry_addr=body_entry,
+        latch_addr=latches[0],
+        body_block_addrs=tuple(sorted(component)),
+        entry_edges=entry_edges,
+        exit_edges=exit_edges,
+        header_instruction_addrs=snapshot.instructions_by_block[header],
+        body_entry_instruction_addrs=snapshot.instructions_by_block[body_entry],
+    )

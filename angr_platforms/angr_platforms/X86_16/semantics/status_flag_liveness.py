@@ -200,47 +200,72 @@ def status_flag_effect_8616(instruction: DecodedStatusFlagInstruction8616) -> St
     if mnemonic in {"inc", "dec"}:
         return StatusFlagEffect8616(overwrites=INCDEC_STATUS_FLAG_WRITES_8616)
     if mnemonic in _COUNTED_SHIFT_MNEMONICS_8616:
-        if instruction.immediate_count is None:
-            return StatusFlagEffect8616()
-        count = instruction.immediate_count & 0x1F
-        if count == 0:
-            return StatusFlagEffect8616()
-        writes = (
-            StatusFlag8616.CARRY | StatusFlag8616.PARITY | StatusFlag8616.ZERO | StatusFlag8616.SIGN
-        )
-        if count == 1:
-            writes |= StatusFlag8616.OVERFLOW
-        return StatusFlagEffect8616(overwrites=writes)
+        return _counted_shift_effect_8616(instruction)
     if mnemonic in _COUNTED_ROTATE_MNEMONICS_8616:
-        if instruction.immediate_count is None:
-            return None if mnemonic in {"rcl", "rcr"} else StatusFlagEffect8616()
-        count = instruction.immediate_count & 0x1F
-        if count == 0:
-            return StatusFlagEffect8616()
-        reads = StatusFlag8616.CARRY if mnemonic in {"rcl", "rcr"} else StatusFlag8616.NONE
-        writes = StatusFlag8616.CARRY
-        if count == 1:
-            writes |= StatusFlag8616.OVERFLOW
-        return StatusFlagEffect8616(reads=reads, overwrites=writes)
-    if mnemonic in {"clc", "stc"}:
-        return StatusFlagEffect8616(overwrites=StatusFlag8616.CARRY)
-    if mnemonic == "cmc":
-        return StatusFlagEffect8616(reads=StatusFlag8616.CARRY, overwrites=StatusFlag8616.CARRY)
-    if mnemonic == "lahf":
-        return StatusFlagEffect8616(reads=_LAHF_FLAGS_8616)
-    if mnemonic == "sahf":
-        return StatusFlagEffect8616(overwrites=_LAHF_FLAGS_8616)
-    if mnemonic in {"pushf", "pushfd"}:
-        return StatusFlagEffect8616(reads=STATUS_FLAGS_8616)
-    if mnemonic in {"popf", "popfd"}:
-        return StatusFlagEffect8616(overwrites=STATUS_FLAGS_8616)
-    if mnemonic in {"iret", "iretd"}:
-        return StatusFlagEffect8616(overwrites=STATUS_FLAGS_8616)
-    if mnemonic in {"loope", "loopz", "loopne", "loopnz"}:
-        return StatusFlagEffect8616(reads=StatusFlag8616.ZERO)
-    if mnemonic == "into":
-        return StatusFlagEffect8616(reads=StatusFlag8616.OVERFLOW)
-    return None
+        return _counted_rotate_effect_8616(instruction)
+    return _fixed_mnemonic_effect_8616(mnemonic)
+
+
+def _counted_shift_effect_8616(
+    instruction: DecodedStatusFlagInstruction8616,
+) -> StatusFlagEffect8616:
+    """Classify one counted shift's flag writes."""
+    if instruction.immediate_count is None:
+        return StatusFlagEffect8616()
+    count = instruction.immediate_count & 0x1F
+    if count == 0:
+        return StatusFlagEffect8616()
+    writes = (
+        StatusFlag8616.CARRY | StatusFlag8616.PARITY | StatusFlag8616.ZERO | StatusFlag8616.SIGN
+    )
+    if count == 1:
+        writes |= StatusFlag8616.OVERFLOW
+    return StatusFlagEffect8616(overwrites=writes)
+
+
+def _counted_rotate_effect_8616(
+    instruction: DecodedStatusFlagInstruction8616,
+) -> StatusFlagEffect8616 | None:
+    """Classify one counted rotate's flag reads and writes."""
+    mnemonic = instruction.mnemonic
+    if instruction.immediate_count is None:
+        return None if mnemonic in {"rcl", "rcr"} else StatusFlagEffect8616()
+    count = instruction.immediate_count & 0x1F
+    if count == 0:
+        return StatusFlagEffect8616()
+    reads = StatusFlag8616.CARRY if mnemonic in {"rcl", "rcr"} else StatusFlag8616.NONE
+    writes = StatusFlag8616.CARRY
+    if count == 1:
+        writes |= StatusFlag8616.OVERFLOW
+    return StatusFlagEffect8616(reads=reads, overwrites=writes)
+
+
+_FIXED_MNEMONIC_EFFECTS_8616 = {
+    "clc": StatusFlagEffect8616(overwrites=StatusFlag8616.CARRY),
+    "stc": StatusFlagEffect8616(overwrites=StatusFlag8616.CARRY),
+    "cmc": StatusFlagEffect8616(
+        reads=StatusFlag8616.CARRY,
+        overwrites=StatusFlag8616.CARRY,
+    ),
+    "lahf": StatusFlagEffect8616(reads=_LAHF_FLAGS_8616),
+    "sahf": StatusFlagEffect8616(overwrites=_LAHF_FLAGS_8616),
+    "pushf": StatusFlagEffect8616(reads=STATUS_FLAGS_8616),
+    "pushfd": StatusFlagEffect8616(reads=STATUS_FLAGS_8616),
+    "popf": StatusFlagEffect8616(overwrites=STATUS_FLAGS_8616),
+    "popfd": StatusFlagEffect8616(overwrites=STATUS_FLAGS_8616),
+    "iret": StatusFlagEffect8616(overwrites=STATUS_FLAGS_8616),
+    "iretd": StatusFlagEffect8616(overwrites=STATUS_FLAGS_8616),
+    "loope": StatusFlagEffect8616(reads=StatusFlag8616.ZERO),
+    "loopz": StatusFlagEffect8616(reads=StatusFlag8616.ZERO),
+    "loopne": StatusFlagEffect8616(reads=StatusFlag8616.ZERO),
+    "loopnz": StatusFlagEffect8616(reads=StatusFlag8616.ZERO),
+    "into": StatusFlagEffect8616(reads=StatusFlag8616.OVERFLOW),
+}
+
+
+def _fixed_mnemonic_effect_8616(mnemonic: str) -> StatusFlagEffect8616 | None:
+    """Return the fixed flag effect for one mnemonic, if any."""
+    return _FIXED_MNEMONIC_EFFECTS_8616.get(mnemonic)
 
 
 def _status_flag_liveness_decision_8616(

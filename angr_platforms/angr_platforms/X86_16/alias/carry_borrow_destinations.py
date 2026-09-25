@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from ..ir import IRInstr, IRValue, MemSpace
+from ..ir import IRAddress, IRInstr, IRValue, MemSpace
 from ..ir.logical_memory_contracts import IRMemoryAccessKind8616
 from ..ir.ssa_function import SSAFunctionArtifact
 from .carry_borrow_projection import (
@@ -147,24 +147,36 @@ def _value_reaches_result_lane(
             required_shift,
             next_visited,
         )
-    if (
-        definition.op == "Iop_Shr16"
-        and len(definition.args) == 2
-        and isinstance(definition.args[0], IRValue)
-        and isinstance(definition.args[1], IRValue)
-        and definition.args[1].const == 8
-        and required_shift >= 8
-    ):
+    step_value = _shr8_step_value_8616(definition, required_shift)
+    if step_value is not None:
         return _value_reaches_result_lane(
             instructions,
             definition_index,
-            definition.args[0],
+            step_value,
             expected,
             expected_domain,
             required_shift - 8,
             next_visited,
         )
     return False
+
+
+def _shr16_by_8_shape_8616(definition: IRInstr) -> bool:
+    """Return True when ``definition`` is exactly ``Shr16(x, 8)``."""
+    return (
+        definition.op == "Iop_Shr16"
+        and len(definition.args) == 2
+        and isinstance(definition.args[0], IRValue)
+        and isinstance(definition.args[1], IRValue)
+        and definition.args[1].const == 8
+    )
+
+
+def _shr8_step_value_8616(definition: IRInstr, required_shift: int) -> IRValue | None:
+    """Return the Shr16-by-8 source when the step consumes 8 bits."""
+    if not _shr16_by_8_shape_8616(definition) or required_shift < 8:
+        return None
+    return definition.args[0]
 
 
 def _logical_store_value_paths(
@@ -230,6 +242,22 @@ def _refusal(
     )
 
 
+def _adjacent_word_lanes_8616(low_address: IRAddress, high_address: IRAddress) -> bool:
+    """Return whether two addresses are adjacent word lanes of one object."""
+    if (
+        low_address.space is not high_address.space
+        or low_address.base != high_address.base
+        or low_address.size != high_address.size
+        or low_address.size != 2
+    ):
+        return False
+    return (
+        high_address.offset == low_address.offset + low_address.size
+        and low_address.status is high_address.status
+        and low_address.segment_origin is high_address.segment_origin
+    )
+
+
 def _resolve_destination(
     function_ssa: SSAFunctionArtifact,
     stack_aliases: StackMemorySSAAliasArtifact8616,
@@ -276,16 +304,11 @@ def _resolve_destination(
         return _refusal(carry, CarryBorrowDestinationAliasFailure8616.STORE_ORDER_MISMATCH)
     low_address = low_store.address
     high_address = high_store.address
-    if (
-        low_address.space is not high_address.space
-        or low_address.base != high_address.base
-        or low_address.size != high_address.size
-        or low_address.size != 2
-        or high_address.offset != low_address.offset + low_address.size
-        or low_address.status is not high_address.status
-        or low_address.segment_origin is not high_address.segment_origin
-    ):
-        return _refusal(carry, CarryBorrowDestinationAliasFailure8616.DESTINATION_RANGE_MISMATCH)
+    if not _adjacent_word_lanes_8616(low_address, high_address):
+        return _refusal(
+            carry,
+            CarryBorrowDestinationAliasFailure8616.DESTINATION_RANGE_MISMATCH,
+        )
     if not low_store.storage.can_join(high_store.storage):
         return _refusal(carry, CarryBorrowDestinationAliasFailure8616.DESTINATION_ALIAS_MISMATCH)
     return CarryBorrowDestinationAliasResolution8616(

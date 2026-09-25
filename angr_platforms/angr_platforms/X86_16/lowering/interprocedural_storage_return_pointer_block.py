@@ -222,65 +222,79 @@ def _apply_stack_transfers_8616(
     return saw_clobber
 
 
-def scan_pointer_carriers_in_block_8616(
-    block: SSABlock,
-    fact: CallerReturnUseFact8616,
-    entry_carriers: dict[DomainKey, PointerCarrier8616],
-    entry_stack_carriers: dict[StackWordStorageVersion8616, PointerCarrier8616],
-    stack_transfers_by_instruction: dict[int, tuple[StackWordRegisterTransfer8616, ...]],
-    start_index: int,
-    witness: int,
-) -> PointerBlockScan8616:
-    """Propagate exact carriers through one block from a proven entry state."""
-    live = dict(entry_carriers)
-    stack_live = dict(entry_stack_carriers)
-    entry_domains = set(live)
-    tainted = {_value_key_8616(carrier.value): carrier for carrier in live.values()}
-    saw_unknown = False
-    saw_ambiguous = False
-    saw_clobber = False
+@dataclass(slots=True)
+class _PointerBlockScanState8616:
+    """Mutable carrier-propagation state for one block scan."""
 
-    for instr_index in range(start_index, len(block.instrs)):
-        instruction = block.instrs[instr_index]
-        instr_addr = instruction.addr
-        if isinstance(instr_addr, int):
-            for address in _address_uses_8616(instruction):
-                carrier, name, ambiguous, unknown = _address_carrier_8616(address, live)
-                saw_ambiguous = saw_ambiguous or ambiguous
-                saw_unknown = saw_unknown or unknown
-                if carrier is not None and name is not None:
-                    evidence = ReturnPointerUseEvidence8616(
-                        caller_addr=fact.caller_addr,
-                        callsite_addr=fact.callsite_addr,
-                        witness_instruction_addr=witness,
-                        dereference_instruction_addr=instr_addr,
-                        carrier_register=name,
-                        address=address,
-                        aliases=carrier.aliases,
-                        cfg_edges=carrier.cfg_edges,
-                        phis=carrier.phis,
-                        stack_transfers=carrier.stack_transfers,
-                    )
-                    if evidence.complete:
-                        return PointerBlockScan8616(
-                            carriers=live,
-                            stack_carriers=stack_live,
-                            evidence=evidence,
-                        )
-                    saw_unknown = True
+    block: SSABlock
+    live: dict[DomainKey, PointerCarrier8616]
+    stack_live: dict[StackWordStorageVersion8616, PointerCarrier8616]
+    entry_domains: set[DomainKey]
+    tainted: dict[_ValueKey8616, PointerCarrier8616]
+    saw_unknown: bool = False
+    saw_ambiguous: bool = False
+    saw_clobber: bool = False
 
+    def deref_evidence(
+        self,
+        instruction: IRInstr,
+        instr_addr: int,
+        fact: CallerReturnUseFact8616,
+        witness: int,
+    ) -> ReturnPointerUseEvidence8616 | None:
+        """Return complete dereference evidence for one instruction or None."""
+        for address in _address_uses_8616(instruction):
+            carrier, name, ambiguous, unknown = _address_carrier_8616(address, self.live)
+            self.saw_ambiguous = self.saw_ambiguous or ambiguous
+            self.saw_unknown = self.saw_unknown or unknown
+            if carrier is not None and name is not None:
+                evidence = ReturnPointerUseEvidence8616(
+                    caller_addr=fact.caller_addr,
+                    callsite_addr=fact.callsite_addr,
+                    witness_instruction_addr=witness,
+                    dereference_instruction_addr=instr_addr,
+                    carrier_register=name,
+                    address=address,
+                    aliases=carrier.aliases,
+                    cfg_edges=carrier.cfg_edges,
+                    phis=carrier.phis,
+                    stack_transfers=carrier.stack_transfers,
+                )
+                if evidence.complete:
+                    return evidence
+                self.saw_unknown = True
+        return None
+
+    def apply_copy(
+        self,
+        instr_index: int,
+        instruction: IRInstr,
+        instr_addr: int | None,
+    ) -> None:
+        """Propagate one exact carrier through a proven register copy."""
         destination = instruction.dst
-        copy = None if not isinstance(instr_addr, int) else _copy_source_8616(instruction, tainted, live, entry_domains)
-        destination_domain = None if destination is None else full_word_pointer_domain_8616(destination)
+        copy = (
+            None
+            if not isinstance(instr_addr, int)
+            else _copy_source_8616(instruction, self.tainted, self.live, self.entry_domains)
+        )
+        destination_domain = (
+            None if destination is None else full_word_pointer_domain_8616(destination)
+        )
         if destination_domain is not None:
-            entry_domains.discard(destination_domain)
-            if destination_domain in live and copy is None:
-                saw_clobber = True
-            live.pop(destination_domain, None)
-        if destination is not None and copy is not None and isinstance(destination.version, int) and isinstance(instr_addr, int):
+            self.entry_domains.discard(destination_domain)
+            if destination_domain in self.live and copy is None:
+                self.saw_clobber = True
+            self.live.pop(destination_domain, None)
+        if (
+            destination is not None
+            and copy is not None
+            and isinstance(destination.version, int)
+            and isinstance(instr_addr, int)
+        ):
             source, source_carrier = copy
             alias = ReturnPointerAliasStep8616(
-                block_addr=block.addr,
+                block_addr=self.block.addr,
                 instr_index=instr_index,
                 instr_addr=instr_addr,
                 source=source,
@@ -293,21 +307,67 @@ def scan_pointer_carriers_in_block_8616(
                 phis=source_carrier.phis,
                 stack_transfers=source_carrier.stack_transfers,
             )
-            tainted[_value_key_8616(destination)] = carrier
+            self.tainted[_value_key_8616(destination)] = carrier
             if destination_domain is not None:
-                live[destination_domain] = carrier
-        next_addr = block.instrs[instr_index + 1].addr if instr_index + 1 < len(block.instrs) else None
+                self.live[destination_domain] = carrier
+
+    def apply_transfers(
+        self,
+        instr_index: int,
+        instr_addr: int | None,
+        stack_transfers_by_instruction: dict[int, tuple[StackWordRegisterTransfer8616, ...]],
+    ) -> None:
+        """Apply stack-transfer clobbers between adjacent addressed instructions."""
+        next_addr = (
+            self.block.instrs[instr_index + 1].addr
+            if instr_index + 1 < len(self.block.instrs)
+            else None
+        )
         if isinstance(instr_addr, int) and next_addr != instr_addr:
             transfer_clobber = _apply_stack_transfers_8616(
                 stack_transfers_by_instruction.get(instr_addr, ()),
-                live,
-                stack_live,
+                self.live,
+                self.stack_live,
             )
-            saw_clobber = saw_clobber or transfer_clobber
+            self.saw_clobber = self.saw_clobber or transfer_clobber
+
+
+def scan_pointer_carriers_in_block_8616(
+    block: SSABlock,
+    fact: CallerReturnUseFact8616,
+    entry_carriers: dict[DomainKey, PointerCarrier8616],
+    entry_stack_carriers: dict[StackWordStorageVersion8616, PointerCarrier8616],
+    stack_transfers_by_instruction: dict[int, tuple[StackWordRegisterTransfer8616, ...]],
+    start_index: int,
+    witness: int,
+) -> PointerBlockScan8616:
+    """Propagate exact carriers through one block from a proven entry state."""
+    live = dict(entry_carriers)
+    state = _PointerBlockScanState8616(
+        block=block,
+        live=live,
+        stack_live=dict(entry_stack_carriers),
+        entry_domains=set(live),
+        tainted={_value_key_8616(carrier.value): carrier for carrier in live.values()},
+    )
+
+    for instr_index in range(start_index, len(block.instrs)):
+        instruction = block.instrs[instr_index]
+        instr_addr = instruction.addr
+        if isinstance(instr_addr, int):
+            evidence = state.deref_evidence(instruction, instr_addr, fact, witness)
+            if evidence is not None:
+                return PointerBlockScan8616(
+                    carriers=state.live,
+                    stack_carriers=state.stack_live,
+                    evidence=evidence,
+                )
+        state.apply_copy(instr_index, instruction, instr_addr)
+        state.apply_transfers(instr_index, instr_addr, stack_transfers_by_instruction)
     return PointerBlockScan8616(
-        carriers=live,
-        stack_carriers=stack_live,
-        saw_unknown_address=saw_unknown,
-        saw_ambiguous_address=saw_ambiguous,
-        saw_alias_clobber=saw_clobber,
+        carriers=state.live,
+        stack_carriers=state.stack_live,
+        saw_unknown_address=state.saw_unknown,
+        saw_ambiguous_address=state.saw_ambiguous,
+        saw_alias_clobber=state.saw_clobber,
     )

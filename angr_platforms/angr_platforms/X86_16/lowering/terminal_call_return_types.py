@@ -10,7 +10,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Protocol, cast
 
@@ -23,6 +23,7 @@ from ..call_target_identity import resolve_x86_16_call_target_function_8616
 from ..callsite_summary import CallerReturnUseVerdict8616
 from ..semantics.branch_target_return import TerminalAxReturnEffectKind8616, terminal_ax_return_effect_8616
 from ..semantics.terminal_call_paths import (
+    TerminalCallPathCallbacks8616,
     TerminalCallPathStatus8616,
     angr_terminal_call_path_callbacks_8616,
     prove_terminal_call_path_8616,
@@ -226,6 +227,68 @@ def _scalar_callee_return_type_8616(
     return return_type, TerminalCallReturnTypeSource8616.CALLEE_PROTOTYPE
 
 
+@dataclass(slots=True)
+class _CallReturnCensus8616:
+    """Mutable census over terminal call-clobber sites in one function."""
+
+    raw_count: int = 0
+    normalized_count: int = 0
+    failure_count: int = 0
+    classified: list[tuple[int, int, SimType, TerminalCallReturnTypeSource8616]] = field(
+        default_factory=list
+    )
+    inspected_targets: set[int] = field(default_factory=set)
+
+    def scan(
+        self,
+        project: object,
+        callbacks: TerminalCallPathCallbacks8616,
+    ) -> None:
+        """Classify every proven terminal call-clobber site in the function."""
+        for block_addr, block_size in callbacks.function_block_ranges():
+            try:
+                block = callbacks.load_block(int(block_addr), int(block_size))
+            except Exception:
+                self.failure_count += 1
+                continue
+            capstone = _dynamic_attr_8616(block, "capstone", None) if block is not None else None
+            raw_insns = _dynamic_attr_8616(capstone, "insns", ())
+            insns = tuple(raw_insns) if isinstance(raw_insns, Iterable) else ()
+            for insn in insns:
+                self._scan_insn(project, insn, callbacks)
+
+    def _scan_insn(
+        self,
+        project: object,
+        insn: object,
+        callbacks: TerminalCallPathCallbacks8616,
+    ) -> None:
+        """Classify one candidate terminal call-clobber instruction."""
+        if terminal_ax_return_effect_8616(insn).kind is not TerminalAxReturnEffectKind8616.CALL_CLOBBER:
+            return
+        self.raw_count += 1
+        call_ins_addr = _dynamic_attr_8616(insn, "address", None)
+        if not isinstance(call_ins_addr, int):
+            self.failure_count += 1
+            return
+        path_result = prove_terminal_call_path_8616(call_ins_addr, callbacks)
+        if path_result.status is not TerminalCallPathStatus8616.PROVEN:
+            return
+        self.normalized_count += 1
+        target_addr = _direct_call_target_8616(insn)
+        if isinstance(target_addr, int):
+            self.inspected_targets.add(target_addr)
+        return_type, source = (
+            _scalar_callee_return_type_8616(project, target_addr)
+            if isinstance(target_addr, int)
+            else (None, None)
+        )
+        if return_type is None or source is None or target_addr is None:
+            self.failure_count += 1
+            return
+        self.classified.append((call_ins_addr, target_addr, return_type, source))
+
+
 def collect_terminal_call_return_type_evidence_8616(
     project: object,
     function: object,
@@ -233,44 +296,13 @@ def collect_terminal_call_return_type_evidence_8616(
     """Classify a terminal callee result only when this result is observed."""
     function_surface = cast(_FunctionSurface8616, function)
     callbacks = angr_terminal_call_path_callbacks_8616(project, function)
-    raw_count = 0
-    normalized_count = 0
-    failure_count = 0
-    classified: list[tuple[int, int, SimType, TerminalCallReturnTypeSource8616]] = []
-    inspected_targets: set[int] = set()
-    for block_addr, block_size in callbacks.function_block_ranges():
-        try:
-            block = callbacks.load_block(int(block_addr), int(block_size))
-        except Exception:
-            failure_count += 1
-            continue
-        capstone = _dynamic_attr_8616(block, "capstone", None) if block is not None else None
-        raw_insns = _dynamic_attr_8616(capstone, "insns", ())
-        insns = tuple(raw_insns) if isinstance(raw_insns, Iterable) else ()
-        for insn in insns:
-            if terminal_ax_return_effect_8616(insn).kind is not TerminalAxReturnEffectKind8616.CALL_CLOBBER:
-                continue
-            raw_count += 1
-            call_ins_addr = _dynamic_attr_8616(insn, "address", None)
-            if not isinstance(call_ins_addr, int):
-                failure_count += 1
-                continue
-            path_result = prove_terminal_call_path_8616(call_ins_addr, callbacks)
-            if path_result.status is not TerminalCallPathStatus8616.PROVEN:
-                continue
-            normalized_count += 1
-            target_addr = _direct_call_target_8616(insn)
-            if isinstance(target_addr, int):
-                inspected_targets.add(target_addr)
-            return_type, source = (
-                _scalar_callee_return_type_8616(project, target_addr)
-                if isinstance(target_addr, int)
-                else (None, None)
-            )
-            if return_type is None or source is None or target_addr is None:
-                failure_count += 1
-                continue
-            classified.append((call_ins_addr, target_addr, return_type, source))
+    census = _CallReturnCensus8616()
+    census.scan(project, callbacks)
+    raw_count = census.raw_count
+    normalized_count = census.normalized_count
+    failure_count = census.failure_count
+    classified = census.classified
+    inspected_targets = census.inspected_targets
 
     if (
         proven_function_result_observation_8616(project, function_surface.addr)

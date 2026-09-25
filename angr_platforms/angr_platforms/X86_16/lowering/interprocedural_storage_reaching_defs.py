@@ -169,15 +169,41 @@ def physical_call_argument_8616(
         logical_widths = projected_widths
     if logical_index < 0 or logical_index >= len(logical_widths):
         return None, CallArgumentDefinitionFailure8616.INVALID_ARGUMENT_INDEX
-    if (
+    if _incomplete_widths_8616(
+        summary, physical_widths, logical_widths, physical_count,
+    ):
+        return None, CallArgumentDefinitionFailure8616.INCOMPLETE_PHYSICAL_ARGUMENT
+    source_order_pieces = _source_order_pieces_8616(summary, physical_widths)
+    if source_order_pieces is None:
+        return None, CallArgumentDefinitionFailure8616.INCOMPLETE_PHYSICAL_ARGUMENT
+    groups = _grouped_arguments_8616(logical_widths, source_order_pieces)
+    if groups is None:
+        return None, CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT
+    return groups[logical_index], None
+
+
+def _incomplete_widths_8616(
+    summary: CallsiteSummary8616,
+    physical_widths: tuple[int, ...],
+    logical_widths: tuple[int, ...],
+    physical_count: int,
+) -> bool:
+    """Return whether the pushed widths/addr census is incomplete or unequal."""
+    return bool(
         len(physical_widths) != physical_count
         or len(summary.push_arg_instruction_addrs) != physical_count
         or len(summary.push_arg_sources) != physical_count
         or any(width <= 0 for width in physical_widths)
         or any(width <= 0 for width in logical_widths)
         or sum(physical_widths) != sum(logical_widths)
-    ):
-        return None, CallArgumentDefinitionFailure8616.INCOMPLETE_PHYSICAL_ARGUMENT
+    )
+
+
+def _source_order_pieces_8616(
+    summary: CallsiteSummary8616,
+    physical_widths: tuple[int, ...],
+) -> list[PhysicalCallArgumentPiece8616] | None:
+    """Build source-order pieces or refuse incomplete push-site evidence."""
     source_order_pieces: list[PhysicalCallArgumentPiece8616] = []
     for width, source, push_addr in reversed(
         tuple(
@@ -190,7 +216,7 @@ def physical_call_argument_8616(
         )
     ):
         if not isinstance(source, tuple) or not isinstance(push_addr, int):
-            return None, CallArgumentDefinitionFailure8616.INCOMPLETE_PHYSICAL_ARGUMENT
+            return None
         source_order_pieces.append(
             PhysicalCallArgumentPiece8616(
                 width=width,
@@ -198,6 +224,14 @@ def physical_call_argument_8616(
                 push_addr=push_addr,
             )
         )
+    return source_order_pieces
+
+
+def _grouped_arguments_8616(
+    logical_widths: tuple[int, ...],
+    source_order_pieces: list[PhysicalCallArgumentPiece8616],
+) -> list[PhysicalCallArgument8616] | None:
+    """Group source-order pieces into logical-width arguments."""
     groups: list[PhysicalCallArgument8616] = []
     piece_index = 0
     for logical_width in logical_widths:
@@ -209,11 +243,11 @@ def physical_call_argument_8616(
             grouped_width += piece.width
             piece_index += 1
         if grouped_width != logical_width:
-            return None, CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT
+            return None
         groups.append(PhysicalCallArgument8616(width=logical_width, pieces=tuple(pieces)))
     if piece_index != len(source_order_pieces):
-        return None, CallArgumentDefinitionFailure8616.SOURCE_WIDTH_CONFLICT
-    return groups[logical_index], None
+        return None
+    return groups
 
 
 def resolve_call_argument_reaching_definition_8616(

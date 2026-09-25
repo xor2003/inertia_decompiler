@@ -118,6 +118,23 @@ def select_multi_arm_condition_owners_8616(
     ):
         return _refuse_8616(MultiArmConditionOwnershipStatus8616.DUPLICATE_FACT)
 
+    refused = _cfg_edges_proven_8616(selected, successors)
+    if refused is not None:
+        return refused
+    refused = _fallthrough_connected_8616(selected)
+    if refused is not None:
+        return refused
+    return MultiArmConditionOwnershipResult8616(
+        status=MultiArmConditionOwnershipStatus8616.SELECTED,
+        facts=tuple(selected),
+    )
+
+
+def _cfg_edges_proven_8616(
+    selected: list[ConditionIR],
+    successors: Mapping[int, tuple[int, ...]],
+) -> MultiArmConditionOwnershipResult8616 | None:
+    """Refuse when any selected fact's edges are absent from the CFG."""
     for fact in selected:
         block_addr = fact.block_addr
         if not isinstance(block_addr, int):
@@ -133,6 +150,13 @@ def select_multi_arm_condition_owners_8616(
                 MultiArmConditionOwnershipStatus8616.CFG_EDGE_MISMATCH,
                 detail=f"block={block_addr:#x}",
             )
+    return None
+
+
+def _fallthrough_connected_8616(
+    selected: list[ConditionIR],
+) -> MultiArmConditionOwnershipResult8616 | None:
+    """Refuse when consecutive selected facts are not fallthrough-linked."""
     for current, following in itertools.pairwise(selected):
         if current.fallthrough_target != following.block_addr:
             return _refuse_8616(
@@ -142,10 +166,7 @@ def select_multi_arm_condition_owners_8616(
                     f"to={following.block_addr!r}"
                 ),
             )
-    return MultiArmConditionOwnershipResult8616(
-        status=MultiArmConditionOwnershipStatus8616.SELECTED,
-        facts=tuple(selected),
-    )
+    return None
 
 
 def materialize_multi_arm_condition_owners_8616[BodyT](

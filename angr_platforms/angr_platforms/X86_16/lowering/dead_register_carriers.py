@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Protocol, cast
 
@@ -237,6 +237,37 @@ def _physical_register_read_identities_8616(root: object) -> frozenset[PhysicalR
     return frozenset(reads)
 
 
+def _rhs_variable_verdict_8616(node: CVariable) -> tuple[bool, tuple[object, ...], bool]:
+    """Return the acceptance verdict for one variable node."""
+    variable = node.variable
+    if isinstance(variable, SimStackVariable):
+        if variable.base != "bp" or not isinstance(variable.offset, int):
+            return False, (), False
+        return True, (), True
+    if isinstance(variable, SimMemoryVariable):
+        return False, (), False
+    return True, (), False
+
+
+def _rhs_node_children_8616(node: object) -> tuple[bool, tuple[object, ...], bool]:
+    """Return ``(accepted, children, stack_source)`` for one value-only node."""
+    if isinstance(node, CConstant):
+        return True, (), False
+    if isinstance(node, CVariable):
+        return _rhs_variable_verdict_8616(node)
+    if isinstance(node, CBinaryOp):
+        return True, (node.lhs, node.rhs), False
+    if isinstance(node, CTypeCast):
+        return True, (node.expr,), False
+    if isinstance(node, CUnaryOp):
+        if node.op in {"Dereference", "Reference"}:
+            return False, (), False
+        return True, (node.operand,), False
+    if isinstance(node, CITE):
+        return True, (node.cond, node.iftrue, node.iffalse), False
+    return False, (), False
+
+
 def _pure_stack_lowered_rhs_8616(rhs: object) -> tuple[bool, bool]:
     """Return ``(pure, has_stack_source)`` for a bounded value-only RHS."""
     has_stack_source = False
@@ -250,32 +281,11 @@ def _pure_stack_lowered_rhs_8616(rhs: object) -> tuple[bool, bool]:
         if marker in active:
             return False, has_stack_source
         active.add(marker)
-        if isinstance(node, CConstant):
-            continue
-        if isinstance(node, CVariable):
-            variable = node.variable
-            if isinstance(variable, SimStackVariable):
-                if variable.base != "bp" or not isinstance(variable.offset, int):
-                    return False, has_stack_source
-                has_stack_source = True
-            elif isinstance(variable, SimMemoryVariable):
-                return False, has_stack_source
-            continue
-        if isinstance(node, CBinaryOp):
-            pending.extend((node.lhs, node.rhs))
-            continue
-        if isinstance(node, CTypeCast):
-            pending.append(node.expr)
-            continue
-        if isinstance(node, CUnaryOp):
-            if node.op in {"Dereference", "Reference"}:
-                return False, has_stack_source
-            pending.append(node.operand)
-            continue
-        if isinstance(node, CITE):
-            pending.extend((node.cond, node.iftrue, node.iffalse))
-            continue
-        return False, has_stack_source
+        accepted, children, stack_source = _rhs_node_children_8616(node)
+        if not accepted:
+            return False, has_stack_source
+        has_stack_source = has_stack_source or stack_source
+        pending.extend(children)
     return True, has_stack_source
 
 
@@ -321,6 +331,108 @@ def _first_following_physical_register_event_8616(
     return "block_end", None
 
 
+@dataclass(slots=True)
+class _CarrierPruneScan8616:
+    """Mutable census of unread stack-lowered register carriers."""
+
+    stack_move_facts: tuple[StackMoveRegisterOverwriteFact8616, ...]
+    read_owner_ids: dict[RegisterSsaIdentity8616, frozenset[int | None]]
+    runtime_gp_names: frozenset[str]
+    raw: int = 0
+    normalized: int = 0
+    classified: int = 0
+    live_refused: int = 0
+    rhs_refused: int = 0
+    no_stack_refused: int = 0
+    identity_refused: int = 0
+    removable_ids: set[int] = field(default_factory=set)
+    candidate_locations: dict[int, tuple[CStatements, int]] = field(default_factory=dict)
+
+    def scan_node(self, node: object) -> None:
+        """Census one node and classify register assignment candidates."""
+        if isinstance(node, CStatements):
+            for statement_index, statement in enumerate(node.statements):
+                self.candidate_locations[id(statement)] = (node, statement_index)
+        if not isinstance(node, CAssignment):
+            return
+        if not isinstance(node.lhs, CVariable) or not isinstance(node.lhs.variable, SimRegisterVariable):
+            return
+        self.raw += 1
+        self.classify_assignment(node)
+
+    def classify_assignment(self, node: CAssignment) -> None:
+        """Apply the full evidence ladder to one register assignment."""
+        identity = _register_ssa_identity_8616(node.lhs)
+        location = self.candidate_locations.get(id(node))
+        physical_identity = _physical_register_identity_8616(node.lhs)
+        physical_next_event = (
+            _first_following_physical_register_event_8616(
+                location[0],
+                location[1],
+                physical_identity,
+                self.stack_move_facts,
+            )
+            if identity is None and location is not None and physical_identity is not None
+            else ("unknown", None)
+        )
+        physical_overwrite_proven = physical_next_event[0] == "overwrite"
+        register_name = node.lhs.codegen.project.arch.register_names.get(node.lhs.variable.reg)
+        caller_visible_state = register_name in SEGMENT_REGISTER_SET or (
+            register_name is not None and runtime_gp_live_in_name_8616(register_name) in self.runtime_gp_names
+        )
+        if identity is None and not physical_overwrite_proven:
+            self.identity_refused += 1
+            return
+        self.normalized += 1
+        pure, has_stack_source = _pure_stack_lowered_rhs_8616(node.rhs)
+        next_event = (
+            _first_following_register_event_8616(location[0], location[1], identity)
+            if identity is not None and location is not None
+            else physical_next_event
+        )
+        if not pure:
+            self.rhs_refused += 1
+            decision = LoweredRegisterCarrierDecision8616.EFFECTFUL_OR_UNKNOWN_RHS
+        elif not has_stack_source:
+            self.no_stack_refused += 1
+            decision = LoweredRegisterCarrierDecision8616.NO_STACK_SOURCE
+        elif caller_visible_state or (
+            identity is not None and any(owner != id(node) for owner in self.read_owner_ids.get(identity, ()))
+        ):
+            self.live_refused += 1
+            decision = LoweredRegisterCarrierDecision8616.LIVE_USE
+        else:
+            self.classified += 1
+            decision = LoweredRegisterCarrierDecision8616.DEFINITELY_DEAD
+            self.removable_ids.add(id(node))
+        if os.environ.get("INERTIA_DEBUG_LOWERED_CARRIERS") == "1":
+            log.warning(
+                "[lowered-register-carrier] identity=%r decision=%s next=%r tags=%r",
+                identity,
+                decision.value,
+                next_event,
+                node.tags,
+            )
+
+
+def _remove_removable_8616(root: CStatements, removable_ids: set[int]) -> int:
+    """Delete all proven-dead assignments from their owning blocks."""
+    materialized = 0
+    seen_blocks: set[int] = set()
+    blocks: list[CStatements] = []
+    for node in (root, *_iter_c_nodes_deep_8616(root)):
+        if isinstance(node, CStatements) and id(node) not in seen_blocks:
+            seen_blocks.add(id(node))
+            blocks.append(node)
+    for block in blocks:
+        kept = [statement for statement in block.statements if id(statement) not in removable_ids]
+        removed = len(block.statements) - len(kept)
+        if removed:
+            block.statements[:] = kept
+            materialized += removed
+    return materialized
+
+
 def prune_unread_stack_lowered_register_carriers_8616(codegen: object) -> bool:
     """Delete only globally unread register SSA assignments consumed by stack lowering.
 
@@ -340,118 +452,40 @@ def prune_unread_stack_lowered_register_carriers_8616(codegen: object) -> bool:
     except AttributeError:
         stack_move_facts = ()
 
-    read_owner_ids = _register_read_owner_ids_8616(root)
-    runtime_gp_names = runtime_gp_state_names_8616(codegen)
-    raw = 0
-    normalized = 0
-    classified = 0
-    live_refused = 0
-    rhs_refused = 0
-    no_stack_refused = 0
-    identity_refused = 0
-    removable_ids: set[int] = set()
-    nodes = (root, *_iter_c_nodes_deep_8616(root))
-    candidate_locations: dict[int, tuple[CStatements, int]] = {}
-    for node in nodes:
-        if isinstance(node, CStatements):
-            for statement_index, statement in enumerate(node.statements):
-                candidate_locations[id(statement)] = (node, statement_index)
-        if not isinstance(node, CAssignment):
-            continue
-        if not isinstance(node.lhs, CVariable) or not isinstance(node.lhs.variable, SimRegisterVariable):
-            continue
-        raw += 1
-        identity = _register_ssa_identity_8616(node.lhs)
-        location = candidate_locations.get(id(node))
-        physical_identity = _physical_register_identity_8616(node.lhs)
-        physical_next_event = (
-            _first_following_physical_register_event_8616(
-                location[0],
-                location[1],
-                physical_identity,
-                stack_move_facts,
-            )
-            if identity is None and location is not None and physical_identity is not None
-            else ("unknown", None)
-        )
-        physical_overwrite_proven = physical_next_event[0] == "overwrite"
-        register_name = node.lhs.codegen.project.arch.register_names.get(node.lhs.variable.reg)
-        caller_visible_state = register_name in SEGMENT_REGISTER_SET or (
-            register_name is not None and runtime_gp_live_in_name_8616(register_name) in runtime_gp_names
-        )
-        if identity is None and not physical_overwrite_proven:
-            identity_refused += 1
-            continue
-        normalized += 1
-        pure, has_stack_source = _pure_stack_lowered_rhs_8616(node.rhs)
-        next_event = (
-            _first_following_register_event_8616(location[0], location[1], identity)
-            if identity is not None and location is not None
-            else physical_next_event
-        )
-        if not pure:
-            rhs_refused += 1
-            decision = LoweredRegisterCarrierDecision8616.EFFECTFUL_OR_UNKNOWN_RHS
-        elif not has_stack_source:
-            no_stack_refused += 1
-            decision = LoweredRegisterCarrierDecision8616.NO_STACK_SOURCE
-        elif caller_visible_state or (
-            identity is not None and any(owner != id(node) for owner in read_owner_ids.get(identity, ()))
-        ):
-            live_refused += 1
-            decision = LoweredRegisterCarrierDecision8616.LIVE_USE
-        else:
-            classified += 1
-            decision = LoweredRegisterCarrierDecision8616.DEFINITELY_DEAD
-            removable_ids.add(id(node))
-        if os.environ.get("INERTIA_DEBUG_LOWERED_CARRIERS") == "1":
-            log.warning(
-                "[lowered-register-carrier] identity=%r decision=%s next=%r tags=%r",
-                identity,
-                decision.value,
-                next_event,
-                node.tags,
-            )
-
-    materialized = 0
-    seen_blocks: set[int] = set()
-    blocks: list[CStatements] = []
+    scan = _CarrierPruneScan8616(
+        stack_move_facts=stack_move_facts,
+        read_owner_ids=_register_read_owner_ids_8616(root),
+        runtime_gp_names=runtime_gp_state_names_8616(codegen),
+    )
     for node in (root, *_iter_c_nodes_deep_8616(root)):
-        if isinstance(node, CStatements) and id(node) not in seen_blocks:
-            seen_blocks.add(id(node))
-            blocks.append(node)
-    for block in blocks:
-        kept = [statement for statement in block.statements if id(statement) not in removable_ids]
-        removed = len(block.statements) - len(kept)
-        if removed:
-            block.statements[:] = kept
-            materialized += removed
+        scan.scan_node(node)
+    materialized = _remove_removable_8616(root, scan.removable_ids)
 
-    normalized_outcomes = classified + live_refused + rhs_refused + no_stack_refused
+    normalized_outcomes = scan.classified + scan.live_refused + scan.rhs_refused + scan.no_stack_refused
     failures = (
-        abs(raw - normalized - identity_refused)
-        + abs(normalized - normalized_outcomes)
-        + abs(classified - materialized)
+        abs(scan.raw - scan.normalized - scan.identity_refused)
+        + abs(scan.normalized - normalized_outcomes)
+        + abs(scan.classified - materialized)
     )
 
     stats = LoweredRegisterCarrierPruneStats8616(
-        raw_fact_count=raw,
-        normalized_fact_count=normalized,
-        classified_fact_count=classified,
+        raw_fact_count=scan.raw,
+        normalized_fact_count=scan.normalized,
+        classified_fact_count=scan.classified,
         materialized_count=materialized,
         failure_count=failures,
-        live_use_refused_count=live_refused,
-        rhs_refused_count=rhs_refused,
-        no_stack_source_refused_count=no_stack_refused,
-        unstructured_identity_refused_count=identity_refused,
+        live_use_refused_count=scan.live_refused,
+        rhs_refused_count=scan.rhs_refused,
+        no_stack_source_refused_count=scan.no_stack_refused,
+        unstructured_identity_refused_count=scan.identity_refused,
     )
     typed_codegen._inertia_lowered_register_carrier_prune_8616 = stats
-    if classified > 0 and materialized == 0:
+    if scan.classified > 0 and materialized == 0:
         raise PipelineHardError(
             "stack-lowered register carriers classified but not materialized",
             layer="lowering",
             details={
-                "classified_fact_count": classified,
+                "classified_fact_count": scan.classified,
                 "materialized_count": materialized,
                 "failure_count": failures,
             },

@@ -60,16 +60,14 @@ def _capture_sort_key(
 
 def _capture_identity(capture: IRLogicalMemoryCaptureRecord8616) -> tuple[int, int, int, int] | None:
     """Return a complete durable capture key, or ``None`` for missing identity."""
-    if (
-        capture.block_addr is None
-        or capture.insn_addr is None
-        or capture.access_ordinal is None
-        or capture.block_addr < 0
-        or capture.insn_addr < 0
-        or capture.access_ordinal < 0
-    ):
+    block_addr = capture.block_addr
+    insn_addr = capture.insn_addr
+    access_ordinal = capture.access_ordinal
+    if block_addr is None or insn_addr is None or access_ordinal is None:
         return None
-    return (capture.function_addr, capture.block_addr, capture.insn_addr, capture.access_ordinal)
+    if block_addr < 0 or insn_addr < 0 or access_ordinal < 0:
+        return None
+    return (capture.function_addr, block_addr, insn_addr, access_ordinal)
 
 
 def _refusal(

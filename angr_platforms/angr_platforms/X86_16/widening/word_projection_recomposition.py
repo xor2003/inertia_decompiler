@@ -153,6 +153,49 @@ def _word_destination_proven_8616(node: object) -> bool:
         return False
 
 
+def _process_assignment_8616(
+    assignment: structured_c.CAssignment,
+    stats: WordProjectionRecompositionStats8616,
+    identity_assignment_ids: set[int],
+) -> None:
+    """Fold one assignment when both word halves share one proven source."""
+    sources = _word_projection_sources_8616(assignment.rhs)
+    if sources is None:
+        return
+    stats.raw_fact_count += 1
+    low_source, high_source = sources
+    if not _same_c_expression_8616(low_source, high_source) or not _side_effect_free_source_8616(
+        low_source
+    ):
+        stats.failure_count += 1
+        return
+    stats.normalized_fact_count += 1
+    if not _word_destination_proven_8616(assignment.lhs):
+        stats.failure_count += 1
+        return
+    stats.classified_fact_count += 1
+    assignment.rhs = cast(structured_c.CExpression, _clone_c_ast_tree_8616(low_source))
+    stats.materialized_count += 1
+    if _same_c_expression_8616(assignment.lhs, low_source):
+        identity_assignment_ids.add(id(assignment))
+
+
+def _elide_identity_assignments_8616(
+    root: object,
+    identity_assignment_ids: set[int],
+    stats: WordProjectionRecompositionStats8616,
+) -> None:
+    """Drop folded self-assignments from every statement container."""
+    if not identity_assignment_ids:
+        return
+    for node in _iter_c_nodes_deep_8616(root):
+        if not isinstance(node, structured_c.CStatements):
+            continue
+        retained = [statement for statement in node.statements if id(statement) not in identity_assignment_ids]
+        stats.identity_elided_count += len(node.statements) - len(retained)
+        node.statements[:] = retained
+
+
 def materialize_word_projection_recompositions_8616(codegen: object) -> bool:
     """Fold complete word projections while preserving destination truncation."""
     surface = cast(_CodegenSurface8616, codegen)
@@ -168,32 +211,8 @@ def materialize_word_projection_recompositions_8616(codegen: object) -> bool:
     )
     identity_assignment_ids: set[int] = set()
     for assignment in assignments:
-        sources = _word_projection_sources_8616(assignment.rhs)
-        if sources is None:
-            continue
-        stats.raw_fact_count += 1
-        low_source, high_source = sources
-        if not _same_c_expression_8616(low_source, high_source) or not _side_effect_free_source_8616(
-            low_source
-        ):
-            stats.failure_count += 1
-            continue
-        stats.normalized_fact_count += 1
-        if not _word_destination_proven_8616(assignment.lhs):
-            stats.failure_count += 1
-            continue
-        stats.classified_fact_count += 1
-        assignment.rhs = cast(structured_c.CExpression, _clone_c_ast_tree_8616(low_source))
-        stats.materialized_count += 1
-        if _same_c_expression_8616(assignment.lhs, low_source):
-            identity_assignment_ids.add(id(assignment))
-    if identity_assignment_ids:
-        for node in _iter_c_nodes_deep_8616(root):
-            if not isinstance(node, structured_c.CStatements):
-                continue
-            retained = [statement for statement in node.statements if id(statement) not in identity_assignment_ids]
-            stats.identity_elided_count += len(node.statements) - len(retained)
-            node.statements[:] = retained
+        _process_assignment_8616(assignment, stats, identity_assignment_ids)
+    _elide_identity_assignments_8616(root, identity_assignment_ids, stats)
     get_codegen_side_metadata(codegen)["word_projection_recomposition_8616"] = stats
     if stats.classified_fact_count > 0 and stats.materialized_count == 0:
         raise PipelineHardError(

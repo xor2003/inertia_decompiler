@@ -24,6 +24,7 @@ from ..ir.condition_ir import (
     JCC_SGT_MNEMONICS_8616,
     JCC_SLE_MNEMONICS_8616,
     JCC_SLT_MNEMONICS_8616,
+    JCC_TO_COND_8616,
     JCC_UGE_MNEMONICS_8616,
     JCC_UGT_MNEMONICS_8616,
     JCC_ULE_MNEMONICS_8616,
@@ -346,33 +347,7 @@ def _jcc_to_condition_op_8616(mnemonic: str | None, lhs: object, rhs: object) ->
 
 
 def _jcc_to_condition_op_with_zero_8616(mnemonic: str | None, lhs: object, rhs: object) -> ConditionOp:
-    def _impl() -> ConditionOp:
-        nonlocal mnemonic
-        """Map a JCC against zero to the appropriate condition op."""
-        if isinstance(mnemonic, str):
-            mnemonic = mnemonic.lower().strip()
-            if mnemonic in JCC_EQ_MNEMONICS_8616:
-                return "eq"
-            if mnemonic in JCC_NE_MNEMONICS_8616:
-                return "ne"
-            if mnemonic in JCC_SGT_MNEMONICS_8616:
-                return "sgt"
-            if mnemonic in JCC_SGE_MNEMONICS_8616:
-                return "sge"
-            if mnemonic in JCC_SLT_MNEMONICS_8616:
-                return "slt"
-            if mnemonic in JCC_SLE_MNEMONICS_8616:
-                return "sle"
-            if mnemonic in JCC_UGT_MNEMONICS_8616:
-                return "ugt"
-            if mnemonic in JCC_UGE_MNEMONICS_8616:
-                return "uge"
-            if mnemonic in JCC_ULT_MNEMONICS_8616:
-                return "ult"
-            if mnemonic in JCC_ULE_MNEMONICS_8616:
-                return "ule"
-            if mnemonic in _JCC_COMPARISON_MNEMONICS_8616:
-                return "compare"
+    """Map a JCC against zero to the appropriate condition op."""
+    if not isinstance(mnemonic, str):
         return "ne"
-
-    return _impl()
+    return JCC_TO_COND_8616.get(mnemonic.lower().strip(), "ne")

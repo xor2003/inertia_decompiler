@@ -85,74 +85,115 @@ def _function_instructions_8616(function: object) -> tuple[tuple[object, ...], .
     return tuple(sequences)
 
 
+@dataclass(slots=True)
+class _SequenceEdgeCensus8616:
+    """Mutable census of sequence entries and jump instructions for one move."""
+
+    project: object
+    move_addr: int
+    sequence_entries: set[int]
+    jump_instructions: list[object]
+
+    def collect(self, instructions: tuple[object, ...]) -> None:
+        """Collect one instruction sequence's entries and jumps."""
+        for index, instruction in enumerate(instructions):
+            self._collect_one(instructions, index, instruction)
+
+    def _collect_one(
+        self,
+        instructions: tuple[object, ...],
+        index: int,
+        instruction: object,
+    ) -> None:
+        """Record one instruction's jump membership and backward entries."""
+        address = _boundary_attr_8616(instruction, "address")
+        groups = frozenset(
+            boundary_tuple_8616(_boundary_attr_8616(instruction, "groups", ()) or ())
+        )
+        if CS_GRP_JUMP in groups:
+            self.jump_instructions.append(instruction)
+        if (
+            not isinstance(address, int)
+            or comparable_address_8616(self.project, address, self.move_addr)
+            != self.move_addr
+        ):
+            return
+        self.sequence_entries.add(self.move_addr)
+        self._extend_backward(instructions, index)
+
+    def _extend_backward(
+        self,
+        instructions: tuple[object, ...],
+        index: int,
+    ) -> None:
+        """Walk backward from the move until a control-flow boundary."""
+        for previous_index in range(index - 1, -1, -1):
+            previous = instructions[previous_index]
+            previous_addr = _boundary_attr_8616(previous, "address")
+            previous_groups = frozenset(
+                boundary_tuple_8616(_boundary_attr_8616(previous, "groups", ()) or ())
+            )
+            if (
+                not isinstance(previous_addr, int)
+                or previous_groups & {CS_GRP_CALL, CS_GRP_JUMP, CS_GRP_RET}
+            ):
+                break
+            comparable_previous = comparable_address_8616(
+                self.project,
+                previous_addr,
+                self.move_addr,
+            )
+            if self.move_addr - comparable_previous > 16:
+                break
+            self.sequence_entries.add(comparable_previous)
+
+
+def _jump_edge_8616(
+    project: object,
+    instruction: object,
+    move_addr: int,
+    sequence_entries: set[int],
+) -> DirectStackMoveLoopEntryEdge8616 | None:
+    """Return the proven backward edge for one jump, if any."""
+    jump_addr = _boundary_attr_8616(instruction, "address")
+    operands = boundary_tuple_8616(
+        _boundary_attr_8616(instruction, "operands", ()) or ()
+    )
+    if not isinstance(jump_addr, int) or len(operands) != 1:
+        return None
+    operand = operands[0]
+    target = _boundary_attr_8616(operand, "imm")
+    if _boundary_attr_8616(operand, "type") != X86_OP_IMM or not isinstance(
+        target, int
+    ):
+        return None
+    comparable_jump = comparable_address_8616(project, jump_addr, move_addr)
+    comparable_target = comparable_address_8616(project, target, move_addr)
+    if comparable_target not in sequence_entries:
+        return None
+    if comparable_jump <= move_addr or comparable_target >= comparable_jump:
+        return None
+    return DirectStackMoveLoopEntryEdge8616(
+        move_addr,
+        comparable_target,
+        comparable_jump,
+    )
+
+
 def repeated_sequence_edges_8616(
     project: object,
     function: object,
     move_addr: int,
 ) -> tuple[DirectStackMoveLoopEntryEdge8616, ...]:
     """Recover exact backward edges whose target repeats one direct move."""
-    sequence_entries: set[int] = set()
-    jump_instructions: list[object] = []
+    census = _SequenceEdgeCensus8616(project, move_addr, set(), [])
     for instructions in _function_instructions_8616(function):
-        for index, instruction in enumerate(instructions):
-            address = _boundary_attr_8616(instruction, "address")
-            groups = frozenset(
-                boundary_tuple_8616(_boundary_attr_8616(instruction, "groups", ()) or ())
-            )
-            if CS_GRP_JUMP in groups:
-                jump_instructions.append(instruction)
-            if (
-                not isinstance(address, int)
-                or comparable_address_8616(project, address, move_addr) != move_addr
-            ):
-                continue
-            sequence_entries.add(move_addr)
-            for previous_index in range(index - 1, -1, -1):
-                previous = instructions[previous_index]
-                previous_addr = _boundary_attr_8616(previous, "address")
-                previous_groups = frozenset(
-                    boundary_tuple_8616(_boundary_attr_8616(previous, "groups", ()) or ())
-                )
-                if (
-                    not isinstance(previous_addr, int)
-                    or previous_groups & {CS_GRP_CALL, CS_GRP_JUMP, CS_GRP_RET}
-                ):
-                    break
-                comparable_previous = comparable_address_8616(
-                    project,
-                    previous_addr,
-                    move_addr,
-                )
-                if move_addr - comparable_previous > 16:
-                    break
-                sequence_entries.add(comparable_previous)
-    if not sequence_entries:
+        census.collect(instructions)
+    if not census.sequence_entries:
         return ()
     edges: list[DirectStackMoveLoopEntryEdge8616] = []
-    for instruction in jump_instructions:
-        jump_addr = _boundary_attr_8616(instruction, "address")
-        operands = boundary_tuple_8616(
-            _boundary_attr_8616(instruction, "operands", ()) or ()
-        )
-        if not isinstance(jump_addr, int) or len(operands) != 1:
-            continue
-        operand = operands[0]
-        target = _boundary_attr_8616(operand, "imm")
-        if _boundary_attr_8616(operand, "type") != X86_OP_IMM or not isinstance(
-            target, int
-        ):
-            continue
-        comparable_jump = comparable_address_8616(project, jump_addr, move_addr)
-        comparable_target = comparable_address_8616(project, target, move_addr)
-        if comparable_target not in sequence_entries:
-            continue
-        if comparable_jump <= move_addr or comparable_target >= comparable_jump:
-            continue
-        edges.append(
-            DirectStackMoveLoopEntryEdge8616(
-                move_addr,
-                comparable_target,
-                comparable_jump,
-            )
-        )
+    for instruction in census.jump_instructions:
+        edge = _jump_edge_8616(project, instruction, move_addr, census.sequence_entries)
+        if edge is not None:
+            edges.append(edge)
     return tuple(dict.fromkeys(edges))

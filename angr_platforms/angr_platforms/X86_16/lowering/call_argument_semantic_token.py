@@ -53,6 +53,122 @@ def _call_target_token_8616(call: structured_c.CFunctionCall) -> str | int | Non
     return name if isinstance(name, str) and name else None
 
 
+def _variable_token_8616(
+    expression: structured_c.CVariable,
+) -> CallArgumentSemanticToken8616 | None:
+    """Return the storage-identity token for one proven variable reference."""
+    variable = expression.variable
+    if isinstance(variable, SimStackVariable):
+        if not isinstance(variable.offset, int) or not isinstance(variable.size, int):
+            return None
+        return ("stack", variable.offset, variable.size, variable.base, variable.region)
+    if isinstance(variable, SimRegisterVariable):
+        if not isinstance(variable.reg, int) or not isinstance(variable.size, int):
+            return None
+        return ("register", variable.reg, variable.size)
+    if isinstance(variable, SimMemoryVariable):
+        if not isinstance(variable.addr, int) or not isinstance(variable.size, int):
+            return None
+        return ("memory", variable.addr, variable.size)
+    return None
+
+
+def _indexed_variable_token_8616(
+    expression: structured_c.CIndexedVariable,
+    seen: frozenset[int],
+    depth: int,
+) -> CallArgumentSemanticToken8616 | None:
+    """Return the token for a proven indexed variable expression."""
+    variable = call_argument_semantic_token_8616(
+        expression.variable,
+        _seen=seen,
+        _depth=depth + 1,
+    )
+    index = call_argument_semantic_token_8616(
+        expression.index,
+        _seen=seen,
+        _depth=depth + 1,
+    )
+    if variable is None or index is None:
+        return None
+    return ("index", variable, index)
+
+
+def _unary_op_token_8616(
+    expression: structured_c.CUnaryOp,
+    seen: frozenset[int],
+    depth: int,
+) -> CallArgumentSemanticToken8616 | None:
+    """Return the token for a proven unary operation."""
+    operand = call_argument_semantic_token_8616(
+        expression.operand,
+        _seen=seen,
+        _depth=depth + 1,
+    )
+    return ("unary", expression.op, operand) if operand is not None else None
+
+
+def _binary_op_token_8616(
+    expression: structured_c.CBinaryOp,
+    seen: frozenset[int],
+    depth: int,
+) -> CallArgumentSemanticToken8616 | None:
+    """Return the token for a proven binary operation."""
+    lhs = call_argument_semantic_token_8616(
+        expression.lhs,
+        _seen=seen,
+        _depth=depth + 1,
+    )
+    rhs = call_argument_semantic_token_8616(
+        expression.rhs,
+        _seen=seen,
+        _depth=depth + 1,
+    )
+    if lhs is None or rhs is None:
+        return None
+    return ("binary", expression.op, lhs, rhs)
+
+
+def _function_call_token_8616(
+    expression: structured_c.CFunctionCall,
+    seen: frozenset[int],
+    depth: int,
+) -> CallArgumentSemanticToken8616 | None:
+    """Return the token for a proven call with stable callee identity."""
+    target = _call_target_token_8616(expression)
+    if target is None:
+        return None
+    arguments = tuple(
+        call_argument_semantic_token_8616(argument, _seen=seen, _depth=depth + 1)
+        for argument in expression.args or ()
+    )
+    if any(argument is None for argument in arguments):
+        return None
+    return ("call", target, arguments)
+
+
+def _node_token_8616(
+    expression: object,
+    seen: frozenset[int],
+    depth: int,
+) -> CallArgumentSemanticToken8616 | None:
+    """Dispatch one AST node kind to its typed token arm."""
+    if isinstance(expression, structured_c.CConstant):
+        value = expression.value
+        return ("const", value) if isinstance(value, (str, int, bool)) else None
+    if isinstance(expression, structured_c.CVariable):
+        return _variable_token_8616(expression)
+    if isinstance(expression, structured_c.CIndexedVariable):
+        return _indexed_variable_token_8616(expression, seen, depth)
+    if isinstance(expression, structured_c.CUnaryOp):
+        return _unary_op_token_8616(expression, seen, depth)
+    if isinstance(expression, structured_c.CBinaryOp):
+        return _binary_op_token_8616(expression, seen, depth)
+    if isinstance(expression, structured_c.CFunctionCall):
+        return _function_call_token_8616(expression, seen, depth)
+    return None
+
+
 def call_argument_semantic_token_8616(
     expression: object,
     *,
@@ -78,77 +194,7 @@ def call_argument_semantic_token_8616(
     if virtual_identity is not None:
         return ("virtual", virtual_identity.kind.value, virtual_identity.value)
 
-    if isinstance(expression, structured_c.CConstant):
-        value = expression.value
-        return ("const", value) if isinstance(value, (str, int, bool)) else None
-
-    if isinstance(expression, structured_c.CVariable):
-        variable = expression.variable
-        if isinstance(variable, SimStackVariable):
-            if not isinstance(variable.offset, int) or not isinstance(variable.size, int):
-                return None
-            return ("stack", variable.offset, variable.size, variable.base, variable.region)
-        if isinstance(variable, SimRegisterVariable):
-            if not isinstance(variable.reg, int) or not isinstance(variable.size, int):
-                return None
-            return ("register", variable.reg, variable.size)
-        if isinstance(variable, SimMemoryVariable):
-            if not isinstance(variable.addr, int) or not isinstance(variable.size, int):
-                return None
-            return ("memory", variable.addr, variable.size)
-        return None
-
-    if isinstance(expression, structured_c.CIndexedVariable):
-        variable = call_argument_semantic_token_8616(
-            expression.variable,
-            _seen=seen,
-            _depth=_depth + 1,
-        )
-        index = call_argument_semantic_token_8616(
-            expression.index,
-            _seen=seen,
-            _depth=_depth + 1,
-        )
-        if variable is None or index is None:
-            return None
-        return ("index", variable, index)
-
-    if isinstance(expression, structured_c.CUnaryOp):
-        operand = call_argument_semantic_token_8616(
-            expression.operand,
-            _seen=seen,
-            _depth=_depth + 1,
-        )
-        return ("unary", expression.op, operand) if operand is not None else None
-
-    if isinstance(expression, structured_c.CBinaryOp):
-        lhs = call_argument_semantic_token_8616(
-            expression.lhs,
-            _seen=seen,
-            _depth=_depth + 1,
-        )
-        rhs = call_argument_semantic_token_8616(
-            expression.rhs,
-            _seen=seen,
-            _depth=_depth + 1,
-        )
-        if lhs is None or rhs is None:
-            return None
-        return ("binary", expression.op, lhs, rhs)
-
-    if isinstance(expression, structured_c.CFunctionCall):
-        target = _call_target_token_8616(expression)
-        if target is None:
-            return None
-        arguments = tuple(
-            call_argument_semantic_token_8616(argument, _seen=seen, _depth=_depth + 1)
-            for argument in expression.args or ()
-        )
-        if any(argument is None for argument in arguments):
-            return None
-        return ("call", target, arguments)
-
-    return None
+    return _node_token_8616(expression, seen, _depth)
 
 
 __all__ = [

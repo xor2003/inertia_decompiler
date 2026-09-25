@@ -478,96 +478,16 @@ def _proven_logical_reload_condition_fingerprints_8616(
         if operand.name is None:
             continue
         register_name = operand.name.lower()
-        candidates = tuple(
-            transfer
-            for transfer in active_context.transfers_by_register.get(
-                (register_name, operand.size),
-                (),
-            )
-            if transfer.register.size == operand.size
-            and dominators.dominates(transfer.register_site.block_addr, condition_block) is True
-            and (
-                transfer.register_site.block_addr != condition_block
-                or transfer.register_site.instr_addr < condition_insn
-            )
+        address_fingerprint = _operand_reload_fingerprint_8616(
+            active_context,
+            snapshot,
+            dominators,
+            operand,
+            register_name,
+            condition_block,
+            condition_insn,
         )
-        if not candidates:
-            continue
-        depths = {
-            transfer.register_site.block_addr: len(
-                dominators.dominators(transfer.register_site.block_addr) or ()
-            )
-            for transfer in candidates
-        }
-        nearest_depth = max(depths.values())
-        nearest = tuple(
-            transfer
-            for transfer in candidates
-            if depths[transfer.register_site.block_addr] == nearest_depth
-        )
-        candidate = max(nearest, key=lambda transfer: transfer.register_site.instr_addr)
-        base_registers = {
-            value.name.lower()
-            for value in candidate.access.address.base_values
-            if value.space is MemSpace.REG and isinstance(value.name, str)
-        }
-        forward = {candidate.register_site.block_addr}
-        pending = [candidate.register_site.block_addr]
-        while pending:
-            block_addr = pending.pop()
-            if block_addr == condition_block:
-                continue
-            for successor in snapshot.successors(block_addr) or ():
-                if successor not in forward:
-                    forward.add(successor)
-                    pending.append(successor)
-        reverse = {condition_block}
-        pending = [condition_block]
-        while pending:
-            block_addr = pending.pop()
-            if block_addr == candidate.register_site.block_addr:
-                continue
-            for predecessor in snapshot.predecessors(block_addr) or ():
-                if predecessor not in reverse:
-                    reverse.add(predecessor)
-                    pending.append(predecessor)
-        path_blocks = forward & reverse
-        if candidate.register_site.block_addr not in path_blocks or condition_block not in path_blocks:
-            continue
-        stable = True
-        for block_addr in path_blocks:
-            block = active_context.blocks_by_addr.get(block_addr)
-            if block is None:
-                stable = False
-                break
-            for instr_index, instruction in enumerate(block.instrs):
-                if (
-                    block_addr == candidate.register_site.block_addr
-                    and instr_index <= candidate.register_site.instr_index
-                ):
-                    continue
-                if block_addr == condition_block:
-                    if instruction.addr is None:
-                        stable = False
-                        break
-                    if instruction.addr >= condition_insn:
-                        continue
-                destination = instruction.dst
-                if instruction.op in {"CALL", "STORE"}:
-                    stable = False
-                    break
-                if (
-                    isinstance(destination, IRValue)
-                    and destination.space is MemSpace.REG
-                    and isinstance(destination.name, str)
-                    and destination.name.lower() in {register_name, *base_registers}
-                ):
-                    stable = False
-                    break
-            if not stable:
-                break
-        address_fingerprint = _logical_reload_address_fingerprint_8616(candidate)
-        if not stable or address_fingerprint is None:
+        if address_fingerprint is None:
             continue
         token = f"reg:{register_name}"
         previous = replacements.get(token)
@@ -576,6 +496,149 @@ def _proven_logical_reload_condition_fingerprints_8616(
         replacements[token] = address_fingerprint
     if not replacements:
         return frozenset()
+    return _projected_reload_fingerprints_8616(expected, replacements, normalizer)
+
+
+def _nearest_reload_transfer_8616(
+    dominators: SSADominators8616,
+    candidates: tuple[LogicalMemoryRegisterTransfer8616, ...],
+) -> LogicalMemoryRegisterTransfer8616:
+    """Return the deepest dominating transfer, tie-broken by latest instruction."""
+    depths = {
+        transfer.register_site.block_addr: len(
+            dominators.dominators(transfer.register_site.block_addr) or ()
+        )
+        for transfer in candidates
+    }
+    nearest_depth = max(depths.values())
+    nearest = tuple(
+        transfer
+        for transfer in candidates
+        if depths[transfer.register_site.block_addr] == nearest_depth
+    )
+    return max(nearest, key=lambda transfer: transfer.register_site.instr_addr)
+
+
+def _reload_path_blocks_8616(
+    snapshot: SSACFGSnapshot8616,
+    source_block: int,
+    target_block: int,
+) -> set[int]:
+    """Return blocks lying on forward paths from the transfer site to the condition."""
+    forward = {source_block}
+    pending = [source_block]
+    while pending:
+        block_addr = pending.pop()
+        if block_addr == target_block:
+            continue
+        for successor in snapshot.successors(block_addr) or ():
+            if successor not in forward:
+                forward.add(successor)
+                pending.append(successor)
+    reverse = {target_block}
+    pending = [target_block]
+    while pending:
+        block_addr = pending.pop()
+        if block_addr == source_block:
+            continue
+        for predecessor in snapshot.predecessors(block_addr) or ():
+            if predecessor not in reverse:
+                reverse.add(predecessor)
+                pending.append(predecessor)
+    return forward & reverse
+
+
+def _reload_path_stable_8616(
+    context: _LogicalReloadValidationContext8616,
+    path_blocks: set[int],
+    candidate: LogicalMemoryRegisterTransfer8616,
+    condition_block: int,
+    condition_insn: int,
+    covered_names: set[str],
+) -> bool:
+    """Check no path instruction rewrites the register or its address bases."""
+    for block_addr in path_blocks:
+        block = context.blocks_by_addr.get(block_addr)
+        if block is None:
+            return False
+        for instr_index, instruction in enumerate(block.instrs):
+            if (
+                block_addr == candidate.register_site.block_addr
+                and instr_index <= candidate.register_site.instr_index
+            ):
+                continue
+            if block_addr == condition_block:
+                if instruction.addr is None:
+                    return False
+                if instruction.addr >= condition_insn:
+                    continue
+            destination = instruction.dst
+            if instruction.op in {"CALL", "STORE"}:
+                return False
+            if (
+                isinstance(destination, IRValue)
+                and destination.space is MemSpace.REG
+                and isinstance(destination.name, str)
+                and destination.name.lower() in covered_names
+            ):
+                return False
+    return True
+
+
+def _operand_reload_fingerprint_8616(
+    context: _LogicalReloadValidationContext8616,
+    snapshot: SSACFGSnapshot8616,
+    dominators: SSADominators8616,
+    operand: IRValue,
+    register_name: str,
+    condition_block: int,
+    condition_insn: int,
+) -> str | None:
+    """Return the proven reload fingerprint for one register operand."""
+    candidates = tuple(
+        transfer
+        for transfer in context.transfers_by_register.get((register_name, operand.size), ())
+        if transfer.register.size == operand.size
+        and dominators.dominates(transfer.register_site.block_addr, condition_block) is True
+        and (
+            transfer.register_site.block_addr != condition_block
+            or transfer.register_site.instr_addr < condition_insn
+        )
+    )
+    if not candidates:
+        return None
+    candidate = _nearest_reload_transfer_8616(dominators, candidates)
+    base_registers = {
+        value.name.lower()
+        for value in candidate.access.address.base_values
+        if value.space is MemSpace.REG and isinstance(value.name, str)
+    }
+    path_blocks = _reload_path_blocks_8616(
+        snapshot, candidate.register_site.block_addr, condition_block
+    )
+    if (
+        candidate.register_site.block_addr not in path_blocks
+        or condition_block not in path_blocks
+    ):
+        return None
+    if not _reload_path_stable_8616(
+        context,
+        path_blocks,
+        candidate,
+        condition_block,
+        condition_insn,
+        {register_name, *base_registers},
+    ):
+        return None
+    return _logical_reload_address_fingerprint_8616(candidate)
+
+
+def _projected_reload_fingerprints_8616(
+    expected: str,
+    replacements: dict[str, str],
+    normalizer: Callable[[str], str] | None,
+) -> frozenset[str]:
+    """Apply register-token replacements and return normalized fingerprints."""
     projected = expected
     for token, replacement in sorted(replacements.items()):
         projected = projected.replace(token, replacement)
@@ -587,6 +650,25 @@ def _proven_logical_reload_condition_fingerprints_8616(
         else None
     )
     return frozenset(value for value in (normalized, inverted) if value is not None)
+
+
+def _is_induction_update_8616(iterator: object) -> bool:
+    """Check the statement is ``lhs = lhs +/- const`` in C form."""
+    return (
+        isinstance(iterator, CAssignment)
+        and isinstance(iterator.lhs, CVariable)
+        and _binary_induction_rhs_8616(iterator.rhs)
+    )
+
+
+def _binary_induction_rhs_8616(rhs: object) -> bool:
+    """Check the assignment RHS is ``variable +/- constant``."""
+    return (
+        isinstance(rhs, CBinaryOp)
+        and rhs.op in {"Add", "Sub"}
+        and isinstance(rhs.lhs, CVariable)
+        and isinstance(rhs.rhs, CConstant)
+    )
 
 
 def _post_body_do_while_fingerprint_8616(
@@ -610,14 +692,7 @@ def _post_body_do_while_fingerprint_8616(
     if not statements:
         return None
     iterator = statements[-1]
-    if (
-        not isinstance(iterator, CAssignment)
-        or not isinstance(iterator.lhs, CVariable)
-        or not isinstance(iterator.rhs, CBinaryOp)
-        or iterator.rhs.op not in {"Add", "Sub"}
-        or not isinstance(iterator.rhs.lhs, CVariable)
-        or not isinstance(iterator.rhs.rhs, CConstant)
-    ):
+    if not _is_induction_update_8616(iterator):
         return None
     target = condition_fingerprint(iterator.lhs)
     if condition_fingerprint(iterator.rhs.lhs) != target:
@@ -638,6 +713,241 @@ def _post_body_do_while_fingerprint_8616(
     return result if occurrence_count == 1 else None
 
 
+def _jcc_surface_groups_8616(
+    surfaces: tuple[tuple[int, object], ...],
+) -> dict[int, list[object]]:
+    """Group materialized condition surfaces by their Jcc address."""
+    surfaces_by_jcc: dict[int, list[object]] = {}
+    for jcc_addr, condition in surfaces:
+        surfaces_by_jcc.setdefault(jcc_addr, []).append(condition)
+    return surfaces_by_jcc
+
+
+def _condition_fact_index_8616(
+    typed_conditions: tuple[ConditionIR, ...],
+) -> dict[int, dict[tuple[object, ...], ConditionIR]]:
+    """Index typed condition facts by their Jcc instruction address."""
+    facts_by_jcc: dict[int, dict[tuple[object, ...], ConditionIR]] = {}
+    for fact in typed_conditions:
+        if isinstance(fact.src_insn, int):
+            facts_by_jcc.setdefault(fact.src_insn, {})[
+                condition_sort_key_8616(fact)
+            ] = fact
+    return facts_by_jcc
+
+
+def _precision_evidence_maps_8616(
+    codegen: object,
+) -> tuple[dict[int, set[str]], dict[int, set[str]]]:
+    """Index precision-after and integer-view evidence by Jcc address."""
+    precision_after_by_jcc: dict[int, set[str]] = {}
+    precision_views_by_jcc: dict[int, set[str]] = {}
+    for evidence in condition_precision_evidence_8616(codegen):
+        if isinstance(evidence.jcc_addr, int):
+            precision_after_by_jcc.setdefault(evidence.jcc_addr, set()).add(
+                evidence.after
+            )
+            if evidence.after_integer_view is not None:
+                precision_views_by_jcc.setdefault(evidence.jcc_addr, set()).add(
+                    evidence.after_integer_view
+                )
+    return precision_after_by_jcc, precision_views_by_jcc
+
+
+@dataclass(frozen=True, slots=True)
+class _JccFingerprintViews8616:
+    """All normalized fingerprint projections for one condition surface."""
+
+    expected: str
+    actual: str
+    actual_precision: str
+    semantic_view: str | None
+    post_body: str | None
+    inverted: str | None
+
+
+@dataclass(slots=True)
+class _BranchValidationContext8616:
+    """Shared evidence reused across per-Jcc surface validation."""
+
+    codegen: object
+    root: object
+    condition_fingerprint: Callable[[object], str]
+    condition_ir_fingerprint: Callable[[ConditionIR], str | None]
+    condition_fingerprint_normalizer: Callable[[str], str] | None
+    facts_by_jcc: dict[int, dict[tuple[object, ...], ConditionIR]]
+    precision_after_by_jcc: dict[int, set[str]]
+    precision_views_by_jcc: dict[int, set[str]]
+    logical_reload_context: _LogicalReloadValidationContext8616 | None = None
+
+
+def _jcc_fingerprint_views_8616(
+    vctx: _BranchValidationContext8616,
+    fact: ConditionIR,
+    candidate: object,
+    expected_raw: str,
+) -> _JccFingerprintViews8616:
+    """Compute every normalized fingerprint projection for one surface."""
+    actual_raw = vctx.condition_fingerprint(candidate)
+    semantic_view_raw = condition_semantic_view_projection_fingerprint_8616(
+        fact,
+        candidate,
+        condition_fingerprint=vctx.condition_fingerprint,
+    )
+    post_body_raw = _post_body_do_while_fingerprint_8616(
+        vctx.root,
+        candidate,
+        vctx.condition_fingerprint,
+    )
+    inverted_raw = invert_condition_fingerprint_string_8616(expected_raw)
+    return _JccFingerprintViews8616(
+        expected=_normalized_fingerprint_8616(
+            expected_raw, vctx.condition_fingerprint_normalizer
+        ),
+        actual=_normalized_fingerprint_8616(
+            actual_raw, vctx.condition_fingerprint_normalizer
+        ),
+        actual_precision=condition_precision_token_8616(actual_raw),
+        semantic_view=(
+            _normalized_fingerprint_8616(
+                semantic_view_raw, vctx.condition_fingerprint_normalizer
+            )
+            if semantic_view_raw is not None
+            else None
+        ),
+        post_body=(
+            _normalized_fingerprint_8616(
+                post_body_raw, vctx.condition_fingerprint_normalizer
+            )
+            if post_body_raw is not None
+            else None
+        ),
+        inverted=(
+            _normalized_fingerprint_8616(
+                inverted_raw, vctx.condition_fingerprint_normalizer
+            )
+            if inverted_raw is not None
+            else None
+        ),
+    )
+
+
+def _jcc_evidence_matches_8616(
+    vctx: _BranchValidationContext8616,
+    jcc_addr: int,
+    fact: ConditionIR,
+    candidate: object,
+    views: _JccFingerprintViews8616,
+    reload_fingerprints: frozenset[str],
+    chain_proven: bool,
+) -> bool:
+    """Decide whether any proven evidence class matches the surface."""
+    precision_after = vctx.precision_after_by_jcc.get(jcc_addr, set())
+    precision_views = vctx.precision_views_by_jcc.get(jcc_addr, set())
+    precision_view_matches = bool(precision_views) and precision_views == {
+        condition_precision_token_8616(
+            condition_precision_view_fingerprint_8616(
+                candidate, vctx.condition_fingerprint
+            )
+        )
+    }
+    fingerprint_matches = (
+        views.actual in {views.expected, views.inverted}
+        or views.semantic_view in {views.expected, views.inverted}
+        or views.post_body in {views.expected, views.inverted}
+        or views.actual in reload_fingerprints
+    )
+    # Proven storage-view normalization must happen before compaction:
+    # a digest cannot recover the original low/high-word expressions.
+    precision_matches = (
+        precision_view_matches
+        or precision_after == {views.actual_precision}
+        or precision_after == {condition_precision_token_8616(views.actual)}
+    )
+    return bool(
+        fingerprint_matches
+        or precision_matches
+        or chain_proven
+        or _proven_stored_call_return_condition_8616(vctx.codegen, fact, candidate)
+    )
+
+
+def _validate_jcc_surface_8616(
+    vctx: _BranchValidationContext8616,
+    jcc_addr: int,
+    candidates: list[object],
+    facts: tuple[ConditionIR, ...],
+) -> BranchConditionIssue8616 | None:
+    """Validate one materialized surface; return its issue or ``None``."""
+    wide_verdict = validate_terminal_wide_condition_8616(
+        vctx.codegen,
+        vctx.root,
+        candidates[0],
+        vctx.facts_by_jcc,
+    )
+    if wide_verdict is TerminalWideValidation8616.PROVEN:
+        return None
+    if wide_verdict is not TerminalWideValidation8616.NOT_APPLICABLE:
+        return BranchConditionIssue8616(
+            BranchConditionIssueKind8616.WIDE_PROOF_MISMATCH,
+            jcc_addr,
+            actual=wide_verdict.value,
+        )
+    # Exact typed call-return proof does not depend on rendering its former
+    # register carrier, which may no longer exist in the final C surface.
+    if _proven_call_return_condition_8616(vctx.codegen, facts[0], candidates[0]):
+        return None
+    expected_raw = vctx.condition_ir_fingerprint(facts[0])
+    if expected_raw is None:
+        return BranchConditionIssue8616(
+            BranchConditionIssueKind8616.INVALID_FINGERPRINT,
+            jcc_addr,
+        )
+    views = _jcc_fingerprint_views_8616(vctx, facts[0], candidates[0], expected_raw)
+    if (
+        vctx.logical_reload_context is None
+        and _condition_register_operands_8616(facts[0])
+    ):
+        vctx.logical_reload_context = _build_logical_reload_validation_context_8616(
+            vctx.codegen
+        )
+    reload_fingerprints = _proven_logical_reload_condition_fingerprints_8616(
+        vctx.codegen,
+        facts[0],
+        views.expected,
+        vctx.condition_fingerprint_normalizer,
+        vctx.logical_reload_context,
+    )
+    chain_validation = validate_complete_condition_chain_8616(
+        candidates[0],
+        root_jcc_addr=jcc_addr,
+        facts_by_jcc=vctx.facts_by_jcc,
+        actual_fingerprint=views.actual_precision,
+        precision_candidates=frozenset(
+            vctx.precision_after_by_jcc.get(jcc_addr, set())
+        ),
+    )
+    if _jcc_evidence_matches_8616(
+        vctx,
+        jcc_addr,
+        facts[0],
+        candidates[0],
+        views,
+        reload_fingerprints,
+        bool(chain_validation.proven),
+    ):
+        return None
+    return BranchConditionIssue8616(
+        BranchConditionIssueKind8616.PREDICATE_MISMATCH,
+        jcc_addr,
+        expected=views.expected,
+        actual=views.actual,
+        precision_candidates=tuple(
+            sorted(vctx.precision_after_by_jcc.get(jcc_addr, set()))
+        ),
+    )
+
+
 def validate_materialized_branch_conditions_8616(
     codegen: object,
     root: object,
@@ -649,25 +959,22 @@ def validate_materialized_branch_conditions_8616(
 ) -> BranchConditionValidationReport8616:
     """Validate each Structuring-tagged predicate against one exact typed fact."""
     surfaces = _materialized_conditions_8616(root, query_index)
-    surfaces_by_jcc: dict[int, list[object]] = {}
-    for jcc_addr, condition in surfaces:
-        surfaces_by_jcc.setdefault(jcc_addr, []).append(condition)
-    facts_by_jcc: dict[int, dict[tuple[object, ...], ConditionIR]] = {}
+    surfaces_by_jcc = _jcc_surface_groups_8616(surfaces)
     typed_conditions = _typed_conditions_8616(codegen)
-    for fact in typed_conditions:
-        if isinstance(fact.src_insn, int):
-            facts_by_jcc.setdefault(fact.src_insn, {})[
-                condition_sort_key_8616(fact)
-            ] = fact
-    precision_after_by_jcc: dict[int, set[str]] = {}
-    precision_views_by_jcc: dict[int, set[str]] = {}
-    for evidence in condition_precision_evidence_8616(codegen):
-        if isinstance(evidence.jcc_addr, int):
-            precision_after_by_jcc.setdefault(evidence.jcc_addr, set()).add(evidence.after)
-            if evidence.after_integer_view is not None:
-                precision_views_by_jcc.setdefault(evidence.jcc_addr, set()).add(evidence.after_integer_view)
+    precision_after_by_jcc, precision_views_by_jcc = _precision_evidence_maps_8616(
+        codegen
+    )
+    vctx = _BranchValidationContext8616(
+        codegen=codegen,
+        root=root,
+        condition_fingerprint=condition_fingerprint,
+        condition_ir_fingerprint=condition_ir_fingerprint,
+        condition_fingerprint_normalizer=condition_fingerprint_normalizer,
+        facts_by_jcc=_condition_fact_index_8616(typed_conditions),
+        precision_after_by_jcc=precision_after_by_jcc,
+        precision_views_by_jcc=precision_views_by_jcc,
+    )
 
-    logical_reload_context: _LogicalReloadValidationContext8616 | None = None
     classified_count = 0
     materialized_count = 0
     issues: list[BranchConditionIssue8616] = []
@@ -682,7 +989,7 @@ def validate_materialized_branch_conditions_8616(
                 )
             )
             continue
-        facts = tuple(facts_by_jcc.get(jcc_addr, {}).values())
+        facts = tuple(vctx.facts_by_jcc.get(jcc_addr, {}).values())
         if not facts:
             issues.append(
                 BranchConditionIssue8616(
@@ -700,127 +1007,11 @@ def validate_materialized_branch_conditions_8616(
                 )
             )
             continue
-        wide_verdict = validate_terminal_wide_condition_8616(codegen, root, candidates[0], facts_by_jcc)
-        if wide_verdict is TerminalWideValidation8616.PROVEN:
+        issue = _validate_jcc_surface_8616(vctx, jcc_addr, candidates, facts)
+        if issue is None:
             materialized_count += 1
-            continue
-        if wide_verdict is not TerminalWideValidation8616.NOT_APPLICABLE:
-            issues.append(BranchConditionIssue8616(
-                BranchConditionIssueKind8616.WIDE_PROOF_MISMATCH, jcc_addr, actual=wide_verdict.value,
-            ))
-            continue
-        # Exact typed call-return proof does not depend on rendering its former
-        # register carrier, which may no longer exist in the final C surface.
-        if _proven_call_return_condition_8616(codegen, facts[0], candidates[0]):
-            materialized_count += 1
-            continue
-        expected_raw = condition_ir_fingerprint(facts[0])
-        if expected_raw is None:
-            issues.append(
-                BranchConditionIssue8616(
-                    BranchConditionIssueKind8616.INVALID_FINGERPRINT,
-                    jcc_addr,
-                )
-            )
-            continue
-        actual_raw = condition_fingerprint(candidates[0])
-        actual_precision = condition_precision_token_8616(actual_raw)
-        actual = _normalized_fingerprint_8616(
-            actual_raw,
-            condition_fingerprint_normalizer,
-        )
-        semantic_view_raw = condition_semantic_view_projection_fingerprint_8616(
-            facts[0],
-            candidates[0],
-            condition_fingerprint=condition_fingerprint,
-        )
-        semantic_view_actual = (
-            _normalized_fingerprint_8616(
-                semantic_view_raw,
-                condition_fingerprint_normalizer,
-            )
-            if semantic_view_raw is not None
-            else None
-        )
-        post_body_raw = _post_body_do_while_fingerprint_8616(
-            root,
-            candidates[0],
-            condition_fingerprint,
-        )
-        post_body_actual = (
-            _normalized_fingerprint_8616(
-                post_body_raw,
-                condition_fingerprint_normalizer,
-            )
-            if post_body_raw is not None
-            else None
-        )
-        expected = _normalized_fingerprint_8616(
-            expected_raw,
-            condition_fingerprint_normalizer,
-        )
-        inverted_raw = invert_condition_fingerprint_string_8616(expected_raw)
-        inverted = (
-            _normalized_fingerprint_8616(
-                inverted_raw,
-                condition_fingerprint_normalizer,
-            )
-            if inverted_raw is not None
-            else None
-        )
-        precision_after = precision_after_by_jcc.get(jcc_addr, set())
-        precision_views = precision_views_by_jcc.get(jcc_addr, set())
-        precision_view_matches = bool(precision_views) and precision_views == {
-            condition_precision_token_8616(
-                condition_precision_view_fingerprint_8616(candidates[0], condition_fingerprint)
-            )
-        }
-        if logical_reload_context is None and _condition_register_operands_8616(facts[0]):
-            logical_reload_context = _build_logical_reload_validation_context_8616(codegen)
-        logical_reload_fingerprints = _proven_logical_reload_condition_fingerprints_8616(
-            codegen,
-            facts[0],
-            expected,
-            condition_fingerprint_normalizer,
-            logical_reload_context,
-        )
-        chain_validation = validate_complete_condition_chain_8616(
-            candidates[0],
-            root_jcc_addr=jcc_addr,
-            facts_by_jcc=facts_by_jcc,
-            actual_fingerprint=actual_precision,
-            precision_candidates=frozenset(precision_after),
-        )
-        fingerprint_matches = (
-            actual in {expected, inverted}
-            or semantic_view_actual in {expected, inverted}
-            or post_body_actual in {expected, inverted}
-            or actual in logical_reload_fingerprints
-        )
-        # Proven storage-view normalization must happen before compaction:
-        # a digest cannot recover the original low/high-word expressions.
-        precision_matches = (
-            precision_view_matches
-            or precision_after == {actual_precision}
-            or precision_after == {condition_precision_token_8616(actual)}
-        )
-        if (
-            fingerprint_matches
-            or precision_matches
-            or chain_validation.proven
-            or _proven_stored_call_return_condition_8616(codegen, facts[0], candidates[0])
-        ):
-            materialized_count += 1
-            continue
-        issues.append(
-            BranchConditionIssue8616(
-                BranchConditionIssueKind8616.PREDICATE_MISMATCH,
-                jcc_addr,
-                expected=expected,
-                actual=actual,
-                precision_candidates=tuple(sorted(precision_after)),
-            )
-        )
+        else:
+            issues.append(issue)
     missing_keys = missing_required_condition_keys_8616(codegen, root, typed_conditions)
     issues.extend(
         BranchConditionIssue8616(

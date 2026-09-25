@@ -13,6 +13,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -22,6 +23,7 @@ from angr.sim_variable import SimStackVariable
 from archinfo import Arch
 
 from .authoritative_function_prototypes import publish_authoritative_function_prototype_8616
+from .interprocedural_storage_contracts import FunctionStorageContract8616
 from .interprocedural_storage_prototype_types import (
     FunctionStoragePrototypeApplicationResult8616,
     FunctionStoragePrototypeApplicationVerdict8616,
@@ -94,11 +96,25 @@ def _record_result_8616(
     return result
 
 
-def apply_accepted_function_storage_prototype_8616(
+@dataclass(slots=True)
+class _PrototypeApplyContext8616:
+    """Proven surfaces needed for the atomic callee prototype update."""
+
+    function_addr: int
+    project_surface: _ProjectSurface8616
+    function_surface: _FunctionSurface8616
+    cfunc: _CFunctionSurface8616
+    cfunc_prototype: SimTypeFunction
+    function_prototype: SimTypeFunction
+    cvars: tuple[structured_c.CVariable, ...]
+    contract: FunctionStorageContract8616
+
+
+def _proven_apply_context_8616(
     project: object,
     codegen: object,
-) -> FunctionStoragePrototypeApplicationResult8616:
-    """Apply one complete accepted contract to every current callee projection."""
+) -> _PrototypeApplyContext8616 | FunctionStoragePrototypeApplicationResult8616:
+    """Collect every proven surface for the atomic prototype update."""
     try:
         cfunc = cast(_CodegenSurface8616, codegen).cfunc
         function_addr = cfunc.addr
@@ -167,12 +183,85 @@ def apply_accepted_function_storage_prototype_8616(
                 FunctionStoragePrototypeApplicationVerdict8616.ARGUMENT_SHAPE_REFUSED,
             ),
         )
+    return _PrototypeApplyContext8616(
+        function_addr=function_addr,
+        project_surface=project_surface,
+        function_surface=function_surface,
+        cfunc=cfunc,
+        cfunc_prototype=cfunc_prototype,
+        function_prototype=function_prototype,
+        cvars=cvars,
+        contract=resolution.contract,
+    )
+
+
+def _mutate_prototype_surfaces_8616(
+    project: object,
+    ctx: _PrototypeApplyContext8616,
+    argument_types: tuple[SimType, ...],
+    cfunc_return: SimType,
+    function_return: SimType,
+) -> tuple[SimTypeFunction, bool]:
+    """Update cvar types, stack sizes, prototypes, and the replay snapshot."""
+    new_cfunc_prototype = storage_prototype_with_types_8616(
+        ctx.cfunc_prototype,
+        argument_types,
+        cfunc_return,
+        ctx.project_surface.arch,
+    )
+    new_function_prototype = storage_prototype_with_types_8616(
+        ctx.function_prototype,
+        argument_types,
+        function_return,
+        ctx.project_surface.arch,
+    )
+    changed = False
+    for slot, cvar, argument_type in zip(
+        ctx.contract.inputs,
+        ctx.cvars,
+        argument_types,
+        strict=True,
+    ):
+        if cvar.variable_type != argument_type:
+            cvar.variable_type = argument_type
+            changed = True
+        variable = cast(SimStackVariable, cvar.variable)
+        if variable.size != slot.width:
+            variable.size = slot.width
+            changed = True
+    if ctx.cfunc.functy != new_cfunc_prototype:
+        ctx.cfunc.functy = new_cfunc_prototype
+        changed = True
+    if ctx.function_surface.prototype != new_function_prototype:
+        ctx.function_surface.prototype = new_function_prototype
+        changed = True
+    if ctx.function_surface.is_prototype_guessed:
+        ctx.function_surface.is_prototype_guessed = False
+        changed = True
+    publish_authoritative_function_prototype_8616(
+        project,
+        ctx.function_addr,
+        new_cfunc_prototype,
+        source=PrototypeSource.CCA_DECOMPILER,
+    )
+    return new_cfunc_prototype, changed
+
+
+def apply_accepted_function_storage_prototype_8616(
+    project: object,
+    codegen: object,
+) -> FunctionStoragePrototypeApplicationResult8616:
+    """Apply one complete accepted contract to every current callee projection."""
+    context = _proven_apply_context_8616(project, codegen)
+    if isinstance(context, FunctionStoragePrototypeApplicationResult8616):
+        return context
+    function_addr = context.function_addr
     preflight = preflight_storage_prototype_types_8616(
-        resolution.contract,
-        cfunc_prototype,
-        function_prototype,
-        cvars,
-        project_surface.arch,
+        context.contract,
+        context.cfunc_prototype,
+        context.function_prototype,
+        context.cvars,
+        context.project_surface.arch,
         codegen,
     )
     if not preflight.accepted or preflight.argument_types is None:
@@ -185,8 +274,10 @@ def apply_accepted_function_storage_prototype_8616(
             ),
         )
     argument_types = preflight.argument_types
-    cfunc_return = preflight.proven_return or cast(SimType, cfunc_prototype.returnty)
-    function_return = preflight.proven_return or cast(SimType, function_prototype.returnty)
+    cfunc_return = preflight.proven_return or cast(SimType, context.cfunc_prototype.returnty)
+    function_return = preflight.proven_return or cast(
+        SimType, context.function_prototype.returnty
+    )
     if not isinstance(cfunc_return, SimType) or not isinstance(function_return, SimType):
         return _record_result_8616(
             codegen,
@@ -195,43 +286,12 @@ def apply_accepted_function_storage_prototype_8616(
                 FunctionStoragePrototypeApplicationVerdict8616.PROTOTYPE_UNAVAILABLE,
             ),
         )
-    new_cfunc_prototype = storage_prototype_with_types_8616(
-        cfunc_prototype,
+    new_cfunc_prototype, changed = _mutate_prototype_surfaces_8616(
+        project,
+        context,
         argument_types,
         cfunc_return,
-        project_surface.arch,
-    )
-    new_function_prototype = storage_prototype_with_types_8616(
-        function_prototype,
-        argument_types,
         function_return,
-        project_surface.arch,
-    )
-    changed = False
-    for slot, cvar, argument_type in zip(
-        resolution.contract.inputs,
-        cvars,
-        argument_types,
-        strict=True,
-    ):
-        if cvar.variable_type != argument_type:
-            cvar.variable_type = argument_type
-            changed = True
-        variable = cast(SimStackVariable, cvar.variable)
-        if variable.size != slot.width:
-            variable.size = slot.width
-            changed = True
-    if cfunc.functy != new_cfunc_prototype:
-        cfunc.functy = new_cfunc_prototype
-        changed = True
-    if function_surface.prototype != new_function_prototype:
-        function_surface.prototype = new_function_prototype
-        changed = True
-    if function_surface.is_prototype_guessed:
-        function_surface.is_prototype_guessed = False
-        changed = True
-    publish_authoritative_function_prototype_8616(
-        project, function_addr, new_cfunc_prototype, source=PrototypeSource.CCA_DECOMPILER,
     )
     if changed:
         cast(_CodegenSurface8616, codegen)._inertia_codegen_decl_refresh_required_8616 = True

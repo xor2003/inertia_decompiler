@@ -10,7 +10,7 @@ import builtins
 import contextlib
 import logging
 import os
-from collections.abc import Collection, Iterable, Iterator
+from collections.abc import Callable, Collection, Iterable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum, StrEnum
 from types import SimpleNamespace
@@ -35,7 +35,7 @@ from .alias.register_reaching_source import (
     RegisterReachingSourceResult8616,
     RegisterReachingSourceVerdict8616,
 )
-from .analysis_helpers import collect_neighbor_call_targets, resolve_direct_call_target_from_block
+from .analysis_helpers import CallTargetSeed, collect_neighbor_call_targets, resolve_direct_call_target_from_block
 from .callee_name_normalization import normalize_callee_name_8616
 from .caller_return_use_contracts import (
     CallerReturnUseEvidence8616,
@@ -59,6 +59,7 @@ from .frontend_caller_return_use_program import (
     current_caller_return_use_program_evidence_8616,
     use_caller_return_use_program_evidence_8616,
 )
+from .frontend_direct_callsite_index import DecodedDirectCallsiteIndex8616
 from .frontend_instruction_kinds import is_x86_16_call_mnemonic_8616
 from .helper_abi import (
     known_helper_is_variadic_8616 as _catalog_helper_is_variadic_8616,
@@ -76,6 +77,7 @@ from .semantics.callsite_summary_request import (
     CallsiteSummaryRequestCache8616,
 )
 from .semantics.register_value_preservation import (
+    AxValueView8616,
     ByteReturnExtensionKind8616,
     decoded_ax_read_view_8616,
     decoded_byte_return_extension_8616,
@@ -601,59 +603,19 @@ def _logical_arg_interface_for_target_8616(
         project = cast(Any, function).project
     except AttributeError:
         return (), ()
-    candidate_addrs: list[int] = [target_addr]
-    try:
-        original_delta = project._inertia_original_linear_delta
-    except AttributeError:
-        original_delta = None
-    if isinstance(original_delta, int):
-        candidate_addrs.extend((target_addr + original_delta, target_addr - original_delta))
-    candidate_projects = [project]
-    try:
-        original_project = project._inertia_original_project
-    except AttributeError:
-        original_project = None
-    if original_project is not None:
-        candidate_projects.append(original_project)
     candidates: list[tuple[bool, int, tuple[int, ...]]] = []
     candidate_order = 0
-    for candidate_project in candidate_projects:
-        for candidate_addr in dict.fromkeys(addr for addr in candidate_addrs if addr >= 0):
+    for candidate_project in _prototype_candidate_projects_8616(project):
+        for candidate_addr in dict.fromkeys(
+            addr for addr in _prototype_candidate_addrs_8616(project, target_addr)
+            if addr >= 0
+        ):
             candidate_order += 1
-            try:
-                callee = candidate_project.kb.functions.function(addr=candidate_addr, create=False)
-            except (AttributeError, KeyError):
-                continue
-            if callee is None:
-                continue
-            typed_callee = cast(_AngrFunctionPrototypeSurface8616, callee)
-            try:
-                prototype = typed_callee.prototype
-            except AttributeError:
-                continue
-            if not isinstance(prototype, SimTypeFunction):
-                continue
-            widths: list[int] = []
-            for arg_type in tuple(prototype.args or ()):
-                if isinstance(arg_type, SimTypeBottom):
-                    widths = []
-                    break
-                try:
-                    size_bits = arg_type.size
-                except AttributeError:
-                    widths = []
-                    break
-                if not isinstance(size_bits, int):
-                    widths = []
-                    break
-                width = max(2, (size_bits + 7) // 8)
-                widths.append(width)
-            if widths:
-                try:
-                    is_guessed = bool(typed_callee.is_prototype_guessed)
-                except AttributeError:
-                    is_guessed = True
-                candidates.append((is_guessed, candidate_order, tuple(widths)))
+            candidate = _prototype_widths_for_addr_8616(
+                candidate_project, candidate_addr, candidate_order
+            )
+            if candidate is not None:
+                candidates.append(candidate)
     if candidates:
         _is_guessed, _order, selected_widths = min(
             candidates,
@@ -661,6 +623,73 @@ def _logical_arg_interface_for_target_8616(
         )
         return selected_widths, ()
     return (), ()
+
+
+def _prototype_candidate_addrs_8616(project: object, target_addr: int) -> list[int]:
+    """Return the target plus any original-delta rebased addresses."""
+    candidate_addrs: list[int] = [target_addr]
+    original_delta = _dynamic_callsite_getattr_8616(
+        project, "_inertia_original_linear_delta", None
+    )
+    if isinstance(original_delta, int):
+        candidate_addrs.extend((target_addr + original_delta, target_addr - original_delta))
+    return candidate_addrs
+
+
+def _prototype_candidate_projects_8616(project: object) -> list[object]:
+    """Return the active project plus the pre-rebase project when present."""
+    candidate_projects: list[object] = [project]
+    original_project = _dynamic_callsite_getattr_8616(
+        project, "_inertia_original_project", None
+    )
+    if original_project is not None:
+        candidate_projects.append(original_project)
+    return candidate_projects
+
+
+def _prototype_widths_for_addr_8616(
+    candidate_project: object,
+    candidate_addr: int,
+    candidate_order: int,
+) -> tuple[bool, int, tuple[int, ...]] | None:
+    """Return (is_guessed, order, widths) for one candidate callee prototype."""
+    try:
+        callee = cast(Any, candidate_project).kb.functions.function(addr=candidate_addr, create=False)
+    except (AttributeError, KeyError):
+        return None
+    if callee is None:
+        return None
+    typed_callee = cast(_AngrFunctionPrototypeSurface8616, callee)
+    try:
+        prototype = typed_callee.prototype
+    except AttributeError:
+        return None
+    if not isinstance(prototype, SimTypeFunction):
+        return None
+    widths = _prototype_arg_widths_8616(prototype)
+    if not widths:
+        return None
+    try:
+        is_guessed = bool(typed_callee.is_prototype_guessed)
+    except AttributeError:
+        is_guessed = True
+    return is_guessed, candidate_order, widths
+
+
+def _prototype_arg_widths_8616(prototype: SimTypeFunction) -> tuple[int, ...]:
+    """Convert prototype argument bit sizes into at least 2-byte widths."""
+    widths: list[int] = []
+    for arg_type in tuple(prototype.args or ()):
+        if isinstance(arg_type, SimTypeBottom):
+            return ()
+        try:
+            size_bits = arg_type.size
+        except AttributeError:
+            return ()
+        if not isinstance(size_bits, int):
+            return ()
+        widths.append(max(2, (size_bits + 7) // 8))
+    return tuple(widths)
 
 
 def _logical_arg_widths_for_target_8616(function: object, target_addr: int | None) -> tuple[int, ...]:
@@ -679,81 +708,98 @@ def _evidence_name_8616(evidence: object) -> str | None:
     return name if isinstance(name, str) else None
 
 
-def _lookup_target_name_8616(function: object, target_addr: int | None) -> str | None:
-    def _impl() -> str | None:
-        if not isinstance(target_addr, int):
-            return None
-        project = _dynamic_callsite_getattr_8616(function, "project", None)
-        original_delta = _dynamic_callsite_getattr_8616(project, "_inertia_original_linear_delta", None)
-        lookup_addrs = [target_addr]
-        if isinstance(original_delta, int):
-            lookup_addrs.append(target_addr + original_delta)
-            rebased = target_addr - original_delta
-            if rebased >= 0:
-                lookup_addrs.append(rebased)
-        deduped_addrs: list[int] = []
-        for addr in lookup_addrs:
-            if addr not in deduped_addrs:
-                deduped_addrs.append(addr)
-
-        for candidate_project in (project, _dynamic_callsite_getattr_8616(project, "_inertia_original_project", None)):
-            kb_functions = _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(candidate_project, "kb", None), "functions", None)
-            lookup = _dynamic_callsite_getattr_8616(kb_functions, "function", None)
-            for candidate_addr in deduped_addrs:
-                evidence = identify_x86_16_compiler_helper_at_8616(candidate_project, candidate_addr)
-                generic_name: str | None = None
-                if callable(lookup):
-                    try:
-                        callee = lookup(addr=candidate_addr, create=False)
-                    except Exception as ex:
-                        log.debug(
-                            "callsite target lookup failed project=%r addr=%#x: %s",
-                            candidate_project,
-                            candidate_addr,
-                            ex,
-                        )
-                        callee = None
-                    name = _dynamic_callsite_getattr_8616(callee, "name", None)
-                    if isinstance(name, str) and name:
-                        normalized = normalize_callee_name_8616(name)
-                        if evidence is not None and (
-                            not isinstance(normalized, str) or normalized.startswith(("sub_", "loc_"))
-                        ):
-                            return _evidence_name_8616(evidence)
-                        if _is_stack_probe_target_name_8616(name):
-                            return name
-                        generic_name = name
-                for labels in (
-                    _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(candidate_project, "kb", None), "labels", None),
-                    _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(candidate_project, "_inertia_lst_metadata", None), "code_labels", None),
+def _lookup_label_at_addr_8616(
+    candidate_project: object, candidate_addr: int, evidence: object
+) -> str | None:
+    """Return a label-backed target name for one project/address, or None."""
+    for labels in (
+        _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(candidate_project, "kb", None), "labels", None),
+        _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(candidate_project, "_inertia_lst_metadata", None), "code_labels", None),
+    ):
+        if labels is None:
+            continue
+        try:
+            label = labels.get(candidate_addr)
+        except Exception as ex:
+            log.debug(
+                "callsite label lookup failed project=%r addr=%#x: %s",
+                candidate_project,
+                candidate_addr,
+                ex,
+            )
+            label = None
+        if isinstance(label, str) and label:
+            if evidence is not None:
+                normalized = normalize_callee_name_8616(label)
+                if (
+                    not isinstance(normalized, str) or normalized.startswith(("sub_", "loc_"))
                 ):
-                    if labels is None:
-                        continue
-                    try:
-                        label = labels.get(candidate_addr)
-                    except Exception as ex:
-                        log.debug(
-                            "callsite label lookup failed project=%r addr=%#x: %s",
-                            candidate_project,
-                            candidate_addr,
-                            ex,
-                        )
-                        label = None
-                    if isinstance(label, str) and label:
-                        if evidence is not None:
-                            normalized = normalize_callee_name_8616(label)
-                            if (
-                                not isinstance(normalized, str) or normalized.startswith(("sub_", "loc_"))
-                            ):
-                                return _evidence_name_8616(evidence)
-                        return label
-                if evidence is not None:
                     return _evidence_name_8616(evidence)
-                if generic_name is not None:
-                    return generic_name
-        return None
+            return label
+    return None
 
-    return _impl()
+
+def _lookup_name_at_addr_8616(
+    candidate_project: object, lookup: object, candidate_addr: int
+) -> str | None:
+    """Resolve a target name for one project/address, or None to keep looking."""
+    evidence = identify_x86_16_compiler_helper_at_8616(candidate_project, candidate_addr)
+    generic_name: str | None = None
+    if callable(lookup):
+        try:
+            callee = lookup(addr=candidate_addr, create=False)
+        except Exception as ex:
+            log.debug(
+                "callsite target lookup failed project=%r addr=%#x: %s",
+                candidate_project,
+                candidate_addr,
+                ex,
+            )
+            callee = None
+        name = _dynamic_callsite_getattr_8616(callee, "name", None)
+        if isinstance(name, str) and name:
+            normalized = normalize_callee_name_8616(name)
+            if evidence is not None and (
+                not isinstance(normalized, str) or normalized.startswith(("sub_", "loc_"))
+            ):
+                return _evidence_name_8616(evidence)
+            if _is_stack_probe_target_name_8616(name):
+                return name
+            generic_name = name
+    label = _lookup_label_at_addr_8616(candidate_project, candidate_addr, evidence)
+    if label is not None:
+        return label
+    if evidence is not None:
+        return _evidence_name_8616(evidence)
+    if generic_name is not None:
+        return generic_name
+    return None
+
+
+def _lookup_target_name_8616(function: object, target_addr: int | None) -> str | None:
+    if not isinstance(target_addr, int):
+        return None
+    project = _dynamic_callsite_getattr_8616(function, "project", None)
+    original_delta = _dynamic_callsite_getattr_8616(project, "_inertia_original_linear_delta", None)
+    lookup_addrs = [target_addr]
+    if isinstance(original_delta, int):
+        lookup_addrs.append(target_addr + original_delta)
+        rebased = target_addr - original_delta
+        if rebased >= 0:
+            lookup_addrs.append(rebased)
+    deduped_addrs: list[int] = []
+    for addr in lookup_addrs:
+        if addr not in deduped_addrs:
+            deduped_addrs.append(addr)
+
+    for candidate_project in (project, _dynamic_callsite_getattr_8616(project, "_inertia_original_project", None)):
+        kb_functions = _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(candidate_project, "kb", None), "functions", None)
+        lookup = _dynamic_callsite_getattr_8616(kb_functions, "function", None)
+        for candidate_addr in deduped_addrs:
+            name = _lookup_name_at_addr_8616(candidate_project, lookup, candidate_addr)
+            if name is not None:
+                return name
+    return None
 
 
 def callsite_target_name_for_project_8616(project: object, target_addr: int | None) -> str | None:
@@ -923,92 +969,115 @@ def _find_call_index(insns: tuple[object, ...], callsite_addr: int) -> int | Non
     return None
 
 
+def _callsite_debug_insns_8616(
+    debug: bool, callsite_addr: int, label: str, insns: tuple[object, ...]
+) -> None:
+    """Emit the callsite-window debug line when the env flag is enabled."""
+    if not debug:
+        return
+    rendered = ", ".join(
+        f"{_instruction_address_8616(insn):#x}:{_mnemonic(insn)} {_instruction_op_str_8616(insn)}"
+        for insn in insns[:12]
+    )
+    log.warning("[callsite-window] callsite=%#x %s count=%d %s", callsite_addr, label, len(insns), rendered)
+
+
+def _decode_linear_window_8616(
+    project: object, callsite_addr: int, start_addr: int, debug: bool
+) -> tuple[object, ...]:
+    """Decode a linear instruction window ending after the callsite."""
+    if not isinstance(start_addr, int) or start_addr > callsite_addr:
+        return ()
+    size = max(callsite_addr - start_addr + 16, 16)
+    try:
+        block = cast(Any, project).factory.block(
+            start_addr,
+            size=size,
+            num_inst=max(callsite_addr - start_addr + 8, 8),
+            strict_block_end=False,
+            opt_level=0,
+        )
+    except Exception as ex:
+        log.debug(
+            "callsite linear-window decode failed start=%#x callsite=%#x: %s", start_addr, callsite_addr, ex
+        )
+        block = None
+    insns = tuple(_dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(block, "capstone", None), "insns", ()) or ()) if block is not None else ()
+    _callsite_debug_insns_8616(debug, callsite_addr, f"factory-window start={start_addr:#x}", insns)
+    if _find_call_index(insns, callsite_addr) is not None:
+        return insns
+    capstone_engine = _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(project, "arch", None), "capstone", None)
+    memory = _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(project, "loader", None), "memory", None)
+    if capstone_engine is None or memory is None:
+        return insns
+    try:
+        data = bytes(memory.load(start_addr, size))
+        capstone_insns = tuple(capstone_engine.disasm(data, start_addr))
+        _callsite_debug_insns_8616(debug, callsite_addr, f"capstone-window start={start_addr:#x}", capstone_insns)
+        return capstone_insns
+    except Exception as ex:
+        log.debug(
+            "callsite capstone-window decode failed start=%#x callsite=%#x: %s", start_addr, callsite_addr, ex
+        )
+        return insns
+
+
 def _block_insns_for_callsite(function: object, callsite_addr: int) -> tuple[object, ...]:
-    def _impl() -> tuple[object, ...]:
-        project = _dynamic_callsite_getattr_8616(function, "project", None)
-        if project is None:
-            return ()
-
-        debug = bool(os.environ.get("INERTIA_DEBUG_CALLSITE_SUMMARY"))
-
-        def _debug_insns(label: str, insns: tuple[object, ...]) -> None:
-            if not debug:
-                return
-            rendered = ", ".join(
-                f"{_instruction_address_8616(insn):#x}:{_mnemonic(insn)} {_instruction_op_str_8616(insn)}"
-                for insn in insns[:12]
-            )
-            log.warning("[callsite-window] callsite=%#x %s count=%d %s", callsite_addr, label, len(insns), rendered)
-
-        def _decode_linear_window(start_addr: int) -> tuple[object, ...]:
-            if not isinstance(start_addr, int) or start_addr > callsite_addr:
-                return ()
-            size = max(callsite_addr - start_addr + 16, 16)
-            try:
-                block = project.factory.block(
-                    start_addr,
-                    size=size,
-                    num_inst=max(callsite_addr - start_addr + 8, 8),
-                    strict_block_end=False,
-                    opt_level=0,
-                )
-            except Exception as ex:
-                log.debug(
-                    "callsite linear-window decode failed start=%#x callsite=%#x: %s", start_addr, callsite_addr, ex
-                )
-                block = None
-            insns = tuple(_dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(block, "capstone", None), "insns", ()) or ()) if block is not None else ()
-            _debug_insns(f"factory-window start={start_addr:#x}", insns)
-            if _find_call_index(insns, callsite_addr) is not None:
-                return insns
-            capstone_engine = _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(project, "arch", None), "capstone", None)
-            memory = _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(project, "loader", None), "memory", None)
-            if capstone_engine is None or memory is None:
-                return insns
-            try:
-                data = bytes(memory.load(start_addr, size))
-                capstone_insns = tuple(capstone_engine.disasm(data, start_addr))
-                _debug_insns(f"capstone-window start={start_addr:#x}", capstone_insns)
-                return capstone_insns
-            except Exception as ex:
-                log.debug(
-                    "callsite capstone-window decode failed start=%#x callsite=%#x: %s", start_addr, callsite_addr, ex
-                )
-                return insns
-
-        candidate_addrs = [callsite_addr]
-        func_addr = _dynamic_callsite_getattr_8616(function, "addr", None)
-        if isinstance(func_addr, int) and func_addr <= callsite_addr:
-            candidate_addrs.append(func_addr)
-        for block_addr in tuple(sorted(_dynamic_callsite_getattr_8616(function, "block_addrs_set", ()) or ())):
-            if block_addr == callsite_addr:
-                continue
-            if block_addr > callsite_addr:
-                break
-            candidate_addrs.append(block_addr)
-
-        for block_addr in reversed(candidate_addrs):
-            try:
-                insns = tuple(
-                    decoded_block_instructions_8616(project, block_addr, opt_level=0)
-                )
-            except Exception as ex:
-                log.debug("callsite block decode failed block=%#x: %s", block_addr, ex)
-                continue
-            _debug_insns(f"factory-block start={block_addr:#x}", insns)
-            call_idx = _find_call_index(insns, callsite_addr)
-            if call_idx is not None and call_idx > 0:
-                return insns
-            if call_idx is not None:
-                for start_addr in reversed(candidate_addrs):
-                    window_insns = _decode_linear_window(start_addr)
-                    window_idx = _find_call_index(window_insns, callsite_addr)
-                    if window_idx is not None and window_idx > 0:
-                        return window_insns
-                return insns
+    project = _dynamic_callsite_getattr_8616(function, "project", None)
+    if project is None:
         return ()
 
-    return _impl()
+    debug = bool(os.environ.get("INERTIA_DEBUG_CALLSITE_SUMMARY"))
+    candidate_addrs = _callsite_candidate_block_addrs_8616(function, callsite_addr)
+
+    for block_addr in reversed(candidate_addrs):
+        try:
+            insns = tuple(
+                decoded_block_instructions_8616(project, block_addr, opt_level=0)
+            )
+        except Exception as ex:
+            log.debug("callsite block decode failed block=%#x: %s", block_addr, ex)
+            continue
+        _callsite_debug_insns_8616(debug, callsite_addr, f"factory-block start={block_addr:#x}", insns)
+        call_idx = _find_call_index(insns, callsite_addr)
+        if call_idx is not None and call_idx > 0:
+            return insns
+        if call_idx is not None:
+            window = _linear_window_for_callsite_8616(
+                project, candidate_addrs, callsite_addr, debug
+            )
+            return window if window is not None else insns
+    return ()
+
+
+def _callsite_candidate_block_addrs_8616(function: object, callsite_addr: int) -> list[int]:
+    """Return block-start candidates at or before the callsite, ascending."""
+    candidate_addrs = [callsite_addr]
+    func_addr = _dynamic_callsite_getattr_8616(function, "addr", None)
+    if isinstance(func_addr, int) and func_addr <= callsite_addr:
+        candidate_addrs.append(func_addr)
+    for block_addr in tuple(sorted(_dynamic_callsite_getattr_8616(function, "block_addrs_set", ()) or ())):
+        if block_addr == callsite_addr:
+            continue
+        if block_addr > callsite_addr:
+            break
+        candidate_addrs.append(block_addr)
+    return candidate_addrs
+
+
+def _linear_window_for_callsite_8616(
+    project: object,
+    candidate_addrs: list[int],
+    callsite_addr: int,
+    debug: bool,
+) -> tuple[object, ...] | None:
+    """Return the first linear window containing a preceded callsite."""
+    for start_addr in reversed(candidate_addrs):
+        window_insns = _decode_linear_window_8616(project, callsite_addr, start_addr, debug)
+        window_idx = _find_call_index(window_insns, callsite_addr)
+        if window_idx is not None and window_idx > 0:
+            return window_insns
+    return None
 
 
 def _next_linear_block_insns(function: object, callsite_addr: int) -> tuple[object, ...]:
@@ -1233,40 +1302,31 @@ def _is_segment_register_push_8616(insn: object) -> bool:
     return len(operands) == 1 and _operand_reg_name(insn, operands[0]) in {"cs", "ds", "es", "ss"}
 
 
+def _dest_reg_not_frame_8616(insn: object, operands: tuple[object, ...]) -> bool:
+    """Return whether the destination operand is a non-frame register."""
+    dest_name = _operand_reg_name(insn, operands[0])
+    return dest_name not in {"sp", "bp", "ss", "ds", "es", "cs"} if dest_name is not None else False
+
+
 def _transparent_between_push_args_8616(insn: object) -> bool:
     """Allow register calculations between pushes without crossing frame writes."""
     mnemonic = _mnemonic(insn)
     if mnemonic in {"cbw", "cwd", "cwde", "cdq", "nop"}:
         return True
+    operands = _instruction_operands(insn)
     if mnemonic in {"mul", "imul"}:
-        operands = _instruction_operands(insn)
         if len(operands) == 1:
             return True
-        if len(operands) in {2, 3}:
-            dest_name = _operand_reg_name(insn, operands[0])
-            return dest_name not in {"sp", "bp", "ss", "ds", "es", "cs"} if dest_name is not None else False
-        return False
-    if mnemonic in {"mov", "lea"}:
-        operands = _instruction_operands(insn)
-        if len(operands) != 2:
-            return False
-        return _operand_reg_name(insn, operands[0]) not in {"sp", "bp", "ss", "ds", "es", "cs"}
-
-    if mnemonic not in {"adc", "add", "sbb", "sub", "sar", "shl", "shr", "and", "or", "xor", "inc", "dec", "neg", "not"}:
-        return False
-    operands = _instruction_operands(insn)
-    if mnemonic in {"inc", "dec", "neg", "not"}:
-        if len(operands) != 1:
-            return False
-        dest_name = _operand_reg_name(insn, operands[0])
-        return dest_name not in {"sp", "bp", "ss", "ds", "es", "cs"} if dest_name is not None else False
-
-    if len(operands) != 2:
-        return False
-    dest_name = _operand_reg_name(insn, operands[0])
-    if dest_name in {"sp", "bp", "ss", "ds", "es", "cs"}:
-        return False
-    return dest_name is not None
+        return len(operands) in {2, 3} and _dest_reg_not_frame_8616(insn, operands)
+    expected_operands = {
+        "inc": 1, "dec": 1, "neg": 1, "not": 1,
+        "mov": 2, "lea": 2,
+        "adc": 2, "add": 2, "sbb": 2, "sub": 2,
+        "sar": 2, "shl": 2, "shr": 2,
+        "and": 2, "or": 2, "xor": 2,
+    }
+    expected = expected_operands.get(mnemonic)
+    return expected is not None and len(operands) == expected and _dest_reg_not_frame_8616(insn, operands)
 
 
 def _nested_call_argument_window_8616(
@@ -1416,42 +1476,57 @@ def _callee_saved_frame_push_addresses_8616(function: object) -> frozenset[int]:
     for ret_index, insn in enumerate(insns):
         if not _mnemonic(insn).startswith("ret"):
             continue
-        restored: set[str] = set()
-        scan = ret_index - 1
-        while scan >= 0:
-            candidate = insns[scan]
-            mnemonic = _mnemonic(candidate)
-            operands = _instruction_operands(candidate)
-            if mnemonic == "pop" and len(operands) == 1:
-                reg_name = _operand_reg_name(candidate, operands[0])
-                if reg_name == "bp":
-                    scan -= 1
-                    continue
-                if reg_name is not None and reg_name in callee_saved:
-                    restored.add(reg_name)
-                    scan -= 1
-                    continue
-            if mnemonic == "leave":
-                scan -= 1
-                continue
-            if mnemonic == "mov" and len(operands) == 2 and (
-                _operand_reg_name(candidate, operands[0]) == "sp"
-                and _operand_reg_name(candidate, operands[1]) == "bp"
-            ):
-                scan -= 1
-                continue
-            if mnemonic in {"nop", "clc", "cmc", "stc"}:
-                scan -= 1
-                continue
-            break
-        restored_by_return.append(restored)
+        restored_by_return.append(
+            _restored_registers_before_ret_8616(insns, ret_index, callee_saved)
+        )
 
     if not restored_by_return or any(not restored for restored in restored_by_return):
         return frozenset()
     restored_on_all_paths = set.intersection(*restored_by_return)
     if not restored_on_all_paths:
         return frozenset()
+    return _restored_push_addresses_8616(insns, restored_on_all_paths)
 
+
+def _restored_registers_before_ret_8616(
+    insns: tuple[object, ...], ret_index: int, callee_saved: frozenset[str] | set[str]
+) -> set[str]:
+    """Census callee-saved registers restored immediately before one RET."""
+    restored: set[str] = set()
+    scan = ret_index - 1
+    while scan >= 0:
+        candidate = insns[scan]
+        mnemonic = _mnemonic(candidate)
+        operands = _instruction_operands(candidate)
+        if mnemonic == "pop" and len(operands) == 1:
+            reg_name = _operand_reg_name(candidate, operands[0])
+            if reg_name == "bp":
+                scan -= 1
+                continue
+            if reg_name is not None and reg_name in callee_saved:
+                restored.add(reg_name)
+                scan -= 1
+                continue
+        if mnemonic == "leave":
+            scan -= 1
+            continue
+        if mnemonic == "mov" and len(operands) == 2 and (
+            _operand_reg_name(candidate, operands[0]) == "sp"
+            and _operand_reg_name(candidate, operands[1]) == "bp"
+        ):
+            scan -= 1
+            continue
+        if mnemonic in {"nop", "clc", "cmc", "stc"}:
+            scan -= 1
+            continue
+        break
+    return restored
+
+
+def _restored_push_addresses_8616(
+    insns: tuple[object, ...], restored_on_all_paths: set[str]
+) -> frozenset[int]:
+    """Return the first PUSH address per register restored on every path."""
     push_by_register: dict[str, int] = {}
     for insn in insns:
         if _mnemonic(insn) != "push":
@@ -1518,62 +1593,85 @@ def _cross_call_saved_push_addresses_8616(
             if _mnemonic(insns[push_idx]) == "push" and len(operands) == 1
             else None
         )
-        if register not in MSC16_CALLER_SAVED_GENERAL_REGISTERS_8616:
+        if register is None or register not in MSC16_CALLER_SAVED_GENERAL_REGISTERS_8616:
             continue
-        scan = call_idx + 1
-        crossed_call = False
-        while scan < len(insns):
-            insn = insns[scan]
-            mnemonic = _mnemonic(insn)
-            operands = _instruction_operands(insn)
-            if mnemonic == "push" and len(operands) == 1:
-                pushed_register = _operand_reg_name(insn, operands[0])
-                if (
-                    pushed_register == "cs"
-                    and scan + 1 < len(insns)
-                    and is_x86_16_call_mnemonic_8616(_mnemonic(insns[scan + 1]))
-                ):
-                    nested_evidence = _callee_terminal_stack_evidence_8616(
-                        function,
-                        insns[scan + 1],
-                        request_cache=request_cache,
-                    )
-                    if (
-                        nested_evidence is not None
-                        and nested_evidence.consistent_cleanup == 0
-                        and nested_evidence.consistent_return_frame_kind
-                        is TerminalReturnFrameKind8616.FAR
-                    ):
-                        crossed_call = True
-                        scan += 2
-                        continue
-                break
-            if is_x86_16_call_mnemonic_8616(mnemonic):
-                nested_evidence = _callee_terminal_stack_evidence_8616(
-                    function,
-                    insn,
-                    request_cache=request_cache,
-                )
-                if nested_evidence is None or nested_evidence.consistent_cleanup != 0:
-                    break
-                crossed_call = True
-                scan += 1
-                continue
-            if mnemonic == "pop" and len(operands) == 1:
-                if crossed_call and _operand_reg_name(insn, operands[0]) == register:
-                    saved.add(push_addr)
-                break
-            if (
-                mnemonic.startswith(("push", "pop", "ret", "j", "loop"))
-                or mnemonic in {"enter", "leave", "iret"}
-                or (
-                    operands
-                    and _operand_reg_name(insn, operands[0]) in {"sp", "esp"}
-                )
-            ):
-                break
-            scan += 1
+        if _push_crossed_call_restored_8616(
+            function, insns, call_idx, register, request_cache
+        ):
+            saved.add(push_addr)
     return frozenset(saved)
+
+
+def _nested_far_call_crossed_8616(
+    function: object,
+    insns: tuple[object, ...],
+    scan: int,
+    request_cache: CallsiteSummaryRequestCache8616 | None,
+) -> bool:
+    """Return whether insn[scan+1] is a proven zero-cleanup far call."""
+    nested_evidence = _callee_terminal_stack_evidence_8616(
+        function,
+        insns[scan + 1],
+        request_cache=request_cache,
+    )
+    return (
+        nested_evidence is not None
+        and nested_evidence.consistent_cleanup == 0
+        and nested_evidence.consistent_return_frame_kind
+        is TerminalReturnFrameKind8616.FAR
+    )
+
+
+def _push_crossed_call_restored_8616(
+    function: object,
+    insns: tuple[object, ...],
+    call_idx: int,
+    register: str,
+    request_cache: CallsiteSummaryRequestCache8616 | None,
+) -> bool:
+    """Return whether a pushed register is restored after a proven nested call."""
+    scan = call_idx + 1
+    crossed_call = False
+    while scan < len(insns):
+        insn = insns[scan]
+        mnemonic = _mnemonic(insn)
+        operands = _instruction_operands(insn)
+        if mnemonic == "push" and len(operands) == 1:
+            pushed_register = _operand_reg_name(insn, operands[0])
+            if (
+                pushed_register == "cs"
+                and scan + 1 < len(insns)
+                and is_x86_16_call_mnemonic_8616(_mnemonic(insns[scan + 1]))
+                and _nested_far_call_crossed_8616(function, insns, scan, request_cache)
+            ):
+                crossed_call = True
+                scan += 2
+                continue
+            break
+        if is_x86_16_call_mnemonic_8616(mnemonic):
+            nested_evidence = _callee_terminal_stack_evidence_8616(
+                function,
+                insn,
+                request_cache=request_cache,
+            )
+            if nested_evidence is None or nested_evidence.consistent_cleanup != 0:
+                break
+            crossed_call = True
+            scan += 1
+            continue
+        if mnemonic == "pop" and len(operands) == 1:
+            return crossed_call and _operand_reg_name(insn, operands[0]) == register
+        if (
+            mnemonic.startswith(("push", "pop", "ret", "j", "loop"))
+            or mnemonic in {"enter", "leave", "iret"}
+            or (
+                operands
+                and _operand_reg_name(insn, operands[0]) in {"sp", "esp"}
+            )
+        ):
+            break
+        scan += 1
+    return False
 
 
 def _filter_callee_saved_frame_pushes_8616(
@@ -1798,7 +1896,17 @@ def _indexed_global_source_from_mov_operand_8616(insns: tuple[object, ...], mov_
     base_name = _operand_reg_name(insn, type("_IndexedGlobalMemOperand", (), {"reg": base})())
     if not isinstance(base_name, str) or not base_name or base_name in {"sp", "bp", "ss", "ds", "es", "cs"}:
         return None
+    return _indexed_global_base_scan_8616(insns, mov_idx, operand, base_name, int(disp))
 
+
+def _indexed_global_base_scan_8616(
+    insns: tuple[object, ...],
+    mov_idx: int,
+    operand: object,
+    base_name: str,
+    disp: int,
+) -> _CallsiteTuple8616 | None:
+    """Scan backward for the base-register MOV while collecting index ops."""
     scan = mov_idx - 1
     skipped = 0
     ops: list[tuple[str, object]] = []
@@ -1903,142 +2011,402 @@ def _segmented_indirect_source_from_operand_8616(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _RegisterScanStep8616:
+    """One matched backward register-scan arm outcome."""
+
+    advance: bool
+    result: _CallsiteTuple8616 | None = None
+
+
+@dataclass(slots=True)
+class _RegisterSourceScan8616:
+    """Backward scan state for decoded register-source tracing."""
+
+    max_skips = 8
+
+    insns: tuple[object, ...]
+    reg_name: str
+    depth: int
+    scan: int
+    skipped: int = 0
+    ops: list[tuple[str, object]] = field(default_factory=list)
+    source_regs: set[str] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.source_regs = {self.reg_name}
+
+    def _folded(self, source: _CallsiteTuple8616) -> _RegisterScanStep8616:
+        folded = source if not self.ops else (
+            CallsitePushSourceKind8616.EXPR.value, source, tuple(reversed(self.ops)),
+        )
+        return _RegisterScanStep8616(advance=False, result=folded)
+
+    def _cwd_high_word_arm(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616 | None:
+        del insn, operands
+        if self.reg_name != "dx" or mnemonic not in {"cwd", "cdq"}:
+            return None
+        ax_source = _register_source_from_context_8616(
+            self.insns, self.scan, "ax", depth=self.depth + 1,
+        )
+        if ax_source is None:
+            return _RegisterScanStep8616(advance=False)
+        high_source = (
+            CallsitePushSourceKind8616.EXPR.value,
+            ax_source,
+            ((CallsitePushExprOp8616.SIGN_EXT_HI.value, 16),),
+        )
+        return self._folded(high_source)
+
+    def _cbw_low_byte_arm(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616 | None:
+        del insn, operands
+        if self.reg_name != "ax" or mnemonic not in {"cbw", "cwde"}:
+            return None
+        self.source_regs.add("al")
+        return _RegisterScanStep8616(advance=True)
+
+    def _mov_dest_arm(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616 | None:
+        if (
+            mnemonic != "mov" or len(operands) != 2
+            or _operand_reg_name(insn, operands[0]) not in self.source_regs
+        ):
+            return None
+        base_source = _mov_rhs_source_8616(
+            self.insns, self.scan, insn, operands[1], self.source_regs, self.depth,
+        )
+        if base_source is None:
+            return _RegisterScanStep8616(advance=False)
+        if (
+            "al" in self.source_regs
+            and len(base_source) == 2
+            and base_source[0] == CallsitePushSourceKind8616.BP_VALUE.value
+        ):
+            base_source = (*base_source, 1)
+        return self._folded(base_source)
+
+    def _zero_source_arm(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616 | None:
+        del mnemonic, operands
+        zero_source = _zeroing_register_source_8616(insn, self.source_regs)
+        if zero_source is None:
+            return None
+        return self._folded(zero_source)
+
+    def _accumulating_op_arm(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616 | None:
+        if (
+            len(operands) != 2
+            or _operand_reg_name(insn, operands[0]) != self.reg_name
+        ):
+            return None
+        if mnemonic in {"adc", "add", "sbb", "sub"}:
+            return self._arith_op_step(insn, mnemonic, operands[1])
+        if mnemonic in {"sar", "shl", "shr"}:
+            return self._imm_op_step(
+                mnemonic, operands[1],
+                {
+                    "sar": CallsitePushExprOp8616.SAR,
+                    "shl": CallsitePushExprOp8616.SHL,
+                    "shr": CallsitePushExprOp8616.SHR,
+                },
+            )
+        if mnemonic in {"and", "or", "xor"}:
+            return self._imm_op_step(
+                mnemonic, operands[1],
+                {
+                    "and": CallsitePushExprOp8616.AND,
+                    "or": CallsitePushExprOp8616.OR,
+                    "xor": CallsitePushExprOp8616.XOR,
+                },
+            )
+        return None
+
+    def _arith_op_step(
+        self, insn: object, mnemonic: str, rhs: object,
+    ) -> _RegisterScanStep8616:
+        value = _operand_imm_value(rhs)
+        if isinstance(value, int):
+            op = {
+                "adc": CallsitePushExprOp8616.ADC,
+                "add": CallsitePushExprOp8616.ADD,
+                "sbb": CallsitePushExprOp8616.SBB,
+                "sub": CallsitePushExprOp8616.SUB,
+            }[mnemonic]
+            self.ops.append((op.value, value))
+            return _RegisterScanStep8616(advance=True)
+        rhs_source = _mov_rhs_source_8616(
+            self.insns, self.scan, insn, rhs, self.source_regs, self.depth,
+        )
+        if rhs_source is None:
+            return _RegisterScanStep8616(advance=False)
+        op = {
+            "adc": CallsitePushExprOp8616.ADC_SOURCE,
+            "add": CallsitePushExprOp8616.ADD_SOURCE,
+            "sbb": CallsitePushExprOp8616.SBB_SOURCE,
+            "sub": CallsitePushExprOp8616.SUB_SOURCE,
+        }[mnemonic]
+        self.ops.append((op.value, rhs_source))
+        return _RegisterScanStep8616(advance=True)
+
+    def _imm_op_step(
+        self, mnemonic: str, rhs: object, op_map: dict[str, CallsitePushExprOp8616],
+    ) -> _RegisterScanStep8616:
+        value = _operand_imm_value(rhs)
+        if not isinstance(value, int):
+            return _RegisterScanStep8616(advance=False)
+        self.ops.append((op_map[mnemonic].value, value))
+        return _RegisterScanStep8616(advance=True)
+
+    def _neg_not_arm(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616 | None:
+        if (
+            mnemonic not in {"neg", "not"} or len(operands) != 1
+            or _operand_reg_name(insn, operands[0]) != self.reg_name
+        ):
+            return None
+        width = cast(_CapstoneOperandSurface8616, operands[0]).size
+        if mnemonic == "not" and width not in (1, 2, 4):
+            return _RegisterScanStep8616(advance=False)
+        operation = (CallsitePushExprOp8616.NEG.value, 0) if mnemonic == "neg" else (
+            CallsitePushExprOp8616.XOR.value, (1 << (width * 8)) - 1,
+        )
+        self.ops.append(operation)
+        return _RegisterScanStep8616(advance=True)
+
+    def _arms(
+        self,
+    ) -> tuple[
+        Callable[[object, str, tuple[object, ...]], _RegisterScanStep8616 | None], ...,
+    ]:
+        """Return the ordered arm matchers tried for each instruction."""
+        return (
+            self._cwd_high_word_arm,
+            self._cbw_low_byte_arm,
+            self._mov_dest_arm,
+            self._zero_source_arm,
+            self._accumulating_op_arm,
+            self._neg_not_arm,
+        )
+
+    def _fallback_step(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616:
+        """Resolve a scan step for instructions matched by no arm."""
+        del operands
+        if mnemonic.startswith("push"):
+            return _RegisterScanStep8616(advance=True)
+        if (
+            is_x86_16_call_mnemonic_8616(mnemonic)
+            or mnemonic.startswith(("pop", "ret", "jmp"))
+            or _instruction_writes_return_reg(
+                insn, register_value_family_8616(self.reg_name),
+            )
+            or (self.ops and not _transparent_between_push_args_8616(insn))
+        ):
+            return _RegisterScanStep8616(advance=False)
+        return _RegisterScanStep8616(advance=True)
+
+    def _step(self, insn: object) -> _RegisterScanStep8616:
+        """Match one instruction against the scan arms in priority order."""
+        mnemonic = _mnemonic(insn)
+        operands = _instruction_operands(insn)
+        for arm in self._arms():
+            step = arm(insn, mnemonic, operands)
+            if step is not None:
+                return step
+        return self._fallback_step(insn, mnemonic, operands)
+
+    def run(self) -> _CallsiteTuple8616 | None:
+        """Scan backward until a source is proven or evidence runs out."""
+        while self.scan >= 0 and self.skipped < self.max_skips:
+            step = self._step(self.insns[self.scan])
+            if not step.advance:
+                return step.result
+            self.scan -= 1
+            self.skipped += 1
+        return None
+
+
+@dataclass(slots=True)
+class _PushArgSourceScan8616(_RegisterSourceScan8616):
+    """Backward scan for a pushed register, with push/call-aware barriers."""
+
+    max_skips = 6
+
+    def _mov_dest_arm(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616 | None:
+        if (
+            mnemonic != "mov" or len(operands) != 2
+            or _operand_reg_name(insn, operands[0]) not in self.source_regs
+        ):
+            return None
+        base_source = _source_from_mov_operand(insn, operands[1])
+        if base_source is None:
+            base_source = _indexed_global_source_from_mov_operand_8616(
+                self.insns, self.scan, insn, operands[1],
+            )
+        if base_source is None:
+            return _RegisterScanStep8616(advance=False)
+        if (
+            "al" in self.source_regs
+            and len(base_source) == 2
+            and base_source[0] == CallsitePushSourceKind8616.BP_VALUE.value
+        ):
+            base_source = (*base_source, 1)
+        return self._folded(base_source)
+
+    def _lea_arm(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616 | None:
+        if (
+            mnemonic != "lea" or len(operands) != 2
+            or _operand_reg_name(insn, operands[0]) != self.reg_name
+        ):
+            return None
+        base_source = _source_from_lea_operand_8616(insn, operands[1])
+        if base_source is None:
+            return _RegisterScanStep8616(advance=False)
+        if (
+            isinstance(base_source, tuple)
+            and len(base_source) >= 4
+            and base_source[0] == CallsitePushSourceKind8616.BP_INDEX_ADDRESS.value
+            and isinstance(base_source[2], str)
+        ):
+            index_source = _register_source_from_context_8616(
+                self.insns, self.scan, base_source[2],
+            )
+            if index_source is not None:
+                base_source = (*base_source, index_source)
+        return self._folded(base_source)
+
+    def _accumulating_op_arm(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616 | None:
+        step = super()._accumulating_op_arm(insn, mnemonic, operands)
+        if step is not None:
+            return step
+        if len(operands) == 2 and _operand_reg_name(insn, operands[0]) == self.reg_name:
+            return _RegisterScanStep8616(advance=False)
+        return None
+
+    def _inc_dec_arm(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616 | None:
+        if (
+            mnemonic not in {"inc", "dec"} or len(operands) != 1
+            or _operand_reg_name(insn, operands[0]) != self.reg_name
+        ):
+            return None
+        self.ops.append(
+            (
+                CallsitePushExprOp8616.ADD.value if mnemonic == "inc"
+                else CallsitePushExprOp8616.SUB.value,
+                1,
+            )
+        )
+        return _RegisterScanStep8616(advance=True)
+
+    def _mul_arm(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616 | None:
+        if mnemonic not in {"mul", "imul"}:
+            return None
+        if len(operands) == 1 and self.reg_name == "ax":
+            source = _source_from_mov_operand(insn, operands[0])
+            factor = _ax_immediate_before_one_operand_mul_8616(self.insns, self.scan)
+            if source is not None and isinstance(factor, int):
+                return _RegisterScanStep8616(
+                    advance=False,
+                    result=(
+                        CallsitePushSourceKind8616.EXPR.value,
+                        source,
+                        ((CallsitePushExprOp8616.MUL.value, factor), *tuple(reversed(self.ops))),
+                    ),
+                )
+            return _RegisterScanStep8616(advance=False)
+        if self.reg_name in {"ax", "dx"}:
+            return _RegisterScanStep8616(advance=False)
+        if len(operands) in {2, 3} and _operand_reg_name(insn, operands[0]) == self.reg_name:
+            return _RegisterScanStep8616(advance=False)
+        return None
+
+    def _arms(
+        self,
+    ) -> tuple[
+        Callable[[object, str, tuple[object, ...]], _RegisterScanStep8616 | None], ...,
+    ]:
+        return (
+            self._cwd_high_word_arm,
+            self._cbw_low_byte_arm,
+            self._mov_dest_arm,
+            self._lea_arm,
+            self._zero_source_arm,
+            self._accumulating_op_arm,
+            self._neg_not_arm,
+            self._inc_dec_arm,
+            self._mul_arm,
+        )
+
+    def _fallback_step(
+        self, insn: object, mnemonic: str, operands: tuple[object, ...],
+    ) -> _RegisterScanStep8616:
+        if mnemonic.startswith("push"):
+            sibling_reg = (
+                _operand_reg_name(insn, operands[0]) if len(operands) == 1 else None
+            )
+            if _is_segment_register_push_8616(insn) or (
+                isinstance(sibling_reg, str)
+                and (
+                    sibling_reg == self.reg_name
+                    or (self.reg_name in {"ax", "dx"} and sibling_reg in {"ax", "dx"})
+                )
+            ):
+                return _RegisterScanStep8616(advance=True)
+            return _RegisterScanStep8616(advance=False)
+        if (
+            is_x86_16_call_mnemonic_8616(mnemonic)
+            or mnemonic.startswith(("pop", "ret", "jmp"))
+            or not _transparent_between_push_args_8616(insn)
+        ):
+            return _RegisterScanStep8616(advance=False)
+        return _RegisterScanStep8616(advance=True)
+
+
+def _mov_rhs_source_8616(
+    insns: tuple[object, ...],
+    scan: int,
+    insn: object,
+    rhs: object,
+    source_regs: set[str],
+    depth: int,
+) -> _CallsiteTuple8616 | None:
+    """Resolve a non-immediate MOV/arith right operand to a push source."""
+    rhs_reg = _operand_reg_name(insn, rhs)
+    if isinstance(rhs_reg, str) and rhs_reg and rhs_reg not in source_regs:
+        return _register_source_from_context_8616(insns, scan, rhs_reg, depth=depth + 1)
+    source = _source_from_mov_operand(insn, rhs)
+    if source is None:
+        source = _indexed_global_source_from_mov_operand_8616(insns, scan, insn, rhs)
+    return source
+
+
 def _register_source_from_context_8616(insns: tuple[object, ...], idx: int, reg_name: str, *, depth: int = 0) -> _CallsiteTuple8616 | None:
     """Trace a decoded register value through supported width-aware operations."""
     if depth > 4 or reg_name in {"sp", "bp", "ss", "ds", "es", "cs"}:
         return None
-    scan = idx - 1
-    skipped = 0
-    ops: list[tuple[str, object]] = []
-    source_regs = {reg_name}
-    while scan >= 0 and skipped < 8:
-        insn = insns[scan]
-        operands = _instruction_operands(insn)
-        mnemonic = _mnemonic(insn)
-        if reg_name == "dx" and mnemonic in {"cwd", "cdq"}:
-            ax_source = _register_source_from_context_8616(insns, scan, "ax", depth=depth + 1)
-            if ax_source is None:
-                return None
-            high_source = (
-                CallsitePushSourceKind8616.EXPR.value,
-                ax_source,
-                ((CallsitePushExprOp8616.SIGN_EXT_HI.value, 16),),
-            )
-            if not ops:
-                return high_source
-            return (CallsitePushSourceKind8616.EXPR.value, high_source, tuple(reversed(ops)))
-        if reg_name == "ax" and mnemonic in {"cbw", "cwde"}:
-            source_regs.add("al")
-            scan -= 1
-            skipped += 1
-            continue
-        if mnemonic == "mov" and len(operands) == 2 and _operand_reg_name(insn, operands[0]) in source_regs:
-            rhs_reg = _operand_reg_name(insn, operands[1])
-            if isinstance(rhs_reg, str) and rhs_reg and rhs_reg not in source_regs:
-                base_source = _register_source_from_context_8616(insns, scan, rhs_reg, depth=depth + 1)
-            else:
-                base_source = _source_from_mov_operand(insn, operands[1])
-                if base_source is None:
-                    base_source = _indexed_global_source_from_mov_operand_8616(insns, scan, insn, operands[1])
-            if base_source is None:
-                return None
-            if (
-                "al" in source_regs
-                and len(base_source) == 2
-                and base_source[0] == CallsitePushSourceKind8616.BP_VALUE.value
-            ):
-                base_source = (*base_source, 1)
-            if not ops:
-                return base_source
-            return (CallsitePushSourceKind8616.EXPR.value, base_source, tuple(reversed(ops)))
-        zero_source = _zeroing_register_source_8616(insn, source_regs)
-        if zero_source is not None:
-            if not ops:
-                return zero_source
-            return (CallsitePushSourceKind8616.EXPR.value, zero_source, tuple(reversed(ops)))
-        if len(operands) == 2 and _operand_reg_name(insn, operands[0]) == reg_name:
-            if mnemonic in {"adc", "add", "sbb", "sub"}:
-                value = _operand_imm_value(operands[1])
-                if isinstance(value, int):
-                    op = {
-                        "adc": CallsitePushExprOp8616.ADC,
-                        "add": CallsitePushExprOp8616.ADD,
-                        "sbb": CallsitePushExprOp8616.SBB,
-                        "sub": CallsitePushExprOp8616.SUB,
-                    }[mnemonic]
-                    ops.append((op.value, value))
-                    scan -= 1
-                    skipped += 1
-                    continue
-                rhs_reg = _operand_reg_name(insn, operands[1])
-                if isinstance(rhs_reg, str) and rhs_reg and rhs_reg not in source_regs:
-                    rhs_source = _register_source_from_context_8616(insns, scan, rhs_reg, depth=depth + 1)
-                else:
-                    rhs_source = _source_from_mov_operand(insn, operands[1])
-                    if rhs_source is None:
-                        rhs_source = _indexed_global_source_from_mov_operand_8616(insns, scan, insn, operands[1])
-                if rhs_source is None:
-                    return None
-                op = {
-                    "adc": CallsitePushExprOp8616.ADC_SOURCE,
-                    "add": CallsitePushExprOp8616.ADD_SOURCE,
-                    "sbb": CallsitePushExprOp8616.SBB_SOURCE,
-                    "sub": CallsitePushExprOp8616.SUB_SOURCE,
-                }[mnemonic]
-                ops.append((op.value, rhs_source))
-                scan -= 1
-                skipped += 1
-                continue
-            if mnemonic in {"sar", "shl", "shr"}:
-                value = _operand_imm_value(operands[1])
-                if not isinstance(value, int):
-                    return None
-                op = {
-                    "sar": CallsitePushExprOp8616.SAR,
-                    "shl": CallsitePushExprOp8616.SHL,
-                    "shr": CallsitePushExprOp8616.SHR,
-                }[mnemonic]
-                ops.append((op.value, value))
-                scan -= 1
-                skipped += 1
-                continue
-            if mnemonic in {"and", "or", "xor"}:
-                value = _operand_imm_value(operands[1])
-                if not isinstance(value, int):
-                    return None
-                op = {
-                    "and": CallsitePushExprOp8616.AND,
-                    "or": CallsitePushExprOp8616.OR,
-                    "xor": CallsitePushExprOp8616.XOR,
-                }[mnemonic]
-                ops.append((op.value, value))
-                scan -= 1
-                skipped += 1
-                continue
-        if mnemonic in {"neg", "not"} and len(operands) == 1 and _operand_reg_name(insn, operands[0]) == reg_name:
-            width = cast(_CapstoneOperandSurface8616, operands[0]).size
-            if mnemonic == "not" and width not in (1, 2, 4):
-                return None
-            operation = (CallsitePushExprOp8616.NEG.value, 0) if mnemonic == "neg" else (
-                CallsitePushExprOp8616.XOR.value, (1 << (width * 8)) - 1,
-            )
-            ops.append(operation)
-            scan -= 1
-            skipped += 1
-            continue
-        if mnemonic.startswith("push"):
-            scan -= 1
-            skipped += 1
-            continue
-        if is_x86_16_call_mnemonic_8616(mnemonic) or mnemonic.startswith(("pop", "ret", "jmp")):
-            return None
-        if _instruction_writes_return_reg(insn, register_value_family_8616(reg_name)):
-            return None
-        if ops and not _transparent_between_push_args_8616(insn):
-            return None
-        skipped += 1
-        scan -= 1
-    return None
+    return _RegisterSourceScan8616(
+        insns=insns, reg_name=reg_name, depth=depth, scan=idx - 1,
+    ).run()
 
 
 def _zeroing_register_source_8616(insn: object, source_regs: set[str]) -> _CallsiteTuple8616 | None:
@@ -2209,9 +2577,10 @@ def _stable_stack_return_store_source_8616(
     return (CallsitePushSourceKind8616.BP_VALUE.value, destination, 2)
 
 
-def _return_register_push_source_from_context_8616(function: object, insns: tuple[object, ...], idx: int, pushed_reg: str) -> _CallsiteTuple8616 | None:
-    if pushed_reg not in {"ax", "dx"}:
-        return None
+def _preceding_proven_call_idx_8616(
+    insns: tuple[object, ...], idx: int, pushed_reg: str
+) -> int | None:
+    """Scan backward for the call whose return feeds the pushed register."""
     call_idx = idx - 1
     while call_idx >= 0:
         insn = insns[call_idx]
@@ -2231,9 +2600,13 @@ def _return_register_push_source_from_context_8616(function: object, insns: tupl
         call_idx -= 1
     if call_idx < 0 or not is_x86_16_call_mnemonic_8616(_mnemonic(insns[call_idx])):
         return None
-    if not _return_carrier_path_is_proven_8616(function, insns, call_idx, idx, pushed_reg):
-        return None
+    return call_idx
 
+
+def _observed_ax_dx_push_regs_8616(
+    insns: tuple[object, ...], call_idx: int, idx: int
+) -> set[str]:
+    """Census AX/DX pushes between the proven call and the push index."""
     observed_regs: set[str] = set()
     scan = call_idx + 1
     while scan < len(insns):
@@ -2250,6 +2623,19 @@ def _return_register_push_source_from_context_8616(function: object, insns: tupl
         if scan >= idx and {"ax", "dx"} <= observed_regs:
             break
         scan += 1
+    return observed_regs
+
+
+def _return_register_push_source_from_context_8616(function: object, insns: tuple[object, ...], idx: int, pushed_reg: str) -> _CallsiteTuple8616 | None:
+    if pushed_reg not in {"ax", "dx"}:
+        return None
+    call_idx = _preceding_proven_call_idx_8616(insns, idx, pushed_reg)
+    if call_idx is None:
+        return None
+    if not _return_carrier_path_is_proven_8616(function, insns, call_idx, idx, pushed_reg):
+        return None
+
+    observed_regs = _observed_ax_dx_push_regs_8616(insns, call_idx, idx)
 
     callsite_addr = _instruction_address_8616(insns[call_idx])
     if not isinstance(callsite_addr, int):
@@ -2265,6 +2651,27 @@ def _return_register_push_source_from_context_8616(function: object, insns: tupl
     if {"ax", "dx"} <= observed_regs and pushed_reg in observed_regs:
         return (CallsitePushSourceKind8616.RETURN_REGISTER.value, callsite_addr, pushed_reg)
     return None
+
+
+def _low_byte_mov_source_8616(
+    insns: tuple[object, ...], scan: int, insn: object, operands: tuple[object, ...]
+) -> tuple[object, ...] | None:
+    """Resolve a byte MOV right operand, widening BP sources to byte width."""
+    if _mnemonic(insn) != "mov" or len(operands) != 2:
+        return None
+    rhs_reg = _operand_reg_name(insn, operands[1])
+    low_source = (
+        _register_source_from_context_8616(insns, scan, rhs_reg, depth=1)
+        if isinstance(rhs_reg, str) and rhs_reg
+        else _source_from_mov_operand(insn, operands[1])
+    )
+    if low_source is None:
+        low_source = _indexed_global_source_from_mov_operand_8616(insns, scan, insn, operands[1])
+    if low_source is None:
+        return None
+    if len(low_source) == 2 and low_source[0] == CallsitePushSourceKind8616.BP_VALUE.value:
+        low_source = (*low_source, 1)
+    return low_source
 
 
 def _zero_extended_byte_push_source_8616(
@@ -2293,27 +2700,17 @@ def _zero_extended_byte_push_source_8616(
             skipped += 1
             continue
         destination = _operand_reg_name(insn, operands[0]) if operands else None
+        if destination == pushed_reg or (
+            destination == high_reg
+            and _zeroing_register_source_8616(insn, {high_reg}) is None
+        ):
+            return None
         if destination == high_reg:
-            if _zeroing_register_source_8616(insn, {high_reg}) is None:
-                return None
             high_zeroed = True
         elif destination == low_reg:
-            if mnemonic != "mov" or len(operands) != 2:
-                return None
-            rhs_reg = _operand_reg_name(insn, operands[1])
-            low_source = (
-                _register_source_from_context_8616(insns, scan, rhs_reg, depth=1)
-                if isinstance(rhs_reg, str) and rhs_reg
-                else _source_from_mov_operand(insn, operands[1])
-            )
-            if low_source is None:
-                low_source = _indexed_global_source_from_mov_operand_8616(insns, scan, insn, operands[1])
+            low_source = _low_byte_mov_source_8616(insns, scan, insn, operands)
             if low_source is None:
                 return None
-            if len(low_source) == 2 and low_source[0] == CallsitePushSourceKind8616.BP_VALUE.value:
-                low_source = (*low_source, 1)
-        elif destination == pushed_reg:
-            return None
         if low_source is not None and high_zeroed:
             return (
                 CallsitePushSourceKind8616.EXPR.value,
@@ -2327,216 +2724,43 @@ def _zero_extended_byte_push_source_8616(
     return None
 
 
+def _local_push_arg_source_8616(
+    function: object, insns: tuple[object, ...], idx: int
+) -> _CallsiteTuple8616 | None:
+    """Recover a PUSH value from same-block decoded provenance."""
+    source = _push_arg_source(insns[idx])
+    if source is not None:
+        return source
+    operands = _instruction_operands(insns[idx])
+    if len(operands) != 1:
+        return None
+    indexed_global_source = _indexed_global_source_from_mov_operand_8616(insns, idx, insns[idx], operands[0])
+    if indexed_global_source is not None:
+        return indexed_global_source
+    segmented_indirect_source = _segmented_indirect_source_from_operand_8616(
+        insns, idx, insns[idx], operands[0]
+    )
+    if segmented_indirect_source is not None:
+        return segmented_indirect_source
+    pushed_reg = _operand_reg_name(insns[idx], operands[0])
+    if pushed_reg is None or pushed_reg in {"sp", "bp", "ss", "ds", "es", "cs"}:
+        return None
+    return_source = _return_register_push_source_from_context_8616(function, insns, idx, pushed_reg)
+    if return_source is not None:
+        return return_source
+    byte_source = _zero_extended_byte_push_source_8616(insns, idx, pushed_reg)
+    if byte_source is not None:
+        return byte_source
+    return _PushArgSourceScan8616(
+        insns=insns, reg_name=pushed_reg, depth=0, scan=idx - 1,
+    ).run()
+
+
 def _push_arg_source_from_context(
     function: object, insns: tuple[object, ...], idx: int
 ) -> _CallsiteTuple8616 | None:
     """Recover a PUSH value from decoded local and cross-block provenance."""
-    def _impl() -> _CallsiteTuple8616 | None:
-        source = _push_arg_source(insns[idx])
-        if source is not None:
-            return source
-        operands = _instruction_operands(insns[idx])
-        if len(operands) != 1:
-            return None
-        indexed_global_source = _indexed_global_source_from_mov_operand_8616(insns, idx, insns[idx], operands[0])
-        if indexed_global_source is not None:
-            return indexed_global_source
-        segmented_indirect_source = _segmented_indirect_source_from_operand_8616(
-            insns, idx, insns[idx], operands[0]
-        )
-        if segmented_indirect_source is not None:
-            return segmented_indirect_source
-        pushed_reg = _operand_reg_name(insns[idx], operands[0])
-        if pushed_reg is None or pushed_reg in {"sp", "bp", "ss", "ds", "es", "cs"}:
-            return None
-        return_source = _return_register_push_source_from_context_8616(function, insns, idx, pushed_reg)
-        if return_source is not None:
-            return return_source
-        byte_source = _zero_extended_byte_push_source_8616(insns, idx, pushed_reg)
-        if byte_source is not None:
-            return byte_source
-        scan = idx - 1
-        skipped = 0
-        ops: list[tuple[str, object]] = []
-        source_regs = {pushed_reg}
-        while scan >= 0 and skipped < 6:
-            insn = insns[scan]
-            operands = _instruction_operands(insn)
-            mnemonic = _mnemonic(insn)
-            if pushed_reg == "dx" and mnemonic in {"cwd", "cdq"}:
-                ax_source = _register_source_from_context_8616(insns, scan, "ax", depth=1)
-                if ax_source is None:
-                    return None
-                high_source = (
-                    CallsitePushSourceKind8616.EXPR.value,
-                    ax_source,
-                    ((CallsitePushExprOp8616.SIGN_EXT_HI.value, 16),),
-                )
-                if not ops:
-                    return high_source
-                return (CallsitePushSourceKind8616.EXPR.value, high_source, tuple(reversed(ops)))
-            if pushed_reg == "ax" and mnemonic in {"cbw", "cwde"}:
-                source_regs.add("al")
-                scan -= 1
-                skipped += 1
-                continue
-            if mnemonic == "mov" and len(operands) == 2 and _operand_reg_name(insn, operands[0]) in source_regs:
-                base_source = _source_from_mov_operand(insn, operands[1])
-                if base_source is None:
-                    base_source = _indexed_global_source_from_mov_operand_8616(insns, scan, insn, operands[1])
-                if base_source is None:
-                    return None
-                if (
-                    "al" in source_regs
-                    and len(base_source) == 2
-                    and base_source[0]
-                    == CallsitePushSourceKind8616.BP_VALUE.value
-                ):
-                    base_source = (*base_source, 1)
-                if not ops:
-                    return base_source
-                return (CallsitePushSourceKind8616.EXPR.value, base_source, tuple(reversed(ops)))
-            if mnemonic == "lea" and len(operands) == 2 and _operand_reg_name(insn, operands[0]) == pushed_reg:
-                base_source = _source_from_lea_operand_8616(insn, operands[1])
-                if base_source is None:
-                    return None
-                if (
-                    isinstance(base_source, tuple)
-                    and len(base_source) >= 4
-                    and base_source[0] == CallsitePushSourceKind8616.BP_INDEX_ADDRESS.value
-                    and isinstance(base_source[2], str)
-                ):
-                    index_source = _register_source_from_context_8616(insns, scan, base_source[2])
-                    if index_source is not None:
-                        base_source = (*base_source, index_source)
-                if not ops:
-                    return base_source
-                return (CallsitePushSourceKind8616.EXPR.value, base_source, tuple(reversed(ops)))
-            zero_source = _zeroing_register_source_8616(insn, source_regs)
-            if zero_source is not None:
-                if not ops:
-                    return zero_source
-                return (CallsitePushSourceKind8616.EXPR.value, zero_source, tuple(reversed(ops)))
-            if len(operands) == 2 and _operand_reg_name(insn, operands[0]) == pushed_reg:
-                if mnemonic in {"adc", "add", "sbb", "sub"}:
-                    value = _operand_imm_value(operands[1])
-                    if isinstance(value, int):
-                        op = {
-                            "adc": CallsitePushExprOp8616.ADC,
-                            "add": CallsitePushExprOp8616.ADD,
-                            "sbb": CallsitePushExprOp8616.SBB,
-                            "sub": CallsitePushExprOp8616.SUB,
-                        }[mnemonic]
-                        ops.append((op.value, value))
-                        scan -= 1
-                        skipped += 1
-                        continue
-                    rhs_reg = _operand_reg_name(insn, operands[1])
-                    if isinstance(rhs_reg, str) and rhs_reg and rhs_reg not in source_regs:
-                        rhs_source = _register_source_from_context_8616(insns, scan, rhs_reg, depth=1)
-                    else:
-                        rhs_source = _source_from_mov_operand(insn, operands[1])
-                        if rhs_source is None:
-                            rhs_source = _indexed_global_source_from_mov_operand_8616(insns, scan, insn, operands[1])
-                    if rhs_source is None:
-                        return None
-                    op = {
-                        "adc": CallsitePushExprOp8616.ADC_SOURCE,
-                        "add": CallsitePushExprOp8616.ADD_SOURCE,
-                        "sbb": CallsitePushExprOp8616.SBB_SOURCE,
-                        "sub": CallsitePushExprOp8616.SUB_SOURCE,
-                    }[mnemonic]
-                    ops.append((op.value, rhs_source))
-                    scan -= 1
-                    skipped += 1
-                    continue
-                if mnemonic in {"sar", "shl", "shr"}:
-                    value = _operand_imm_value(operands[1])
-                    if not isinstance(value, int):
-                        return None
-                    op = {
-                        "sar": CallsitePushExprOp8616.SAR,
-                        "shl": CallsitePushExprOp8616.SHL,
-                        "shr": CallsitePushExprOp8616.SHR,
-                    }[mnemonic]
-                    ops.append((op.value, value))
-                    scan -= 1
-                    skipped += 1
-                    continue
-                if mnemonic in {"and", "or", "xor"}:
-                    value = _operand_imm_value(operands[1])
-                    if not isinstance(value, int):
-                        return None
-                    op = {
-                        "and": CallsitePushExprOp8616.AND,
-                        "or": CallsitePushExprOp8616.OR,
-                        "xor": CallsitePushExprOp8616.XOR,
-                    }[mnemonic]
-                    ops.append((op.value, value))
-                    scan -= 1
-                    skipped += 1
-                    continue
-                return None
-            if mnemonic in {"neg", "not"} and len(operands) == 1 and _operand_reg_name(insn, operands[0]) == pushed_reg:
-                width = cast(_CapstoneOperandSurface8616, operands[0]).size
-                if mnemonic == "not" and width not in (1, 2, 4):
-                    return None
-                operation = (CallsitePushExprOp8616.NEG.value, 0) if mnemonic == "neg" else (
-                    CallsitePushExprOp8616.XOR.value, (1 << (width * 8)) - 1,
-                )
-                ops.append(operation)
-                scan -= 1
-                skipped += 1
-                continue
-            if mnemonic in {"inc", "dec"} and len(operands) == 1 and _operand_reg_name(insn, operands[0]) == pushed_reg:
-                ops.append(
-                    (
-                        CallsitePushExprOp8616.ADD.value if mnemonic == "inc" else CallsitePushExprOp8616.SUB.value,
-                        1,
-                    )
-                )
-                scan -= 1
-                skipped += 1
-                continue
-            if mnemonic in {"mul", "imul"}:
-                if len(operands) == 1 and pushed_reg == "ax":
-                    source = _source_from_mov_operand(insn, operands[0])
-                    factor = _ax_immediate_before_one_operand_mul_8616(insns, scan)
-                    if source is not None and isinstance(factor, int):
-                        return (
-                            CallsitePushSourceKind8616.EXPR.value,
-                            source,
-                            ((CallsitePushExprOp8616.MUL.value, factor), *tuple(reversed(ops))),
-                        )
-                    return None
-                if pushed_reg in {"ax", "dx"}:
-                    return None
-                if len(operands) in {2, 3} and _operand_reg_name(insn, operands[0]) == pushed_reg:
-                    return None
-            if _mnemonic(insn).startswith("push"):
-                operands = _instruction_operands(insn)
-                sibling_reg = _operand_reg_name(insn, operands[0]) if len(operands) == 1 else None
-                if _is_segment_register_push_8616(insn) or (
-                    isinstance(sibling_reg, str)
-                    and (
-                        sibling_reg == pushed_reg
-                        or (pushed_reg in {"ax", "dx"} and sibling_reg in {"ax", "dx"})
-                    )
-                ):
-                    scan -= 1
-                    skipped += 1
-                    continue
-                return None
-            mnemonic = _mnemonic(insn)
-            if is_x86_16_call_mnemonic_8616(mnemonic) or mnemonic.startswith(("pop", "ret", "jmp")):
-                return None
-            if not _transparent_between_push_args_8616(insn):
-                return None
-            skipped += 1
-            scan -= 1
-        return None
-
-    local_source = _impl()
+    local_source = _local_push_arg_source_8616(function, insns, idx)
     if local_source is not None:
         return local_source
     operands = _instruction_operands(insns[idx])
@@ -2702,6 +2926,108 @@ def _unresolved_entry_push_register_8616(
     return register, push_addr
 
 
+@dataclass(frozen=True, slots=True)
+class _PredecessorTraces8616:
+    """Push and optional register-join trace collected from one predecessor."""
+
+    push_trace: CallsitePushTrace8616
+    register_trace: CallsiteRegisterJoinTrace8616 | None
+
+
+def _predecessor_traces_8616(
+    function: object,
+    project: object,
+    predecessor: object,
+    sink_addr: int,
+    join_register: str | None,
+    debug: bool,
+) -> _PredecessorTraces8616 | None:
+    """Decode one predecessor block and collect its push/register traces."""
+    predecessor_addr = _cfg_node_addr_8616(predecessor)
+    if not isinstance(predecessor_addr, int):
+        return None
+    try:
+        block = cast(Any, project).factory.block(predecessor_addr, opt_level=0)
+    except Exception:
+        return None
+    predecessor_insns = tuple(
+        _dynamic_callsite_getattr_8616(
+            _dynamic_callsite_getattr_8616(block, "capstone", None),
+            "insns",
+            (),
+        )
+        or ()
+    )
+    predecessor_insns = tuple(
+        insn
+        for insn in predecessor_insns
+        if (address := _instruction_address_8616(insn)) is not None
+        and (predecessor_addr >= sink_addr or address < sink_addr)
+    )
+    if debug:
+        log.warning(
+            "[callsite-predecessor-stack] block=%#x insns=%r",
+            predecessor_addr,
+            tuple(
+                (_instruction_address_8616(insn), _mnemonic(insn), _instruction_op_str_8616(insn))
+                for insn in predecessor_insns
+            ),
+        )
+    while predecessor_insns and _mnemonic(predecessor_insns[-1]).startswith("j"):
+        predecessor_insns = predecessor_insns[:-1]
+    register_trace = (
+        CallsiteRegisterJoinTrace8616(
+            predecessor_addr=predecessor_addr,
+            register=join_register,
+            source=_register_source_from_context_8616(
+                predecessor_insns,
+                len(predecessor_insns),
+                join_register,
+            ),
+        )
+        if join_register is not None
+        else None
+    )
+    argument_scan_end = len(predecessor_insns)
+    while argument_scan_end > 0 and _transparent_between_push_args_8616(
+        predecessor_insns[argument_scan_end - 1]
+    ):
+        argument_scan_end -= 1
+    widths = _collect_push_args_before_call(function, predecessor_insns, argument_scan_end)
+    sources = _collect_push_arg_sources_before_call(function, predecessor_insns, argument_scan_end)
+    addresses = _collect_push_arg_instruction_addrs_before_call(
+        function,
+        predecessor_insns,
+        argument_scan_end,
+    )
+    return _PredecessorTraces8616(
+        push_trace=CallsitePushTrace8616(
+            widths,
+            sources,
+            addresses,
+            predecessor_addr=predecessor_addr,
+        ),
+        register_trace=register_trace,
+    )
+
+
+def _callsite_sink_predecessors_8616(
+    graph: _DirectedGraphSurface8616, callsite_addr: int
+) -> tuple[int, tuple[object, ...]] | None:
+    """Resolve the callsite sink block and its direct CFG predecessors."""
+    sink = _cfg_node_for_instruction_8616(graph, callsite_addr)
+    if sink is None:
+        return None
+    sink_addr = _cfg_node_addr_8616(sink)
+    if not isinstance(sink_addr, int):
+        return None
+    try:
+        predecessors = tuple(graph.predecessors(sink))
+    except Exception:
+        return None
+    return sink_addr, predecessors
+
+
 def _predecessor_stack_merge_8616(
     function: object,
     callsite_addr: int,
@@ -2715,22 +3041,16 @@ def _predecessor_stack_merge_8616(
     if graph_value is None or project is None:
         return None
     graph = cast(_DirectedGraphSurface8616, graph_value)
-    sink = _cfg_node_for_instruction_8616(graph, callsite_addr)
-    if sink is None:
+    resolved = _callsite_sink_predecessors_8616(graph, callsite_addr)
+    if resolved is None:
         return None
-    sink_addr = _cfg_node_addr_8616(sink)
-    if not isinstance(sink_addr, int):
-        return None
-    try:
-        predecessors = tuple(graph.predecessors(sink))
-    except Exception:
-        return None
+    sink_addr, predecessors = resolved
     debug = bool(os.environ.get("INERTIA_DEBUG_CALLSITE_SUMMARY"))
     if debug:
         log.warning(
             "[callsite-predecessor-stack] callsite=%#x sink=%r predecessors=%r",
             callsite_addr,
-            _cfg_node_addr_8616(sink),
+            sink_addr,
             tuple(_cfg_node_addr_8616(node) for node in predecessors),
         )
     if not predecessors:
@@ -2738,70 +3058,14 @@ def _predecessor_stack_merge_8616(
     traces: list[CallsitePushTrace8616] = []
     register_traces: list[CallsiteRegisterJoinTrace8616] = []
     for predecessor in predecessors:
-        predecessor_addr = _cfg_node_addr_8616(predecessor)
-        if not isinstance(predecessor_addr, int):
+        collected = _predecessor_traces_8616(
+            function, project, predecessor, sink_addr, join_register, debug
+        )
+        if collected is None:
             return None
-        try:
-            block = project.factory.block(predecessor_addr, opt_level=0)
-        except Exception:
-            return None
-        predecessor_insns = tuple(
-            _dynamic_callsite_getattr_8616(
-                _dynamic_callsite_getattr_8616(block, "capstone", None),
-                "insns",
-                (),
-            )
-            or ()
-        )
-        predecessor_insns = tuple(
-            insn
-            for insn in predecessor_insns
-            if (address := _instruction_address_8616(insn)) is not None
-            and (predecessor_addr >= sink_addr or address < sink_addr)
-        )
-        if debug:
-            log.warning(
-                "[callsite-predecessor-stack] block=%#x insns=%r",
-                predecessor_addr,
-                tuple(
-                    (_instruction_address_8616(insn), _mnemonic(insn), _instruction_op_str_8616(insn))
-                    for insn in predecessor_insns
-                ),
-            )
-        while predecessor_insns and _mnemonic(predecessor_insns[-1]).startswith("j"):
-            predecessor_insns = predecessor_insns[:-1]
-        if join_register is not None:
-            register_traces.append(
-                CallsiteRegisterJoinTrace8616(
-                    predecessor_addr=predecessor_addr,
-                    register=join_register,
-                    source=_register_source_from_context_8616(
-                        predecessor_insns,
-                        len(predecessor_insns),
-                        join_register,
-                    ),
-                )
-            )
-        argument_scan_end = len(predecessor_insns)
-        while argument_scan_end > 0 and _transparent_between_push_args_8616(
-            predecessor_insns[argument_scan_end - 1]
-        ):
-            argument_scan_end -= 1
-        widths = _collect_push_args_before_call(function, predecessor_insns, argument_scan_end)
-        sources = _collect_push_arg_sources_before_call(function, predecessor_insns, argument_scan_end)
-        addresses = _collect_push_arg_instruction_addrs_before_call(
-            function,
-            predecessor_insns,
-            argument_scan_end,
-        )
-        traces.append(
-            CallsitePushTrace8616(
-                widths,
-                sources,
-                addresses,
-                predecessor_addr=predecessor_addr,
-            )
-        )
+        traces.append(collected.push_trace)
+        if collected.register_trace is not None:
+            register_traces.append(collected.register_trace)
     register_join = (
         merge_callsite_register_join_traces_8616(
             tuple(register_traces),
@@ -2955,7 +3219,13 @@ def _wide_return_condition_use_8616(follow_insns: tuple[object, ...] | list[obje
         return False
     if not _instruction_reads_return_reg(high_compare, {"dx", "dh", "dl"}):
         return False
+    return _wide_low_compare_with_branch_8616(follow_insns, index)
 
+
+def _wide_low_compare_with_branch_8616(
+    follow_insns: tuple[object, ...] | list[object], index: int
+) -> bool:
+    """Scan forward for a guarded AX-low compare after the DX-high compare."""
     saw_conditional_branch = False
     for candidate in follow_insns[index + 1 : index + 9]:
         mnemonic = _mnemonic(candidate)
@@ -3173,38 +3443,52 @@ def _return_use_after_call(
     if _return_value_feeds_divide_8616(tuple(bounded_follow_insns)):
         return "ax", True, CallsiteReturnUseKind8616.VALUE
     for follow_index, insn in enumerate(bounded_follow_insns):
-        operands = _instruction_operands(insn)
-        mnemonic = _mnemonic(insn)
-        if mnemonic == "add" and len(operands) == 2 and _operand_is_reg(insn, operands[0], {"sp", "esp"}):
-            continue
-        if _wide_return_condition_use_8616(bounded_follow_insns, follow_index):
-            return "ax", True, CallsiteReturnUseKind8616.CONDITION
-        if decoded_byte_return_extension_8616(insn) is not None:
-            continue
-        reads_return = _instruction_reads_return_reg(insn, {"ax", "al", "ah"})
-        writes_return = _instruction_writes_return_reg(insn, {"ax", "al", "ah"})
-        self_clearing_write = decoded_instruction_self_clears_register_8616(insn, "ax")
-        if not self_clearing_write and reads_return and writes_return and mnemonic in {
-            "adc", "add", "and", "dec", "inc", "neg", "not", "or", "rcl", "rcr", "rol", "ror", "sar", "sbb", "shl", "shr", "sub", "xor"
-        }:
-            next_mnemonic = _mnemonic(bounded_follow_insns[follow_index + 1]) if follow_index + 1 < len(bounded_follow_insns) else ""
-            use_kind = CallsiteReturnUseKind8616.CONDITION if next_mnemonic.startswith("j") and next_mnemonic != "jmp" else CallsiteReturnUseKind8616.VALUE
-            return "ax", True, use_kind
-        if mnemonic not in {"cmp", "test"} and writes_return:
-            return "ax", False, CallsiteReturnUseKind8616.CLOBBERED
-        if reads_return:
-            return (
-                "ax",
-                True,
-                CallsiteReturnUseKind8616.CONDITION if mnemonic in {"cmp", "test"} else CallsiteReturnUseKind8616.VALUE,
-            )
-        if mnemonic in {"ret", "retf", "retw", "iret"}:
-            if caller_returns_explicit_void:
-                return None, False, None
-            return "ax", True, CallsiteReturnUseKind8616.FUNCTION_RETURN
-        if _transparent_return_epilogue_insn_8616(insn):
-            continue
-        break
+        verdict = _return_use_insn_verdict_8616(
+            insn, bounded_follow_insns, follow_index, caller_returns_explicit_void
+        )
+        if verdict is not None:
+            return verdict
+    return None, False, None
+
+
+def _return_use_insn_verdict_8616(
+    insn: object,
+    bounded_follow_insns: list[object],
+    follow_index: int,
+    caller_returns_explicit_void: bool,
+) -> tuple[str | None, bool | None, CallsiteReturnUseKind8616 | None] | None:
+    """Classify one post-call instruction, or None to keep scanning."""
+    operands = _instruction_operands(insn)
+    mnemonic = _mnemonic(insn)
+    if mnemonic == "add" and len(operands) == 2 and _operand_is_reg(insn, operands[0], {"sp", "esp"}):
+        return None
+    if _wide_return_condition_use_8616(bounded_follow_insns, follow_index):
+        return "ax", True, CallsiteReturnUseKind8616.CONDITION
+    if decoded_byte_return_extension_8616(insn) is not None:
+        return None
+    reads_return = _instruction_reads_return_reg(insn, {"ax", "al", "ah"})
+    writes_return = _instruction_writes_return_reg(insn, {"ax", "al", "ah"})
+    self_clearing_write = decoded_instruction_self_clears_register_8616(insn, "ax")
+    if not self_clearing_write and reads_return and writes_return and mnemonic in {
+        "adc", "add", "and", "dec", "inc", "neg", "not", "or", "rcl", "rcr", "rol", "ror", "sar", "sbb", "shl", "shr", "sub", "xor"
+    }:
+        next_mnemonic = _mnemonic(bounded_follow_insns[follow_index + 1]) if follow_index + 1 < len(bounded_follow_insns) else ""
+        use_kind = CallsiteReturnUseKind8616.CONDITION if next_mnemonic.startswith("j") and next_mnemonic != "jmp" else CallsiteReturnUseKind8616.VALUE
+        return "ax", True, use_kind
+    if mnemonic not in {"cmp", "test"} and writes_return:
+        return "ax", False, CallsiteReturnUseKind8616.CLOBBERED
+    if reads_return:
+        return (
+            "ax",
+            True,
+            CallsiteReturnUseKind8616.CONDITION if mnemonic in {"cmp", "test"} else CallsiteReturnUseKind8616.VALUE,
+        )
+    if mnemonic in {"ret", "retf", "retw", "iret"}:
+        if caller_returns_explicit_void:
+            return None, False, None
+        return "ax", True, CallsiteReturnUseKind8616.FUNCTION_RETURN
+    if _transparent_return_epilogue_insn_8616(insn):
+        return None
     return None, False, None
 
 
@@ -3216,6 +3500,135 @@ def _linear_call_target_8616(insn: object) -> int | None:
     if len(operands) != 1:
         return None
     return _operand_imm_value(operands[0])
+
+
+@dataclass(slots=True)
+class _LinearReturnUseScan8616:
+    """Bounded forward scan state for one caller return-use observation."""
+
+    insns: tuple[object, ...]
+    caller_addr: int
+    callsite_addr: int
+    addr_to_index: dict[int, int]
+    pending: list[int]
+    visited: set[int] = field(default_factory=set)
+    examined: int = 0
+    byte_extension: ByteReturnExtensionKind8616 | None = None
+    byte_extension_instruction_addr: int | None = None
+
+    def _fact(
+        self,
+        verdict: CallerReturnUseVerdict8616,
+        kind: CallsiteReturnUseKind8616 | None,
+        witness_addr: int | None,
+        *,
+        byte_extension: ByteReturnExtensionKind8616 | None = None,
+        byte_extension_instruction_addr: int | None = None,
+        observed_value_view: AxValueView8616 | None = None,
+    ) -> CallerReturnUseFact8616:
+        return CallerReturnUseFact8616(
+            self.caller_addr,
+            self.callsite_addr,
+            verdict,
+            kind,
+            witness_addr,
+            byte_extension=byte_extension,
+            byte_extension_instruction_addr=byte_extension_instruction_addr,
+            observed_value_view=observed_value_view,
+        )
+
+    def _byte_extension_step(
+        self, insn: object, index: int, witness_addr: int | None
+    ) -> tuple[bool, CallerReturnUseFact8616 | None]:
+        current_extension = decoded_byte_return_extension_8616(insn)
+        if current_extension is None:
+            return False, None
+        if self.byte_extension is not None and current_extension is not self.byte_extension:
+            return True, self._fact(
+                CallerReturnUseVerdict8616.UNKNOWN, None, witness_addr
+            )
+        self.byte_extension = current_extension
+        self.byte_extension_instruction_addr = witness_addr
+        self.pending.append(index + 1)
+        return True, None
+
+    def _step(self, index: int) -> CallerReturnUseFact8616 | None:
+        """Classify one scanned instruction; None keeps the scan running."""
+        insn = self.insns[index]
+        operands = _instruction_operands(insn)
+        mnemonic = _mnemonic(insn)
+        instruction_addr = _instruction_address_8616(insn)
+        witness_addr = instruction_addr if isinstance(instruction_addr, int) else None
+        if mnemonic == "add" and len(operands) == 2 and _operand_is_reg(insn, operands[0], {"sp", "esp"}):
+            self.pending.append(index + 1)
+            return None
+        if _wide_return_condition_use_8616(self.insns, index):
+            return self._fact(
+                CallerReturnUseVerdict8616.USED,
+                CallsiteReturnUseKind8616.CONDITION,
+                witness_addr,
+                observed_value_view=decoded_ax_read_view_8616(insn),
+            )
+        extension_consumed, extension_fact = self._byte_extension_step(
+            insn, index, witness_addr
+        )
+        if extension_consumed:
+            return extension_fact
+        return_registers = {"ax", "al", "ah"}
+        self_clearing_write = decoded_instruction_self_clears_register_8616(insn, "ax")
+        if not self_clearing_write and _instruction_reads_return_reg(insn, return_registers):
+            kind = CallsiteReturnUseKind8616.CONDITION if mnemonic in {"cmp", "test"} else CallsiteReturnUseKind8616.VALUE
+            return self._fact(
+                CallerReturnUseVerdict8616.USED,
+                kind,
+                witness_addr,
+                byte_extension=self.byte_extension,
+                byte_extension_instruction_addr=self.byte_extension_instruction_addr,
+                observed_value_view=decoded_ax_read_view_8616(insn),
+            )
+        if mnemonic not in {"cmp", "test"} and _instruction_writes_return_reg(insn, return_registers):
+            return self._fact(
+                CallerReturnUseVerdict8616.UNUSED,
+                CallsiteReturnUseKind8616.CLOBBERED,
+                witness_addr,
+            )
+        if mnemonic in {"ret", "retf", "retw", "iret"}:
+            return self._fact(
+                CallerReturnUseVerdict8616.USED,
+                CallsiteReturnUseKind8616.FUNCTION_RETURN,
+                witness_addr,
+            )
+        if mnemonic in {"jmp", "jmpw", "ljmp"}:
+            return self._jump_step(insn, witness_addr)
+        if _transparent_return_epilogue_insn_8616(insn):
+            self.pending.append(index + 1)
+            return None
+        return self._fact(CallerReturnUseVerdict8616.UNUSED, None, witness_addr)
+
+    def _jump_step(
+        self, insn: object, witness_addr: int | None
+    ) -> CallerReturnUseFact8616 | None:
+        target = _direct_jump_target_8616(insn)
+        target_index = self.addr_to_index.get(target) if isinstance(target, int) else None
+        if target_index is None:
+            return self._fact(
+                CallerReturnUseVerdict8616.UNKNOWN, None, witness_addr
+            )
+        self.pending.append(target_index)
+        return None
+
+    def run(self) -> CallerReturnUseFact8616:
+        """Walk pending blocks until a verdict or the bounded budget ends."""
+        while self.pending and self.examined < 24:
+            index = self.pending.pop()
+            if index in self.visited or index < 0 or index >= len(self.insns):
+                continue
+            self.visited.add(index)
+            self.examined += 1
+            fact = self._step(index)
+            if fact is not None:
+                return fact
+        return self._fact(CallerReturnUseVerdict8616.UNKNOWN, None, None)
 
 
 def _linear_return_use_after_call_8616(
@@ -3238,11 +3651,6 @@ def _linear_return_use_after_call_8616(
         for index, insn in enumerate(insns)
         if isinstance((addr := _instruction_address_8616(insn)), int)
     }
-    pending = [call_idx + 1]
-    visited: set[int] = set()
-    examined = 0
-    byte_extension: ByteReturnExtensionKind8616 | None = None
-    byte_extension_instruction_addr: int | None = None
     divide_witness = _return_value_divide_witness_8616(
         insns[call_idx + 1 : call_idx + 9]
     )
@@ -3254,103 +3662,13 @@ def _linear_return_use_after_call_8616(
             CallsiteReturnUseKind8616.VALUE,
             divide_witness,
         )
-    while pending and examined < 24:
-        index = pending.pop()
-        if index in visited or index < 0 or index >= len(insns):
-            continue
-        visited.add(index)
-        insn = insns[index]
-        examined += 1
-        operands = _instruction_operands(insn)
-        mnemonic = _mnemonic(insn)
-        instruction_addr = _instruction_address_8616(insn)
-        witness_addr = instruction_addr if isinstance(instruction_addr, int) else None
-        if mnemonic == "add" and len(operands) == 2 and _operand_is_reg(insn, operands[0], {"sp", "esp"}):
-            pending.append(index + 1)
-            continue
-        if _wide_return_condition_use_8616(insns, index):
-            return CallerReturnUseFact8616(
-                caller_addr,
-                callsite_addr,
-                CallerReturnUseVerdict8616.USED,
-                CallsiteReturnUseKind8616.CONDITION,
-                witness_addr,
-                observed_value_view=decoded_ax_read_view_8616(insn),
-            )
-        current_extension = decoded_byte_return_extension_8616(insn)
-        if current_extension is not None:
-            if byte_extension is not None and current_extension is not byte_extension:
-                return CallerReturnUseFact8616(
-                    caller_addr,
-                    callsite_addr,
-                    CallerReturnUseVerdict8616.UNKNOWN,
-                    None,
-                    witness_addr,
-                )
-            byte_extension = current_extension
-            byte_extension_instruction_addr = witness_addr
-            pending.append(index + 1)
-            continue
-        return_registers = {"ax", "al", "ah"}
-        self_clearing_write = decoded_instruction_self_clears_register_8616(insn, "ax")
-        if not self_clearing_write and _instruction_reads_return_reg(insn, return_registers):
-            kind = CallsiteReturnUseKind8616.CONDITION if mnemonic in {"cmp", "test"} else CallsiteReturnUseKind8616.VALUE
-            return CallerReturnUseFact8616(
-                caller_addr,
-                callsite_addr,
-                CallerReturnUseVerdict8616.USED,
-                kind,
-                witness_addr,
-                byte_extension=byte_extension,
-                byte_extension_instruction_addr=byte_extension_instruction_addr,
-                observed_value_view=decoded_ax_read_view_8616(insn),
-            )
-        if mnemonic not in {"cmp", "test"} and _instruction_writes_return_reg(insn, return_registers):
-            return CallerReturnUseFact8616(
-                caller_addr,
-                callsite_addr,
-                CallerReturnUseVerdict8616.UNUSED,
-                CallsiteReturnUseKind8616.CLOBBERED,
-                witness_addr,
-            )
-        if mnemonic in {"ret", "retf", "retw", "iret"}:
-            return CallerReturnUseFact8616(
-                caller_addr,
-                callsite_addr,
-                CallerReturnUseVerdict8616.USED,
-                CallsiteReturnUseKind8616.FUNCTION_RETURN,
-                witness_addr,
-            )
-        if mnemonic in {"jmp", "jmpw", "ljmp"}:
-            target = _direct_jump_target_8616(insn)
-            target_index = addr_to_index.get(target) if isinstance(target, int) else None
-            if target_index is None:
-                return CallerReturnUseFact8616(
-                    caller_addr,
-                    callsite_addr,
-                    CallerReturnUseVerdict8616.UNKNOWN,
-                    None,
-                    witness_addr,
-                )
-            pending.append(target_index)
-            continue
-        if _transparent_return_epilogue_insn_8616(insn):
-            pending.append(index + 1)
-            continue
-        return CallerReturnUseFact8616(
-            caller_addr,
-            callsite_addr,
-            CallerReturnUseVerdict8616.UNUSED,
-            None,
-            witness_addr,
-        )
-    return CallerReturnUseFact8616(
-        caller_addr,
-        callsite_addr,
-        CallerReturnUseVerdict8616.UNKNOWN,
-        None,
-        None,
-    )
+    return _LinearReturnUseScan8616(
+        insns=insns,
+        caller_addr=caller_addr,
+        callsite_addr=callsite_addr,
+        addr_to_index=addr_to_index,
+        pending=[call_idx + 1],
+    ).run()
 
 
 @contextlib.contextmanager
@@ -3367,6 +3685,80 @@ def caller_return_use_program_scope_8616(
     )
     with use_caller_return_use_program_evidence_8616(evidence):
         yield
+
+
+@dataclass(slots=True)
+class _CallerReturnUseResolver8616:
+    """Cached resolver for direct and transitive caller return-use verdicts."""
+
+    direct_callsite_index: DecodedDirectCallsiteIndex8616
+    callsite_cache: dict[int, dict[int, CallerReturnUseFact8616]] = field(
+        default_factory=dict
+    )
+    transitive_cache: dict[int, CallerReturnUseVerdict8616] = field(
+        default_factory=dict
+    )
+
+    def callsites_for_target(
+        self, candidate_target: int
+    ) -> dict[int, CallerReturnUseFact8616]:
+        """Return decoded direct-call use facts keyed by callsite address."""
+        normalized_target = self.direct_callsite_index.target_identity(candidate_target)
+        cached = self.callsite_cache.get(normalized_target)
+        if cached is not None:
+            return cached
+        facts: dict[int, CallerReturnUseFact8616] = {}
+        for callsite in self.direct_callsite_index.for_target(normalized_target):
+            facts[callsite.callsite_addr] = _linear_return_use_after_call_8616(
+                callsite.instructions,
+                callsite.instruction_index,
+                callsite.caller_start,
+                callsite.callsite_addr,
+            )
+        self.callsite_cache[normalized_target] = facts
+        return facts
+
+    def return_observed_transitively(
+        self,
+        candidate_target: int,
+        active_targets: frozenset[int],
+    ) -> CallerReturnUseVerdict8616:
+        """Resolve terminal return pass-throughs only through independent callers."""
+        normalized_target = self.direct_callsite_index.target_identity(candidate_target)
+        cached = self.transitive_cache.get(normalized_target)
+        if cached is not None:
+            return cached
+        if normalized_target in active_targets:
+            return CallerReturnUseVerdict8616.UNKNOWN
+        facts = self.callsites_for_target(candidate_target)
+        if not facts:
+            self.transitive_cache[normalized_target] = CallerReturnUseVerdict8616.UNKNOWN
+            return CallerReturnUseVerdict8616.UNKNOWN
+        resolutions: list[CallerReturnUseVerdict8616] = []
+        next_active = active_targets | {normalized_target}
+        for fact in facts.values():
+            if fact.kind is CallsiteReturnUseKind8616.FUNCTION_RETURN:
+                # A recursive tail pass-through cannot observe its own return.
+                # Ignore that cycle when independent callers provide evidence;
+                # a recursion-only function still resolves to unknown below.
+                if (fact.caller_addr & 0xFFFF) in next_active:
+                    continue
+                resolutions.append(
+                    self.return_observed_transitively(fact.caller_addr, next_active)
+                )
+            else:
+                resolutions.append(fact.verdict)
+        if CallerReturnUseVerdict8616.USED in resolutions:
+            result = CallerReturnUseVerdict8616.USED
+        elif resolutions and all(
+            resolution is CallerReturnUseVerdict8616.UNUSED
+            for resolution in resolutions
+        ):
+            result = CallerReturnUseVerdict8616.UNUSED
+        else:
+            result = CallerReturnUseVerdict8616.UNKNOWN
+        self.transitive_cache[normalized_target] = result
+        return result
 
 
 def collect_caller_return_use_evidence_8616(
@@ -3405,77 +3797,14 @@ def collect_caller_return_use_evidence_8616(
             0,
             (),
         )
-    direct_callsite_index = program.callsites
-    callsite_cache: dict[int, dict[int, CallerReturnUseFact8616]] = {}
+    resolver = _CallerReturnUseResolver8616(direct_callsite_index=program.callsites)
 
-    def _callsites_for_target(
-        candidate_target: int,
-    ) -> dict[int, CallerReturnUseFact8616]:
-        """Return decoded direct-call use facts keyed by callsite address."""
-        normalized_target = direct_callsite_index.target_identity(candidate_target)
-        cached = callsite_cache.get(normalized_target)
-        if cached is not None:
-            return cached
-        facts: dict[int, CallerReturnUseFact8616] = {}
-        for callsite in direct_callsite_index.for_target(normalized_target):
-            facts[callsite.callsite_addr] = _linear_return_use_after_call_8616(
-                callsite.instructions,
-                callsite.instruction_index,
-                callsite.caller_start,
-                callsite.callsite_addr,
-            )
-        callsite_cache[normalized_target] = facts
-        return facts
-
-    transitive_cache: dict[int, CallerReturnUseVerdict8616] = {}
-
-    def _return_observed_transitively(
-        candidate_target: int,
-        active_targets: frozenset[int],
-    ) -> CallerReturnUseVerdict8616:
-        """Resolve terminal return pass-throughs only through independent callers."""
-        normalized_target = direct_callsite_index.target_identity(candidate_target)
-        cached = transitive_cache.get(normalized_target)
-        if cached is not None:
-            return cached
-        if normalized_target in active_targets:
-            return CallerReturnUseVerdict8616.UNKNOWN
-        facts = _callsites_for_target(candidate_target)
-        if not facts:
-            transitive_cache[normalized_target] = CallerReturnUseVerdict8616.UNKNOWN
-            return CallerReturnUseVerdict8616.UNKNOWN
-        resolutions: list[CallerReturnUseVerdict8616] = []
-        next_active = active_targets | {normalized_target}
-        for fact in facts.values():
-            if fact.kind is CallsiteReturnUseKind8616.FUNCTION_RETURN:
-                # A recursive tail pass-through cannot observe its own return.
-                # Ignore that cycle when independent callers provide evidence;
-                # a recursion-only function still resolves to unknown below.
-                if (fact.caller_addr & 0xFFFF) in next_active:
-                    continue
-                resolutions.append(
-                    _return_observed_transitively(fact.caller_addr, next_active)
-                )
-            else:
-                resolutions.append(fact.verdict)
-        if CallerReturnUseVerdict8616.USED in resolutions:
-            result = CallerReturnUseVerdict8616.USED
-        elif resolutions and all(
-            resolution is CallerReturnUseVerdict8616.UNUSED
-            for resolution in resolutions
-        ):
-            result = CallerReturnUseVerdict8616.UNUSED
-        else:
-            result = CallerReturnUseVerdict8616.UNKNOWN
-        transitive_cache[normalized_target] = result
-        return result
-
-    normalized_target_aliases = frozenset(direct_callsite_index.target_identity(addr) for addr in target_aliases)
-    census_targets = normalized_target_aliases | {direct_callsite_index.target_identity(target_addr)}
+    normalized_target_aliases = frozenset(program.callsites.target_identity(addr) for addr in target_aliases)
+    census_targets = normalized_target_aliases | {program.callsites.target_identity(target_addr)}
     direct_facts = {
         callsite_addr: fact
         for candidate_target in census_targets
-        for callsite_addr, fact in _callsites_for_target(candidate_target).items()
+        for callsite_addr, fact in resolver.callsites_for_target(candidate_target).items()
     }
     resolved_facts: list[CallerReturnUseFact8616] = []
     for fact in direct_facts.values():
@@ -3489,7 +3818,7 @@ def collect_caller_return_use_evidence_8616(
         if fact.kind is CallsiteReturnUseKind8616.FUNCTION_RETURN:
             fact = replace(
                 fact,
-                verdict=_return_observed_transitively(
+                verdict=resolver.return_observed_transitively(
                     fact.caller_addr,
                     census_targets,
                 ),
@@ -3530,6 +3859,101 @@ def collect_caller_return_use_evidence_8616(
     )
 
 
+def _has_adjacent_word_pair_8616(ax_offsets: set[int], dx_offsets: set[int]) -> bool:
+    """Return whether AX/DX stores form an adjacent word pair."""
+    for offset in dx_offsets:
+        if (offset + 2 in ax_offsets) or (offset - 2 in ax_offsets):
+            return True
+    return any(offset + 2 in dx_offsets or offset - 2 in dx_offsets for offset in ax_offsets)
+
+
+@dataclass(slots=True)
+class _ReturnShapeScan8616:
+    """Forward scan state for DX:AX return-shape classification."""
+
+    store_dx_offsets: set[int] = field(default_factory=set)
+    store_ax_offsets: set[int] = field(default_factory=set)
+    forwarded_return_regs: set[str] = field(default_factory=set)
+    forwarding_window_open: bool = True
+    saw_ax: bool = False
+    done: bool = False
+
+    def _forwarded_push_step(self, insn: object) -> CallsiteReturnShape8616 | None:
+        """Track AX/DX pushes while the forwarding window stays open."""
+        if not self.forwarding_window_open:
+            return None
+        if _mnemonic(insn) == "push":
+            operands = _instruction_operands(insn)
+            pushed_reg = _operand_reg_name(insn, operands[0]) if len(operands) == 1 else None
+            if pushed_reg in {"ax", "dx"}:
+                self.forwarded_return_regs.add(pushed_reg)
+                if {"ax", "dx"} <= self.forwarded_return_regs:
+                    return CallsiteReturnShape8616.DX_AX
+                return None
+            self.forwarding_window_open = False
+            return None
+        if not _transparent_return_arg_carrier_insn_8616(insn):
+            self.forwarding_window_open = False
+        return None
+
+    def _record_store(self, insn: object) -> None:
+        """Record BP/global AX/DX word stores for pair matching."""
+        if _mnemonic(insn) != "mov" or len(_instruction_operands(insn)) != 2:
+            return
+        operands = _instruction_operands(insn)
+        base, disp = _operand_mem_base_disp(insn, operands[0])
+        if base in {"bp", None} and isinstance(disp, int):
+            if _operand_is_reg(insn, operands[1], {"dx", "dh", "dl"}):
+                self.store_dx_offsets.add(disp)
+            if _operand_is_reg(insn, operands[1], {"ax", "al", "ah"}):
+                self.store_ax_offsets.add(disp)
+                self.saw_ax = True
+
+    def _step(
+        self, insn: object, bounded_follow_insns: list[object], follow_index: int
+    ) -> CallsiteReturnShape8616 | None:
+        """Process one post-call insn; DX_AX ends the scan, done ends the loop."""
+        if _mnemonic(insn) in {"ret", "retf", "retw", "iret"}:
+            self.done = True
+            return None
+        if _wide_return_condition_use_8616(bounded_follow_insns, follow_index):
+            return CallsiteReturnShape8616.DX_AX
+
+        forwarded = self._forwarded_push_step(insn)
+        if forwarded is not None:
+            return forwarded
+        if is_x86_16_call_mnemonic_8616(_mnemonic(insn)):
+            self.done = True
+            return None
+
+        self._record_store(insn)
+        if _has_adjacent_word_pair_8616(self.store_ax_offsets, self.store_dx_offsets):
+            return CallsiteReturnShape8616.DX_AX
+
+        if _instruction_reads_return_reg(insn, {"ax", "al", "ah"}):
+            self.saw_ax = True
+        if _instruction_writes_return_reg(insn, {"ax", "al", "ah"}):
+            self.saw_ax = True
+
+        return None
+
+    def run(self, bounded_follow_insns: list[object]) -> CallsiteReturnShape8616 | None:
+        """Scan until a proven DX_AX shape, a barrier, or the tail census."""
+        for follow_index, insn in enumerate(bounded_follow_insns):
+            shape = self._step(insn, bounded_follow_insns, follow_index)
+            if shape is not None:
+                return shape
+            if self.done:
+                break
+        if any(off + 2 in self.store_ax_offsets for off in self.store_dx_offsets):
+            return CallsiteReturnShape8616.DX_AX
+        if any(off - 2 in self.store_ax_offsets for off in self.store_dx_offsets):
+            return CallsiteReturnShape8616.DX_AX
+        if self.saw_ax:
+            return CallsiteReturnShape8616.AX
+        return None
+
+
 def _return_shape_after_call(
     function: object, insns: tuple[object, ...], idx: int, callsite_addr: int
 ) -> CallsiteReturnShape8616 | None:
@@ -3537,67 +3961,451 @@ def _return_shape_after_call(
     if any(_wide_return_condition_use_8616(follow_insns, follow_index) for follow_index in range(len(follow_insns))):
         return CallsiteReturnShape8616.DX_AX
     follow_insns = _extend_follow_insns_through_direct_jumps_8616(function, follow_insns, limit=16)
+    return _ReturnShapeScan8616().run(follow_insns[:16])
 
-    store_dx_offsets: set[int] = set()
-    store_ax_offsets: set[int] = set()
-    forwarded_return_regs: set[str] = set()
-    forwarding_window_open = True
-    saw_ax = False
 
-    def _has_adjacent_word_pair_8616(ax_offsets: set[int], dx_offsets: set[int]) -> bool:
-        for offset in dx_offsets:
-            if (offset + 2 in ax_offsets) or (offset - 2 in ax_offsets):
-                return True
-        return any(offset + 2 in dx_offsets or offset - 2 in dx_offsets for offset in ax_offsets)
+def _callsite_seed_8616(
+    function: object,
+    callsite_addr: int,
+    target_inventory: CallsiteTargetInventory8616 | None,
+) -> CallTargetSeed | None:
+    """Resolve the callsite seed from inventory, neighbors, or a fresh census."""
+    seed = (
+        target_inventory.seed_for_callsite(callsite_addr)
+        if target_inventory is not None
+        else next(
+            (
+                candidate
+                for candidate in collect_neighbor_call_targets(function)
+                if candidate.callsite_addr == callsite_addr
+            ),
+            None,
+        )
+    )
+    if seed is None and target_inventory is None:
+        seed = CallsiteTargetInventory8616.collect(
+            function,
+            (callsite_addr,),
+        ).seed_for_callsite(callsite_addr)
+    return seed
 
-    bounded_follow_insns = follow_insns[:16]
-    for follow_index, insn in enumerate(bounded_follow_insns):
-        if _mnemonic(insn) in {"ret", "retf", "retw", "iret"}:
-            break
-        if _wide_return_condition_use_8616(bounded_follow_insns, follow_index):
-            return CallsiteReturnShape8616.DX_AX
 
-        if forwarding_window_open and _mnemonic(insn) == "push":
-            operands = _instruction_operands(insn)
-            pushed_reg = _operand_reg_name(insn, operands[0]) if len(operands) == 1 else None
-            if pushed_reg in {"ax", "dx"}:
-                forwarded_return_regs.add(pushed_reg)
-                if {"ax", "dx"} <= forwarded_return_regs:
-                    return CallsiteReturnShape8616.DX_AX
-            else:
-                forwarding_window_open = False
-        elif forwarding_window_open and not _transparent_return_arg_carrier_insn_8616(insn):
-            forwarding_window_open = False
-        if is_x86_16_call_mnemonic_8616(_mnemonic(insn)):
-            break
+def _helper_only_summary_8616(
+    callsite_addr: int,
+    target_addr: int | None,
+    return_addr: int | None,
+    kind: str | None,
+    stack_probe_helper: bool,
+) -> CallsiteSummary8616:
+    """Build the evidence-free summary for helper-only or undecodable callsites."""
+    return CallsiteSummary8616(
+        callsite_addr,
+        target_addr,
+        return_addr,
+        kind,
+        None,
+        (),
+        None,
+        None,
+        None,
+        stack_probe_helper,
+        helper_return_state="stack_address" if stack_probe_helper else "none",
+        helper_return_space="ss" if stack_probe_helper else None,
+        helper_return_width=2 if stack_probe_helper else None,
+        helper_return_address_kind="stack" if stack_probe_helper else "none",
+    )
 
-        if _mnemonic(insn) == "mov" and len(_instruction_operands(insn)) == 2:
-            operands = _instruction_operands(insn)
-            base, disp = _operand_mem_base_disp(insn, operands[0])
-            if base in {"bp", None} and isinstance(disp, int):
-                if _operand_is_reg(insn, operands[1], {"dx", "dh", "dl"}):
-                    store_dx_offsets.add(disp)
-                if _operand_is_reg(insn, operands[1], {"ax", "al", "ah"}):
-                    store_ax_offsets.add(disp)
-                    saw_ax = True
-            if _has_adjacent_word_pair_8616(store_ax_offsets, store_dx_offsets):
-                return CallsiteReturnShape8616.DX_AX
 
-        if _instruction_reads_return_reg(insn, {"ax", "al", "ah"}):
-            saw_ax = True
-        if _instruction_writes_return_reg(insn, {"ax", "al", "ah"}):
-            saw_ax = True
-
-        if _transparent_return_epilogue_insn_8616(insn):
-            continue
-
-    if any(off + 2 in store_ax_offsets for off in store_dx_offsets):
-        return CallsiteReturnShape8616.DX_AX
-    if any(off - 2 in store_ax_offsets for off in store_dx_offsets):
-        return CallsiteReturnShape8616.DX_AX
-    if saw_ax:
-        return CallsiteReturnShape8616.AX
+def _linear_fallthrough_return_addr_8616(insns: tuple[object, ...], call_idx: int) -> int | None:
+    """Return the linear fall-through address of the call instruction."""
+    call_insn = insns[call_idx]
+    insn_addr = _instruction_address_8616(call_insn)
+    insn_size = _instruction_size_8616(call_insn)
+    if isinstance(insn_addr, int) and isinstance(insn_size, int) and insn_size > 0:
+        # Summary identities use linear addresses. The architectural
+        # return IP remains the low word of this exact fall-through.
+        return insn_addr + insn_size
     return None
+
+
+def _callsite_cleanup_8616(
+    function: object,
+    insns: tuple[object, ...],
+    call_idx: int,
+    callsite_addr: int,
+    request_cache: CallsiteSummaryRequestCache8616 | None,
+) -> tuple[int | None, int | None]:
+    """Return (cleanup bytes, cleanup instruction addr) for one callsite."""
+    cleanup_evidence = _stack_cleanup_after_call(
+        function,
+        insns,
+        call_idx,
+        callsite_addr,
+    )
+    cleanup_instruction_addr = (
+        cleanup_evidence.instruction_addr
+        if cleanup_evidence is not None
+        else None
+    )
+    cleanup = cleanup_evidence.amount if cleanup_evidence is not None else None
+    if cleanup is None:
+        cleanup = _callee_stack_cleanup_bytes_8616(
+            function,
+            insns[call_idx],
+            request_cache=request_cache,
+        )
+    return cleanup, cleanup_instruction_addr
+
+
+@dataclass(frozen=True, slots=True)
+class _RawPushArgEvidence8616:
+    """Pre-trim push evidence plus any proven predecessor-stack merge."""
+
+    widths: tuple[int, ...]
+    sources: tuple[_CallsiteTuple8616 | None, ...]
+    instruction_addrs: tuple[int, ...]
+    predecessor_stack_merge: CallsitePredecessorStackMerge8616 | None
+
+
+def _better_window_arg_evidence_8616(
+    function: object,
+    callsite_addr: int,
+    argument_byte_limit: int | None,
+    raw_arg_widths: tuple[int, ...],
+    raw_arg_sources: tuple[_CallsiteTuple8616 | None, ...],
+) -> tuple[tuple[int, ...], tuple[_CallsiteTuple8616 | None, ...], tuple[int, ...]] | None:
+    """Retry the push scan across a linear window when block evidence is weaker."""
+    window_insns = _linear_window_insns_for_callsite_8616(function, callsite_addr)
+    window_idx = _find_call_index(window_insns, callsite_addr) if window_insns else None
+    if window_idx is None:
+        return None
+    window_widths = _collect_push_args_before_call(
+        function, window_insns, window_idx, argument_byte_limit
+    )
+    window_sources = _collect_push_arg_sources_before_call(
+        function, window_insns, window_idx, argument_byte_limit
+    )
+    window_push_instruction_addrs = _collect_push_arg_instruction_addrs_before_call(
+        function,
+        window_insns,
+        window_idx,
+        argument_byte_limit,
+    )
+    window_has_better_widths = sum(window_widths) > sum(raw_arg_widths)
+    window_has_same_widths_better_sources = (
+        sum(window_widths) == sum(raw_arg_widths)
+        and len(window_widths) == len(raw_arg_widths)
+        and _push_arg_source_known_count_8616(window_sources)
+        > _push_arg_source_known_count_8616(raw_arg_sources)
+    )
+    if window_has_better_widths or window_has_same_widths_better_sources:
+        return window_widths, window_sources, window_push_instruction_addrs
+    return None
+
+
+def _raw_push_arg_evidence_8616(
+    function: object,
+    insns: tuple[object, ...],
+    call_idx: int,
+    callsite_addr: int,
+    argument_byte_limit: int | None,
+    request_cache: CallsiteSummaryRequestCache8616 | None,
+) -> _RawPushArgEvidence8616:
+    """Collect, predecessor-merge, callee-filter, and window-retry push evidence."""
+    raw_arg_widths = _collect_push_args_before_call(function, insns, call_idx, argument_byte_limit)
+    raw_arg_sources = _collect_push_arg_sources_before_call(function, insns, call_idx, argument_byte_limit)
+    raw_push_instruction_addrs = _collect_push_arg_instruction_addrs_before_call(
+        function,
+        insns,
+        call_idx,
+        argument_byte_limit,
+    )
+    predecessor_stack_merge = None
+    if _push_scan_reaches_block_entry_8616(insns, call_idx, raw_push_instruction_addrs):
+        unresolved_entry_push = _unresolved_entry_push_register_8616(
+            insns,
+            raw_arg_sources,
+            raw_push_instruction_addrs,
+        )
+        predecessor_stack_merge = _predecessor_stack_merge_8616(
+            function,
+            callsite_addr,
+            join_register=unresolved_entry_push[0] if unresolved_entry_push is not None else None,
+            join_push_addr=unresolved_entry_push[1] if unresolved_entry_push is not None else None,
+        )
+        if predecessor_stack_merge is not None:
+            raw_arg_widths = predecessor_stack_merge.widths + raw_arg_widths
+            raw_arg_sources = predecessor_stack_merge.sources + raw_arg_sources
+            raw_push_instruction_addrs = (
+                predecessor_stack_merge.representative_instruction_addrs
+                + raw_push_instruction_addrs
+            )
+    raw_arg_widths, raw_arg_sources, raw_push_instruction_addrs = _filter_callee_saved_frame_pushes_8616(
+        function,
+        callsite_addr,
+        raw_arg_widths,
+        raw_arg_sources,
+        raw_push_instruction_addrs,
+        request_cache,
+    )
+    if (
+        predecessor_stack_merge is None
+        and
+        isinstance(argument_byte_limit, int)
+        and argument_byte_limit > 0
+        and (
+            sum(raw_arg_widths) < argument_byte_limit
+            or _push_arg_sources_have_unknown_8616(raw_arg_sources)
+        )
+    ):
+        window_evidence = _better_window_arg_evidence_8616(
+            function,
+            callsite_addr,
+            argument_byte_limit,
+            raw_arg_widths,
+            raw_arg_sources,
+        )
+        if window_evidence is not None:
+            raw_arg_widths, raw_arg_sources, raw_push_instruction_addrs = window_evidence
+    return _RawPushArgEvidence8616(
+        widths=raw_arg_widths,
+        sources=raw_arg_sources,
+        instruction_addrs=raw_push_instruction_addrs,
+        predecessor_stack_merge=predecessor_stack_merge,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _TrimmedArgEvidence8616:
+    """Cleanup-bounded argument evidence with address-break fallback."""
+
+    arg_widths: tuple[int, ...]
+    push_arg_sources: tuple[_CallsiteTuple8616 | None, ...]
+    push_arg_instruction_addrs: tuple[int, ...]
+    push_arg_address_break_evidence: tuple[PartialRegisterAddressBreakEvidence8616 | None, ...]
+
+
+def _trimmed_arg_evidence_8616(
+    raw: _RawPushArgEvidence8616,
+    insns: tuple[object, ...],
+    argument_byte_limit: int | None,
+) -> _TrimmedArgEvidence8616:
+    """Trim raw push evidence to the proven cleanup byte budget."""
+    arg_widths = _trim_push_args_to_stack_cleanup(raw.widths, argument_byte_limit)
+    push_arg_sources = _trim_push_arg_sources_to_stack_cleanup(
+        raw.widths, raw.sources, argument_byte_limit
+    )
+    push_arg_instruction_addrs = _trim_push_arg_instruction_addrs_to_stack_cleanup(
+        raw.widths,
+        raw.instruction_addrs,
+        argument_byte_limit,
+    )
+    push_arg_address_break_evidence = (
+        tuple(
+            None
+            if source is not None
+            else collect_partial_register_address_break_8616(insns, push_addr)
+            for source, push_addr in zip(
+                push_arg_sources,
+                push_arg_instruction_addrs,
+                strict=True,
+            )
+        )
+        if len(push_arg_sources) == len(push_arg_instruction_addrs)
+        else ()
+    )
+    return _TrimmedArgEvidence8616(
+        arg_widths=arg_widths,
+        push_arg_sources=push_arg_sources,
+        push_arg_instruction_addrs=push_arg_instruction_addrs,
+        push_arg_address_break_evidence=push_arg_address_break_evidence,
+    )
+
+
+def _logical_arg_interface_evidence_8616(
+    function: object,
+    target_addr: int | None,
+    helper_abi_widths: tuple[int, ...] | None,
+    arg_widths: tuple[int, ...],
+) -> tuple[tuple[int, ...], tuple[CallsiteArgumentClass8616, ...]]:
+    """Return logical widths/classes only when they match observed evidence."""
+    if helper_abi_widths is not None:
+        logical_arg_widths = helper_abi_widths
+        logical_arg_classes: tuple[CallsiteArgumentClass8616, ...] = ()
+    else:
+        logical_arg_widths, logical_arg_classes = _logical_arg_interface_for_target_8616(
+            function,
+            target_addr,
+        )
+    if sum(logical_arg_widths) != sum(arg_widths):
+        return (), ()
+    return logical_arg_widths, logical_arg_classes
+
+
+def _helper_return_fields_8616(
+    stack_probe_helper: bool,
+    return_register: str | None,
+    return_used: bool | None,
+    has_followup_insns: bool,
+) -> tuple[str, str | None, int | None, str]:
+    """Return (state, space, width, address_kind) for stack-probe returns."""
+    helper_return_state = "none"
+    helper_return_space = None
+    helper_return_width = None
+    helper_return_address_kind = "none"
+    if stack_probe_helper:
+        if return_register not in {None, "ax"}:
+            helper_return_state = "unknown"
+            helper_return_address_kind = "unknown"
+        elif return_used is True or not has_followup_insns:
+            helper_return_state = "stack_address"
+            helper_return_space = "ss"
+            helper_return_width = 2
+            helper_return_address_kind = "stack"
+    return helper_return_state, helper_return_space, helper_return_width, helper_return_address_kind
+
+
+def _summarize_callsite_impl_8616(
+    function: object,
+    callsite_addr: int,
+    target_inventory: CallsiteTargetInventory8616 | None,
+    request_cache: CallsiteSummaryRequestCache8616 | None,
+) -> CallsiteSummary8616 | None:
+    """Summarize one callsite from decoded blocks and proven evidence."""
+    project = _dynamic_callsite_getattr_8616(function, "project", None)
+    if project is None or _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(project, "arch", None), "name", None) != "86_16":
+        return None
+
+    seed = _callsite_seed_8616(function, callsite_addr, target_inventory)
+    target_addr: int | None = None
+    return_addr: int | None = None
+    kind: str | None = None
+    if seed is not None:
+        target_addr = seed.target_addr
+        return_addr = seed.return_addr
+        kind = seed.kind
+
+    insns = _block_insns_for_callsite(function, callsite_addr)
+    target_name = _lookup_target_name_8616(function, target_addr)
+    stack_probe_helper = is_x86_16_registered_stack_probe_target_8616(
+        _dynamic_callsite_getattr_8616(project, "arch", None),
+        target_addr,
+    ) or _is_stack_probe_target_name_8616(target_name)
+    if not insns:
+        return _helper_only_summary_8616(
+            callsite_addr, target_addr, return_addr, kind, stack_probe_helper
+        )
+    call_idx = _find_call_index(insns, callsite_addr)
+    if call_idx is None:
+        return _helper_only_summary_8616(
+            callsite_addr, target_addr, return_addr, kind, stack_probe_helper
+        )
+
+    stack_probe_allocation_size = (
+        _fixed_stack_probe_allocation_before_call_8616(insns, call_idx)
+        if stack_probe_helper
+        else None
+    )
+
+    if return_addr is None:
+        return_addr = _linear_fallthrough_return_addr_8616(insns, call_idx)
+
+    cleanup, cleanup_instruction_addr = _callsite_cleanup_8616(
+        function, insns, call_idx, callsite_addr, request_cache
+    )
+    target_source = _call_target_source_8616(insns[call_idx])
+    helper_abi_widths = known_helper_abi_widths_8616(target_name)
+    argument_byte_limit = cleanup
+    if (
+        (not isinstance(argument_byte_limit, int) or argument_byte_limit <= 0)
+        and helper_abi_widths is not None
+    ):
+        argument_byte_limit = sum(helper_abi_widths)
+    raw = _raw_push_arg_evidence_8616(
+        function,
+        insns,
+        call_idx,
+        callsite_addr,
+        argument_byte_limit,
+        request_cache,
+    )
+    trimmed = _trimmed_arg_evidence_8616(raw, insns, argument_byte_limit)
+    arg_widths = trimmed.arg_widths
+    push_arg_sources = trimmed.push_arg_sources
+    push_arg_instruction_addrs = trimmed.push_arg_instruction_addrs
+    push_arg_address_break_evidence = trimmed.push_arg_address_break_evidence
+    arg_count = len(arg_widths)
+    logical_arg_widths, logical_arg_classes = _logical_arg_interface_evidence_8616(
+        function, target_addr, helper_abi_widths, arg_widths
+    )
+    follow_insns = list(insns[call_idx + 1 : call_idx + 3])
+    if len(follow_insns) < 2:
+        follow_insns.extend(_next_linear_block_insns(function, callsite_addr)[: 2 - len(follow_insns)])
+    has_followup_insns = bool(follow_insns)
+    return_register, return_used, return_use_kind = _return_use_after_call(function, insns, call_idx, callsite_addr)
+    return_shape = _return_shape_after_call(function, insns, call_idx, callsite_addr)
+    return_store = _return_store_after_call(function, insns, call_idx, callsite_addr)
+    return_store_destination = return_store[:2] if return_store is not None else None
+    return_store_width = return_store[2] if return_store is not None else None
+    return_store_instruction_addr = return_store[3] if return_store is not None else None
+    if os.environ.get("INERTIA_DEBUG_CALLSITE_SUMMARY"):
+        log.warning(
+            "[callsite-summary] callsite=%#x call_idx=%s cleanup=%r target_source=%r raw_widths=%r raw_sources=%r widths=%r logical_widths=%r logical_classes=%r sources=%r push_addrs=%r return_register=%r return_used=%r return_shape=%r return_store=%r return_use_kind=%r",
+            callsite_addr,
+            call_idx,
+            cleanup,
+            target_source,
+            raw.widths,
+            raw.sources,
+            arg_widths,
+            logical_arg_widths,
+            logical_arg_classes,
+            push_arg_sources,
+            push_arg_instruction_addrs,
+            return_register,
+            return_used,
+            return_shape.value if isinstance(return_shape, CallsiteReturnShape8616) else None,
+            return_store,
+            return_use_kind,
+        )
+    (
+        helper_return_state,
+        helper_return_space,
+        helper_return_width,
+        helper_return_address_kind,
+    ) = _helper_return_fields_8616(
+        stack_probe_helper, return_register, return_used, has_followup_insns
+    )
+    return CallsiteSummary8616(
+        callsite_addr=callsite_addr,
+        target_addr=target_addr,
+        return_addr=return_addr,
+        kind=kind,
+        arg_count=arg_count,
+        arg_widths=arg_widths,
+        stack_cleanup=cleanup,
+        return_register=return_register,
+        return_used=return_used,
+        stack_probe_helper=stack_probe_helper,
+        stack_probe_allocation_size=stack_probe_allocation_size,
+        helper_return_state=helper_return_state,
+        helper_return_space=helper_return_space,
+        helper_return_width=helper_return_width,
+        helper_return_address_kind=helper_return_address_kind,
+        return_shape=return_shape.value if isinstance(return_shape, CallsiteReturnShape8616) else None,
+        push_arg_sources=push_arg_sources,
+        push_arg_instruction_addrs=push_arg_instruction_addrs,
+        return_store_destination=return_store_destination,
+        return_store_width=return_store_width,
+        target_source=target_source,
+        return_use_kind=return_use_kind,
+        logical_arg_widths=logical_arg_widths,
+        logical_arg_classes=logical_arg_classes,
+        stack_cleanup_instruction_addr=cleanup_instruction_addr,
+        predecessor_stack_merge=raw.predecessor_stack_merge,
+        return_store_instruction_addr=return_store_instruction_addr,
+        push_arg_address_break_evidence=push_arg_address_break_evidence,
+    )
 
 
 def summarize_x86_16_callsite(
@@ -3608,308 +4416,6 @@ def summarize_x86_16_callsite(
     request_cache: CallsiteSummaryRequestCache8616 | None = None,
 ) -> CallsiteSummary8616 | None:
     """Summarize argument, cleanup, and return-use facts for one callsite."""
-
-    def _impl() -> CallsiteSummary8616 | None:
-        project = _dynamic_callsite_getattr_8616(function, "project", None)
-        if project is None or _dynamic_callsite_getattr_8616(_dynamic_callsite_getattr_8616(project, "arch", None), "name", None) != "86_16":
-            return None
-
-        seed = (
-            target_inventory.seed_for_callsite(callsite_addr)
-            if target_inventory is not None
-            else next(
-                (
-                    candidate
-                    for candidate in collect_neighbor_call_targets(function)
-                    if candidate.callsite_addr == callsite_addr
-                ),
-                None,
-            )
-        )
-        if seed is None and target_inventory is None:
-            seed = CallsiteTargetInventory8616.collect(
-                function,
-                (callsite_addr,),
-            ).seed_for_callsite(callsite_addr)
-        target_addr: int | None = None
-        return_addr: int | None = None
-        kind: str | None = None
-        if seed is not None:
-            target_addr = seed.target_addr
-            return_addr = seed.return_addr
-            kind = seed.kind
-
-        insns = _block_insns_for_callsite(function, callsite_addr)
-        target_name = _lookup_target_name_8616(function, target_addr)
-        stack_probe_helper = is_x86_16_registered_stack_probe_target_8616(
-            _dynamic_callsite_getattr_8616(project, "arch", None),
-            target_addr,
-        ) or _is_stack_probe_target_name_8616(target_name)
-        if not insns:
-            helper_return_state = "stack_address" if stack_probe_helper else "none"
-            helper_return_space = "ss" if stack_probe_helper else None
-            helper_return_width = 2 if stack_probe_helper else None
-            helper_return_address_kind = "stack" if stack_probe_helper else "none"
-            return CallsiteSummary8616(
-                callsite_addr,
-                target_addr,
-                return_addr,
-                kind,
-                None,
-                (),
-                None,
-                None,
-                None,
-                stack_probe_helper,
-                helper_return_state=helper_return_state,
-                helper_return_space=helper_return_space,
-                helper_return_width=helper_return_width,
-                helper_return_address_kind=helper_return_address_kind,
-            )
-        call_idx = _find_call_index(insns, callsite_addr)
-        if call_idx is None:
-            helper_return_state = "stack_address" if stack_probe_helper else "none"
-            helper_return_space = "ss" if stack_probe_helper else None
-            helper_return_width = 2 if stack_probe_helper else None
-            helper_return_address_kind = "stack" if stack_probe_helper else "none"
-            return CallsiteSummary8616(
-                callsite_addr,
-                target_addr,
-                return_addr,
-                kind,
-                None,
-                (),
-                None,
-                None,
-                None,
-                stack_probe_helper,
-                helper_return_state=helper_return_state,
-                helper_return_space=helper_return_space,
-                helper_return_width=helper_return_width,
-                helper_return_address_kind=helper_return_address_kind,
-            )
-
-        stack_probe_allocation_size = (
-            _fixed_stack_probe_allocation_before_call_8616(insns, call_idx)
-            if stack_probe_helper
-            else None
-        )
-
-        if return_addr is None:
-            call_insn = insns[call_idx]
-            insn_addr = _instruction_address_8616(call_insn)
-            insn_size = _instruction_size_8616(call_insn)
-            if isinstance(insn_addr, int) and isinstance(insn_size, int) and insn_size > 0:
-                # Summary identities use linear addresses. The architectural
-                # return IP remains the low word of this exact fall-through.
-                return_addr = insn_addr + insn_size
-
-        cleanup_evidence = _stack_cleanup_after_call(
-            function,
-            insns,
-            call_idx,
-            callsite_addr,
-        )
-        cleanup_instruction_addr = (
-            cleanup_evidence.instruction_addr
-            if cleanup_evidence is not None
-            else None
-        )
-        cleanup = cleanup_evidence.amount if cleanup_evidence is not None else None
-        if cleanup is None:
-            cleanup = _callee_stack_cleanup_bytes_8616(
-                function,
-                insns[call_idx],
-                request_cache=request_cache,
-            )
-        target_source = _call_target_source_8616(insns[call_idx])
-        helper_abi_widths = known_helper_abi_widths_8616(target_name)
-        argument_byte_limit = cleanup
-        if (
-            (not isinstance(argument_byte_limit, int) or argument_byte_limit <= 0)
-            and helper_abi_widths is not None
-        ):
-            argument_byte_limit = sum(helper_abi_widths)
-        raw_arg_widths = _collect_push_args_before_call(function, insns, call_idx, argument_byte_limit)
-        raw_arg_sources = _collect_push_arg_sources_before_call(function, insns, call_idx, argument_byte_limit)
-        raw_push_instruction_addrs = _collect_push_arg_instruction_addrs_before_call(
-            function,
-            insns,
-            call_idx,
-            argument_byte_limit,
-        )
-        predecessor_stack_merge = None
-        if _push_scan_reaches_block_entry_8616(insns, call_idx, raw_push_instruction_addrs):
-            unresolved_entry_push = _unresolved_entry_push_register_8616(
-                insns,
-                raw_arg_sources,
-                raw_push_instruction_addrs,
-            )
-            predecessor_stack_merge = _predecessor_stack_merge_8616(
-                function,
-                callsite_addr,
-                join_register=unresolved_entry_push[0] if unresolved_entry_push is not None else None,
-                join_push_addr=unresolved_entry_push[1] if unresolved_entry_push is not None else None,
-            )
-            if predecessor_stack_merge is not None:
-                raw_arg_widths = predecessor_stack_merge.widths + raw_arg_widths
-                raw_arg_sources = predecessor_stack_merge.sources + raw_arg_sources
-                raw_push_instruction_addrs = (
-                    predecessor_stack_merge.representative_instruction_addrs
-                    + raw_push_instruction_addrs
-                )
-        raw_arg_widths, raw_arg_sources, raw_push_instruction_addrs = _filter_callee_saved_frame_pushes_8616(
-            function,
-            callsite_addr,
-            raw_arg_widths,
-            raw_arg_sources,
-            raw_push_instruction_addrs,
-            request_cache,
-        )
-        if (
-            predecessor_stack_merge is None
-            and
-            isinstance(argument_byte_limit, int)
-            and argument_byte_limit > 0
-            and (
-                sum(raw_arg_widths) < argument_byte_limit
-                or _push_arg_sources_have_unknown_8616(raw_arg_sources)
-            )
-        ):
-            window_insns = _linear_window_insns_for_callsite_8616(function, callsite_addr)
-            window_idx = _find_call_index(window_insns, callsite_addr) if window_insns else None
-            if window_idx is not None:
-                window_widths = _collect_push_args_before_call(
-                    function, window_insns, window_idx, argument_byte_limit
-                )
-                window_sources = _collect_push_arg_sources_before_call(
-                    function, window_insns, window_idx, argument_byte_limit
-                )
-                window_push_instruction_addrs = _collect_push_arg_instruction_addrs_before_call(
-                    function,
-                    window_insns,
-                    window_idx,
-                    argument_byte_limit,
-                )
-                window_has_better_widths = sum(window_widths) > sum(raw_arg_widths)
-                window_has_same_widths_better_sources = (
-                    sum(window_widths) == sum(raw_arg_widths)
-                    and len(window_widths) == len(raw_arg_widths)
-                    and _push_arg_source_known_count_8616(window_sources)
-                    > _push_arg_source_known_count_8616(raw_arg_sources)
-                )
-                if window_has_better_widths or window_has_same_widths_better_sources:
-                    raw_arg_widths = window_widths
-                    raw_arg_sources = window_sources
-                    raw_push_instruction_addrs = window_push_instruction_addrs
-        arg_widths = _trim_push_args_to_stack_cleanup(raw_arg_widths, argument_byte_limit)
-        push_arg_sources = _trim_push_arg_sources_to_stack_cleanup(
-            raw_arg_widths, raw_arg_sources, argument_byte_limit
-        )
-        push_arg_instruction_addrs = _trim_push_arg_instruction_addrs_to_stack_cleanup(
-            raw_arg_widths,
-            raw_push_instruction_addrs,
-            argument_byte_limit,
-        )
-        push_arg_address_break_evidence = (
-            tuple(
-                None
-                if source is not None
-                else collect_partial_register_address_break_8616(insns, push_addr)
-                for source, push_addr in zip(
-                    push_arg_sources,
-                    push_arg_instruction_addrs,
-                    strict=True,
-                )
-            )
-            if len(push_arg_sources) == len(push_arg_instruction_addrs)
-            else ()
-        )
-        arg_count = len(arg_widths)
-        logical_arg_classes: tuple[CallsiteArgumentClass8616, ...] = ()
-        if helper_abi_widths is not None:
-            logical_arg_widths = helper_abi_widths
-            logical_arg_classes = ()
-        else:
-            logical_arg_widths, logical_arg_classes = _logical_arg_interface_for_target_8616(
-                function,
-                target_addr,
-            )
-        if sum(logical_arg_widths) != sum(arg_widths):
-            logical_arg_widths = ()
-            logical_arg_classes = ()
-        follow_insns = list(insns[call_idx + 1 : call_idx + 3])
-        if len(follow_insns) < 2:
-            follow_insns.extend(_next_linear_block_insns(function, callsite_addr)[: 2 - len(follow_insns)])
-        has_followup_insns = bool(follow_insns)
-        return_register, return_used, return_use_kind = _return_use_after_call(function, insns, call_idx, callsite_addr)
-        return_shape = _return_shape_after_call(function, insns, call_idx, callsite_addr)
-        return_store = _return_store_after_call(function, insns, call_idx, callsite_addr)
-        return_store_destination = return_store[:2] if return_store is not None else None
-        return_store_width = return_store[2] if return_store is not None else None
-        return_store_instruction_addr = return_store[3] if return_store is not None else None
-        if os.environ.get("INERTIA_DEBUG_CALLSITE_SUMMARY"):
-            log.warning(
-                "[callsite-summary] callsite=%#x call_idx=%s cleanup=%r target_source=%r raw_widths=%r raw_sources=%r widths=%r logical_widths=%r logical_classes=%r sources=%r push_addrs=%r return_register=%r return_used=%r return_shape=%r return_store=%r return_use_kind=%r",
-                callsite_addr,
-                call_idx,
-                cleanup,
-                target_source,
-                raw_arg_widths,
-                raw_arg_sources,
-                arg_widths,
-                logical_arg_widths,
-                logical_arg_classes,
-                push_arg_sources,
-                push_arg_instruction_addrs,
-                return_register,
-                return_used,
-                return_shape.value if isinstance(return_shape, CallsiteReturnShape8616) else None,
-                return_store,
-                return_use_kind,
-            )
-        helper_return_state = "none"
-        helper_return_space = None
-        helper_return_width = None
-        helper_return_address_kind = "none"
-        if stack_probe_helper:
-            if return_register not in {None, "ax"}:
-                helper_return_state = "unknown"
-                helper_return_address_kind = "unknown"
-            elif return_used is True or not has_followup_insns:
-                helper_return_state = "stack_address"
-                helper_return_space = "ss"
-                helper_return_width = 2
-                helper_return_address_kind = "stack"
-        return CallsiteSummary8616(
-            callsite_addr=callsite_addr,
-            target_addr=target_addr,
-            return_addr=return_addr,
-            kind=kind,
-            arg_count=arg_count,
-            arg_widths=arg_widths,
-            stack_cleanup=cleanup,
-            return_register=return_register,
-            return_used=return_used,
-            stack_probe_helper=stack_probe_helper,
-            stack_probe_allocation_size=stack_probe_allocation_size,
-            helper_return_state=helper_return_state,
-            helper_return_space=helper_return_space,
-            helper_return_width=helper_return_width,
-            helper_return_address_kind=helper_return_address_kind,
-            return_shape=return_shape.value if isinstance(return_shape, CallsiteReturnShape8616) else None,
-            push_arg_sources=push_arg_sources,
-            push_arg_instruction_addrs=push_arg_instruction_addrs,
-            return_store_destination=return_store_destination,
-            return_store_width=return_store_width,
-            target_source=target_source,
-            return_use_kind=return_use_kind,
-            logical_arg_widths=logical_arg_widths,
-            logical_arg_classes=logical_arg_classes,
-            stack_cleanup_instruction_addr=cleanup_instruction_addr,
-            predecessor_stack_merge=predecessor_stack_merge,
-            return_store_instruction_addr=return_store_instruction_addr,
-            push_arg_address_break_evidence=push_arg_address_break_evidence,
-        )
-
-    return _impl()
+    return _summarize_callsite_impl_8616(
+        function, callsite_addr, target_inventory, request_cache
+    )

@@ -106,6 +106,62 @@ def _bounded_instructions_8616(
     return tuple(instructions)
 
 
+def _carrier_deref_scan_8616(
+    operands: tuple[object, ...],
+    carriers: dict[int, int],
+) -> tuple[int, tuple[int, ...], tuple[int, ...]]:
+    """Count carrier dereferences on one instruction's memory operands."""
+    raw = 0
+    observed: list[int] = []
+    pointer: list[int] = []
+    for operand_value in operands:
+        operand = cast(Any, operand_value)
+        if operand.type != X86_OP_MEM:
+            continue
+        stack_offset = carriers.get(int(operand.mem.base))
+        if stack_offset is None or int(operand.size) <= 0:
+            continue
+        raw += 1
+        observed.append(stack_offset)
+        if int(operand.mem.index) == X86_REG_INVALID and int(operand.mem.disp) == 0:
+            pointer.append(stack_offset)
+    return raw, tuple(observed), tuple(pointer)
+
+
+def _carrier_transfer_8616(
+    insn_value: object,
+    operands: tuple[object, ...],
+    carriers: dict[int, int],
+) -> None:
+    """Update register carrier provenance for one instruction."""
+    insn = cast(Any, insn_value)
+    if insn.id in {X86_INS_CALL, X86_INS_LCALL}:
+        carriers.clear()
+        return
+    if not operands or cast(Any, operands[0]).type != X86_OP_REG:
+        return
+    destination_register = int(cast(Any, operands[0]).reg)
+    if insn.id == X86_INS_ADD and destination_register in carriers:
+        return
+    if insn.id != X86_INS_MOV or len(operands) != 2:
+        carriers.pop(destination_register, None)
+        return
+    source = cast(Any, operands[1])
+    if (
+        source.type == X86_OP_MEM
+        and int(source.mem.base) == X86_REG_BP
+        and int(source.mem.index) == X86_REG_INVALID
+        and int(source.mem.disp) >= 4
+        and int(source.size) == 2
+    ):
+        carriers[destination_register] = int(source.mem.disp)
+        return
+    if source.type == X86_OP_REG and int(source.reg) in carriers:
+        carriers[destination_register] = carriers[int(source.reg)]
+        return
+    carriers.pop(destination_register, None)
+
+
 def _pointer_stack_offsets_8616(
     instructions: Sequence[object],
 ) -> tuple[int, tuple[int, ...], tuple[int, ...]]:
@@ -117,44 +173,11 @@ def _pointer_stack_offsets_8616(
     for insn_value in instructions:
         insn = cast(Any, insn_value)
         operands = tuple(insn.operands)
-        for operand in operands:
-            if operand.type != X86_OP_MEM:
-                continue
-            stack_offset = carriers.get(int(operand.mem.base))
-            if stack_offset is None or int(operand.size) <= 0:
-                continue
-            raw_fact_count += 1
-            observed_offsets.add(stack_offset)
-            if (
-                int(operand.mem.index) == X86_REG_INVALID
-                and int(operand.mem.disp) == 0
-            ):
-                pointer_offsets.append(stack_offset)
-        if insn.id in {X86_INS_CALL, X86_INS_LCALL}:
-            carriers.clear()
-            continue
-        if not operands or operands[0].type != X86_OP_REG:
-            continue
-        destination_register = int(operands[0].reg)
-        if insn.id == X86_INS_ADD and destination_register in carriers:
-            continue
-        if insn.id != X86_INS_MOV or len(operands) != 2:
-            carriers.pop(destination_register, None)
-            continue
-        source = operands[1]
-        if (
-            source.type == X86_OP_MEM
-            and int(source.mem.base) == X86_REG_BP
-            and int(source.mem.index) == X86_REG_INVALID
-            and int(source.mem.disp) >= 4
-            and int(source.size) == 2
-        ):
-            carriers[destination_register] = int(source.mem.disp)
-            continue
-        if source.type == X86_OP_REG and int(source.reg) in carriers:
-            carriers[destination_register] = carriers[int(source.reg)]
-            continue
-        carriers.pop(destination_register, None)
+        raw, observed, pointer = _carrier_deref_scan_8616(operands, carriers)
+        raw_fact_count += raw
+        observed_offsets.update(observed)
+        pointer_offsets.extend(pointer)
+        _carrier_transfer_8616(insn, operands, carriers)
     proven_offsets = tuple(sorted(set(pointer_offsets)))
     ambiguous_offsets = tuple(sorted(observed_offsets - set(proven_offsets)))
     return raw_fact_count, proven_offsets, ambiguous_offsets

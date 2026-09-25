@@ -204,6 +204,45 @@ def _provenance_is_one_call_cleanup_8616(
     )
 
 
+def _statement_prune_verdict_8616(
+    project: object,
+    normalized: dict[int, CallsiteSummary8616],
+    statement: object,
+) -> tuple[bool, bool]:
+    """Classify one statement; return ``(matched, drop)`` for prune decision."""
+    provenance = _expression_instruction_addresses_8616(statement)
+    matching_addrs = tuple(
+        address
+        for address, summary in normalized.items()
+        if _provenance_is_one_call_cleanup_8616(
+            project,
+            provenance,
+            address,
+            summary,
+        )
+    )
+    matched_addr = matching_addrs[0] if len(matching_addrs) == 1 else None
+    if os.environ.get("INERTIA_DEBUG_CALL_CLEANUP_CARRIER"):
+        log.warning(
+            "[call-cleanup-carrier] statement=%s provenance=%s "
+            "matching=%s lhs=%s rhs=%s rendered=%s",
+            type(statement).__name__,
+            tuple(hex(address) for address in sorted(provenance)),
+            tuple(hex(address) for address in matching_addrs),
+            type(getattr(statement, "lhs", None)).__name__,
+            type(getattr(statement, "rhs", None)).__name__,
+            _debug_render_8616(statement),
+        )
+    if matched_addr is None:
+        return False, False
+    drop = (
+        isinstance(statement, structured_c.CAssignment)
+        and _stack_cleanup_carrier_lhs_8616(statement.lhs, project)
+        and _pure_expression_8616(statement.rhs)
+    )
+    return True, drop
+
+
 def prune_consumed_call_cleanup_carriers_8616(
     project: object,
     codegen: object,
@@ -254,41 +293,14 @@ def prune_consumed_call_cleanup_carriers_8616(
         if isinstance(statements, list):
             retained: list[object] = []
             for statement in tuple(statements):
-                provenance = _expression_instruction_addresses_8616(statement)
-                matching_addrs = tuple(
-                    address
-                    for address, summary in normalized.items()
-                    if _provenance_is_one_call_cleanup_8616(
-                        project,
-                        provenance,
-                        address,
-                        summary,
-                    )
+                matched, drop = _statement_prune_verdict_8616(
+                    project, normalized, statement
                 )
-                matched_addr = matching_addrs[0] if len(matching_addrs) == 1 else None
-                if os.environ.get("INERTIA_DEBUG_CALL_CLEANUP_CARRIER"):
-                    log.warning(
-                        "[call-cleanup-carrier] statement=%s provenance=%s "
-                        "matching=%s lhs=%s rhs=%s rendered=%s",
-                        type(statement).__name__,
-                        tuple(hex(address) for address in sorted(provenance)),
-                        tuple(hex(address) for address in matching_addrs),
-                        type(getattr(statement, "lhs", None)).__name__,
-                        type(getattr(statement, "rhs", None)).__name__,
-                        _debug_render_8616(statement),
-                    )
-                if matched_addr is not None:
+                if matched:
                     classified += 1
-                    if (
-                        isinstance(statement, structured_c.CAssignment)
-                        and _stack_cleanup_carrier_lhs_8616(
-                            statement.lhs,
-                            project,
-                        )
-                        and _pure_expression_8616(statement.rhs)
-                    ):
-                        materialized += 1
-                        continue
+                if drop:
+                    materialized += 1
+                    continue
                 retained.append(statement)
                 visit(statement)
             statements[:] = retained

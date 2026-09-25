@@ -142,6 +142,65 @@ def _step_kind_8616(
     return None, None
 
 
+def _load_source_trace_8616(definition: ScalarDefinition8616) -> _ValueTrace8616:
+    """Return the terminal trace for one exact LOAD definition."""
+    instruction = definition.instruction
+    if instruction.dst is None or instruction.addr is None:
+        return _failed_trace_8616(
+            IndexedAddressCopyFailureKind8616.VALUE_OPERATION_UNSUPPORTED,
+            "source LOAD lacks exact value or instruction identity",
+        )
+    return _ValueTrace8616(definition, definition, (), None, None)
+
+
+def _copy_source_expression_8616(instruction: IRInstr) -> IRValue | None:
+    """Return the copied source value for exact MOV/Shr16 copy operations."""
+    source_expression: IRValue | None = None
+    if (
+        instruction.op == "MOV" and len(instruction.args) == 1
+    ) or (
+        instruction.op == "Iop_Shr16" and len(instruction.args) == 2
+    ):
+        argument = instruction.args[0]
+        source_expression = argument if isinstance(argument, IRValue) else None
+    return source_expression
+
+
+def _or16_logical_source_trace_8616(
+    definition: ScalarDefinition8616,
+    definitions: ScalarDefinitionIndex8616,
+    logical_memory: IRLogicalMemoryArtifact8616 | None,
+    *,
+    function_addr: int,
+    block_addr: int,
+) -> _ValueTrace8616:
+    """Trace one ``Iop_Or16`` definition through closed logical word evidence."""
+    instruction = definition.instruction
+    logical_source = trace_logical_word_load_8616(
+        instruction,
+        definitions,
+        logical_memory,
+        function_addr=function_addr,
+        block_addr=block_addr,
+        before_index=definition.instr_index,
+    )
+    if not logical_source.complete:
+        failure = _logical_copy_failure_8616(logical_source.failure)
+        detail = (
+            "logical word source lacks closed exact value evidence"
+            if logical_source.failure is None
+            else f"logical word source refused {logical_source.failure.value}"
+        )
+        return _failed_trace_8616(failure, detail)
+    return _ValueTrace8616(
+        definition,
+        definition,
+        (),
+        None,
+        logical_source,
+    )
+
+
 def _trace_value_to_load_8616(
     value: IRValue,
     definitions: ScalarDefinitionIndex8616,
@@ -170,44 +229,16 @@ def _trace_value_to_load_8616(
     definition = resolved
     instruction = definition.instruction
     if instruction.op == "LOAD":
-        if instruction.dst is None or instruction.addr is None:
-            return _failed_trace_8616(
-                IndexedAddressCopyFailureKind8616.VALUE_OPERATION_UNSUPPORTED,
-                "source LOAD lacks exact value or instruction identity",
-            )
-        return _ValueTrace8616(definition, definition, (), None, None)
+        return _load_source_trace_8616(definition)
     if instruction.op == "Iop_Or16":
-        logical_source = trace_logical_word_load_8616(
-            instruction,
+        return _or16_logical_source_trace_8616(
+            definition,
             definitions,
             logical_memory,
             function_addr=function_addr,
             block_addr=block_addr,
-            before_index=definition.instr_index,
         )
-        if not logical_source.complete:
-            failure = _logical_copy_failure_8616(logical_source.failure)
-            detail = (
-                "logical word source lacks closed exact value evidence"
-                if logical_source.failure is None
-                else f"logical word source refused {logical_source.failure.value}"
-            )
-            return _failed_trace_8616(failure, detail)
-        return _ValueTrace8616(
-            definition,
-            definition,
-            (),
-            None,
-            logical_source,
-        )
-    source_expression: IRValue | None = None
-    if (
-        instruction.op == "MOV" and len(instruction.args) == 1
-    ) or (
-        instruction.op == "Iop_Shr16" and len(instruction.args) == 2
-    ):
-        argument = instruction.args[0]
-        source_expression = argument if isinstance(argument, IRValue) else None
+    source_expression = _copy_source_expression_8616(instruction)
     if source_expression is None:
         return _failed_trace_8616(
             IndexedAddressCopyFailureKind8616.VALUE_OPERATION_UNSUPPORTED,

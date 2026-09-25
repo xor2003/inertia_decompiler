@@ -34,6 +34,28 @@ from .terminal_memory_output_contracts import (
 )
 
 
+def _stable_direct_address_8616(address: object) -> bool:
+    """Return whether one address is a stable base-free DS/ES word."""
+    return (
+        isinstance(address, IRAddress)
+        and address.space in {MemSpace.DS, MemSpace.ES}
+        and not address.base
+        and address.status is AddressStatus.STABLE
+    )
+
+
+def _width_coherent_value_8616(address: object, value: object, instruction: IRInstr) -> bool:
+    """Return whether one STORE value's width matches its address and site."""
+    return (
+        isinstance(address, IRAddress)
+        and isinstance(value, IRValue)
+        and address.size > 0
+        and address.size == instruction.size
+        and address.size == value.size
+        and instruction.addr is not None
+    )
+
+
 def _direct_store_8616(
     block_addr: int,
     instr_index: int,
@@ -43,16 +65,8 @@ def _direct_store_8616(
     if instruction.op != "STORE" or len(instruction.args) < 2:
         return None
     address, value = instruction.args[:2]
-    if (
-        not isinstance(address, IRAddress)
-        or not isinstance(value, IRValue)
-        or address.space not in {MemSpace.DS, MemSpace.ES}
-        or address.base
-        or address.status is not AddressStatus.STABLE
-        or address.size <= 0
-        or address.size != instruction.size
-        or address.size != value.size
-        or instruction.addr is None
+    if not _stable_direct_address_8616(address) or not _width_coherent_value_8616(
+        address, value, instruction
     ):
         return None
     key = (address.space, address.offset, address.size)
@@ -188,6 +202,51 @@ def _must_write_keys_8616(
     return frozenset.intersection(*terminal_sets), terminals, definite_terminals
 
 
+def _grouped_store_sites_8616(
+    artifact: SSAFunctionArtifact,
+    reachable: set[int],
+) -> dict[MemoryOutputKey8616, tuple[IRAddress, list[TerminalMemoryStoreSite8616]]]:
+    """Group proven direct-store sites by output key over reachable blocks."""
+    grouped: dict[MemoryOutputKey8616, tuple[IRAddress, list[TerminalMemoryStoreSite8616]]] = {}
+    for block in artifact.blocks:
+        if block.addr not in reachable:
+            continue
+        for instr_index, instruction in enumerate(block.instrs):
+            if instruction.op != "STORE":
+                continue
+            direct = _direct_store_8616(block.addr, instr_index, instruction)
+            if direct is None:
+                continue
+            key, address, site = direct
+            stored = grouped.setdefault(key, (address, []))
+            stored[1].append(site)
+    return grouped
+
+
+def _memory_output_facts_8616(
+    grouped: dict[MemoryOutputKey8616, tuple[IRAddress, list[TerminalMemoryStoreSite8616]]],
+    keys: tuple[MemoryOutputKey8616, ...],
+    must_write: frozenset[MemoryOutputKey8616],
+    terminals: tuple[int, ...],
+    definite_terminals: dict[MemoryOutputKey8616, tuple[int, ...]],
+) -> tuple[TerminalMemoryOutputFact8616, ...]:
+    """Materialize one dispositioned output fact per proven key."""
+    return tuple(
+        TerminalMemoryOutputFact8616(
+            address=grouped[key][0],
+            disposition=(
+                TerminalMemoryOutputDisposition8616.MUST_WRITE
+                if key in must_write
+                else TerminalMemoryOutputDisposition8616.CONDITIONAL
+            ),
+            store_sites=tuple(sorted(grouped[key][1], key=lambda site: (site.block_addr, site.instr_index))),
+            terminal_block_addrs=terminals,
+            definitely_written_terminal_block_addrs=definite_terminals[key],
+        )
+        for key in keys
+    )
+
+
 def collect_terminal_memory_output_evidence_8616(
     project: object,
     artifact: SSAFunctionArtifact,
@@ -210,19 +269,7 @@ def collect_terminal_memory_output_evidence_8616(
             raise RuntimeError("incomplete memory-output CFG refusal")
         return _refused_8616(artifact, failure, len(all_direct))
 
-    grouped: dict[MemoryOutputKey8616, tuple[IRAddress, list[TerminalMemoryStoreSite8616]]] = {}
-    for block in artifact.blocks:
-        if block.addr not in reachable:
-            continue
-        for instr_index, instruction in enumerate(block.instrs):
-            if instruction.op != "STORE":
-                continue
-            direct = _direct_store_8616(block.addr, instr_index, instruction)
-            if direct is None:
-                continue
-            key, address, site = direct
-            stored = grouped.setdefault(key, (address, []))
-            stored[1].append(site)
+    grouped = _grouped_store_sites_8616(artifact, reachable)
     if not grouped:
         return TerminalMemoryOutputEvidence8616(
             artifact.function_addr, (), None, TerminalMemoryOutputStats8616()
@@ -238,20 +285,7 @@ def collect_terminal_memory_output_evidence_8616(
         return _refused_8616(
             artifact, TerminalMemoryOutputFailure8616.TERMINAL_NOT_RETURN, len(keys), len(keys)
         )
-    facts = tuple(
-        TerminalMemoryOutputFact8616(
-            address=grouped[key][0],
-            disposition=(
-                TerminalMemoryOutputDisposition8616.MUST_WRITE
-                if key in must_write
-                else TerminalMemoryOutputDisposition8616.CONDITIONAL
-            ),
-            store_sites=tuple(sorted(grouped[key][1], key=lambda site: (site.block_addr, site.instr_index))),
-            terminal_block_addrs=terminals,
-            definitely_written_terminal_block_addrs=definite_terminals[key],
-        )
-        for key in keys
-    )
+    facts = _memory_output_facts_8616(grouped, keys, must_write, terminals, definite_terminals)
     count = len(facts)
     return TerminalMemoryOutputEvidence8616(
         artifact.function_addr,

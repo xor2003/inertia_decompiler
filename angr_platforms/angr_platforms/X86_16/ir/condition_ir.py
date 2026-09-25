@@ -752,30 +752,41 @@ def _normalize_segmented_index_duplicate_displacement_8616(value: str) -> str:
         arg: idx for idx, arg in enumerate(args[1:], start=1) if isinstance(arg, str) and arg.startswith("const:")
     }
     for idx, arg in enumerate(args[1:], start=1):
-        inner = _split_fingerprint_call_8616(arg)
-        if inner is None:
-            continue
-        inner_op, inner_args_str = inner
-        if inner_op != "Add":
-            continue
-        inner_args = _split_fingerprint_args_8616(inner_args_str)
-        inner_consts = [part for part in inner_args if part.startswith("const:")]
-        if len(inner_consts) != 1:
-            continue
-        duplicate_const = inner_consts[0]
-        duplicate_idx = const_positions.get(duplicate_const)
-        if duplicate_idx is None or duplicate_idx == idx:
-            continue
-        merged_args = [args[0]]
-        for pos, part in enumerate(args[1:], start=1):
-            if pos == duplicate_idx:
-                continue
-            if pos == idx:
-                merged_args.extend(inner_args)
-            else:
-                merged_args.append(part)
-        return f"Add({','.join(merged_args)})"
+        merged = _merged_duplicate_displacement_args_8616(args, const_positions, idx, arg)
+        if merged is not None:
+            return f"Add({','.join(merged)})"
     return f"{op}({','.join(args)})"
+
+
+def _merged_duplicate_displacement_args_8616(
+    args: list[str],
+    const_positions: dict[str, int],
+    idx: int,
+    arg: str,
+) -> list[str] | None:
+    """Merge one inner Add's duplicated const displacement into the outer args."""
+    inner = _split_fingerprint_call_8616(arg)
+    if inner is None:
+        return None
+    inner_op, inner_args_str = inner
+    if inner_op != "Add":
+        return None
+    inner_args = _split_fingerprint_args_8616(inner_args_str)
+    inner_consts = [part for part in inner_args if part.startswith("const:")]
+    if len(inner_consts) != 1:
+        return None
+    duplicate_idx = const_positions.get(inner_consts[0])
+    if duplicate_idx is None or duplicate_idx == idx:
+        return None
+    merged_args = [args[0]]
+    for pos, part in enumerate(args[1:], start=1):
+        if pos == duplicate_idx:
+            continue
+        if pos == idx:
+            merged_args.extend(inner_args)
+        else:
+            merged_args.append(part)
+    return merged_args
 
 
 def normalize_condition_fingerprint_algebraic_8616(value: str) -> str:
@@ -798,89 +809,108 @@ def normalize_condition_fingerprint_algebraic_8616(value: str) -> str:
     format. It does not mutate IR or feed results back into recovery.
     """
 
-    def _impl() -> str:
-        if not isinstance(value, str) or not value:
-            return value
+    return _normalize_algebraic_impl_8616(value)
 
-        # Handle control-flow prefixes
-        for prefix in ("if:", "ifbreak:", "while:", "dowhile:", "for:", "switch:"):
-            if value.startswith(prefix):
-                return prefix + normalize_condition_fingerprint_algebraic_8616(value[len(prefix) :])
 
-        normalized_value = _normalize_segmented_index_duplicate_displacement_8616(
-            normalize_condition_full_width_masks_8616(value)
-        )
+def _algebraic_zero_cancellation_8616(op: str, args: list[str]) -> str | None:
+    """Fold ``x - x`` and ``x + (-x)`` to the exact zero constant."""
+    if op == "Sub" and len(args) == 2 and args[0] == args[1]:
+        return "const:0"
+    if op == "Add" and len(args) == 2:
+        for value_arg, negated_arg in ((args[0], args[1]), (args[1], args[0])):
+            negated_call = _split_fingerprint_call_8616(negated_arg)
+            if negated_call is not None and negated_call[0] == "Neg":
+                negated_args = _split_fingerprint_args_8616(negated_call[1])
+                if negated_args == [value_arg]:
+                    return "const:0"
+    return None
 
-        call = _split_fingerprint_call_8616(normalized_value)
-        if call is None:
-            return normalized_value
 
-        op, args_str = call
-        args = _split_fingerprint_args_8616(args_str)
+def _cmp_sub_zero_rewrite_8616(
+    op: str,
+    args: list[str],
+    normalized_value: str,
+) -> str | None:
+    """Rewrite ``Cmp(Sub(x, y), const:0)`` to a direct operand comparison."""
+    if op not in ("CmpEQ", "CmpNE") or len(args) != 2 or args[1] != "const:0":
+        return None
+    lhs_call = _split_fingerprint_call_8616(_normalize_arg_fingerprint_8616(args[0]))
+    if lhs_call is None:
+        return None
+    lhs_op, lhs_args = lhs_call
+    if lhs_op != "Sub":
+        return None
+    sub_args = _split_fingerprint_args_8616(lhs_args)
+    if len(sub_args) == 2:
+        # Sub(x, const:c) == 0  →  x == const:c ; Sub(x, y) == 0  →  x == y
+        return f"{op}({sub_args[0]},{sub_args[1]})"
+    # Handle nested Sub: Sub(Sub(x, a), b) == 0  →  x == a+b
+    if len(sub_args) == 2:
+        inner_call = _split_fingerprint_call_8616(sub_args[0])
+        if inner_call is not None and inner_call[0] == "Sub":
+            inner_args = _split_fingerprint_args_8616(inner_call[1])
+            if (
+                len(inner_args) == 2
+                and inner_args[1].startswith("const:")
+                and sub_args[1].startswith("const:")
+            ):
+                try:
+                    a = (
+                        int(inner_args[1].split(":")[-1], 0)
+                        if inner_args[1].startswith("const:")
+                        else 0
+                    )
+                    b = (
+                        int(sub_args[1].split(":")[-1], 0)
+                        if sub_args[1].startswith("const:")
+                        else 0
+                    )
+                except (ValueError, IndexError):
+                    return normalized_value
+                c_sum = a + b
+                c_str = f"const:{c_sum:#x}" if c_sum >= 0 else f"const:{c_sum}"
+                return f"{op}({inner_args[0]},{c_str})"
+    return None
 
-        # x - x and x + (-x) are the same exact zero value.
-        if op == "Sub" and len(args) == 2 and args[0] == args[1]:
-            return "const:0"
-        if op == "Add" and len(args) == 2:
-            for value_arg, negated_arg in ((args[0], args[1]), (args[1], args[0])):
-                negated_call = _split_fingerprint_call_8616(negated_arg)
-                if negated_call is not None and negated_call[0] == "Neg":
-                    negated_args = _split_fingerprint_args_8616(negated_call[1])
-                    if negated_args == [value_arg]:
-                        return "const:0"
 
-        # Rule: CmpEQ(Sub(x,const:c),const:0) → CmpEQ(x,const:c)
-        # Rule: CmpNE(Sub(x,const:c),const:0) → CmpNE(x,const:c)
-        if op in ("CmpEQ", "CmpNE") and len(args) == 2 and args[1] == "const:0":
-            lhs_call = _split_fingerprint_call_8616(_normalize_arg_fingerprint_8616(args[0]))
-            if lhs_call is not None:
-                lhs_op, lhs_args = lhs_call
-                if lhs_op == "Sub":
-                    sub_args = _split_fingerprint_args_8616(lhs_args)
-                    if len(sub_args) == 2:
-                        # Sub(x, const:c) == 0  →  x == const:c
-                        if sub_args[1].startswith("const:"):
-                            return f"{op}({sub_args[0]},{sub_args[1]})"
-                        # Sub(x, y) == 0  →  x == y
-                        return f"{op}({sub_args[0]},{sub_args[1]})"
-                    # Handle nested Sub: Sub(Sub(x, a), b) == 0  →  x == a+b
-                    if len(sub_args) == 2:
-                        inner_call = _split_fingerprint_call_8616(sub_args[0])
-                        if inner_call is not None and inner_call[0] == "Sub":
-                            inner_args = _split_fingerprint_args_8616(inner_call[1])
-                            if (
-                                len(inner_args) == 2
-                                and inner_args[1].startswith("const:")
-                                and sub_args[1].startswith("const:")
-                            ):
-                                try:
-                                    a = (
-                                        int(inner_args[1].split(":")[-1], 0)
-                                        if inner_args[1].startswith("const:")
-                                        else 0
-                                    )
-                                    b = (
-                                        int(sub_args[1].split(":")[-1], 0)
-                                        if sub_args[1].startswith("const:")
-                                        else 0
-                                    )
-                                except (ValueError, IndexError):
-                                    return normalized_value
-                                c_sum = a + b
-                                c_str = f"const:{c_sum:#x}" if c_sum >= 0 else f"const:{c_sum}"
-                                return f"{op}({inner_args[0]},{c_str})"
+def _normalize_algebraic_impl_8616(value: str) -> str:
+    """Apply the algebraic fingerprint rules to one normalized value string."""
+    if not isinstance(value, str) or not value:
+        return value
 
-        # Recurse into args for nested normalization
-        normalized_args = [_normalize_arg_fingerprint_8616(a) for a in args]
-        canonical = _canonicalize_add_neg_fingerprint_8616(op, normalized_args)
-        if canonical is not None:
-            return canonical
-        if normalized_args != args:
-            return f"{op}({','.join(normalized_args)})"
+    # Handle control-flow prefixes
+    for prefix in ("if:", "ifbreak:", "while:", "dowhile:", "for:", "switch:"):
+        if value.startswith(prefix):
+            return prefix + normalize_condition_fingerprint_algebraic_8616(value[len(prefix) :])
 
+    normalized_value = _normalize_segmented_index_duplicate_displacement_8616(
+        normalize_condition_full_width_masks_8616(value)
+    )
+
+    call = _split_fingerprint_call_8616(normalized_value)
+    if call is None:
         return normalized_value
 
-    return _impl()
+    op, args_str = call
+    args = _split_fingerprint_args_8616(args_str)
+
+    zero = _algebraic_zero_cancellation_8616(op, args)
+    if zero is not None:
+        return zero
+
+    rewritten = _cmp_sub_zero_rewrite_8616(op, args, normalized_value)
+    if rewritten is not None:
+        return rewritten
+
+    # Recurse into args for nested normalization
+    normalized_args = [_normalize_arg_fingerprint_8616(a) for a in args]
+    canonical = _canonicalize_add_neg_fingerprint_8616(op, normalized_args)
+    if canonical is not None:
+        return canonical
+    if normalized_args != args:
+        return f"{op}({','.join(normalized_args)})"
+
+    return normalized_value
 
 
 def _normalize_arg_fingerprint_8616(arg: str) -> str:
@@ -994,6 +1024,11 @@ def _linear_ds_offset_fingerprint_8616(value: str) -> tuple[bool, int] | None:
         return True, 0
     if op not in {"Add", "Sub"} or not args:
         return None
+    return _fold_linear_ds_args_8616(op, args)
+
+
+def _fold_linear_ds_args_8616(op: str, args: list[str]) -> tuple[bool, int] | None:
+    """Fold Add/Sub argument offsets into one linear ds+offset result."""
     has_ds = False
     offset = 0
     for index, arg in enumerate(args):

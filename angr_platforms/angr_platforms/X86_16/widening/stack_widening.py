@@ -154,6 +154,134 @@ def _register_version_for_expr(expr: object, state: AliasState | None) -> int | 
     return version if isinstance(version, int) else None
 
 
+def _adjacent_refusal_8616(
+    reason: str,
+    low_facts: AliasStorageFacts,
+    high_facts: AliasStorageFacts,
+    low_version: int | None,
+    high_version: int | None,
+) -> WideningProof:
+    """Build a refused widening proof carrying the version evidence."""
+    return WideningProof(
+        False,
+        reason,
+        low_facts,
+        high_facts,
+        left_version=low_version,
+        right_version=high_version,
+    )
+
+
+def _shared_register_value_8616(
+    low_facts: AliasStorageFacts,
+    high_facts: AliasStorageFacts,
+) -> str | None:
+    """Return the register name both slice identities agree on."""
+    if low_facts.identity is None or high_facts.identity is None:
+        return None
+    low_kind, low_value = low_facts.identity
+    high_kind, high_value = high_facts.identity
+    if (
+        low_kind == high_kind == "register"
+        and low_value == high_value
+        and isinstance(low_value, str)
+    ):
+        return low_value
+    return None
+
+
+def _register_pair_identity_8616(
+    low_facts: AliasStorageFacts,
+    high_facts: AliasStorageFacts,
+) -> str | None:
+    """Return the shared register when both slices order as a named pair."""
+    low_value = _shared_register_value_8616(low_facts, high_facts)
+    if low_value is None:
+        return None
+    low_view = low_facts.domain.view
+    high_view = high_facts.domain.view
+    if (
+        low_view is not None
+        and high_view is not None
+        and low_view.bit_offset < high_view.bit_offset
+    ):
+        return low_value
+    return None
+
+
+def _register_version_verdict_8616(
+    register_pair: str | None,
+    low_facts: AliasStorageFacts,
+    high_facts: AliasStorageFacts,
+    low_version: int | None,
+    high_version: int | None,
+) -> WideningProof | None:
+    """Check pair/version evidence when an alias state is supplied."""
+    if register_pair is None:
+        return _adjacent_refusal_8616(
+            "register_pair_mismatch", low_facts, high_facts, low_version, high_version,
+        )
+    if low_version is None or high_version is None:
+        return _adjacent_refusal_8616(
+            "missing_version_evidence", low_facts, high_facts, low_version, high_version,
+        )
+    if low_version != high_version:
+        return _adjacent_refusal_8616(
+            "version_mismatch", low_facts, high_facts, low_version, high_version,
+        )
+    return None
+
+
+def _prove_adjacent_slices_8616(
+    low_expr: object,
+    high_expr: object,
+    alias_state: AliasState | None,
+    version_resolver: Callable[[object, AliasState | None], int | None],
+) -> WideningProof:
+    """Run the adjacent-slice proof ladder over alias storage facts."""
+    low_facts = describe_alias_storage(low_expr)
+    high_facts = describe_alias_storage(high_expr)
+    register_pair = _register_pair_identity_8616(low_facts, high_facts)
+    low_version = version_resolver(low_expr, alias_state)
+    high_version = version_resolver(high_expr, alias_state)
+
+    if low_facts.needs_synthesis() or high_facts.needs_synthesis():
+        return _adjacent_refusal_8616(
+            "needs_synthesis", low_facts, high_facts, low_version, high_version,
+        )
+    if not same_alias_storage_domain(low_expr, high_expr):
+        return _adjacent_refusal_8616(
+            "domain_mismatch", low_facts, high_facts, low_version, high_version,
+        )
+    if not can_join_alias_storage(low_expr, high_expr):
+        return _adjacent_refusal_8616(
+            "view_mismatch", low_facts, high_facts, low_version, high_version,
+        )
+    if alias_state is not None and (
+        low_facts.identity is not None
+        and high_facts.identity is not None
+        and low_facts.identity[0] == "register"
+        and high_facts.identity[0] == "register"
+    ):
+        verdict = _register_version_verdict_8616(
+            register_pair, low_facts, high_facts, low_version, high_version,
+        )
+        if verdict is not None:
+            return verdict
+
+    merged_domain = _merge_storage_domains(_storage_domain_for_expr(low_expr), _storage_domain_for_expr(high_expr))
+    return WideningProof(
+        True,
+        "ok",
+        low_facts,
+        high_facts,
+        merged_domain=merged_domain,
+        register_pair=register_pair,
+        left_version=low_version,
+        right_version=high_version,
+    )
+
+
 def prove_adjacent_storage_slices(
     low_expr: object,
     high_expr: object,
@@ -162,88 +290,12 @@ def prove_adjacent_storage_slices(
     register_version_for_expr: Callable[[object, AliasState | None], int | None] | None = None,
 ) -> WideningProof:
     """Prove whether two adjacent slices can be joined by the widening layer."""
-
-    def _impl() -> WideningProof:
-        version_resolver = register_version_for_expr or _register_version_for_expr
-        low_facts = describe_alias_storage(low_expr)
-        high_facts = describe_alias_storage(high_expr)
-        register_pair: str | None = None
-        if low_facts.identity is not None and high_facts.identity is not None:
-            low_kind, low_value = low_facts.identity
-            high_kind, high_value = high_facts.identity
-            low_view = low_facts.domain.view
-            high_view = high_facts.domain.view
-            if (
-                low_kind == high_kind == "register"
-                and low_value == high_value
-                and isinstance(low_value, str)
-                and low_view is not None
-                and high_view is not None
-                and low_view.bit_offset < high_view.bit_offset
-            ):
-                register_pair = low_value
-        low_version = version_resolver(low_expr, alias_state)
-        high_version = version_resolver(high_expr, alias_state)
-
-        if low_facts.needs_synthesis() or high_facts.needs_synthesis():
-            return WideningProof(
-                False, "needs_synthesis", low_facts, high_facts, left_version=low_version, right_version=high_version
-            )
-        if not same_alias_storage_domain(low_expr, high_expr):
-            return WideningProof(
-                False, "domain_mismatch", low_facts, high_facts, left_version=low_version, right_version=high_version
-            )
-        if not can_join_alias_storage(low_expr, high_expr):
-            return WideningProof(
-                False, "view_mismatch", low_facts, high_facts, left_version=low_version, right_version=high_version
-            )
-        if alias_state is not None and (
-            low_facts.identity is not None
-            and high_facts.identity is not None
-            and low_facts.identity[0] == "register"
-            and high_facts.identity[0] == "register"
-        ):
-            if register_pair is None:
-                return WideningProof(
-                    False,
-                    "register_pair_mismatch",
-                    low_facts,
-                    high_facts,
-                    left_version=low_version,
-                    right_version=high_version,
-                )
-            if low_version is None or high_version is None:
-                return WideningProof(
-                    False,
-                    "missing_version_evidence",
-                    low_facts,
-                    high_facts,
-                    left_version=low_version,
-                    right_version=high_version,
-                )
-            if low_version != high_version:
-                return WideningProof(
-                    False,
-                    "version_mismatch",
-                    low_facts,
-                    high_facts,
-                    left_version=low_version,
-                    right_version=high_version,
-                )
-
-        merged_domain = _merge_storage_domains(_storage_domain_for_expr(low_expr), _storage_domain_for_expr(high_expr))
-        return WideningProof(
-            True,
-            "ok",
-            low_facts,
-            high_facts,
-            merged_domain=merged_domain,
-            register_pair=register_pair,
-            left_version=low_version,
-            right_version=high_version,
-        )
-
-    return _impl()
+    return _prove_adjacent_slices_8616(
+        low_expr,
+        high_expr,
+        alias_state,
+        register_version_for_expr or _register_version_for_expr,
+    )
 
 
 def prove_contained_stack_subview(

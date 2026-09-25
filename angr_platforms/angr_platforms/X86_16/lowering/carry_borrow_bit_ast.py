@@ -257,19 +257,34 @@ def _equivalent_low_arm_assignment_8616(
     second = statement.else_node.statements[0]
     low_site = CFGInstructionSite8616(fact.low_block_addr, fact.low_ins_addr)
     operation = "Sub" if fact.kind is CarryBorrowKind8616.SUB_WITH_BORROW else "Add"
-    if (
-        not isinstance(first, CAssignment)
-        or not isinstance(second, CAssignment)
-        or not isinstance(first.lhs, CVariable)
-        or not isinstance(second.lhs, CVariable)
-        or variable_key_8616(first.lhs) != variable_key_8616(second.lhs)
-        or not isinstance(first.rhs, CBinaryOp)
-        or first.rhs.op != operation
-        or not node_matches_instruction_site_8616(first.rhs, low_site, ownership)
-        or not _same_c_expression_8616(first.rhs, second.rhs)
+    arms = _same_variable_assignments_8616(first, second)
+    if arms is None:
+        return None
+    first, second = arms
+    if not (
+        isinstance(first.rhs, CBinaryOp)
+        and first.rhs.op == operation
+        and node_matches_instruction_site_8616(first.rhs, low_site, ownership)
+        and _same_c_expression_8616(first.rhs, second.rhs)
     ):
         return None
     return first
+
+
+def _same_variable_assignments_8616(
+    first: object,
+    second: object,
+) -> tuple[CAssignment, CAssignment] | None:
+    """Return both assignments when they bind the same C-SSA variable."""
+    if not (
+        isinstance(first, CAssignment)
+        and isinstance(second, CAssignment)
+        and isinstance(first.lhs, CVariable)
+        and isinstance(second.lhs, CVariable)
+        and variable_key_8616(first.lhs) == variable_key_8616(second.lhs)
+    ):
+        return None
+    return first, second
 
 
 def _collapse_equivalent_low_arms_8616(

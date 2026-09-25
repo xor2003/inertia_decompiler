@@ -19,7 +19,7 @@ decoder helpers below; owned summaries and contracts use direct typed access.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 from capstone import CS_AC_WRITE
@@ -175,6 +175,20 @@ def _memory_space_8616(mem: DynamicValue) -> MemSpace:
     return MemSpace.UNKNOWN
 
 
+def _direct_addressing_8616(mem: object) -> bool:
+    """Return whether one capstone mem operand is direct [disp] addressing."""
+    return (
+        cast(Any, mem).base == X86_REG_INVALID
+        and cast(Any, mem).index == X86_REG_INVALID
+        and isinstance(cast(Any, mem).disp, int)
+    )
+
+
+def _positive_size_8616(operand: object) -> bool:
+    """Return whether one operand has a positive integer byte size."""
+    return isinstance(cast(Any, operand).size, int) and cast(Any, operand).size > 0
+
+
 def _memory_write_8616(operand: DynamicValue) -> tuple[IRAddress | None, bool]:
     """Classify one written memory operand as exact, local-stack, or unknown."""
     mem = cast(Any, operand).mem
@@ -183,11 +197,8 @@ def _memory_write_8616(operand: DynamicValue) -> tuple[IRAddress | None, bool]:
         return None, False
     if (
         space not in {MemSpace.DS, MemSpace.ES}
-        or mem.base != X86_REG_INVALID
-        or mem.index != X86_REG_INVALID
-        or not isinstance(mem.disp, int)
-        or not isinstance(cast(Any, operand).size, int)
-        or operand.size <= 0
+        or not _direct_addressing_8616(mem)
+        or not _positive_size_8616(operand)
     ):
         return None, True
     return (
@@ -233,6 +244,114 @@ def _instruction_effects_8616(
     )
 
 
+@dataclass(slots=True)
+class _BinaryFunctionScan8616:
+    """Mutable worklist state for one binary function summary scan."""
+
+    project: object
+    depth: int
+    next_active: frozenset[int]
+    cache: dict[int, _BinaryFunctionSummary8616]
+    worklist: list[tuple[int, bool]]
+    visited: set[tuple[int, bool]] = field(default_factory=set)
+    exact_writes: set[IRAddress] = field(default_factory=set)
+    unknown_write: bool = False
+    return_states: list[bool] = field(default_factory=list)
+
+    def apply_call(self, insn: DynamicValue) -> bool:
+        """Transfer one direct call through the callee summary."""
+        call_target = _direct_target_8616(insn)
+        if call_target is None:
+            self.unknown_write = True
+            return False
+        callee = _analyze_binary_function_8616(
+            self.project,
+            call_target,
+            depth=self.depth + 1,
+            active_targets=self.next_active,
+            cache=self.cache,
+        )
+        self.exact_writes.update(callee.exact_memory_writes)
+        self.unknown_write = (
+            self.unknown_write or callee.has_unknown_memory_writes
+        )
+        return callee.return_count > 0 and callee.all_returns_nonnegative_ax
+
+    def enqueue_jump(
+        self,
+        insn: DynamicValue,
+        next_addr: int,
+        ax_sign_clear: bool,
+    ) -> None:
+        """Enqueue the proven jump target and conditional fallthrough."""
+        jump_target = _direct_target_8616(insn)
+        if jump_target is None:
+            self.unknown_write = True
+        elif _address_is_mapped_8616(self.project, jump_target):
+            self.worklist.append((jump_target, ax_sign_clear))
+        else:
+            self.unknown_write = True
+        if insn.id != X86_INS_JMP:
+            self.worklist.append((next_addr, ax_sign_clear))
+
+    def scan_block(self, block_addr: int, ax_sign_clear: bool) -> None:
+        """Decode and transfer one block onto the scan state."""
+        try:
+            wrappers = _decode_block_8616(self.project, block_addr)
+        except (AttributeError, KeyError, ValueError):
+            self.unknown_write = True
+            return
+        if not wrappers:
+            self.unknown_write = True
+            return
+
+        for wrapper in wrappers:
+            insn = _instruction_from_wrapper_8616(wrapper)
+            next_addr = insn.address + insn.size
+            if insn.id in {X86_INS_CALL, X86_INS_LCALL}:
+                ax_sign_clear = self.apply_call(insn)
+                continue
+
+            effects = _instruction_effects_8616(insn, ax_sign_clear)
+            ax_sign_clear = effects.ax_sign_clear
+            self.exact_writes.update(effects.exact_memory_writes)
+            self.unknown_write = (
+                self.unknown_write or effects.has_unknown_memory_write
+            )
+            if insn.group(X86_GRP_RET):
+                self.return_states.append(ax_sign_clear)
+                return
+            if insn.group(X86_GRP_JUMP):
+                self.enqueue_jump(insn, next_addr, ax_sign_clear)
+                return
+
+        last_insn = _instruction_from_wrapper_8616(wrappers[-1])
+        fallthrough = last_insn.address + last_insn.size
+        if _address_is_mapped_8616(self.project, fallthrough):
+            self.worklist.append((fallthrough, ax_sign_clear))
+        else:
+            self.unknown_write = True
+
+    def summary(self) -> _BinaryFunctionSummary8616:
+        """Materialize the converged conservative summary."""
+        return _BinaryFunctionSummary8616(
+            all_returns_nonnegative_ax=bool(self.return_states)
+            and all(self.return_states),
+            return_count=len(self.return_states),
+            exact_memory_writes=tuple(
+                sorted(
+                    self.exact_writes,
+                    key=lambda address: (
+                        address.space.value,
+                        address.offset,
+                        address.size,
+                    ),
+                )
+            ),
+            has_unknown_memory_writes=self.unknown_write,
+        )
+
+
 def _analyze_binary_function_8616(
     project: object,
     target: int,
@@ -252,104 +371,25 @@ def _analyze_binary_function_8616(
     ):
         return _BinaryFunctionSummary8616(False, 0, (), True)
 
-    worklist: list[tuple[int, bool]] = [(target, False)]
-    visited: set[tuple[int, bool]] = set()
-    exact_writes: set[IRAddress] = set()
-    unknown_write = False
-    return_states: list[bool] = []
-    next_active = active_targets | {target}
-
-    while worklist:
-        block_addr, ax_sign_clear = worklist.pop()
-        state_key = (block_addr, ax_sign_clear)
-        if state_key in visited:
-            continue
-        if len(visited) >= _MAX_FUNCTION_BLOCKS_8616:
-            unknown_write = True
-            break
-        visited.add(state_key)
-        try:
-            wrappers = _decode_block_8616(project, block_addr)
-        except (AttributeError, KeyError, ValueError):
-            unknown_write = True
-            continue
-        if not wrappers:
-            unknown_write = True
-            continue
-
-        terminated = False
-        for wrapper in wrappers:
-            insn = _instruction_from_wrapper_8616(wrapper)
-            next_addr = insn.address + insn.size
-            if insn.id in {X86_INS_CALL, X86_INS_LCALL}:
-                call_target = _direct_target_8616(insn)
-                if call_target is None:
-                    ax_sign_clear = False
-                    unknown_write = True
-                    continue
-                callee = _analyze_binary_function_8616(
-                    project,
-                    call_target,
-                    depth=depth + 1,
-                    active_targets=next_active,
-                    cache=cache,
-                )
-                exact_writes.update(callee.exact_memory_writes)
-                unknown_write = (
-                    unknown_write or callee.has_unknown_memory_writes
-                )
-                ax_sign_clear = (
-                    callee.return_count > 0
-                    and callee.all_returns_nonnegative_ax
-                )
-                continue
-
-            effects = _instruction_effects_8616(insn, ax_sign_clear)
-            ax_sign_clear = effects.ax_sign_clear
-            exact_writes.update(effects.exact_memory_writes)
-            unknown_write = (
-                unknown_write or effects.has_unknown_memory_write
-            )
-            if insn.group(X86_GRP_RET):
-                return_states.append(ax_sign_clear)
-                terminated = True
-                break
-            if insn.group(X86_GRP_JUMP):
-                jump_target = _direct_target_8616(insn)
-                if jump_target is None:
-                    unknown_write = True
-                elif _address_is_mapped_8616(project, jump_target):
-                    worklist.append((jump_target, ax_sign_clear))
-                else:
-                    unknown_write = True
-                if insn.id != X86_INS_JMP:
-                    worklist.append((next_addr, ax_sign_clear))
-                terminated = True
-                break
-
-        if not terminated:
-            last_insn = _instruction_from_wrapper_8616(wrappers[-1])
-            fallthrough = last_insn.address + last_insn.size
-            if _address_is_mapped_8616(project, fallthrough):
-                worklist.append((fallthrough, ax_sign_clear))
-            else:
-                unknown_write = True
-
-    summary = _BinaryFunctionSummary8616(
-        all_returns_nonnegative_ax=bool(return_states) and all(return_states),
-        return_count=len(return_states),
-        exact_memory_writes=tuple(
-            sorted(
-                exact_writes,
-                key=lambda address: (
-                    address.space.value,
-                    address.offset,
-                    address.size,
-                ),
-            )
-        ),
-        has_unknown_memory_writes=unknown_write,
+    scan = _BinaryFunctionScan8616(
+        project=project,
+        depth=depth,
+        next_active=active_targets | {target},
+        cache=cache,
+        worklist=[(target, False)],
     )
+    while scan.worklist:
+        block_addr, ax_sign_clear = scan.worklist.pop()
+        state_key = (block_addr, ax_sign_clear)
+        if state_key in scan.visited:
+            continue
+        if len(scan.visited) >= _MAX_FUNCTION_BLOCKS_8616:
+            scan.unknown_write = True
+            break
+        scan.visited.add(state_key)
+        scan.scan_block(block_addr, ax_sign_clear)
+
+    summary = scan.summary()
     cache[target] = summary
     return summary
 

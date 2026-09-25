@@ -141,6 +141,62 @@ def _frame_teardown_8616(insn: object) -> bool:
     )
 
 
+def _graph_node_census_8616(
+    nodes: tuple[object, ...],
+) -> tuple[dict[int, list[object]], list[tuple[int, int]]]:
+    """Index graph nodes by address and record exact block ranges."""
+    nodes_by_addr: dict[int, list[object]] = {}
+    block_ranges: list[tuple[int, int]] = []
+    for node in nodes:
+        node_addr = _dynamic_attr_8616(node, "addr", None)
+        node_size = _dynamic_attr_8616(node, "size", None)
+        if not isinstance(node_addr, int) or not isinstance(node_size, int) or node_size <= 0:
+            continue
+        nodes_by_addr.setdefault(node_addr, []).append(node)
+        block_ranges.append((node_addr, node_size))
+    return nodes_by_addr, block_ranges
+
+
+@dataclass(frozen=True, slots=True)
+class _AngrGraphCallbacks8616:
+    """Bound angr function-graph adapters for the typed path proof."""
+
+    graph: object
+    nodes_by_addr: dict[int, list[object]]
+    project_surface: _AngrProjectSurface8616
+
+    def load_block(self, block_addr: int, block_size: int) -> object | None:
+        """Load one exact-size block through the active project factory."""
+        block_builder = _dynamic_attr_8616(self.project_surface.factory, "block", None)
+        if not callable(block_builder):
+            return None
+        return cast(object | None, block_builder(block_addr, size=block_size))
+
+    def successor_addrs(self, block_addr: int) -> tuple[int, ...]:
+        """Return exact in-function successor addresses or raise on ambiguity."""
+        candidates = tuple(self.nodes_by_addr.get(block_addr, ()))
+        successor_reader = _dynamic_attr_8616(self.graph, "successors", None)
+        if len(candidates) != 1 or not callable(successor_reader):
+            raise ValueError(f"ambiguous function graph node at {block_addr:#x}")
+        successors = _dynamic_tuple_8616(successor_reader(candidates[0]))
+        addresses: list[int] = []
+        for successor in successors:
+            successor_addr = _dynamic_attr_8616(successor, "addr", None)
+            if not isinstance(successor_addr, int):
+                raise ValueError(f"missing successor address at {block_addr:#x}")
+            addresses.append(successor_addr)
+        return tuple(addresses)
+
+    @staticmethod
+    def branch_target_imm(insn: object) -> int | None:
+        """Return one exact direct branch target through Capstone operands."""
+        operands = _instruction_operands_8616(insn)
+        if not operands or _dynamic_attr_8616(operands[0], "type", -1) != 2:
+            return None
+        immediate = _dynamic_attr_8616(operands[0], "imm", None)
+        return immediate if isinstance(immediate, int) else None
+
+
 def angr_terminal_call_path_callbacks_8616(
     project: object,
     function: object,
@@ -153,55 +209,182 @@ def angr_terminal_call_path_callbacks_8616(
         nodes = _dynamic_tuple_8616(raw_nodes)
     except Exception:
         nodes = ()
-    nodes_by_addr: dict[int, list[object]] = {}
-    block_ranges: list[tuple[int, int]] = []
-    for node in nodes:
-        node_addr = _dynamic_attr_8616(node, "addr", None)
-        node_size = _dynamic_attr_8616(node, "size", None)
-        if not isinstance(node_addr, int) or not isinstance(node_size, int) or node_size <= 0:
-            continue
-        nodes_by_addr.setdefault(node_addr, []).append(node)
-        block_ranges.append((node_addr, node_size))
+    nodes_by_addr, block_ranges = _graph_node_census_8616(nodes)
 
-    project_surface = cast(_AngrProjectSurface8616, project)
-
-    def _load_block(block_addr: int, block_size: int) -> object | None:
-        """Load one exact-size block through the active project factory."""
-        block_builder = _dynamic_attr_8616(project_surface.factory, "block", None)
-        if not callable(block_builder):
-            return None
-        return cast(object | None, block_builder(block_addr, size=block_size))
-
-    def _successor_addrs(block_addr: int) -> tuple[int, ...]:
-        """Return exact in-function successor addresses or raise on ambiguity."""
-        candidates = tuple(nodes_by_addr.get(block_addr, ()))
-        successor_reader = _dynamic_attr_8616(graph, "successors", None)
-        if len(candidates) != 1 or not callable(successor_reader):
-            raise ValueError(f"ambiguous function graph node at {block_addr:#x}")
-        successors = _dynamic_tuple_8616(successor_reader(candidates[0]))
-        addresses: list[int] = []
-        for successor in successors:
-            successor_addr = _dynamic_attr_8616(successor, "addr", None)
-            if not isinstance(successor_addr, int):
-                raise ValueError(f"missing successor address at {block_addr:#x}")
-            addresses.append(successor_addr)
-        return tuple(addresses)
-
-    def _branch_target_imm(insn: object) -> int | None:
-        """Return one exact direct branch target through Capstone operands."""
-        operands = _instruction_operands_8616(insn)
-        if not operands or _dynamic_attr_8616(operands[0], "type", -1) != 2:
-            return None
-        immediate = _dynamic_attr_8616(operands[0], "imm", None)
-        return immediate if isinstance(immediate, int) else None
-
+    adapters = _AngrGraphCallbacks8616(
+        graph, nodes_by_addr, cast(_AngrProjectSurface8616, project)
+    )
     callbacks = TerminalCallPathCallbacks8616(
         function_block_ranges=lambda: tuple(block_ranges),
-        load_block=_load_block,
-        successor_addrs=_successor_addrs,
-        branch_target_imm=_branch_target_imm,
+        load_block=adapters.load_block,
+        successor_addrs=adapters.successor_addrs,
+        branch_target_imm=adapters.branch_target_imm,
     )
     return boundary_terminal_callbacks_8616(function, callbacks)
+
+
+def _first_block_call_site_8616(
+    insns: tuple[object, ...],
+    call_ins_addr: int,
+) -> tuple[int, int | None] | None:
+    """Resolve the exact call instruction inside the containing block."""
+    exact_call_indexes = tuple(
+        index
+        for index, insn in enumerate(insns)
+        if _dynamic_attr_8616(insn, "address", -1) == call_ins_addr
+        and terminal_ax_return_effect_8616(insn).kind is TerminalAxReturnEffectKind8616.CALL_CLOBBER
+    )
+    if len(exact_call_indexes) != 1:
+        return None
+    return exact_call_indexes[0] + 1, _direct_call_target_8616(insns[exact_call_indexes[0]])
+
+
+@dataclass(slots=True)
+class _PostCallInsnScan8616:
+    """Scan one block's post-call instructions for a proven path edge."""
+
+    callbacks: TerminalCallPathCallbacks8616
+    block_ranges: tuple[tuple[int, int], ...]
+    saw_return: bool = False
+    saw_jump: bool = False
+    saw_external_conditional_jump: bool = False
+    return_instruction_addr: int | None = None
+    jump_target: int | None = None
+    conditional_fallthrough: int | None = None
+
+    def run(
+        self,
+        insns: tuple[object, ...],
+        scan_start: int,
+    ) -> TerminalCallPathStatus8616 | None:
+        """Scan instructions after the call; return a failure status or None."""
+        for index, insn in enumerate(insns[scan_start:], start=scan_start):
+            status = self._process(insn, index, len(insns))
+            if status is not None:
+                return status
+        return None
+
+    def _process(
+        self,
+        insn: object,
+        index: int,
+        insn_count: int,
+    ) -> TerminalCallPathStatus8616 | None:
+        """Classify one post-call instruction and record path edge state."""
+        mnemonic = str(_dynamic_attr_8616(insn, "mnemonic", "")).lower()
+        if mnemonic in {"ret", "retf", "iret"}:
+            return self._ret(insn, index, insn_count)
+        if mnemonic in {"jmp", "ljmp"}:
+            return self._jmp(insn, index, insn_count)
+        if mnemonic.startswith("j"):
+            return self._jcc(insn, index, insn_count)
+        if _stack_adjust_8616(insn) or _frame_teardown_8616(insn):
+            return None
+        return TerminalCallPathStatus8616.UNSAFE_POST_CALL_EFFECT
+
+    def _ret(self, insn: object, index: int, insn_count: int) -> TerminalCallPathStatus8616 | None:
+        """Accept a block-terminal machine return and record its address."""
+        if index != insn_count - 1:
+            return TerminalCallPathStatus8616.UNSAFE_POST_CALL_EFFECT
+        self.saw_return = True
+        decoded_return_addr = _dynamic_attr_8616(insn, "address", None)
+        self.return_instruction_addr = (
+            decoded_return_addr if isinstance(decoded_return_addr, int) else None
+        )
+        return None
+
+    def _jmp(self, insn: object, index: int, insn_count: int) -> TerminalCallPathStatus8616 | None:
+        """Accept a block-terminal direct jump and record its target."""
+        if index != insn_count - 1:
+            return TerminalCallPathStatus8616.UNSAFE_POST_CALL_EFFECT
+        try:
+            self.jump_target = self.callbacks.branch_target_imm(insn)
+        except Exception:
+            return TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS
+        if self.jump_target is None:
+            return TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS
+        self.saw_jump = True
+        return None
+
+    def _jcc(self, insn: object, index: int, insn_count: int) -> TerminalCallPathStatus8616 | None:
+        """Accept a block-terminal out-of-function conditional jump."""
+        if index != insn_count - 1:
+            return TerminalCallPathStatus8616.UNSAFE_POST_CALL_EFFECT
+        try:
+            self.jump_target = self.callbacks.branch_target_imm(insn)
+        except Exception:
+            return TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS
+        instruction_addr = _dynamic_attr_8616(insn, "address", None)
+        instruction_size = _dynamic_attr_8616(insn, "size", None)
+        if (
+            self.jump_target is None
+            or not isinstance(instruction_addr, int)
+            or not isinstance(instruction_size, int)
+            or instruction_size <= 0
+            or any(
+                block_addr <= self.jump_target < block_addr + block_size
+                for block_addr, block_size in self.block_ranges
+            )
+        ):
+            return TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS
+        self.conditional_fallthrough = instruction_addr + instruction_size
+        self.saw_external_conditional_jump = True
+        return None
+
+
+def _path_tail_8616(
+    scan: _PostCallInsnScan8616,
+    successors: tuple[int, ...],
+    call_target_addr: int | None,
+    path: list[int],
+) -> TerminalCallPathResult8616 | int:
+    """Return the terminal result or the next block address for the path."""
+    if scan.saw_return:
+        status = (
+            TerminalCallPathStatus8616.PROVEN
+            if not successors and scan.return_instruction_addr is not None
+            else TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS
+        )
+        return TerminalCallPathResult8616(
+            status,
+            tuple(path),
+            call_target_addr,
+            scan.return_instruction_addr,
+        )
+    if len(successors) != 1:
+        status = (
+            TerminalCallPathStatus8616.RETURN_NOT_REACHED
+            if not successors
+            else TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS
+        )
+        return TerminalCallPathResult8616(status, tuple(path))
+    if scan.saw_external_conditional_jump and successors[0] != scan.conditional_fallthrough:
+        return TerminalCallPathResult8616(
+            TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS,
+            tuple(path),
+        )
+    if scan.saw_jump and scan.jump_target != successors[0]:
+        return TerminalCallPathResult8616(TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS, tuple(path))
+    return successors[0]
+
+
+def _block_instructions_8616(
+    callbacks: TerminalCallPathCallbacks8616,
+    size_by_addr: dict[int, int],
+    current_addr: int,
+) -> tuple[object, ...] | None:
+    """Load and decode one path block's instructions, or None on ambiguity."""
+    block_size = size_by_addr.get(current_addr)
+    if block_size is None:
+        return None
+    try:
+        block = callbacks.load_block(current_addr, block_size)
+    except Exception:
+        return None
+    if block is None:
+        return None
+    capstone = _dynamic_attr_8616(block, "capstone", None)
+    return _dynamic_tuple_8616(_dynamic_attr_8616(capstone, "insns", ()))
 
 
 def prove_terminal_call_path_8616(
@@ -235,140 +418,31 @@ def prove_terminal_call_path_8616(
     while current_addr not in visited and len(path) <= len(block_ranges):
         visited.add(current_addr)
         path.append(current_addr)
-        block_size = size_by_addr.get(current_addr)
-        if block_size is None:
+        insns = _block_instructions_8616(callbacks, size_by_addr, current_addr)
+        if insns is None:
             return TerminalCallPathResult8616(TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS, tuple(path))
-        try:
-            block = callbacks.load_block(current_addr, block_size)
-        except Exception:
-            return TerminalCallPathResult8616(TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS, tuple(path))
-        if block is None:
-            return TerminalCallPathResult8616(TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS, tuple(path))
-        capstone = _dynamic_attr_8616(block, "capstone", None)
-        insns = _dynamic_tuple_8616(_dynamic_attr_8616(capstone, "insns", ()))
         scan_start = 0
         if first_block:
-            exact_call_indexes = tuple(
-                index
-                for index, insn in enumerate(insns)
-                if _dynamic_attr_8616(insn, "address", -1) == call_ins_addr
-                and terminal_ax_return_effect_8616(insn).kind is TerminalAxReturnEffectKind8616.CALL_CLOBBER
-            )
-            if len(exact_call_indexes) != 1:
+            call_site = _first_block_call_site_8616(insns, call_ins_addr)
+            if call_site is None:
                 return TerminalCallPathResult8616(
                     TerminalCallPathStatus8616.CALL_INSTRUCTION_MISSING_OR_AMBIGUOUS,
                     tuple(path),
                 )
-            call_target_addr = _direct_call_target_8616(insns[exact_call_indexes[0]])
-            scan_start = exact_call_indexes[0] + 1
+            scan_start, call_target_addr = call_site
             first_block = False
 
-        saw_jump = False
-        saw_external_conditional_jump = False
-        saw_return = False
-        return_instruction_addr: int | None = None
-        jump_target: int | None = None
-        conditional_fallthrough: int | None = None
-        for index, insn in enumerate(insns[scan_start:], start=scan_start):
-            mnemonic = str(_dynamic_attr_8616(insn, "mnemonic", "")).lower()
-            if mnemonic in {"ret", "retf", "iret"}:
-                if index != len(insns) - 1:
-                    return TerminalCallPathResult8616(
-                        TerminalCallPathStatus8616.UNSAFE_POST_CALL_EFFECT,
-                        tuple(path),
-                    )
-                saw_return = True
-                decoded_return_addr = _dynamic_attr_8616(insn, "address", None)
-                return_instruction_addr = decoded_return_addr if isinstance(decoded_return_addr, int) else None
-                continue
-            if mnemonic in {"jmp", "ljmp"}:
-                if index != len(insns) - 1:
-                    return TerminalCallPathResult8616(
-                        TerminalCallPathStatus8616.UNSAFE_POST_CALL_EFFECT,
-                        tuple(path),
-                    )
-                try:
-                    jump_target = callbacks.branch_target_imm(insn)
-                except Exception:
-                    return TerminalCallPathResult8616(
-                        TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS,
-                        tuple(path),
-                    )
-                if jump_target is None:
-                    return TerminalCallPathResult8616(
-                        TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS,
-                        tuple(path),
-                    )
-                saw_jump = True
-                continue
-            if mnemonic.startswith("j") and mnemonic not in {"jmp", "ljmp"}:
-                if index != len(insns) - 1:
-                    return TerminalCallPathResult8616(
-                        TerminalCallPathStatus8616.UNSAFE_POST_CALL_EFFECT,
-                        tuple(path),
-                    )
-                try:
-                    jump_target = callbacks.branch_target_imm(insn)
-                except Exception:
-                    return TerminalCallPathResult8616(
-                        TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS,
-                        tuple(path),
-                    )
-                instruction_addr = _dynamic_attr_8616(insn, "address", None)
-                instruction_size = _dynamic_attr_8616(insn, "size", None)
-                if (
-                    jump_target is None
-                    or not isinstance(instruction_addr, int)
-                    or not isinstance(instruction_size, int)
-                    or instruction_size <= 0
-                    or any(
-                        block_addr <= jump_target < block_addr + block_size
-                        for block_addr, block_size in block_ranges
-                    )
-                ):
-                    return TerminalCallPathResult8616(
-                        TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS,
-                        tuple(path),
-                    )
-                conditional_fallthrough = instruction_addr + instruction_size
-                saw_external_conditional_jump = True
-                continue
-            if _stack_adjust_8616(insn) or _frame_teardown_8616(insn):
-                continue
-            return TerminalCallPathResult8616(TerminalCallPathStatus8616.UNSAFE_POST_CALL_EFFECT, tuple(path))
+        scan = _PostCallInsnScan8616(callbacks, block_ranges)
+        status = scan.run(insns, scan_start)
+        if status is not None:
+            return TerminalCallPathResult8616(status, tuple(path))
 
         try:
             successors = tuple(sorted({int(addr) for addr in callbacks.successor_addrs(current_addr)}))
         except Exception:
             return TerminalCallPathResult8616(TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS, tuple(path))
-        if saw_return:
-            status = (
-                TerminalCallPathStatus8616.PROVEN
-                if not successors and return_instruction_addr is not None
-                else TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS
-            )
-            return TerminalCallPathResult8616(
-                status,
-                tuple(path),
-                call_target_addr,
-                return_instruction_addr,
-            )
-        if len(successors) != 1:
-            status = (
-                TerminalCallPathStatus8616.RETURN_NOT_REACHED
-                if not successors
-                else TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS
-            )
-            return TerminalCallPathResult8616(status, tuple(path))
-        if (
-            saw_external_conditional_jump
-            and successors[0] != conditional_fallthrough
-        ):
-            return TerminalCallPathResult8616(
-                TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS,
-                tuple(path),
-            )
-        if saw_jump and jump_target != successors[0]:
-            return TerminalCallPathResult8616(TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS, tuple(path))
-        current_addr = successors[0]
+        step = _path_tail_8616(scan, successors, call_target_addr, path)
+        if isinstance(step, TerminalCallPathResult8616):
+            return step
+        current_addr = step
     return TerminalCallPathResult8616(TerminalCallPathStatus8616.CFG_PATH_AMBIGUOUS, tuple(path))

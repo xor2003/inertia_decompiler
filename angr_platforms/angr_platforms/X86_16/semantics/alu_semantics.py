@@ -87,75 +87,81 @@ def _size_bytes_from_operand(value: object) -> int:
     return 0
 
 
+def _int_condition_value_8616(value: int, hinted_size: int) -> IRValue:
+    """Return the sized CONST lane for a Python int operand."""
+    size = hinted_size or 1
+    if hinted_size <= 0:
+        if not -(1 << 7) <= value < (1 << 8):
+            size = 2
+        if not -(1 << 15) <= value < (1 << 16):
+            size = 4
+    return IRValue(MemSpace.CONST, const=value, size=size, expr=("int",))
+
+
+def _mapped_reg_offset_value_8616(value: object, reg_offset: int, hinted_size: int) -> IRValue:
+    """Return the REG lane for a VEX offset inside REG16_OFFSET_MAP."""
+    return IRValue(
+        MemSpace.REG,
+        name=register_name_from_offset(reg_offset),
+        offset=reg_offset,
+        size=_size_bytes_from_operand(value) or hinted_size,
+        expr=(_type_name_for_operand(value),),
+    )
+
+
+def _reg_name_value_8616(value: object, reg_name: str, hinted_size: int) -> IRValue:
+    """Return the REG lane for a dynamic register-name operand."""
+    reg_offset = _dynamic_vex_attr_8616(value, "offset")
+    return IRValue(
+        MemSpace.REG,
+        name=reg_name.lower(),
+        offset=int(reg_offset) if isinstance(reg_offset, int) else 0,
+        size=_size_bytes_from_operand(value) or hinted_size,
+        expr=(_type_name_for_operand(value),),
+    )
+
+
 def _condition_value_from_operand(value: object, *, size_hint: int = 0) -> IRValue:
-    def _impl() -> IRValue:
-        hinted_size = int(size_hint or 0)
-        if isinstance(value, bool):
-            return IRValue(MemSpace.CONST, const=int(value), size=max(1, hinted_size), expr=("bool",))
-        if isinstance(value, int):
-            size = hinted_size or 1
-            if hinted_size <= 0:
-                if not -(1 << 7) <= value < (1 << 8):
-                    size = 2
-                if not -(1 << 15) <= value < (1 << 16):
-                    size = 4
-            return IRValue(MemSpace.CONST, const=value, size=size, expr=("int",))
-        value_const = _dynamic_vex_attr_8616(value, "value")
-        if isinstance(value_const, int):
-            size = _size_bytes_from_operand(value) or hinted_size
-            return IRValue(MemSpace.CONST, const=value_const, size=size, expr=("vex_const",))
+    """Lower one operand boundary value into a typed IRValue."""
+    hinted_size = int(size_hint or 0)
+    if isinstance(value, bool):
+        return IRValue(MemSpace.CONST, const=int(value), size=max(1, hinted_size), expr=("bool",))
+    if isinstance(value, int):
+        return _int_condition_value_8616(value, hinted_size)
+    value_const = _dynamic_vex_attr_8616(value, "value")
+    if isinstance(value_const, int):
+        size = _size_bytes_from_operand(value) or hinted_size
+        return IRValue(MemSpace.CONST, const=value_const, size=size, expr=("vex_const",))
 
-        reg_offset = _dynamic_vex_attr_8616(value, "reg")
-        if isinstance(reg_offset, int) and int(reg_offset) in REG16_OFFSET_MAP:
-            reg_name = register_name_from_offset(reg_offset)
-            size = _size_bytes_from_operand(value) or hinted_size
-            return IRValue(
-                MemSpace.REG, name=reg_name, offset=reg_offset, size=size, expr=(_type_name_for_operand(value),)
-            )
+    reg_offset = _dynamic_vex_attr_8616(value, "reg")
+    if isinstance(reg_offset, int) and int(reg_offset) in REG16_OFFSET_MAP:
+        return _mapped_reg_offset_value_8616(value, reg_offset, hinted_size)
 
-        dynamic_reg_name = _dynamic_vex_attr_8616(value, "reg_name")
-        if isinstance(dynamic_reg_name, str) and dynamic_reg_name:
-            size = _size_bytes_from_operand(value) or hinted_size
-            reg_offset = _dynamic_vex_attr_8616(value, "offset")
-            return IRValue(
-                MemSpace.REG,
-                name=dynamic_reg_name.lower(),
-                offset=int(reg_offset) if isinstance(reg_offset, int) else 0,
-                size=size,
-                expr=(_type_name_for_operand(value),),
-            )
+    dynamic_reg_name = _dynamic_vex_attr_8616(value, "reg_name")
+    if isinstance(dynamic_reg_name, str) and dynamic_reg_name:
+        return _reg_name_value_8616(value, dynamic_reg_name, hinted_size)
 
-        reg_offset = _dynamic_vex_attr_8616(value, "offset")
-        if isinstance(reg_offset, int) and int(reg_offset) in REG16_OFFSET_MAP:
-            size = _size_bytes_from_operand(value) or hinted_size
-            reg_name = register_name_from_offset(reg_offset)
-            return IRValue(
-                MemSpace.REG,
-                name=reg_name,
-                offset=reg_offset,
-                size=size,
-                expr=(_type_name_for_operand(value),),
-            )
+    reg_offset = _dynamic_vex_attr_8616(value, "offset")
+    if isinstance(reg_offset, int) and int(reg_offset) in REG16_OFFSET_MAP:
+        return _mapped_reg_offset_value_8616(value, reg_offset, hinted_size)
 
-        tmp = _dynamic_vex_attr_8616(value, "tmp")
-        if isinstance(tmp, int):
-            return IRValue(
-                MemSpace.TMP,
-                name=f"tmp_{tmp}",
-                size=_size_bytes_from_operand(value) or hinted_size,
-                expr=("tmp",),
-            )
-
+    tmp = _dynamic_vex_attr_8616(value, "tmp")
+    if isinstance(tmp, int):
         return IRValue(
             MemSpace.TMP,
-            name=type(value).__name__,
+            name=f"tmp_{tmp}",
             size=_size_bytes_from_operand(value) or hinted_size,
-            expr=(
-                _type_name_for_operand(value),
-            ),
+            expr=("tmp",),
         )
 
-    return _impl()
+    return IRValue(
+        MemSpace.TMP,
+        name=type(value).__name__,
+        size=_size_bytes_from_operand(value) or hinted_size,
+        expr=(
+            _type_name_for_operand(value),
+        ),
+    )
 
 
 def _same_condition_operand_8616(lhs: object, rhs: object) -> bool:

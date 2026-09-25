@@ -208,6 +208,85 @@ def _unique_memory_carrier_8616(
     return register, carriers[register]
 
 
+def _record_pointer_facts_8616(
+    insn: _InstructionBoundary8616,
+    insn_addr: int,
+    operands: tuple[_OperandBoundary8616, ...],
+    carriers: dict[int, _NearPointerCarrier8616],
+    facts: list[NearPointerArgumentFact8616],
+    seen: set[tuple[int, int, int]],
+) -> None:
+    """Record pointer dereferences proven through one live carrier."""
+    for operand in operands:
+        if operand.type != X86_OP_MEM or insn.id == X86_INS_LEA:
+            continue
+        carrier_match = _unique_memory_carrier_8616(operand, carriers)
+        if carrier_match is None or int(operand.size) <= 0:
+            continue
+        register, carrier = carrier_match
+        try:
+            register_name = insn.reg_name(register)
+        except AttributeError:
+            register_name = None
+        key = (carrier.stack_offset, insn_addr, int(operand.size))
+        if key in seen:
+            continue
+        seen.add(key)
+        facts.append(
+            NearPointerArgumentFact8616(
+                stack_offset=carrier.stack_offset,
+                carrier_load_ins_addr=carrier.carrier_load_ins_addr,
+                dereference_ins_addr=insn_addr,
+                access_width_bytes=int(operand.size),
+                source_version_delta=carrier.source_version_delta,
+                source_update_ins_addrs=carrier.source_update_ins_addrs,
+                carrier_register_name=register_name,
+                carrier_value_is_exact=carrier.value_is_exact and register_name is not None,
+            )
+        )
+
+
+def _update_carriers_8616(
+    insn: _InstructionBoundary8616,
+    insn_addr: int,
+    operands: tuple[_OperandBoundary8616, ...],
+    carriers: dict[int, _NearPointerCarrier8616],
+) -> None:
+    """Apply one instruction's carrier version, transfer, or invalidation."""
+    stack_write = _direct_stack_write_delta_8616(insn, operands)
+    if stack_write is not None:
+        stack_offset, delta = stack_write
+        for register, carrier in tuple(carriers.items()):
+            if carrier.stack_offset != stack_offset:
+                continue
+            if delta is None:
+                carriers.pop(register, None)
+                continue
+            carriers[register] = replace(
+                carrier,
+                source_version_delta=carrier.source_version_delta + delta,
+                source_update_ins_addrs=(*carrier.source_update_ins_addrs, insn_addr),
+            )
+    if not operands or operands[0].type != X86_OP_REG:
+        return
+    destination_register = int(operands[0].reg)
+    if insn.id == X86_INS_ADD and destination_register in carriers:
+        carriers[destination_register] = replace(carriers[destination_register], value_is_exact=False)
+        return
+    if insn.id != X86_INS_MOV or len(operands) != 2:
+        carriers.pop(destination_register, None)
+        return
+    source = operands[1]
+    source_stack_slot = _direct_bp_stack_operand_8616(source)
+    if source_stack_slot is not None and source_stack_slot[0] >= 4 and source_stack_slot[1] == 2:
+        carriers[destination_register] = _NearPointerCarrier8616(source_stack_slot[0], insn_addr)
+        return
+    if source.type == X86_OP_REG and int(source.reg) in carriers:
+        carriers[destination_register] = carriers[int(source.reg)]
+        return
+    carriers.pop(destination_register, None)
+
+
 def _collect_near_pointer_argument_facts_uncached_8616(
     project: object | None,
     function: object,
@@ -238,68 +317,11 @@ def _collect_near_pointer_argument_facts_uncached_8616(
                 insn = cast(_InstructionBoundary8616, wrapped)
             operands = tuple(insn.operands)
             insn_addr = int(insn.address)
-            for operand in operands:
-                if operand.type != X86_OP_MEM or insn.id == X86_INS_LEA:
-                    continue
-                carrier_match = _unique_memory_carrier_8616(operand, carriers)
-                if carrier_match is None or int(operand.size) <= 0:
-                    continue
-                register, carrier = carrier_match
-                try:
-                    register_name = insn.reg_name(register)
-                except AttributeError:
-                    register_name = None
-                key = (carrier.stack_offset, insn_addr, int(operand.size))
-                if key in seen:
-                    continue
-                seen.add(key)
-                facts.append(
-                    NearPointerArgumentFact8616(
-                        stack_offset=carrier.stack_offset,
-                        carrier_load_ins_addr=carrier.carrier_load_ins_addr,
-                        dereference_ins_addr=insn_addr,
-                        access_width_bytes=int(operand.size),
-                        source_version_delta=carrier.source_version_delta,
-                        source_update_ins_addrs=carrier.source_update_ins_addrs,
-                        carrier_register_name=register_name,
-                        carrier_value_is_exact=carrier.value_is_exact and register_name is not None,
-                    )
-                )
+            _record_pointer_facts_8616(insn, insn_addr, operands, carriers, facts, seen)
             if insn.id in {X86_INS_CALL, X86_INS_LCALL}:
                 carriers.clear()
                 continue
-            stack_write = _direct_stack_write_delta_8616(insn, operands)
-            if stack_write is not None:
-                stack_offset, delta = stack_write
-                for register, carrier in tuple(carriers.items()):
-                    if carrier.stack_offset != stack_offset:
-                        continue
-                    if delta is None:
-                        carriers.pop(register, None)
-                        continue
-                    carriers[register] = replace(
-                        carrier,
-                        source_version_delta=carrier.source_version_delta + delta,
-                        source_update_ins_addrs=(*carrier.source_update_ins_addrs, insn_addr),
-                    )
-            if not operands or operands[0].type != X86_OP_REG:
-                continue
-            destination_register = int(operands[0].reg)
-            if insn.id == X86_INS_ADD and destination_register in carriers:
-                carriers[destination_register] = replace(carriers[destination_register], value_is_exact=False)
-                continue
-            if insn.id != X86_INS_MOV or len(operands) != 2:
-                carriers.pop(destination_register, None)
-                continue
-            source = operands[1]
-            source_stack_slot = _direct_bp_stack_operand_8616(source)
-            if source_stack_slot is not None and source_stack_slot[0] >= 4 and source_stack_slot[1] == 2:
-                carriers[destination_register] = _NearPointerCarrier8616(source_stack_slot[0], insn_addr)
-                continue
-            if source.type == X86_OP_REG and int(source.reg) in carriers:
-                carriers[destination_register] = carriers[int(source.reg)]
-                continue
-            carriers.pop(destination_register, None)
+            _update_carriers_8616(insn, insn_addr, operands, carriers)
     return tuple(sorted(facts, key=lambda fact: (fact.dereference_ins_addr, fact.stack_offset)))
 
 

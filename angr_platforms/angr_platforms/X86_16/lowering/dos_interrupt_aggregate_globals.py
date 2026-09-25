@@ -23,6 +23,7 @@ from ..pipeline.errors import PipelineHardError
 from .cod_global_identity import CodGlobalIdentityFact8616
 from .dos_interrupt_abi import (
     DosInterruptAbiArgumentKind8616,
+    DosInterruptAggregateTypes8616,
     dos_interrupt_aggregate_type_definitions_8616,
     dos_interrupt_aggregate_types_8616,
 )
@@ -132,6 +133,47 @@ def _record_object_types_8616(
     return changed or declarations_before != surface._inertia_global_declaration_specs_8616
 
 
+def _project_interrupt_accesses_8616(
+    root: object,
+    codegen: object,
+    objects: tuple[DosInterruptAggregateObjectFact8616, ...],
+    evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
+    identities: tuple[CodGlobalIdentityFact8616, ...],
+    types: DosInterruptAggregateTypes8616,
+) -> tuple[bool, int]:
+    """Project exact scalar accesses; return ``(changed, projection_count)``."""
+    projection_count = 0
+
+    def transform(node: object) -> object:
+        """Project exact scalar accesses while preserving whole-object references."""
+        nonlocal projection_count
+        replacement = project_dos_interrupt_global_access_8616(
+            codegen,
+            node,
+            objects,
+            evidence,
+            identities,
+            types,
+        )
+        if replacement is not None:
+            projection_count += 1
+            return replacement
+        return node
+
+    def should_process_child(parent: object, attr: str) -> bool:
+        """Keep aggregate bases whole beneath references and existing fields."""
+        if isinstance(parent, structured_c.CUnaryOp) and parent.op == "Reference" and attr == "operand":
+            return False
+        return not isinstance(parent, structured_c.CVariableField) or attr != "variable"
+
+    changed = bool(objects) and _replace_c_children_8616(
+        root,
+        transform,
+        should_process_child=should_process_child,
+    )
+    return changed, projection_count
+
+
 def materialize_dos_interrupt_aggregate_globals_8616(codegen: object) -> bool:
     """Materialize every fully classified DOS interrupt aggregate call."""
     surface = cast(_CodegenSurface8616, codegen)
@@ -173,36 +215,15 @@ def materialize_dos_interrupt_aggregate_globals_8616(codegen: object) -> bool:
         if materialized:
             materialized_count += 1
             argument_count += len(fact.objects)
-    projection_count = 0
-
-    def transform(node: object) -> object:
-        """Project exact scalar accesses while preserving whole-object references."""
-        nonlocal projection_count
-        replacement = project_dos_interrupt_global_access_8616(
-            codegen,
-            node,
-            objects,
-            evidence,
-            identities,
-            types,
-        )
-        if replacement is not None:
-            projection_count += 1
-            return replacement
-        return node
-
-    def should_process_child(parent: object, attr: str) -> bool:
-        """Keep aggregate bases whole beneath references and existing fields."""
-        if isinstance(parent, structured_c.CUnaryOp) and parent.op == "Reference" and attr == "operand":
-            return False
-        return not isinstance(parent, structured_c.CVariableField) or attr != "variable"
-
-    if objects and _replace_c_children_8616(
+    projected, projection_count = _project_interrupt_accesses_8616(
         root,
-        transform,
-        should_process_child=should_process_child,
-    ):
-        changed = True
+        codegen,
+        objects,
+        evidence,
+        identities,
+        types,
+    )
+    changed = changed or projected
     failure_count = (raw_count - normalized_count) + (len(facts) - materialized_count)
     stats = DosInterruptAggregateMaterializationStats8616(
         raw_fact_count=raw_count,

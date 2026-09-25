@@ -95,6 +95,36 @@ def _delta_field_changed_8616(value: object) -> bool:
     return bool(value.get("added") or value.get("removed"))
 
 
+def _delta_refusal_8616(
+    validation: Mapping[str, object],
+    before_missing: tuple[str, ...],
+    after_missing: tuple[str, ...],
+) -> CallsiteCompletenessDeltaReason8616 | None:
+    """Return the refusal reason when the validation delta does not close."""
+    delta = validation.get("delta")
+    if not isinstance(delta, Mapping):
+        return CallsiteCompletenessDeltaReason8616.VALIDATION_SHAPE_UNKNOWN
+    if validation.get("semantic_failures"):
+        return CallsiteCompletenessDeltaReason8616.SEMANTIC_FAILURE
+    touched_fields = {name for name, value in delta.items() if _delta_field_changed_8616(value)}
+    if touched_fields != {"helper_calls"}:
+        return CallsiteCompletenessDeltaReason8616.OTHER_OBSERVABLE_DELTA
+    helper_delta = delta.get("helper_calls")
+    if not isinstance(helper_delta, Mapping):
+        return CallsiteCompletenessDeltaReason8616.HELPER_DELTA_SHAPE_UNKNOWN
+    added = _string_tuple_8616(helper_delta.get("added"))
+    removed = _string_tuple_8616(helper_delta.get("removed"))
+    if added is None or removed is None:
+        return CallsiteCompletenessDeltaReason8616.HELPER_DELTA_SHAPE_UNKNOWN
+    if added:
+        return CallsiteCompletenessDeltaReason8616.ADDED_HELPER_CALL
+    if after_missing:
+        return CallsiteCompletenessDeltaReason8616.REMAINING_DEFICIT
+    if Counter(removed) != Counter(before_missing):
+        return CallsiteCompletenessDeltaReason8616.REMOVED_DEFICIT_MISMATCH
+    return None
+
+
 def classify_callsite_completeness_delta_8616(
     before: TailValidationCallsiteSummary8616,
     after: TailValidationCallsiteSummary8616,
@@ -131,28 +161,10 @@ def classify_callsite_completeness_delta_8616(
             raw_count,
         )
 
-    delta = validation.get("delta")
-    if not isinstance(delta, Mapping):
-        return _refuse(CallsiteCompletenessDeltaReason8616.VALIDATION_SHAPE_UNKNOWN)
-    if validation.get("semantic_failures"):
-        return _refuse(CallsiteCompletenessDeltaReason8616.SEMANTIC_FAILURE)
-    touched_fields = {name for name, value in delta.items() if _delta_field_changed_8616(value)}
-    if touched_fields != {"helper_calls"}:
-        return _refuse(CallsiteCompletenessDeltaReason8616.OTHER_OBSERVABLE_DELTA)
-    helper_delta = delta.get("helper_calls")
-    if not isinstance(helper_delta, Mapping):
-        return _refuse(CallsiteCompletenessDeltaReason8616.HELPER_DELTA_SHAPE_UNKNOWN)
-    added = _string_tuple_8616(helper_delta.get("added"))
-    removed = _string_tuple_8616(helper_delta.get("removed"))
     after_missing = _missing_callsites_8616(after)
-    if added is None or removed is None:
-        return _refuse(CallsiteCompletenessDeltaReason8616.HELPER_DELTA_SHAPE_UNKNOWN)
-    if added:
-        return _refuse(CallsiteCompletenessDeltaReason8616.ADDED_HELPER_CALL)
-    if after_missing:
-        return _refuse(CallsiteCompletenessDeltaReason8616.REMAINING_DEFICIT)
-    if Counter(removed) != Counter(before_missing):
-        return _refuse(CallsiteCompletenessDeltaReason8616.REMOVED_DEFICIT_MISMATCH)
+    reason = _delta_refusal_8616(validation, before_missing, after_missing)
+    if reason is not None:
+        return _refuse(reason)
     return CallsiteCompletenessDeltaResult8616(
         CallsiteCompletenessDeltaVerdict8616.COMPLETE_IMPROVEMENT,
         CallsiteCompletenessDeltaReason8616.COMPLETE,

@@ -148,6 +148,47 @@ def _program_source_8616(
     return source
 
 
+def _classify_access_8616(
+    access: IndexedAliasAccessFact8616,
+    layouts: GlobalObjectLayoutEvidence8616,
+    accesses: dict[IndexedGlobalObjectKey8616, list[IndexedAliasAccessFact8616]],
+    failures: dict[
+        IndexedGlobalObjectKey8616,
+        BoundedGlobalObjectRangeFailureKind8616,
+    ],
+) -> None:
+    """Group one global-indexed access by layout keys or record its failure."""
+    if access.role is not IndexedAliasAccessRole8616.GLOBAL_INDEXED:
+        return
+    matches = matching_indexed_global_layouts_8616(access, layouts)
+    keys = (
+        tuple(
+            (layout.address.space, layout.address.offset)
+            for layout in matches
+        )
+        if matches
+        else (
+            (
+                access.source.storage.space,
+                access.source.storage.base_offset,
+            ),
+        )
+    )
+    for key in keys:
+        accesses.setdefault(key, []).append(access)
+    if len(matches) != 1:
+        failure = (
+            BoundedGlobalObjectRangeFailureKind8616.LAYOUT_CONFLICT
+            if matches
+            else unmatched_indexed_global_layout_failure_8616(
+                access,
+                layouts,
+            )
+        )
+        for key in keys:
+            failures[key] = failure
+
+
 def _collect_program_inputs_8616(
     program: IndexedAliasProgramEvidence8616,
     layouts: GlobalObjectLayoutEvidence8616,
@@ -170,35 +211,7 @@ def _collect_program_inputs_8616(
     ] = {}
     for function in program.functions:
         for access in function.accesses.facts:
-            if access.role is not IndexedAliasAccessRole8616.GLOBAL_INDEXED:
-                continue
-            matches = matching_indexed_global_layouts_8616(access, layouts)
-            keys = (
-                tuple(
-                    (layout.address.space, layout.address.offset)
-                    for layout in matches
-                )
-                if matches
-                else (
-                    (
-                        access.source.storage.space,
-                        access.source.storage.base_offset,
-                    ),
-                )
-            )
-            for key in keys:
-                accesses.setdefault(key, []).append(access)
-            if len(matches) != 1:
-                failure = (
-                    BoundedGlobalObjectRangeFailureKind8616.LAYOUT_CONFLICT
-                    if matches
-                    else unmatched_indexed_global_layout_failure_8616(
-                        access,
-                        layouts,
-                    )
-                )
-                for key in keys:
-                    failures[key] = failure
+            _classify_access_8616(access, layouts, accesses, failures)
         for fact in function.ranges.facts:
             keys = indexed_global_access_object_keys_8616(fact.access, layouts)
             if len(keys) == 1:

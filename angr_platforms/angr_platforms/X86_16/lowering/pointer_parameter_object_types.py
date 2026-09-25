@@ -88,6 +88,83 @@ def _anchor_layouts_8616(
     )
 
 
+def _object_type_fact_8616(
+    source: PointerParameterMemoryOutputObject8616,
+    layout_evidence: GlobalObjectLayoutEvidence8616,
+    function_addr: int,
+    raw_count: int,
+    normalized_count: int,
+) -> PointerParameterObjectTypeFact8616 | PointerParameterObjectTypeEvidence8616:
+    """Join one accepted pointer output to its proven object-family fact."""
+    output = source.source.output_view
+    if (
+        output.segment is not MemSpace.DS
+        or output.relative_offset != 0
+        or output.width <= 0
+        or not _output_field_offsets_8616(source)
+    ):
+        return _refused_8616(
+            function_addr,
+            raw_count,
+            normalized_count,
+            PointerParameterObjectTypeFailure8616.OUTPUT_SHAPE_UNSUPPORTED,
+            logical_index=source.source.logical_index,
+        )
+    anchors = _anchor_layouts_8616(
+        source,
+        layout_evidence.layouts,
+    )
+    if not anchors:
+        return _refused_8616(
+            function_addr,
+            raw_count,
+            normalized_count,
+            PointerParameterObjectTypeFailure8616.LAYOUT_ANCHOR_UNMATCHED,
+            logical_index=source.source.logical_index,
+        )
+    families = {layout.family_base_offset for layout in anchors}
+    if len(families) != 1:
+        return _refused_8616(
+            function_addr,
+            raw_count,
+            normalized_count,
+            PointerParameterObjectTypeFailure8616.LAYOUT_FAMILY_CONFLICT,
+            logical_index=source.source.logical_index,
+        )
+    layout = min(
+        anchors,
+        key=lambda item: (
+            item.address.offset,
+            item.element_width,
+            item.field_offsets,
+        ),
+    )
+    views = tuple(
+        PointerParameterObjectTypeView8616(view, layout)
+        for view in source.views
+    )
+    failed_view = next((view for view in views if not view.complete), None)
+    if failed_view is not None:
+        return _refused_8616(
+            function_addr,
+            raw_count,
+            normalized_count,
+            PointerParameterObjectTypeFailure8616.TARGET_ALIGNMENT_UNPROVEN,
+            logical_index=source.source.logical_index,
+            callsite_addr=failed_view.source.callsite_addr,
+        )
+    fact = PointerParameterObjectTypeFact8616(source, layout, views)
+    if not fact.complete:
+        return _refused_8616(
+            function_addr,
+            raw_count,
+            normalized_count,
+            PointerParameterObjectTypeFailure8616.UPSTREAM_CONTRACT_REFUSED,
+            logical_index=source.source.logical_index,
+        )
+    return fact
+
+
 def recover_pointer_parameter_object_types_8616(
     function_addr: int,
     objects: Sequence[PointerParameterMemoryOutputObject8616],
@@ -128,73 +205,16 @@ def recover_pointer_parameter_object_types_8616(
 
     facts: list[PointerParameterObjectTypeFact8616] = []
     for source in sorted(objects, key=lambda item: item.source.logical_index):
-        output = source.source.output_view
-        if (
-            output.segment is not MemSpace.DS
-            or output.relative_offset != 0
-            or output.width <= 0
-            or not _output_field_offsets_8616(source)
-        ):
-            return _refused_8616(
-                function_addr,
-                raw_count,
-                normalized_count,
-                PointerParameterObjectTypeFailure8616.OUTPUT_SHAPE_UNSUPPORTED,
-                logical_index=source.source.logical_index,
-            )
-        anchors = _anchor_layouts_8616(
+        outcome = _object_type_fact_8616(
             source,
-            layout_evidence.layouts,
+            layout_evidence,
+            function_addr,
+            raw_count,
+            normalized_count,
         )
-        if not anchors:
-            return _refused_8616(
-                function_addr,
-                raw_count,
-                normalized_count,
-                PointerParameterObjectTypeFailure8616.LAYOUT_ANCHOR_UNMATCHED,
-                logical_index=source.source.logical_index,
-            )
-        families = {layout.family_base_offset for layout in anchors}
-        if len(families) != 1:
-            return _refused_8616(
-                function_addr,
-                raw_count,
-                normalized_count,
-                PointerParameterObjectTypeFailure8616.LAYOUT_FAMILY_CONFLICT,
-                logical_index=source.source.logical_index,
-            )
-        layout = min(
-            anchors,
-            key=lambda item: (
-                item.address.offset,
-                item.element_width,
-                item.field_offsets,
-            ),
-        )
-        views = tuple(
-            PointerParameterObjectTypeView8616(view, layout)
-            for view in source.views
-        )
-        failed_view = next((view for view in views if not view.complete), None)
-        if failed_view is not None:
-            return _refused_8616(
-                function_addr,
-                raw_count,
-                normalized_count,
-                PointerParameterObjectTypeFailure8616.TARGET_ALIGNMENT_UNPROVEN,
-                logical_index=source.source.logical_index,
-                callsite_addr=failed_view.source.callsite_addr,
-            )
-        fact = PointerParameterObjectTypeFact8616(source, layout, views)
-        if not fact.complete:
-            return _refused_8616(
-                function_addr,
-                raw_count,
-                normalized_count,
-                PointerParameterObjectTypeFailure8616.UPSTREAM_CONTRACT_REFUSED,
-                logical_index=source.source.logical_index,
-            )
-        facts.append(fact)
+        if isinstance(outcome, PointerParameterObjectTypeEvidence8616):
+            return outcome
+        facts.append(outcome)
 
     evidence = PointerParameterObjectTypeEvidence8616(
         function_addr,

@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping, MutableMapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from angr.ailment.expression import VirtualVariableCategory
@@ -268,6 +268,89 @@ def _runtime_segment_dirty_cvar_8616(
     return materialized
 
 
+def _dirty_carrier_debug_8616(
+    dirty: _DirtySegmentCarrier8616,
+) -> tuple[str | None, int | None, int | None]:
+    """Extract the dynamic dirty-carrier fields for debug accounting."""
+    try:
+        dirty_name = dirty.name
+    except AttributeError:
+        dirty_name = None
+    try:
+        dirty_varid = dirty.varid
+    except AttributeError:
+        dirty_varid = None
+    try:
+        dirty_oident = dirty.oident
+    except AttributeError:
+        dirty_oident = None
+    return (
+        dirty_name if isinstance(dirty_name, str) else None,
+        dirty_varid if isinstance(dirty_varid, int) else None,
+        dirty_oident if isinstance(dirty_oident, int) else None,
+    )
+
+
+@dataclass
+class _SegmentStateScan8616:
+    """Replace proven segment live-ins and census every visited node."""
+
+    project: _ProjectSegmentRegisters8616
+    function_addr: int
+    live_in_segments: frozenset[str] | set[str]
+    raw_node_ids: set[int] = field(default_factory=set)
+    classified_node_ids: set[int] = field(default_factory=set)
+    materialized_node_ids: set[int] = field(default_factory=set)
+    debug_unclassified_registers: set[tuple[str | None, int | None, int | None]] = field(default_factory=set)
+    debug_dirty_segment_carriers: set[tuple[str, str | None, int | None, int | None]] = field(default_factory=set)
+
+    def _transform_dirty(self, node: structured_c.CDirtyExpression) -> object:
+        """Replace one proven register-origin dirty segment carrier."""
+        dirty = cast(_DirtySegmentCarrier8616, node.dirty)
+        segment_name = _dirty_segment_name_8616(node, self.project)
+        if segment_name is None:
+            return node
+        self.raw_node_ids.add(id(node))
+        dirty_name, dirty_varid, dirty_oident = _dirty_carrier_debug_8616(dirty)
+        self.debug_dirty_segment_carriers.add(
+            (segment_name, dirty_name, dirty_varid, dirty_oident)
+        )
+        if segment_name not in self.live_in_segments:
+            return node
+        self.classified_node_ids.add(id(node))
+        self.materialized_node_ids.add(id(node))
+        return _runtime_segment_dirty_cvar_8616(segment_name, node, self.function_addr)
+
+    def _transform_cvar(self, node: structured_c.CVariable) -> object:
+        """Replace one proven architectural segment CVariable."""
+        segment_name = _cvar_segment_name_8616(node, self.project)
+        if segment_name is None:
+            variable = node.variable
+            if isinstance(variable, SimRegisterVariable):
+                self.debug_unclassified_registers.add(
+                    (
+                        variable.name if isinstance(variable.name, str) else None,
+                        variable.reg if isinstance(variable.reg, int) else None,
+                        variable.size if isinstance(variable.size, int) else None,
+                    )
+                )
+            return node
+        self.raw_node_ids.add(id(node))
+        if segment_name not in self.live_in_segments:
+            return node
+        self.classified_node_ids.add(id(node))
+        self.materialized_node_ids.add(id(node))
+        return _runtime_segment_cvar_8616(segment_name, node, self.function_addr)
+
+    def transform(self, node: object) -> object:
+        """Dispatch one C node through the segment-state replacement arms."""
+        if isinstance(node, structured_c.CDirtyExpression):
+            return self._transform_dirty(node)
+        if not isinstance(node, structured_c.CVariable):
+            return node
+        return self._transform_cvar(node)
+
+
 def lower_architectural_segment_register_state_8616(codegen: object) -> bool:
     """Materialize IR-proven segment live-ins as explicit C runtime globals."""
     typed_codegen = cast(_CodegenSegmentRegisters8616, codegen)
@@ -283,86 +366,31 @@ def lower_architectural_segment_register_state_8616(codegen: object) -> bool:
         )
         return False
 
-    live_in_segments = _entry_live_in_segments_8616(artifact, cfunc.addr)
-    raw_node_ids: set[int] = set()
-    classified_node_ids: set[int] = set()
-    materialized_node_ids: set[int] = set()
-    debug_unclassified_registers: set[tuple[str | None, int | None, int | None]] = set()
-    debug_dirty_segment_carriers: set[tuple[str, str | None, int | None, int | None]] = set()
-
-    def transform(node: object) -> object:
-        if isinstance(node, structured_c.CDirtyExpression):
-            dirty = cast(_DirtySegmentCarrier8616, node.dirty)
-            segment_name = _dirty_segment_name_8616(node, project)
-            if segment_name is None:
-                return node
-            raw_node_ids.add(id(node))
-            try:
-                dirty_name = dirty.name
-            except AttributeError:
-                dirty_name = None
-            try:
-                dirty_varid = dirty.varid
-            except AttributeError:
-                dirty_varid = None
-            try:
-                dirty_oident = dirty.oident
-            except AttributeError:
-                dirty_oident = None
-            debug_dirty_segment_carriers.add(
-                (
-                    segment_name,
-                    dirty_name if isinstance(dirty_name, str) else None,
-                    dirty_varid if isinstance(dirty_varid, int) else None,
-                    dirty_oident if isinstance(dirty_oident, int) else None,
-                )
-            )
-            if segment_name not in live_in_segments:
-                return node
-            classified_node_ids.add(id(node))
-            materialized_node_ids.add(id(node))
-            return _runtime_segment_dirty_cvar_8616(segment_name, node, cfunc.addr)
-        if not isinstance(node, structured_c.CVariable):
-            return node
-        segment_name = _cvar_segment_name_8616(node, project)
-        if segment_name is None:
-            variable = node.variable
-            if isinstance(variable, SimRegisterVariable):
-                debug_unclassified_registers.add(
-                    (
-                        variable.name if isinstance(variable.name, str) else None,
-                        variable.reg if isinstance(variable.reg, int) else None,
-                        variable.size if isinstance(variable.size, int) else None,
-                    )
-                )
-            return node
-        raw_node_ids.add(id(node))
-        if segment_name not in live_in_segments:
-            return node
-        classified_node_ids.add(id(node))
-        materialized_node_ids.add(id(node))
-        return _runtime_segment_cvar_8616(segment_name, node, cfunc.addr)
-
+    scan = _SegmentStateScan8616(
+        project=project,
+        function_addr=cfunc.addr,
+        live_in_segments=_entry_live_in_segments_8616(artifact, cfunc.addr),
+    )
     root = cfunc.statements
-    new_root = transform(root)
+    new_root = scan.transform(root)
     changed = new_root is not root
     if changed:
         cfunc.statements = new_root
-    if _replace_c_children_8616(cfunc.statements, transform):
+    if _replace_c_children_8616(cfunc.statements, scan.transform):
         changed = True
 
     for variable in tuple(cfunc.unified_local_vars):
         segment_name = _physical_segment_name_8616(variable, project)
-        if segment_name in live_in_segments:
+        if segment_name in scan.live_in_segments:
             del cfunc.unified_local_vars[variable]
             changed = True
 
-    classified_count = len(classified_node_ids)
-    materialized_count = len(materialized_node_ids)
+    classified_count = len(scan.classified_node_ids)
+    materialized_count = len(scan.materialized_node_ids)
     typed_codegen._inertia_segment_register_state_lowering_stats_8616 = (
         SegmentRegisterStateLoweringStats8616(
-            raw_fact_count=len(raw_node_ids),
-            normalized_fact_count=len(raw_node_ids),
+            raw_fact_count=len(scan.raw_node_ids),
+            normalized_fact_count=len(scan.raw_node_ids),
             classified_fact_count=classified_count,
             materialized_count=materialized_count,
             failure_count=max(classified_count - materialized_count, 0),
@@ -373,14 +401,14 @@ def lower_architectural_segment_register_state_8616(codegen: object) -> bool:
             "[segment-register-state] function=%#x live_ins=%s raw=%d classified=%d "
             "materialized=%d dirty_candidates=%s unclassified_registers=%s",
             cfunc.addr,
-            tuple(sorted(live_in_segments)),
-            len(raw_node_ids),
+            tuple(sorted(scan.live_in_segments)),
+            len(scan.raw_node_ids),
             classified_count,
             materialized_count,
-            tuple(sorted(debug_dirty_segment_carriers)),
+            tuple(sorted(scan.debug_dirty_segment_carriers)),
             tuple(
                 sorted(
-                    debug_unclassified_registers,
+                    scan.debug_unclassified_registers,
                     key=lambda item: (
                         item[0] or "",
                         item[1] if item[1] is not None else -1,

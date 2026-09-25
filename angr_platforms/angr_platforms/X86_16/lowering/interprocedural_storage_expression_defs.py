@@ -136,50 +136,84 @@ def _expected_source_8616(
     if failure is not None or current is None:
         return None, failure or CallArgumentDefinitionFailure8616.EXPRESSION_SHAPE_CONFLICT
     for raw_operation in operations:
-        if not isinstance(raw_operation, tuple) or len(raw_operation) != 2:
+        current, step_failure = _apply_expected_operation_8616(
+            current, raw_operation, width, mask
+        )
+        if step_failure is not None or current is None:
+            return (
+                None,
+                step_failure or CallArgumentDefinitionFailure8616.EXPRESSION_SHAPE_CONFLICT,
+            )
+    return current, None
+
+
+def _apply_expected_operation_8616(
+    current: _ExpectedAffine8616,
+    raw_operation: object,
+    width: int,
+    mask: int,
+) -> tuple[_ExpectedAffine8616 | None, CallArgumentDefinitionFailure8616 | None]:
+    """Apply one typed EXPR operation to the running expected affine."""
+    if not isinstance(raw_operation, tuple) or len(raw_operation) != 2:
+        return None, CallArgumentDefinitionFailure8616.EXPRESSION_SHAPE_CONFLICT
+    op = _expression_op_8616(raw_operation[0])
+    operand = raw_operation[1]
+    if op in {CallsitePushExprOp8616.ADC, CallsitePushExprOp8616.SBB}:
+        return None, CallArgumentDefinitionFailure8616.EXPRESSION_FLAGS_UNPROVEN
+    if op in {CallsitePushExprOp8616.ADD, CallsitePushExprOp8616.SUB}:
+        if not isinstance(operand, int):
             return None, CallArgumentDefinitionFailure8616.EXPRESSION_SHAPE_CONFLICT
-        op = _expression_op_8616(raw_operation[0])
-        operand = raw_operation[1]
-        if op in {CallsitePushExprOp8616.ADC, CallsitePushExprOp8616.SBB}:
-            return None, CallArgumentDefinitionFailure8616.EXPRESSION_FLAGS_UNPROVEN
-        if op in {CallsitePushExprOp8616.ADD, CallsitePushExprOp8616.SUB}:
-            if not isinstance(operand, int):
-                return None, CallArgumentDefinitionFailure8616.EXPRESSION_SHAPE_CONFLICT
-            delta = operand if op is CallsitePushExprOp8616.ADD else -operand
-            current = _ExpectedAffine8616(
+        delta = operand if op is CallsitePushExprOp8616.ADD else -operand
+        return (
+            _ExpectedAffine8616(
                 width,
                 (current.constant + delta) & mask,
                 current.terms,
-            )
-            continue
-        if op is CallsitePushExprOp8616.SHL:
-            if not isinstance(operand, int) or not 0 <= operand < width * 8:
-                return None, CallArgumentDefinitionFailure8616.EXPRESSION_WIDTH_CONFLICT
-            current = _scale_expected_8616(current, 1 << operand, mask)
-            continue
-        if op in {
-            CallsitePushExprOp8616.ADD_SOURCE,
-            CallsitePushExprOp8616.SUB_SOURCE,
-        }:
-            if not isinstance(operand, tuple):
-                return None, CallArgumentDefinitionFailure8616.EXPRESSION_SHAPE_CONFLICT
-            right, right_failure = _expected_source_8616(operand, width)
-            if right_failure is not None or right is None:
-                return None, right_failure or CallArgumentDefinitionFailure8616.EXPRESSION_SHAPE_CONFLICT
-            current = _combine_expected_8616(
-                current,
-                right,
-                sign=1 if op is CallsitePushExprOp8616.ADD_SOURCE else -1,
-                mask=mask,
-            )
-            continue
-        if op in {
-            CallsitePushExprOp8616.ADC_SOURCE,
-            CallsitePushExprOp8616.SBB_SOURCE,
-        }:
-            return None, CallArgumentDefinitionFailure8616.EXPRESSION_FLAGS_UNPROVEN
-        return None, CallArgumentDefinitionFailure8616.EXPRESSION_OPERATION_UNSUPPORTED
-    return current, None
+            ),
+            None,
+        )
+    if op is CallsitePushExprOp8616.SHL:
+        if not isinstance(operand, int) or not 0 <= operand < width * 8:
+            return None, CallArgumentDefinitionFailure8616.EXPRESSION_WIDTH_CONFLICT
+        return _scale_expected_8616(current, 1 << operand, mask), None
+    if op in {
+        CallsitePushExprOp8616.ADD_SOURCE,
+        CallsitePushExprOp8616.SUB_SOURCE,
+    }:
+        return _combine_source_operand_8616(current, op, operand, width, mask)
+    if op in {
+        CallsitePushExprOp8616.ADC_SOURCE,
+        CallsitePushExprOp8616.SBB_SOURCE,
+    }:
+        return None, CallArgumentDefinitionFailure8616.EXPRESSION_FLAGS_UNPROVEN
+    return None, CallArgumentDefinitionFailure8616.EXPRESSION_OPERATION_UNSUPPORTED
+
+
+def _combine_source_operand_8616(
+    current: _ExpectedAffine8616,
+    op: CallsitePushExprOp8616,
+    operand: object,
+    width: int,
+    mask: int,
+) -> tuple[_ExpectedAffine8616 | None, CallArgumentDefinitionFailure8616 | None]:
+    """Merge one nested source operand into the running expected affine."""
+    if not isinstance(operand, tuple):
+        return None, CallArgumentDefinitionFailure8616.EXPRESSION_SHAPE_CONFLICT
+    right, right_failure = _expected_source_8616(operand, width)
+    if right_failure is not None or right is None:
+        return (
+            None,
+            right_failure or CallArgumentDefinitionFailure8616.EXPRESSION_SHAPE_CONFLICT,
+        )
+    return (
+        _combine_expected_8616(
+            current,
+            right,
+            sign=1 if op is CallsitePushExprOp8616.ADD_SOURCE else -1,
+            mask=mask,
+        ),
+        None,
+    )
 
 
 def _actual_terms_8616(

@@ -433,39 +433,84 @@ class SyntheticInternalCallRepairStats8616:
             self.refused_no_matching_call += 1
 
 
-def recover_stack_accumulator_loop_evidence_8616(
-    summaries: list[InsnSummary8616],
-) -> tuple[StackAccumulatorLoopEvidence8616, ...]:
-    """Recover stack accumulator loop evidence from normalized instructions."""
-    zero_inits: set[int] = set()
-    inc_slots: set[int] = set()
-    dec_slots: set[int] = set()
-    add_pairs: set[tuple[int, int]] = set()
+def _word_bp_mem_update_8616(
+    insn: InsnSummary8616,
+    mnemonic: str,
+    op0_int: int | None,
+) -> bool:
+    """Check one instruction updates a BP-relative word slot."""
+    return (
+        insn.mnemonic.lower() == mnemonic
+        and insn.op0_kind == "bp_mem"
+        and insn.op0_size in {None, 2}
+        and op0_int is not None
+    )
+
+
+def _zero_init_shape_8616(
+    insn: InsnSummary8616,
+    mnemonic: str,
+    op0_int: int | None,
+    op1_int: int | None,
+) -> bool:
+    """Check one mov zero-initializes a BP-relative word slot."""
+    return (
+        mnemonic == "mov"
+        and insn.op0_kind == "bp_mem"
+        and insn.op1_kind == "imm"
+        and op1_int == 0
+        and (insn.op0_size in {None, 2})
+        and op0_int is not None
+    )
+
+
+def _accumulator_add_shape_8616(
+    insn: InsnSummary8616,
+    mnemonic: str,
+    op0_int: int | None,
+    previous_ax_load: int | None,
+) -> bool:
+    """Check one add feeds a BP slot from a remembered AX load."""
+    return (
+        mnemonic == "add"
+        and insn.op0_kind == "bp_mem"
+        and insn.op1_kind == "reg"
+        and insn.op1_value == "ax"
+        and previous_ax_load is not None
+        and op0_int is not None
+    )
+
+
+@dataclass
+class _AccumulatorInsnScan8616:
+    """Track BP-slot accumulator evidence across normalized instructions."""
+
+    zero_inits: set[int] = field(default_factory=set)
+    inc_slots: set[int] = field(default_factory=set)
+    dec_slots: set[int] = field(default_factory=set)
+    add_pairs: set[tuple[int, int]] = field(default_factory=set)
     previous_ax_load: int | None = None
 
-    for insn in summaries:
+    def visit(self, insn: InsnSummary8616) -> None:
+        """Fold one normalized instruction into the accumulator evidence."""
         mnemonic = insn.mnemonic.lower()
         op0_int = _dynamic_int_8616(insn.op0_value)
         op1_int = _dynamic_int_8616(insn.op1_value)
-        if (
-            mnemonic == "mov"
-            and insn.op0_kind == "bp_mem"
-            and insn.op1_kind == "imm"
-            and op1_int == 0
-            and (insn.op0_size in {None, 2})
-            and op0_int is not None
-        ):
-            zero_inits.add(op0_int)
-            previous_ax_load = None
-            continue
-        if mnemonic == "inc" and insn.op0_kind == "bp_mem" and (insn.op0_size in {None, 2}) and op0_int is not None:
-            inc_slots.add(op0_int)
-            previous_ax_load = None
-            continue
-        if mnemonic == "dec" and insn.op0_kind == "bp_mem" and (insn.op0_size in {None, 2}) and op0_int is not None:
-            dec_slots.add(op0_int)
-            previous_ax_load = None
-            continue
+        if _zero_init_shape_8616(insn, mnemonic, op0_int, op1_int):
+            assert op0_int is not None
+            self.zero_inits.add(op0_int)
+            self.previous_ax_load = None
+            return
+        if _word_bp_mem_update_8616(insn, "inc", op0_int):
+            assert op0_int is not None
+            self.inc_slots.add(op0_int)
+            self.previous_ax_load = None
+            return
+        if _word_bp_mem_update_8616(insn, "dec", op0_int):
+            assert op0_int is not None
+            self.dec_slots.add(op0_int)
+            self.previous_ax_load = None
+            return
         if (
             mnemonic == "mov"
             and insn.op0_kind == "reg"
@@ -473,29 +518,28 @@ def recover_stack_accumulator_loop_evidence_8616(
             and insn.op1_kind == "bp_mem"
             and op1_int is not None
         ):
-            previous_ax_load = op1_int
-            continue
-        if (
-            mnemonic == "add"
-            and insn.op0_kind == "bp_mem"
-            and insn.op1_kind == "reg"
-            and insn.op1_value == "ax"
-            and previous_ax_load is not None
-            and op0_int is not None
-        ):
-            add_pairs.add((op0_int, previous_ax_load))
-            previous_ax_load = None
-            continue
+            self.previous_ax_load = op1_int
+            return
+        if _accumulator_add_shape_8616(insn, mnemonic, op0_int, self.previous_ax_load):
+            assert op0_int is not None and self.previous_ax_load is not None
+            self.add_pairs.add((op0_int, self.previous_ax_load))
+            self.previous_ax_load = None
+            return
         if mnemonic not in {"cmp", "jmp", "jb", "jbe", "ja", "jae", "je", "jne"}:
-            previous_ax_load = None
+            self.previous_ax_load = None
 
+
+def _accumulator_evidence_8616(
+    scan: _AccumulatorInsnScan8616,
+) -> tuple[StackAccumulatorLoopEvidence8616, ...]:
+    """Join proven add pairs with zero-init and step evidence."""
     recovered: list[StackAccumulatorLoopEvidence8616] = []
-    for accumulator_disp, induction_disp in sorted(add_pairs):
+    for accumulator_disp, induction_disp in sorted(scan.add_pairs):
         if accumulator_disp >= 0 or induction_disp >= 0 or accumulator_disp == induction_disp:
             continue
-        if accumulator_disp not in zero_inits:
+        if accumulator_disp not in scan.zero_inits:
             continue
-        if induction_disp in inc_slots:
+        if induction_disp in scan.inc_slots:
             recovered.append(
                 StackAccumulatorLoopEvidence8616(
                     induction_disp=induction_disp,
@@ -504,7 +548,7 @@ def recover_stack_accumulator_loop_evidence_8616(
                     accumulator_zero_initialized=True,
                 )
             )
-        if induction_disp in dec_slots:
+        if induction_disp in scan.dec_slots:
             recovered.append(
                 StackAccumulatorLoopEvidence8616(
                     induction_disp=induction_disp,
@@ -514,6 +558,16 @@ def recover_stack_accumulator_loop_evidence_8616(
                 )
             )
     return tuple(recovered)
+
+
+def recover_stack_accumulator_loop_evidence_8616(
+    summaries: list[InsnSummary8616],
+) -> tuple[StackAccumulatorLoopEvidence8616, ...]:
+    """Recover stack accumulator loop evidence from normalized instructions."""
+    scan = _AccumulatorInsnScan8616()
+    for insn in summaries:
+        scan.visit(insn)
+    return _accumulator_evidence_8616(scan)
 
 
 def recover_hoisted_jcc_target_copy_evidence_8616(
@@ -694,6 +748,51 @@ def _classify_pretest_targets_from_cfg_8616(
     return (jcc_target, jump_target) if jcc_reaches_test else (jump_target, jcc_target)
 
 
+def _pretest_branch_evidence_8616(
+    function: object,
+    function_start_int: int | None,
+    function_end: int | None,
+    insn: object,
+    fallthrough_jmp: object,
+    mnemonic: str,
+) -> PretestLoopGuardEvidence8616 | None:
+    """Classify one JCC+JMP pair as a proven pre-test loop guard."""
+    jcc_target = _branch_target_imm_from_capstone_8616(insn)
+    jump_target = _branch_target_imm_from_capstone_8616(fallthrough_jmp)
+    if jcc_target is None or jump_target is None:
+        return None
+    jcc_target_int = _dynamic_int_8616(jcc_target)
+    jump_target_int = _dynamic_int_8616(jump_target)
+    branch_addr = _dynamic_int_8616(getattr(insn, "address", None))
+    if jcc_target_int is None or jump_target_int is None or branch_addr is None:
+        return None
+    classified_targets = _classify_pretest_targets_from_cfg_8616(
+        function,
+        branch_addr,
+        jcc_target_int,
+        jump_target_int,
+    )
+    if classified_targets is None:
+        return None
+    body_target_int, exit_target_int = classified_targets
+    if function_end is not None:
+        if function_start_int is not None and not (function_start_int <= body_target_int < function_end):
+            return None
+        if function_start_int is not None and not (function_start_int <= exit_target_int <= function_end):
+            return None
+    taken_op = _JCC_TAKEN_COMPARISON_OPS_8616.get(mnemonic)
+    body_condition_op = taken_op if body_target_int == jcc_target_int else _complementary_cmp_op_8616(taken_op)
+    if body_condition_op is None:
+        return None
+    return PretestLoopGuardEvidence8616(
+        branch_addr=branch_addr,
+        body_target=body_target_int,
+        exit_target=exit_target_int,
+        mnemonic=mnemonic,
+        body_condition_op=body_condition_op,
+    )
+
+
 def recover_pretest_loop_guard_evidence_8616(
     project: object,
     function: object,
@@ -727,6 +826,7 @@ def recover_pretest_loop_guard_evidence_8616(
         if isinstance(function_start, int) and isinstance(function_size, int)
         else None
     )
+    function_start_int = _dynamic_int_8616(function_start)
     for idx, insn in enumerate(insns[:-1]):
         mnemonic = str(getattr(insn, "mnemonic", "")).lower()
         if mnemonic not in _CONDITIONAL_BRANCH_MNEMONICS_8616:
@@ -734,44 +834,53 @@ def recover_pretest_loop_guard_evidence_8616(
         fallthrough_jmp = insns[idx + 1]
         if str(getattr(fallthrough_jmp, "mnemonic", "")).lower() not in _UNCONDITIONAL_JMP_MNEMONICS_8616:
             continue
-        jcc_target = _branch_target_imm_from_capstone_8616(insn)
-        jump_target = _branch_target_imm_from_capstone_8616(fallthrough_jmp)
-        if jcc_target is None or jump_target is None:
-            continue
-        function_start_int = _dynamic_int_8616(function_start)
-        jcc_target_int = _dynamic_int_8616(jcc_target)
-        jump_target_int = _dynamic_int_8616(jump_target)
-        branch_addr = _dynamic_int_8616(getattr(insn, "address", None))
-        if jcc_target_int is None or jump_target_int is None or branch_addr is None:
-            continue
-        classified_targets = _classify_pretest_targets_from_cfg_8616(
+        evidence = _pretest_branch_evidence_8616(
             function,
-            branch_addr,
-            jcc_target_int,
-            jump_target_int,
+            function_start_int,
+            function_end,
+            insn,
+            fallthrough_jmp,
+            mnemonic,
         )
-        if classified_targets is None:
-            continue
-        body_target_int, exit_target_int = classified_targets
-        if function_end is not None:
-            if function_start_int is not None and not (function_start_int <= body_target_int < function_end):
-                continue
-            if function_start_int is not None and not (function_start_int <= exit_target_int <= function_end):
-                continue
-        taken_op = _JCC_TAKEN_COMPARISON_OPS_8616.get(mnemonic)
-        body_condition_op = taken_op if body_target_int == jcc_target_int else _complementary_cmp_op_8616(taken_op)
-        if body_condition_op is None:
-            continue
-        recovered.append(
-            PretestLoopGuardEvidence8616(
-                branch_addr=branch_addr,
-                body_target=body_target_int,
-                exit_target=exit_target_int,
-                mnemonic=mnemonic,
-                body_condition_op=body_condition_op,
-            )
-        )
+        if evidence is not None:
+            recovered.append(evidence)
     return tuple(recovered)
+
+
+def _short_circuit_branch_evidence_8616(
+    graph: object,
+    known: dict[int, PretestLoopGuardEvidence8616],
+    insn: object,
+    fallthrough_jmp: object,
+    mnemonic: str,
+    branch_addr: int,
+) -> PretestLoopGuardEvidence8616 | None:
+    """Prove one predecessor predicate shares a downstream exit edge."""
+    body_target = _branch_target_imm_from_capstone_8616(insn)
+    exit_target = _branch_target_imm_from_capstone_8616(fallthrough_jmp)
+    if body_target is None or exit_target is None:
+        return None
+    continuation_node = _cfg_node_containing_addr_8616(graph, body_target)
+    if continuation_node is None:
+        return None
+    downstream = tuple(
+        item
+        for item in known.values()
+        if item.exit_target == exit_target
+        and _cfg_node_containing_addr_8616(graph, item.branch_addr) == continuation_node
+    )
+    if len(downstream) != 1:
+        return None
+    body_condition_op = _JCC_TAKEN_COMPARISON_OPS_8616.get(mnemonic)
+    if body_condition_op is None:
+        return None
+    return PretestLoopGuardEvidence8616(
+        branch_addr=branch_addr,
+        body_target=body_target,
+        exit_target=exit_target,
+        mnemonic=mnemonic,
+        body_condition_op=body_condition_op,
+    )
 
 
 def _recover_short_circuit_pretest_guard_evidence_8616(
@@ -804,31 +913,16 @@ def _recover_short_circuit_pretest_guard_evidence_8616(
             fallthrough_jmp = insns[index + 1]
             if str(getattr(fallthrough_jmp, "mnemonic", "")).lower() not in _UNCONDITIONAL_JMP_MNEMONICS_8616:
                 continue
-            body_target = _branch_target_imm_from_capstone_8616(insn)
-            exit_target = _branch_target_imm_from_capstone_8616(fallthrough_jmp)
-            if body_target is None or exit_target is None:
-                continue
-            continuation_node = _cfg_node_containing_addr_8616(graph, body_target)
-            if continuation_node is None:
-                continue
-            downstream = tuple(
-                item
-                for item in known.values()
-                if item.exit_target == exit_target
-                and _cfg_node_containing_addr_8616(graph, item.branch_addr) == continuation_node
+            fact = _short_circuit_branch_evidence_8616(
+                graph,
+                known,
+                insn,
+                fallthrough_jmp,
+                mnemonic,
+                branch_addr,
             )
-            if len(downstream) != 1:
+            if fact is None:
                 continue
-            body_condition_op = _JCC_TAKEN_COMPARISON_OPS_8616.get(mnemonic)
-            if body_condition_op is None:
-                continue
-            fact = PretestLoopGuardEvidence8616(
-                branch_addr=branch_addr,
-                body_target=body_target,
-                exit_target=exit_target,
-                mnemonic=mnemonic,
-                body_condition_op=body_condition_op,
-            )
             known[branch_addr] = fact
             recovered.append(fact)
             progress = True
@@ -1326,47 +1420,47 @@ def _store_redundant_loop_break_carrier_stats_8616(
         cast(Any, codegen)._inertia_redundant_loop_break_carrier_stats_8616 = stats
 
 
+def _pretest_shape_visit_8616(node: object, depth: int, rows: list[str]) -> None:
+    """Collect a bounded structural debug view of nested loop nodes."""
+    if node is None or depth > 11 or len(rows) >= 420:
+        return
+    row = f"{'  ' * depth}{type(node).__name__}"
+    if isinstance(node, CStatements):
+        children = tuple(node.statements or ())
+        row += f" statements={len(children)}"
+        rows.append(row)
+        for child in children[:16]:
+            _pretest_shape_visit_8616(child, depth + 1, rows)
+        return
+    if isinstance(node, (CWhileLoop, CDoWhileLoop, CForLoop)):
+        body = node.body
+        row += f" body={type(body).__name__}"
+        rows.append(row)
+        _pretest_shape_visit_8616(body, depth + 1, rows)
+        return
+    if isinstance(node, CIfElse):
+        pairs = _dynamic_sequence_8616(node.condition_and_nodes)
+        row += f" pairs={len(pairs)} else={type(node.else_node).__name__}"
+        rows.append(row)
+        for pair in pairs[:4]:
+            if not isinstance(pair, tuple) or len(pair) < 2:
+                continue
+            body = pair[1]
+            _pretest_shape_visit_8616(body, depth + 1, rows)
+        _pretest_shape_visit_8616(node.else_node, depth + 1, rows)
+        return
+    if isinstance(node, CIfBreak):
+        row += f" condition={type(node.condition).__name__}"
+        rows.append(row)
+        return
+    rows.append(row)
+
+
 def _debug_pretest_loop_shape_8616(root: object) -> None:
     if not os.environ.get("INERTIA_DEBUG_PRETEST_LOOP_GUARD_REPAIR_VERBOSE"):
         return
     rows: list[str] = []
-
-    def visit(node: object, depth: int) -> None:
-        """Collect a bounded structural debug view of nested loop nodes."""
-        if node is None or depth > 11 or len(rows) >= 420:
-            return
-        row = f"{'  ' * depth}{type(node).__name__}"
-        if isinstance(node, CStatements):
-            children = tuple(node.statements or ())
-            row += f" statements={len(children)}"
-            rows.append(row)
-            for child in children[:16]:
-                visit(child, depth + 1)
-            return
-        if isinstance(node, (CWhileLoop, CDoWhileLoop, CForLoop)):
-            body = node.body
-            row += f" body={type(body).__name__}"
-            rows.append(row)
-            visit(body, depth + 1)
-            return
-        if isinstance(node, CIfElse):
-            pairs = _dynamic_sequence_8616(node.condition_and_nodes)
-            row += f" pairs={len(pairs)} else={type(node.else_node).__name__}"
-            rows.append(row)
-            for pair in pairs[:4]:
-                if not isinstance(pair, tuple) or len(pair) < 2:
-                    continue
-                body = pair[1]
-                visit(body, depth + 1)
-            visit(node.else_node, depth + 1)
-            return
-        if isinstance(node, CIfBreak):
-            row += f" condition={type(node.condition).__name__}"
-            rows.append(row)
-            return
-        rows.append(row)
-
-    visit(root, 0)
+    _pretest_shape_visit_8616(root, 0, rows)
     if rows:
         log.warning("[pretest-loop-guard-repair] ast-shape\n%s", "\n".join(rows))
 
@@ -1570,6 +1664,24 @@ def _iter_synthetic_internal_call_candidates_8616(
             yield child
 
 
+def _retained_statements_8616(
+    statements: Iterable[object],
+    candidate_ids: set[int],
+    stats: SyntheticInternalCallRepairStats8616,
+) -> tuple[list[object], bool]:
+    """Drop proven synthetic-call expression statements from one block."""
+    retained: list[object] = []
+    changed = False
+    for stmt in statements:
+        expr = getattr(stmt, "expr", None) if isinstance(stmt, CExpressionStatement) else None
+        if isinstance(expr, CFunctionCall) and id(expr) in candidate_ids:
+            stats.record(SyntheticInternalCallRepairDecision8616.MATERIALIZED)
+            changed = True
+            continue
+        retained.append(stmt)
+    return retained, changed
+
+
 def _prune_call_expression_statements_8616(
     node: object,
     candidate_ids: set[int],
@@ -1578,28 +1690,11 @@ def _prune_call_expression_statements_8616(
     """Remove expression statements whose expression is a proven synthetic call."""
     changed = False
     statements = getattr(node, "statements", None)
-    if isinstance(statements, list):
-        retained: list[object] = []
-        for stmt in statements:
-            expr = getattr(stmt, "expr", None) if isinstance(stmt, CExpressionStatement) else None
-            if isinstance(expr, CFunctionCall) and id(expr) in candidate_ids:
-                stats.record(SyntheticInternalCallRepairDecision8616.MATERIALIZED)
-                changed = True
-                continue
-            retained.append(stmt)
-        if changed:
-            cast(Any, node).statements = retained
-    elif isinstance(statements, tuple):
-        retained_tuple: list[object] = []
-        for stmt in statements:
-            expr = getattr(stmt, "expr", None) if isinstance(stmt, CExpressionStatement) else None
-            if isinstance(expr, CFunctionCall) and id(expr) in candidate_ids:
-                stats.record(SyntheticInternalCallRepairDecision8616.MATERIALIZED)
-                changed = True
-                continue
-            retained_tuple.append(stmt)
-        if changed:
-            cast(Any, node).statements = tuple(retained_tuple)
+    if isinstance(statements, (list, tuple)):
+        retained, pruned = _retained_statements_8616(statements, candidate_ids, stats)
+        if pruned:
+            cast(Any, node).statements = retained if isinstance(statements, list) else tuple(retained)
+            changed = True
     for child in _iter_node_and_children_8616(node):
         if child is node:
             continue
@@ -2195,41 +2290,62 @@ def _repair_pretest_loop_guard_in_node_8616(
     body = node.body
     if not isinstance(body, CStatements):
         return False
+    return _repair_pretest_guard_body_8616(body, evidence, stats, codegen)
 
-    def repair_nested_body() -> bool:
-        """Continue searching nested nodes when this loop is not repairable."""
-        return _repair_pretest_loop_guard_in_node_8616(body, evidence, stats, codegen)
 
+def _splice_complementary_return_8616(
+    statements: list[object],
+    body: CStatements,
+    break_index: int,
+    break_condition: object,
+    stats: PretestLoopGuardRepairStats8616,
+) -> bool:
+    """Drop a redundant break guard before a complementary return arm."""
+    if break_index + 1 >= len(statements):
+        return False
+    following = statements[break_index + 1]
+    following_condition = _single_ifelse_condition_8616(following)
+    if (
+        following_condition is not None
+        and _conditions_are_complementary_8616(break_condition, following_condition)
+        and _ifelse_body_is_single_return_8616(following)
+    ):
+        del statements[break_index]
+        body.statements = statements
+        stats.record(PretestLoopGuardRepairDecision8616.MATERIALIZED)
+        return True
+    return False
+
+
+def _pretest_guard_site_8616(
+    body: CStatements,
+) -> tuple[list[object], int, object, object] | None:
+    """Locate the proven IfBreak guard inside one flattened loop body."""
     raw_statements: list[object] = list(_dynamic_sequence_8616(body.statements))
     statements, flattened_wrappers = _flatten_direct_statement_wrappers_8616(raw_statements)
     if flattened_wrappers:
         cast(Any, body).statements = statements
     if len(statements) < 2:
-        return repair_nested_body()
+        return None
     break_index = _first_pretest_break_guard_index_8616(statements)
     if break_index is None:
-        return repair_nested_body()
+        return None
     guard = statements[break_index]
     break_condition = _ifbreak_condition_8616(guard)
     if break_condition is None:
-        return repair_nested_body()
-    rest = CStatements(statements[break_index + 1 :], codegen=codegen)
-    matched = _pretest_evidence_for_loop_body_8616(break_condition, rest, evidence, guard=guard)
-    if matched is None:
-        stats.record(PretestLoopGuardRepairDecision8616.REFUSED_BODY_TARGET_UNPROVEN)
-        return repair_nested_body()
-    if break_index + 1 < len(statements):
-        following = statements[break_index + 1]
-        following_condition = _single_ifelse_condition_8616(following)
-        if (
-            following_condition is not None
-            and _conditions_are_complementary_8616(break_condition, following_condition)
-            and _ifelse_body_is_single_return_8616(following)
-        ):
-            del statements[break_index]
-            body.statements = statements
-            stats.record(PretestLoopGuardRepairDecision8616.MATERIALIZED)
-            return True
+        return None
+    return statements, break_index, guard, break_condition
+
+
+def _normalize_pretest_prefix_8616(
+    statements: list[object],
+    body: CStatements,
+    break_index: int,
+    break_condition: object,
+    rest: CStatements,
+    stats: PretestLoopGuardRepairStats8616,
+) -> tuple[int, object, int, int]:
+    """Remove consumed call carriers, then move iterator updates to tail."""
     removed_call_carriers = _remove_pretest_consumed_call_return_carriers_8616(
         statements,
         break_index,
@@ -2240,13 +2356,45 @@ def _repair_pretest_loop_guard_in_node_8616(
         stats.call_return_carriers_removed_count += removed_call_carriers
         body.statements = statements
         break_index -= removed_call_carriers
-        guard = statements[break_index]
     moved_count = _move_pretest_prefix_iterator_updates_to_tail_8616(statements, break_index, break_condition)
     if moved_count:
         stats.iterator_moved_count += moved_count
         body.statements = statements
         break_index -= moved_count
-        guard = statements[break_index]
+    return break_index, statements[break_index], removed_call_carriers, moved_count
+
+
+def _repair_pretest_guard_body_8616(
+    body: CStatements,
+    evidence: tuple[PretestLoopGuardEvidence8616, ...],
+    stats: PretestLoopGuardRepairStats8616,
+    codegen: object,
+) -> bool:
+    """Run the pretest guard repair ladder on one loop body."""
+
+    def repair_nested_body() -> bool:
+        """Continue searching nested nodes when this loop is not repairable."""
+        return _repair_pretest_loop_guard_in_node_8616(body, evidence, stats, codegen)
+
+    site = _pretest_guard_site_8616(body)
+    if site is None:
+        return repair_nested_body()
+    statements, break_index, guard, break_condition = site
+    rest = CStatements(statements[break_index + 1 :], codegen=codegen)
+    matched = _pretest_evidence_for_loop_body_8616(break_condition, rest, evidence, guard=guard)
+    if matched is None:
+        stats.record(PretestLoopGuardRepairDecision8616.REFUSED_BODY_TARGET_UNPROVEN)
+        return repair_nested_body()
+    if _splice_complementary_return_8616(statements, body, break_index, break_condition, stats):
+        return True
+    break_index, guard, removed_call_carriers, moved_count = _normalize_pretest_prefix_8616(
+        statements,
+        body,
+        break_index,
+        break_condition,
+        rest,
+        stats,
+    )
     if _pretest_guard_already_exit_edge_8616(break_condition, matched):
         if removed_call_carriers or moved_count:
             stats.record(PretestLoopGuardRepairDecision8616.MATERIALIZED)
@@ -2616,6 +2764,84 @@ def _leading_stack_slot_copy_8616(insns: tuple[object, ...]) -> tuple[int, int, 
     return copy_addr, dest_disp, src_disp
 
 
+def _debug_conditional_continue_body_8616(
+    node: object,
+    body_statements: list[object],
+) -> None:
+    """Emit the verbose per-statement debug census for one loop body."""
+    if not os.environ.get("INERTIA_DEBUG_CONDITIONAL_CONTINUE_REPAIR_VERBOSE"):
+        return
+    log.warning(
+        "[conditional-continue-repair] loop=%s body_types=%r",
+        type(node).__name__,
+        tuple(type(stmt).__name__ for stmt in body_statements),
+    )
+    for dbg_idx, dbg_stmt in enumerate(body_statements):
+        dbg_cond_nodes = (
+            _dynamic_sequence_8616(getattr(dbg_stmt, "condition_and_nodes", ()))
+            if isinstance(dbg_stmt, CIfElse)
+            else ()
+        )
+        dbg_first_pair = dbg_cond_nodes[0] if dbg_cond_nodes else None
+        dbg_condition = dbg_first_pair[0] if isinstance(dbg_first_pair, tuple) and len(dbg_first_pair) >= 2 else None
+        dbg_if_body = dbg_first_pair[1] if isinstance(dbg_first_pair, tuple) and len(dbg_first_pair) >= 2 else None
+        dbg_if_body_types = (
+            tuple(type(child).__name__ for child in _dynamic_sequence_8616(getattr(dbg_if_body, "statements", ())))
+            if isinstance(dbg_if_body, CStatements)
+            else (type(dbg_if_body).__name__,)
+        )
+        log.warning(
+            "[conditional-continue-repair] body[%d]=%s break_cond=%s if_cond=%s if_op=%s else=%s cstyle=%r tags=%r if_body=%r",
+            dbg_idx,
+            type(dbg_stmt).__name__,
+            type(_ifbreak_condition_8616(dbg_stmt)).__name__,
+            type(_single_ifelse_condition_8616(dbg_stmt)).__name__,
+            getattr(dbg_condition, "op", None),
+            type(getattr(dbg_stmt, "else_node", None)).__name__,
+            getattr(dbg_stmt, "cstyle_ifs", None),
+            getattr(dbg_stmt, "tags", None),
+            dbg_if_body_types,
+        )
+
+
+def _step_continue_body_repair_8616(
+    body_statements: list[object],
+    idx: int,
+    remaining_repairs: int,
+    stats: ConditionalContinueRepairStats8616,
+) -> tuple[bool, int, int]:
+    """Advance one body statement through the continue-repair ladder."""
+    current_stmt = body_statements[idx]
+    if isinstance(current_stmt, CIfElse):
+        ifelse_changed, remaining_repairs = _repair_conditional_continue_in_ifelse_node_8616(
+            current_stmt,
+            remaining_repairs,
+            stats,
+        )
+        if ifelse_changed:
+            return True, remaining_repairs, idx + 1
+    break_cond = _ifbreak_condition_8616(current_stmt)
+    guarded_cond = _single_ifelse_condition_8616(body_statements[idx + 1])
+    if (
+        break_cond is not None
+        and guarded_cond is not None
+        and _conditions_are_complementary_8616(
+            break_cond,
+            guarded_cond,
+        )
+    ):
+        del body_statements[idx]
+        remaining_repairs -= 1
+        stats.record(ConditionalContinueRepairDecision8616.MATERIALIZED)
+        return True, remaining_repairs, idx
+    child_changed, remaining_repairs = _repair_conditional_continue_in_node_8616(
+        current_stmt,
+        remaining_repairs,
+        stats,
+    )
+    return child_changed, remaining_repairs, idx + 1
+
+
 def _repair_conditional_continue_in_node_8616(
     node: object,
     remaining_repairs: int,
@@ -2649,83 +2875,34 @@ def _repair_conditional_continue_in_node_8616(
     body = node.body
     if not isinstance(body, CStatements):
         return False, remaining_repairs
+    return _repair_continue_loop_body_8616(node, body, remaining_repairs, stats)
+
+
+def _repair_continue_loop_body_8616(
+    node: object,
+    body: CStatements,
+    remaining_repairs: int,
+    stats: ConditionalContinueRepairStats8616,
+) -> tuple[bool, int]:
+    """Run the continue-repair ladder on one proven loop body."""
     raw_body_statements: list[object] = list(_dynamic_sequence_8616(body.statements))
     body_statements, _flattened_wrappers = _flatten_direct_statement_wrappers_8616(raw_body_statements)
-    if os.environ.get("INERTIA_DEBUG_CONDITIONAL_CONTINUE_REPAIR_VERBOSE"):
-        log.warning(
-            "[conditional-continue-repair] loop=%s body_types=%r",
-            type(node).__name__,
-            tuple(type(stmt).__name__ for stmt in body_statements),
-        )
-        for dbg_idx, dbg_stmt in enumerate(body_statements):
-            dbg_cond_nodes = (
-                _dynamic_sequence_8616(getattr(dbg_stmt, "condition_and_nodes", ()))
-                if isinstance(dbg_stmt, CIfElse)
-                else ()
-            )
-            dbg_first_pair = dbg_cond_nodes[0] if dbg_cond_nodes else None
-            dbg_condition = dbg_first_pair[0] if isinstance(dbg_first_pair, tuple) and len(dbg_first_pair) >= 2 else None
-            dbg_if_body = dbg_first_pair[1] if isinstance(dbg_first_pair, tuple) and len(dbg_first_pair) >= 2 else None
-            dbg_if_body_types = (
-                tuple(type(child).__name__ for child in _dynamic_sequence_8616(getattr(dbg_if_body, "statements", ())))
-                if isinstance(dbg_if_body, CStatements)
-                else (type(dbg_if_body).__name__,)
-            )
-            log.warning(
-                "[conditional-continue-repair] body[%d]=%s break_cond=%s if_cond=%s if_op=%s else=%s cstyle=%r tags=%r if_body=%r",
-                dbg_idx,
-                type(dbg_stmt).__name__,
-                type(_ifbreak_condition_8616(dbg_stmt)).__name__,
-                type(_single_ifelse_condition_8616(dbg_stmt)).__name__,
-                getattr(dbg_condition, "op", None),
-                type(getattr(dbg_stmt, "else_node", None)).__name__,
-                getattr(dbg_stmt, "cstyle_ifs", None),
-                getattr(dbg_stmt, "tags", None),
-                dbg_if_body_types,
-            )
+    _debug_conditional_continue_body_8616(node, body_statements)
     local_changed = False
     idx = 0
     while idx + 1 < len(body_statements) and remaining_repairs > 0:
-        current_stmt = body_statements[idx]
-        if isinstance(current_stmt, CIfElse):
-            current_ifelse = current_stmt
-            ifelse_changed, remaining_repairs = _repair_conditional_continue_in_ifelse_node_8616(
-                current_ifelse,
-                remaining_repairs,
-                stats,
-            )
-            local_changed = ifelse_changed or local_changed
-            if ifelse_changed:
-                idx += 1
-                continue
-        break_cond = _ifbreak_condition_8616(current_stmt)
-        guarded_cond = _single_ifelse_condition_8616(body_statements[idx + 1])
-        if (
-            break_cond is not None
-            and guarded_cond is not None
-            and _conditions_are_complementary_8616(
-                break_cond,
-                guarded_cond,
-            )
-        ):
-            del body_statements[idx]
-            remaining_repairs -= 1
-            stats.record(ConditionalContinueRepairDecision8616.MATERIALIZED)
-            local_changed = True
-            continue
-        child_changed, remaining_repairs = _repair_conditional_continue_in_node_8616(
-            body_statements[idx],
+        step_changed, remaining_repairs, idx = _step_continue_body_repair_8616(
+            body_statements,
+            idx,
             remaining_repairs,
             stats,
         )
-        local_changed = child_changed or local_changed
-        idx += 1
+        local_changed = step_changed or local_changed
     if idx < len(body_statements) and remaining_repairs > 0:
         current_stmt = body_statements[idx]
         if isinstance(current_stmt, CIfElse):
-            current_ifelse = current_stmt
             ifelse_changed, remaining_repairs = _repair_conditional_continue_in_ifelse_node_8616(
-                current_ifelse,
+                current_stmt,
                 remaining_repairs,
                 stats,
             )
@@ -2773,54 +2950,72 @@ def _repair_conditional_continue_in_ifelse_node_8616(
     return False, remaining_repairs
 
 
+def _repair_hoisted_copy_statements_8616(
+    node: CStatements,
+    evidence: tuple[HoistedJccTargetCopyEvidence8616, ...],
+    stats: HoistedJccTargetCopyRepairStats8616,
+) -> bool:
+    """Run the displaced-copy repair across one statement block."""
+    changed = False
+    raw_statements: list[object] = list(_dynamic_sequence_8616(node.statements))
+    statements, _flattened_wrappers = _flatten_direct_statement_wrappers_8616(raw_statements)
+    idx = 0
+    while idx < len(statements):
+        stmt = statements[idx]
+        if isinstance(stmt, CIfElse):
+            decision, removed_index = _try_repair_displaced_jcc_target_copy_8616(
+                statements,
+                idx,
+                stmt,
+                evidence,
+            )
+            stats.record(decision)
+            if decision is HoistedJccTargetCopyRepairDecision8616.MATERIALIZED:
+                changed = True
+                if removed_index is not None and removed_index < idx:
+                    idx -= 1
+                idx += 1
+                continue
+        child_changed = _repair_hoisted_jcc_target_copy_in_node_8616(stmt, evidence, stats)
+        changed = child_changed or changed
+        idx += 1
+    if changed:
+        node.statements = statements
+    return changed
+
+
+def _repair_hoisted_copy_ifelse_8616(
+    node: CIfElse,
+    evidence: tuple[HoistedJccTargetCopyEvidence8616, ...],
+    stats: HoistedJccTargetCopyRepairStats8616,
+) -> bool:
+    """Recurse the displaced-copy repair through one if/else node."""
+    local_changed = False
+    pairs = _dynamic_sequence_8616(node.condition_and_nodes)
+    for pair in pairs:
+        if not isinstance(pair, tuple) or len(pair) < 2:
+            continue
+        body = pair[1]
+        local_changed = _repair_hoisted_jcc_target_copy_in_node_8616(body, evidence, stats) or local_changed
+    else_node = node.else_node
+    local_changed = _repair_hoisted_jcc_target_copy_in_node_8616(else_node, evidence, stats) or local_changed
+    return local_changed
+
+
 def _repair_hoisted_jcc_target_copy_in_node_8616(
     node: object,
     evidence: tuple[HoistedJccTargetCopyEvidence8616, ...],
     stats: HoistedJccTargetCopyRepairStats8616,
 ) -> bool:
-    changed = False
     if isinstance(node, CStatements):
-        raw_statements: list[object] = list(_dynamic_sequence_8616(node.statements))
-        statements, _flattened_wrappers = _flatten_direct_statement_wrappers_8616(raw_statements)
-        idx = 0
-        while idx < len(statements):
-            stmt = statements[idx]
-            if isinstance(stmt, CIfElse):
-                decision, removed_index = _try_repair_displaced_jcc_target_copy_8616(
-                    statements,
-                    idx,
-                    stmt,
-                    evidence,
-                )
-                stats.record(decision)
-                if decision is HoistedJccTargetCopyRepairDecision8616.MATERIALIZED:
-                    changed = True
-                    if removed_index is not None and removed_index < idx:
-                        idx -= 1
-                    idx += 1
-                    continue
-            child_changed = _repair_hoisted_jcc_target_copy_in_node_8616(stmt, evidence, stats)
-            changed = child_changed or changed
-            idx += 1
-        if changed:
-            node.statements = statements
-        return changed
+        return _repair_hoisted_copy_statements_8616(node, evidence, stats)
     if isinstance(node, (CForLoop, CWhileLoop, CDoWhileLoop)):
         body = node.body
         if isinstance(body, CStatements):
             return _repair_hoisted_jcc_target_copy_in_node_8616(body, evidence, stats)
         return False
     if isinstance(node, CIfElse):
-        local_changed = False
-        pairs = _dynamic_sequence_8616(node.condition_and_nodes)
-        for pair in pairs:
-            if not isinstance(pair, tuple) or len(pair) < 2:
-                continue
-            body = pair[1]
-            local_changed = _repair_hoisted_jcc_target_copy_in_node_8616(body, evidence, stats) or local_changed
-        else_node = node.else_node
-        local_changed = _repair_hoisted_jcc_target_copy_in_node_8616(else_node, evidence, stats) or local_changed
-        return local_changed
+        return _repair_hoisted_copy_ifelse_8616(node, evidence, stats)
     return False
 
 
@@ -2840,26 +3035,11 @@ def _try_repair_displaced_jcc_target_copy_8616(
     if not _node_has_ins_addr_in_window_8616(body, matched_evidence.body_target, 0x40):
         return HoistedJccTargetCopyRepairDecision8616.REFUSED_BODY_TARGET_UNPROVEN, None
 
-    candidate_indices: list[int] = []
-    for idx, stmt in enumerate(statements):
-        if idx == if_index:
-            continue
-        if _assignment_matches_hoisted_jcc_target_copy_8616(stmt, matched_evidence):
-            candidate_indices.append(idx)
-            continue
-        stmt = statements[idx]
-        if os.environ.get("INERTIA_DEBUG_HOISTED_JCC_TARGET_COPY_REPAIR_VERBOSE") and isinstance(stmt, CAssignment):
-            log.warning(
-                "[hoisted-jcc-target-copy-repair] candidate idx=%d side=%s lhs_disp=%r rhs_disps=%r ins=%r target=%#x copy=%#x expr=%s",
-                idx,
-                "before" if idx < if_index else "after",
-                _assignment_lhs_stack_offset_8616(stmt),
-                sorted(_stack_offsets_read_8616(stmt.rhs)),
-                sorted(_node_ins_addrs_8616(stmt)),
-                matched_evidence.body_target,
-                matched_evidence.copy_addr,
-                _debug_c_expr_string_8616(stmt),
-            )
+    candidate_indices = _hoisted_copy_candidate_indices_8616(
+        statements,
+        if_index,
+        matched_evidence,
+    )
     if not candidate_indices:
         return HoistedJccTargetCopyRepairDecision8616.REFUSED_NO_HOISTED_COPY, None
     if len(candidate_indices) != 1:
@@ -2874,6 +3054,34 @@ def _try_repair_displaced_jcc_target_copy_8616(
             (condition, CStatements([candidate, body], codegen=getattr(if_stmt, "codegen", None)))
         ]
     return HoistedJccTargetCopyRepairDecision8616.MATERIALIZED, candidate_index
+
+
+def _hoisted_copy_candidate_indices_8616(
+    statements: list[object],
+    if_index: int,
+    matched_evidence: HoistedJccTargetCopyEvidence8616,
+) -> list[int]:
+    """Census statements matching the uniquely proven displaced copy."""
+    candidate_indices: list[int] = []
+    for idx, stmt in enumerate(statements):
+        if idx == if_index:
+            continue
+        if _assignment_matches_hoisted_jcc_target_copy_8616(stmt, matched_evidence):
+            candidate_indices.append(idx)
+            continue
+        if os.environ.get("INERTIA_DEBUG_HOISTED_JCC_TARGET_COPY_REPAIR_VERBOSE") and isinstance(stmt, CAssignment):
+            log.warning(
+                "[hoisted-jcc-target-copy-repair] candidate idx=%d side=%s lhs_disp=%r rhs_disps=%r ins=%r target=%#x copy=%#x expr=%s",
+                idx,
+                "before" if idx < if_index else "after",
+                _assignment_lhs_stack_offset_8616(stmt),
+                sorted(_stack_offsets_read_8616(stmt.rhs)),
+                sorted(_node_ins_addrs_8616(stmt)),
+                matched_evidence.body_target,
+                matched_evidence.copy_addr,
+                _debug_c_expr_string_8616(stmt),
+            )
+    return candidate_indices
 
 
 def _evidence_for_if_body_8616(
@@ -3188,6 +3396,66 @@ def _repair_statement_list_8616(
     return changed
 
 
+def _nonempty_loop_body_outcome_8616(
+    statements: list[object],
+    loop_index: int,
+    body: object,
+    evidence: tuple[StackAccumulatorLoopEvidence8616, ...],
+    codegen: object,
+) -> tuple[LoopBodyRepairDecision8616, bool]:
+    """Try the missing-init rescue, else refuse a nonempty loop body."""
+    if isinstance(body, CStatements):
+        init_decision = _try_insert_missing_accumulator_init_8616(statements, loop_index, body, evidence, codegen)
+        if init_decision is LoopBodyRepairDecision8616.MATERIALIZED:
+            return init_decision, True
+    if os.environ.get("INERTIA_DEBUG_LOOP_BODY_REPAIR_VERBOSE"):
+        raw_body_statements = tuple(getattr(body, "statements", ()) or ()) if isinstance(body, CStatements) else ()
+        log.warning(
+            "[loop-body-repair] refused nonempty body_type=%s child_types=%r",
+            type(body).__name__,
+            tuple(type(child).__name__ for child in raw_body_statements),
+        )
+    return LoopBodyRepairDecision8616.REFUSED_NONEMPTY_BODY, False
+
+
+def _matched_accumulator_evidence_8616(
+    loop_induction_disp: int,
+    update_accumulator_disp: int,
+    update_read_disps: frozenset[int],
+    evidence: tuple[StackAccumulatorLoopEvidence8616, ...],
+) -> StackAccumulatorLoopEvidence8616 | None:
+    """Return the evidence item whose slots match this loop and update."""
+    for item in evidence:
+        if (
+            item.induction_disp == loop_induction_disp
+            and item.accumulator_disp == update_accumulator_disp
+            and item.accumulator_disp in update_read_disps
+            and item.induction_disp in update_read_disps
+        ):
+            return item
+    return None
+
+
+def _insert_missing_zero_init_8616(
+    statements: list[object],
+    loop_index: int,
+    matched: StackAccumulatorLoopEvidence8616,
+    update_stmt: object,
+    codegen: object,
+) -> bool:
+    """Insert the proven zero-initializer before the loop when absent."""
+    if not matched.accumulator_zero_initialized or _preceded_by_zero_init_8616(
+        statements,
+        loop_index,
+        matched.accumulator_disp,
+    ):
+        return False
+    lhs = getattr(update_stmt, "lhs", None)
+    zero = CConstant(0, getattr(lhs, "variable_type", None) or SimTypeShort(False), codegen=codegen)
+    statements.insert(loop_index, CAssignment(lhs, zero, codegen=codegen))
+    return True
+
+
 def _try_repair_loop_at_8616(
     statements: list[object],
     loop_index: int,
@@ -3197,18 +3465,7 @@ def _try_repair_loop_at_8616(
     loop = statements[loop_index]
     body = getattr(loop, "body", None)
     if not _body_semantically_empty_8616(body):
-        if isinstance(body, CStatements):
-            init_decision = _try_insert_missing_accumulator_init_8616(statements, loop_index, body, evidence, codegen)
-            if init_decision is LoopBodyRepairDecision8616.MATERIALIZED:
-                return init_decision, True
-        if os.environ.get("INERTIA_DEBUG_LOOP_BODY_REPAIR_VERBOSE"):
-            raw_body_statements = tuple(getattr(body, "statements", ()) or ()) if isinstance(body, CStatements) else ()
-            log.warning(
-                "[loop-body-repair] refused nonempty body_type=%s child_types=%r",
-                type(body).__name__,
-                tuple(type(child).__name__ for child in raw_body_statements),
-            )
-        return LoopBodyRepairDecision8616.REFUSED_NONEMPTY_BODY, False
+        return _nonempty_loop_body_outcome_8616(statements, loop_index, body, evidence, codegen)
     following_update = _next_assignment_after_loop_8616(statements, loop_index)
     if following_update is None:
         return LoopBodyRepairDecision8616.REFUSED_NO_FOLLOWING_UPDATE, False
@@ -3218,16 +3475,12 @@ def _try_repair_loop_at_8616(
     update_read_disps = _stack_offsets_read_8616(getattr(update_stmt, "rhs", None))
     if loop_induction_disp is None or update_accumulator_disp is None:
         return LoopBodyRepairDecision8616.REFUSED_SLOT_MISMATCH, False
-    matched = None
-    for item in evidence:
-        if (
-            item.induction_disp == loop_induction_disp
-            and item.accumulator_disp == update_accumulator_disp
-            and item.accumulator_disp in update_read_disps
-            and item.induction_disp in update_read_disps
-        ):
-            matched = item
-            break
+    matched = _matched_accumulator_evidence_8616(
+        loop_induction_disp,
+        update_accumulator_disp,
+        update_read_disps,
+        evidence,
+    )
     if matched is None:
         return LoopBodyRepairDecision8616.REFUSED_SLOT_MISMATCH, False
 
@@ -3238,16 +3491,13 @@ def _try_repair_loop_at_8616(
     del update_container[update_index]
     if update_container is not statements and not update_container:
         del statements[loop_index + 1]
-    inserted = False
-    if matched.accumulator_zero_initialized and not _preceded_by_zero_init_8616(
+    inserted = _insert_missing_zero_init_8616(
         statements,
         loop_index,
-        matched.accumulator_disp,
-    ):
-        lhs = getattr(update_stmt, "lhs", None)
-        zero = CConstant(0, getattr(lhs, "variable_type", None) or SimTypeShort(False), codegen=codegen)
-        statements.insert(loop_index, CAssignment(lhs, zero, codegen=codegen))
-        inserted = True
+        matched,
+        update_stmt,
+        codegen,
+    )
     return LoopBodyRepairDecision8616.MATERIALIZED, inserted
 
 

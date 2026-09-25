@@ -87,15 +87,30 @@ class ReturnFrame8616:
         return (self.operand_bits // 8) * (2 if self.far else 1)
 
 
+def _real_function_8616(function: Function) -> bool:
+    """Return whether the node is a real function, not a simprocedure/PLT."""
+    return not function.is_simprocedure and not function.is_plt
+
+
+def _resolved_exits_8616(function: Function) -> bool:
+    """Return whether the function graph has no unresolved exits."""
+    return (
+        not function.has_unresolved_jumps
+        and not function.has_unresolved_calls
+        and not function.jumpout_sites
+        and not function.callout_sites
+    )
+
+
+def _closed_return_graph_8616(function: Function, returns: set[object]) -> bool:
+    """Return whether every endpoint is a known return site."""
+    return bool(returns) and set(function.endpoints) == returns and _resolved_exits_8616(function)
+
+
 def collect_function_return_frames_8616(project: Project, function: Function) -> tuple[ReturnFrame8616, ...] | None:
     """Decode every closed function endpoint, refusing unknown control exits."""
     returns = set(function.ret_sites)
-    if (
-        function.is_simprocedure or function.is_plt
-        or not returns or set(function.endpoints) != returns
-        or function.has_unresolved_jumps or function.has_unresolved_calls
-        or function.jumpout_sites or function.callout_sites
-    ):
+    if not _real_function_8616(function) or not _closed_return_graph_8616(function, returns):
         return None
     result: list[ReturnFrame8616] = []
     for site in sorted(returns, key=lambda node: node.addr):
@@ -192,14 +207,12 @@ def _push_effects_8616(
     return tuple(effects)
 
 
-def collect_return_segment_frames_8616(
-    project: object, function: object, return_addrs: Mapping[int, int],
-    *, block_addr: int | None = None,
-) -> tuple[ReturnSegmentFrame8616, ...]:
-    """Return one explicit outcome per call using decoded prefix and exit proof."""
-    if not isinstance(project, Project) or not isinstance(function, Function):
-        return tuple(ReturnSegmentFrame8616(addr, refusal=ReturnSegmentRefusal8616.UNKNOWN_CALLEE)
-                     for addr in sorted(return_addrs))
+def _push_call_candidates_8616(
+    function: Function,
+    return_addrs: Mapping[int, int],
+    block_addr: int | None,
+) -> dict[int, list[tuple[int, int, CsInsn, CsInsn]]]:
+    """Census every push+immediate-call pair feeding a known return address."""
     candidates: dict[int, list[tuple[int, int, CsInsn, CsInsn]]] = {}
     blocks = function.blocks if block_addr is None else (
         (function.get_block(block_addr),) if block_addr in function.block_addrs_set else ()
@@ -211,30 +224,51 @@ def collect_return_segment_frames_8616(
         for push, call in pairwise(instructions):
             if call.address in return_addrs and _is_cs_push_8616(push):
                 candidates.setdefault(call.address, []).append((block.addr, block.size, push, call))
+    return candidates
+
+
+def _call_frame_outcome_8616(
+    project: Project,
+    address: int,
+    return_addr: int,
+    matches: list[tuple[int, int, CsInsn, CsInsn]],
+) -> tuple[ReturnSegmentRefusal8616 | None, tuple[ReturnSegmentEffect8616, ...]]:
+    """Classify one call's prefix candidates into a refusal or effects."""
+    if not matches:
+        return ReturnSegmentRefusal8616.NO_PREFIX, ()
+    if len(matches) != 1:
+        return ReturnSegmentRefusal8616.AMBIGUOUS_EFFECTS, ()
+    block_addr, block_size, push, call = matches[0]
+    if (
+        call.id != X86_INS_CALL or len(call.operands) != 1
+        or call.operands[0].type != X86_OP_IMM
+        or push.address + push.size != address or address + call.size != return_addr
+    ):
+        return ReturnSegmentRefusal8616.UNKNOWN_CALLEE, ()
+    if 0x66 in push.prefix or 0x66 in call.prefix:
+        return ReturnSegmentRefusal8616.UNSUPPORTED_WIDTH_OR_CLEANUP, ()
+    refusal = _callee_refusal_8616(project, call.operands[0].imm)
+    if refusal is not None:
+        return refusal, ()
+    effects = _push_effects_8616(project, block_addr, block_size, push.address)
+    if not effects:
+        return ReturnSegmentRefusal8616.AMBIGUOUS_EFFECTS, ()
+    return None, effects
+
+
+def collect_return_segment_frames_8616(
+    project: object, function: object, return_addrs: Mapping[int, int],
+    *, block_addr: int | None = None,
+) -> tuple[ReturnSegmentFrame8616, ...]:
+    """Return one explicit outcome per call using decoded prefix and exit proof."""
+    if not isinstance(project, Project) or not isinstance(function, Function):
+        return tuple(ReturnSegmentFrame8616(addr, refusal=ReturnSegmentRefusal8616.UNKNOWN_CALLEE)
+                     for addr in sorted(return_addrs))
+    candidates = _push_call_candidates_8616(function, return_addrs, block_addr)
     result: list[ReturnSegmentFrame8616] = []
     for address, return_addr in sorted(return_addrs.items()):
-        matches = candidates.get(address, [])
-        refusal: ReturnSegmentRefusal8616 | None = None
-        effects: tuple[ReturnSegmentEffect8616, ...] = ()
-        if not matches:
-            refusal = ReturnSegmentRefusal8616.NO_PREFIX
-        elif len(matches) != 1:
-            refusal = ReturnSegmentRefusal8616.AMBIGUOUS_EFFECTS
-        else:
-            block_addr, block_size, push, call = matches[0]
-            if (
-                call.id != X86_INS_CALL or len(call.operands) != 1
-                or call.operands[0].type != X86_OP_IMM
-                or push.address + push.size != address or address + call.size != return_addr
-            ):
-                refusal = ReturnSegmentRefusal8616.UNKNOWN_CALLEE
-            elif 0x66 in push.prefix or 0x66 in call.prefix:
-                refusal = ReturnSegmentRefusal8616.UNSUPPORTED_WIDTH_OR_CLEANUP
-            else:
-                refusal = _callee_refusal_8616(project, call.operands[0].imm)
-                if refusal is None:
-                    effects = _push_effects_8616(project, block_addr, block_size, push.address)
-                    if not effects:
-                        refusal = ReturnSegmentRefusal8616.AMBIGUOUS_EFFECTS
+        refusal, effects = _call_frame_outcome_8616(
+            project, address, return_addr, candidates.get(address, [])
+        )
         result.append(ReturnSegmentFrame8616(address, effects, refusal))
     return tuple(result)

@@ -13,11 +13,15 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from ..alias.domains import AX, DomainKey
 from ..caller_return_use_contracts import CallerReturnUseFact8616
-from ..ir.ssa_function import SSAFunctionArtifact, SSAPhiNode
+from ..ir import IRValue
+from ..ir.ssa_function import SSABlock, SSAFunctionArtifact, SSAPhiNode
 from ..widening.stack_word_register_transfers import StackWordStorageVersion8616
 from .interprocedural_storage_return_pointer_block import (
+    PointerBlockScan8616,
     PointerCarrier8616,
     append_unique_pointer_proofs_8616,
     full_word_pointer_domain_8616,
@@ -25,6 +29,7 @@ from .interprocedural_storage_return_pointer_block import (
     scan_pointer_carriers_in_block_8616,
 )
 from .interprocedural_storage_return_pointer_stack import (
+    PointerStackTransferContext8616,
     build_pointer_stack_transfer_context_8616,
     join_pointer_stack_carriers_8616,
 )
@@ -209,11 +214,11 @@ def _failure_8616(
     return ReturnStorageTypeFailure8616.POINTER_DEREFERENCE_NOT_FOUND
 
 
-def scan_pointer_return_flow_8616(
+def _witness_scan_entry_8616(
     artifact: SSAFunctionArtifact,
     fact: CallerReturnUseFact8616,
-) -> ReturnPointerFlowScan8616:
-    """Trace one exact returned pointer through acyclic CFG and phi evidence."""
+) -> tuple[SSABlock, IRValue, int, int] | ReturnPointerFlowScan8616:
+    """Return the unique witness block, seed value, and start index."""
     witness = fact.witness_instruction_addr
     candidates = tuple(
         block for block in artifact.blocks if witness is not None and pointer_witness_seed_values_8616(block, witness)
@@ -226,22 +231,17 @@ def scan_pointer_return_flow_8616(
     seeds = pointer_witness_seed_values_8616(block, witness)
     if len(seeds) != 1:
         return ReturnPointerFlowScan8616(failure=ReturnStorageTypeFailure8616.POINTER_WITNESS_CONFLICT)
-    stack_context = build_pointer_stack_transfer_context_8616(artifact)
     start_indices = tuple(index for index, instruction in enumerate(block.instrs) if instruction.addr == witness)
     if not start_indices:
         return ReturnPointerFlowScan8616(failure=ReturnStorageTypeFailure8616.POINTER_WITNESS_NOT_FOUND)
-    start = scan_pointer_carriers_in_block_8616(
-        block,
-        fact,
-        {AX: PointerCarrier8616(seeds[0])},
-        {},
-        stack_context.by_instruction_addr,
-        start_indices[0],
-        witness,
-    )
-    if start.evidence is not None:
-        return ReturnPointerFlowScan8616(evidence=start.evidence)
+    return block, seeds[0], start_indices[0], witness
 
+
+def _pointer_cfg_context_8616(
+    artifact: SSAFunctionArtifact,
+    origin_addr: int,
+) -> tuple[dict[int, SSABlock], dict[int, tuple[int, ...]], set[int]] | ReturnPointerFlowScan8616:
+    """Validate the acyclic CFG and return deterministic traversal surfaces."""
     block_by_addr = {item.addr: item for item in artifact.blocks}
     block_addrs = set(block_by_addr)
     if set(artifact.predecessor_map) != block_addrs or any(
@@ -251,22 +251,45 @@ def scan_pointer_return_flow_8616(
     ):
         return ReturnPointerFlowScan8616(failure=ReturnStorageTypeFailure8616.POINTER_CFG_INCOMPLETE)
     successors = _successors_8616(artifact)
-    reachable = _reachable_blocks_8616(block.addr, successors)
+    reachable = _reachable_blocks_8616(origin_addr, successors)
     if _has_cycle_8616(reachable, successors):
         return ReturnPointerFlowScan8616(failure=ReturnStorageTypeFailure8616.POINTER_CFG_CYCLE)
+    return block_by_addr, successors, reachable
 
-    outputs = {block.addr: start.carriers}
+
+@dataclass(slots=True)
+class _PointerFlowPropagation8616:
+    """Evidence and refusal flags collected across the acyclic worklist."""
+
+    evidence: list[ReturnPointerUseEvidence8616] = field(default_factory=list)
+    ambiguous: bool = False
+    unknown: bool = False
+    clobber: bool = False
+    join_conflict: bool = False
+    phi_conflict: bool = False
+
+
+def _propagate_pointer_carriers_8616(
+    artifact: SSAFunctionArtifact,
+    fact: CallerReturnUseFact8616,
+    start: PointerBlockScan8616,
+    origin_addr: int,
+    pending: set[int],
+    block_by_addr: dict[int, SSABlock],
+    stack_context: PointerStackTransferContext8616,
+    witness: int,
+) -> _PointerFlowPropagation8616 | ReturnPointerFlowScan8616:
+    """Advance carriers through the acyclic worklist in deterministic order."""
+    outputs = {origin_addr: start.carriers}
     stack_outputs: dict[
         int,
         dict[StackWordStorageVersion8616, PointerCarrier8616],
-    ] = {block.addr: start.stack_carriers}
-    pending = reachable - {block.addr}
-    evidence: list[ReturnPointerUseEvidence8616] = []
-    ambiguous = start.saw_ambiguous_address
-    unknown = start.saw_unknown_address
-    clobber = start.saw_alias_clobber
-    join_conflict = False
-    phi_conflict = False
+    ] = {origin_addr: start.stack_carriers}
+    collected = _PointerFlowPropagation8616(
+        ambiguous=start.saw_ambiguous_address,
+        unknown=start.saw_unknown_address,
+        clobber=start.saw_alias_clobber,
+    )
     while pending:
         progress = False
         for block_addr in sorted(pending):
@@ -296,15 +319,57 @@ def scan_pointer_return_flow_8616(
             stack_outputs[block_addr] = scan.stack_carriers
             pending.remove(block_addr)
             progress = True
-            join_conflict = join_conflict or joined_bad or stack_join_bad
-            phi_conflict = phi_conflict or phi_bad
-            ambiguous = ambiguous or scan.saw_ambiguous_address
-            unknown = unknown or scan.saw_unknown_address
-            clobber = clobber or scan.saw_alias_clobber
+            collected.join_conflict = collected.join_conflict or joined_bad or stack_join_bad
+            collected.phi_conflict = collected.phi_conflict or phi_bad
+            collected.ambiguous = collected.ambiguous or scan.saw_ambiguous_address
+            collected.unknown = collected.unknown or scan.saw_unknown_address
+            collected.clobber = collected.clobber or scan.saw_alias_clobber
             if scan.evidence is not None:
-                evidence.append(scan.evidence)
+                collected.evidence.append(scan.evidence)
         if not progress:
             return ReturnPointerFlowScan8616(failure=ReturnStorageTypeFailure8616.POINTER_CFG_INCOMPLETE)
+    return collected
+
+
+def scan_pointer_return_flow_8616(
+    artifact: SSAFunctionArtifact,
+    fact: CallerReturnUseFact8616,
+) -> ReturnPointerFlowScan8616:
+    """Trace one exact returned pointer through acyclic CFG and phi evidence."""
+    entry = _witness_scan_entry_8616(artifact, fact)
+    if isinstance(entry, ReturnPointerFlowScan8616):
+        return entry
+    block, seed, start_index, proven_witness = entry
+    stack_context = build_pointer_stack_transfer_context_8616(artifact)
+    start = scan_pointer_carriers_in_block_8616(
+        block,
+        fact,
+        {AX: PointerCarrier8616(seed)},
+        {},
+        stack_context.by_instruction_addr,
+        start_index,
+        proven_witness,
+    )
+    if start.evidence is not None:
+        return ReturnPointerFlowScan8616(evidence=start.evidence)
+
+    cfg = _pointer_cfg_context_8616(artifact, block.addr)
+    if isinstance(cfg, ReturnPointerFlowScan8616):
+        return cfg
+    block_by_addr, _successors, reachable = cfg
+    propagation = _propagate_pointer_carriers_8616(
+        artifact,
+        fact,
+        start,
+        block.addr,
+        reachable - {block.addr},
+        block_by_addr,
+        stack_context,
+        proven_witness,
+    )
+    if isinstance(propagation, ReturnPointerFlowScan8616):
+        return propagation
+    evidence = propagation.evidence
     if evidence:
         chosen = min(
             evidence,
@@ -320,10 +385,10 @@ def scan_pointer_return_flow_8616(
         )
     return ReturnPointerFlowScan8616(
         failure=_failure_8616(
-            ambiguous=ambiguous,
-            unknown=unknown,
-            phi=phi_conflict,
-            join=join_conflict,
-            clobber=clobber,
+            ambiguous=propagation.ambiguous,
+            unknown=propagation.unknown,
+            phi=propagation.phi_conflict,
+            join=propagation.join_conflict,
+            clobber=propagation.clobber,
         )
     )

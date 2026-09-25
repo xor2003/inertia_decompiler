@@ -11,7 +11,8 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
 
 from angr.errors import SimEngineError, SimTranslationError
@@ -25,11 +26,16 @@ from ..function_evidence_inventory import (
     FunctionEvidenceKind8616,
     collect_function_binary_evidence_8616,
 )
-from .branch_target_return import TerminalAxReturnEffectKind8616, terminal_ax_return_effect_8616
+from .branch_target_return import (
+    TerminalAxReturnEffect8616,
+    TerminalAxReturnEffectKind8616,
+    terminal_ax_return_effect_8616,
+)
 from .terminal_register_restore import terminal_register_restore_sites_8616
 from .terminal_value_roles import (
     TerminalAxReturnEvidence8616,
     TerminalAxReturnLane8616,
+    TerminalAxUse8616,
     TerminalAxUseKind8616,
     TerminalReturnStorageState8616,
     terminal_ax_use_8616,
@@ -186,6 +192,223 @@ def _decoded_instructions_by_block_8616(
     return decoded
 
 
+@dataclass(slots=True)
+class _LaneFlow8616:
+    """Mutable per-path lane state carried across one terminal AX scan."""
+
+    lanes: TerminalAxReturnLane8616
+    dx_ax_pair_proven: bool
+    call_output_lanes: TerminalAxReturnLane8616
+    local_definition_lanes: TerminalAxReturnLane8616
+    local_pointer_output_lanes: TerminalAxReturnLane8616
+
+    def snapshot(self) -> _LaneFlow8616:
+        """Return an independent copy for one successor path."""
+        return _LaneFlow8616(
+            self.lanes,
+            self.dx_ax_pair_proven,
+            self.call_output_lanes,
+            self.local_definition_lanes,
+            self.local_pointer_output_lanes,
+        )
+
+
+@dataclass(slots=True)
+class _TerminalAxEvidenceScan8616:
+    """Bounded path scan collecting terminal AX lane evidence."""
+
+    project_dynamic: Any
+    block_addrs: frozenset[int]
+    decoded_by_block: Mapping[int, tuple[object, ...]]
+    explicit_restore_sites: frozenset[int]
+    terminal_states: set[TerminalReturnStorageState8616] = field(default_factory=set)
+    visited_states: set[_TerminalAxScanState8616] = field(default_factory=set)
+    raw_fact_count: int = 0
+    normalized_fact_count: int = 0
+    classified_fact_count: int = 0
+    materialized_count: int = 0
+    failure_count: int = 0
+
+    def _record_terminal(self, flow: _LaneFlow8616) -> None:
+        """Materialize one classified terminal-path state into the evidence set."""
+        self.raw_fact_count += 1
+        self.normalized_fact_count += 1
+        self.classified_fact_count += 1
+        self.materialized_count += 1
+        self.terminal_states.add(
+            TerminalReturnStorageState8616(
+                flow.lanes,
+                flow.dx_ax_pair_proven,
+                flow.call_output_lanes,
+                flow.local_pointer_output_lanes,
+            )
+        )
+
+    def _record_failure(self) -> None:
+        """Record one reachable control-flow fact that could not be classified."""
+        self.raw_fact_count += 1
+        self.failure_count += 1
+
+    def _block_instructions(self, block_addr: int) -> tuple[object, ...]:
+        """Return decoded instructions for one block or empty on refusal."""
+        insns = self.decoded_by_block.get(block_addr)
+        if insns is not None:
+            return insns
+        try:
+            return cast(
+                tuple[object, ...],
+                decoded_block_instructions_8616(self.project_dynamic, block_addr, opt_level=0),
+            )
+        except (KeyError, SimEngineError, SimTranslationError, ValueError):
+            return ()
+
+    def scan(self, block_addr: int, flow: _LaneFlow8616) -> None:
+        """Propagate one finite typed state once through an entry-reachable block."""
+        state = _TerminalAxScanState8616(
+            block_addr,
+            flow.lanes,
+            flow.dx_ax_pair_proven,
+            flow.call_output_lanes,
+            flow.local_definition_lanes,
+            flow.local_pointer_output_lanes,
+        )
+        if state in self.visited_states:
+            return
+        self.visited_states.add(state)
+        insns = self._block_instructions(block_addr)
+        if not insns:
+            self._record_failure()
+            return
+        for insn in insns:
+            effect = terminal_ax_return_effect_8616(insn)
+            ax_use = terminal_ax_use_8616(insn)
+            mnemonic = str(cast(Any, _inner_instruction_8616(insn)).mnemonic or "").lower()
+            if self._apply_effect(insn, effect, ax_use, mnemonic, flow):
+                continue
+            if self._dispatch_edge(insn, mnemonic, flow):
+                return
+        self._propagate_fallthrough(insns[-1], flow)
+
+    def _apply_effect(
+        self,
+        insn: object,
+        effect: TerminalAxReturnEffect8616,
+        ax_use: TerminalAxUse8616,
+        mnemonic: str,
+        flow: _LaneFlow8616,
+    ) -> bool:
+        """Apply one instruction's lane effects; return True to skip edges."""
+        if effect.kind is TerminalAxReturnEffectKind8616.CALL_CLOBBER:
+            flow.lanes = TerminalAxReturnLane8616.WORD
+            flow.dx_ax_pair_proven = False
+            flow.call_output_lanes = TerminalAxReturnLane8616.WORD
+            flow.local_definition_lanes = TerminalAxReturnLane8616.NONE
+            flow.local_pointer_output_lanes = TerminalAxReturnLane8616.NONE
+            return False
+        written_register = _written_register_8616(insn, effect.dst_reg)
+        if _instruction_address_8616(insn) in self.explicit_restore_sites:
+            self._apply_restore(written_register, flow)
+            return True
+        self._apply_write(insn, effect, written_register, mnemonic, flow)
+        self._apply_use(ax_use, flow)
+        return False
+
+    @staticmethod
+    def _apply_restore(written_register: str | None, flow: _LaneFlow8616) -> None:
+        """Reset lanes proven consumed by an explicit terminal restore."""
+        if written_register in {"ax", "al", "ah"}:
+            flow.lanes = TerminalAxReturnLane8616.NONE
+            flow.call_output_lanes = TerminalAxReturnLane8616.NONE
+            flow.local_definition_lanes = TerminalAxReturnLane8616.NONE
+            flow.local_pointer_output_lanes = TerminalAxReturnLane8616.NONE
+            flow.dx_ax_pair_proven = False
+        elif written_register == "dx":
+            flow.dx_ax_pair_proven = False
+
+    @staticmethod
+    def _apply_write(
+        insn: object,
+        effect: TerminalAxReturnEffect8616,
+        written_register: str | None,
+        mnemonic: str,
+        flow: _LaneFlow8616,
+    ) -> None:
+        """Apply register-write lane effects for one instruction."""
+        if written_register in {"ax", "al", "ah"}:
+            written = _written_lane_8616(insn, effect.dst_reg)
+            flow.lanes = (
+                written if written == TerminalAxReturnLane8616.WORD else flow.lanes | written
+            )
+            flow.call_output_lanes &= ~written
+            flow.local_definition_lanes &= ~written
+            flow.local_pointer_output_lanes &= ~written
+            if (
+                effect.kind is TerminalAxReturnEffectKind8616.MOV_REG_STACK
+                and isinstance(effect.mem_disp, int)
+                and effect.mem_disp < 0
+            ):
+                flow.local_definition_lanes |= written
+            flow.dx_ax_pair_proven = False
+        elif written_register == "dx":
+            explicit_lanes = flow.lanes & ~flow.call_output_lanes
+            flow.dx_ax_pair_proven = (
+                explicit_lanes == TerminalAxReturnLane8616.WORD
+                and mnemonic in {"adc", "mov", "sbb"}
+            )
+        elif flow.dx_ax_pair_proven and not _preserves_terminal_return_storage_8616(insn, mnemonic):
+            flow.dx_ax_pair_proven = False
+
+    @staticmethod
+    def _apply_use(ax_use: TerminalAxUse8616, flow: _LaneFlow8616) -> None:
+        """Apply AX-use lane effects for one instruction."""
+        if ax_use.kind is TerminalAxUseKind8616.MEMORY_EFFECT:
+            flow.local_pointer_output_lanes |= (
+                ax_use.lanes & flow.lanes & flow.local_definition_lanes
+            )
+        elif ax_use.kind in {
+            TerminalAxUseKind8616.OTHER,
+            TerminalAxUseKind8616.UNKNOWN_REFUSE,
+        }:
+            flow.local_pointer_output_lanes &= ~ax_use.lanes
+
+    def _dispatch_edge(
+        self,
+        insn: object,
+        mnemonic: str,
+        flow: _LaneFlow8616,
+    ) -> bool:
+        """Handle terminal/branch mnemonics; return whether the block ends."""
+        if mnemonic in {"ret", "retf", "iret"}:
+            self._record_terminal(flow)
+            return True
+        if mnemonic in {"jmp", "ljmp"}:
+            target = _direct_jump_target_8616(insn)
+            if isinstance(target, int) and target in self.block_addrs:
+                self.scan(target, flow.snapshot())
+            else:
+                self._record_failure()
+            return True
+        if mnemonic in _CONDITIONAL_BRANCHES_8616:
+            target = _direct_jump_target_8616(insn)
+            fallthrough = _instruction_fallthrough_8616(insn)
+            successors = tuple(dict.fromkeys((target, fallthrough)))
+            for successor in successors:
+                if isinstance(successor, int) and successor in self.block_addrs:
+                    self.scan(successor, flow.snapshot())
+                else:
+                    self._record_failure()
+            return True
+        return False
+
+    def _propagate_fallthrough(self, last_insn: object, flow: _LaneFlow8616) -> None:
+        """Propagate the lane state along the block's fallthrough edge."""
+        fallthrough = _instruction_fallthrough_8616(last_insn)
+        if isinstance(fallthrough, int) and fallthrough in self.block_addrs:
+            self.scan(fallthrough, flow.snapshot())
+        else:
+            self._record_failure()
+
+
 def _collect_terminal_ax_return_evidence_uncached_8616(
     project: object,
     function: object,
@@ -216,191 +439,29 @@ def _collect_terminal_ax_return_evidence_uncached_8616(
         if frozenset(decoded_by_block) == block_addrs
         else frozenset()
     )
-    terminal_states: set[TerminalReturnStorageState8616] = set()
-    raw_fact_count = 0
-    normalized_fact_count = 0
-    classified_fact_count = 0
-    materialized_count = 0
-    failure_count = 0
-    visited_states: set[_TerminalAxScanState8616] = set()
-
-    def _record_terminal(
-        lanes: TerminalAxReturnLane8616,
-        dx_ax_pair_proven: bool,
-        call_output_lanes: TerminalAxReturnLane8616,
-        local_pointer_output_lanes: TerminalAxReturnLane8616,
-    ) -> None:
-        """Materialize one classified terminal-path state into the evidence set."""
-        nonlocal raw_fact_count, normalized_fact_count, classified_fact_count, materialized_count
-        raw_fact_count += 1
-        normalized_fact_count += 1
-        classified_fact_count += 1
-        materialized_count += 1
-        terminal_states.add(
-            TerminalReturnStorageState8616(
-                lanes,
-                dx_ax_pair_proven,
-                call_output_lanes,
-                local_pointer_output_lanes,
-            )
-        )
-
-    def _record_failure() -> None:
-        """Record one reachable control-flow fact that could not be classified."""
-        nonlocal raw_fact_count, failure_count
-        raw_fact_count += 1
-        failure_count += 1
-
-    def _scan(
-        block_addr: int,
-        lanes: TerminalAxReturnLane8616,
-        dx_ax_pair_proven: bool,
-        call_output_lanes: TerminalAxReturnLane8616,
-        local_definition_lanes: TerminalAxReturnLane8616,
-        local_pointer_output_lanes: TerminalAxReturnLane8616,
-    ) -> None:
-        """Propagate one finite typed state once through an entry-reachable block."""
-        state = _TerminalAxScanState8616(
-            block_addr,
-            lanes,
-            dx_ax_pair_proven,
-            call_output_lanes,
-            local_definition_lanes,
-            local_pointer_output_lanes,
-        )
-        if state in visited_states:
-            return
-        visited_states.add(state)
-        insns = decoded_by_block.get(block_addr)
-        if insns is None:
-            try:
-                insns = decoded_block_instructions_8616(project_dynamic, block_addr, opt_level=0)
-            except (KeyError, SimEngineError, SimTranslationError, ValueError):
-                _record_failure()
-                return
-        if not insns:
-            _record_failure()
-            return
-        for insn in insns:
-            effect = terminal_ax_return_effect_8616(insn)
-            ax_use = terminal_ax_use_8616(insn)
-            mnemonic = str(cast(Any, _inner_instruction_8616(insn)).mnemonic or "").lower()
-            if effect.kind is TerminalAxReturnEffectKind8616.CALL_CLOBBER:
-                lanes = TerminalAxReturnLane8616.WORD
-                dx_ax_pair_proven = False
-                call_output_lanes = TerminalAxReturnLane8616.WORD
-                local_definition_lanes = TerminalAxReturnLane8616.NONE
-                local_pointer_output_lanes = TerminalAxReturnLane8616.NONE
-            else:
-                written_register = _written_register_8616(insn, effect.dst_reg)
-                instruction_addr = _instruction_address_8616(insn)
-                if instruction_addr in explicit_restore_sites:
-                    if written_register in {"ax", "al", "ah"}:
-                        lanes = TerminalAxReturnLane8616.NONE
-                        call_output_lanes = TerminalAxReturnLane8616.NONE
-                        local_definition_lanes = TerminalAxReturnLane8616.NONE
-                        local_pointer_output_lanes = TerminalAxReturnLane8616.NONE
-                        dx_ax_pair_proven = False
-                    elif written_register == "dx":
-                        dx_ax_pair_proven = False
-                    continue
-                if written_register in {"ax", "al", "ah"}:
-                    written = _written_lane_8616(insn, effect.dst_reg)
-                    lanes = written if written == TerminalAxReturnLane8616.WORD else lanes | written
-                    call_output_lanes &= ~written
-                    local_definition_lanes &= ~written
-                    local_pointer_output_lanes &= ~written
-                    if (
-                        effect.kind is TerminalAxReturnEffectKind8616.MOV_REG_STACK
-                        and isinstance(effect.mem_disp, int)
-                        and effect.mem_disp < 0
-                    ):
-                        local_definition_lanes |= written
-                    dx_ax_pair_proven = False
-                elif written_register == "dx":
-                    explicit_lanes = lanes & ~call_output_lanes
-                    dx_ax_pair_proven = (
-                        explicit_lanes == TerminalAxReturnLane8616.WORD
-                        and mnemonic in {"adc", "mov", "sbb"}
-                    )
-                elif dx_ax_pair_proven and not _preserves_terminal_return_storage_8616(insn, mnemonic):
-                    dx_ax_pair_proven = False
-                if ax_use.kind is TerminalAxUseKind8616.MEMORY_EFFECT:
-                    local_pointer_output_lanes |= (
-                        ax_use.lanes & lanes & local_definition_lanes
-                    )
-                elif ax_use.kind in {
-                    TerminalAxUseKind8616.OTHER,
-                    TerminalAxUseKind8616.UNKNOWN_REFUSE,
-                }:
-                    local_pointer_output_lanes &= ~ax_use.lanes
-            if mnemonic in {"ret", "retf", "iret"}:
-                _record_terminal(
-                    lanes,
-                    dx_ax_pair_proven,
-                    call_output_lanes,
-                    local_pointer_output_lanes,
-                )
-                return
-            if mnemonic in {"jmp", "ljmp"}:
-                target = _direct_jump_target_8616(insn)
-                if isinstance(target, int) and target in block_addrs:
-                    _scan(
-                        target,
-                        lanes,
-                        dx_ax_pair_proven,
-                        call_output_lanes,
-                        local_definition_lanes,
-                        local_pointer_output_lanes,
-                    )
-                else:
-                    _record_failure()
-                return
-            if mnemonic in _CONDITIONAL_BRANCHES_8616:
-                target = _direct_jump_target_8616(insn)
-                fallthrough = _instruction_fallthrough_8616(insn)
-                successors = tuple(dict.fromkeys((target, fallthrough)))
-                for successor in successors:
-                    if isinstance(successor, int) and successor in block_addrs:
-                        _scan(
-                            successor,
-                            lanes,
-                            dx_ax_pair_proven,
-                            call_output_lanes,
-                            local_definition_lanes,
-                            local_pointer_output_lanes,
-                        )
-                    else:
-                        _record_failure()
-                return
-        fallthrough = _instruction_fallthrough_8616(insns[-1])
-        if isinstance(fallthrough, int) and fallthrough in block_addrs:
-            _scan(
-                fallthrough,
-                lanes,
-                dx_ax_pair_proven,
-                call_output_lanes,
-                local_definition_lanes,
-                local_pointer_output_lanes,
-            )
-        else:
-            _record_failure()
-
-    _scan(
+    scan = _TerminalAxEvidenceScan8616(
+        project_dynamic,
+        block_addrs,
+        decoded_by_block,
+        explicit_restore_sites,
+    )
+    scan.scan(
         entry_addr,
-        TerminalAxReturnLane8616.NONE,
-        False,
-        TerminalAxReturnLane8616.NONE,
-        TerminalAxReturnLane8616.NONE,
-        TerminalAxReturnLane8616.NONE,
+        _LaneFlow8616(
+            TerminalAxReturnLane8616.NONE,
+            False,
+            TerminalAxReturnLane8616.NONE,
+            TerminalAxReturnLane8616.NONE,
+            TerminalAxReturnLane8616.NONE,
+        ),
     )
     return TerminalAxReturnEvidence8616(
-        storage_states=frozenset(terminal_states),
-        raw_fact_count=raw_fact_count,
-        normalized_fact_count=normalized_fact_count,
-        classified_fact_count=classified_fact_count,
-        materialized_count=materialized_count,
-        failure_count=failure_count,
+        storage_states=frozenset(scan.terminal_states),
+        raw_fact_count=scan.raw_fact_count,
+        normalized_fact_count=scan.normalized_fact_count,
+        classified_fact_count=scan.classified_fact_count,
+        materialized_count=scan.materialized_count,
+        failure_count=scan.failure_count,
     )
 
 

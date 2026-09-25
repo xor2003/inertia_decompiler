@@ -27,6 +27,7 @@ from archinfo import Arch
 from .semantic_cast import CSemanticCast8616
 from .stack_variable_coordinates import (
     StackVariableCoordinateProjection8616,
+    StackVariableCoordinateRegistry8616,
     stack_variable_coordinate_registry_8616,
 )
 
@@ -184,28 +185,14 @@ def project_pointer_storage_value_8616(
     )
 
 
-def project_stack_value_range_8616(
+def _range_owners_8616(
     codegen: object,
+    registry: StackVariableCoordinateRegistry8616,
     bp_offset: int,
     size: int,
-    *,
-    owner_hint: StackValueOwnerHint8616 | None = None,
-    require_lvalue: bool = False,
-) -> StackValueProjectionResult8616:
-    """Project one proven stack value range as a typed C expression.
-
-    ABI padding is not part of the typed value. A byte read at ``arg+1`` may
-    therefore project from a word argument, but must refuse for a one-byte
-    argument occupying a two-byte stack slot. An exact function-pointer load
-    remains a function pointer; only data-pointer storage views become numeric
-    guest offsets.
-    """
-    if size <= 0:
-        return _publish_result_8616(
-            codegen,
-            StackValueProjectionResult8616(StackValueProjectionStatus8616.INVALID_RANGE),
-        )
-    registry = stack_variable_coordinate_registry_8616(codegen)
+    owner_hint: StackValueOwnerHint8616 | None,
+) -> tuple[StackVariableCoordinateProjection8616, ...]:
+    """Collect range-covering owners, honoring the hint and interface ties."""
     owners = tuple(
         projection
         for projection in registry.projections
@@ -234,6 +221,66 @@ def project_stack_value_range_8616(
         )
         if len(interface_owners) == 1:
             owners = interface_owners
+    return owners
+
+
+def _lvalue_projection_8616(
+    codegen: object,
+    owner: StackVariableCoordinateProjection8616,
+    expression: structured_c.CExpression,
+    source_type: SimType | None,
+    relative_offset: int,
+    size: int,
+) -> StackValueProjectionResult8616:
+    """Project a proven writable byte view of a word owner."""
+    status = StackValueProjectionStatus8616.EXACT_VALUE
+    if relative_offset != 0 or size != owner.value_size:
+        if size != 1 or owner.value_size != 2 or not isinstance(source_type, SimTypeShort):
+            return _publish_result_8616(codegen, StackValueProjectionResult8616(
+                StackValueProjectionStatus8616.UNSUPPORTED_WRITE_VIEW, owner=owner,
+            ))
+        byte_pointer = SimTypePointer(SimTypeChar(False, label="unsigned char")).with_arch(
+            cast(_CodegenBoundary8616, codegen).project.arch,
+        )
+        reference = structured_c.CUnaryOp("Reference", expression, codegen=codegen)
+        expression = structured_c.CIndexedVariable(
+            CSemanticCast8616(None, byte_pointer, reference, codegen=codegen),
+            structured_c.CConstant(relative_offset, _unsigned_type_for_width_8616(codegen, 2), codegen=codegen),
+            codegen=codegen,
+        )
+        status = StackValueProjectionStatus8616.CONTAINED_VALUE
+    return _publish_result_8616(codegen, StackValueProjectionResult8616(status, expression, owner))
+
+
+def project_stack_value_range_8616(
+    codegen: object,
+    bp_offset: int,
+    size: int,
+    *,
+    owner_hint: StackValueOwnerHint8616 | None = None,
+    require_lvalue: bool = False,
+) -> StackValueProjectionResult8616:
+    """Project one proven stack value range as a typed C expression.
+
+    ABI padding is not part of the typed value. A byte read at ``arg+1`` may
+    therefore project from a word argument, but must refuse for a one-byte
+    argument occupying a two-byte stack slot. An exact function-pointer load
+    remains a function pointer; only data-pointer storage views become numeric
+    guest offsets.
+    """
+    if size <= 0:
+        return _publish_result_8616(
+            codegen,
+            StackValueProjectionResult8616(StackValueProjectionStatus8616.INVALID_RANGE),
+        )
+    registry = stack_variable_coordinate_registry_8616(codegen)
+    owners = _range_owners_8616(
+        codegen,
+        registry,
+        bp_offset,
+        size,
+        owner_hint,
+    )
     if not owners:
         return _publish_result_8616(
             codegen,
@@ -268,23 +315,33 @@ def project_stack_value_range_8616(
         source_type = None
     expression: structured_c.CExpression = owner.cvar
     if require_lvalue:
-        status = StackValueProjectionStatus8616.EXACT_VALUE
-        if relative_offset != 0 or size != owner.value_size:
-            if size != 1 or owner.value_size != 2 or not isinstance(source_type, SimTypeShort):
-                return _publish_result_8616(codegen, StackValueProjectionResult8616(
-                    StackValueProjectionStatus8616.UNSUPPORTED_WRITE_VIEW, owner=owner,
-                ))
-            byte_pointer = SimTypePointer(SimTypeChar(False, label="unsigned char")).with_arch(
-                cast(_CodegenBoundary8616, codegen).project.arch,
-            )
-            reference = structured_c.CUnaryOp("Reference", expression, codegen=codegen)
-            expression = structured_c.CIndexedVariable(
-                CSemanticCast8616(None, byte_pointer, reference, codegen=codegen),
-                structured_c.CConstant(relative_offset, _unsigned_type_for_width_8616(codegen, 2), codegen=codegen),
-                codegen=codegen,
-            )
-            status = StackValueProjectionStatus8616.CONTAINED_VALUE
-        return _publish_result_8616(codegen, StackValueProjectionResult8616(status, expression, owner))
+        return _lvalue_projection_8616(
+            codegen,
+            owner,
+            expression,
+            source_type,
+            relative_offset,
+            size,
+        )
+    return _value_projection_8616(
+        codegen,
+        owner,
+        expression,
+        source_type,
+        relative_offset,
+        size,
+    )
+
+
+def _value_projection_8616(
+    codegen: object,
+    owner: StackVariableCoordinateProjection8616,
+    expression: structured_c.CExpression,
+    source_type: SimType | None,
+    relative_offset: int,
+    size: int,
+) -> StackValueProjectionResult8616:
+    """Project the proven owner value at one contained offset and width."""
     if (
         isinstance(source_type, SimTypePointer)
         and isinstance(source_type.pts_to, SimTypeFunction)

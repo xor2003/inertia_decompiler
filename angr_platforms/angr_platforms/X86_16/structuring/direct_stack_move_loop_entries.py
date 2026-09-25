@@ -29,6 +29,7 @@ from .direct_stack_move_immediate_loop_entries import (
     classify_immediate_loop_entry_relocation_8616,
 )
 from .direct_stack_move_loop_evidence import (
+    DirectStackMoveLoopEntryEdge8616,
     boundary_tuple_8616,
     repeated_sequence_edges_8616,
 )
@@ -39,6 +40,7 @@ from .direct_stack_move_loop_sites import (
     tagged_assignment_locations_8616,
 )
 from .direct_stack_move_ownership import (
+    DirectStackMoveControlClaim8616,
     direct_stack_move_branch_claims_8616,
     direct_stack_move_loop_entry_supersedes_branch_claim_8616,
 )
@@ -158,6 +160,131 @@ def place_direct_stack_move_loop_entry_assignment_8616(
     )
 
 
+@dataclass(slots=True)
+class _LoopEntryScan8616:
+    """Mutable per-fact loop-entry placement scan state."""
+
+    project: object
+    codegen: object
+    function: object
+    root: object
+    normalized: int = 0
+    classified: int = 0
+    materialized: int = 0
+    failures: int = 0
+    already_materialized: int = 0
+    refused_no_edge: int = 0
+    refused_no_site: int = 0
+    refused_assignment: int = 0
+    refused_branch_owner: int = 0
+    refused_immediate_scope: int = 0
+    changed: bool = False
+
+    def process(
+        self,
+        move_fact: DirectStackMoveFact8616,
+        move_branch_claims: tuple[DirectStackMoveControlClaim8616, ...],
+    ) -> None:
+        """Apply the loop-entry gate ladder to one move fact."""
+        edges = repeated_sequence_edges_8616(self.project, self.function, move_fact.ins_addr)
+        if move_branch_claims and not (
+            len(move_branch_claims) == 1
+            and len(edges) == 1
+            and direct_stack_move_loop_entry_supersedes_branch_claim_8616(
+                move_branch_claims[0],
+                edges[0],
+            )
+        ):
+            self.refused_branch_owner += 1
+            return
+        debug_loop_entry = os.environ.get("INERTIA_DEBUG_STACK_LOOP_ENTRY") == "1"
+        if not edges:
+            self.refused_no_edge += 1
+            if debug_loop_entry:
+                log.warning("[direct-stack-move-loop-entry] move=%#x no-edge", move_fact.ins_addr)
+            return
+        self.normalized += 1
+        if len(edges) != 1 or self.root is None:
+            self.failures += 1
+            if debug_loop_entry:
+                log.warning(
+                    "[direct-stack-move-loop-entry] move=%#x edge-count=%d",
+                    move_fact.ins_addr,
+                    len(edges),
+                )
+            return
+        self._resolve_and_place(move_fact, edges[0], debug_loop_entry)
+
+    def _resolve_and_place(
+        self,
+        move_fact: DirectStackMoveFact8616,
+        edge: DirectStackMoveLoopEntryEdge8616,
+        debug_loop_entry: bool,
+    ) -> None:
+        """Resolve site/location/verdict gates, then place the assignment."""
+        sites = loop_entry_sites_8616(
+            self.project,
+            self.codegen,
+            self.root,
+            edge,
+            move_fact.dst_offset,
+            function=self.function,
+        )
+        if len(sites) != 1:
+            self.refused_no_site += 1
+            self.failures += int(len(sites) > 1)
+            if debug_loop_entry:
+                log.warning(
+                    "[direct-stack-move-loop-entry] move=%#x site-count=%d edge=%r",
+                    move_fact.ins_addr,
+                    len(sites),
+                    edge,
+                )
+            return
+        locations = tagged_assignment_locations_8616(self.project, self.codegen, self.root, move_fact)
+        if len(locations) != 1:
+            self.refused_assignment += 1
+            self.failures += int(len(locations) > 1)
+            if debug_loop_entry:
+                log.warning(
+                    "[direct-stack-move-loop-entry] move=%#x assignment-count=%d",
+                    move_fact.ins_addr,
+                    len(locations),
+                )
+            return
+        immediate_verdict = classify_immediate_loop_entry_relocation_8616(
+            self.root,
+            sites[0],
+            move_fact,
+            edge,
+            locations[0],
+        )
+        if not immediate_verdict.permits_relocation:
+            self.refused_immediate_scope += 1
+            if debug_loop_entry:
+                log.warning(
+                    "[direct-stack-move-loop-entry] move=%#x immediate-verdict=%s",
+                    move_fact.ins_addr,
+                    immediate_verdict.name,
+                )
+            return
+        self.classified += 1
+        placed, already = place_assignment_8616(
+            self.project,
+            self.codegen,
+            sites[0],
+            move_fact,
+            locations[0].assignment,
+            locations[0],
+        )
+        if not placed:
+            self.failures += 1
+            return
+        self.materialized += 1
+        self.already_materialized += int(already)
+        self.changed = self.changed or not already
+
+
 def materialize_direct_stack_move_loop_entry_ownership_8616(
     project: object,
     codegen: object,
@@ -176,17 +303,7 @@ def materialize_direct_stack_move_loop_entry_ownership_8616(
         if isinstance(fact, DirectStackMoveFact8616)
         and fact.source_kind in _LOOP_ENTRY_SOURCE_KINDS_8616
     )
-    normalized = 0
-    classified = 0
-    materialized = 0
-    failures = 0
-    already_materialized = 0
-    refused_no_edge = 0
-    refused_no_site = 0
-    refused_assignment = 0
-    refused_branch_owner = 0
-    refused_immediate_scope = 0
-    changed = False
+    scan = _LoopEntryScan8616(project, codegen, function, root)
     branch_claims = direct_stack_move_branch_claims_8616(
         project,
         codegen,
@@ -198,107 +315,21 @@ def materialize_direct_stack_move_loop_entry_ownership_8616(
             for claim in branch_claims
             if claim.move_ins_addr == move_fact.ins_addr
         )
-        edges = repeated_sequence_edges_8616(project, function, move_fact.ins_addr)
-        if move_branch_claims and not (
-            len(move_branch_claims) == 1
-            and len(edges) == 1
-            and direct_stack_move_loop_entry_supersedes_branch_claim_8616(
-                move_branch_claims[0],
-                edges[0],
-            )
-        ):
-            refused_branch_owner += 1
-            continue
-        debug_loop_entry = os.environ.get("INERTIA_DEBUG_STACK_LOOP_ENTRY") == "1"
-        if not edges:
-            refused_no_edge += 1
-            if debug_loop_entry:
-                log.warning("[direct-stack-move-loop-entry] move=%#x no-edge", move_fact.ins_addr)
-            continue
-        normalized += 1
-        if len(edges) != 1 or root is None:
-            failures += 1
-            if debug_loop_entry:
-                log.warning(
-                    "[direct-stack-move-loop-entry] move=%#x edge-count=%d",
-                    move_fact.ins_addr,
-                    len(edges),
-                )
-            continue
-        sites = loop_entry_sites_8616(
-            project,
-            codegen,
-            root,
-            edges[0],
-            move_fact.dst_offset,
-            function=function,
-        )
-        if len(sites) != 1:
-            refused_no_site += 1
-            failures += int(len(sites) > 1)
-            if debug_loop_entry:
-                log.warning(
-                    "[direct-stack-move-loop-entry] move=%#x site-count=%d edge=%r",
-                    move_fact.ins_addr,
-                    len(sites),
-                    edges[0],
-                )
-            continue
-        locations = tagged_assignment_locations_8616(project, codegen, root, move_fact)
-        if len(locations) != 1:
-            refused_assignment += 1
-            failures += int(len(locations) > 1)
-            if debug_loop_entry:
-                log.warning(
-                    "[direct-stack-move-loop-entry] move=%#x assignment-count=%d",
-                    move_fact.ins_addr,
-                    len(locations),
-                )
-            continue
-        immediate_verdict = classify_immediate_loop_entry_relocation_8616(
-            root,
-            sites[0],
-            move_fact,
-            edges[0],
-            locations[0],
-        )
-        if not immediate_verdict.permits_relocation:
-            refused_immediate_scope += 1
-            if debug_loop_entry:
-                log.warning(
-                    "[direct-stack-move-loop-entry] move=%#x immediate-verdict=%s",
-                    move_fact.ins_addr,
-                    immediate_verdict.name,
-                )
-            continue
-        classified += 1
-        placed, already = place_assignment_8616(
-            project,
-            codegen,
-            sites[0],
-            move_fact,
-            locations[0].assignment,
-            locations[0],
-        )
-        if not placed:
-            failures += 1
-            continue
-        materialized += 1
-        already_materialized += int(already)
-        changed = changed or not already
+        scan.process(move_fact, move_branch_claims)
     stats = DirectStackMoveLoopEntryStats8616(
         raw_fact_count=len(move_facts),
-        normalized_fact_count=normalized,
-        classified_fact_count=classified,
-        materialized_count=materialized,
-        failure_count=failures,
-        already_materialized_count=already_materialized,
-        refused_no_edge_count=refused_no_edge,
-        refused_no_site_count=refused_no_site,
-        refused_assignment_count=refused_assignment,
-        refused_branch_owner_count=refused_branch_owner,
-        refused_immediate_scope_count=refused_immediate_scope,
+        normalized_fact_count=scan.normalized,
+        classified_fact_count=scan.classified,
+        materialized_count=scan.materialized,
+        failure_count=scan.failures,
+        already_materialized_count=scan.already_materialized,
+        refused_no_edge_count=scan.refused_no_edge,
+        refused_no_site_count=scan.refused_no_site,
+        refused_assignment_count=scan.refused_assignment,
+        refused_branch_owner_count=scan.refused_branch_owner,
+        refused_immediate_scope_count=scan.refused_immediate_scope,
     )
+    changed = scan.changed
     cast(Any, codegen)._inertia_direct_stack_move_loop_entry_placement_8616 = stats
     if os.environ.get("INERTIA_DEBUG_STACK_NOISE") or os.environ.get(
         "INERTIA_DEBUG_STACK_LOOP_ENTRY"

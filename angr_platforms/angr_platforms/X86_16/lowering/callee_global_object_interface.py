@@ -142,13 +142,51 @@ def _materialize_aggregate_interface_8616(
     cfunc.variable_manager.types[struct_type.name] = registered_type
     codegen.show_local_types = True
     pointer_type = near_pointer_type_8616(registered_type, codegen.project.arch)
+    argument_nodes = _pointer_argument_nodes_8616(cfunc, evidence)
+    if argument_nodes is None:
+        return 0, False
+    argument_variables = [
+        cast(SimStackVariable, argument.variable) for argument in argument_nodes
+    ]
+    changed = _retarget_argument_types_8616(
+        codegen,
+        cfunc,
+        evidence,
+        argument_nodes,
+        pointer_type,
+    )
+
+    roots = cfunc_roots_8616(cfunc)
+    changed = (
+        _retarget_use_sites_8616(
+            roots, argument_variables, pointer_type, registered_type, struct_type,
+        )
+        or changed
+    )
+
+    changed = (
+        _retype_aggregate_locals_8616(
+            cfunc, roots, struct_type, registered_type,
+        )
+        or changed
+    )
+
+    _retarget_callee_prototype_8616(codegen, evidence, pointer_type)
+    return len(argument_variables), changed
+
+
+def _pointer_argument_nodes_8616(
+    cfunc: _CFunction8616,
+    evidence: CalleeGlobalObjectInterfaceEvidence8616,
+) -> list[CVariable] | None:
+    """Return the proven stack-variable argument nodes or None."""
     function_type = cfunc.functy
     function_argument_types = list(function_type.args or ())
     if any(
         index >= len(cfunc.arg_list) or index >= len(function_argument_types)
         for index in evidence.pointer_argument_indices
     ):
-        return 0, False
+        return None
     argument_nodes: list[CVariable] = []
     for index in evidence.pointer_argument_indices:
         argument = cfunc.arg_list[index]
@@ -156,11 +194,21 @@ def _materialize_aggregate_interface_8616(
             argument.variable,
             SimStackVariable,
         ):
-            return 0, False
+            return None
         argument_nodes.append(argument)
-    argument_variables = [
-        cast(SimStackVariable, argument.variable) for argument in argument_nodes
-    ]
+    return argument_nodes
+
+
+def _retarget_argument_types_8616(
+    codegen: _Codegen8616,
+    cfunc: _CFunction8616,
+    evidence: CalleeGlobalObjectInterfaceEvidence8616,
+    argument_nodes: list[CVariable],
+    pointer_type: SimType,
+) -> bool:
+    """Rewrite each pointer argument's C and function-signature type."""
+    function_type = cfunc.functy
+    function_argument_types = list(function_type.args or ())
     changed = False
     for index, argument in zip(
         evidence.pointer_argument_indices,
@@ -185,8 +233,18 @@ def _materialize_aggregate_interface_8616(
         arg_names=tuple(function_type.arg_names or ()),
         variadic=function_type.variadic,
     ).with_arch(codegen.project.arch)
+    return changed
 
-    roots = cfunc_roots_8616(cfunc)
+
+def _retarget_use_sites_8616(
+    roots: tuple[object, ...],
+    argument_variables: list[SimStackVariable],
+    pointer_type: SimType,
+    registered_type: TypeRef,
+    struct_type: SimStruct,
+) -> bool:
+    """Retype variable uses and indexed views of the pointer arguments."""
+    changed = False
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):
             if isinstance(node, CVariable) and any(
@@ -206,19 +264,33 @@ def _materialize_aggregate_interface_8616(
             ):
                 node._type = registered_type
                 changed = True
+    return changed
 
+
+def _aggregate_local_assignment_8616(node: object, struct_type: SimStruct) -> bool:
+    """Return whether one statement copies a struct view into a BP-local."""
+    return bool(
+        isinstance(node, CAssignment)
+        and isinstance(node.lhs, CVariable)
+        and isinstance(node.lhs.variable, SimStackVariable)
+        and node.lhs.variable.offset < 0
+        and isinstance(node.rhs, CIndexedVariable)
+        and is_named_struct_type_8616(node.rhs.type, struct_type)
+    )
+
+
+def _retype_aggregate_locals_8616(
+    cfunc: _CFunction8616,
+    roots: tuple[object, ...],
+    struct_type: SimStruct,
+    registered_type: TypeRef,
+) -> bool:
+    """Declare and retype locals materialized from the struct view."""
     aggregate_locals: list[SimStackVariable] = []
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):
-            if (
-                isinstance(node, CAssignment)
-                and isinstance(node.lhs, CVariable)
-                and isinstance(node.lhs.variable, SimStackVariable)
-                and node.lhs.variable.offset < 0
-                and isinstance(node.rhs, CIndexedVariable)
-                and is_named_struct_type_8616(node.rhs.type, struct_type)
-            ):
-                aggregate_locals.append(node.lhs.variable)
+            if _aggregate_local_assignment_8616(node, struct_type):
+                aggregate_locals.append(cast(CAssignment, node).lhs.variable)
     for local in aggregate_locals:
         cfunc.variable_manager.set_variable_type(
             local,
@@ -227,15 +299,12 @@ def _materialize_aggregate_interface_8616(
             override_bot=True,
             all_unified=True,
         )
-    changed = (
-        materialize_local_struct_declarations_8616(
-            cfunc,
-            aggregate_locals,
-            registered_type,
-            struct_type,
-        )
-        or changed
-    )
+    changed = bool(materialize_local_struct_declarations_8616(
+        cfunc,
+        aggregate_locals,
+        registered_type,
+        struct_type,
+    ))
     for root in roots:
         for node in _iter_c_nodes_deep_8616(root):
             if isinstance(node, CVariable) and any(
@@ -244,7 +313,15 @@ def _materialize_aggregate_interface_8616(
             ) and not is_named_struct_type_8616(node.variable_type, struct_type):
                 node.variable_type = registered_type
                 changed = True
+    return changed
 
+
+def _retarget_callee_prototype_8616(
+    codegen: _Codegen8616,
+    evidence: CalleeGlobalObjectInterfaceEvidence8616,
+    pointer_type: SimType,
+) -> None:
+    """Rewrite the callee-side prototype argument types when present."""
     try:
         function = codegen.project.kb.functions.function(
             addr=evidence.target_addr,
@@ -263,7 +340,6 @@ def _materialize_aggregate_interface_8616(
             arg_names=tuple(function.prototype.arg_names or ()),
             variadic=function.prototype.variadic,
         ).with_arch(codegen.project.arch)
-    return len(argument_variables), changed
 
 
 def materialize_callee_global_object_interface_8616(

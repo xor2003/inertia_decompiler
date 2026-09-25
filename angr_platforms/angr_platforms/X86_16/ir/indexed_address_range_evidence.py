@@ -15,6 +15,7 @@ from collections import Counter
 from collections.abc import Iterable
 
 from .indexed_address_range_contracts import (
+    IndexedInductionSourceIdentity8616,
     IndexedLoopRangeCandidate8616,
     IndexedLoopRangeEvidence8616,
     IndexedLoopRangeFact8616,
@@ -46,11 +47,11 @@ def _failure_8616(
     return IndexedLoopRangeRefusal8616(candidate, failure, detail)
 
 
-def _validate_candidate_8616(
+def _validate_source_identity_8616(
     function_addr: int,
     candidate: IndexedLoopRangeCandidate8616,
-) -> IndexedLoopRangeFact8616 | IndexedLoopRangeRefusal8616:
-    """Validate one explicit witness without deriving any missing proof."""
+) -> IndexedLoopRangeRefusal8616 | None:
+    """Check the candidate source belongs to the function and is complete."""
     source = candidate.source
     if source.function_addr != function_addr:
         return _failure_8616(
@@ -70,7 +71,16 @@ def _validate_candidate_8616(
             candidate.generation_failure,
             candidate.generation_detail or "typed candidate generation refused",
         )
-    canonical = canonical_induction_source_identity_8616(source.index_source)
+    return None
+
+
+def _proven_induction_identity_8616(
+    candidate: IndexedLoopRangeCandidate8616,
+) -> IndexedInductionSourceIdentity8616 | IndexedLoopRangeRefusal8616:
+    """Return the proven canonical induction identity or a typed refusal."""
+    canonical = canonical_induction_source_identity_8616(
+        candidate.source.index_source
+    )
     if canonical is None or candidate.induction_source is None:
         return _failure_8616(
             candidate,
@@ -83,6 +93,13 @@ def _validate_candidate_8616(
             IndexedLoopRangeFailureKind8616.INDUCTION_IDENTITY_MISMATCH,
             "candidate induction identity differs from the indexed access source",
         )
+    return canonical
+
+
+def _validate_induction_update_8616(
+    candidate: IndexedLoopRangeCandidate8616,
+) -> IndexedLoopRangeRefusal8616 | None:
+    """Check the zero initializer and unit step with their write evidence."""
     if (
         candidate.init is None
         or isinstance(candidate.init, bool)
@@ -127,6 +144,13 @@ def _validate_candidate_8616(
             IndexedLoopRangeFailureKind8616.STEP_UNPROVEN,
             "logical old-word-plus-one evidence is absent or incomplete",
         )
+    return None
+
+
+def _validate_candidate_bound_8616(
+    candidate: IndexedLoopRangeCandidate8616,
+) -> IndexedLoopRangeRefusal8616 | None:
+    """Check the constant upper bound lies in the induction value domain."""
     if not candidate.upper_bound_is_constant:
         return _failure_8616(
             candidate,
@@ -139,24 +163,28 @@ def _validate_candidate_8616(
             IndexedLoopRangeFailureKind8616.BOUND_UNPROVEN,
             "constant loop upper bound is absent",
         )
-    max_value = (1 << (source.index_value.size * 8)) - 1
+    max_value = (1 << (candidate.source.index_value.size * 8)) - 1
     if not 0 < candidate.upper_bound <= max_value:
         return _failure_8616(
             candidate,
             IndexedLoopRangeFailureKind8616.BOUND_OUT_OF_RANGE,
             "constant upper bound is outside the induction value domain",
         )
-    if (
-        candidate.guard is None
-        or not candidate.guard.complete
-        or candidate.guard_site is None
-    ):
+    return None
+
+
+def _validate_guard_loop_and_access_8616(
+    candidate: IndexedLoopRangeCandidate8616,
+) -> IndexedLoopRangeRefusal8616 | None:
+    """Check the strict guard, natural loop, backedge, and access site."""
+    guard = candidate.guard
+    if guard is None or not guard.complete or candidate.guard_site is None:
         return _failure_8616(
             candidate,
             IndexedLoopRangeFailureKind8616.GUARD_UNPROVEN,
             "typed loop guard or its exact site is absent",
         )
-    if not candidate.guard.proves_strict_unsigned_continue:
+    if not guard.proves_strict_unsigned_continue:
         return _failure_8616(
             candidate,
             IndexedLoopRangeFailureKind8616.GUARD_NOT_STRICT_UNSIGNED,
@@ -179,48 +207,97 @@ def _validate_candidate_8616(
             IndexedLoopRangeFailureKind8616.BACKEDGE_UNPROVEN,
             "exact latch-to-header backedge is not proven",
         )
-    if not candidate.guard.guard_dominates_access or not candidate.guard.guard_dominates_latch:
+    if not guard.guard_dominates_access or not guard.guard_dominates_latch:
         return _failure_8616(
             candidate,
             IndexedLoopRangeFailureKind8616.DOMINANCE_UNPROVEN,
             "guard dominance over the access and latch is not proven",
         )
-    if candidate.access_site is None:
+    return _validate_loop_access_site_8616(candidate)
+
+
+def _validate_loop_access_site_8616(
+    candidate: IndexedLoopRangeCandidate8616,
+) -> IndexedLoopRangeRefusal8616 | None:
+    """Check the access site matches the retained indexed fact inside the loop."""
+    loop = candidate.natural_loop
+    access_site = candidate.access_site
+    if access_site is None:
         return _failure_8616(
             candidate,
             IndexedLoopRangeFailureKind8616.ACCESS_SITE_UNPROVEN,
             "exact indexed access site is absent",
         )
+    source = candidate.source
     if (
-        candidate.access_site.block_addr,
-        candidate.access_site.instr_index,
-        candidate.access_site.instr_addr,
+        access_site.block_addr,
+        access_site.instr_index,
+        access_site.instr_addr,
     ) != (source.block_addr, source.instr_index, source.instr_addr):
         return _failure_8616(
             candidate,
             IndexedLoopRangeFailureKind8616.ACCESS_SITE_MISMATCH,
             "access witness does not identify the retained indexed fact",
         )
-    if candidate.access_site.block_addr not in loop.blocks:
+    if loop is None or access_site.block_addr not in loop.blocks:
         return _failure_8616(
             candidate,
             IndexedLoopRangeFailureKind8616.ACCESS_OUTSIDE_LOOP,
             "indexed access is outside the proven natural loop",
         )
+    return None
+
+
+def _validate_candidate_8616(
+    function_addr: int,
+    candidate: IndexedLoopRangeCandidate8616,
+) -> IndexedLoopRangeFact8616 | IndexedLoopRangeRefusal8616:
+    """Validate one explicit witness without deriving any missing proof."""
+    source = candidate.source
+    refusal = _validate_source_identity_8616(function_addr, candidate)
+    if refusal is not None:
+        return refusal
+    canonical = _proven_induction_identity_8616(candidate)
+    if isinstance(canonical, IndexedLoopRangeRefusal8616):
+        return canonical
+    refusal = _validate_induction_update_8616(candidate)
+    if refusal is not None:
+        return refusal
+    refusal = _validate_candidate_bound_8616(candidate)
+    if refusal is not None:
+        return refusal
+    refusal = _validate_guard_loop_and_access_8616(candidate)
+    if refusal is not None:
+        return refusal
+    init = candidate.init
+    init_site = candidate.init_site
+    init_write = candidate.init_write
+    step = candidate.step
+    step_site = candidate.step_site
+    step_write = candidate.step_write
+    upper_bound = candidate.upper_bound
+    guard_site = candidate.guard_site
+    guard = candidate.guard
+    access_site = candidate.access_site
+    loop = candidate.natural_loop
+    assert init is not None and init_site is not None and init_write is not None
+    assert step is not None and step_site is not None and step_write is not None
+    assert upper_bound is not None and guard_site is not None and guard is not None
+    assert access_site is not None and loop is not None
     fact = IndexedLoopRangeFact8616(
         source,
         canonical,
-        candidate.init,
-        candidate.step,
-        candidate.upper_bound,
-        candidate.init_site,
-        candidate.step_site,
-        candidate.guard_site,
-        candidate.access_site,
+        init,
+        step,
+        upper_bound,
+        init_site,
+        step_site,
+        guard_site,
+        access_site,
         loop,
-        candidate.guard,
-        candidate.init_write,
-        candidate.step_write,
+        guard,
+        init_write,
+        step_write,
     )
     if not fact.complete:
         return _failure_8616(

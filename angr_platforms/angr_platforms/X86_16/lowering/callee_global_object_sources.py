@@ -48,8 +48,8 @@ class GlobalObjectSourceEvidence8616:
     pointer_target_addrs: tuple[int, ...] = ()
     layout_evidence: GlobalObjectLayoutEvidence8616 | None = None
 
-    def validate(self) -> None:
-        """Reject incoherent collection counters or project target identity."""
+    def _validate_counters_8616(self) -> None:
+        """Reject incoherent or non-monotonic collection counters."""
         counters = (
             self.raw_fact_count,
             self.normalized_fact_count,
@@ -69,10 +69,16 @@ class GlobalObjectSourceEvidence8616:
             raise ValueError("global source evidence materialized count exceeds classification")
         if self.failure_count < self.raw_fact_count - self.classified_fact_count:
             raise ValueError("global source evidence failure count does not close collection")
+
+    def _validate_pointer_targets_8616(self) -> None:
+        """Reject non-canonical or negative pointer target identities."""
         if self.pointer_target_addrs != tuple(sorted(set(self.pointer_target_addrs))):
             raise ValueError("global source evidence pointer targets are not canonical")
         if any(target_addr < 0 for target_addr in self.pointer_target_addrs):
             raise ValueError("global source evidence has a negative pointer target")
+
+    def _validate_layout_dependency_8616(self) -> None:
+        """Reject missing, open, or undeclared layout/pointer dependencies."""
         if self.scope_addr is None and self.layout_evidence is None:
             raise ValueError("project global source evidence has no layout dependency")
         if self.layout_evidence is not None and not self.layout_evidence.closed:
@@ -81,6 +87,12 @@ class GlobalObjectSourceEvidence8616:
             fact.target_addr not in self.pointer_target_addrs for fact in self.source_facts
         ):
             raise ValueError("project global source fact has no pointer-target dependency")
+
+    def validate(self) -> None:
+        """Reject incoherent collection counters or project target identity."""
+        self._validate_counters_8616()
+        self._validate_pointer_targets_8616()
+        self._validate_layout_dependency_8616()
 
 
 def project_global_object_source_evidence_8616(

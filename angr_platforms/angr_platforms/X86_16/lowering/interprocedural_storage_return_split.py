@@ -81,19 +81,38 @@ def _output_pieces_8616(
         return None
     pieces: dict[DomainKey, StorageIdentity8616] = {}
     for storage in storages:
-        domain = register_domain_for_name(storage.register)
-        view = register_view_for_name(storage.register)
-        if (
-            domain is None or not storage.is_exact
-            or storage.kind is not StorageIdentityKind8616.REGISTER
-            or storage.width != 2
-            or domain not in {AX, DX}
-            or view != FULL16
-            or domain in pieces
-        ):
+        domain = _full_word_ax_dx_domain_8616(storage, pieces)
+        if domain is None:
             return None
         pieces[domain] = storage
     return pieces if set(pieces) == {AX, DX} else None
+
+
+def _exact_word_register_8616(storage: StorageIdentity8616) -> bool:
+    """Return whether one storage is an exact full-word register piece."""
+    return bool(
+        storage.is_exact
+        and storage.kind is StorageIdentityKind8616.REGISTER
+        and storage.width == 2
+    )
+
+
+def _full_word_ax_dx_domain_8616(
+    storage: StorageIdentity8616,
+    pieces: dict[DomainKey, StorageIdentity8616],
+) -> DomainKey | None:
+    """Return the exact AX/DX domain for one full-word register piece."""
+    domain = register_domain_for_name(storage.register)
+    view = register_view_for_name(storage.register)
+    if (
+        domain is None
+        or domain not in {AX, DX}
+        or view != FULL16
+        or domain in pieces
+        or not _exact_word_register_8616(storage)
+    ):
+        return None
+    return domain
 
 
 def _piece_use_8616(
@@ -143,14 +162,24 @@ def _definition_source_keys_8616(
     return tuple(keys)
 
 
-def classify_split_return_storage_8616(
-    artifact: SSAFunctionArtifact,
-    fact: CallerReturnUseFact8616,
+def _definitions_match_outputs_8616(
     definitions: CallOutputDefinitionResult8616,
     output_storages: tuple[StorageIdentity8616, ...],
-    conditions: Sequence[ConditionIR],
-) -> ReturnStorageTypeResult8616:
-    """Prove a split scalar return from one exact wide condition chain."""
+) -> bool:
+    """Return whether complete definitions name every output storage exactly."""
+    definition_source_keys = _definition_source_keys_8616(definitions)
+    return bool(
+        definitions.complete
+        and len(definitions.definitions) == len(output_storages)
+        and definition_source_keys == tuple(storage.key for storage in output_storages)
+    )
+
+
+def _split_return_prelude_8616(
+    artifact: SSAFunctionArtifact,
+    fact: CallerReturnUseFact8616,
+) -> ReturnStorageTypeResult8616 | None:
+    """Return the refusal when caller identity or return use is unproven."""
     if artifact.function_addr != fact.caller_addr:
         return _refused_result_8616(
             ReturnStorageTypeFailure8616.CALLER_IDENTITY_CONFLICT,
@@ -168,6 +197,20 @@ def classify_split_return_storage_8616(
             ReturnStorageTypeFailure8616.RETURN_USE_NOT_CONDITION,
             normalized=True,
         )
+    return None
+
+
+def classify_split_return_storage_8616(
+    artifact: SSAFunctionArtifact,
+    fact: CallerReturnUseFact8616,
+    definitions: CallOutputDefinitionResult8616,
+    output_storages: tuple[StorageIdentity8616, ...],
+    conditions: Sequence[ConditionIR],
+) -> ReturnStorageTypeResult8616:
+    """Prove a split scalar return from one exact wide condition chain."""
+    prelude = _split_return_prelude_8616(artifact, fact)
+    if prelude is not None:
+        return prelude
     pieces = _output_pieces_8616(output_storages)
     if pieces is None:
         return _refused_result_8616(
@@ -175,12 +218,7 @@ def classify_split_return_storage_8616(
             verdict=ReturnStorageTypeVerdict8616.CONFLICT,
             normalized=True,
         )
-    definition_source_keys = _definition_source_keys_8616(definitions)
-    if (
-        not definitions.complete
-        or len(definitions.definitions) != len(output_storages)
-        or definition_source_keys != tuple(storage.key for storage in output_storages)
-    ):
+    if not _definitions_match_outputs_8616(definitions, output_storages):
         return _refused_result_8616(
             ReturnStorageTypeFailure8616.SPLIT_OUTPUT_DEFINITION_CONFLICT,
             verdict=ReturnStorageTypeVerdict8616.CONFLICT,

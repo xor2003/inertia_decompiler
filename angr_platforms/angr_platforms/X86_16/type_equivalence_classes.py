@@ -33,43 +33,49 @@ def _dict_summary_value_8616(summary: dict[str, object], key: str) -> dict[str, 
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _ir_atom_census_8616(
+    artifact: object,
+) -> tuple[int, int, dict[str, int], dict[str, int]]:
+    """Count provisional/multi-base addresses, segment origins, and condition ops."""
+    provisional_addresses = 0
+    multi_base_addresses = 0
+    segment_origin_counts = {origin.value: 0 for origin in SegmentOrigin}
+    condition_counts: dict[str, int] = {}
+    for block in tuple(_dynamic_codegen_attr_8616(artifact, "blocks", ()) or ()):
+        for instr in tuple(block.instrs or ()):
+            for atom in tuple(instr.args or ()):
+                if isinstance(atom, IRAddress):
+                    if atom.status.value == "provisional":
+                        provisional_addresses += 1
+                    if len(atom.base or ()) > 1:
+                        multi_base_addresses += 1
+                    origin = atom.segment_origin.value
+                    segment_origin_counts[origin] = segment_origin_counts.get(origin, 0) + 1
+                elif isinstance(atom, IRCondition):
+                    op = str(atom.op)
+                    condition_counts[op] = condition_counts.get(op, 0) + 1
+    return provisional_addresses, multi_base_addresses, segment_origin_counts, condition_counts
+
+
 def _typed_ir_summary_from_codegen(codegen: object) -> dict[str, object]:
     """Summarize typed-IR evidence already attached to a structured codegen."""
-
-    def _impl() -> dict[str, object]:
-        artifact = _dynamic_codegen_attr_8616(codegen, "_inertia_vex_ir_artifact", None)
-        if artifact is None or not hasattr(artifact, "blocks"):
-            summary = _dynamic_codegen_attr_8616(codegen, "_inertia_vex_ir_summary", None)
-            return dict(summary) if isinstance(summary, dict) else {}
-
-        provisional_addresses = 0
-        multi_base_addresses = 0
-        segment_origin_counts = {origin.value: 0 for origin in SegmentOrigin}
-        condition_counts: dict[str, int] = {}
-        for block in tuple(artifact.blocks or ()):
-            for instr in tuple(block.instrs or ()):
-                for atom in tuple(instr.args or ()):
-                    if isinstance(atom, IRAddress):
-                        if atom.status.value == "provisional":
-                            provisional_addresses += 1
-                        if len(atom.base or ()) > 1:
-                            multi_base_addresses += 1
-                        origin = atom.segment_origin.value
-                        segment_origin_counts[origin] = segment_origin_counts.get(origin, 0) + 1
-                    elif isinstance(atom, IRCondition):
-                        op = str(atom.op)
-                        condition_counts[op] = condition_counts.get(op, 0) + 1
-
+    artifact = _dynamic_codegen_attr_8616(codegen, "_inertia_vex_ir_artifact", None)
+    if artifact is None or not hasattr(artifact, "blocks"):
         summary = _dynamic_codegen_attr_8616(codegen, "_inertia_vex_ir_summary", None)
-        base = dict(summary) if isinstance(summary, dict) else {}
-        base["provisional_address_count"] = provisional_addresses
-        base["multi_base_address_count"] = multi_base_addresses
-        base["segment_origin_counts"] = dict(sorted(segment_origin_counts.items()))
-        if condition_counts:
-            base["condition_counts"] = dict(sorted(condition_counts.items()))
-        return base
+        return dict(summary) if isinstance(summary, dict) else {}
 
-    return _impl()
+    provisional_addresses, multi_base_addresses, segment_origin_counts, condition_counts = (
+        _ir_atom_census_8616(artifact)
+    )
+
+    summary = _dynamic_codegen_attr_8616(codegen, "_inertia_vex_ir_summary", None)
+    base = dict(summary) if isinstance(summary, dict) else {}
+    base["provisional_address_count"] = provisional_addresses
+    base["multi_base_address_count"] = multi_base_addresses
+    base["segment_origin_counts"] = dict(sorted(segment_origin_counts.items()))
+    if condition_counts:
+        base["condition_counts"] = dict(sorted(condition_counts.items()))
+    return base
 
 
 @dataclass(frozen=True)
@@ -205,88 +211,105 @@ def _expr_key_for_address(address: IRAddress) -> str | None:
     return f"base:{space}:{'+'.join(base)}"
 
 
+@dataclass(slots=True)
+class _ExprCensus8616:
+    """Mutable expression/constraint/merge collector for the IR census."""
+
+    exprs: list[str] = field(default_factory=list)
+    typed_constraints: dict[str, set[str]] = field(default_factory=dict)
+    merges: list[tuple[str, str]] = field(default_factory=list)
+
+    def ensure_expr(self, expr: str | None) -> None:
+        """Register one expression key in deterministic first-seen order."""
+        if expr is None or expr in self.exprs:
+            return
+        self.exprs.append(expr)
+
+    def add_constraint(self, expr: str | None, constraint: str) -> None:
+        """Attach one typed constraint to a registered expression key."""
+        if expr is None:
+            return
+        self.ensure_expr(expr)
+        self.typed_constraints.setdefault(expr, set()).add(constraint)
+
+    def add_merge(self, left: str | None, right: str | None) -> None:
+        """Record one equivalence merge between two expression keys."""
+        if left is None or right is None or left == right:
+            return
+        self.ensure_expr(left)
+        self.ensure_expr(right)
+        self.merges.append((left, right))
+
+
+def _census_ir_blocks_8616(census: _ExprCensus8616, artifact: object) -> None:
+    """Collect expression, constraint, and merge evidence from IR blocks."""
+    for block in tuple(_dynamic_codegen_attr_8616(artifact, "blocks", ()) or ()):
+        for instr in tuple(block.instrs or ()):
+            dst_key = _expr_key_for_value(instr.dst)
+            census.ensure_expr(dst_key)
+            for atom in tuple(instr.args or ()):
+                if isinstance(atom, IRAddress):
+                    base_key = _expr_key_for_address(atom)
+                    status_value = atom.status.value
+                    if base_key is not None and status_value not in {"unknown", "provisional"}:
+                        census.add_constraint(base_key, "pointer")
+                    elif base_key is not None:
+                        census.add_constraint(base_key, "address_like")
+                elif isinstance(atom, IRCondition):
+                    census.add_constraint(f"cond:{atom.op}", "boolean")
+                    for cond_arg in tuple(atom.args or ()):
+                        census.add_constraint(_expr_key_for_value(cond_arg), "integer")
+                else:
+                    census.ensure_expr(_expr_key_for_value(atom))
+
+
+def _census_phi_nodes_8616(census: _ExprCensus8616, function_ssa: object) -> None:
+    """Collect phi-target constraints and incoming merges from SSA evidence."""
+    for phi in tuple(
+        _dynamic_codegen_attr_8616(function_ssa, "phi_nodes", ())
+        if function_ssa is not None
+        else ()
+    ):
+        target = phi.target
+        phi_key = _expr_key_for_value(target)
+        census.add_constraint(phi_key, "ssa_join")
+        if target.space == MemSpace.REG:
+            census.add_constraint(phi_key, "integer")
+        for incoming in tuple(phi.incoming or ()):
+            incoming_key = _expr_key_for_value(incoming.value)
+            census.add_merge(phi_key, incoming_key)
+
+
 def _typed_ir_equivalence_from_codegen(codegen: object) -> tuple[dict[int, EquivalenceClass], dict[str, str]]:
     """Build expression equivalence classes from typed-IR artifacts."""
+    artifact = _dynamic_codegen_attr_8616(codegen, "_inertia_vex_ir_artifact", None)
+    if artifact is None or not hasattr(artifact, "blocks"):
+        return {}, {}
+    function_ssa = _dynamic_codegen_attr_8616(codegen, "_inertia_vex_ir_function_ssa", None)
 
-    def _impl() -> tuple[dict[int, EquivalenceClass], dict[str, str]]:
-        artifact = _dynamic_codegen_attr_8616(codegen, "_inertia_vex_ir_artifact", None)
-        if artifact is None or not hasattr(artifact, "blocks"):
-            return {}, {}
-        function_ssa = _dynamic_codegen_attr_8616(codegen, "_inertia_vex_ir_function_ssa", None)
+    census = _ExprCensus8616()
+    _census_ir_blocks_8616(census, artifact)
+    _census_phi_nodes_8616(census, function_ssa)
 
-        builder = EquivalenceClassBuilder()
-        exprs: list[str] = []
-        typed_constraints: dict[str, set[str]] = {}
-        merges: list[tuple[str, str]] = []
+    if not census.exprs:
+        return {}, {}
 
-        def ensure_expr(expr: str | None) -> None:
-            if expr is None:
-                return
-            if expr not in exprs:
-                exprs.append(expr)
+    builder = EquivalenceClassBuilder()
+    classes = builder.build(census.exprs)
+    for left, right in census.merges:
+        builder.merge_classes(left, right)
+    for expr, constraints in census.typed_constraints.items():
+        class_id = builder.expr_to_class.get(expr)
+        if class_id is None:
+            continue
+        for constraint in sorted(constraints):
+            classes[class_id].add_type_constraint(constraint)
 
-        def add_constraint(expr: str | None, constraint: str) -> None:
-            if expr is None:
-                return
-            ensure_expr(expr)
-            typed_constraints.setdefault(expr, set()).add(constraint)
-
-        def add_merge(left: str | None, right: str | None) -> None:
-            if left is None or right is None or left == right:
-                return
-            ensure_expr(left)
-            ensure_expr(right)
-            merges.append((left, right))
-
-        for block in tuple(artifact.blocks or ()):
-            for instr in tuple(block.instrs or ()):
-                dst_key = _expr_key_for_value(instr.dst)
-                ensure_expr(dst_key)
-                for atom in tuple(instr.args or ()):
-                    if isinstance(atom, IRAddress):
-                        base_key = _expr_key_for_address(atom)
-                        status_value = atom.status.value
-                        if base_key is not None and status_value not in {"unknown", "provisional"}:
-                            add_constraint(base_key, "pointer")
-                        elif base_key is not None:
-                            add_constraint(base_key, "address_like")
-                    elif isinstance(atom, IRCondition):
-                        add_constraint(f"cond:{atom.op}", "boolean")
-                        for cond_arg in tuple(atom.args or ()):
-                            add_constraint(_expr_key_for_value(cond_arg), "integer")
-                    else:
-                        ensure_expr(_expr_key_for_value(atom))
-
-        for phi in tuple(function_ssa.phi_nodes if function_ssa is not None else ()):
-            target = phi.target
-            phi_key = _expr_key_for_value(target)
-            add_constraint(phi_key, "ssa_join")
-            if target.space == MemSpace.REG:
-                add_constraint(phi_key, "integer")
-            for incoming in tuple(phi.incoming or ()):
-                incoming_key = _expr_key_for_value(incoming.value)
-                add_merge(phi_key, incoming_key)
-
-        if not exprs:
-            return {}, {}
-
-        classes = builder.build(exprs)
-        for left, right in merges:
-            builder.merge_classes(left, right)
-        for expr, constraints in typed_constraints.items():
-            class_id = builder.expr_to_class.get(expr)
-            if class_id is None:
-                continue
-            for constraint in sorted(constraints):
-                classes[class_id].add_type_constraint(constraint)
-
-        resolved = TypeVariableReplacer().replace(classes)
-        resolved_by_expr = {
-            expr: resolved[class_id] for expr, class_id in builder.expr_to_class.items() if class_id in resolved
-        }
-        return classes, dict(sorted(resolved_by_expr.items()))
-
-    return _impl()
+    resolved = TypeVariableReplacer().replace(classes)
+    resolved_by_expr = {
+        expr: resolved[class_id] for expr, class_id in builder.expr_to_class.items() if class_id in resolved
+    }
+    return classes, dict(sorted(resolved_by_expr.items()))
 
 
 class TypeVariableReplacer:

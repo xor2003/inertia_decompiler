@@ -124,6 +124,71 @@ def _classify_object_8616(
     )
 
 
+def _widening_outcomes_8616(
+    object_widening: StackMemoryObjectWideningArtifact8616,
+    bp_entry_sp_delta: int | None,
+    covered_keys: set[_StorageKey8616],
+) -> tuple[
+    list[StackMemorySSALoweringCandidate8616],
+    list[StackMemorySSALoweringRefusal8616],
+]:
+    """Classify widening candidates and retain every widening refusal."""
+    candidates: list[StackMemorySSALoweringCandidate8616] = []
+    refusals: list[StackMemorySSALoweringRefusal8616] = []
+    for candidate in object_widening.candidates:
+        covered_keys.update(_address_key_8616(address) for address in candidate.covered_addresses)
+        outcome = _classify_object_8616(
+            candidate.address,
+            candidate.storage,
+            candidate.versions,
+            candidate.fact_kinds,
+            bp_entry_sp_delta,
+        )
+        if isinstance(outcome, StackMemorySSALoweringCandidate8616):
+            candidates.append(outcome)
+        else:
+            refusals.append(outcome)
+    for refusal in object_widening.refusals:
+        covered_keys.update(_address_key_8616(address) for address in refusal.addresses)
+        refusals.append(
+            StackMemorySSALoweringRefusal8616(
+                StackMemorySSALoweringRefusalKind8616.SOURCE_WIDENING_REFUSAL,
+                refusal.detail,
+                refusal.addresses[0] if refusal.addresses else None,
+                refusal.addresses,
+            )
+        )
+    return candidates, refusals
+
+
+def _classify_fact_group_8616(
+    facts: list[StackMemorySSAAliasFact8616],
+    bp_entry_sp_delta: int | None,
+) -> StackMemorySSALoweringCandidate8616 | StackMemorySSALoweringRefusal8616:
+    """Classify one uncovered SSA group or refuse with typed evidence."""
+    representative = facts[0]
+    if any(fact.storage != representative.storage for fact in facts[1:]):
+        return StackMemorySSALoweringRefusal8616(
+            StackMemorySSALoweringRefusalKind8616.INCONSISTENT_ALIAS_STORAGE,
+            "SSA versions for one range have different Alias storage identities",
+            representative.address,
+        )
+    kinds = tuple(sorted({fact.kind for fact in facts}, key=lambda item: item.value))
+    if all(kind is StackMemoryAliasFactKind8616.PHI for kind in kinds):
+        return StackMemorySSALoweringRefusal8616(
+            StackMemorySSALoweringRefusalKind8616.PHI_WITHOUT_ACCESS,
+            "memory phi has no concrete load or store",
+            representative.address,
+        )
+    return _classify_object_8616(
+        representative.address,
+        representative.storage,
+        tuple(sorted({cast(int, fact.address.version) for fact in facts})),
+        kinds,
+        bp_entry_sp_delta,
+    )
+
+
 def _classify_storage_groups_8616(
     source: StackMemorySSAAliasArtifact8616,
     object_widening: StackMemoryObjectWideningArtifact8616 | None,
@@ -147,60 +212,17 @@ def _classify_storage_groups_8616(
     ]
     covered_keys: set[_StorageKey8616] = set()
     if object_widening is not None:
-        for candidate in object_widening.candidates:
-            covered_keys.update(_address_key_8616(address) for address in candidate.covered_addresses)
-            outcome = _classify_object_8616(
-                candidate.address,
-                candidate.storage,
-                candidate.versions,
-                candidate.fact_kinds,
-                bp_entry_sp_delta,
-            )
-            if isinstance(outcome, StackMemorySSALoweringCandidate8616):
-                candidates.append(outcome)
-            else:
-                refusals.append(outcome)
-        for refusal in object_widening.refusals:
-            covered_keys.update(_address_key_8616(address) for address in refusal.addresses)
-            refusals.append(
-                StackMemorySSALoweringRefusal8616(
-                    StackMemorySSALoweringRefusalKind8616.SOURCE_WIDENING_REFUSAL,
-                    refusal.detail,
-                    refusal.addresses[0] if refusal.addresses else None,
-                    refusal.addresses,
-                )
-            )
+        widening_candidates, widening_refusals = _widening_outcomes_8616(
+            object_widening,
+            bp_entry_sp_delta,
+            covered_keys,
+        )
+        candidates.extend(widening_candidates)
+        refusals.extend(widening_refusals)
     for key in sorted(groups):
         if key in covered_keys:
             continue
-        facts = groups[key]
-        representative = facts[0]
-        if any(fact.storage != representative.storage for fact in facts[1:]):
-            refusals.append(
-                StackMemorySSALoweringRefusal8616(
-                    StackMemorySSALoweringRefusalKind8616.INCONSISTENT_ALIAS_STORAGE,
-                    "SSA versions for one range have different Alias storage identities",
-                    representative.address,
-                )
-            )
-            continue
-        kinds = tuple(sorted({fact.kind for fact in facts}, key=lambda item: item.value))
-        if all(kind is StackMemoryAliasFactKind8616.PHI for kind in kinds):
-            refusals.append(
-                StackMemorySSALoweringRefusal8616(
-                    StackMemorySSALoweringRefusalKind8616.PHI_WITHOUT_ACCESS,
-                    "memory phi has no concrete load or store",
-                    representative.address,
-                )
-            )
-            continue
-        outcome = _classify_object_8616(
-            representative.address,
-            representative.storage,
-            tuple(sorted({cast(int, fact.address.version) for fact in facts})),
-            kinds,
-            bp_entry_sp_delta,
-        )
+        outcome = _classify_fact_group_8616(groups[key], bp_entry_sp_delta)
         if isinstance(outcome, StackMemorySSALoweringCandidate8616):
             candidates.append(outcome)
         else:
@@ -208,11 +230,10 @@ def _classify_storage_groups_8616(
     return candidates, refusals
 
 
-def lower_x86_16_stack_memory_ssa_alias_artifact(
-    codegen: object,
-) -> StackMemorySSALoweringArtifact8616 | None:
-    """Materialize exact SSA storage through the existing Lowering consumer."""
-    boundary = cast(_CodegenBoundary8616, codegen)
+def _required_source_alias_8616(
+    boundary: _CodegenBoundary8616,
+) -> StackMemorySSAAliasArtifact8616 | None:
+    """Require a complete typed SSA Alias artifact at the codegen boundary."""
     try:
         source = boundary._inertia_stack_memory_ssa_alias_artifact
     except AttributeError:
@@ -224,72 +245,113 @@ def lower_x86_16_stack_memory_ssa_alias_artifact(
             "stack-memory SSA Alias artifact is incomplete before Lowering",
             layer="stack_lowering",
         )
-    object_widening: StackMemoryObjectWideningArtifact8616 | None = None
-    if source.accesses or source.logical_accesses or source.logical_refusals:
-        try:
-            candidate_widening = boundary._inertia_stack_memory_object_widening_artifact
-        except AttributeError as ex:
-            raise PipelineHardError(
-                "composed stack-memory Alias accesses reached Lowering before Widening",
-                layer="stack_lowering",
-            ) from ex
-        if (
-            not isinstance(candidate_widening, StackMemoryObjectWideningArtifact8616)
-            or candidate_widening.source_alias is not source
-            or not candidate_widening.complete
-        ):
-            raise PipelineHardError(
-                "stack-memory object Widening does not consume this exact Alias artifact",
-                layer="stack_lowering",
-            )
-        object_widening = candidate_widening
+    return source
+
+
+def _required_object_widening_8616(
+    boundary: _CodegenBoundary8616,
+    source: StackMemorySSAAliasArtifact8616,
+) -> StackMemoryObjectWideningArtifact8616 | None:
+    """Require composed object Widening to consume this exact Alias artifact."""
+    if not (source.accesses or source.logical_accesses or source.logical_refusals):
+        return None
+    try:
+        candidate_widening = boundary._inertia_stack_memory_object_widening_artifact
+    except AttributeError as ex:
+        raise PipelineHardError(
+            "composed stack-memory Alias accesses reached Lowering before Widening",
+            layer="stack_lowering",
+        ) from ex
+    if (
+        not isinstance(candidate_widening, StackMemoryObjectWideningArtifact8616)
+        or candidate_widening.source_alias is not source
+        or not candidate_widening.complete
+    ):
+        raise PipelineHardError(
+            "stack-memory object Widening does not consume this exact Alias artifact",
+            layer="stack_lowering",
+        )
+    return candidate_widening
+
+
+def _bp_entry_sp_delta_8616(boundary: _CodegenBoundary8616) -> int | None:
+    """Return the proven BP-to-entry-SP coordinate delta, if any."""
     try:
         frame = boundary._inertia_vex_ir_frame
     except AttributeError:
         frame = None
     bp_coordinate = frame.bp_coordinate if isinstance(frame, FrameAccessArtifact) else None
-    bp_entry_sp_delta = (
+    return (
         bp_coordinate.bp_entry_sp_delta
         if bp_coordinate is not None and bp_coordinate.status is FrameCoordinateStatus8616.PROVEN
         else None
     )
+
+
+def _merge_wide_carry_stack_8616(
+    boundary: _CodegenBoundary8616,
+    source: StackMemorySSAAliasArtifact8616,
+    candidates: list[StackMemorySSALoweringCandidate8616],
+    bp_entry_sp_delta: int | None,
+) -> list[StackMemorySSALoweringCandidate8616]:
+    """Replace covered SSA candidates with proven wide carry-stack locals."""
+    try:
+        carry_pipeline = boundary._inertia_carry_borrow_widening_pipeline_8616
+    except AttributeError:
+        carry_pipeline = None
+    if not isinstance(carry_pipeline, CarryBorrowWideningPipeline8616):
+        return candidates
+    if not carry_pipeline.complete or carry_pipeline.source_stack_alias is not source:
+        raise PipelineHardError(
+            "carry Widening does not consume this exact stack-memory Alias artifact",
+            layer="stack_lowering",
+        )
+    wide_stack = project_wide_carry_borrow_stack_storage_8616(
+        carry_pipeline,
+        bp_entry_sp_delta,
+    )
+    covered = {
+        _address_key_8616(address)
+        for candidate in wide_stack.candidates
+        for address in candidate.source_ranges
+    }
+    merged = [candidate for candidate in candidates if _address_key_8616(candidate.address) not in covered]
+    merged.extend(
+        StackMemorySSALoweringCandidate8616(
+            StackMemoryObjectKind8616.LOCAL,
+            candidate.address,
+            candidate.entry_sp_offset,
+            candidate.storage,
+            candidate.source.source_versions,
+            (StackMemoryAliasFactKind8616.STORE,),
+        )
+        for candidate in wide_stack.candidates
+    )
+    boundary._inertia_wide_carry_borrow_stack_artifact = wide_stack
+    return merged
+
+
+def lower_x86_16_stack_memory_ssa_alias_artifact(
+    codegen: object,
+) -> StackMemorySSALoweringArtifact8616 | None:
+    """Materialize exact SSA storage through the existing Lowering consumer."""
+    boundary = cast(_CodegenBoundary8616, codegen)
+    source = _required_source_alias_8616(boundary)
+    if source is None:
+        return None
+    object_widening = _required_object_widening_8616(boundary, source)
+    bp_entry_sp_delta = _bp_entry_sp_delta_8616(boundary)
     candidates, refusals = _classify_storage_groups_8616(
         source,
         object_widening,
         bp_entry_sp_delta,
     )
-    try:
-        carry_pipeline = boundary._inertia_carry_borrow_widening_pipeline_8616
-    except AttributeError:
-        carry_pipeline = None
-    if isinstance(carry_pipeline, CarryBorrowWideningPipeline8616):
-        if not carry_pipeline.complete or carry_pipeline.source_stack_alias is not source:
-            raise PipelineHardError(
-                "carry Widening does not consume this exact stack-memory Alias artifact",
-                layer="stack_lowering",
-            )
-        wide_stack = project_wide_carry_borrow_stack_storage_8616(
-            carry_pipeline,
-            bp_entry_sp_delta,
-        )
-        covered = {
-            _address_key_8616(address)
-            for candidate in wide_stack.candidates
-            for address in candidate.source_ranges
-        }
-        candidates = [candidate for candidate in candidates if _address_key_8616(candidate.address) not in covered]
-        candidates.extend(
-            StackMemorySSALoweringCandidate8616(
-                StackMemoryObjectKind8616.LOCAL,
-                candidate.address,
-                candidate.entry_sp_offset,
-                candidate.storage,
-                candidate.source.source_versions,
-                (StackMemoryAliasFactKind8616.STORE,),
-            )
-            for candidate in wide_stack.candidates
-        )
-        boundary._inertia_wide_carry_borrow_stack_artifact = wide_stack
+    candidates = _merge_wide_carry_stack_8616(
+        boundary,
+        source,
+        candidates,
+        bp_entry_sp_delta,
+    )
     if candidates:
         reset_local_stack_coordinate_projections_8616(
             codegen,

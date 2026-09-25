@@ -12,7 +12,7 @@ CLI/reporting evidence.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from ..alias.alias_model_impl import AliasStorageFacts, alias_facts_for_ir_address_8616
@@ -23,7 +23,7 @@ from ..alias.storage_fact_join import (
     segmented_access_relation_8616,
 )
 from ..alias.terminal_memory_outputs import TerminalMemoryAliasFact8616
-from ..ir import AddressStatus, IRAddress, MemSpace, SegmentOrigin
+from ..ir import AddressStatus, IRAddress, IRInstr, MemSpace, SegmentOrigin
 from ..ir.ssa_function import SSAFunctionArtifact
 
 
@@ -180,6 +180,80 @@ def _view_range_8616(address: IRAddress) -> SegmentedAliasRange8616 | None:
     return build_segmented_alias_range_8616((address,), (storage,))
 
 
+@dataclass(slots=True)
+class _OutputViewScan8616:
+    """Mutable grouping state for one terminal output-view scan."""
+
+    alias_output: TerminalMemoryAliasFact8616
+    owner: SegmentedAliasRange8616
+    owner_address: IRAddress
+    grouped: dict[
+        tuple[MemSpace, int, int],
+        tuple[SegmentedAliasRange8616, list[TerminalMemoryOutputViewAccess8616]],
+    ] = field(default_factory=dict)
+    raw_count: int = 0
+
+    def _refuse(
+        self,
+        failure: TerminalMemoryOutputViewFailure8616,
+    ) -> TerminalMemoryOutputViewEvidence8616:
+        """Produce one refusal carrying the scan's closed counts."""
+        return _refused_8616(
+            self.alias_output,
+            failure,
+            self.raw_count,
+            len(self.grouped),
+        )
+
+    def process(
+        self,
+        block_addr: int,
+        instr_index: int,
+        instruction: IRInstr,
+    ) -> TerminalMemoryOutputViewEvidence8616 | None:
+        """Classify one instruction or return the scan-closing refusal."""
+        if instruction.op != "LOAD" or instruction.addr is None:
+            return None
+        address = instruction.args[0] if instruction.args else None
+        if not isinstance(address, IRAddress):
+            return None
+        relation = segmented_access_relation_8616(address, self.owner_address)
+        if relation in {
+            SegmentedAccessRelation8616.DISJOINT,
+            SegmentedAccessRelation8616.UNKNOWN,
+        }:
+            return None
+        self.raw_count += 1
+        if relation is SegmentedAccessRelation8616.UNPROVEN:
+            return self._refuse(TerminalMemoryOutputViewFailure8616.RANGE_BUILD_REFUSED)
+        if instruction.size != address.size:
+            return self._refuse(TerminalMemoryOutputViewFailure8616.ACCESS_WIDTH_CONFLICT)
+        view_range = _view_range_8616(address)
+        if view_range is None:
+            return self._refuse(TerminalMemoryOutputViewFailure8616.RANGE_BUILD_REFUSED)
+        if relation in {
+            SegmentedAccessRelation8616.CONTAINS,
+            SegmentedAccessRelation8616.CROSSING,
+        } or not self.owner.contains(view_range):
+            return self._refuse(TerminalMemoryOutputViewFailure8616.CROSSING_OVERLAP)
+        key = (view_range.space, view_range.offset, view_range.size)
+        access = TerminalMemoryOutputViewAccess8616(
+            block_addr,
+            instr_index,
+            instruction.addr,
+            address,
+            instruction.size,
+        )
+        previous = self.grouped.get(key)
+        if previous is None:
+            self.grouped[key] = (view_range, [access])
+        elif previous[0] == view_range:
+            previous[1].append(access)
+        else:
+            return self._refuse(TerminalMemoryOutputViewFailure8616.STORAGE_CONFLICT)
+        return None
+
+
 def collect_terminal_memory_output_views_8616(
     alias_output: TerminalMemoryAliasFact8616,
     artifact: SSAFunctionArtifact,
@@ -192,80 +266,14 @@ def collect_terminal_memory_output_views_8616(
             1,
         )
     owner = alias_output.storage_range
-    owner_address = owner.addresses[0]
-    grouped: dict[
-        tuple[MemSpace, int, int],
-        tuple[SegmentedAliasRange8616, list[TerminalMemoryOutputViewAccess8616]],
-    ] = {}
-    raw_count = 0
+    scan = _OutputViewScan8616(alias_output, owner, owner.addresses[0])
     for block in sorted(artifact.blocks, key=lambda item: item.addr):
         for instr_index, instruction in enumerate(block.instrs):
-            if instruction.op != "LOAD" or instruction.addr is None:
-                continue
-            address = instruction.args[0] if instruction.args else None
-            if (
-                not isinstance(address, IRAddress)
-            ):
-                continue
-            relation = segmented_access_relation_8616(address, owner_address)
-            if relation in {
-                SegmentedAccessRelation8616.DISJOINT,
-                SegmentedAccessRelation8616.UNKNOWN,
-            }:
-                continue
-            raw_count += 1
-            if relation is SegmentedAccessRelation8616.UNPROVEN:
-                return _refused_8616(
-                    alias_output,
-                    TerminalMemoryOutputViewFailure8616.RANGE_BUILD_REFUSED,
-                    raw_count,
-                    len(grouped),
-                )
-            if instruction.size != address.size:
-                return _refused_8616(
-                    alias_output,
-                    TerminalMemoryOutputViewFailure8616.ACCESS_WIDTH_CONFLICT,
-                    raw_count,
-                    len(grouped),
-                )
-            view_range = _view_range_8616(address)
-            if view_range is None:
-                return _refused_8616(
-                    alias_output,
-                    TerminalMemoryOutputViewFailure8616.RANGE_BUILD_REFUSED,
-                    raw_count,
-                    len(grouped),
-                )
-            if relation in {
-                SegmentedAccessRelation8616.CONTAINS,
-                SegmentedAccessRelation8616.CROSSING,
-            } or not owner.contains(view_range):
-                return _refused_8616(
-                    alias_output,
-                    TerminalMemoryOutputViewFailure8616.CROSSING_OVERLAP,
-                    raw_count,
-                    len(grouped),
-                )
-            key = (view_range.space, view_range.offset, view_range.size)
-            access = TerminalMemoryOutputViewAccess8616(
-                block.addr,
-                instr_index,
-                instruction.addr,
-                address,
-                instruction.size,
-            )
-            previous = grouped.get(key)
-            if previous is None:
-                grouped[key] = (view_range, [access])
-            elif previous[0] == view_range:
-                previous[1].append(access)
-            else:
-                return _refused_8616(
-                    alias_output,
-                    TerminalMemoryOutputViewFailure8616.STORAGE_CONFLICT,
-                    raw_count,
-                    len(grouped),
-                )
+            refusal = scan.process(block.addr, instr_index, instruction)
+            if refusal is not None:
+                return refusal
+    grouped = scan.grouped
+    raw_count = scan.raw_count
 
     facts = tuple(
         TerminalMemoryOutputViewFact8616(

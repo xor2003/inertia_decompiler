@@ -81,44 +81,53 @@ class DeadSetupMode8616(enum.Enum):
     PRODUCTION = "production"
 
 
+def _env_dead_setup_mode_8616() -> DeadSetupMode8616 | None:
+    """Resolve pruning mode from environment flags, or None when unset."""
+    env_mode = os.environ.get("INERTIA_DEAD_SETUP_PRUNE_MODE", "").strip().lower()
+    if env_mode in {"diag", "diagnostic"}:
+        return DeadSetupMode8616.DIAGNOSTIC
+    if env_mode in {"disabled", "off", "0", "false", "no"}:
+        return DeadSetupMode8616.DISABLED
+    if env_mode == "production":
+        return DeadSetupMode8616.PRODUCTION
+    legacy_disable = os.environ.get("INERTIA_DISABLE_DEAD_SETUP_PRUNE", "").strip().lower()
+    if legacy_disable in {"1", "true", "yes", "on"}:
+        return DeadSetupMode8616.DISABLED
+    return None
+
+
+def _attr_dead_setup_mode_8616(codegen: object) -> DeadSetupMode8616 | None:
+    """Resolve pruning mode from dynamic codegen compatibility boundary flags."""
+    attr = getattr(codegen, "_inertia_dead_setup_prune_mode", None)
+    if isinstance(attr, DeadSetupMode8616):
+        return attr
+    if isinstance(attr, str):
+        normalized = attr.strip().lower()
+        if normalized in {"disabled", "off", "0", "false", "no"}:
+            return DeadSetupMode8616.DISABLED
+        if normalized in {"diagnostic", "diag"}:
+            return DeadSetupMode8616.DIAGNOSTIC
+        if normalized in {"production", "prod", "on", "1", "true", "yes"}:
+            return DeadSetupMode8616.PRODUCTION
+    return None
+
+
 def _resolve_dead_setup_mode_8616(codegen: object) -> DeadSetupMode8616:
     """Resolve pruning mode from environment and dynamic codegen compatibility boundary flags."""
-
-    def _impl() -> DeadSetupMode8616:
-        """Read mode from dynamic codegen compatibility boundary flags."""
-        env_mode = os.environ.get("INERTIA_DEAD_SETUP_PRUNE_MODE", "").strip().lower()
-        if env_mode in {"diag", "diagnostic"}:
-            return DeadSetupMode8616.DIAGNOSTIC
-        if env_mode in {"disabled", "off", "0", "false", "no"}:
-            return DeadSetupMode8616.DISABLED
-        if env_mode == "production":
-            return DeadSetupMode8616.PRODUCTION
-        legacy_disable = os.environ.get("INERTIA_DISABLE_DEAD_SETUP_PRUNE", "").strip().lower()
-        if legacy_disable in {"1", "true", "yes", "on"}:
-            return DeadSetupMode8616.DISABLED
-
-        attr = getattr(codegen, "_inertia_dead_setup_prune_mode", None)
-        if isinstance(attr, DeadSetupMode8616):
-            return attr
-        if isinstance(attr, str):
-            normalized = attr.strip().lower()
-            if normalized in {"disabled", "off", "0", "false", "no"}:
-                return DeadSetupMode8616.DISABLED
-            if normalized in {"diagnostic", "diag"}:
-                return DeadSetupMode8616.DIAGNOSTIC
-            if normalized in {"production", "prod", "on", "1", "true", "yes"}:
-                return DeadSetupMode8616.PRODUCTION
-
-        safe_attr = getattr(codegen, "_inertia_enable_safe_dead_setup_prune", None)
-        if safe_attr is False:
-            return DeadSetupMode8616.DISABLED
-        if safe_attr is True:
-            return DeadSetupMode8616.PRODUCTION
-        # Default to conservative diagnostics-only mode. Production mutation must
-        # be explicitly requested via mode/env after evidence gates are green.
-        return DeadSetupMode8616.DIAGNOSTIC
-
-    return _impl()
+    env_resolved = _env_dead_setup_mode_8616()
+    if env_resolved is not None:
+        return env_resolved
+    attr_resolved = _attr_dead_setup_mode_8616(codegen)
+    if attr_resolved is not None:
+        return attr_resolved
+    safe_attr = getattr(codegen, "_inertia_enable_safe_dead_setup_prune", None)
+    if safe_attr is False:
+        return DeadSetupMode8616.DISABLED
+    if safe_attr is True:
+        return DeadSetupMode8616.PRODUCTION
+    # Default to conservative diagnostics-only mode. Production mutation must
+    # be explicitly requested via mode/env after evidence gates are green.
+    return DeadSetupMode8616.DIAGNOSTIC
 
 
 def _setup_counter_defaults(codegen: object) -> None:
@@ -183,36 +192,36 @@ def _is_candidate_lhs(lhs: object) -> TypeGuard[CVariable]:
     return bool(name and _STAGING_NAME_RE.match(name))
 
 
+def _is_address_of_op_8616(node: object) -> bool:
+    """Return whether a dynamic angr/codegen node takes an address."""
+    return isinstance(node, CUnaryOp) and getattr(node, "op", None) in {"Reference", "AddressOf"}
+
+
+def _binop_has_const_operand_8616(node: CBinaryOp) -> bool:
+    """Return whether an Add/Sub node has a constant operand."""
+    if getattr(node, "op", None) not in {"Add", "Sub"}:
+        return False
+    return isinstance(node.lhs, CConstant) or isinstance(node.rhs, CConstant)
+
+
 def _is_setup_rhs(rhs: object) -> bool:
     """Classify setup expressions across a dynamic angr/codegen C AST boundary."""
-
-    def _impl() -> bool:
-        """Inspect setup expressions across a dynamic angr/codegen C AST boundary."""
-        if rhs is None:
-            return False
-        if isinstance(rhs, CUnaryOp) and getattr(rhs, "op", None) in {"Reference", "AddressOf"}:
-            return True
-        if isinstance(rhs, CBinaryOp):
-            op = rhs.op
-            if op in {"Add", "Sub"}:
-                lhs = rhs.lhs
-                r = rhs.rhs
-                if isinstance(lhs, CConstant) or isinstance(r, CConstant):
-                    return True
-                if isinstance(lhs, CVariable) or isinstance(r, CVariable):
-                    return True
-        # Deep fallback: if expression tree contains address-taking or simple const offset arithmetic.
-        for node in _iter_c_nodes_deep_8616(rhs):
-            if isinstance(node, CUnaryOp) and getattr(node, "op", None) in {"Reference", "AddressOf"}:
-                return True
-            if isinstance(node, CBinaryOp) and getattr(node, "op", None) in {"Add", "Sub"}:
-                lhs = node.lhs
-                r = node.rhs
-                if isinstance(lhs, CConstant) or isinstance(r, CConstant):
-                    return True
+    if rhs is None:
         return False
-
-    return _impl()
+    if _is_address_of_op_8616(rhs):
+        return True
+    if isinstance(rhs, CBinaryOp) and getattr(rhs, "op", None) in {"Add", "Sub"}:
+        if _binop_has_const_operand_8616(rhs):
+            return True
+        if isinstance(rhs.lhs, CVariable) or isinstance(rhs.rhs, CVariable):
+            return True
+    # Deep fallback: if expression tree contains address-taking or simple const offset arithmetic.
+    for node in _iter_c_nodes_deep_8616(rhs):
+        if _is_address_of_op_8616(node):
+            return True
+        if isinstance(node, CBinaryOp) and _binop_has_const_operand_8616(node):
+            return True
+    return False
 
 
 def _rhs_has_side_effects(rhs: object) -> bool:
@@ -221,91 +230,92 @@ def _rhs_has_side_effects(rhs: object) -> bool:
     return any(isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(rhs))
 
 
+def _count_variable_reads_8616(node: object, reads: dict[tuple[str, int | str], int]) -> None:
+    """Accumulate CVariable reads under one dynamic angr/codegen subtree."""
+    for sub in _iter_c_nodes_deep_8616(node):
+        if isinstance(sub, CVariable):
+            key = _var_key(sub)
+            reads[key] = reads.get(key, 0) + 1
+
+
+def _count_assignment_reads_8616(stmt: CAssignment, reads: dict[tuple[str, int | str], int]) -> None:
+    """Accumulate reads for one assignment across the dynamic angr/codegen boundary."""
+    lhs = stmt.lhs
+    rhs = stmt.rhs
+    if isinstance(rhs, CVariable):
+        key = _var_key(rhs)
+        reads[key] = reads.get(key, 0) + 1
+    _count_variable_reads_8616(rhs, reads)
+    # count nested lvalue uses only for address forms, not direct def lhs
+    if isinstance(lhs, CUnaryOp) and getattr(lhs, "op", None) in {"Dereference", "Reference"}:
+        _count_variable_reads_8616(lhs, reads)
+
+
 def _collect_read_counts(root: object) -> dict[tuple[str, int | str], int]:
     """Count CVariable reads across dynamic angr/codegen boundary statement blocks."""
+    reads: dict[tuple[str, int | str], int] = {}
+    # Traverse by statement blocks to avoid double-counting that occurs when
+    # walking the full tree and then re-walking each nested node.
+    for block in _iter_statement_blocks(root):
+        for stmt in list(getattr(block, "statements", ()) or ()):
+            if isinstance(stmt, CAssignment):
+                _count_assignment_reads_8616(stmt, reads)
+                continue
+            _count_variable_reads_8616(stmt, reads)
+    return reads
 
-    def _impl() -> dict[tuple[str, int | str], int]:
-        """Traverse dynamic angr/codegen boundary statement blocks for reads."""
-        reads: dict[tuple[str, int | str], int] = {}
-        # Traverse by statement blocks to avoid double-counting that occurs when
-        # walking the full tree and then re-walking each nested node.
-        for block in _iter_statement_blocks(root):
-            for stmt in list(getattr(block, "statements", ()) or ()):
-                if isinstance(stmt, CAssignment):
-                    lhs = stmt.lhs
-                    rhs = stmt.rhs
-                    if isinstance(rhs, CVariable):
-                        key = _var_key(rhs)
-                        reads[key] = reads.get(key, 0) + 1
-                    for rhs_node in _iter_c_nodes_deep_8616(rhs):
-                        if isinstance(rhs_node, CVariable):
-                            key = _var_key(rhs_node)
-                            reads[key] = reads.get(key, 0) + 1
-                    # count nested lvalue uses only for address forms, not direct def lhs
-                    if isinstance(lhs, CUnaryOp) and getattr(lhs, "op", None) in {"Dereference", "Reference"}:
-                        for lhs_node in _iter_c_nodes_deep_8616(lhs):
-                            if isinstance(lhs_node, CVariable):
-                                key = _var_key(lhs_node)
-                                reads[key] = reads.get(key, 0) + 1
-                    continue
 
-                for sub in _iter_c_nodes_deep_8616(stmt):
-                    if isinstance(sub, CVariable):
-                        key = _var_key(sub)
-                        reads[key] = reads.get(key, 0) + 1
-        return reads
+_BLOCK_CHILD_ATTRS_8616 = (
+    "condition",
+    "cond",
+    "body",
+    "else_node",
+    "iftrue",
+    "iffalse",
+    "true_node",
+    "false_node",
+    "expr",
+    "retval",
+)
 
-    return _impl()
+
+def _push_block_children_8616(node: object, stack: list[object]) -> None:
+    """Push nested dynamic angr/codegen C AST boundary children onto the worklist."""
+    for attr in _BLOCK_CHILD_ATTRS_8616:
+        child = getattr(node, attr, None)
+        if child is not None:
+            stack.append(child)
+    condition_and_nodes = getattr(node, "condition_and_nodes", None)
+    if condition_and_nodes:
+        for cond, body in condition_and_nodes:
+            stack.append(cond)
+            stack.append(body)
+    cases = getattr(node, "cases", None)
+    if isinstance(cases, dict):
+        for body in cases.values():
+            stack.append(body)  # noqa: PERF402
+    default = getattr(node, "default", None)
+    if default is not None:
+        stack.append(default)
 
 
 def _iter_statement_blocks(root: object) -> Iterator[object]:
     """Yield nested statement blocks from a dynamic angr/codegen C AST boundary."""
-
-    def _impl() -> Iterator[object]:
-        """Walk nested dynamic angr/codegen C AST boundary nodes."""
-        seen: set[int] = set()
-        stack = [root]
-        while stack:
-            node = stack.pop()
-            if node is None:
-                continue
-            nid = id(node)
-            if nid in seen:
-                continue
-            seen.add(nid)
-            if hasattr(node, "statements"):
-                yield node
-                for stmt in list(getattr(node, "statements", ()) or ()):
-                    stack.append(stmt)  # noqa: PERF402
-            for attr in (
-                "condition",
-                "cond",
-                "body",
-                "else_node",
-                "iftrue",
-                "iffalse",
-                "true_node",
-                "false_node",
-                "expr",
-                "retval",
-            ):
-                child = getattr(node, attr, None)
-                if child is not None:
-                    stack.append(child)
-            condition_and_nodes = getattr(node, "condition_and_nodes", None)
-            if condition_and_nodes:
-                for cond, body in condition_and_nodes:
-                    stack.append(cond)
-                    stack.append(body)
-            cases = getattr(node, "cases", None)
-            if isinstance(cases, dict):
-                for body in cases.values():
-                    stack.append(body)  # noqa: PERF402
-            default = getattr(node, "default", None)
-            if default is not None:
-                stack.append(default)
-
-    return _impl()
+    seen: set[int] = set()
+    stack: list[object] = [root]
+    while stack:
+        node = stack.pop()
+        if node is None:
+            continue
+        nid = id(node)
+        if nid in seen:
+            continue
+        seen.add(nid)
+        if hasattr(node, "statements"):
+            yield node
+            for stmt in list(getattr(node, "statements", ()) or ()):
+                stack.append(stmt)  # noqa: PERF402
+        _push_block_children_8616(node, stack)
 
 
 def _gather_candidates(statements: object) -> list[_Candidate]:
@@ -390,172 +400,200 @@ def _record_decision_counter_8616(codegen: object, decision: DeadSetupDecision86
         typing.cast(typing.Any, codegen).dead_setup_unknown_refuse = int(getattr(codegen, "dead_setup_unknown_refuse", 0)) + 1
 
 
+def _block_call_indices_8616(stmts: list[object]) -> set[int]:
+    """Return statement indices containing calls in one dynamic angr/codegen block."""
+    return {
+        idx
+        for idx, stmt in enumerate(stmts)
+        if any(isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(stmt))
+    }
+
+
+def _classify_block_candidates_8616(
+    codegen: object,
+    candidates: list[_Candidate],
+    reads: dict[tuple[str, int | str], int],
+    call_indices: set[int] | None,
+) -> tuple[set[int], int]:
+    """Classify one block's candidates; return removable indices and refused count."""
+    to_remove: set[int] = set()
+    refused = 0
+    for cand in candidates:
+        try:
+            decision = _classify_candidate_8616(cand, reads, call_indices=call_indices)
+        except Exception:
+            _bump_counter_8616(codegen, "dead_setup_failure_count")
+            decision = DeadSetupDecision8616.UNKNOWN_REFUSE
+        _bump_counter_8616(codegen, "dead_setup_classified_fact_count")
+        if decision == DeadSetupDecision8616.DEFINITELY_DEAD:
+            to_remove.add(cand.stmt_index)
+            continue
+        refused += 1
+        _record_decision_counter_8616(codegen, decision)
+    return to_remove, refused
+
+
+def _diagnostic_sweep_8616(codegen: object, statements: object) -> None:
+    """Run the diagnostics-only census across dynamic angr/codegen statement blocks."""
+    reads = _collect_read_counts(statements)
+    total_candidates = 0
+    total_refused = 0
+    for block in _iter_statement_blocks(statements):
+        candidates = _gather_candidates(block)
+        if not candidates:
+            continue
+        total_candidates += len(candidates)
+        _bump_counter_8616(codegen, "dead_setup_raw_fact_count", len(candidates))
+        _bump_counter_8616(codegen, "dead_setup_normalized_fact_count", len(candidates))
+        _to_remove, refused = _classify_block_candidates_8616(codegen, candidates, reads, None)
+        total_refused += refused
+    if total_candidates:
+        _bump_counter_8616(codegen, "dead_setup_candidates", total_candidates)
+    if total_refused:
+        _bump_counter_8616(codegen, "dead_setup_refused", total_refused)
+
+
+def _prune_block_candidates_8616(
+    codegen: object,
+    block: object,
+    stmts: list[object],
+    reads: dict[tuple[str, int | str], int],
+) -> tuple[int, int, int, bool]:
+    """Classify and delete proven-dead candidates in one block.
+
+    Returns (candidate_count, refused, pruned, block_changed).
+    """
+    candidates = _gather_candidates(block)
+    if not candidates:
+        return 0, 0, 0, False
+    _bump_counter_8616(codegen, "dead_setup_raw_fact_count", len(candidates))
+    _bump_counter_8616(codegen, "dead_setup_normalized_fact_count", len(candidates))
+    call_indices = _block_call_indices_8616(stmts)
+    to_remove, refused = _classify_block_candidates_8616(codegen, candidates, reads, call_indices)
+    if not to_remove:
+        return len(candidates), refused, 0, False
+    pruned = 0
+    for idx in sorted(to_remove, reverse=True):
+        if 0 <= idx < len(stmts):
+            del stmts[idx]
+            pruned += 1
+            _bump_counter_8616(codegen, "dead_setup_materialized_count")
+    if pruned and _is_statement_block_like_8616(block):
+        block.statements = stmts
+        return len(candidates), refused, pruned, True
+    return len(candidates), refused, 0, False
+
+
+def _production_sweep_8616(codegen: object, statements: object) -> bool:
+    """Run production prune passes until a fixpoint across dynamic angr/codegen blocks."""
+    changed = False
+    while True:
+        reads = _collect_read_counts(statements)
+        pass_changed = False
+        total_refused = 0
+        total_candidates = 0
+        total_pruned = 0
+        for block in _iter_statement_blocks(statements):
+            # Dynamic angr/codegen statement-block boundary.
+            stmts: list[object] = list(getattr(block, "statements", ()) or ())
+            if not stmts:
+                continue
+            count, refused, pruned, block_changed = _prune_block_candidates_8616(
+                codegen, block, stmts, reads
+            )
+            total_candidates += count
+            total_refused += refused
+            total_pruned += pruned
+            pass_changed = pass_changed or block_changed
+
+        if total_candidates:
+            typing.cast(typing.Any, codegen).dead_setup_candidates = int(getattr(codegen, "dead_setup_candidates", 0)) + total_candidates
+        if total_refused:
+            typing.cast(typing.Any, codegen).dead_setup_refused = int(getattr(codegen, "dead_setup_refused", 0)) + total_refused
+        if total_pruned:
+            typing.cast(typing.Any, codegen).dead_setup_pruned = int(getattr(codegen, "dead_setup_pruned", 0)) + total_pruned
+            changed = True
+        if not pass_changed:
+            break
+    return changed
+
+
 def _prune_dead_setup_carriers_8616(codegen: object) -> bool:
     """Prune dead setup carriers across a dynamic angr/codegen C AST boundary."""
+    cfunc = getattr(codegen, "cfunc", None)
+    if cfunc is None:
+        return False
+    statements = getattr(cfunc, "statements", None)
+    if statements is None or not hasattr(statements, "statements"):
+        return False
 
-    def _impl() -> bool:
-        """Mutate dynamic angr/codegen C AST boundary statement blocks."""
-        cfunc = getattr(codegen, "cfunc", None)
-        if cfunc is None:
-            return False
-        statements = getattr(cfunc, "statements", None)
-        if statements is None or not hasattr(statements, "statements"):
-            return False
+    _setup_counter_defaults(codegen)
+    mode = _resolve_dead_setup_mode_8616(codegen)
+    if mode == DeadSetupMode8616.DISABLED:
+        typing.cast(typing.Any, codegen).dead_setup_prune_disabled = int(getattr(codegen, "dead_setup_prune_disabled", 0)) + 1
+        return False
 
-        _setup_counter_defaults(codegen)
-        mode = _resolve_dead_setup_mode_8616(codegen)
-        if mode == DeadSetupMode8616.DISABLED:
-            typing.cast(typing.Any, codegen).dead_setup_prune_disabled = int(getattr(codegen, "dead_setup_prune_disabled", 0)) + 1
-            return False
+    # Evidence gate: never prune until callsite argument materialization is complete
+    # when callsite statistics are available.
+    if hasattr(codegen, "_inertia_callsite_materialization_stats") and not _callsite_materialization_complete_8616(
+        codegen
+    ):
+        typing.cast(typing.Any, codegen).dead_setup_refused = int(getattr(codegen, "dead_setup_refused", 0)) + 1
+        typing.cast(typing.Any, codegen).dead_setup_live_call_arg = int(getattr(codegen, "dead_setup_live_call_arg", 0)) + 1
+        return False
 
-        # Evidence gate: never prune until callsite argument materialization is complete
-        # when callsite statistics are available.
-        if hasattr(codegen, "_inertia_callsite_materialization_stats") and not _callsite_materialization_complete_8616(
-            codegen
-        ):
-            typing.cast(typing.Any, codegen).dead_setup_refused = int(getattr(codegen, "dead_setup_refused", 0)) + 1
-            typing.cast(typing.Any, codegen).dead_setup_live_call_arg = int(getattr(codegen, "dead_setup_live_call_arg", 0)) + 1
-            return False
+    if mode == DeadSetupMode8616.DIAGNOSTIC:
+        _diagnostic_sweep_8616(codegen, statements)
+        return False
 
-        if mode == DeadSetupMode8616.DIAGNOSTIC:
-            reads = _collect_read_counts(statements)
-            total_candidates = 0
-            total_refused = 0
-            for block in _iter_statement_blocks(statements):
-                candidates = _gather_candidates(block)
-                if not candidates:
-                    continue
-                total_candidates += len(candidates)
-                _bump_counter_8616(codegen, "dead_setup_raw_fact_count", len(candidates))
-                _bump_counter_8616(codegen, "dead_setup_normalized_fact_count", len(candidates))
-                for cand in candidates:
-                    try:
-                        decision = _classify_candidate_8616(cand, reads, call_indices=None)
-                    except Exception:
-                        _bump_counter_8616(codegen, "dead_setup_failure_count")
-                        decision = DeadSetupDecision8616.UNKNOWN_REFUSE
-                    _bump_counter_8616(codegen, "dead_setup_classified_fact_count")
-                    if decision != DeadSetupDecision8616.DEFINITELY_DEAD:
-                        total_refused += 1
-                        _record_decision_counter_8616(codegen, decision)
-            if total_candidates:
-                _bump_counter_8616(codegen, "dead_setup_candidates", total_candidates)
-            if total_refused:
-                _bump_counter_8616(codegen, "dead_setup_refused", total_refused)
-            return False
+    legacy_prune = os.environ.get("INERTIA_ENABLE_LEGACY_DEAD_STACK_CARRIER_PRUNE", "").strip().lower()
+    if legacy_prune in {"1", "true", "yes", "on"} and _prune_dead_stack_carrier_assignments_core_8616(
+        statements, codegen=codegen
+    ):
+        return True
 
-        legacy_prune = os.environ.get("INERTIA_ENABLE_LEGACY_DEAD_STACK_CARRIER_PRUNE", "").strip().lower()
-        if legacy_prune in {"1", "true", "yes", "on"} and _prune_dead_stack_carrier_assignments_core_8616(
-            statements, codegen=codegen
-        ):
-            return True
+    return _production_sweep_8616(codegen, statements)
 
-        changed = False
 
-        while True:
-            reads = _collect_read_counts(statements)
-            pass_changed = False
-            total_refused = 0
-            total_candidates = 0
-            total_pruned = 0
-            for block in _iter_statement_blocks(statements):
-                # Dynamic angr/codegen statement-block boundary.
-                stmts: list[object] = list(getattr(block, "statements", ()) or ())
-                if not stmts:
-                    continue
-                call_indices = {
-                    idx
-                    for idx, stmt in enumerate(stmts)
-                    if any(isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(stmt))
-                }
-                candidates = _gather_candidates(block)
-                if not candidates:
-                    continue
-                total_candidates += len(candidates)
-                _bump_counter_8616(codegen, "dead_setup_raw_fact_count", len(candidates))
-                _bump_counter_8616(codegen, "dead_setup_normalized_fact_count", len(candidates))
-                to_remove: set[int] = set()
-                refused = 0
-                for cand in candidates:
-                    try:
-                        decision = _classify_candidate_8616(cand, reads, call_indices=call_indices)
-                    except Exception:
-                        _bump_counter_8616(codegen, "dead_setup_failure_count")
-                        decision = DeadSetupDecision8616.UNKNOWN_REFUSE
-                    _bump_counter_8616(codegen, "dead_setup_classified_fact_count")
-                    if decision == DeadSetupDecision8616.DEFINITELY_DEAD:
-                        to_remove.add(cand.stmt_index)
-                        continue
-                    refused += 1
-                    _record_decision_counter_8616(codegen, decision)
-                total_refused += refused
-                if not to_remove:
-                    continue
-                pruned = 0
-                for idx in sorted(to_remove, reverse=True):
-                    if 0 <= idx < len(stmts):
-                        del stmts[idx]
-                        pruned += 1
-                        _bump_counter_8616(codegen, "dead_setup_materialized_count")
-                if pruned and _is_statement_block_like_8616(block):
-                    block.statements = stmts
-                    total_pruned += pruned
-                    pass_changed = True
-
-            if total_candidates:
-                typing.cast(typing.Any, codegen).dead_setup_candidates = int(getattr(codegen, "dead_setup_candidates", 0)) + total_candidates
-            if total_refused:
-                typing.cast(typing.Any, codegen).dead_setup_refused = int(getattr(codegen, "dead_setup_refused", 0)) + total_refused
-            if total_pruned:
-                typing.cast(typing.Any, codegen).dead_setup_pruned = int(getattr(codegen, "dead_setup_pruned", 0)) + total_pruned
-                changed = True
-            if not pass_changed:
-                break
-
-        return changed
-
-    return _impl()
+def _block_escaped_names_8616(
+    block: object,
+    reads: dict[tuple[str, int | str], int],
+    escaped: set[str],
+) -> None:
+    """Record names of still-present proven-dead candidates in one block."""
+    stmts = list(getattr(block, "statements", ()) or ())
+    if not stmts:
+        return
+    call_indices = _block_call_indices_8616(stmts)
+    for cand in _gather_candidates(block):
+        decision = _classify_candidate_8616(cand, reads, call_indices=call_indices)
+        if decision != DeadSetupDecision8616.DEFINITELY_DEAD:
+            continue
+        name = _var_name(cand.lhs)
+        if name:
+            escaped.add(name)
 
 
 def _count_dead_setup_escaped_8616(codegen: object) -> int:
     """Count escaped setup carriers across a dynamic angr/codegen C AST boundary."""
-
-    def _impl() -> int:
-        """Inspect dynamic angr/codegen C AST boundary statement blocks."""
-        mode = _resolve_dead_setup_mode_8616(codegen)
-        if mode != DeadSetupMode8616.PRODUCTION:
-            return 0
-        if hasattr(codegen, "_inertia_callsite_materialization_stats") and not _callsite_materialization_complete_8616(
-            codegen
-        ):
-            return 0
-        cfunc = getattr(codegen, "cfunc", None)
-        if cfunc is None:
-            return 0
-        statements = getattr(cfunc, "statements", None)
-        if statements is None:
-            return 0
-        # Count only true escapes: assignments classified as DEFINITELY_DEAD by the
-        # current evidence pipeline are considered escaped if they are still present
-        # after all passes.
-        reads = _collect_read_counts(statements)
-        escaped: set[str] = set()
-        for block in _iter_statement_blocks(statements):
-            stmts = list(getattr(block, "statements", ()) or ())
-            if not stmts:
-                continue
-            call_indices = {
-                idx
-                for idx, stmt in enumerate(stmts)
-                if any(isinstance(node, CFunctionCall) for node in _iter_c_nodes_deep_8616(stmt))
-            }
-            for cand in _gather_candidates(block):
-                decision = _classify_candidate_8616(cand, reads, call_indices=call_indices)
-                if decision != DeadSetupDecision8616.DEFINITELY_DEAD:
-                    continue
-                name = _var_name(cand.lhs)
-                if name:
-                    escaped.add(name)
-        return len(escaped)
-
-    return _impl()
+    mode = _resolve_dead_setup_mode_8616(codegen)
+    if mode != DeadSetupMode8616.PRODUCTION:
+        return 0
+    if hasattr(codegen, "_inertia_callsite_materialization_stats") and not _callsite_materialization_complete_8616(
+        codegen
+    ):
+        return 0
+    cfunc = getattr(codegen, "cfunc", None)
+    if cfunc is None:
+        return 0
+    statements = getattr(cfunc, "statements", None)
+    if statements is None:
+        return 0
+    # Count only true escapes: assignments classified as DEFINITELY_DEAD by the
+    # current evidence pipeline are considered escaped if they are still present
+    # after all passes.
+    reads = _collect_read_counts(statements)
+    escaped: set[str] = set()
+    for block in _iter_statement_blocks(statements):
+        _block_escaped_names_8616(block, reads, escaped)
+    return len(escaped)

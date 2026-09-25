@@ -88,83 +88,103 @@ def _edge_guard_graph_summary_8616(graph: object) -> dict[str, object]:
     }
 
 
+def _structured_region_artifacts_8616(
+    structured: object,
+) -> tuple[list[dict[str, object]], list[object], list[dict[str, object]]]:
+    """Collect non-linear region, loop-plan, and switch artifacts."""
+    structured_regions: list[dict[str, object]] = []
+    abnormal_loop_regions: list[object] = []
+    typed_edge_switch_region_artifacts: list[dict[str, object]] = []
+    dynamic_structured = cast(Any, structured)
+    for region in dynamic_structured.nodes:
+        if region.region_type != RegionType.Linear:
+            structured_regions.append(
+                {
+                    "addr": region.block_addr,
+                    "type": region.region_type.value,
+                    "metadata_keys": list(region.metadata.keys()),
+                }
+            )
+        if "abnormal_loop_plan" in region.metadata:
+            abnormal_loop_regions.append(region.metadata["abnormal_loop_plan"])
+        switch_artifact = region.metadata.get("typed_edge_switch_region_artifact")
+        if isinstance(switch_artifact, dict):
+            typed_edge_switch_region_artifacts.append(dict(switch_artifact))
+    return structured_regions, abnormal_loop_regions, typed_edge_switch_region_artifacts
+
+
+def _merge_cfunc_stats_8616(codegen: object, stats: dict[str, object]) -> None:
+    """Merge the pass stats record into the cfunc stats surface."""
+    codegen_dynamic = cast(Any, codegen)
+    cfunc = codegen_dynamic.cfunc
+    cfunc_stats = getattr(cfunc, "_structuring_stats", None)
+    if not isinstance(cfunc_stats, dict):
+        cfunc_stats = {}
+        try:
+            cfunc._structuring_stats = cfunc_stats
+        except AttributeError:
+            cfunc_stats = None
+    if isinstance(cfunc_stats, dict):
+        cfunc_stats.update(stats)
+
+
 class GroupedRegionBasedStructuringPass(RegionBasedStructuringPass):
     """Run region structuring on grouped region graphs with typed evidence."""
 
     def __call__(self, codegen: object) -> bool:
         """Apply grouped region-based structuring to codegen."""
+        if getattr(codegen, "cfunc", None) is None:
+            return False
+        return self._apply(codegen)
 
-        def _impl() -> bool:
-            """Apply grouped structuring across the dynamic angr/codegen compatibility boundary."""
-            if getattr(codegen, "cfunc", None) is None:
+    def _stats_record_8616(
+        self,
+        structured: object,
+        initial_graph_summary: dict[str, object],
+    ) -> dict[str, object]:
+        """Build the grouped-structuring stats record for this run."""
+        structured_regions, abnormal_loop_regions, switch_artifacts = (
+            _structured_region_artifacts_8616(structured)
+        )
+        return {
+            "iterations": self.stats.iterations,
+            "regions_reduced": self.stats.regions_reduced,
+            "cycles_resolved": self.stats.cycles_resolved,
+            "sequences_created": self.stats.sequences_created,
+            "edge_guard_switches_detected": self.stats.edge_guard_switches_detected,
+            "final_node_count": len(cast(Any, structured).nodes),
+            "initial_graph_summary": initial_graph_summary,
+            "final_graph_summary": _edge_guard_graph_summary_8616(structured),
+            "structured_regions": structured_regions,
+            "abnormal_loop_regions": abnormal_loop_regions,
+            "typed_edge_switch_region_artifacts": switch_artifacts,
+        }
+
+    def _apply(self, codegen: object) -> bool:
+        """Apply grouped structuring across the dynamic codegen boundary."""
+        try:
+            graph, entry = self._build_region_graph(codegen)
+            if graph is None or entry is None or len(graph.nodes) < 2:
                 return False
+            initial_graph_summary = _edge_guard_graph_summary_8616(graph)
 
-            try:
-                graph, entry = self._build_region_graph(codegen)
-                if graph is None or entry is None or len(graph.nodes) < 2:
-                    return False
-                initial_graph_summary = _edge_guard_graph_summary_8616(graph)
+            analysis = AbnormalLoopStructureAnalysis(graph)
+            structured = analysis.structure()
+            self.stats = analysis.stats
+            typing.cast(typing.Any, codegen)._inertia_grouped_structuring_graph = structured
 
-                analysis = AbnormalLoopStructureAnalysis(graph)
-                structured = analysis.structure()
-                self.stats = analysis.stats
-                typing.cast(typing.Any, codegen)._inertia_grouped_structuring_graph = structured
-                final_graph_summary = _edge_guard_graph_summary_8616(structured)
+            stats = self._stats_record_8616(structured, initial_graph_summary)
+            typing.cast(typing.Any, codegen)._inertia_grouped_structuring_stats_8616 = dict(stats)
+            _merge_cfunc_stats_8616(codegen, stats)
 
-                structured_regions = []
-                abnormal_loop_regions = []
-                typed_edge_switch_region_artifacts = []
-                dynamic_structured = cast(Any, structured)
-                for region in dynamic_structured.nodes:
-                    if region.region_type != RegionType.Linear:
-                        structured_regions.append(
-                            {
-                                "addr": region.block_addr,
-                                "type": region.region_type.value,
-                                "metadata_keys": list(region.metadata.keys()),
-                            }
-                        )
-                    if "abnormal_loop_plan" in region.metadata:
-                        abnormal_loop_regions.append(region.metadata["abnormal_loop_plan"])
-                    switch_artifact = region.metadata.get("typed_edge_switch_region_artifact")
-                    if isinstance(switch_artifact, dict):
-                        typed_edge_switch_region_artifacts.append(dict(switch_artifact))
-                stats = {
-                    "iterations": self.stats.iterations,
-                    "regions_reduced": self.stats.regions_reduced,
-                    "cycles_resolved": self.stats.cycles_resolved,
-                    "sequences_created": self.stats.sequences_created,
-                    "edge_guard_switches_detected": self.stats.edge_guard_switches_detected,
-                    "final_node_count": len(dynamic_structured.nodes),
-                    "initial_graph_summary": initial_graph_summary,
-                    "final_graph_summary": final_graph_summary,
-                    "structured_regions": structured_regions,
-                    "abnormal_loop_regions": abnormal_loop_regions,
-                    "typed_edge_switch_region_artifacts": typed_edge_switch_region_artifacts,
+            return False
+        except Exception as ex:
+            typing.cast(typing.Any, codegen)._inertia_grouped_structuring_error_8616 = {
+                    "type": type(ex).__name__,
+                    "message": str(ex),
+                    "traceback": "".join(traceback.format_exception(type(ex), ex, ex.__traceback__, limit=4)),
                 }
-                typing.cast(typing.Any, codegen)._inertia_grouped_structuring_stats_8616 = dict(stats)
-                codegen_dynamic = cast(Any, codegen)
-                cfunc = codegen_dynamic.cfunc
-                cfunc_stats = getattr(cfunc, "_structuring_stats", None)
-                if not isinstance(cfunc_stats, dict):
-                    cfunc_stats = {}
-                    try:
-                        cfunc._structuring_stats = cfunc_stats
-                    except AttributeError:
-                        cfunc_stats = None
-                if isinstance(cfunc_stats, dict):
-                    cfunc_stats.update(stats)
-
-                return False
-            except Exception as ex:
-                typing.cast(typing.Any, codegen)._inertia_grouped_structuring_error_8616 = {
-                        "type": type(ex).__name__,
-                        "message": str(ex),
-                        "traceback": "".join(traceback.format_exception(type(ex), ex, ex.__traceback__, limit=4)),
-                    }
-                return False
-
-        return _impl()
+            return False
 
     def _build_region_graph(self, codegen: object) -> tuple[RegionGraph | None, Region | None]:
         """Build the grouped-region graph through the structuring graph-builder contract."""

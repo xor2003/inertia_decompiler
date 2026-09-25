@@ -53,6 +53,28 @@ def _ast_field_8616(node: object | None, name: str) -> object | None:
     return getattr(node, name, None)
 
 
+def _node_tag_values_8616(node: object, addresses: set[int]) -> None:
+    """Collect instruction-origin tag values from one structured node."""
+    tags = _ast_field_8616(node, "tags")
+    if isinstance(tags, dict):
+        for key in ("ins_addr", "inertia_relocated_from_ins_addr"):
+            address = tags.get(key)
+            if isinstance(address, int):
+                addresses.add(address)
+
+
+def _push_tag_children_8616(node: object, stack: list[object]) -> None:
+    """Push the structured children of one node onto the tag walk stack."""
+    for attr in ("condition", "body", "else_node", "statements"):
+        child = _ast_field_8616(node, attr)
+        if child is not None:
+            stack.append(child)
+    pairs = _ast_field_8616(node, "condition_and_nodes")
+    if pairs:
+        for condition, body in boundary_tuple_8616(pairs):
+            stack.extend((condition, body))
+
+
 def _tree_tag_addresses_8616(root: object) -> frozenset[int]:
     """Collect exact instruction-origin tags from one structured subtree."""
     addresses: set[int] = set()
@@ -66,20 +88,8 @@ def _tree_tag_addresses_8616(root: object) -> frozenset[int]:
             stack.extend(node)
             continue
         seen.add(id(node))
-        tags = _ast_field_8616(node, "tags")
-        if isinstance(tags, dict):
-            for key in ("ins_addr", "inertia_relocated_from_ins_addr"):
-                address = tags.get(key)
-                if isinstance(address, int):
-                    addresses.add(address)
-        for attr in ("condition", "body", "else_node", "statements"):
-            child = _ast_field_8616(node, attr)
-            if child is not None:
-                stack.append(child)
-        pairs = _ast_field_8616(node, "condition_and_nodes")
-        if pairs:
-            for condition, body in boundary_tuple_8616(pairs):
-                stack.extend((condition, body))
+        _node_tag_values_8616(node, addresses)
+        _push_tag_children_8616(node, stack)
     return frozenset(addresses)
 
 
@@ -174,6 +184,35 @@ def _same_unique_binary_block_8616(
     return matches == 1
 
 
+def _posttest_site_8616(
+    node: object,
+    condition: object,
+    codegen: object,
+    dst_offset: int,
+    jump_owns_posttest_condition: bool,
+) -> bool:
+    """Return whether a do-while loop's posttest reads the moved stack slot."""
+    return bool(
+        isinstance(node, structured_c.CDoWhileLoop)
+        and jump_owns_posttest_condition
+        and _tree_reads_stack_offset_8616(codegen, condition, dst_offset)
+    )
+
+
+def _pretest_site_8616(
+    node: object,
+    condition: object,
+    jump_owns_pretest_body_tail: bool,
+) -> bool:
+    """Return whether a while(1) loop's pretest tail owns the move edge."""
+    return bool(
+        isinstance(node, structured_c.CWhileLoop)
+        and isinstance(condition, structured_c.CConstant)
+        and condition.value == 1
+        and jump_owns_pretest_body_tail
+    )
+
+
 def loop_entry_sites_8616(
     project: object,
     codegen: object,
@@ -233,21 +272,11 @@ def loop_entry_sites_8616(
                     )
                 )
             )
-            if (
-                entry_reaches_body
-                and (
-                    (
-                        isinstance(node, structured_c.CDoWhileLoop)
-                        and jump_owns_posttest_condition
-                        and _tree_reads_stack_offset_8616(codegen, condition, dst_offset)
-                    )
-                    or (
-                        isinstance(node, structured_c.CWhileLoop)
-                        and isinstance(condition, structured_c.CConstant)
-                        and condition.value == 1
-                        and jump_owns_pretest_body_tail
-                    )
+            if entry_reaches_body and (
+                _posttest_site_8616(
+                    node, condition, codegen, dst_offset, jump_owns_posttest_condition,
                 )
+                or _pretest_site_8616(node, condition, jump_owns_pretest_body_tail)
             ):
                 sites.append(DirectStackMoveLoopEntrySite8616(statements, depth))
         nested_loop_count = enclosing_loop_count + int(

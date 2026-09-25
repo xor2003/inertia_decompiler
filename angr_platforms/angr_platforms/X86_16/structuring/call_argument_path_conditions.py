@@ -142,6 +142,30 @@ def _resolve_path_target_8616(
     return None
 
 
+def _path_decision_key_8616(
+    condition: ConditionIR,
+    successors: dict[int, tuple[int, ...]],
+    visited: frozenset[int],
+) -> tuple[int, int, int] | None:
+    """Return the proven ``(block, taken, fallthrough)`` int triple or None."""
+    block_addr = condition.block_addr
+    taken_target = condition.taken_target
+    fallthrough_target = condition.fallthrough_target
+    if not (
+        isinstance(block_addr, int)
+        and block_addr not in visited
+        and isinstance(taken_target, int)
+        and isinstance(fallthrough_target, int)
+    ):
+        return None
+    if (
+        taken_target == fallthrough_target
+        or set(successors.get(block_addr, ())) != {taken_target, fallthrough_target}
+    ):
+        return None
+    return block_addr, taken_target, fallthrough_target
+
+
 def _build_path_decision_8616(
     condition: ConditionIR,
     *,
@@ -151,18 +175,10 @@ def _build_path_decision_8616(
     visited: frozenset[int],
 ) -> _PathDecision8616 | None:
     """Build one acyclic decision from exact typed branch successors."""
-    block_addr = condition.block_addr
-    taken_target = condition.taken_target
-    fallthrough_target = condition.fallthrough_target
-    if (
-        not isinstance(block_addr, int)
-        or block_addr in visited
-        or not isinstance(taken_target, int)
-        or not isinstance(fallthrough_target, int)
-        or taken_target == fallthrough_target
-        or set(successors.get(block_addr, ())) != {taken_target, fallthrough_target}
-    ):
+    key = _path_decision_key_8616(condition, successors, visited)
+    if key is None:
         return None
+    block_addr, taken_target, fallthrough_target = key
     next_visited = visited | {block_addr}
     taken = _resolve_path_target_8616(
         taken_target,

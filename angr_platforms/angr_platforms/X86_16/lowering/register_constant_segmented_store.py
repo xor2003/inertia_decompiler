@@ -129,6 +129,84 @@ class SegmentRegisterMemorySourceEvidence8616:
     source: IRAddress
 
 
+def _memory_access_sources_8616(
+    instruction: InstructionView8616,
+    sources: dict[str, IRAddress],
+    segment_name: RegisterNameResolver8616,
+    recovered: list[SegmentRegisterMemorySourceEvidence8616],
+) -> None:
+    """Record evidence when a tracked segment register feeds one operand."""
+    if not isinstance(instruction.address, int):
+        return
+    for operand in instruction.operands:
+        memory = operand.memory
+        if operand.kind != X86_OP_MEM or memory is None:
+            continue
+        access_segment = segment_name(instruction.raw, memory.segment)
+        source = sources.get(access_segment) if access_segment is not None else None
+        if access_segment is not None and source is not None:
+            recovered.append(
+                SegmentRegisterMemorySourceEvidence8616(
+                    ins_addr=int(instruction.address),
+                    segment_name=access_segment,
+                    source=source,
+                )
+            )
+
+
+def _direct_word_memory_source_8616(source_operand: OperandView8616 | None) -> bool:
+    """Check one mov source operand is a direct word memory reference."""
+    if source_operand is None or source_operand.kind != X86_OP_MEM:
+        return False
+    source_memory = source_operand.memory
+    return (
+        source_memory is not None
+        and source_memory.base in {None, 0, X86_REG_INVALID}
+        and source_memory.index in {None, 0, X86_REG_INVALID}
+        and isinstance(source_memory.displacement, int)
+        and source_operand.size == 2
+    )
+
+
+def _segment_destination_update_8616(
+    instruction: InstructionView8616,
+    sources: dict[str, IRAddress],
+    register_name: RegisterNameResolver8616,
+    segment_name: RegisterNameResolver8616,
+) -> None:
+    """Track or invalidate one segment-register memory source."""
+    operands = instruction.operands
+    if not operands or operands[0].kind != X86_OP_REG:
+        return
+    destination_name = register_name(instruction.raw, operands[0].register)
+    if destination_name not in {"ds", "es", "ss"}:
+        return
+    source_address: IRAddress | None = None
+    source_operand = (
+        operands[1]
+        if instruction.instruction_id == X86_INS_MOV and len(operands) == 2
+        else None
+    )
+    if _direct_word_memory_source_8616(source_operand):
+        assert source_operand is not None
+        source_memory = source_operand.memory
+        assert source_memory is not None
+        assert isinstance(source_memory.displacement, int)
+        source_segment = segment_name(instruction.raw, source_memory.segment)
+        source_space = MemSpace.DS if source_segment == "ds" else MemSpace.ES if source_segment == "es" else None
+        if source_space is not None and source_segment not in sources:
+            source_address = IRAddress(
+                space=source_space,
+                offset=int(source_memory.displacement) & 0xFFFF,
+                size=2,
+                status=AddressStatus.STABLE,
+                segment_origin=SegmentOrigin.PROVEN,
+            )
+    sources.pop(destination_name, None)
+    if source_address is not None:
+        sources[destination_name] = source_address
+
+
 def recover_segment_register_memory_sources_8616(
     instructions: Sequence[InstructionView8616],
     *,
@@ -139,52 +217,13 @@ def recover_segment_register_memory_sources_8616(
     sources: dict[str, IRAddress] = {}
     recovered: list[SegmentRegisterMemorySourceEvidence8616] = []
     for instruction in instructions:
-        operands = instruction.operands
-        if isinstance(instruction.address, int):
-            for operand in operands:
-                memory = operand.memory
-                if operand.kind != X86_OP_MEM or memory is None:
-                    continue
-                access_segment = segment_name(instruction.raw, memory.segment)
-                source = sources.get(access_segment) if access_segment is not None else None
-                if access_segment is not None and source is not None:
-                    recovered.append(
-                        SegmentRegisterMemorySourceEvidence8616(
-                            ins_addr=int(instruction.address),
-                            segment_name=access_segment,
-                            source=source,
-                        )
-                    )
-        if not operands or operands[0].kind != X86_OP_REG:
-            continue
-        destination_name = register_name(instruction.raw, operands[0].register)
-        if destination_name not in {"ds", "es", "ss"}:
-            continue
-        source_address: IRAddress | None = None
-        source_operand = operands[1] if instruction.instruction_id == X86_INS_MOV and len(operands) == 2 else None
-        source_memory = source_operand.memory if source_operand is not None else None
-        if (
-            source_operand is not None
-            and source_operand.kind == X86_OP_MEM
-            and source_memory is not None
-            and source_memory.base in {None, 0, X86_REG_INVALID}
-            and source_memory.index in {None, 0, X86_REG_INVALID}
-            and isinstance(source_memory.displacement, int)
-            and source_operand.size == 2
-        ):
-            source_segment = segment_name(instruction.raw, source_memory.segment)
-            source_space = MemSpace.DS if source_segment == "ds" else MemSpace.ES if source_segment == "es" else None
-            if source_space is not None and source_segment not in sources:
-                source_address = IRAddress(
-                    space=source_space,
-                    offset=int(source_memory.displacement) & 0xFFFF,
-                    size=2,
-                    status=AddressStatus.STABLE,
-                    segment_origin=SegmentOrigin.PROVEN,
-                )
-        sources.pop(destination_name, None)
-        if source_address is not None:
-            sources[destination_name] = source_address
+        _memory_access_sources_8616(instruction, sources, segment_name, recovered)
+        _segment_destination_update_8616(
+            instruction,
+            sources,
+            register_name,
+            segment_name,
+        )
     return tuple(recovered)
 
 

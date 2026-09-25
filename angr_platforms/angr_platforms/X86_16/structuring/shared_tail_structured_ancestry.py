@@ -149,91 +149,117 @@ def collect_shared_tail_call_occurrences_8616(
         if not isinstance(statements, list):
             continue
         for index, statement in enumerate(statements):
-            if isinstance(statement, structured_c.CFunctionCall):
-                occurrences.append(
-                    SharedTailCallOccurrence8616(
-                        SharedTailCallOccurrenceKind8616.STANDALONE,
-                        statement,
-                        statement,
-                        parent,
-                        index,
-                        control_path,
-                    )
-                )
-                continue
-            if isinstance(statement, structured_c.CStatements):
-                step = _ControlPathStep8616(id(statement), id(parent), index, "statements", 0, parent)
-                pending.append((statement, (*control_path, step)))
-                continue
-            if not isinstance(statement, structured_c.CStatement):
-                continue
-            occurrences.extend(
-                SharedTailCallOccurrence8616(
-                    SharedTailCallOccurrenceKind8616.CONDITION,
-                    call,
-                    statement,
-                    parent,
-                    index,
-                    control_path,
-                )
-                for call in _condition_calls_8616(statement)
+            _collect_statement_8616(
+                statement,
+                parent,
+                index,
+                control_path,
+                occurrences,
+                pending,
             )
-            if isinstance(statement, structured_c.CReturn) and isinstance(
-                statement.retval,
-                structured_c.CFunctionCall,
-            ):
-                occurrences.append(
-                    SharedTailCallOccurrence8616(
-                        SharedTailCallOccurrenceKind8616.RETURNED,
-                        statement.retval,
-                        statement,
-                        parent,
-                        index,
-                        control_path,
-                    )
-                )
-            elif (
-                isinstance(statement, structured_c.CAssignment)
-                and isinstance(statement.rhs, structured_c.CFunctionCall)
-                and isinstance(statement.lhs, structured_c.CVariable)
-                and isinstance(statement.lhs.name, str)
-            ):
-                occurrences.append(
-                    SharedTailCallOccurrence8616(
-                        SharedTailCallOccurrenceKind8616.RETURN_CARRIER,
-                        statement.rhs,
-                        statement,
-                        parent,
-                        index,
-                        control_path,
-                        statement.lhs.variable,
-                    )
-                )
-            elif isinstance(statement, structured_c.CExpressionStatement) and isinstance(
-                statement.expr,
-                structured_c.CFunctionCall,
-            ):
-                occurrences.append(
-                    SharedTailCallOccurrence8616(
-                        SharedTailCallOccurrenceKind8616.STANDALONE,
-                        statement.expr,
-                        statement,
-                        parent,
-                        index,
-                        control_path,
-                    )
-                )
-            for arm_kind, arm_index, child in _child_statement_arms_8616(statement):
-                step = _ControlPathStep8616(
-                    id(statement),
-                    id(parent),
-                    index,
-                    arm_kind,
-                    arm_index,
-                    parent,
-                )
-                pending.append((child, (*control_path, step)))
     return tuple(occurrences)
+
+
+def _collect_statement_8616(
+    statement: object,
+    parent: structured_c.CStatements,
+    index: int,
+    control_path: tuple[_ControlPathStep8616, ...],
+    occurrences: list[SharedTailCallOccurrence8616],
+    pending: list[tuple[structured_c.CStatements, tuple[_ControlPathStep8616, ...]]],
+) -> None:
+    """Collect call occurrences for one statement and queue its children."""
+    if isinstance(statement, structured_c.CFunctionCall):
+        occurrences.append(
+            SharedTailCallOccurrence8616(
+                SharedTailCallOccurrenceKind8616.STANDALONE,
+                statement,
+                statement,
+                parent,
+                index,
+                control_path,
+            )
+        )
+        return
+    if isinstance(statement, structured_c.CStatements):
+        step = _ControlPathStep8616(id(statement), id(parent), index, "statements", 0, parent)
+        pending.append((statement, (*control_path, step)))
+        return
+    if not isinstance(statement, structured_c.CStatement):
+        return
+    occurrences.extend(
+        SharedTailCallOccurrence8616(
+            SharedTailCallOccurrenceKind8616.CONDITION,
+            call,
+            statement,
+            parent,
+            index,
+            control_path,
+        )
+        for call in _condition_calls_8616(statement)
+    )
+    kinded = _kinded_occurrence_8616(statement, parent, index, control_path)
+    if kinded is not None:
+        occurrences.append(kinded)
+    for arm_kind, arm_index, child in _child_statement_arms_8616(statement):
+        step = _ControlPathStep8616(
+            id(statement),
+            id(parent),
+            index,
+            arm_kind,
+            arm_index,
+            parent,
+        )
+        pending.append((child, (*control_path, step)))
+
+
+def _kinded_occurrence_8616(
+    statement: structured_c.CStatement,
+    parent: structured_c.CStatements,
+    index: int,
+    control_path: tuple[_ControlPathStep8616, ...],
+) -> SharedTailCallOccurrence8616 | None:
+    """Return the call occurrence carried by one statement's kind, if any."""
+    if isinstance(statement, structured_c.CReturn) and isinstance(
+        statement.retval,
+        structured_c.CFunctionCall,
+    ):
+        return SharedTailCallOccurrence8616(
+            SharedTailCallOccurrenceKind8616.RETURNED,
+            statement.retval,
+            statement,
+            parent,
+            index,
+            control_path,
+        )
+    if (
+        isinstance(statement, structured_c.CAssignment)
+        and isinstance(statement.rhs, structured_c.CFunctionCall)
+        and isinstance(statement.lhs, structured_c.CVariable)
+        and isinstance(statement.lhs.name, str)
+    ):
+        return SharedTailCallOccurrence8616(
+            SharedTailCallOccurrenceKind8616.RETURN_CARRIER,
+            statement.rhs,
+            statement,
+            parent,
+            index,
+            control_path,
+            statement.lhs.variable,
+        )
+    if isinstance(statement, structured_c.CExpressionStatement) and isinstance(
+        statement.expr,
+        structured_c.CFunctionCall,
+    ):
+        return SharedTailCallOccurrence8616(
+            SharedTailCallOccurrenceKind8616.STANDALONE,
+            statement.expr,
+            statement,
+            parent,
+            index,
+            control_path,
+        )
+    return None
 
 
 def standalone_follows_nested_clone_8616(

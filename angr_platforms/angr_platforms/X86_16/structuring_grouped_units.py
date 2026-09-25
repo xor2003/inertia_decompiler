@@ -9,7 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from .structuring_cfg_grouping import CFGGroupingArtifact, build_cfg_grouping_artifact
+from .structuring_cfg_grouping import (
+    CFGGroupingArtifact,
+    CFGGroupingRecord,
+    build_cfg_grouping_artifact,
+)
+from .structuring_cfg_snapshot import CFGSnapshotNode
 
 __all__ = (
     "CrossEntryGroupedUnit",
@@ -106,124 +111,175 @@ class CrossEntryGroupedUnitArtifact:
         return _impl()
 
 
+def _shared_component_8616(
+    shared_region_id: int,
+    shared_region_id_set: set[int],
+    snapshot_nodes: dict[int, CFGSnapshotNode],
+    visited_shared_region_ids: set[int],
+) -> tuple[int, ...]:
+    """Flood one connected shared-region component, marking it visited."""
+    component_worklist = [shared_region_id]
+    component_shared_region_ids: set[int] = set()
+    while component_worklist:
+        current_region_id = component_worklist.pop()
+        if current_region_id in component_shared_region_ids:
+            continue
+        component_shared_region_ids.add(current_region_id)
+        visited_shared_region_ids.add(current_region_id)
+        current_node = snapshot_nodes.get(current_region_id)
+        if current_node is None:
+            continue
+        neighbor_ids = set(current_node.predecessor_ids) | set(current_node.successor_ids)
+        for neighbor_region_id in neighbor_ids:
+            if (
+                neighbor_region_id in shared_region_id_set
+                and neighbor_region_id not in component_shared_region_ids
+            ):
+                component_worklist.append(neighbor_region_id)
+    return tuple(sorted(component_shared_region_ids))
+
+
+def _component_predecessor_groups_8616(
+    component_region_ids: tuple[int, ...],
+    snapshot_nodes: dict[int, CFGSnapshotNode],
+    record_by_region_id: dict[int, CFGGroupingRecord],
+) -> tuple[list[int], tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
+    """Census external predecessors of one component by grouping kind."""
+    component_set = set(component_region_ids)
+    external_predecessor_ids = sorted(
+        {
+            predecessor_region_id
+            for component_region_id in component_region_ids
+            for predecessor_region_id in snapshot_nodes.get(
+                component_region_id, _SnapshotNodeFallback(),
+            ).predecessor_ids
+            if predecessor_region_id not in component_set
+            and predecessor_region_id in record_by_region_id
+        }
+    )
+    primary_entry_region_ids = tuple(
+        region_id
+        for region_id in external_predecessor_ids
+        if record_by_region_id[region_id].grouping_kind == "primary_entry"
+    )
+    entry_fragment_region_ids = tuple(
+        region_id
+        for region_id in external_predecessor_ids
+        if record_by_region_id[region_id].grouping_kind == "entry_fragment"
+    )
+    ambiguous_predecessor_ids = tuple(
+        region_id
+        for region_id in external_predecessor_ids
+        if record_by_region_id[region_id].grouping_kind == "grouped_entry_candidate"
+    )
+    return (
+        external_predecessor_ids,
+        primary_entry_region_ids,
+        entry_fragment_region_ids,
+        ambiguous_predecessor_ids,
+    )
+
+
+def _process_shared_component_8616(
+    shared_region_id: int,
+    shared_region_id_set: set[int],
+    snapshot_nodes: dict[int, CFGSnapshotNode],
+    record_by_region_id: dict[int, CFGGroupingRecord],
+    visited_shared_region_ids: set[int],
+) -> CrossEntryGroupedUnit | CrossEntryGroupedUnitRefusal:
+    """Classify one shared-region component as a unit or a typed refusal."""
+    component_shared_region_ids_tuple = _shared_component_8616(
+        shared_region_id,
+        shared_region_id_set,
+        snapshot_nodes,
+        visited_shared_region_ids,
+    )
+    anchor_shared_region_id = component_shared_region_ids_tuple[0]
+    (
+        external_predecessor_ids,
+        primary_entry_region_ids,
+        entry_fragment_region_ids,
+        ambiguous_predecessor_ids,
+    ) = _component_predecessor_groups_8616(
+        component_shared_region_ids_tuple, snapshot_nodes, record_by_region_id,
+    )
+    refusal_reason = None
+    if ambiguous_predecessor_ids:
+        refusal_reason = "shared_predecessor_anchor"
+    elif not primary_entry_region_ids and not entry_fragment_region_ids:
+        refusal_reason = "no_external_entry_context"
+    if refusal_reason is not None:
+        return CrossEntryGroupedUnitRefusal(
+            anchor_shared_region_id=anchor_shared_region_id,
+            shared_region_ids=component_shared_region_ids_tuple,
+            external_predecessor_region_ids=tuple(external_predecessor_ids),
+            ambiguous_predecessor_region_ids=ambiguous_predecessor_ids,
+            refusal_reason=refusal_reason,
+        )
+    member_region_ids = tuple(
+        sorted(
+            set(primary_entry_region_ids)
+            | set(entry_fragment_region_ids)
+            | set(component_shared_region_ids_tuple)
+            | set(ambiguous_predecessor_ids)
+        )
+    )
+    return CrossEntryGroupedUnit(
+        anchor_shared_region_id=anchor_shared_region_id,
+        primary_entry_region_ids=primary_entry_region_ids,
+        entry_fragment_region_ids=entry_fragment_region_ids,
+        shared_region_ids=component_shared_region_ids_tuple,
+        member_region_ids=member_region_ids,
+        refusal_reason=None,
+    )
+
+
 def build_x86_16_cross_entry_grouped_units(codegen: object) -> CrossEntryGroupedUnitArtifact | None:
     """Build grouped CFG units from existing structuring ownership artifacts."""
+    grouping = build_cfg_grouping_artifact(codegen)
+    if grouping is None:
+        return None
 
-    def _impl() -> CrossEntryGroupedUnitArtifact | None:
-        grouping = build_cfg_grouping_artifact(codegen)
-        if grouping is None:
-            return None
+    record_by_region_id = {record.region_id: record for record in grouping.records}
+    snapshot_nodes = {node.region_id: node for node in grouping.indirect.ownership.snapshot.nodes}
+    shared_region_ids = tuple(sorted(grouping.grouped_entry_candidate_ids))
+    shared_region_id_set = set(shared_region_ids)
+    units: list[CrossEntryGroupedUnit] = []
+    refusals: list[CrossEntryGroupedUnitRefusal] = []
+    visited_shared_region_ids: set[int] = set()
 
-        record_by_region_id = {record.region_id: record for record in grouping.records}
-        snapshot_nodes = {node.region_id: node for node in grouping.indirect.ownership.snapshot.nodes}
-        shared_region_ids = tuple(sorted(grouping.grouped_entry_candidate_ids))
-        shared_region_id_set = set(shared_region_ids)
-        units: list[CrossEntryGroupedUnit] = []
-        refusals: list[CrossEntryGroupedUnitRefusal] = []
-        visited_shared_region_ids: set[int] = set()
-
-        for shared_region_id in shared_region_ids:
-            if shared_region_id in visited_shared_region_ids:
-                continue
-            if shared_region_id not in snapshot_nodes:
-                refusals.append(
-                    CrossEntryGroupedUnitRefusal(
-                        anchor_shared_region_id=shared_region_id,
-                        shared_region_ids=(shared_region_id,),
-                        external_predecessor_region_ids=(),
-                        ambiguous_predecessor_region_ids=(),
-                        refusal_reason="missing_snapshot_node",
-                    )
-                )
-                continue
-            component_worklist = [shared_region_id]
-            component_shared_region_ids: set[int] = set()
-            while component_worklist:
-                current_region_id = component_worklist.pop()
-                if current_region_id in component_shared_region_ids:
-                    continue
-                component_shared_region_ids.add(current_region_id)
-                visited_shared_region_ids.add(current_region_id)
-                current_node = snapshot_nodes.get(current_region_id)
-                if current_node is None:
-                    continue
-                neighbor_ids = set(current_node.predecessor_ids) | set(current_node.successor_ids)
-                for neighbor_region_id in neighbor_ids:
-                    if (
-                        neighbor_region_id in shared_region_id_set
-                        and neighbor_region_id not in component_shared_region_ids
-                    ):
-                        component_worklist.append(neighbor_region_id)
-
-            component_shared_region_ids_tuple = tuple(sorted(component_shared_region_ids))
-            anchor_shared_region_id = component_shared_region_ids_tuple[0]
-            external_predecessor_ids = sorted(
-                {
-                    predecessor_region_id
-                    for component_region_id in component_shared_region_ids_tuple
-                    for predecessor_region_id in snapshot_nodes.get(component_region_id, _SnapshotNodeFallback()).predecessor_ids
-                    if predecessor_region_id not in component_shared_region_ids
-                    and predecessor_region_id in record_by_region_id
-                }
-            )
-            primary_entry_region_ids = tuple(
-                region_id
-                for region_id in external_predecessor_ids
-                if record_by_region_id[region_id].grouping_kind == "primary_entry"
-            )
-            entry_fragment_region_ids = tuple(
-                region_id
-                for region_id in external_predecessor_ids
-                if record_by_region_id[region_id].grouping_kind == "entry_fragment"
-            )
-            ambiguous_predecessor_ids = tuple(
-                region_id
-                for region_id in external_predecessor_ids
-                if record_by_region_id[region_id].grouping_kind == "grouped_entry_candidate"
-            )
-            refusal_reason = None
-            if ambiguous_predecessor_ids:
-                refusal_reason = "shared_predecessor_anchor"
-            elif not primary_entry_region_ids and not entry_fragment_region_ids:
-                refusal_reason = "no_external_entry_context"
-            member_region_ids = tuple(
-                sorted(
-                    set(primary_entry_region_ids)
-                    | set(entry_fragment_region_ids)
-                    | set(component_shared_region_ids_tuple)
-                    | set(ambiguous_predecessor_ids)
+    for shared_region_id in shared_region_ids:
+        if shared_region_id in visited_shared_region_ids:
+            continue
+        if shared_region_id not in snapshot_nodes:
+            refusals.append(
+                CrossEntryGroupedUnitRefusal(
+                    anchor_shared_region_id=shared_region_id,
+                    shared_region_ids=(shared_region_id,),
+                    external_predecessor_region_ids=(),
+                    ambiguous_predecessor_region_ids=(),
+                    refusal_reason="missing_snapshot_node",
                 )
             )
-            if refusal_reason is not None:
-                refusals.append(
-                    CrossEntryGroupedUnitRefusal(
-                        anchor_shared_region_id=anchor_shared_region_id,
-                        shared_region_ids=component_shared_region_ids_tuple,
-                        external_predecessor_region_ids=tuple(external_predecessor_ids),
-                        ambiguous_predecessor_region_ids=ambiguous_predecessor_ids,
-                        refusal_reason=refusal_reason,
-                    )
-                )
-                continue
-            units.append(
-                CrossEntryGroupedUnit(
-                    anchor_shared_region_id=anchor_shared_region_id,
-                    primary_entry_region_ids=primary_entry_region_ids,
-                    entry_fragment_region_ids=entry_fragment_region_ids,
-                    shared_region_ids=component_shared_region_ids_tuple,
-                    member_region_ids=member_region_ids,
-                    refusal_reason=None,
-                )
-            )
-
-        return CrossEntryGroupedUnitArtifact(
-            grouping=grouping,
-            units=tuple(units),
-            refusals=tuple(sorted(refusals, key=lambda item: item.anchor_shared_region_id)),
-            refused_anchor_region_ids=tuple(sorted({item.anchor_shared_region_id for item in refusals})),
+            continue
+        outcome = _process_shared_component_8616(
+            shared_region_id,
+            shared_region_id_set,
+            snapshot_nodes,
+            record_by_region_id,
+            visited_shared_region_ids,
         )
+        if isinstance(outcome, CrossEntryGroupedUnitRefusal):
+            refusals.append(outcome)
+        else:
+            units.append(outcome)
 
-    return _impl()
+    return CrossEntryGroupedUnitArtifact(
+        grouping=grouping,
+        units=tuple(units),
+        refusals=tuple(sorted(refusals, key=lambda item: item.anchor_shared_region_id)),
+        refused_anchor_region_ids=tuple(sorted({item.anchor_shared_region_id for item in refusals})),
+    )
 
 
 def apply_x86_16_cross_entry_grouped_units(codegen: _CrossEntryGroupedUnitCodegen) -> bool:

@@ -174,6 +174,28 @@ def storage_prototype_with_types_8616(
     ).with_arch(arch)
 
 
+def _prototype_inputs_aligned_8616(
+    cfunc_args: tuple[SimType, ...] | None,
+    function_args: tuple[SimType, ...] | None,
+    contract: FunctionStorageContract8616,
+    cvars: tuple[structured_c.CVariable, ...],
+    codegen: object,
+) -> bool:
+    """Return whether argument counts, logical order, and cvars all align."""
+    if cfunc_args is None or function_args is None:
+        return False
+    expected_indices = tuple(range(len(contract.inputs)))
+    return (
+        len(cfunc_args) == len(contract.inputs)
+        and len(cvars) == len(contract.inputs)
+        and tuple(slot.logical_index for slot in contract.inputs) == expected_indices
+        and all(
+            _slot_matches_cvar_8616(slot, cvar, codegen)
+            for slot, cvar in zip(contract.inputs, cvars, strict=True)
+        )
+    )
+
+
 def preflight_storage_prototype_types_8616(
     contract: FunctionStorageContract8616,
     cfunc_prototype: SimTypeFunction,
@@ -185,22 +207,15 @@ def preflight_storage_prototype_types_8616(
     """Preflight every parameter and any proven return before mutation."""
     cfunc_args = _prototype_arguments_8616(cfunc_prototype)
     function_args = _prototype_arguments_8616(function_prototype)
-    expected_indices = tuple(range(len(contract.inputs)))
-    if (
-        cfunc_args is None
-        or function_args is None
-        or len(cfunc_args) != len(contract.inputs)
-        or len(cvars) != len(contract.inputs)
-        or tuple(slot.logical_index for slot in contract.inputs) != expected_indices
-        or any(
-            not _slot_matches_cvar_8616(slot, cvar, codegen)
-            for slot, cvar in zip(contract.inputs, cvars, strict=True)
-        )
+    if not _prototype_inputs_aligned_8616(
+        cfunc_args, function_args, contract, cvars, codegen
     ):
         return FunctionStoragePrototypeTypes8616(
             None,
             failures=(StorageSimTypeFailureKind8616.INVALID_LOGICAL_ORDER,),
         )
+    assert cfunc_args is not None
+    assert function_args is not None
     argument_types: list[SimType] = []
     for index, (slot, cvar) in enumerate(zip(contract.inputs, cvars, strict=True)):
         function_arg = function_args[index] if index < len(function_args) else None

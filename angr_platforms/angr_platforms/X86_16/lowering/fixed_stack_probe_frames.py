@@ -120,40 +120,26 @@ def _probe_call_statement_8616(statement: object) -> CFunctionCall | None:
     return None
 
 
-def lower_fixed_stack_probe_frames_8616(codegen: object) -> FixedStackProbeFrameLoweringStats8616:
-    """Remove only fixed, unused probe calls represented by recovered BP locals."""
-    root = _structured_root_8616(codegen)
+def _probe_summary_map_8616(codegen: object) -> dict[int, CallsiteSummary8616]:
+    """Return only stack-probe callsite summaries published on the codegen."""
     summary_map_raw = _dynamic_codegen_attr_8616(codegen, "_inertia_callsite_summaries", None)
-    summary_map = (
-        {
-            node_id: summary
-            for node_id, summary in summary_map_raw.items()
-            if isinstance(node_id, int) and isinstance(summary, CallsiteSummary8616)
-        }
-        if isinstance(summary_map_raw, dict)
-        else {}
-    )
-    probe_summaries = {
+    if not isinstance(summary_map_raw, dict):
+        return {}
+    return {
         node_id: summary
-        for node_id, summary in summary_map.items()
-        if summary.stack_probe_helper
+        for node_id, summary in summary_map_raw.items()
+        if isinstance(node_id, int)
+        and isinstance(summary, CallsiteSummary8616)
+        and summary.stack_probe_helper
     }
-    raw_fact_count = len(probe_summaries)
-    if raw_fact_count == 0:
-        stats = FixedStackProbeFrameLoweringStats8616(0, 0, 0, 0, 0, 0, 0)
-        cast(Any, codegen)._inertia_fixed_stack_probe_frame_lowering_stats_8616 = stats
-        return stats
-    surface = (
-        _collect_fixed_stack_probe_surface_8616(root)
-        if root is not None
-        else _FixedStackProbeSurface8616(0, (), frozenset(), ())
-    )
-    frame_extent = surface.frame_extent
-    containers = surface.containers
-    live_call_ids = surface.live_call_ids
-    statement_occurrences = dict(surface.statement_occurrences)
 
-    normalized_fact_count = sum(node_id in live_call_ids for node_id in probe_summaries)
+
+def _classified_probe_ids_8616(
+    probe_summaries: dict[int, CallsiteSummary8616],
+    statement_occurrences: dict[int, int],
+    frame_extent: int,
+) -> set[int]:
+    """Classify probe calls proven fixed, unused, and covered by BP locals."""
     classified_ids: set[int] = set()
     for node_id, summary in probe_summaries.items():
         allocation_size = summary.stack_probe_allocation_size
@@ -168,7 +154,14 @@ def lower_fixed_stack_probe_frames_8616(codegen: object) -> FixedStackProbeFrame
         if frame_extent < allocation_size:
             continue
         classified_ids.add(node_id)
+    return classified_ids
 
+
+def _remove_classified_probes_8616(
+    containers: tuple[CStatements, ...],
+    classified_ids: set[int],
+) -> set[int]:
+    """Remove each classified arg-less probe statement from its container."""
     removed_ids: set[int] = set()
     for container in containers:
         statements = list(container.statements or ())
@@ -184,6 +177,33 @@ def lower_fixed_stack_probe_frames_8616(codegen: object) -> FixedStackProbeFrame
             retained.append(statement)
         if len(retained) != len(statements):
             cast(Any, container).statements = retained
+    return removed_ids
+
+
+def lower_fixed_stack_probe_frames_8616(codegen: object) -> FixedStackProbeFrameLoweringStats8616:
+    """Remove only fixed, unused probe calls represented by recovered BP locals."""
+    root = _structured_root_8616(codegen)
+    probe_summaries = _probe_summary_map_8616(codegen)
+    raw_fact_count = len(probe_summaries)
+    if raw_fact_count == 0:
+        stats = FixedStackProbeFrameLoweringStats8616(0, 0, 0, 0, 0, 0, 0)
+        cast(Any, codegen)._inertia_fixed_stack_probe_frame_lowering_stats_8616 = stats
+        return stats
+    surface = (
+        _collect_fixed_stack_probe_surface_8616(root)
+        if root is not None
+        else _FixedStackProbeSurface8616(0, (), frozenset(), ())
+    )
+    frame_extent = surface.frame_extent
+    statement_occurrences = dict(surface.statement_occurrences)
+
+    normalized_fact_count = sum(
+        node_id in surface.live_call_ids for node_id in probe_summaries
+    )
+    classified_ids = _classified_probe_ids_8616(
+        probe_summaries, statement_occurrences, frame_extent
+    )
+    removed_ids = _remove_classified_probes_8616(surface.containers, classified_ids)
 
     materialized_count = len(classified_ids & removed_ids)
     failure_count = len(classified_ids - removed_ids)

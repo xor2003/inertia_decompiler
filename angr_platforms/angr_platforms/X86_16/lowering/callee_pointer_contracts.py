@@ -36,8 +36,8 @@ class CalleePointerArgumentEvidence8616:
     pointer_argument_indices: tuple[int, ...]
     ambiguous_displaced_stack_offsets: tuple[int, ...]
 
-    def validate(self) -> None:
-        """Reject malformed counters, target identity, or pointer coordinates."""
+    def _validate_counters_8616(self) -> None:
+        """Reject negative, non-monotonic, or unclosed collection counters."""
         counters = (
             self.raw_fact_count,
             self.normalized_fact_count,
@@ -65,6 +65,9 @@ class CalleePointerArgumentEvidence8616:
         )
         if self.failure_count != expected_failures:
             raise ValueError("callee pointer failure count does not close collection")
+
+    def _validate_coordinates_8616(self) -> None:
+        """Reject non-canonical, out-of-range, or overlapping coordinates."""
         if self.pointer_stack_offsets != tuple(sorted(set(self.pointer_stack_offsets))):
             raise ValueError("callee pointer stack offsets are not canonical")
         if self.pointer_argument_indices != tuple(
@@ -83,6 +86,11 @@ class CalleePointerArgumentEvidence8616:
             self.ambiguous_displaced_stack_offsets
         ):
             raise ValueError("callee pointer proven and ambiguous offsets overlap")
+
+    def validate(self) -> None:
+        """Reject malformed counters, target identity, or pointer coordinates."""
+        self._validate_counters_8616()
+        self._validate_coordinates_8616()
 
     @property
     def closes_classification(self) -> bool:

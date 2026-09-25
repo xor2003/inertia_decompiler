@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .core import IRAddress, IRValue, MemSpace
+from .core import IRAddress, IRInstr, IRValue, MemSpace
 from .indexed_address_contracts import IndexedAddressDefinitionSite8616
 from .logical_memory_contracts import IRLogicalMemoryAccess8616, IRMemoryAccessKind8616
 from .logical_memory_register_transfer_contracts import (
@@ -153,16 +153,9 @@ def _trace_store_lane_8616(
             path=next_path,
             depth=depth + 1,
         )
-    if instruction.op == "Iop_Shr16" and len(instruction.args) == 2:
-        source, amount = instruction.args
-        if (
-            isinstance(source, IRValue)
-            and isinstance(amount, IRValue)
-            and amount.space is MemSpace.CONST
-            and amount.const == 8
-            and instruction.size == source.size == 2
-            and not saw_shift
-        ):
+    if instruction.op == "Iop_Shr16" and not saw_shift:
+        source = _shr16_high_byte_source_8616(instruction)
+        if source is not None:
             return _trace_store_lane_8616(
                 source,
                 definitions,
@@ -180,6 +173,22 @@ def _trace_store_lane_8616(
         saw_shift,
         LogicalMemoryRegisterTransferFailure8616.VALUE_OPERATION_UNSUPPORTED,
     )
+
+
+def _shr16_high_byte_source_8616(instruction: IRInstr) -> IRValue | None:
+    """Return the shifted source for one exact ``word >> 8`` step."""
+    if len(instruction.args) != 2:
+        return None
+    source, amount = instruction.args
+    if (
+        isinstance(source, IRValue)
+        and isinstance(amount, IRValue)
+        and amount.space is MemSpace.CONST
+        and amount.const == 8
+        and instruction.size == source.size == 2
+    ):
+        return source
+    return None
 
 
 def _same_address_8616(left: IRAddress, right: IRAddress) -> bool:
@@ -251,6 +260,28 @@ def _trace_spill_8616(
     )
 
 
+def _word_register_destination_8616(instruction: IRInstr) -> bool:
+    """Return whether the MOV writes a named 16-bit register."""
+    destination = instruction.dst
+    return (
+        destination is not None
+        and destination.space is MemSpace.REG
+        and destination.size == 2
+        and bool(destination.name)
+    )
+
+
+def _reload_mov_candidate_8616(instruction: IRInstr, insn_addr: int) -> bool:
+    """Return whether the instruction is a word-register MOV at the read site."""
+    return (
+        instruction.addr == insn_addr
+        and instruction.op == "MOV"
+        and _word_register_destination_8616(instruction)
+        and len(instruction.args) == 1
+        and isinstance(instruction.args[0], IRValue)
+    )
+
+
 def _trace_reload_8616(
     artifact: SSAFunctionArtifact,
     access: IRLogicalMemoryAccess8616,
@@ -266,18 +297,9 @@ def _trace_reload_8616(
         )
     candidates: list[LogicalMemoryRegisterTransfer8616] = []
     for instr_index, instruction in enumerate(block.instrs):
-        destination = instruction.dst
-        if (
-            instruction.addr != access.key.insn_addr
-            or instruction.op != "MOV"
-            or destination is None
-            or destination.space is not MemSpace.REG
-            or destination.size != 2
-            or not destination.name
-            or len(instruction.args) != 1
-            or not isinstance(instruction.args[0], IRValue)
-        ):
+        if not _reload_mov_candidate_8616(instruction, access.key.insn_addr):
             continue
+        destination = instruction.dst
         source_definition, _failure = _unique_definition_8616(
             definitions,
             instruction.args[0],

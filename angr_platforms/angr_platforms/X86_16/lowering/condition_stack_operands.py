@@ -337,6 +337,189 @@ def project_contained_stack_integer_view_8616(
     return view
 
 
+def _register_cvar_8616(
+    cfunc: _CFunctionLike,
+    variable: SimStackVariable,
+    declaration: structured_c.CVariable,
+) -> None:
+    """Register one fresh stack declaration on both codegen variable maps."""
+    variables_in_use = _variables_in_use(cfunc)
+    if isinstance(variables_in_use, dict):
+        variables_in_use[variable] = declaration
+    unified_local_vars = _unified_local_vars(cfunc)
+    if isinstance(unified_local_vars, dict):
+        unified_local_vars[variable] = {(declaration, declaration.variable_type)}
+
+
+def _wider_storage_view_8616(
+    codegen: object,
+    cfunc: _CFunctionLike | None,
+    *,
+    base: str,
+    offset: int,
+    size: int,
+    name: str,
+    signed: bool,
+    tags: Mapping[str, object] | None,
+    prefer_signed_local_storage: bool,
+    storage_size: int | None,
+) -> structured_c.CExpression | None:
+    """Project the narrower view from a proven wider stack storage owner."""
+    if cfunc is None or not isinstance(storage_size, int) or storage_size <= size:
+        return None
+    storage_declaration = _existing_stack_cvar(
+        codegen,
+        cfunc,
+        base=base,
+        offset=offset,
+        size=storage_size,
+    )
+    if storage_declaration is None:
+        storage_variable = SimStackVariable(
+            offset,
+            storage_size,
+            base=base,
+            name=name,
+            region=_cfunc_addr(cfunc),
+        )
+        storage_declaration = structured_c.CVariable(
+            storage_variable,
+            variable_type=_condition_integer_type(codegen, storage_size, signed=False),
+            codegen=codegen,
+            tags=dict(tags or {}),
+        )
+        _register_cvar_8616(cfunc, storage_variable, storage_declaration)
+    return _wide_stack_word_projection(
+        codegen,
+        storage_declaration,
+        offset=offset,
+        signed=signed,
+        prefer_word_view=(prefer_signed_local_storage and base == "bp" and offset > 0),
+    )
+
+
+def _bp_declaration_or_contained_view_8616(
+    codegen: object,
+    offset: int,
+    size: int,
+    signed: bool,
+    tags: Mapping[str, object] | None,
+) -> tuple[structured_c.CVariable | None, structured_c.CExpression | None]:
+    """Return a BP declaration or a contained view inside a wider owner."""
+    projected = stack_cvar_for_machine_bp_range_8616(codegen, offset, size)
+    if isinstance(projected, structured_c.CVariable):
+        return projected, None
+    owner = stack_variable_coordinate_registry_8616(codegen).containing_bp_range(
+        offset,
+        size,
+    )
+    if (
+        owner is not None
+        and owner.size > size
+        and isinstance(owner.cvar, structured_c.CVariable)
+    ):
+        contained_view = project_contained_stack_integer_view_8616(
+            codegen,
+            owner.cvar,
+            owner_bp_offset=owner.bp_offset,
+            offset=offset,
+            size=size,
+            signed=signed,
+            tags=tags,
+        )
+        if contained_view is not None:
+            return None, contained_view
+    return None, None
+
+
+def _existing_wide_projection_8616(
+    codegen: object,
+    cfunc: _CFunctionLike,
+    *,
+    base: str,
+    offset: int,
+    size: int,
+    signed: bool,
+    prefer_signed_local_storage: bool,
+) -> structured_c.CExpression | None:
+    """Project a word view from an existing wider stack declaration."""
+    wide_declaration = _existing_wide_stack_cvar(
+        codegen,
+        cfunc,
+        base=base,
+        offset=offset,
+        size=size,
+    )
+    if wide_declaration is None:
+        return None
+    return _wide_stack_word_projection(
+        codegen,
+        wide_declaration,
+        offset=offset,
+        signed=signed,
+        prefer_word_view=(prefer_signed_local_storage and base == "bp" and offset > 0),
+    )
+
+
+def _register_stack_declaration_8616(
+    codegen: object,
+    cfunc: _CFunctionLike | None,
+    *,
+    base: str,
+    offset: int,
+    size: int,
+    name: str,
+    signed: bool,
+    tags: Mapping[str, object] | None,
+) -> structured_c.CVariable:
+    """Create and register one fresh stack declaration for the view."""
+    variable = SimStackVariable(
+        offset,
+        size,
+        base=base,
+        name=name,
+        region=_cfunc_addr(cfunc) if cfunc is not None else None,
+    )
+    declaration = structured_c.CVariable(
+        variable,
+        variable_type=_condition_integer_type(codegen, size, signed=signed),
+        codegen=codegen,
+        tags=dict(tags or {}),
+    )
+    if cfunc is not None:
+        _register_cvar_8616(cfunc, variable, declaration)
+    return declaration
+
+
+def _signed_stack_view_8616(
+    codegen: object,
+    declaration: structured_c.CVariable,
+    size: int,
+    signed: bool,
+    tags: Mapping[str, object] | None,
+) -> structured_c.CExpression:
+    """Return the declaration view, semantically cast when signedness differs."""
+    current_type = declaration.variable_type
+    target_type = _condition_integer_type(codegen, size, signed=signed)
+    view = structured_c.CVariable(
+        declaration.variable,
+        unified_variable=declaration.unified_variable,
+        variable_type=current_type or target_type,
+        codegen=codegen,
+        tags=dict(tags or declaration.tags),
+    )
+    current_signed = current_type.signed if isinstance(current_type, (SimTypeChar, SimTypeShort, SimTypeLong)) else None
+    if current_signed is None or bool(current_signed) == signed:
+        return view
+    return CSemanticCast8616(
+        current_type,
+        target_type,
+        view,
+        codegen=codegen,
+        tags=dict(tags or declaration.tags),
+    )
+
+
 def materialize_typed_condition_stack_operand_8616(
     codegen: object,
     *,
@@ -361,49 +544,20 @@ def materialize_typed_condition_stack_operand_8616(
         return None
     cfunc = _cfunc_for_codegen(codegen)
 
-    if (
-        cfunc is not None
-        and isinstance(storage_size, int)
-        and storage_size > size
-    ):
-        storage_declaration = _existing_stack_cvar(
-            codegen,
-            cfunc,
-            base=base,
-            offset=offset,
-            size=storage_size,
-        )
-        if storage_declaration is None:
-            storage_variable = SimStackVariable(
-                offset,
-                storage_size,
-                base=base,
-                name=name,
-                region=_cfunc_addr(cfunc),
-            )
-            storage_declaration = structured_c.CVariable(
-                storage_variable,
-                variable_type=_condition_integer_type(codegen, storage_size, signed=False),
-                codegen=codegen,
-                tags=dict(tags or {}),
-            )
-            variables_in_use = _variables_in_use(cfunc)
-            if isinstance(variables_in_use, dict):
-                variables_in_use[storage_variable] = storage_declaration
-            unified_local_vars = _unified_local_vars(cfunc)
-            if isinstance(unified_local_vars, dict):
-                unified_local_vars[storage_variable] = {
-                    (storage_declaration, storage_declaration.variable_type)
-                }
-        projected = _wide_stack_word_projection(
-            codegen,
-            storage_declaration,
-            offset=offset,
-            signed=signed,
-            prefer_word_view=(prefer_signed_local_storage and base == "bp" and offset > 0),
-        )
-        if projected is not None:
-            return projected
+    projected = _wider_storage_view_8616(
+        codegen,
+        cfunc,
+        base=base,
+        offset=offset,
+        size=size,
+        name=name,
+        signed=signed,
+        tags=tags,
+        prefer_signed_local_storage=prefer_signed_local_storage,
+        storage_size=storage_size,
+    )
+    if projected is not None:
+        return projected
 
     declaration = preferred
     if declaration is not None and not _matches_stack_storage(
@@ -415,91 +569,42 @@ def materialize_typed_condition_stack_operand_8616(
     ):
         declaration = None
     if declaration is None and base == "bp":
-        projected = stack_cvar_for_machine_bp_range_8616(codegen, offset, size)
-        if isinstance(projected, structured_c.CVariable):
-            declaration = projected
-        else:
-            owner = stack_variable_coordinate_registry_8616(codegen).containing_bp_range(
-                offset,
-                size,
-            )
-            if (
-                owner is not None
-                and owner.size > size
-                and isinstance(owner.cvar, structured_c.CVariable)
-            ):
-                contained_view = project_contained_stack_integer_view_8616(
-                    codegen,
-                    owner.cvar,
-                    owner_bp_offset=owner.bp_offset,
-                    offset=offset,
-                    size=size,
-                    signed=signed,
-                    tags=tags,
-                )
-                if contained_view is not None:
-                    return contained_view
+        declaration, contained_view = _bp_declaration_or_contained_view_8616(
+            codegen,
+            offset,
+            size,
+            signed,
+            tags,
+        )
+        if contained_view is not None:
+            return contained_view
     if declaration is None and cfunc is not None:
         declaration = _existing_stack_cvar(codegen, cfunc, base=base, offset=offset, size=size)
     if declaration is None and cfunc is not None and size == 2:
-        wide_declaration = _existing_wide_stack_cvar(
+        projected = _existing_wide_projection_8616(
             codegen,
             cfunc,
             base=base,
             offset=offset,
             size=size,
+            signed=signed,
+            prefer_signed_local_storage=prefer_signed_local_storage,
         )
-        if wide_declaration is not None:
-            projected = _wide_stack_word_projection(
-                codegen,
-                wide_declaration,
-                offset=offset,
-                signed=signed,
-                prefer_word_view=(prefer_signed_local_storage and base == "bp" and offset > 0),
-            )
-            if projected is not None:
-                return projected
+        if projected is not None:
+            return projected
     if declaration is None:
-        variable = SimStackVariable(
-            offset,
-            size,
+        declaration = _register_stack_declaration_8616(
+            codegen,
+            cfunc,
             base=base,
+            offset=offset,
+            size=size,
             name=name,
-            region=_cfunc_addr(cfunc) if cfunc is not None else None,
+            signed=signed,
+            tags=tags,
         )
-        declaration = structured_c.CVariable(
-            variable,
-            variable_type=_condition_integer_type(codegen, size, signed=signed),
-            codegen=codegen,
-            tags=dict(tags or {}),
-        )
-        if cfunc is not None:
-            variables_in_use = _variables_in_use(cfunc)
-            if isinstance(variables_in_use, dict):
-                variables_in_use[variable] = declaration
-            unified_local_vars = _unified_local_vars(cfunc)
-            if isinstance(unified_local_vars, dict):
-                unified_local_vars[variable] = {(declaration, declaration.variable_type)}
 
-    current_type = declaration.variable_type
-    target_type = _condition_integer_type(codegen, size, signed=signed)
-    view = structured_c.CVariable(
-        declaration.variable,
-        unified_variable=declaration.unified_variable,
-        variable_type=current_type or target_type,
-        codegen=codegen,
-        tags=dict(tags or declaration.tags),
-    )
-    current_signed = current_type.signed if isinstance(current_type, (SimTypeChar, SimTypeShort, SimTypeLong)) else None
-    if current_signed is None or bool(current_signed) == signed:
-        return view
-    return CSemanticCast8616(
-        current_type,
-        target_type,
-        view,
-        codegen=codegen,
-        tags=dict(tags or declaration.tags),
-    )
+    return _signed_stack_view_8616(codegen, declaration, size, signed, tags)
 
 
 __all__ = [

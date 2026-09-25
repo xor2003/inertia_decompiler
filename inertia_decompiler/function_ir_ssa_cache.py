@@ -14,11 +14,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from angr_platforms.X86_16.ir.function_ir_registry import (
+    FunctionIRArtifactResolution8616,
     FunctionIRArtifactVerdict8616,
     publish_function_ir_artifact_8616,
     registered_function_ir_artifact_8616,
 )
 from angr_platforms.X86_16.ir.function_ssa_registry import (
+    FunctionSSAArtifactResolution8616,
     FunctionSSAArtifactStage8616,
     FunctionSSAArtifactVerdict8616,
     publish_function_ssa_artifact_8616,
@@ -233,6 +235,23 @@ def hydrate_function_ir_ssa_catalog_8616(
     return _catalog_result_8616(results)
 
 
+def _hydrated_hit_matches_8616(
+    hydrated: FunctionIRSSACacheResult8616 | None,
+    ir_result: FunctionIRArtifactResolution8616,
+    ssa_result: FunctionSSAArtifactResolution8616,
+) -> bool:
+    """Return True when a retained hydrated hit matches fresh artifacts."""
+    return (
+        hydrated is not None
+        and hydrated.bundle is not None
+        and ir_result.verdict is FunctionIRArtifactVerdict8616.PROVEN
+        and ssa_result.verdict is FunctionSSAArtifactVerdict8616.PROVEN
+        and ir_result.artifact == hydrated.bundle.ir
+        and ssa_result.artifact == hydrated.bundle.ssa
+        and ssa_result.stage is FunctionSSAArtifactStage8616.IR
+    )
+
+
 def store_function_ir_ssa_catalog_8616(
     project: object,
     functions: Sequence[object],
@@ -254,15 +273,7 @@ def store_function_ir_ssa_catalog_8616(
         ir_result = registered_function_ir_artifact_8616(project, function_addr)
         ssa_result = registered_function_ssa_artifact_8616(project, function_addr)
         hydrated = hydrated_hits.get(function_addr)
-        if (
-            hydrated is not None
-            and hydrated.bundle is not None
-            and ir_result.verdict is FunctionIRArtifactVerdict8616.PROVEN
-            and ssa_result.verdict is FunctionSSAArtifactVerdict8616.PROVEN
-            and ir_result.artifact == hydrated.bundle.ir
-            and ssa_result.artifact == hydrated.bundle.ssa
-            and ssa_result.stage is FunctionSSAArtifactStage8616.IR
-        ):
+        if _hydrated_hit_matches_8616(hydrated, ir_result, ssa_result):
             results.append(hydrated)
             continue
         cache_key = function_ir_ssa_cache_key_8616(project, function)

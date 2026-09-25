@@ -36,6 +36,7 @@ from .interprocedural_storage_contracts import (
 )
 from .interprocedural_storage_live_out_contracts import (
     MemoryLiveOutUseDisposition8616,
+    MemoryLiveOutUseFact8616,
 )
 from .pointer_parameter_memory_outputs import (
     join_pointer_parameter_memory_outputs_8616,
@@ -95,108 +96,139 @@ def _view_order_8616(view: MemoryOutputViewBinding8616) -> tuple[object, ...]:
     )
 
 
-def join_memory_output_object_contracts_8616(
-    callsites: tuple[CallsiteStorageTrials8616, ...],
-) -> MemoryOutputObjectJoinEvidence8616:
-    """Join complete caller memory effects under canonical Alias owners."""
-    pointer_join = join_pointer_parameter_memory_outputs_8616(callsites)
-    direct_count = sum(len(callsite.memory_effects) for callsite in callsites)
-    raw_count = direct_count + pointer_join.stats.raw_fact_count
-    normalized_count = pointer_join.stats.normalized_fact_count
-    if not pointer_join.complete:
+_GroupedOwnerViews8616 = dict[
+    tuple[str, int, int],
+    tuple[TerminalMemoryAliasFact8616, StorageIdentity8616, list[MemoryOutputViewBinding8616]],
+]
+
+
+def _effect_trial_8616(
+    effect: MemoryLiveOutUseFact8616,
+    candidates: list[StorageTrial8616],
+    raw_count: int,
+    normalized_count: int,
+) -> StorageTrial8616 | MemoryOutputObjectJoinEvidence8616 | None:
+    """Bind at most one matching live-out trial to one memory effect."""
+    needs_trial = bool(
+        effect.disposition is MemoryLiveOutUseDisposition8616.USED
+        and effect.terminal_output.disposition
+        is TerminalMemoryOutputDisposition8616.MUST_WRITE
+    )
+    if needs_trial and not candidates:
         return _refused_8616(
-            MemoryOutputObjectFailure8616.POINTER_OUTPUT_REFUSED,
+            MemoryOutputObjectFailure8616.MISSING_TRIAL,
             raw_count,
             normalized_count,
         )
-    grouped: dict[
-        tuple[str, int, int],
-        tuple[TerminalMemoryAliasFact8616, StorageIdentity8616, list[MemoryOutputViewBinding8616]],
-    ] = {}
-    for callsite in sorted(callsites, key=lambda item: (item.callsite_addr, item.caller_addr)):
-        trials_by_storage: dict[tuple[object, ...], list[StorageTrial8616]] = {}
-        for live_out_trial in callsite.live_outs:
-            trials_by_storage.setdefault(live_out_trial.storage.key, []).append(live_out_trial)
-        seen_effects: set[tuple[object, ...]] = set()
-        consumed_trials: set[int] = set()
-        effects = sorted(callsite.memory_effects, key=lambda item: _storage_order_8616(item.storage))
-        for effect in effects:
-            if not effect.complete:
-                return _refused_8616(
-                    MemoryOutputObjectFailure8616.INCOMPLETE_EFFECT,
-                    raw_count,
-                    normalized_count,
-                )
-            normalized_count += 1
-            if effect.storage.key in seen_effects:
-                return _refused_8616(
-                    MemoryOutputObjectFailure8616.DUPLICATE_EFFECT,
-                    raw_count,
-                    normalized_count,
-                )
-            seen_effects.add(effect.storage.key)
-            candidates = trials_by_storage.get(effect.storage.key, [])
-            needs_trial = bool(
-                effect.disposition is MemoryLiveOutUseDisposition8616.USED
-                and effect.terminal_output.disposition
-                is TerminalMemoryOutputDisposition8616.MUST_WRITE
-            )
-            if needs_trial and not candidates:
-                return _refused_8616(
-                    MemoryOutputObjectFailure8616.MISSING_TRIAL,
-                    raw_count,
-                    normalized_count,
-                )
-            if len(candidates) > 1:
-                return _refused_8616(
-                    MemoryOutputObjectFailure8616.TRIAL_CONFLICT,
-                    raw_count,
-                    normalized_count,
-                )
-            if candidates and not needs_trial:
-                return _refused_8616(
-                    MemoryOutputObjectFailure8616.EXTRA_TRIAL,
-                    raw_count,
-                    normalized_count,
-                )
-            trial = candidates[0] if candidates else None
-            if trial is not None:
-                consumed_trials.add(id(trial))
-            view = MemoryOutputViewBinding8616(
-                callsite.caller_addr,
-                callsite.callee_addr,
-                callsite.callsite_addr,
-                effect,
-                trial,
-            )
-            if not view.complete:
-                return _refused_8616(
-                    MemoryOutputObjectFailure8616.TRIAL_CONFLICT,
-                    raw_count,
-                    normalized_count,
-                )
-            owner = effect.alias_output
-            owner_storage = _owner_storage_8616(owner)
-            owner_key = _storage_order_8616(owner_storage)
-            previous = grouped.get(owner_key)
-            if previous is None:
-                grouped[owner_key] = (owner, owner_storage, [view])
-            elif previous[0] != owner or previous[1] != owner_storage:
-                return _refused_8616(
-                    MemoryOutputObjectFailure8616.OWNER_CONFLICT,
-                    raw_count,
-                    normalized_count,
-                )
-            else:
-                previous[2].append(view)
-        if any(id(item) not in consumed_trials for item in callsite.live_outs):
+    if len(candidates) > 1:
+        return _refused_8616(
+            MemoryOutputObjectFailure8616.TRIAL_CONFLICT,
+            raw_count,
+            normalized_count,
+        )
+    if candidates and not needs_trial:
+        return _refused_8616(
+            MemoryOutputObjectFailure8616.EXTRA_TRIAL,
+            raw_count,
+            normalized_count,
+        )
+    return candidates[0] if candidates else None
+
+
+def _record_owner_view_8616(
+    callsite: CallsiteStorageTrials8616,
+    effect: MemoryLiveOutUseFact8616,
+    trial: StorageTrial8616 | None,
+    grouped: _GroupedOwnerViews8616,
+    raw_count: int,
+    normalized_count: int,
+) -> MemoryOutputObjectJoinEvidence8616 | None:
+    """Attach one complete view to its canonical Alias owner group."""
+    view = MemoryOutputViewBinding8616(
+        callsite.caller_addr,
+        callsite.callee_addr,
+        callsite.callsite_addr,
+        effect,
+        trial,
+    )
+    if not view.complete:
+        return _refused_8616(
+            MemoryOutputObjectFailure8616.TRIAL_CONFLICT,
+            raw_count,
+            normalized_count,
+        )
+    owner = effect.alias_output
+    owner_storage = _owner_storage_8616(owner)
+    owner_key = _storage_order_8616(owner_storage)
+    previous = grouped.get(owner_key)
+    if previous is None:
+        grouped[owner_key] = (owner, owner_storage, [view])
+    elif previous[0] != owner or previous[1] != owner_storage:
+        return _refused_8616(
+            MemoryOutputObjectFailure8616.OWNER_CONFLICT,
+            raw_count,
+            normalized_count,
+        )
+    else:
+        previous[2].append(view)
+    return None
+
+
+def _group_callsite_effects_8616(
+    callsite: CallsiteStorageTrials8616,
+    grouped: _GroupedOwnerViews8616,
+    raw_count: int,
+    normalized_count: int,
+) -> int | MemoryOutputObjectJoinEvidence8616:
+    """Fold one callsite's effects under their canonical Alias owners."""
+    trials_by_storage: dict[tuple[object, ...], list[StorageTrial8616]] = {}
+    for live_out_trial in callsite.live_outs:
+        trials_by_storage.setdefault(live_out_trial.storage.key, []).append(live_out_trial)
+    seen_effects: set[tuple[object, ...]] = set()
+    consumed_trials: set[int] = set()
+    effects = sorted(callsite.memory_effects, key=lambda item: _storage_order_8616(item.storage))
+    for effect in effects:
+        if not effect.complete:
             return _refused_8616(
-                MemoryOutputObjectFailure8616.EXTRA_TRIAL,
+                MemoryOutputObjectFailure8616.INCOMPLETE_EFFECT,
                 raw_count,
                 normalized_count,
             )
+        normalized_count += 1
+        if effect.storage.key in seen_effects:
+            return _refused_8616(
+                MemoryOutputObjectFailure8616.DUPLICATE_EFFECT,
+                raw_count,
+                normalized_count,
+            )
+        seen_effects.add(effect.storage.key)
+        candidates = trials_by_storage.get(effect.storage.key, [])
+        trial_gate = _effect_trial_8616(effect, candidates, raw_count, normalized_count)
+        if isinstance(trial_gate, MemoryOutputObjectJoinEvidence8616):
+            return trial_gate
+        trial = trial_gate
+        if trial is not None:
+            consumed_trials.add(id(trial))
+        owner_refusal = _record_owner_view_8616(
+            callsite, effect, trial, grouped, raw_count, normalized_count
+        )
+        if owner_refusal is not None:
+            return owner_refusal
+    if any(id(item) not in consumed_trials for item in callsite.live_outs):
+        return _refused_8616(
+            MemoryOutputObjectFailure8616.EXTRA_TRIAL,
+            raw_count,
+            normalized_count,
+        )
+    return normalized_count
 
-    owners = tuple(item[0] for _key, item in sorted(grouped.items()))
+
+def _owner_trial_consistency_8616(
+    grouped: _GroupedOwnerViews8616,
+    raw_count: int,
+    normalized_count: int,
+) -> MemoryOutputObjectJoinEvidence8616 | None:
+    """Require uniform signedness and value class per owner trial group."""
     for _owner, _storage, views in grouped.values():
         by_storage: dict[tuple[object, ...], list[StorageTrial8616]] = {}
         for view in views:
@@ -215,6 +247,15 @@ def join_memory_output_object_contracts_8616(
                     raw_count,
                     normalized_count,
                 )
+    return None
+
+
+def _owner_disjointness_8616(
+    owners: tuple[TerminalMemoryAliasFact8616, ...],
+    raw_count: int,
+    normalized_count: int,
+) -> MemoryOutputObjectJoinEvidence8616 | None:
+    """Require every pair of Alias owners to be disjoint or exact."""
     for index, left in enumerate(owners):
         for right in owners[index + 1 :]:
             relation = segmented_access_relation_8616(
@@ -230,6 +271,39 @@ def join_memory_output_object_contracts_8616(
                     raw_count,
                     normalized_count,
                 )
+    return None
+
+
+def join_memory_output_object_contracts_8616(
+    callsites: tuple[CallsiteStorageTrials8616, ...],
+) -> MemoryOutputObjectJoinEvidence8616:
+    """Join complete caller memory effects under canonical Alias owners."""
+    pointer_join = join_pointer_parameter_memory_outputs_8616(callsites)
+    direct_count = sum(len(callsite.memory_effects) for callsite in callsites)
+    raw_count = direct_count + pointer_join.stats.raw_fact_count
+    normalized_count = pointer_join.stats.normalized_fact_count
+    if not pointer_join.complete:
+        return _refused_8616(
+            MemoryOutputObjectFailure8616.POINTER_OUTPUT_REFUSED,
+            raw_count,
+            normalized_count,
+        )
+    grouped: _GroupedOwnerViews8616 = {}
+    for callsite in sorted(callsites, key=lambda item: (item.callsite_addr, item.caller_addr)):
+        grouped_result = _group_callsite_effects_8616(
+            callsite, grouped, raw_count, normalized_count
+        )
+        if isinstance(grouped_result, MemoryOutputObjectJoinEvidence8616):
+            return grouped_result
+        normalized_count = grouped_result
+
+    owners = tuple(item[0] for _key, item in sorted(grouped.items()))
+    consistency = _owner_trial_consistency_8616(grouped, raw_count, normalized_count)
+    if consistency is not None:
+        return consistency
+    overlap = _owner_disjointness_8616(owners, raw_count, normalized_count)
+    if overlap is not None:
+        return overlap
 
     objects = tuple(
         MemoryOutputObjectContract8616(owner, storage, tuple(sorted(views, key=_view_order_8616)))

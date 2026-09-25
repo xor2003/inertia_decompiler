@@ -10,7 +10,7 @@ structuring, rewrite, postprocess, or CLI/reporting work here.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Any, Protocol, cast
 
@@ -402,6 +402,22 @@ def _function_block_addrs(function: object) -> tuple[object, ...]:
     return tuple(sorted(_external_int(block_addr) for block_addr in cast(Iterable[object], block_addrs)))
 
 
+def _graph_edge_addresses_8616(edge: object) -> tuple[int, int] | None:
+    """Resolve one raw graph edge to its two node addresses."""
+    if not isinstance(edge, (tuple, list)) or len(edge) < 2:
+        return None
+    addresses: list[int] = []
+    for node in edge[:2]:
+        raw_address = node if isinstance(node, int) else cast(_FunctionGraphNodeBoundary, node).addr
+        try:
+            addresses.append(_external_int(raw_address))
+        except (AttributeError, TypeError, ValueError):
+            return None
+    if len(addresses) != 2:
+        return None
+    return addresses[0], addresses[1]
+
+
 def _function_graph_successors(
     function: object,
     block_addrs: frozenset[int],
@@ -428,16 +444,10 @@ def _function_graph_successors(
     except TypeError:
         return None
     for edge in edge_items:
-        if not isinstance(edge, (tuple, list)) or len(edge) < 2:
+        addresses = _graph_edge_addresses_8616(edge)
+        if addresses is None:
             continue
-        addresses: list[int] = []
-        for node in edge[:2]:
-            raw_address = node if isinstance(node, int) else cast(_FunctionGraphNodeBoundary, node).addr
-            try:
-                addresses.append(_external_int(raw_address))
-            except (AttributeError, TypeError, ValueError):
-                break
-        if len(addresses) == 2 and addresses[0] in block_addrs and addresses[1] in block_addrs:
+        if addresses[0] in block_addrs and addresses[1] in block_addrs:
             successors[addresses[0]].add(addresses[1])
     return {
         address: tuple(sorted(targets))
@@ -535,77 +545,310 @@ def _expr_to_value(
 ) -> IRValue:
     """Convert a VEX expression boundary into a typed IR value."""
     convert = partial(_expr_to_value, type_environment=type_environment)
+    return _expr_to_value_impl_8616(expr, tmps, conditions, convert, type_environment)
 
-    def _impl() -> IRValue:
-        def _unop_value() -> IRValue:
-            args = _expr_args(expr)
-            op = _expr_op(expr, "unop")
-            if not args:
-                return IRValue(MemSpace.UNKNOWN, name=op, expr=("empty_unop",))
-            inner = convert(args[0], tmps, conditions)
-            return IRValue(
-                inner.space,
-                name=inner.name,
-                offset=inner.offset,
-                const=inner.const,
-                size=_int_size(expr, type_environment=type_environment),
-                expr=(op,),
-                source_tmp=inner.source_tmp,
-            )
 
-        def _binop_value() -> IRValue:
-            op = _expr_op(expr)
-            args = _expr_args(expr)
-            if len(args) != 2:
-                return IRValue(MemSpace.TMP, name=f"expr:{op}", expr=(op,))
-            left = convert(args[0], tmps, conditions)
-            right = convert(args[1], tmps, conditions)
-            return _binary_value_from_operands_8616(op, left, right)
+def _unop_ir_value_8616(
+    expr: object,
+    tmps: _TmpValues,
+    conditions: _TmpConditions,
+    convert: Callable[[object, _TmpValues, _TmpConditions], IRValue],
+    type_environment: object | None,
+) -> IRValue:
+    """Convert one Unop boundary into a typed IR value."""
+    args = _expr_args(expr)
+    op = _expr_op(expr, "unop")
+    if not args:
+        return IRValue(MemSpace.UNKNOWN, name=op, expr=("empty_unop",))
+    inner = convert(args[0], tmps, conditions)
+    return IRValue(
+        inner.space,
+        name=inner.name,
+        offset=inner.offset,
+        const=inner.const,
+        size=_int_size(expr, type_environment=type_environment),
+        expr=(op,),
+        source_tmp=inner.source_tmp,
+    )
 
-        tag = _expr_tag(expr)
-        if tag == "Iex_RdTmp":
-            tmp_id = _expr_tmp(expr)
-            if tmp_id in tmps:
-                return tmps[tmp_id]
-            if tmp_id in conditions:
-                return IRValue(MemSpace.TMP, name=f"cond_t{tmp_id}", size=1, expr=("condition_tmp",))
-            return IRValue(MemSpace.TMP, name=f"t{tmp_id}")
-        if tag == "Iex_Get":
-            size = _int_size(expr, type_environment=type_environment)
-            name = register_name_from_offset(_expr_offset(expr), size=size)
-            return IRValue(
-                MemSpace.REG,
-                name=name,
-                size=size,
-            )
-        # Exit.dst is an IRConst, unlike wrapped expression constants.
-        if tag == "Iex_Const" or tag in _DIRECT_INTEGER_CONSTANT_TAGS_8616:
-            return IRValue(
-                MemSpace.CONST,
-                const=_const(expr),
-                size=_int_size(expr, type_environment=type_environment),
-            )
-        if tag == "Iex_Unop":
-            return _unop_value()
-        if tag == "Iex_Binop":
-            return _binop_value()
-        if tag == "Iex_Load":
-            addr = expr_to_address(
-                _expr_addr(expr),
-                tmps,
-                conditions,
-                expr_to_value=convert,
-                size=_int_size(expr, type_environment=type_environment),
-            )
-            return IRValue(
-                MemSpace.TMP,
-                name="load",
-                size=addr.size or _int_size(expr, type_environment=type_environment),
-                expr=("load",),
-            )
-        return IRValue(MemSpace.UNKNOWN, name=tag or "expr")
 
-    return _impl()
+def _binop_ir_value_8616(
+    expr: object,
+    tmps: _TmpValues,
+    conditions: _TmpConditions,
+    convert: Callable[[object, _TmpValues, _TmpConditions], IRValue],
+) -> IRValue:
+    """Convert one Binop boundary into a typed IR value."""
+    op = _expr_op(expr)
+    args = _expr_args(expr)
+    if len(args) != 2:
+        return IRValue(MemSpace.TMP, name=f"expr:{op}", expr=(op,))
+    left = convert(args[0], tmps, conditions)
+    right = convert(args[1], tmps, conditions)
+    return _binary_value_from_operands_8616(op, left, right)
+
+
+def _expr_to_value_impl_8616(
+    expr: object,
+    tmps: _TmpValues,
+    conditions: _TmpConditions,
+    convert: Callable[[object, _TmpValues, _TmpConditions], IRValue],
+    type_environment: object | None,
+) -> IRValue:
+    tag = _expr_tag(expr)
+    if tag == "Iex_RdTmp":
+        tmp_id = _expr_tmp(expr)
+        if tmp_id in tmps:
+            return tmps[tmp_id]
+        if tmp_id in conditions:
+            return IRValue(MemSpace.TMP, name=f"cond_t{tmp_id}", size=1, expr=("condition_tmp",))
+        return IRValue(MemSpace.TMP, name=f"t{tmp_id}")
+    if tag == "Iex_Get":
+        size = _int_size(expr, type_environment=type_environment)
+        name = register_name_from_offset(_expr_offset(expr), size=size)
+        return IRValue(
+            MemSpace.REG,
+            name=name,
+            size=size,
+        )
+    # Exit.dst is an IRConst, unlike wrapped expression constants.
+    if tag == "Iex_Const" or tag in _DIRECT_INTEGER_CONSTANT_TAGS_8616:
+        return IRValue(
+            MemSpace.CONST,
+            const=_const(expr),
+            size=_int_size(expr, type_environment=type_environment),
+        )
+    if tag == "Iex_Unop":
+        return _unop_ir_value_8616(expr, tmps, conditions, convert, type_environment)
+    if tag == "Iex_Binop":
+        return _binop_ir_value_8616(expr, tmps, conditions, convert)
+    if tag == "Iex_Load":
+        addr = expr_to_address(
+            _expr_addr(expr),
+            tmps,
+            conditions,
+            expr_to_value=convert,
+            size=_int_size(expr, type_environment=type_environment),
+        )
+        return IRValue(
+            MemSpace.TMP,
+            name="load",
+            size=addr.size or _int_size(expr, type_environment=type_environment),
+            expr=("load",),
+        )
+    return IRValue(MemSpace.UNKNOWN, name=tag or "expr")
+
+
+@dataclass(frozen=True, slots=True)
+class _StmtImportContext8616:
+    """Shared statement-import context for per-tag conversion helpers."""
+
+    convert: Callable[[object, _TmpValues, _TmpConditions], IRValue]
+    instruction_addr: int | None
+    segment_hints: SegmentHintMap
+    tmp_exprs: _TmpExprs
+    type_environment: object | None
+    condition_demand: VexConditionDemand8616
+
+
+def _wrtmp_load_instr_8616(
+    data: object,
+    tmp_id: int,
+    dst: IRValue,
+    data_size: int,
+    tmps: _MutableTmpValues,
+    conditions: _MutableTmpConditions,
+    ctx: _StmtImportContext8616,
+) -> IRInstr:
+    """Import a ``tN = Load(addr)`` write into a LOAD instruction."""
+    addr = expr_to_address(
+        _expr_addr(data),
+        tmps,
+        conditions,
+        expr_to_value=ctx.convert,
+        size=data_size,
+        segment_hints=ctx.segment_hints,
+        tmp_exprs=ctx.tmp_exprs,
+    )
+    tmps[tmp_id] = IRValue(
+        MemSpace.TMP,
+        name=f"load_t{tmp_id}",
+        size=data_size,
+        expr=("load",),
+        source_tmp=tmp_id,
+    )
+    return IRInstr(
+        op="LOAD",
+        dst=dst,
+        args=(addr,),
+        size=data_size,
+        addr=ctx.instruction_addr,
+    )
+
+
+def _wrtmp_binop_instr_8616(
+    data: object,
+    tmp_id: int,
+    dst: IRValue,
+    tmps: _MutableTmpValues,
+    conditions: _MutableTmpConditions,
+    ctx: _StmtImportContext8616,
+) -> IRInstr | None:
+    """Import a ``tN = Binop(l, r)`` write, recording eager conditions."""
+    op = _expr_op(data, "BINOP")
+    args = _expr_args(data)
+    if len(args) != 2:
+        return None
+    left = ctx.convert(args[0], tmps, conditions)
+    right = ctx.convert(args[1], tmps, conditions)
+    if "Cmp" in op or (
+        ctx.condition_demand.requires_eager_condition(tmp_id)
+        and any(token in op for token in ("And", "Or"))
+    ):
+        conditions[tmp_id] = expr_to_condition(
+            data,
+            tmps,
+            conditions,
+            expr_to_value=ctx.convert,
+            tmp_exprs=ctx.tmp_exprs,
+        )
+    else:
+        cond = build_condition_from_binop(op, left, right)
+        if cond is not None:
+            conditions[tmp_id] = cond
+    value = _binary_value_from_operands_8616(op, left, right)
+    tmps[tmp_id] = IRValue(
+        value.space,
+        name=value.name,
+        offset=value.offset,
+        const=value.const,
+        size=value.size,
+        version=value.version,
+        expr=value.expr,
+        memory_access_insn=value.memory_access_insn,
+        source_tmp=tmp_id,
+    )
+    return IRInstr(
+        op=op,
+        dst=dst,
+        args=(left, right),
+        size=max(left.size, right.size),
+        addr=ctx.instruction_addr,
+    )
+
+
+def _wrtmp_ite_condition_8616(
+    data: object,
+    tmp_id: int,
+    tmps: _MutableTmpValues,
+    conditions: _MutableTmpConditions,
+    ctx: _StmtImportContext8616,
+) -> None:
+    """Record an eager ITE condition unless it collapsed to an unknown tmp."""
+    if not ctx.condition_demand.requires_eager_condition(tmp_id):
+        return
+    cond = expr_to_condition(data, tmps, conditions, expr_to_value=ctx.convert, tmp_exprs=ctx.tmp_exprs)
+    if not (
+        cond.op == "nonzero"
+        and len(cond.args) == 1
+        and isinstance(cond.args[0], IRValue)
+        and cond.args[0].space == MemSpace.UNKNOWN
+        and cond.args[0].name == "Iex_ITE"
+    ):
+        conditions[tmp_id] = cond
+
+
+def _wrtmp_instr_8616(
+    stmt: object,
+    tmps: _MutableTmpValues,
+    conditions: _MutableTmpConditions,
+    ctx: _StmtImportContext8616,
+) -> IRInstr | None:
+    """Import one ``Ist_WrTmp`` statement into a typed IR instruction."""
+    data = _stmt_data(stmt)
+    tmp_id = _stmt_tmp(stmt)
+    data_tag = _expr_tag(data)
+    data_size = _int_size(data, type_environment=ctx.type_environment)
+    ctx.tmp_exprs[tmp_id] = data
+    dst = IRValue(
+        MemSpace.TMP,
+        name=f"t{tmp_id}",
+        size=data_size,
+        source_tmp=tmp_id,
+    )
+    if data_tag == "Iex_Load":
+        return _wrtmp_load_instr_8616(data, tmp_id, dst, data_size, tmps, conditions, ctx)
+    if data_tag == "Iex_Binop":
+        instr = _wrtmp_binop_instr_8616(data, tmp_id, dst, tmps, conditions, ctx)
+        if instr is not None:
+            return instr
+    if data_tag == "Iex_ITE":
+        _wrtmp_ite_condition_8616(data, tmp_id, tmps, conditions, ctx)
+    value = ctx.convert(data, tmps, conditions)
+    tmps[tmp_id] = IRValue(
+        value.space,
+        name=value.name,
+        offset=value.offset,
+        const=value.const,
+        size=value.size,
+        version=value.version,
+        expr=value.expr,
+        memory_access_insn=value.memory_access_insn,
+        source_tmp=tmp_id,
+    )
+    return IRInstr(op="MOV", dst=dst, args=(value,), size=value.size, addr=ctx.instruction_addr)
+
+
+def _put_instr_8616(
+    stmt: object,
+    tmps: _MutableTmpValues,
+    conditions: _MutableTmpConditions,
+    ctx: _StmtImportContext8616,
+) -> IRInstr:
+    """Import one ``Ist_Put`` register write into a MOV instruction."""
+    offset = _stmt_offset(stmt)
+    src = ctx.convert(_stmt_data(stmt), tmps, conditions)
+    # Preserve the exact register view. Alias owns parent/slice storage
+    # identity; typed IR must retain whether a byte write targets AL or
+    # AH so selector semantics can consume the correct lane.
+    dst_size = src.size if src.size in {1, 2, 4} else 2
+    dst = IRValue(MemSpace.REG, name=register_name_from_offset(offset, size=dst_size), size=dst_size)
+    return IRInstr(op="MOV", dst=dst, args=(src,), size=src.size or dst.size, addr=ctx.instruction_addr)
+
+
+def _store_instr_8616(
+    stmt: object,
+    tmps: _MutableTmpValues,
+    conditions: _MutableTmpConditions,
+    ctx: _StmtImportContext8616,
+) -> IRInstr:
+    """Import one ``Ist_Store`` memory write into a STORE instruction."""
+    data_expr = _stmt_data(stmt)
+    data = ctx.convert(data_expr, tmps, conditions)
+    addr = expr_to_address(
+        _stmt_addr(stmt),
+        tmps,
+        conditions,
+        expr_to_value=ctx.convert,
+        size=data.size,
+        segment_hints=ctx.segment_hints,
+        tmp_exprs=ctx.tmp_exprs,
+    )
+    return IRInstr(op="STORE", dst=None, args=(addr, data), size=data.size, addr=ctx.instruction_addr)
+
+
+def _exit_instr_8616(
+    stmt: object,
+    tmps: _MutableTmpValues,
+    conditions: _MutableTmpConditions,
+    ctx: _StmtImportContext8616,
+) -> IRInstr:
+    """Import one ``Ist_Exit`` conditional branch into a CJMP instruction."""
+    cond = expr_to_condition(
+        _stmt_guard(stmt), tmps, conditions, expr_to_value=ctx.convert, tmp_exprs=ctx.tmp_exprs
+    )
+    target = ctx.convert(_stmt_dst(stmt), tmps, conditions)
+    return IRInstr(op="CJMP", dst=None, args=(cond, target), size=0, addr=ctx.instruction_addr)
 
 
 def _stmt_to_instr(
@@ -620,234 +863,145 @@ def _stmt_to_instr(
     condition_demand: VexConditionDemand8616,
 ) -> IRInstr | None:
     """Convert one VEX statement boundary into a typed IR instruction."""
-    convert = partial(_expr_to_value, type_environment=type_environment)
+    ctx = _StmtImportContext8616(
+        convert=partial(_expr_to_value, type_environment=type_environment),
+        instruction_addr=instruction_addr,
+        segment_hints=segment_hints,
+        tmp_exprs=tmp_exprs,
+        type_environment=type_environment,
+        condition_demand=condition_demand,
+    )
+    tag = _stmt_tag(stmt)
+    if tag == "Ist_WrTmp":
+        return _wrtmp_instr_8616(stmt, tmps, conditions, ctx)
+    if tag == "Ist_Put":
+        return _put_instr_8616(stmt, tmps, conditions, ctx)
+    if tag == "Ist_Store":
+        return _store_instr_8616(stmt, tmps, conditions, ctx)
+    if tag == "Ist_Exit":
+        return _exit_instr_8616(stmt, tmps, conditions, ctx)
+    return None
 
-    def _impl() -> IRInstr | None:
+
+def _block_statement_instrs_8616(
+    statements: Iterable[object],
+    tmps: _MutableTmpValues,
+    conditions: _MutableTmpConditions,
+    tmp_exprs: _TmpExprs,
+    segment_hints: SegmentHintMap,
+    condition_demand: VexConditionDemand8616,
+    type_environment: object | None,
+    transport: VexConditionTransportNormalizer8616,
+    addr: int,
+) -> tuple[list[IRInstr], list[IRRefusal], int | None]:
+    """Import every VEX statement, tracking the latest instruction mark."""
+    instrs: list[IRInstr] = []
+    refusals: list[IRRefusal] = []
+    instruction_addr: int | None = None
+    for statement_index, stmt in enumerate(statements):
         tag = _stmt_tag(stmt)
-        if tag == "Ist_WrTmp":
-            data = _stmt_data(stmt)
+        if tag == "Ist_IMark":
+            instruction_addr = _stmt_instruction_addr(stmt)
+            continue
+        instr = _stmt_to_instr(
+            stmt,
+            tmps,
+            conditions,
+            instruction_addr=instruction_addr,
+            segment_hints=segment_hints,
+            tmp_exprs=tmp_exprs,
+            type_environment=type_environment,
+            condition_demand=condition_demand,
+        )
+        if instr is None:
+            if tag:
+                refusals.append(IRRefusal("unsupported_stmt", f"unsupported VEX statement {tag}", addr))
+            continue
+        instr = replace(instr, origin=vex_instruction_origin_8616(
+            stmt, block_addr=addr, statement_index=statement_index,
+        ))
+        if instr.op == "LOAD" and tag == "Ist_WrTmp":
             tmp_id = _stmt_tmp(stmt)
-            data_tag = _expr_tag(data)
-            data_size = _int_size(data, type_environment=type_environment)
-            tmp_exprs[tmp_id] = data
-            dst = IRValue(
-                MemSpace.TMP,
-                name=f"t{tmp_id}",
-                size=data_size,
-                source_tmp=tmp_id,
-            )
-            if data_tag == "Iex_Load":
-                addr = expr_to_address(
-                    _expr_addr(data),
-                    tmps,
-                    conditions,
-                    expr_to_value=convert,
-                    size=data_size,
-                    segment_hints=segment_hints,
-                    tmp_exprs=tmp_exprs,
-                )
-                tmps[tmp_id] = IRValue(
-                    MemSpace.TMP,
-                    name=f"load_t{tmp_id}",
-                    size=data_size,
-                    expr=("load",),
-                    source_tmp=tmp_id,
-                )
-                return IRInstr(
-                    op="LOAD",
-                    dst=dst,
-                    args=(addr,),
-                    size=data_size,
-                    addr=instruction_addr,
-                )
-            if data_tag == "Iex_Binop":
-                op = _expr_op(data, "BINOP")
-                args = _expr_args(data)
-                if len(args) == 2:
-                    left = convert(args[0], tmps, conditions)
-                    right = convert(args[1], tmps, conditions)
-                    if "Cmp" in op or (
-                        condition_demand.requires_eager_condition(tmp_id)
-                        and any(token in op for token in ("And", "Or"))
-                    ):
-                        conditions[tmp_id] = expr_to_condition(
-                            data,
-                            tmps,
-                            conditions,
-                            expr_to_value=convert,
-                            tmp_exprs=tmp_exprs,
-                        )
-                    else:
-                        cond = build_condition_from_binop(op, left, right)
-                        if cond is not None:
-                            conditions[tmp_id] = cond
-                    value = _binary_value_from_operands_8616(op, left, right)
-                    tmps[tmp_id] = IRValue(
-                        value.space,
-                        name=value.name,
-                        offset=value.offset,
-                        const=value.const,
-                        size=value.size,
-                        version=value.version,
-                        expr=value.expr,
-                        memory_access_insn=value.memory_access_insn,
-                        source_tmp=tmp_id,
-                    )
-                    return IRInstr(
-                        op=op,
-                        dst=dst,
-                        args=(left, right),
-                        size=max(left.size, right.size),
-                        addr=instruction_addr,
-                    )
-            if data_tag == "Iex_ITE" and condition_demand.requires_eager_condition(
-                tmp_id
-            ):
-                cond = expr_to_condition(data, tmps, conditions, expr_to_value=convert, tmp_exprs=tmp_exprs)
-                if not (
-                    cond.op == "nonzero"
-                    and len(cond.args) == 1
-                    and isinstance(cond.args[0], IRValue)
-                    and cond.args[0].space == MemSpace.UNKNOWN
-                    and cond.args[0].name == "Iex_ITE"
-                ):
-                    conditions[tmp_id] = cond
-            value = convert(data, tmps, conditions)
-            tmps[tmp_id] = IRValue(
-                value.space,
-                name=value.name,
-                offset=value.offset,
-                const=value.const,
-                size=value.size,
-                version=value.version,
-                expr=value.expr,
-                memory_access_insn=value.memory_access_insn,
-                source_tmp=tmp_id,
-            )
-            return IRInstr(op="MOV", dst=dst, args=(value,), size=value.size, addr=instruction_addr)
-        if tag == "Ist_Put":
-            offset = _stmt_offset(stmt)
-            src = convert(_stmt_data(stmt), tmps, conditions)
-            # Preserve the exact register view. Alias owns parent/slice storage
-            # identity; typed IR must retain whether a byte write targets AL or
-            # AH so selector semantics can consume the correct lane.
-            dst_size = src.size if src.size in {1, 2, 4} else 2
-            dst = IRValue(MemSpace.REG, name=register_name_from_offset(offset, size=dst_size), size=dst_size)
-            return IRInstr(op="MOV", dst=dst, args=(src,), size=src.size or dst.size, addr=instruction_addr)
-        if tag == "Ist_Store":
-            data_expr = _stmt_data(stmt)
-            data = convert(data_expr, tmps, conditions)
-            addr = expr_to_address(
-                _stmt_addr(stmt),
-                tmps,
-                conditions,
-                expr_to_value=convert,
-                size=data.size,
-                segment_hints=segment_hints,
-                tmp_exprs=tmp_exprs,
-            )
-            return IRInstr(op="STORE", dst=None, args=(addr, data), size=data.size, addr=instruction_addr)
-        if tag == "Ist_Exit":
-            cond = expr_to_condition(
-                _stmt_guard(stmt), tmps, conditions, expr_to_value=convert, tmp_exprs=tmp_exprs
-            )
-            target = convert(_stmt_dst(stmt), tmps, conditions)
-            return IRInstr(op="CJMP", dst=None, args=(cond, target), size=0, addr=instruction_addr)
-        return None
+            loaded_value = tmps.get(tmp_id)
+            if loaded_value is not None:
+                replacement = transport.observe_load(instr, loaded_value, tmp_id)
+                if replacement is not None:
+                    tmps[tmp_id] = replacement
+                    continue
+        instrs.append(instr)
+    return instrs, refusals, instruction_addr
 
-    return _impl()
+
+def _block_successor_addrs_8616(
+    vex: _VexBlockBoundary | None, statements: Iterable[object]
+) -> tuple[int, ...]:
+    """Collect constant exit targets plus the block's fallthrough next."""
+    successor_addrs: list[int] = []
+    for stmt in statements:
+        if _stmt_tag(stmt) == "Ist_Exit":
+            dst = _stmt_dst(stmt)
+            const_dst = _const(dst)
+            if const_dst is not None:
+                successor_addrs.append(int(const_dst))
+    next_const = _const(_vex_next(vex))
+    if next_const is not None:
+        successor_addrs.append(int(next_const))
+    return tuple(sorted(dict.fromkeys(successor_addrs)))
 
 
 def _block_to_ir(
     block: object,
 ) -> tuple[IRBlock, VexConditionTransportStats8616]:
     """Import one angr block boundary into a typed IR block."""
-
-    def _impl() -> tuple[IRBlock, VexConditionTransportStats8616]:
-        vex = _block_vex(block)
-        addr = _block_addr(block)
-        if vex is None:
-            return (
-                IRBlock(
-                    addr=addr,
-                    refusals=(IRRefusal("missing_vex", "block has no vex IR", addr),),
-                ),
-                VexConditionTransportStats8616(),
-            )
-        tmps: _MutableTmpValues = {}
-        conditions: _MutableTmpConditions = {}
-        tmp_exprs: _TmpExprs = {}
-        instrs: list[IRInstr] = []
-        refusals: list[IRRefusal] = []
-        segment_hints = block_segment_hints(block)
-        statements = _vex_statements(vex)
-        condition_demand = collect_vex_condition_demand_8616(statements)
-        transport = VexConditionTransportNormalizer8616(
-            build_vex_condition_transport_layout_8616(statements)
-        )
-        type_environment = _vex_type_environment(vex)
-        instruction_addr: int | None = None
-        for statement_index, stmt in enumerate(statements):
-            tag = _stmt_tag(stmt)
-            if tag == "Ist_IMark":
-                instruction_addr = _stmt_instruction_addr(stmt)
-                continue
-            instr = _stmt_to_instr(
-                stmt,
-                tmps,
-                conditions,
-                instruction_addr=instruction_addr,
-                segment_hints=segment_hints,
-                tmp_exprs=tmp_exprs,
-                type_environment=type_environment,
-                condition_demand=condition_demand,
-            )
-            if instr is None:
-                if tag:
-                    refusals.append(IRRefusal("unsupported_stmt", f"unsupported VEX statement {tag}", addr))
-                continue
-            instr = replace(instr, origin=vex_instruction_origin_8616(
-                stmt, block_addr=addr, statement_index=statement_index,
-            ))
-            if instr.op == "LOAD" and tag == "Ist_WrTmp":
-                tmp_id = _stmt_tmp(stmt)
-                loaded_value = tmps.get(tmp_id)
-                if loaded_value is not None:
-                    replacement = transport.observe_load(instr, loaded_value, tmp_id)
-                    if replacement is not None:
-                        tmps[tmp_id] = replacement
-                        continue
-            instrs.append(instr)
-        terminal = terminal_control_flow_instr_8616(
-            vex, instruction_addr,
-            resolve_target=partial(
-                _expr_to_value, tmps=tmps, conditions=conditions,
-                type_environment=type_environment,
-            ),
-        )
-        if terminal is not None:
-            instrs.append(terminal)
-        successor_addrs: list[int] = []
-        for stmt in statements:
-            if _stmt_tag(stmt) == "Ist_Exit":
-                dst = _stmt_dst(stmt)
-                const_dst = _const(dst)
-                if const_dst is not None:
-                    successor_addrs.append(int(const_dst))
-        next_const = _const(_vex_next(vex))
-        if next_const is not None:
-            successor_addrs.append(int(next_const))
+    vex = _block_vex(block)
+    addr = _block_addr(block)
+    if vex is None:
         return (
             IRBlock(
                 addr=addr,
-                instrs=tuple(instrs),
-                refusals=tuple(refusals),
-                successor_addrs=tuple(sorted(dict.fromkeys(successor_addrs))),
+                refusals=(IRRefusal("missing_vex", "block has no vex IR", addr),),
             ),
-            transport.stats(),
+            VexConditionTransportStats8616(),
         )
-
-    return _impl()
+    tmps: _MutableTmpValues = {}
+    conditions: _MutableTmpConditions = {}
+    tmp_exprs: _TmpExprs = {}
+    segment_hints = block_segment_hints(block)
+    statements = _vex_statements(vex)
+    condition_demand = collect_vex_condition_demand_8616(statements)
+    transport = VexConditionTransportNormalizer8616(
+        build_vex_condition_transport_layout_8616(statements)
+    )
+    type_environment = _vex_type_environment(vex)
+    instrs, refusals, instruction_addr = _block_statement_instrs_8616(
+        statements,
+        tmps,
+        conditions,
+        tmp_exprs,
+        segment_hints,
+        condition_demand,
+        type_environment,
+        transport,
+        addr,
+    )
+    terminal = terminal_control_flow_instr_8616(
+        vex, instruction_addr,
+        resolve_target=partial(
+            _expr_to_value, tmps=tmps, conditions=conditions,
+            type_environment=type_environment,
+        ),
+    )
+    if terminal is not None:
+        instrs.append(terminal)
+    return (
+        IRBlock(
+            addr=addr,
+            instrs=tuple(instrs),
+            refusals=tuple(refusals),
+            successor_addrs=_block_successor_addrs_8616(vex, statements),
+        ),
+        transport.stats(),
+    )
 
 
 def build_x86_16_ir_function_artifact(project: object, function: object) -> IRFunctionArtifact:
@@ -965,112 +1119,144 @@ def build_x86_16_ir_function_artifact(project: object, function: object) -> IRFu
         logical_memory=logical_memory,
         condition_evidence=condition_evidence,
     )
+
+
+@dataclass
+class _ArtifactSummaryTally8616:
+    """Mutable census state for one IR artifact summary pass."""
+
+    space_counts: dict[str, int] = field(default_factory=lambda: {space.value: 0 for space in MemSpace})
+    address_space_counts: dict[str, int] = field(default_factory=lambda: {space.value: 0 for space in MemSpace})
+    stable_address_space_counts: dict[str, int] = field(
+        default_factory=lambda: {space.value: 0 for space in MemSpace}
+    )
+    address_status_counts: dict[str, int] = field(
+        default_factory=lambda: {status.value: 0 for status in AddressStatus}
+    )
+    segment_origin_counts: dict[str, int] = field(
+        default_factory=lambda: {origin.value: 0 for origin in SegmentOrigin}
+    )
+    condition_counts: dict[str, int] = field(default_factory=dict)
+    ssa_binding_count: int = 0
+    aliasable_values: int = 0
+
+    def record_value_atom(self, atom: IRValue | IRBinaryValue | IRAddress) -> None:
+        """Count one value atom, descending into binary operands."""
+        if isinstance(atom, IRBinaryValue):
+            self.record_value_atom(atom.lhs)
+            self.record_value_atom(atom.rhs)
+            return
+        self.space_counts[atom.space.value] = self.space_counts.get(atom.space.value, 0) + 1
+        if isinstance(atom, IRAddress):
+            self.address_space_counts[atom.space.value] = (
+                self.address_space_counts.get(atom.space.value, 0) + 1
+            )
+            if atom.status == AddressStatus.STABLE:
+                self.stable_address_space_counts[atom.space.value] = (
+                    self.stable_address_space_counts.get(atom.space.value, 0) + 1
+                )
+            self.address_status_counts[atom.status.value] = (
+                self.address_status_counts.get(atom.status.value, 0) + 1
+            )
+            self.segment_origin_counts[atom.segment_origin.value] = (
+                self.segment_origin_counts.get(atom.segment_origin.value, 0) + 1
+            )
+        if storage_of(atom) is not None:
+            self.aliasable_values += 1
+
+    def record_condition_atom(self, cond: IRCondition) -> None:
+        """Count one condition op and every atom in its arguments."""
+        self.condition_counts[cond.op] = self.condition_counts.get(cond.op, 0) + 1
+        for item in cond.args:
+            if isinstance(item, IRCondition):
+                self.record_condition_atom(item)
+                continue
+            self.record_value_atom(item)
+
+
 def build_x86_16_ir_function_artifact_summary(artifact: IRFunctionArtifact) -> dict[str, object]:
     """Summarize typed IR import facts for diagnostics and downstream gates."""
-
-    def _impl() -> dict[str, object]:
-        space_counts = {space.value: 0 for space in MemSpace}
-        address_space_counts = {space.value: 0 for space in MemSpace}
-        stable_address_space_counts = {space.value: 0 for space in MemSpace}
-        address_status_counts = {status.value: 0 for status in AddressStatus}
-        segment_origin_counts = {origin.value: 0 for origin in SegmentOrigin}
-        condition_counts: dict[str, int] = {}
-        ssa_binding_count = 0
-        aliasable_values = 0
-
-        def _record_value_atom(atom: IRValue | IRBinaryValue | IRAddress) -> None:
-            nonlocal aliasable_values
-            if isinstance(atom, IRBinaryValue):
-                _record_value_atom(atom.lhs)
-                _record_value_atom(atom.rhs)
-                return
-            space_counts[atom.space.value] = space_counts.get(atom.space.value, 0) + 1
-            if isinstance(atom, IRAddress):
-                address_space_counts[atom.space.value] = address_space_counts.get(atom.space.value, 0) + 1
-                if atom.status == AddressStatus.STABLE:
-                    stable_address_space_counts[atom.space.value] = (
-                        stable_address_space_counts.get(atom.space.value, 0) + 1
-                    )
-                address_status_counts[atom.status.value] = address_status_counts.get(atom.status.value, 0) + 1
-                segment_origin_counts[atom.segment_origin.value] = (
-                    segment_origin_counts.get(atom.segment_origin.value, 0) + 1
-                )
-            if storage_of(atom) is not None:
-                aliasable_values += 1
-
-        def _record_condition_atom(cond: IRCondition) -> None:
-            condition_counts[cond.op] = condition_counts.get(cond.op, 0) + 1
-            for item in cond.args:
-                if isinstance(item, IRCondition):
-                    _record_condition_atom(item)
+    tally = _ArtifactSummaryTally8616()
+    for block in artifact.blocks:
+        tally.ssa_binding_count += len(build_x86_16_block_local_ssa(block).bindings)
+        for instr in block.instrs:
+            atoms: tuple[IRAtom, ...] = instr.args + (() if instr.dst is None else (instr.dst,))
+            for atom in atoms:
+                if isinstance(atom, IRCondition):
+                    tally.record_condition_atom(atom)
                     continue
-                _record_value_atom(item)
-
-        for block in artifact.blocks:
-            ssa_binding_count += len(build_x86_16_block_local_ssa(block).bindings)
-            for instr in block.instrs:
-                atoms: tuple[IRAtom, ...] = instr.args + (() if instr.dst is None else (instr.dst,))
-                for atom in atoms:
-                    if isinstance(atom, IRCondition):
-                        _record_condition_atom(atom)
-                        continue
-                    _record_value_atom(atom)
-        frame = build_x86_16_ir_frame_access_artifact(artifact)
-        return {
-            "block_count": len(artifact.blocks),
-            "instruction_count": sum(len(block.instrs) for block in artifact.blocks),
-            "refusal_count": len(artifact.refusals),
-            "space_counts": dict(sorted(space_counts.items())),
-            "address_space_counts": dict(sorted(address_space_counts.items())),
-            "stable_address_space_counts": dict(sorted(stable_address_space_counts.items())),
-            "address_status_counts": dict(sorted(address_status_counts.items())),
-            "segment_origin_counts": dict(sorted(segment_origin_counts.items())),
-            "condition_counts": dict(sorted(condition_counts.items())),
-            "aliasable_value_count": aliasable_values,
-            "ssa_binding_count": ssa_binding_count,
-            "frame_slot_count": len(frame.slots),
-            "frame_refusal_count": len(frame.refusals),
-        }
-
-    return _impl()
+                tally.record_value_atom(atom)
+    frame = build_x86_16_ir_frame_access_artifact(artifact)
+    return {
+        "block_count": len(artifact.blocks),
+        "instruction_count": sum(len(block.instrs) for block in artifact.blocks),
+        "refusal_count": len(artifact.refusals),
+        "space_counts": dict(sorted(tally.space_counts.items())),
+        "address_space_counts": dict(sorted(tally.address_space_counts.items())),
+        "stable_address_space_counts": dict(sorted(tally.stable_address_space_counts.items())),
+        "address_status_counts": dict(sorted(tally.address_status_counts.items())),
+        "segment_origin_counts": dict(sorted(tally.segment_origin_counts.items())),
+        "condition_counts": dict(sorted(tally.condition_counts.items())),
+        "aliasable_value_count": tally.aliasable_values,
+        "ssa_binding_count": tally.ssa_binding_count,
+        "frame_slot_count": len(frame.slots),
+        "frame_refusal_count": len(frame.refusals),
+    }
 
 
-def apply_x86_16_vex_ir_artifact(project: object, codegen: object) -> bool:
-    """Attach or reuse typed IR for one immutable codegen function snapshot."""
-    codegen_boundary = cast(_CodegenBoundary, codegen)
+def _codegen_function_8616(codegen_boundary: _CodegenBoundary, project: object) -> tuple[object, int] | None:
+    """Resolve the codegen's function object and address at the angr boundary."""
     try:
         cfunc = codegen_boundary.cfunc
     except AttributeError:
-        return False
+        return None
     if cfunc is None:
-        return False
+        return None
     try:
         func_addr = cfunc.addr
     except AttributeError:
-        return False
+        return None
     if not isinstance(func_addr, int):
-        return False
+        return None
     project_boundary = cast(_ProjectBoundary, project)
     function = project_boundary.kb.functions.function(addr=func_addr, create=False)
     if function is None:
-        return False
+        return None
+    return function, func_addr
+
+
+def _existing_artifacts_current_8616(
+    codegen_boundary: _CodegenBoundary,
+    function: object,
+    func_addr: int,
+) -> bool:
+    """Return whether all attached artifacts already match this function."""
     try:
         existing_source = codegen_boundary._inertia_vex_ir_source_function_8616
         existing_artifact = codegen_boundary._inertia_raw_vex_ir_artifact_8616
         existing_frame = codegen_boundary._inertia_raw_vex_ir_frame_8616
         existing_ssa = codegen_boundary._inertia_raw_vex_ir_function_ssa_8616
     except AttributeError:
-        existing_source = None
-    else:
-        if (
-            existing_source is function
-            and isinstance(existing_artifact, IRFunctionArtifact)
-            and existing_artifact.function_addr == func_addr
-            and existing_frame is not None
-            and isinstance(existing_ssa, SSAFunctionArtifact)
-            and existing_ssa.function_addr == func_addr
-        ):
-            return False
+        return False
+    return (
+        existing_source is function
+        and isinstance(existing_artifact, IRFunctionArtifact)
+        and existing_artifact.function_addr == func_addr
+        and existing_frame is not None
+        and isinstance(existing_ssa, SSAFunctionArtifact)
+        and existing_ssa.function_addr == func_addr
+    )
+
+
+def apply_x86_16_vex_ir_artifact(project: object, codegen: object) -> bool:
+    """Attach or reuse typed IR for one immutable codegen function snapshot."""
+    codegen_boundary = cast(_CodegenBoundary, codegen)
+    resolved = _codegen_function_8616(codegen_boundary, project)
+    if resolved is None:
+        return False
+    function, func_addr = resolved
+    if _existing_artifacts_current_8616(codegen_boundary, function, func_addr):
+        return False
     from .function_ssa_registry import (
         FunctionSSAArtifactStage8616,
         FunctionSSAArtifactVerdict8616,

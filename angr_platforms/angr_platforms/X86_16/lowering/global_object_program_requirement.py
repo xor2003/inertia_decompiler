@@ -12,7 +12,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from ..alias.indexed_address_access_contracts import IndexedAliasAccessRole8616
@@ -105,6 +105,78 @@ GLOBAL_OBJECT_PROGRAM_CALL_TARGET_KINDS_8616: frozenset[CallTargetKind8616] = fr
 )
 
 
+@dataclass(slots=True)
+class _RequirementCensus8616:
+    """Mutable census state for one catalog-requirement decision."""
+
+    reasons: set[GlobalObjectProgramRequirementReason8616] = field(default_factory=set)
+    local_fact_count: int = 0
+    global_source_count: int = 0
+    stack_source_count: int = 0
+    raw_count: int = 0
+    normalized_count: int = 0
+    classified_count: int = 0
+    pointer_targets: set[int] = field(default_factory=set)
+    relevant_callsites: set[int] = field(default_factory=set)
+
+    def scan_local_program(
+        self,
+        local_program: IndexedAliasProgramEvidence8616,
+    ) -> None:
+        """Count local facts that alone require the catalog."""
+        for function_evidence in local_program.functions:
+            for fact in function_evidence.accesses.facts:
+                reason = None
+                if fact.role is IndexedAliasAccessRole8616.GLOBAL_INDEXED:
+                    reason = GlobalObjectProgramRequirementReason8616.LOCAL_GLOBAL_INDEXED_ACCESS
+                elif fact.is_pointer_argument:
+                    reason = GlobalObjectProgramRequirementReason8616.LOCAL_POINTER_ARGUMENT
+                if reason is None:
+                    continue
+                self.reasons.add(reason)
+                self.local_fact_count += 1
+                self.raw_count += 1
+                self.normalized_count += 1
+                self.classified_count += 1
+
+    def scan_callsites(
+        self,
+        summaries: Sequence[CallsiteSummary8616],
+        pointer_argument_indices_by_target: Mapping[int, tuple[int, ...]],
+    ) -> None:
+        """Classify outgoing pointer-argument sources by provenance."""
+        for summary in summaries:
+            target_addr = summary.target_addr
+            if not isinstance(target_addr, int):
+                continue
+            pointer_indices = pointer_argument_indices_by_target.get(target_addr, ())
+            if not pointer_indices:
+                continue
+            self.pointer_targets.add(target_addr)
+            self.relevant_callsites.add(summary.callsite_addr)
+            self.raw_count += len(pointer_indices)
+            projected = logical_pointer_argument_sources_8616(
+                summary,
+                pointer_indices,
+            )
+            if projected is None:
+                continue
+            for _argument_index, source in projected:
+                if source is not None:
+                    self.normalized_count += 1
+                source_kind = classify_callee_pointer_source_8616(source)
+                if source_kind is CalleePointerSourceKind8616.UNKNOWN:
+                    continue
+                self.classified_count += 1
+                if source_kind is CalleePointerSourceKind8616.GLOBAL_OBJECT:
+                    self.global_source_count += 1
+                    self.reasons.add(
+                        GlobalObjectProgramRequirementReason8616.CALLEE_GLOBAL_POINTER_SOURCE
+                    )
+                else:
+                    self.stack_source_count += 1
+
+
 def recover_global_object_program_requirement_8616(
     local_program: IndexedAliasProgramEvidence8616,
     summaries: Sequence[CallsiteSummary8616],
@@ -113,61 +185,18 @@ def recover_global_object_program_requirement_8616(
     """Join local and outgoing-call facts into one typed catalog decision."""
     if not local_program.closed:
         raise ValueError("local indexed Alias program must be closed")
-    reasons: set[GlobalObjectProgramRequirementReason8616] = set()
-    local_fact_count = 0
-    global_source_count = 0
-    stack_source_count = 0
-    raw_count = 0
-    normalized_count = 0
-    classified_count = 0
-    pointer_targets: set[int] = set()
-    relevant_callsites: set[int] = set()
-
-    for function_evidence in local_program.functions:
-        for fact in function_evidence.accesses.facts:
-            reason = None
-            if fact.role is IndexedAliasAccessRole8616.GLOBAL_INDEXED:
-                reason = GlobalObjectProgramRequirementReason8616.LOCAL_GLOBAL_INDEXED_ACCESS
-            elif fact.is_pointer_argument:
-                reason = GlobalObjectProgramRequirementReason8616.LOCAL_POINTER_ARGUMENT
-            if reason is None:
-                continue
-            reasons.add(reason)
-            local_fact_count += 1
-            raw_count += 1
-            normalized_count += 1
-            classified_count += 1
-
-    for summary in summaries:
-        target_addr = summary.target_addr
-        if not isinstance(target_addr, int):
-            continue
-        pointer_indices = pointer_argument_indices_by_target.get(target_addr, ())
-        if not pointer_indices:
-            continue
-        pointer_targets.add(target_addr)
-        relevant_callsites.add(summary.callsite_addr)
-        raw_count += len(pointer_indices)
-        projected = logical_pointer_argument_sources_8616(
-            summary,
-            pointer_indices,
-        )
-        if projected is None:
-            continue
-        for _argument_index, source in projected:
-            if source is not None:
-                normalized_count += 1
-            source_kind = classify_callee_pointer_source_8616(source)
-            if source_kind is CalleePointerSourceKind8616.UNKNOWN:
-                continue
-            classified_count += 1
-            if source_kind is CalleePointerSourceKind8616.GLOBAL_OBJECT:
-                global_source_count += 1
-                reasons.add(
-                    GlobalObjectProgramRequirementReason8616.CALLEE_GLOBAL_POINTER_SOURCE
-                )
-            else:
-                stack_source_count += 1
+    census = _RequirementCensus8616()
+    census.scan_local_program(local_program)
+    census.scan_callsites(summaries, pointer_argument_indices_by_target)
+    reasons = census.reasons
+    local_fact_count = census.local_fact_count
+    global_source_count = census.global_source_count
+    stack_source_count = census.stack_source_count
+    raw_count = census.raw_count
+    normalized_count = census.normalized_count
+    classified_count = census.classified_count
+    pointer_targets = census.pointer_targets
+    relevant_callsites = census.relevant_callsites
 
     failure_count = raw_count - classified_count
     if reasons:

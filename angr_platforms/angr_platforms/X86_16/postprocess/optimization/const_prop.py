@@ -95,52 +95,50 @@ def _eval_const_expr(node: object) -> int | None:
     return _impl()
 
 
+def _fold_binary_op_8616(node: CBinaryOp, node_codegen: object | None) -> bool:
+    """Fold a binary operator node across the dynamic third-party angr C AST boundary."""
+    a_val = _eval_const_expr(node.lhs)
+    b_val = _eval_const_expr(node.rhs)
+    if a_val is not None and b_val is not None:
+        fn = _CONST_PROP_BINARY_OPS.get(node.op)
+        if fn is not None:
+            result = fn(a_val, b_val)
+            if result is not None:
+                node.lhs = _folded_constant_8616(result, codegen=node_codegen)
+                node.rhs = _folded_constant_8616(0, codegen=node_codegen)
+                node.op = "Add"
+                return True
+
+    # Fold: X + 0 → X, X - 0 → X
+    if isinstance(node.rhs, CConstant):
+        rhs_val = _c_constant_value_8616(node.rhs)
+        if rhs_val == 0 and node.op in ("Add", "Sub"):
+            return True
+    return False
+
+
+def _fold_unary_op_8616(node: CUnaryOp, node_codegen: object | None) -> bool:
+    """Fold a unary operator node across the dynamic third-party angr C AST boundary."""
+    operand_val = _eval_const_expr(node.operand)
+    if operand_val is None:
+        return False
+    if node.op == "Neg":
+        node.operand = _folded_constant_8616(-operand_val, codegen=node_codegen)
+        return True
+    if node.op == "Not":
+        node.operand = _folded_constant_8616(int(not operand_val), codegen=node_codegen)
+        return True
+    return False
+
+
 def _fold_constants_in_node(node: object, *, codegen: object | None = None) -> bool:
     """Fold constant sub-expressions in one C AST node."""
-
-    def _impl() -> bool:
-        """Fold across the dynamic third-party angr C AST boundary."""
-        changed = False
-        node_codegen = getattr(node, "codegen", None) or codegen
-
-        if isinstance(node, CBinaryOp):
-            a_val = _eval_const_expr(node.lhs)
-            b_val = _eval_const_expr(node.rhs)
-            if a_val is not None and b_val is not None:
-                fn = _CONST_PROP_BINARY_OPS.get(node.op)
-                if fn is not None:
-                    result = fn(a_val, b_val)
-                    if result is not None:
-                        node.lhs = _folded_constant_8616(result, codegen=node_codegen)
-                        node.rhs = _folded_constant_8616(0, codegen=node_codegen)
-                        node.op = "Add"
-                        changed = True
-                        return changed
-
-            # Fold: X + 0 → X, X - 0 → X
-            if isinstance(node.rhs, CConstant):
-                rhs_val = _c_constant_value_8616(node.rhs)
-                if rhs_val == 0 and node.op in ("Add", "Sub"):
-                    changed = True
-                    return changed
-
-        if isinstance(node, CUnaryOp):
-            operand_val = _eval_const_expr(node.operand)
-            if operand_val is not None:
-                if node.op == "Neg":
-                    result = _folded_constant_8616(-operand_val, codegen=node_codegen)
-                    node.operand = result
-                    changed = True
-                    return changed
-                if node.op == "Not":
-                    result = _folded_constant_8616(int(not operand_val), codegen=node_codegen)
-                    node.operand = result
-                    changed = True
-                    return changed
-
-        return changed
-
-    return _impl()
+    node_codegen = getattr(node, "codegen", None) or codegen
+    if isinstance(node, CBinaryOp):
+        return _fold_binary_op_8616(node, node_codegen)
+    if isinstance(node, CUnaryOp):
+        return _fold_unary_op_8616(node, node_codegen)
+    return False
 
 
 def _constant_propagation_8616(stmts: object, codegen: object | None = None) -> bool:

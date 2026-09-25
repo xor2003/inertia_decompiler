@@ -156,6 +156,17 @@ def _proven_char_type_8616(
     )
 
 
+def _prototype_blocks_refinement_8616(prototype: object) -> bool:
+    """Return whether an existing prototype refuses guessed char refinement."""
+    return (
+        prototype is not None
+        and (
+            not isinstance(prototype, SimTypeFunction)
+            or not isinstance(prototype.returnty, (SimTypeBottom, SimTypeChar))
+        )
+    )
+
+
 def apply_caller_observed_byte_return_type_8616(
     project: object,
     function: object,
@@ -171,13 +182,7 @@ def apply_caller_observed_byte_return_type_8616(
         project_surface.arch.name != "86_16"
         or storage is not TerminalReturnStorage8616.AL
         or explicit_prototype
-        or (
-            prototype is not None
-            and (
-                not isinstance(prototype, SimTypeFunction)
-                or not isinstance(prototype.returnty, (SimTypeBottom, SimTypeChar))
-            )
-        )
+        or _prototype_blocks_refinement_8616(prototype)
     ):
         return _not_applicable_8616()
     return_type, evidence = _proven_char_type_8616(project, function_surface.addr)

@@ -23,6 +23,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CExpressionStatement,
     CFunctionCall,
     CReturn,
+    CStatement,
     CStatements,
     CVariable,
 )
@@ -217,6 +218,81 @@ def _terminal_linear_suffix_8616(root: CStatements) -> tuple[object, ...]:
     return tuple(suffix)
 
 
+def _return_value_context_8616(
+    project_surface: _ProjectSurface8616,
+    codegen_surface: _CodegenSurface8616,
+    function_addr: int,
+) -> tuple[_FunctionSurface8616, int, int] | TerminalRegisterReturnValueResult8616:
+    """Resolve the proven function and AX register geometry or refuse."""
+    functions = project_surface.kb.functions
+    function = functions.function(addr=function_addr, create=False)
+    if function is None:
+        return _result_8616(
+            codegen_surface,
+            TerminalRegisterReturnValueStatus8616.REFUSED,
+            TerminalRegisterReturnValueEvidence8616(failure_count=1),
+            TerminalRegisterReturnValueRefusal8616.MISSING_FUNCTION,
+        )
+    ax_register = project_surface.arch.registers.get("ax")
+    if not isinstance(ax_register, tuple) or len(ax_register) < 2:
+        return _result_8616(
+            codegen_surface,
+            TerminalRegisterReturnValueStatus8616.REFUSED,
+            TerminalRegisterReturnValueEvidence8616(failure_count=1),
+            TerminalRegisterReturnValueRefusal8616.MISSING_AX_REGISTER,
+        )
+    ax_offset, ax_width = ax_register[:2]
+    if not isinstance(ax_offset, int) or not isinstance(ax_width, int):
+        return _result_8616(
+            codegen_surface,
+            TerminalRegisterReturnValueStatus8616.REFUSED,
+            TerminalRegisterReturnValueEvidence8616(failure_count=1),
+            TerminalRegisterReturnValueRefusal8616.MISSING_AX_REGISTER,
+        )
+    return function, ax_offset, ax_width
+
+
+def _debug_linear_order_8616(
+    statements: tuple[CStatement, ...],
+    assignment_index: int,
+    return_index: int,
+) -> None:
+    """Emit the opt-in linear AX-definition ordering dump."""
+    _LOGGER.warning(
+        "terminal AX value linear order: assignment=%d return=%d statements=%s calls=%s",
+        assignment_index,
+        return_index,
+        tuple(
+            (index, type(statement).__name__, contains_effectful_call_8616(statement))
+            for index, statement in enumerate(statements)
+        ),
+        tuple(
+            (
+                index,
+                tuple(
+                    (
+                        call.callee_func.name if call.callee_func is not None else None,
+                        type(call.callee_target).__name__,
+                        (
+                            call.callee_target.variable.name
+                            if isinstance(call.callee_target, CVariable)
+                            else call.callee_target.value
+                            if isinstance(call.callee_target, CConstant)
+                            else call.callee_target
+                            if isinstance(call.callee_target, str)
+                            else None
+                        ),
+                    )
+                    for call in _iter_c_nodes_deep_8616(statement)
+                    if isinstance(call, CFunctionCall)
+                ),
+            )
+            for index, statement in enumerate(statements)
+            if contains_effectful_call_8616(statement)
+        ),
+    )
+
+
 def materialize_terminal_register_return_value_8616(
     project: object,
     codegen: object,
@@ -240,33 +316,44 @@ def materialize_terminal_register_return_value_8616(
             TerminalRegisterReturnValueRefusal8616.NOT_APPLICABLE,
         )
 
-    functions = project_surface.kb.functions
-    function = functions.function(addr=cfunc.addr, create=False)
-    if function is None:
-        return _result_8616(
-            codegen_surface,
-            TerminalRegisterReturnValueStatus8616.REFUSED,
-            TerminalRegisterReturnValueEvidence8616(failure_count=1),
-            TerminalRegisterReturnValueRefusal8616.MISSING_FUNCTION,
-        )
+    context = _return_value_context_8616(project_surface, codegen_surface, cfunc.addr)
+    if isinstance(context, TerminalRegisterReturnValueResult8616):
+        return context
+    function, ax_offset, ax_width = context
 
-    ax_register = project_surface.arch.registers.get("ax")
-    if not isinstance(ax_register, tuple) or len(ax_register) < 2:
+    census = _ax_return_census_8616(project, function, root, ax_offset, ax_width)
+    if not census.terminal_shape or not census.all_assignments:
         return _result_8616(
             codegen_surface,
             TerminalRegisterReturnValueStatus8616.REFUSED,
-            TerminalRegisterReturnValueEvidence8616(failure_count=1),
-            TerminalRegisterReturnValueRefusal8616.MISSING_AX_REGISTER,
+            TerminalRegisterReturnValueEvidence8616(
+                census.raw_count, int(census.terminal_shape), 0, 0, 0
+            ),
+            TerminalRegisterReturnValueRefusal8616.INCOMPLETE_TERMINAL_SHAPE,
         )
-    ax_offset, ax_width = ax_register[:2]
-    if not isinstance(ax_offset, int) or not isinstance(ax_width, int):
-        return _result_8616(
-            codegen_surface,
-            TerminalRegisterReturnValueStatus8616.REFUSED,
-            TerminalRegisterReturnValueEvidence8616(failure_count=1),
-            TerminalRegisterReturnValueRefusal8616.MISSING_AX_REGISTER,
-        )
+    return _materialize_linear_ax_return_8616(codegen_surface, census)
 
+
+@dataclass(slots=True)
+class _AxReturnCensus8616:
+    """Terminal AX-definition census for one structured function."""
+
+    raw_count: int
+    terminal_shape: bool
+    statements: tuple[object, ...]
+    all_assignments: tuple[CAssignment, ...]
+    assignments: tuple[CAssignment, ...]
+    returns: tuple[CReturn, ...]
+
+
+def _ax_return_census_8616(
+    project: object,
+    function: _FunctionSurface8616,
+    root: CStatements,
+    ax_offset: int,
+    ax_width: int,
+) -> _AxReturnCensus8616:
+    """Collect terminal AX assignments, returns, and the linear suffix."""
     nodes = tuple(_iter_c_nodes_deep_8616(root))
     all_assignments = tuple(
         node
@@ -277,19 +364,6 @@ def materialize_terminal_register_return_value_8616(
         and view.width == ax_width
     )
     returns = tuple(node for node in nodes if isinstance(node, CReturn))
-    raw_count = len(all_assignments)
-    terminal_shape = (
-        terminal_return_storage_8616(project, function) is TerminalReturnStorage8616.AX
-        and len(returns) == 1
-    )
-    if not terminal_shape or not all_assignments:
-        return _result_8616(
-            codegen_surface,
-            TerminalRegisterReturnValueStatus8616.REFUSED,
-            TerminalRegisterReturnValueEvidence8616(raw_count, int(terminal_shape), 0, 0, 0),
-            TerminalRegisterReturnValueRefusal8616.INCOMPLETE_TERMINAL_SHAPE,
-        )
-
     statements = _terminal_linear_suffix_8616(root)
     assignments = tuple(
         statement
@@ -297,6 +371,27 @@ def materialize_terminal_register_return_value_8616(
         if isinstance(statement, CAssignment)
         and any(statement is assignment for assignment in all_assignments)
     )
+    return _AxReturnCensus8616(
+        raw_count=len(all_assignments),
+        terminal_shape=(
+            terminal_return_storage_8616(project, function) is TerminalReturnStorage8616.AX
+            and len(returns) == 1
+        ),
+        statements=statements,
+        all_assignments=all_assignments,
+        assignments=assignments,
+        returns=returns,
+    )
+
+
+def _materialize_linear_ax_return_8616(
+    codegen_surface: _CodegenSurface8616,
+    census: _AxReturnCensus8616,
+) -> TerminalRegisterReturnValueResult8616:
+    """Prove linear AX-definition ordering and rewrite the sole return."""
+    raw_count = census.raw_count
+    statements = census.statements
+    assignments = census.assignments
     if not assignments:
         return _result_8616(
             codegen_surface,
@@ -304,7 +399,7 @@ def materialize_terminal_register_return_value_8616(
             TerminalRegisterReturnValueEvidence8616(raw_count, 1, 0, 0, 0),
             TerminalRegisterReturnValueRefusal8616.NONLINEAR_AX_DEFINITION,
         )
-    return_node = returns[0]
+    return_node = census.returns[0]
     if not any(statement is return_node for statement in statements):
         return _result_8616(
             codegen_surface,
@@ -358,39 +453,7 @@ def materialize_terminal_register_return_value_8616(
         )
     if any(contains_effectful_call_8616(statement) for statement in intervening):
         if os.environ.get("INERTIA_DEBUG_TERMINAL_RETURN_VALUES") == "1":
-            _LOGGER.warning(
-                "terminal AX value linear order: assignment=%d return=%d statements=%s calls=%s",
-                assignment_index,
-                return_index,
-                tuple(
-                    (index, type(statement).__name__, contains_effectful_call_8616(statement))
-                    for index, statement in enumerate(statements)
-                ),
-                tuple(
-                    (
-                        index,
-                        tuple(
-                            (
-                                call.callee_func.name if call.callee_func is not None else None,
-                                type(call.callee_target).__name__,
-                                (
-                                    call.callee_target.variable.name
-                                    if isinstance(call.callee_target, CVariable)
-                                    else call.callee_target.value
-                                    if isinstance(call.callee_target, CConstant)
-                                    else call.callee_target
-                                    if isinstance(call.callee_target, str)
-                                    else None
-                                ),
-                            )
-                            for call in _iter_c_nodes_deep_8616(statement)
-                            if isinstance(call, CFunctionCall)
-                        ),
-                    )
-                    for index, statement in enumerate(statements)
-                    if contains_effectful_call_8616(statement)
-                ),
-            )
+            _debug_linear_order_8616(statements, assignment_index, return_index)
         return _result_8616(
             codegen_surface,
             TerminalRegisterReturnValueStatus8616.REFUSED,

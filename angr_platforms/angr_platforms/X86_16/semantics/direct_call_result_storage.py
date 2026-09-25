@@ -120,6 +120,17 @@ def _direct_call_target_8616(instruction: DirectCallResultInstructionView8616) -
     return target.immediate if target.kind == X86_OP_IMM and isinstance(target.immediate, int) else None
 
 
+def _flat_memory_8616(memory: DirectCallResultMemoryView8616 | None) -> bool:
+    """Return whether the memory operand is a flat DS/absolute address."""
+    return (
+        memory is not None
+        and memory.segment in {None, 0, X86_REG_DS}
+        and memory.base in {None, 0}
+        and memory.index in {None, 0}
+        and isinstance(memory.displacement, int)
+    )
+
+
 def _direct_ds_word_store_8616(
     instruction: DirectCallResultInstructionView8616,
     source_register: int,
@@ -129,20 +140,26 @@ def _direct_ds_word_store_8616(
         return None
     destination, source = instruction.operands[:2]
     memory = destination.memory
-    if (
-        destination.kind != X86_OP_MEM
-        or destination.size != 2
-        or memory is None
-        or memory.segment not in {None, 0, X86_REG_DS}
-        or memory.base not in {None, 0}
-        or memory.index not in {None, 0}
-        or not isinstance(memory.displacement, int)
-        or source.kind != X86_OP_REG
-        or source.register != source_register
-        or source.size != 2
-    ):
+    if destination.kind != X86_OP_MEM or destination.size != 2 or not _flat_memory_8616(memory):
         return None
+    if source.kind != X86_OP_REG or source.register != source_register or source.size != 2:
+        return None
+    assert memory is not None and isinstance(memory.displacement, int)
     return memory.displacement & 0xFFFF
+
+
+def _ordered_int_addresses_8616(
+    call: DirectCallResultInstructionView8616,
+    low_store: DirectCallResultInstructionView8616,
+    high_store: DirectCallResultInstructionView8616,
+) -> bool:
+    """Return whether the three sites carry strictly ordered int addresses."""
+    return (
+        isinstance(call.address, int)
+        and isinstance(low_store.address, int)
+        and isinstance(high_store.address, int)
+        and call.address < low_store.address < high_store.address
+    )
 
 
 def recover_direct_call_result_storage_facts_8616(
@@ -160,12 +177,12 @@ def recover_direct_call_result_storage_facts_8616(
             or low_offset is None
             or high_offset is None
             or ((low_offset + 2) & 0xFFFF) != high_offset
-            or not isinstance(call.address, int)
-            or not isinstance(low_store.address, int)
-            or not isinstance(high_store.address, int)
-            or not call.address < low_store.address < high_store.address
+            or not _ordered_int_addresses_8616(call, low_store, high_store)
         ):
             continue
+        assert isinstance(call.address, int)
+        assert isinstance(low_store.address, int)
+        assert isinstance(high_store.address, int)
         facts.append(
             DirectCallResultStorageFact8616(
                 offset=low_offset,

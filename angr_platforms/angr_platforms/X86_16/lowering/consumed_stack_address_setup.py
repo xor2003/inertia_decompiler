@@ -90,7 +90,7 @@ def _masked_word_parent_8616(statement: object) -> str | None:
         and _pure_address_expression_8616(inserted.lhs)
     ):
         return None
-    return parent
+    return cast(str, parent)
 
 
 def _stack_argument_bp_8616(codegen: object, argument: object) -> int | None:
@@ -142,6 +142,39 @@ def _setup_request_8616(
     return requests[0] if len(requests) == 1 else None
 
 
+def _proven_setup_deletion_8616(
+    project: Project,
+    codegen: object,
+    sequence: c.CStatements,
+    index: int,
+    statement: c.CAssignment,
+    parent: str,
+    inventory: Mapping[int, CallsiteSummary8616],
+) -> tuple[int, int]:
+    """Return ``(normalized, classified)`` deltas for one masked-word carrier."""
+    for later in sequence.statements[index + 1:]:
+        call = later.expr if isinstance(later, c.CExpressionStatement) else later
+        if isinstance(call, c.CFunctionCall):
+            summary = inventory.get(structured_callsite_addr_8616(call) or -1)
+            if summary is None:
+                return 0, 0
+            request = _setup_request_8616(codegen, call, summary, statement, parent)
+            if request is None:
+                return 0, 0
+            proof = collect_consumed_stack_address_setup_8616(project, request)
+            if proof.verdict is RegisterEntryOverwriteVerdict8616.PROVEN:
+                return 1, 1
+            return 1, 0
+        if any(
+            isinstance(node, c.CVariable) and runtime_gp_name_for_variable_8616(node.variable) == parent
+            for node in _iter_c_nodes_deep_8616(later)
+        ):
+            return 0, 0
+        if not isinstance(later, c.CAssignment):
+            return 0, 0
+    return 0, 0
+
+
 def prune_consumed_stack_address_setup_8616(
     project: Project, codegen: object, root: object, inventory: Mapping[int, CallsiteSummary8616],
 ) -> bool:
@@ -156,26 +189,13 @@ def prune_consumed_stack_address_setup_8616(
             if parent is None or not isinstance(statement, c.CAssignment):
                 continue
             raw += 1
-            for later in sequence.statements[index + 1:]:
-                call = later.expr if isinstance(later, c.CExpressionStatement) else later
-                if isinstance(call, c.CFunctionCall):
-                    summary = inventory.get(structured_callsite_addr_8616(call) or -1)
-                    if summary is not None:
-                        request = _setup_request_8616(codegen, call, summary, statement, parent)
-                        if request is not None:
-                            normalized += 1
-                            proof = collect_consumed_stack_address_setup_8616(project, request)
-                            if proof.verdict is RegisterEntryOverwriteVerdict8616.PROVEN:
-                                classified += 1
-                                deletions.add(index)
-                    break
-                if any(
-                    isinstance(node, c.CVariable) and runtime_gp_name_for_variable_8616(node.variable) == parent
-                    for node in _iter_c_nodes_deep_8616(later)
-                ):
-                    break
-                if not isinstance(later, c.CAssignment):
-                    break
+            normalized_hit, classified_hit = _proven_setup_deletion_8616(
+                project, codegen, sequence, index, statement, parent, inventory
+            )
+            normalized += normalized_hit
+            if classified_hit:
+                classified += 1
+                deletions.add(index)
         for index in sorted(deletions, reverse=True):
             del sequence.statements[index]
             materialized += 1

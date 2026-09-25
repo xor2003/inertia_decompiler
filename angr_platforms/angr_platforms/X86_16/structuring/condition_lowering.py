@@ -592,96 +592,140 @@ def lower_typed_condition_to_c_expr_8616(
     return _lower_condition_ir_to_c_expr_8616(condition, project, codegen)
 
 
+def _lowered_condition_arg_8616(
+    condition: IRCondition,
+    index: int,
+    project: object,
+    codegen: object,
+) -> object:
+    """Lower one IRValue operand using the condition's signedness and width."""
+    return _ir_value_to_cvar_8616(
+        condition.args[index],
+        project,
+        codegen,
+        signed=condition.is_signed,
+        condition_width_bits=condition.width_bits,
+    )
+
+
+def _lower_zero_test_8616(
+    condition: IRCondition,
+    angr_op: str,
+    project: object,
+    codegen: object,
+) -> object | None:
+    """Lower a zero/nonzero test to a comparison against constant zero."""
+    from angr.analyses.decompiler.structured_codegen.c import CBinaryOp
+
+    if not condition.args or not isinstance(condition.args[0], IRValue):
+        return None
+    lhs = _lowered_condition_arg_8616(condition, 0, project, codegen)
+    zero = _make_c_constant_8616(0, codegen)
+    return cast(object, CBinaryOp(
+        angr_op, lhs, zero,
+        codegen=codegen,
+        tags=condition_origin_tags_8616(condition),
+    ))
+
+
+def _lower_compare_family_8616(
+    condition: IRCondition,
+    project: object,
+    codegen: object,
+) -> object | None:
+    """Lower a typed compare-family condition to its angr binary operator."""
+    from angr.analyses.decompiler.structured_codegen.c import CBinaryOp
+
+    sym = condition_compare_symbol_8616(condition.op)
+    if sym is None:
+        return None
+    lhs = _lowered_condition_arg_8616(condition, 0, project, codegen)
+    rhs = _lowered_condition_arg_8616(condition, 1, project, codegen)
+    # Map to angr structured-codegen CBinaryOp operator names
+    angr_op = _condition_ir_op_to_angr_binary_op_8616(sym)
+    if angr_op is None:
+        return None
+    return cast(object, CBinaryOp(
+        angr_op, lhs, rhs,
+        codegen=codegen,
+        tags=condition_origin_tags_8616(condition),
+    ))
+
+
+def _lower_not_8616(
+    condition: IRCondition,
+    project: object,
+    codegen: object,
+) -> object | None:
+    """Lower a not condition wrapping a nested IRCondition."""
+    from angr.analyses.decompiler.structured_codegen.c import CUnaryOp
+
+    inner = condition.args[0]
+    if isinstance(inner, IRCondition):
+        inner_expr = _lower_condition_ir_to_c_expr_8616(inner, project, codegen)
+        if inner_expr is not None:
+            return cast(object, CUnaryOp(
+                "Not",
+                cast("CExpression", inner_expr),
+                codegen=codegen,
+                tags=condition_origin_tags_8616(condition),
+            ))
+    return None
+
+
+def _lower_generic_compare_8616(
+    condition: IRCondition,
+    project: object,
+    codegen: object,
+) -> object | None:
+    """Lower a generic compare as a nonzero difference test."""
+    from angr.analyses.decompiler.structured_codegen.c import CBinaryOp
+
+    lhs = _lowered_condition_arg_8616(condition, 0, project, codegen)
+    rhs = _lowered_condition_arg_8616(condition, 1, project, codegen)
+    return cast(object, CBinaryOp(
+        "CmpNE", lhs, rhs,
+        codegen=codegen,
+        tags=condition_origin_tags_8616(condition),
+    ))
+
+
+def _binary_ir_operands_8616(condition: IRCondition) -> bool:
+    """Check that the condition carries two IRValue operands."""
+    return (
+        len(condition.args) >= 2
+        and isinstance(condition.args[0], IRValue)
+        and isinstance(condition.args[1], IRValue)
+    )
+
+
 def _lower_condition_ir_to_c_expr_8616(
     condition: IRCondition,
     project: object,
     codegen: object,
 ) -> object | None:
-    def _impl() -> object | None:
-        """Lower a typed IRCondition to a structured-codegen C expression."""
-        from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CUnaryOp
+    """Lower a typed IRCondition to a structured-codegen C expression."""
+    op = condition.op
 
-        op = condition.op
+    # Zero/nonzero tests
+    if op == "zero":
+        return _lower_zero_test_8616(condition, "CmpEQ", project, codegen)
+    if op == "nonzero":
+        return _lower_zero_test_8616(condition, "CmpNE", project, codegen)
 
-        # Zero/nonzero tests
-        if op == "zero":
-            if not condition.args or not isinstance(condition.args[0], IRValue):
-                return None
-            lhs = _ir_value_to_cvar_8616(
-                condition.args[0], project, codegen, signed=condition.is_signed,
-                condition_width_bits=condition.width_bits,
-            )
-            zero = _make_c_constant_8616(0, codegen)
-            return cast(object, CBinaryOp("CmpEQ", lhs, zero, codegen=codegen, tags=condition_origin_tags_8616(condition)))
+    # Binary comparisons
+    if is_condition_compare_family_8616(op) and _binary_ir_operands_8616(condition):
+        return _lower_compare_family_8616(condition, project, codegen)
 
-        if op == "nonzero":
-            if not condition.args or not isinstance(condition.args[0], IRValue):
-                return None
-            lhs = _ir_value_to_cvar_8616(
-                condition.args[0], project, codegen, signed=condition.is_signed,
-                condition_width_bits=condition.width_bits,
-            )
-            zero = _make_c_constant_8616(0, codegen)
-            return cast(object, CBinaryOp("CmpNE", lhs, zero, codegen=codegen, tags=condition_origin_tags_8616(condition)))
+    # Not
+    if op == "not" and len(condition.args) >= 1:
+        return _lower_not_8616(condition, project, codegen)
 
-        # Binary comparisons
-        if (
-            is_condition_compare_family_8616(op)
-            and len(condition.args) >= 2
-            and isinstance(condition.args[0], IRValue)
-            and isinstance(condition.args[1], IRValue)
-        ):
-            sym = condition_compare_symbol_8616(op)
-            if sym is None:
-                return None
-            lhs = _ir_value_to_cvar_8616(
-                condition.args[0], project, codegen, signed=condition.is_signed,
-                condition_width_bits=condition.width_bits,
-            )
-            rhs = _ir_value_to_cvar_8616(
-                condition.args[1], project, codegen, signed=condition.is_signed,
-                condition_width_bits=condition.width_bits,
-            )
-            # Map to angr structured-codegen CBinaryOp operator names
-            angr_op = _condition_ir_op_to_angr_binary_op_8616(sym)
-            if angr_op is None:
-                return None
-            return cast(object, CBinaryOp(angr_op, lhs, rhs, codegen=codegen, tags=condition_origin_tags_8616(condition)))
+    # Compare (generic)
+    if op == "compare" and _binary_ir_operands_8616(condition):
+        return _lower_generic_compare_8616(condition, project, codegen)
 
-        # Not
-        if op == "not" and len(condition.args) >= 1:
-            inner = condition.args[0]
-            if isinstance(inner, IRCondition):
-                inner_expr = _lower_condition_ir_to_c_expr_8616(inner, project, codegen)
-                if inner_expr is not None:
-                    return cast(object, CUnaryOp(
-                        "Not",
-                        cast("CExpression", inner_expr),
-                        codegen=codegen,
-                        tags=condition_origin_tags_8616(condition),
-                    ))
-            return None
-
-        # Compare (generic)
-        if (
-            op == "compare"
-            and len(condition.args) >= 2
-            and isinstance(condition.args[0], IRValue)
-            and isinstance(condition.args[1], IRValue)
-        ):
-            lhs = _ir_value_to_cvar_8616(
-                condition.args[0], project, codegen, signed=condition.is_signed,
-                condition_width_bits=condition.width_bits,
-            )
-            rhs = _ir_value_to_cvar_8616(
-                condition.args[1], project, codegen, signed=condition.is_signed,
-                condition_width_bits=condition.width_bits,
-            )
-            return cast(object, CBinaryOp("CmpNE", lhs, rhs, codegen=codegen, tags=condition_origin_tags_8616(condition)))
-
-        return None
-
-    return _impl()
+    return None
 
 
 def condition_op_to_structured_kind_8616(op: str) -> str:

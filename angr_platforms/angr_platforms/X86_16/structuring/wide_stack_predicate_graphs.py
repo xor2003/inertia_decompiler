@@ -177,18 +177,23 @@ def _pair_path_outcome_8616(
     return None
 
 
-def _canonical_condition_8616(condition: ConditionIR) -> ConditionIR:
-    """Prefer ascending stack offsets while preserving comparison meaning."""
-    lhs = condition.lhs
-    rhs = condition.rhs
-    if (
+def _swappable_bp_offsets_8616(lhs: object, rhs: object) -> bool:
+    """Return whether both operands are int-offset ``bp`` values in descending order."""
+    return (
         isinstance(lhs, IRValue)
         and isinstance(rhs, IRValue)
         and lhs.name == rhs.name == "bp"
         and isinstance(lhs.offset, int)
         and isinstance(rhs.offset, int)
         and lhs.offset > rhs.offset
-    ):
+    )
+
+
+def _canonical_condition_8616(condition: ConditionIR) -> ConditionIR:
+    """Prefer ascending stack offsets while preserving comparison meaning."""
+    lhs = condition.lhs
+    rhs = condition.rhs
+    if _swappable_bp_offsets_8616(lhs, rhs):
         return replace(condition, op=_SWAP_OP_8616[condition.op], lhs=rhs, rhs=lhs)
     return condition
 
@@ -322,25 +327,12 @@ def _combine_8616(
     )
 
 
-def recover_wide_stack_predicate_graph_8616(
+def _collapsed_pair_conditions_8616(
     conditions: tuple[ConditionIR, ...],
-    successors: dict[int, tuple[int, ...]],
-    prove_pair: WideStackPairProver8616,
-    classify_exit: WidePredicateExitClassifier8616,
-) -> WidePredicateGraphResult8616:
-    """Recover one complete boolean predicate over all typed condition blocks."""
-    raw_count = len(conditions)
-    by_block = {
-        condition.block_addr: condition
-        for condition in conditions
-        if isinstance(condition.block_addr, int)
-    }
-    if raw_count < 2 or len(by_block) != raw_count:
-        return WidePredicateGraphResult8616(
-            WidePredicateGraphStatus8616.INCOMPLETE_CFG,
-            raw_condition_count=raw_count,
-        )
-    pairs = candidate_wide_stack_operand_pairs_8616(conditions, prove_pair)
+    pairs: tuple[WideStackOperandPair8616, ...],
+    raw_count: int,
+) -> tuple[_CollapsedWideCondition8616, ...] | WidePredicateGraphResult8616:
+    """Group conditions under their unique proven pair, or refuse."""
     grouped: list[list[ConditionIR]] = [[] for _pair in pairs]
     for condition in conditions:
         owners = tuple(index for index, pair in enumerate(pairs) if _matches_pair_8616(condition, pair))
@@ -361,7 +353,13 @@ def recover_wide_stack_predicate_graph_8616(
             raw_condition_count=raw_count,
             wide_condition_count=len(pairs),
         )
-    proven = cast(tuple[_CollapsedWideCondition8616, ...], collapsed)
+    return cast(tuple[_CollapsedWideCondition8616, ...], collapsed)
+
+
+def _single_graph_root_8616(
+    proven: tuple[_CollapsedWideCondition8616, ...],
+) -> int | None:
+    """Return the unique predicate-graph entry block, or None."""
     by_entry = {
         item.condition.block_addr: item
         for item in proven
@@ -374,12 +372,43 @@ def recover_wide_stack_predicate_graph_8616(
         if target in by_entry
     }
     roots = tuple(entry for entry in by_entry if entry not in incoming_entries)
-    if len(roots) != 1:
+    return roots[0] if len(roots) == 1 else None
+
+
+def recover_wide_stack_predicate_graph_8616(
+    conditions: tuple[ConditionIR, ...],
+    successors: dict[int, tuple[int, ...]],
+    prove_pair: WideStackPairProver8616,
+    classify_exit: WidePredicateExitClassifier8616,
+) -> WidePredicateGraphResult8616:
+    """Recover one complete boolean predicate over all typed condition blocks."""
+    raw_count = len(conditions)
+    by_block = {
+        condition.block_addr: condition
+        for condition in conditions
+        if isinstance(condition.block_addr, int)
+    }
+    if raw_count < 2 or len(by_block) != raw_count:
+        return WidePredicateGraphResult8616(
+            WidePredicateGraphStatus8616.INCOMPLETE_CFG,
+            raw_condition_count=raw_count,
+        )
+    pairs = candidate_wide_stack_operand_pairs_8616(conditions, prove_pair)
+    proven = _collapsed_pair_conditions_8616(conditions, pairs, raw_count)
+    if isinstance(proven, WidePredicateGraphResult8616):
+        return proven
+    root_entry = _single_graph_root_8616(proven)
+    if root_entry is None:
         return WidePredicateGraphResult8616(
             WidePredicateGraphStatus8616.INCOMPLETE_CFG,
             raw_condition_count=raw_count,
             wide_condition_count=len(proven),
         )
+    by_entry = {
+        item.condition.block_addr: item
+        for item in proven
+        if isinstance(item.condition.block_addr, int)
+    }
     visited_entries: set[int] = set()
 
     def build(address: int, active: frozenset[int]) -> WidePredicateExpr8616 | bool | None:
@@ -398,7 +427,7 @@ def recover_wide_stack_predicate_graph_8616(
             return None
         return _combine_8616(WidePredicateLeaf8616(item.condition), taken, fallthrough)
 
-    expression = build(roots[0], frozenset())
+    expression = build(root_entry, frozenset())
     if not isinstance(
         expression,
         (WidePredicateLeaf8616, WidePredicateNot8616, WidePredicateBinary8616),

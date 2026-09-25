@@ -227,6 +227,21 @@ def _has_explicit_prototype_8616(function: _FunctionSurface8616) -> bool:
     return isinstance(annotations, Mapping) and isinstance(annotations.get("prototype"), SimTypeFunction)
 
 
+def _demotion_boundary_8616(
+    project_surface: _ProjectSurface8616,
+    function_surface: _FunctionSurface8616,
+    prototype: object,
+    prototype_was_guessed: bool,
+) -> bool:
+    """Return whether ABI/prototype evidence permits return demotion."""
+    return (
+        project_surface.arch.name == "86_16"
+        and not _has_explicit_prototype_8616(function_surface)
+        and prototype_was_guessed
+        and isinstance(prototype, SimTypeFunction)
+    )
+
+
 def materialize_unused_caller_void_return_type_8616(
     project: object,
     function: object,
@@ -239,15 +254,14 @@ def materialize_unused_caller_void_return_type_8616(
     project_surface = cast(_ProjectSurface8616, project)
     function_surface = cast(_FunctionSurface8616, function)
     prototype = function_surface.prototype
-    if (
-        project_surface.arch.name != "86_16"
-        or _has_explicit_prototype_8616(function_surface)
-        or not prototype_was_guessed
-        or not isinstance(prototype, SimTypeFunction)
-        or caller_observation is not CallerReturnUseVerdict8616.UNUSED
+    if not _demotion_boundary_8616(
+        project_surface, function_surface, prototype, prototype_was_guessed
+    ) or (
+        caller_observation is not CallerReturnUseVerdict8616.UNUSED
         or terminal_value_proven
     ):
         return UnusedVoidReturnTypeResult8616(False, UnusedVoidReturnTypeStats8616())
+    assert isinstance(prototype, SimTypeFunction)
     materialized = UnusedVoidReturnTypeStats8616(2, 2, 2, 1, 0)
     if isinstance(prototype.returnty, SimTypeBottom):
         return UnusedVoidReturnTypeResult8616(False, materialized)

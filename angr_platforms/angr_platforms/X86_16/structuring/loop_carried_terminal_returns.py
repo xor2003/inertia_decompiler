@@ -34,7 +34,9 @@ from .loop_carried_terminal_return_contracts import (
     LoopCarriedTerminalReturnRefusal8616,
     LoopCarriedTerminalReturnResult8616,
     LoopCarriedTerminalReturnStatus8616,
+    _CFunctionSurface8616,
     _CodegenSurface8616,
+    _FunctionSurface8616,
     _ProjectSurface8616,
 )
 
@@ -153,13 +155,38 @@ def _next_temporary_id_8616(root: object, seed: int) -> int:
     return candidate
 
 
-def materialize_loop_carried_terminal_return_8616(
+def _c_return_nodes_8616(root: object) -> tuple[CReturn, ...]:
+    """Collect every structured return node."""
+    return tuple(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CReturn))
+
+
+def _terminal_ax_function_8616(
     project: object,
-    codegen: object,
-) -> LoopCarriedTerminalReturnResult8616:
-    """Preserve one mandatory loop's exact full-AX carrier as a C temporary."""
-    project_surface = cast(_ProjectSurface8616, project)
-    codegen_surface = cast(_CodegenSurface8616, codegen)
+    project_surface: _ProjectSurface8616,
+    codegen_surface: _CodegenSurface8616,
+    function_addr: int,
+) -> _FunctionSurface8616 | LoopCarriedTerminalReturnResult8616:
+    """Resolve the owning function and prove AX terminal storage."""
+    function = project_surface.kb.functions.function(addr=function_addr, create=False)
+    if function is None:
+        return _refused_8616(
+            codegen_surface,
+            LoopCarriedTerminalReturnRefusal8616.MISSING_FUNCTION,
+            failures=1,
+        )
+    if terminal_return_storage_8616(project, function) is not TerminalReturnStorage8616.AX:
+        return _refused_8616(
+            codegen_surface,
+            LoopCarriedTerminalReturnRefusal8616.TERMINAL_STORAGE_NOT_AX,
+        )
+    return function
+
+
+def _loop_carried_prelude_8616(
+    project_surface: _ProjectSurface8616,
+    codegen_surface: _CodegenSurface8616,
+) -> tuple[_CFunctionSurface8616, CStatements] | LoopCarriedTerminalReturnResult8616:
+    """Prove the applicable codegen shape or return NOT_APPLICABLE."""
     cfunc = codegen_surface.cfunc
     prototype = cfunc.functy
     root = cfunc.statements
@@ -175,29 +202,14 @@ def materialize_loop_carried_terminal_return_8616(
             LoopCarriedTerminalReturnRefusal8616.NOT_APPLICABLE,
             LoopCarriedTerminalReturnEvidence8616(),
         )
+    return cfunc, root
 
-    returns = tuple(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CReturn))
-    if _already_materialized_8616(returns):
-        return _result_8616(
-            codegen_surface,
-            LoopCarriedTerminalReturnStatus8616.ALREADY_MATERIALIZED,
-            LoopCarriedTerminalReturnRefusal8616.NONE,
-            LoopCarriedTerminalReturnEvidence8616(1, 1, 1, 1, 0),
-        )
 
-    function = project_surface.kb.functions.function(addr=cfunc.addr, create=False)
-    if function is None:
-        return _refused_8616(
-            codegen_surface,
-            LoopCarriedTerminalReturnRefusal8616.MISSING_FUNCTION,
-            failures=1,
-        )
-    if terminal_return_storage_8616(project, function) is not TerminalReturnStorage8616.AX:
-        return _refused_8616(
-            codegen_surface,
-            LoopCarriedTerminalReturnRefusal8616.TERMINAL_STORAGE_NOT_AX,
-        )
-
+def _ax_geometry_8616(
+    project_surface: _ProjectSurface8616,
+    codegen_surface: _CodegenSurface8616,
+) -> tuple[int, int] | LoopCarriedTerminalReturnResult8616:
+    """Return the proven AX register geometry or refuse."""
     ax_register = project_surface.arch.registers.get("ax")
     if not isinstance(ax_register, tuple) or len(ax_register) < 2:
         return _refused_8616(
@@ -214,7 +226,15 @@ def materialize_loop_carried_terminal_return_8616(
             normalized=1,
             failures=1,
         )
+    return ax_offset, ax_width
 
+
+def _loop_carried_shape_8616(
+    codegen_surface: _CodegenSurface8616,
+    root: CStatements,
+    returns: tuple[CReturn, ...],
+) -> tuple[tuple[object, ...], CReturn] | LoopCarriedTerminalReturnResult8616:
+    """Prove the single mandatory loop + bare terminal return shape."""
     top_level = _linear_statements_8616(root)
     loops = tuple(node for node in top_level if isinstance(node, CDoWhileLoop))
     if len(loops) != 1 or len(returns) != 1 or returns[0].retval is not None:
@@ -232,7 +252,6 @@ def materialize_loop_carried_terminal_return_8616(
             LoopCarriedTerminalReturnRefusal8616.INCOMPLETE_STRUCTURED_SHAPE,
             normalized=1,
         )
-
     body = _linear_statements_8616(loop.body)
     if not body or not all(isinstance(node, (CAssignment, CExpressionStatement)) for node in body):
         return _refused_8616(
@@ -240,6 +259,16 @@ def materialize_loop_carried_terminal_return_8616(
             LoopCarriedTerminalReturnRefusal8616.INCOMPLETE_STRUCTURED_SHAPE,
             normalized=1,
         )
+    return body, return_node
+
+
+def _proven_ax_assignment_8616(
+    codegen_surface: _CodegenSurface8616,
+    body: tuple[object, ...],
+    ax_offset: int,
+    ax_width: int,
+) -> tuple[CAssignment, int] | LoopCarriedTerminalReturnResult8616:
+    """Return the sole self-contained full-AX assignment or refuse."""
     assignments = tuple(
         node
         for node in body
@@ -252,15 +281,22 @@ def materialize_loop_carried_terminal_return_8616(
             normalized=1,
         )
     assignment = assignments[0]
-    assignment_index = body.index(assignment)
     if _ax_views_8616(assignment.rhs, ax_offset, ax_width):
         return _refused_8616(
             codegen_surface,
             LoopCarriedTerminalReturnRefusal8616.UNSAFE_AX_FLOW,
             normalized=1,
         )
+    return assignment, body.index(assignment)
 
-    suffix = body[assignment_index + 1 :]
+
+def _suffix_ax_safety_8616(
+    codegen_surface: _CodegenSurface8616,
+    suffix: tuple[object, ...],
+    ax_offset: int,
+    ax_width: int,
+) -> LoopCarriedTerminalReturnResult8616 | None:
+    """Refuse when the suffix writes or partially reads physical AX."""
     for statement in suffix:
         for nested in _iter_c_nodes_deep_8616(statement):
             if isinstance(nested, CAssignment):
@@ -280,6 +316,55 @@ def materialize_loop_carried_terminal_return_8616(
                 LoopCarriedTerminalReturnRefusal8616.UNSAFE_AX_FLOW,
                 normalized=1,
             )
+    return None
+
+
+def materialize_loop_carried_terminal_return_8616(
+    project: object,
+    codegen: object,
+) -> LoopCarriedTerminalReturnResult8616:
+    """Preserve one mandatory loop's exact full-AX carrier as a C temporary."""
+    project_surface = cast(_ProjectSurface8616, project)
+    codegen_surface = cast(_CodegenSurface8616, codegen)
+    prelude = _loop_carried_prelude_8616(project_surface, codegen_surface)
+    if isinstance(prelude, LoopCarriedTerminalReturnResult8616):
+        return prelude
+    cfunc, root = prelude
+
+    returns = _c_return_nodes_8616(root)
+    if _already_materialized_8616(returns):
+        return _result_8616(
+            codegen_surface,
+            LoopCarriedTerminalReturnStatus8616.ALREADY_MATERIALIZED,
+            LoopCarriedTerminalReturnRefusal8616.NONE,
+            LoopCarriedTerminalReturnEvidence8616(1, 1, 1, 1, 0),
+        )
+
+    function = _terminal_ax_function_8616(
+        project, project_surface, codegen_surface, cfunc.addr
+    )
+    if isinstance(function, LoopCarriedTerminalReturnResult8616):
+        return function
+
+    geometry = _ax_geometry_8616(project_surface, codegen_surface)
+    if isinstance(geometry, LoopCarriedTerminalReturnResult8616):
+        return geometry
+    ax_offset, ax_width = geometry
+
+    shape = _loop_carried_shape_8616(codegen_surface, root, returns)
+    if isinstance(shape, LoopCarriedTerminalReturnResult8616):
+        return shape
+    body, return_node = shape
+
+    proven = _proven_ax_assignment_8616(codegen_surface, body, ax_offset, ax_width)
+    if isinstance(proven, LoopCarriedTerminalReturnResult8616):
+        return proven
+    assignment, assignment_index = proven
+
+    suffix = body[assignment_index + 1 :]
+    unsafe = _suffix_ax_safety_8616(codegen_surface, suffix, ax_offset, ax_width)
+    if unsafe is not None:
+        return unsafe
 
     word_type = _typed_word_8616(assignment.rhs, project_surface.arch)
     if word_type is None:
@@ -288,6 +373,31 @@ def materialize_loop_carried_terminal_return_8616(
             LoopCarriedTerminalReturnRefusal8616.MISSING_TYPED_WORD,
             normalized=1,
         )
+    return _materialize_loop_carrier_8616(
+        codegen,
+        codegen_surface,
+        root,
+        return_node,
+        assignment,
+        suffix,
+        ax_offset,
+        ax_width,
+        word_type,
+    )
+
+
+def _materialize_loop_carrier_8616(
+    codegen: object,
+    codegen_surface: _CodegenSurface8616,
+    root: CStatements,
+    return_node: CReturn,
+    assignment: CAssignment,
+    suffix: tuple[object, ...],
+    ax_offset: int,
+    ax_width: int,
+    word_type: SimTypeInt | SimTypeShort,
+) -> LoopCarriedTerminalReturnResult8616:
+    """Install the temporary carrier and rewrite all proven AX reads."""
     assignment_tags = copy_structured_tags_8616(assignment.tags) or {}
     instruction_addr = assignment_tags.get("ins_addr")
     if not isinstance(instruction_addr, int) or isinstance(instruction_addr, bool):

@@ -116,10 +116,10 @@ def _missing_values_8616(expected: tuple[int, ...], observed: tuple[int, ...]) -
     return tuple(dict.fromkeys(value for value in expected if value not in observed_values))
 
 
-def assess_materialized_return_chain_integrity_8616(
+def _chain_activity_8616(
     codegen: object,
-) -> MaterializedReturnChainIntegrity8616:
-    """Assess exact constant-return preservation without consulting rendered C."""
+) -> tuple[bool, bool] | MaterializedReturnChainIntegrity8616:
+    """Return (chain_active, mask_active) or an early assessment result."""
     marker_missing = object()
     flattened_marker = getattr(codegen, "_inertia_return_chain_flattened_8616", marker_missing)
     suffix_marker = getattr(codegen, "_inertia_return_chain_suffix_materialized_8616", marker_missing)
@@ -134,7 +134,6 @@ def assess_materialized_return_chain_integrity_8616(
         return MaterializedReturnChainIntegrity8616(
             MaterializedReturnChainIntegrityVerdict8616.INCOMPLETE_CODEGEN_BOUNDARY
         )
-    typed_codegen = cast(_ReturnChainCodegenBoundary8616, codegen)
     flattened = False if chain_metadata_absent else flattened_marker is True
     suffix_materialized = False if chain_metadata_absent else suffix_marker is True
     chain_active = flattened or suffix_materialized
@@ -142,46 +141,89 @@ def assess_materialized_return_chain_integrity_8616(
         return MaterializedReturnChainIntegrity8616(
             MaterializedReturnChainIntegrityVerdict8616.NOT_APPLICABLE
         )
-    expected_values: tuple[int, ...] = ()
-    if chain_active:
-        try:
-            materialized_values = tuple(
-                int(value) for value in typed_codegen._inertia_return_chain_materialized_values_8616
-            )
-            final_value = int(typed_codegen._inertia_return_chain_final_value_8616)
-        except (AttributeError, TypeError, ValueError):
-            return MaterializedReturnChainIntegrity8616(
-                MaterializedReturnChainIntegrityVerdict8616.INCOMPLETE_CODEGEN_BOUNDARY
-            )
-        if not materialized_values:
-            return MaterializedReturnChainIntegrity8616(
-                MaterializedReturnChainIntegrityVerdict8616.MISSING_EXPECTED_VALUES
-            )
-        expected_values = (*materialized_values, final_value)
-    expected_return_fingerprint = ""
-    if mask_active:
-        try:
-            expected_return_fingerprint = typed_codegen._inertia_mask_accumulator_return_fingerprint_8616
-        except AttributeError:
-            expected_return_fingerprint = ""
-        if not expected_return_fingerprint:
-            return MaterializedReturnChainIntegrity8616(
-                MaterializedReturnChainIntegrityVerdict8616.INCOMPLETE_CODEGEN_BOUNDARY
-            )
+    return chain_active, mask_active
+
+
+def _expected_values_8616(
+    typed_codegen: _ReturnChainCodegenBoundary8616,
+    chain_active: bool,
+) -> tuple[int, ...] | MaterializedReturnChainIntegrity8616:
+    """Return the expected constant values or an early assessment result."""
+    if not chain_active:
+        return ()
+    try:
+        materialized_values = tuple(
+            int(value) for value in typed_codegen._inertia_return_chain_materialized_values_8616
+        )
+        final_value = int(typed_codegen._inertia_return_chain_final_value_8616)
+    except (AttributeError, TypeError, ValueError):
+        return MaterializedReturnChainIntegrity8616(
+            MaterializedReturnChainIntegrityVerdict8616.INCOMPLETE_CODEGEN_BOUNDARY
+        )
+    if not materialized_values:
+        return MaterializedReturnChainIntegrity8616(
+            MaterializedReturnChainIntegrityVerdict8616.MISSING_EXPECTED_VALUES
+        )
+    return (*materialized_values, final_value)
+
+
+def _expected_fingerprint_8616(
+    typed_codegen: _ReturnChainCodegenBoundary8616,
+    mask_active: bool,
+) -> str | MaterializedReturnChainIntegrity8616:
+    """Return the expected return fingerprint or an early assessment result."""
+    if not mask_active:
+        return ""
+    try:
+        expected_return_fingerprint = typed_codegen._inertia_mask_accumulator_return_fingerprint_8616
+    except AttributeError:
+        expected_return_fingerprint = ""
+    if not expected_return_fingerprint:
+        return MaterializedReturnChainIntegrity8616(
+            MaterializedReturnChainIntegrityVerdict8616.INCOMPLETE_CODEGEN_BOUNDARY
+        )
+    return expected_return_fingerprint
+
+
+def _proven_root_8616(
+    typed_codegen: _ReturnChainCodegenBoundary8616,
+    expected_values: tuple[int, ...],
+    expected_return_fingerprint: str,
+) -> object | MaterializedReturnChainIntegrity8616:
+    """Return the proven AST root or a missing-root assessment result."""
     try:
         root = typed_codegen.cfunc.statements
     except AttributeError:
-        return MaterializedReturnChainIntegrity8616(
-            MaterializedReturnChainIntegrityVerdict8616.MISSING_AST_ROOT,
-            expected_values=expected_values,
-            expected_return_fingerprint=expected_return_fingerprint,
-        )
+        root = None
     if root is None:
         return MaterializedReturnChainIntegrity8616(
             MaterializedReturnChainIntegrityVerdict8616.MISSING_AST_ROOT,
             expected_values=expected_values,
             expected_return_fingerprint=expected_return_fingerprint,
         )
+    return root
+
+
+def assess_materialized_return_chain_integrity_8616(
+    codegen: object,
+) -> MaterializedReturnChainIntegrity8616:
+    """Assess exact constant-return preservation without consulting rendered C."""
+    activity = _chain_activity_8616(codegen)
+    if isinstance(activity, MaterializedReturnChainIntegrity8616):
+        return activity
+    chain_active, mask_active = activity
+    typed_codegen = cast(_ReturnChainCodegenBoundary8616, codegen)
+    values = _expected_values_8616(typed_codegen, chain_active)
+    if isinstance(values, MaterializedReturnChainIntegrity8616):
+        return values
+    expected_values = values
+    fingerprint = _expected_fingerprint_8616(typed_codegen, mask_active)
+    if isinstance(fingerprint, MaterializedReturnChainIntegrity8616):
+        return fingerprint
+    expected_return_fingerprint = fingerprint
+    root = _proven_root_8616(typed_codegen, expected_values, expected_return_fingerprint)
+    if isinstance(root, MaterializedReturnChainIntegrity8616):
+        return root
     observed_values = tuple(
         value
         for node in _iter_c_nodes_deep_8616(root)

@@ -25,7 +25,7 @@ import contextlib
 import logging
 import os
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, cast
 
@@ -382,6 +382,143 @@ def _assignment_matches_stack_move_fact_8616(
     )
 
 
+@dataclass(slots=True)
+class _BranchSiteScan8616:
+    """Placement-site scan state for one stack-move branch fact."""
+
+    project: object
+    fact: DirectStackMoveBranchFact8616
+    replay_facts: tuple[StructuringConditionReplayFact8616, ...]
+    candidates: list[_DirectStackMovePlacementSite8616] = field(default_factory=list)
+    seen: set[int] = field(default_factory=set)
+    move_addresses: frozenset[int] = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Cache the candidate addresses of the move instruction."""
+        self.move_addresses = _candidate_addresses_8616(
+            self.project, self.fact.move_ins_addr
+        )
+
+    def _branch_addresses_8616(self) -> set[int]:
+        """Return candidate addresses of the condition and its producer."""
+        addresses = set(
+            _candidate_addresses_8616(self.project, self.fact.condition_ins_addr)
+        )
+        if isinstance(self.fact.condition_producer_insn, int):
+            addresses.update(
+                _candidate_addresses_8616(
+                    self.project, self.fact.condition_producer_insn
+                )
+            )
+        return addresses
+
+    def has_taken_provenance(self, nodes: object) -> bool:
+        """Return whether nodes own non-target instructions in the taken interval."""
+        for address in _tree_tag_addresses_8616(nodes):
+            candidates_for_address = _candidate_addresses_8616(self.project, address)
+            if candidates_for_address & self.move_addresses:
+                continue
+            if any(
+                self.fact.arm_start <= candidate < self.fact.merge_addr
+                for candidate in candidates_for_address
+            ):
+                return True
+        return False
+
+    def _replay_arm_8616(self, body: object, else_node: object) -> list[object]:
+        """Recover the taken arm from a unique matching replay fact."""
+        matching_replays = tuple(
+            replay
+            for replay in self.replay_facts
+            if replay.root_src_insn == self.fact.condition_ins_addr
+        )
+        if len(matching_replays) != 1:
+            return []
+        replay = matching_replays[0]
+        true_is_taken = self.fact.arm_start <= replay.true_target < self.fact.merge_addr
+        false_is_taken = (
+            self.fact.arm_start <= replay.false_target < self.fact.merge_addr
+        )
+        if true_is_taken == false_is_taken:
+            return []
+        replay_arm = body if true_is_taken else else_node
+        return [] if replay_arm is None else [replay_arm]
+
+    def _loop_site_8616(self, node: object) -> None:
+        """Record a taken loop body as a bounded placement site."""
+        if not isinstance(node, (structured_c.CForLoop, structured_c.CWhileLoop)):
+            return
+        condition = node.condition
+        body_statements = getattr(node.body, "statements", None)
+        if (
+            _tree_tag_addresses_8616(condition) & self._branch_addresses_8616()
+            and self.has_taken_provenance(node.body)
+            and isinstance(body_statements, list)
+        ):
+            self.candidates.append(
+                _DirectStackMovePlacementSite8616(body_statements, 0, True)
+            )
+
+    def _pair_site_8616(
+        self,
+        node: object,
+        condition: object,
+        body: object,
+        owner: list[Any] | None,
+        owner_index: int | None,
+    ) -> None:
+        """Record a taken if/else arm or proven guarded fallthrough site."""
+        addresses = _tree_tag_addresses_8616(condition)
+        if not (addresses & self._branch_addresses_8616()):
+            return
+        arms = [body]
+        else_node = getattr(node, "else_node", None)
+        if else_node is not None:
+            arms.append(else_node)
+        proven_arms = [arm for arm in arms if self.has_taken_provenance(arm)]
+        if not proven_arms:
+            proven_arms = self._replay_arm_8616(body, else_node)
+        if len(proven_arms) == 1:
+            arm_statements = getattr(proven_arms[0], "statements", None)
+            if isinstance(arm_statements, list):
+                self.candidates.append(
+                    _DirectStackMovePlacementSite8616(arm_statements, 0, True)
+                )
+        elif (
+            not proven_arms
+            and owner is not None
+            and isinstance(owner_index, int)
+        ):
+            start_index = owner_index + 1
+            if self.has_taken_provenance(owner[start_index:]):
+                self.candidates.append(
+                    _DirectStackMovePlacementSite8616(owner, start_index, False)
+                )
+
+    def visit(
+        self,
+        node: object,
+        owner: list[Any] | None = None,
+        owner_index: int | None = None,
+    ) -> None:
+        """Walk one structured node, recording proven placement sites."""
+        if node is None or id(node) in self.seen:
+            return
+        self.seen.add(id(node))
+        self._loop_site_8616(node)
+        pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for condition, body in _boundary_tuple_8616(pairs):
+                self._pair_site_8616(node, condition, body, owner, owner_index)
+                self.visit(body)
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            for index, statement in enumerate(tuple(statements)):
+                self.visit(statement, statements, index)
+        for attribute in ("body", "else_node"):
+            self.visit(getattr(node, attribute, None))
+
+
 def _condition_branch_site_8616(
     root: object,
     project: object,
@@ -389,109 +526,11 @@ def _condition_branch_site_8616(
     replay_facts: tuple[StructuringConditionReplayFact8616, ...],
 ) -> _DirectStackMovePlacementSite8616 | None:
     """Find the unique rendered arm or guarded fallthrough for a taken range."""
-    candidates: list[_DirectStackMovePlacementSite8616] = []
-    seen: set[int] = set()
-    move_addresses = _candidate_addresses_8616(project, fact.move_ins_addr)
-
-    def has_taken_provenance(nodes: object) -> bool:
-        """Return whether nodes own non-target instructions in the taken interval."""
-        for address in _tree_tag_addresses_8616(nodes):
-            candidates_for_address = _candidate_addresses_8616(project, address)
-            if candidates_for_address & move_addresses:
-                continue
-            if any(
-                fact.arm_start <= candidate < fact.merge_addr
-                for candidate in candidates_for_address
-            ):
-                return True
-        return False
-
-    def visit(
-        node: object,
-        owner: list[Any] | None = None,
-        owner_index: int | None = None,
-    ) -> None:
-        if node is None or id(node) in seen:
-            return
-        seen.add(id(node))
-        if isinstance(node, (structured_c.CForLoop, structured_c.CWhileLoop)):
-            condition = node.condition
-            branch_addresses = set(_candidate_addresses_8616(project, fact.condition_ins_addr))
-            if isinstance(fact.condition_producer_insn, int):
-                branch_addresses.update(
-                    _candidate_addresses_8616(project, fact.condition_producer_insn)
-                )
-            body_statements = getattr(node.body, "statements", None)
-            if (
-                _tree_tag_addresses_8616(condition) & branch_addresses
-                and has_taken_provenance(node.body)
-                and isinstance(body_statements, list)
-            ):
-                candidates.append(_DirectStackMovePlacementSite8616(body_statements, 0, True))
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for condition, body in _boundary_tuple_8616(pairs):
-                addresses = _tree_tag_addresses_8616(condition)
-                branch_addresses = set(_candidate_addresses_8616(project, fact.condition_ins_addr))
-                if isinstance(fact.condition_producer_insn, int):
-                    branch_addresses.update(
-                        _candidate_addresses_8616(project, fact.condition_producer_insn)
-                    )
-                if addresses & branch_addresses:
-                    arms = [body]
-                    else_node = getattr(node, "else_node", None)
-                    if else_node is not None:
-                        arms.append(else_node)
-                    proven_arms = [arm for arm in arms if has_taken_provenance(arm)]
-                    matching_replays = tuple(
-                        replay
-                        for replay in replay_facts
-                        if replay.root_src_insn == fact.condition_ins_addr
-                    )
-                    if not proven_arms and len(matching_replays) == 1:
-                        replay = matching_replays[0]
-                        true_is_taken = fact.arm_start <= replay.true_target < fact.merge_addr
-                        false_is_taken = fact.arm_start <= replay.false_target < fact.merge_addr
-                        if true_is_taken != false_is_taken:
-                            replay_arm = body if true_is_taken else else_node
-                            if replay_arm is not None:
-                                proven_arms = [replay_arm]
-                    if len(proven_arms) == 1:
-                        arm_statements = getattr(proven_arms[0], "statements", None)
-                        if isinstance(arm_statements, list):
-                            candidates.append(
-                                _DirectStackMovePlacementSite8616(
-                                    arm_statements,
-                                    0,
-                                    True,
-                                )
-                            )
-                    elif (
-                        not proven_arms
-                        and owner is not None
-                        and isinstance(owner_index, int)
-                    ):
-                        start_index = owner_index + 1
-                        if has_taken_provenance(owner[start_index:]):
-                            candidates.append(
-                                _DirectStackMovePlacementSite8616(
-                                    owner,
-                                    start_index,
-                                    False,
-                                )
-                            )
-                visit(body)
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            for index, statement in enumerate(tuple(statements)):
-                visit(statement, statements, index)
-        for attribute in ("body", "else_node"):
-            visit(getattr(node, attribute, None))
-
-    visit(root)
+    scan = _BranchSiteScan8616(project, fact, replay_facts)
+    scan.visit(root)
     unique = {
         (id(candidate.statements), candidate.start_index): candidate
-        for candidate in candidates
+        for candidate in scan.candidates
     }
     if os.environ.get("INERTIA_DEBUG_STACK_NOISE") and len(unique) != 1:
         log.warning(
@@ -503,50 +542,80 @@ def _condition_branch_site_8616(
     return next(iter(unique.values())) if len(unique) == 1 else None
 
 
+def _arm_statement_addresses_8616(
+    statement: object,
+    project: object,
+    fact: DirectStackMoveBranchFact8616,
+) -> tuple[list[int], list[int]]:
+    """Return tagged and in-range non-move candidate addresses for one statement."""
+    tagged_addresses = sorted(
+        candidate
+        for tagged_addr in _tree_tag_addresses_8616(statement)
+        for candidate in _candidate_addresses_8616(project, tagged_addr)
+    )
+    addresses = [
+        candidate
+        for candidate in tagged_addresses
+        if fact.arm_start <= candidate < fact.merge_addr
+        and candidate != fact.move_ins_addr
+    ]
+    return tagged_addresses, addresses
+
+
+@dataclass(slots=True)
+class _ArmInsertionScan8616:
+    """Ordered insertion-index scan state within one proven arm."""
+
+    project: object
+    fact: DirectStackMoveBranchFact8616
+    insertion_index: int | None = None
+    saw_after: bool = False
+
+    def rejects(self, index: int, statement: object) -> bool:
+        """Advance one statement; return True when the arm order is ambiguous."""
+        tagged_addresses, addresses = _arm_statement_addresses_8616(
+            statement, self.project, self.fact
+        )
+        move_addr = self.fact.move_ins_addr
+        if not addresses:
+            if _empty_statement_wrapper_8616(statement):
+                return False
+            if tagged_addresses and min(tagged_addresses) >= self.fact.merge_addr:
+                self._mark_after(index)
+                return False
+            return True
+        if addresses[0] < move_addr < addresses[-1]:
+            return True
+        if addresses[-1] < move_addr:
+            return self.saw_after
+        if addresses[0] > move_addr:
+            self._mark_after(index)
+            return False
+        return True
+
+    def _mark_after(self, index: int) -> None:
+        """Record that following statements start after the move."""
+        self.saw_after = True
+        if self.insertion_index is None:
+            self.insertion_index = index
+
+
 def _ordered_arm_insertion_index_8616(
     statements: Iterable[object],
     project: object,
     fact: DirectStackMoveBranchFact8616,
 ) -> int | None:
     """Return the unique instruction-ordered insertion index within one arm."""
-    move_addr = fact.move_ins_addr
     ordered_statements = tuple(statements)
-    insertion_index: int | None = None
-    saw_after = False
+    scan = _ArmInsertionScan8616(project, fact)
     for index, statement in enumerate(ordered_statements):
-        tagged_addresses = sorted(
-            candidate
-            for tagged_addr in _tree_tag_addresses_8616(statement)
-            for candidate in _candidate_addresses_8616(project, tagged_addr)
-        )
-        addresses = [
-            candidate
-            for candidate in tagged_addresses
-            if fact.arm_start <= candidate < fact.merge_addr
-            and candidate != move_addr
-        ]
-        if not addresses:
-            if _empty_statement_wrapper_8616(statement):
-                continue
-            if tagged_addresses and min(tagged_addresses) >= fact.merge_addr:
-                saw_after = True
-                if insertion_index is None:
-                    insertion_index = index
-                continue
+        if scan.rejects(index, statement):
             return None
-        if addresses[0] < move_addr < addresses[-1]:
-            return None
-        if addresses[-1] < move_addr:
-            if saw_after:
-                return None
-            continue
-        if addresses[0] > move_addr:
-            saw_after = True
-            if insertion_index is None:
-                insertion_index = index
-            continue
-        return None
-    return len(ordered_statements) if insertion_index is None else insertion_index
+    return (
+        len(ordered_statements)
+        if scan.insertion_index is None
+        else scan.insertion_index
+    )
 
 
 def _empty_statement_wrapper_8616(node: object) -> bool:
@@ -619,6 +688,199 @@ def _transparent_assignment_8616(statement: object) -> structured_c.CAssignment 
     return statement if isinstance(statement, structured_c.CAssignment) else None
 
 
+class _BranchPlacementOutcome8616(Enum):
+    """Per-fact placement outcome for the materialize stats contract."""
+
+    FAILURE = "failure"
+    ALREADY_MATERIALIZED = "already_materialized"
+    MATERIALIZED = "materialized"
+
+
+def _tagged_fact_locations_8616(
+    root: object,
+    codegen: object,
+    move_fact: DirectStackMoveFact8616,
+    candidate_addrs: frozenset[int],
+) -> list[tuple[list[Any], int, object]]:
+    """Return rendered assignment locations proven by move-instruction tags."""
+    return [
+        (statements, index, statement)
+        for statements in _statement_lists_8616(root)
+        for index, statement in enumerate(tuple(statements))
+        if (
+            (assignment := _transparent_assignment_8616(statement))
+            is not None
+            and _assignment_destination_matches_stack_move_fact_8616(
+                codegen,
+                assignment,
+                move_fact,
+            )
+            and bool(_tree_tag_addresses_8616(statement) & candidate_addrs)
+            )
+        ]
+
+
+def _joined_fact_locations_8616(
+    root: object,
+    codegen: object,
+    move_fact: DirectStackMoveFact8616,
+    fact: DirectStackMoveBranchFact8616,
+) -> list[tuple[list[Any], int, object]]:
+    """Return rendered assignment locations joined by exact shape evidence."""
+    return [
+        (statements, index, statement)
+        for statements in _statement_lists_8616(root)
+        for index, statement in enumerate(tuple(statements))
+        if (
+            (assignment := _transparent_assignment_8616(statement))
+            is not None
+            and _assignment_matches_stack_move_fact_8616(
+                codegen,
+                assignment,
+                fact,
+                move_fact,
+            )
+        )
+    ]
+
+
+def _detached_tagged_assignments_8616(
+    root: object,
+    codegen: object,
+    move_fact: DirectStackMoveFact8616,
+    candidate_addrs: frozenset[int],
+) -> tuple[structured_c.CAssignment, ...]:
+    """Return proven tagged assignments no statement list still owns."""
+    return tuple(
+        assignment
+        for node in _tree_nodes_8616(root)
+        if (assignment := _transparent_assignment_8616(node)) is not None
+        and _assignment_destination_matches_stack_move_fact_8616(
+            codegen,
+            assignment,
+            move_fact,
+        )
+        and bool(_tree_tag_addresses_8616(node) & candidate_addrs)
+        and all(assignment is not statement for statements in _statement_lists_8616(root) for statement in statements)
+    )
+
+
+def _insert_assignment_8616(
+    owner: list[Any],
+    index: int,
+    assignment: object,
+    target_statements: list[Any],
+    insertion_index: int,
+    fact: DirectStackMoveBranchFact8616,
+) -> None:
+    """Move one rendered assignment into its proven arm insertion slot."""
+    del owner[index]
+    if owner is target_statements and index < insertion_index:
+        insertion_index -= 1
+    target_statements.insert(insertion_index, assignment)
+    if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+        log.warning(
+            "[direct-stack-move-branch] moved move=%#x assignment=%r target=%r",
+            fact.move_ins_addr,
+            assignment,
+            target_statements,
+        )
+
+
+def _place_branch_fact_8616(
+    fact: DirectStackMoveBranchFact8616,
+    move_fact: DirectStackMoveFact8616,
+    placement_site: _DirectStackMovePlacementSite8616,
+    root: object,
+    project: object,
+    codegen: object,
+) -> _BranchPlacementOutcome8616:
+    """Relocate one branch fact's assignment into its proven arm."""
+    target_statements = placement_site.statements
+    candidate_addrs = _candidate_addresses_8616(project, fact.move_ins_addr)
+    locations = _tagged_fact_locations_8616(root, codegen, move_fact, candidate_addrs)
+    detached_tagged = _detached_tagged_assignments_8616(
+        root, codegen, move_fact, candidate_addrs,
+    )
+    if not locations and len(detached_tagged) == 1:
+        return _BranchPlacementOutcome8616.ALREADY_MATERIALIZED
+    if not locations:
+        locations = _joined_fact_locations_8616(root, codegen, move_fact, fact)
+    if len(locations) != 1:
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-move-branch] assignment-count move=%#x count=%d move_fact=%r",
+                fact.move_ins_addr,
+                len(locations),
+                move_fact,
+            )
+        return _BranchPlacementOutcome8616.FAILURE
+    owner, index, assignment = locations[0]
+    if (
+        owner is target_statements
+        and index >= placement_site.start_index
+        and placement_site.bounded_owner
+    ):
+        return _BranchPlacementOutcome8616.ALREADY_MATERIALIZED
+    if owner is not target_statements and _site_suffix_owns_assignment_8616(
+        placement_site,
+        assignment,
+    ):
+        return _BranchPlacementOutcome8616.ALREADY_MATERIALIZED
+    return _relocate_proven_assignment_8616(
+        fact, placement_site, owner, index, assignment, project,
+    )
+
+
+def _relocate_proven_assignment_8616(
+    fact: DirectStackMoveBranchFact8616,
+    placement_site: _DirectStackMovePlacementSite8616,
+    owner: list[Any],
+    index: int,
+    assignment: object,
+    project: object,
+) -> _BranchPlacementOutcome8616:
+    """Insert one proven assignment at its ordered arm index."""
+    target_statements = placement_site.statements
+    ordered_target = tuple(
+        statement
+        for statement in target_statements[placement_site.start_index :]
+        if statement is not assignment
+    )
+    relative_insertion_index = _ordered_arm_insertion_index_8616(
+        ordered_target,
+        project,
+        fact,
+    )
+    if relative_insertion_index is None:
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-move-branch] insertion-refused move=%#x owner_is_target=%s "
+                "index=%d start=%d assignment_tags=%r target_tags=%r",
+                fact.move_ins_addr,
+                owner is target_statements,
+                index,
+                placement_site.start_index,
+                getattr(assignment, "tags", None),
+                tuple(_tree_tag_addresses_8616(statement) for statement in target_statements),
+            )
+        return _BranchPlacementOutcome8616.FAILURE
+    insertion_index = placement_site.start_index + relative_insertion_index
+    if owner is target_statements and index == insertion_index:
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-move-branch] already move=%#x assignment=%r target=%r",
+                fact.move_ins_addr,
+                assignment,
+                target_statements,
+            )
+        return _BranchPlacementOutcome8616.ALREADY_MATERIALIZED
+    _insert_assignment_8616(
+        owner, index, assignment, target_statements, insertion_index, fact,
+    )
+    return _BranchPlacementOutcome8616.MATERIALIZED
+
+
 def materialize_direct_stack_move_branch_ownership_8616(
     project: object,
     codegen: object,
@@ -683,130 +945,17 @@ def materialize_direct_stack_move_branch_ownership_8616(
                 )
             continue
         classified += 1
-        target_statements = placement_site.statements
-        candidate_addrs = _candidate_addresses_8616(project, fact.move_ins_addr)
-        locations = [
-            (statements, index, statement)
-            for statements in _statement_lists_8616(root)
-            for index, statement in enumerate(tuple(statements))
-            if (
-                (assignment := _transparent_assignment_8616(statement))
-                is not None
-                and _assignment_destination_matches_stack_move_fact_8616(
-                    codegen,
-                    assignment,
-                    move_fact,
-                )
-                and bool(_tree_tag_addresses_8616(statement) & candidate_addrs)
-                )
-            ]
-        detached_tagged = tuple(
-            assignment
-            for node in _tree_nodes_8616(root)
-            if (assignment := _transparent_assignment_8616(node)) is not None
-            and _assignment_destination_matches_stack_move_fact_8616(
-                codegen,
-                assignment,
-                move_fact,
-            )
-            and bool(_tree_tag_addresses_8616(node) & candidate_addrs)
-            and all(assignment is not statement for statements in _statement_lists_8616(root) for statement in statements)
+        outcome = _place_branch_fact_8616(
+            fact, move_fact, placement_site, root, project, codegen,
         )
-        if not locations and len(detached_tagged) == 1:
+        if outcome is _BranchPlacementOutcome8616.ALREADY_MATERIALIZED:
             already_materialized += 1
             materialized += 1
-            continue
-        if not locations:
-            locations = [
-                (statements, index, statement)
-                for statements in _statement_lists_8616(root)
-                for index, statement in enumerate(tuple(statements))
-                if (
-                    (assignment := _transparent_assignment_8616(statement))
-                    is not None
-                    and _assignment_matches_stack_move_fact_8616(
-                        codegen,
-                        assignment,
-                        fact,
-                        move_fact,
-                    )
-                )
-            ]
-        if len(locations) != 1:
+        elif outcome is _BranchPlacementOutcome8616.MATERIALIZED:
+            materialized += 1
+            changed = True
+        else:
             failures += 1
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                log.warning(
-                    "[direct-stack-move-branch] assignment-count move=%#x count=%d move_fact=%r",
-                    fact.move_ins_addr,
-                    len(locations),
-                    move_fact,
-                )
-            continue
-        owner, index, assignment = locations[0]
-        if (
-            owner is target_statements
-            and index >= placement_site.start_index
-            and placement_site.bounded_owner
-        ):
-            already_materialized += 1
-            materialized += 1
-            continue
-        if owner is not target_statements and _site_suffix_owns_assignment_8616(
-            placement_site,
-            assignment,
-        ):
-            already_materialized += 1
-            materialized += 1
-            continue
-        ordered_target = tuple(
-            statement
-            for statement in target_statements[placement_site.start_index :]
-            if statement is not assignment
-        )
-        relative_insertion_index = _ordered_arm_insertion_index_8616(
-            ordered_target,
-            project,
-            fact,
-        )
-        if relative_insertion_index is None:
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                log.warning(
-                    "[direct-stack-move-branch] insertion-refused move=%#x owner_is_target=%s "
-                    "index=%d start=%d assignment_tags=%r target_tags=%r",
-                    fact.move_ins_addr,
-                    owner is target_statements,
-                    index,
-                    placement_site.start_index,
-                    getattr(assignment, "tags", None),
-                    tuple(_tree_tag_addresses_8616(statement) for statement in target_statements),
-                )
-            failures += 1
-            continue
-        insertion_index = placement_site.start_index + relative_insertion_index
-        if owner is target_statements and index == insertion_index:
-            already_materialized += 1
-            materialized += 1
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                log.warning(
-                    "[direct-stack-move-branch] already move=%#x assignment=%r target=%r",
-                    fact.move_ins_addr,
-                    assignment,
-                    target_statements,
-                )
-            continue
-        del owner[index]
-        if owner is target_statements and index < insertion_index:
-            insertion_index -= 1
-        target_statements.insert(insertion_index, assignment)
-        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-            log.warning(
-                "[direct-stack-move-branch] moved move=%#x assignment=%r target=%r",
-                fact.move_ins_addr,
-                assignment,
-                target_statements,
-            )
-        materialized += 1
-        changed = True
     stats = DirectStackMoveBranchStats8616(
         raw_fact_count=len(move_facts),
         normalized_fact_count=len(branch_facts),

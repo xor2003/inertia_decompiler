@@ -116,8 +116,8 @@ def _int_path_8616(value: object) -> tuple[int, ...] | None:
     return tuple(value)
 
 
-def _children_8616(node: object) -> tuple[object, ...]:
-    """Enumerate the dynamic boundary: third-party angr structurer node children."""
+def _attr_children_8616(node: object) -> list[object]:
+    """Collect children from the standard named node attributes."""
     children: list[object] = []
     for attr in (
         "node",
@@ -138,9 +138,12 @@ def _children_8616(node: object) -> tuple[object, ...]:
             children.extend(child for child in value if child is not None)
         else:
             children.append(value)
-    condition_and_nodes = getattr(node, "condition_and_nodes", None)
-    if isinstance(condition_and_nodes, (list, tuple)):
-        children.extend(child for _condition, child in condition_and_nodes if child is not None)
+    return children
+
+
+def _case_children_8616(node: object) -> list[object]:
+    """Collect children from switch case containers."""
+    children: list[object] = []
     cases = getattr(node, "cases", None)
     if isinstance(cases, dict):
         children.extend(child for child in cases.values() if child is not None)
@@ -152,6 +155,16 @@ def _children_8616(node: object) -> tuple[object, ...]:
                     children.append(child)
             elif item is not None:
                 children.append(item)
+    return children
+
+
+def _children_8616(node: object) -> tuple[object, ...]:
+    """Enumerate the dynamic boundary: third-party angr structurer node children."""
+    children = _attr_children_8616(node)
+    condition_and_nodes = getattr(node, "condition_and_nodes", None)
+    if isinstance(condition_and_nodes, (list, tuple)):
+        children.extend(child for _condition, child in condition_and_nodes if child is not None)
+    children.extend(_case_children_8616(node))
     return tuple(children)
 
 
@@ -206,6 +219,90 @@ def _replace_child_at_path_8616(sequence: object, path: tuple[int, ...], replace
     return True
 
 
+def _validated_case_plan_8616(
+    loop_mapping: Mapping[str, object],
+    materialization_plan: Mapping[str, object],
+) -> tuple[tuple[int, ...], tuple[tuple[int, ...], ...], TypedSwitchSeqNodeResult8616 | None]:
+    """Return validated ``(case_values, case_paths)`` or a refusal result."""
+    raw_case_values = loop_mapping.get("expanded_root_normalized_case_values")
+    case_values = tuple(raw_case_values) if isinstance(raw_case_values, (list, tuple)) else ()
+    raw_case_paths = materialization_plan.get("case_paths")
+    case_paths = tuple(
+        path
+        for value in (raw_case_paths if isinstance(raw_case_paths, (list, tuple)) else ())
+        if (path := _int_path_8616(value)) is not None
+    )
+    if not case_values or len(case_values) != len(case_paths):
+        return (), (), _refusal_8616(
+            TypedSwitchSeqNodeRefusal8616.CASE_PATH_VALUE_COUNT_MISMATCH,
+            attempted=True,
+        )
+    if not all(isinstance(value, int) for value in case_values):
+        return (), (), _refusal_8616(
+            TypedSwitchSeqNodeRefusal8616.NON_INTEGER_CASE_VALUE,
+            attempted=True,
+        )
+    typed_case_values = tuple(int(value) for value in case_values)
+    if len(set(typed_case_values)) != len(typed_case_values):
+        return (), (), _refusal_8616(
+            TypedSwitchSeqNodeRefusal8616.DUPLICATE_CASE_VALUE,
+            attempted=True,
+        )
+    return typed_case_values, case_paths, None
+
+
+def _case_nodes_8616(
+    loop_sequence: object,
+    typed_case_values: tuple[int, ...],
+    case_paths: tuple[tuple[int, ...], ...],
+) -> tuple[
+    OrderedDict[int | tuple[int, ...], SequenceNode],
+    TypedSwitchSeqNodeResult8616 | None,
+]:
+    """Resolve every case body by path, or return a refusal."""
+    case_nodes: OrderedDict[int | tuple[int, ...], SequenceNode] = OrderedDict()
+    for case_value, case_path in zip(typed_case_values, case_paths, strict=True):
+        node = _node_at_path_8616(loop_sequence, case_path)
+        if node is None:
+            return OrderedDict(), _refusal_8616(
+                TypedSwitchSeqNodeRefusal8616.MISSING_CASE_NODE,
+                attempted=True,
+            )
+        case_nodes[case_value] = _switch_case_body_8616(node)
+    return case_nodes, None
+
+
+def _break_default_8616(
+    loop_sequence: object,
+    materialization_plan: Mapping[str, object],
+) -> tuple[object, tuple[int, ...], TypedSwitchSeqNodeResult8616 | None]:
+    """Return ``(default_node, replace_path)`` or a refusal."""
+    raw_break_paths = materialization_plan.get("break_paths")
+    break_paths = tuple(
+        path
+        for value in (raw_break_paths if isinstance(raw_break_paths, (list, tuple)) else ())
+        if (path := _int_path_8616(value)) is not None
+    )
+    if len(break_paths) != 1:
+        return None, (), _refusal_8616(
+            TypedSwitchSeqNodeRefusal8616.MISSING_UNIQUE_DEFAULT_BREAK_PATH,
+            attempted=True,
+        )
+    default_node = _node_at_path_8616(loop_sequence, break_paths[0])
+    if default_node is None or type(default_node).__name__ not in {"BreakNode", "ConditionalBreakNode"}:
+        return None, (), _refusal_8616(
+            TypedSwitchSeqNodeRefusal8616.DEFAULT_BREAK_NODE_UNAVAILABLE,
+            attempted=True,
+        )
+    replace_path = _int_path_8616(materialization_plan.get("case_path_common_parent"))
+    if not replace_path:
+        return None, (), _refusal_8616(
+            TypedSwitchSeqNodeRefusal8616.MISSING_REPLACEMENT_PATH,
+            attempted=True,
+        )
+    return default_node, replace_path, None
+
+
 def materialize_typed_switch_seqnode_8616(
     project: object | None,
     sequence: object,
@@ -244,64 +341,46 @@ def materialize_typed_switch_seqnode_8616(
             attempted=True,
         )
 
-    raw_case_values = loop_mapping.get("expanded_root_normalized_case_values")
-    case_values = tuple(raw_case_values) if isinstance(raw_case_values, (list, tuple)) else ()
-    raw_case_paths = materialization_plan.get("case_paths")
-    case_paths = tuple(
-        path
-        for value in (raw_case_paths if isinstance(raw_case_paths, (list, tuple)) else ())
-        if (path := _int_path_8616(value)) is not None
+    typed_case_values, case_paths, plan_refusal = _validated_case_plan_8616(
+        loop_mapping,
+        materialization_plan,
     )
-    if not case_values or len(case_values) != len(case_paths):
-        return _refusal_8616(
-            TypedSwitchSeqNodeRefusal8616.CASE_PATH_VALUE_COUNT_MISMATCH,
-            attempted=True,
-        )
-    if not all(isinstance(value, int) for value in case_values):
-        return _refusal_8616(
-            TypedSwitchSeqNodeRefusal8616.NON_INTEGER_CASE_VALUE,
-            attempted=True,
-        )
-    typed_case_values = tuple(int(value) for value in case_values)
-    if len(set(typed_case_values)) != len(typed_case_values):
-        return _refusal_8616(
-            TypedSwitchSeqNodeRefusal8616.DUPLICATE_CASE_VALUE,
-            attempted=True,
-        )
+    if plan_refusal is not None:
+        return plan_refusal
 
-    case_nodes: OrderedDict[int | tuple[int, ...], SequenceNode] = OrderedDict()
-    for case_value, case_path in zip(typed_case_values, case_paths, strict=True):
-        node = _node_at_path_8616(loop_sequence, case_path)
-        if node is None:
-            return _refusal_8616(
-                TypedSwitchSeqNodeRefusal8616.MISSING_CASE_NODE,
-                attempted=True,
-            )
-        case_nodes[case_value] = _switch_case_body_8616(node)
+    case_nodes, case_refusal = _case_nodes_8616(loop_sequence, typed_case_values, case_paths)
+    if case_refusal is not None:
+        return case_refusal
 
-    raw_break_paths = materialization_plan.get("break_paths")
-    break_paths = tuple(
-        path
-        for value in (raw_break_paths if isinstance(raw_break_paths, (list, tuple)) else ())
-        if (path := _int_path_8616(value)) is not None
+    default_node, replace_path, break_refusal = _break_default_8616(
+        loop_sequence,
+        materialization_plan,
     )
-    if len(break_paths) != 1:
-        return _refusal_8616(
-            TypedSwitchSeqNodeRefusal8616.MISSING_UNIQUE_DEFAULT_BREAK_PATH,
-            attempted=True,
-        )
-    default_node = _node_at_path_8616(loop_sequence, break_paths[0])
-    if default_node is None or type(default_node).__name__ not in {"BreakNode", "ConditionalBreakNode"}:
-        return _refusal_8616(
-            TypedSwitchSeqNodeRefusal8616.DEFAULT_BREAK_NODE_UNAVAILABLE,
-            attempted=True,
-        )
-    replace_path = _int_path_8616(materialization_plan.get("case_path_common_parent"))
-    if not replace_path:
-        return _refusal_8616(
-            TypedSwitchSeqNodeRefusal8616.MISSING_REPLACEMENT_PATH,
-            attempted=True,
-        )
+    if break_refusal is not None:
+        return break_refusal
+    return _splice_switch_8616(
+        sequence,
+        loop_sequence,
+        ladder_node,
+        switch_view,
+        case_nodes,
+        default_node,
+        replace_path,
+        materialization_plan,
+    )
+
+
+def _splice_switch_8616(
+    sequence: object,
+    loop_sequence: object,
+    ladder_node: object,
+    switch_view: tuple[int, int],
+    case_nodes: OrderedDict[int | tuple[int, ...], SequenceNode],
+    default_node: object,
+    replace_path: tuple[int, ...],
+    materialization_plan: Mapping[str, object],
+) -> TypedSwitchSeqNodeResult8616:
+    """Bind the selector and splice the proven SwitchCaseNode."""
     try:
         from angr.analyses.decompiler.structurer_nodes import SwitchCaseNode
     except ImportError as exc:

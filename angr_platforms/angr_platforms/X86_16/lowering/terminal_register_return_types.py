@@ -32,6 +32,7 @@ from .caller_observed_byte_return_types import (
 from .return_type_evidence import proven_function_result_observation_8616
 from .unused_void_return_types import (
     TerminalReturnStorageInput8616,
+    UnusedVoidReturnTypeResult8616,
     materialize_unused_caller_void_codegen_type_8616,
 )
 
@@ -250,6 +251,35 @@ def apply_terminal_register_return_type_evidence_8616(
     )
 
 
+def _record_result_8616(
+    codegen_surface: _CodegenSurface8616,
+    result: TerminalRegisterReturnTypeResult8616,
+) -> TerminalRegisterReturnTypeResult8616:
+    """Retain the typed materialization result at the codegen boundary."""
+    codegen_surface._inertia_terminal_register_return_type_result_8616 = result
+    return result
+
+
+def _debug_return_type_candidate_8616(
+    cfunc: _CFunctionSurface8616,
+    function: _FunctionSurface8616 | None,
+    prototype: object,
+) -> None:
+    """Emit the opt-in terminal AX return-type candidate dump."""
+    _LOGGER.warning(
+        "terminal AX return type candidate: addr=%#x function=%s prototype=%s return=%s "
+        "function_return=%s explicit=%s",
+        cfunc.addr,
+        function is not None,
+        type(prototype).__name__,
+        type(prototype.returnty).__name__ if isinstance(prototype, SimTypeFunction) else None,
+        type(function.prototype.returnty).__name__
+        if function is not None and isinstance(function.prototype, SimTypeFunction)
+        else None,
+        function is not None and _has_explicit_prototype_8616(function),
+    )
+
+
 def materialize_terminal_register_return_type_8616(
     project: object,
     codegen: object,
@@ -264,58 +294,36 @@ def materialize_terminal_register_return_type_8616(
     except AttributeError:
         if os.environ.get("INERTIA_DEBUG_TERMINAL_RETURN_TYPES") == "1":
             _LOGGER.warning("terminal AX return type unavailable: missing codegen or function-manager surface")
-        result = TerminalRegisterReturnTypeResult8616(False, TerminalRegisterReturnTypeStats8616(failure_count=1))
-        codegen_surface._inertia_terminal_register_return_type_result_8616 = result
-        return result
+        return _record_result_8616(
+            codegen_surface,
+            TerminalRegisterReturnTypeResult8616(False, TerminalRegisterReturnTypeStats8616(failure_count=1)),
+        )
     prototype = cfunc.functy
     if os.environ.get("INERTIA_DEBUG_TERMINAL_RETURN_TYPES") == "1":
-        _LOGGER.warning(
-            "terminal AX return type candidate: addr=%#x function=%s prototype=%s return=%s "
-            "function_return=%s explicit=%s",
-            cfunc.addr,
-            function is not None,
-            type(prototype).__name__,
-            type(prototype.returnty).__name__ if isinstance(prototype, SimTypeFunction) else None,
-            type(function.prototype.returnty).__name__
-            if function is not None and isinstance(function.prototype, SimTypeFunction)
-            else None,
-            function is not None and _has_explicit_prototype_8616(function),
-        )
+        _debug_return_type_candidate_8616(cfunc, function, prototype)
     if (
         function is None
         or _has_explicit_prototype_8616(function)
         or not isinstance(prototype, SimTypeFunction)
     ):
-        result = TerminalRegisterReturnTypeResult8616(False, TerminalRegisterReturnTypeStats8616())
-        codegen_surface._inertia_terminal_register_return_type_result_8616 = result
-        return result
+        return _record_result_8616(
+            codegen_surface,
+            TerminalRegisterReturnTypeResult8616(False, TerminalRegisterReturnTypeStats8616()),
+        )
     storage = terminal_return_storage_8616(project, function)
     void_result = materialize_unused_caller_void_codegen_type_8616(
         project,
         codegen,
         terminal_storage_input=TerminalReturnStorageInput8616(storage),
     )
-    if void_result.stats.classified_fact_count:
-        result = TerminalRegisterReturnTypeResult8616(
-            void_result.changed,
-            TerminalRegisterReturnTypeStats8616(
-                void_result.stats.raw_fact_count,
-                void_result.stats.normalized_fact_count,
-                void_result.stats.classified_fact_count,
-                void_result.stats.materialized_count,
-                void_result.stats.failure_count,
-            ),
+    delegated = _delegated_void_result_8616(void_result)
+    if delegated is not None:
+        return _record_result_8616(codegen_surface, delegated)
+    if not _refinement_permitted_8616(project, cfunc, prototype):
+        return _record_result_8616(
+            codegen_surface,
+            TerminalRegisterReturnTypeResult8616(False, TerminalRegisterReturnTypeStats8616()),
         )
-        codegen_surface._inertia_terminal_register_return_type_result_8616 = result
-        return result
-    if not _refinable_generated_word_return_8616(prototype.returnty):
-        result = TerminalRegisterReturnTypeResult8616(False, TerminalRegisterReturnTypeStats8616())
-        codegen_surface._inertia_terminal_register_return_type_result_8616 = result
-        return result
-    if proven_function_result_observation_8616(project, cfunc.addr) is CallerReturnUseVerdict8616.UNUSED:
-        result = TerminalRegisterReturnTypeResult8616(False, TerminalRegisterReturnTypeStats8616())
-        codegen_surface._inertia_terminal_register_return_type_result_8616 = result
-        return result
     if os.environ.get("INERTIA_DEBUG_TERMINAL_RETURN_TYPES") == "1":
         _LOGGER.warning("terminal return storage: addr=%#x storage=%s", cfunc.addr, storage)
     byte_result = materialize_caller_observed_byte_return_type_8616(
@@ -326,27 +334,70 @@ def materialize_terminal_register_return_type_8616(
         explicit_prototype=False,
     )
     if byte_result.applicable:
-        result = _terminal_result_from_byte_8616(byte_result)
-        codegen_surface._inertia_terminal_register_return_type_result_8616 = result
-        return result
-    if storage is not TerminalReturnStorage8616.AX:
-        result = TerminalRegisterReturnTypeResult8616(
-            False, TerminalRegisterReturnTypeStats8616(1, int(storage is not None), 0, 0, 0)
+        return _record_result_8616(
+            codegen_surface,
+            _terminal_result_from_byte_8616(byte_result),
         )
-        codegen_surface._inertia_terminal_register_return_type_result_8616 = result
-        return result
+    if storage is not TerminalReturnStorage8616.AX:
+        return _record_result_8616(
+            codegen_surface,
+            TerminalRegisterReturnTypeResult8616(
+                False, TerminalRegisterReturnTypeStats8616(1, int(storage is not None), 0, 0, 0)
+            ),
+        )
+    return _record_result_8616(
+        codegen_surface,
+        _apply_ax_terminal_type_8616(project_surface, codegen_surface, cfunc, prototype),
+    )
+
+
+def _refinement_permitted_8616(
+    project: object,
+    cfunc: _CFunctionSurface8616,
+    prototype: SimTypeFunction,
+) -> bool:
+    """Return whether the generated scalar return may be refined."""
+    return _refinable_generated_word_return_8616(
+        prototype.returnty
+    ) and proven_function_result_observation_8616(
+        project, cfunc.addr
+    ) is not CallerReturnUseVerdict8616.UNUSED
+
+
+def _delegated_void_result_8616(
+    void_result: UnusedVoidReturnTypeResult8616,
+) -> TerminalRegisterReturnTypeResult8616 | None:
+    """Forward caller-observed void demotion when it classified facts."""
+    stats = void_result.stats
+    if not stats.classified_fact_count:
+        return None
+    return TerminalRegisterReturnTypeResult8616(
+        void_result.changed,
+        TerminalRegisterReturnTypeStats8616(
+            stats.raw_fact_count,
+            stats.normalized_fact_count,
+            stats.classified_fact_count,
+            stats.materialized_count,
+            stats.failure_count,
+        ),
+    )
+
+
+def _apply_ax_terminal_type_8616(
+    project_surface: _ProjectSurface8616,
+    codegen_surface: _CodegenSurface8616,
+    cfunc: _CFunctionSurface8616,
+    prototype: SimTypeFunction,
+) -> TerminalRegisterReturnTypeResult8616:
+    """Rewrite a guessed scalar header to the proven AX word type."""
     terminal_type = _typed_terminal_return_type_8616(cfunc) or SimTypeShort(signed=False).with_arch(project_surface.arch)
     if prototype.returnty == terminal_type:
-        result = TerminalRegisterReturnTypeResult8616(
+        return TerminalRegisterReturnTypeResult8616(
             False,
             TerminalRegisterReturnTypeStats8616(1, 1, 1, 1, 0),
         )
-        codegen_surface._inertia_terminal_register_return_type_result_8616 = result
-        return result
     if not isinstance(prototype, SimTypeFunction):
-        result = TerminalRegisterReturnTypeResult8616(False, TerminalRegisterReturnTypeStats8616())
-        codegen_surface._inertia_terminal_register_return_type_result_8616 = result
-        return result
+        return TerminalRegisterReturnTypeResult8616(False, TerminalRegisterReturnTypeStats8616())
     cfunc.functy = SimTypeFunction(
         list(prototype.args),
         terminal_type.with_arch(project_surface.arch),
@@ -355,6 +406,6 @@ def materialize_terminal_register_return_type_8616(
     ).with_arch(project_surface.arch)
     codegen_surface._inertia_codegen_decl_refresh_required_8616 = True
     codegen_surface._inertia_force_codegen_regeneration_8616 = True
-    result = TerminalRegisterReturnTypeResult8616(True, TerminalRegisterReturnTypeStats8616(1, 1, 1, 1, 0))
-    codegen_surface._inertia_terminal_register_return_type_result_8616 = result
-    return result
+    return TerminalRegisterReturnTypeResult8616(
+        True, TerminalRegisterReturnTypeStats8616(1, 1, 1, 1, 0)
+    )

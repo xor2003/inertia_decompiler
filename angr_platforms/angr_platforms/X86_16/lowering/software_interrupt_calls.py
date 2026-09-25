@@ -164,68 +164,118 @@ def _service_target_matches_vector_8616(target_addr: int, vector: int) -> bool:
     return bool(target_addr == int(INTERRUPT_SERVICE_BASE_ADDR) + vector)
 
 
-def materialize_software_interrupt_service_targets_8616(
-    codegen: object,
-) -> bool:
-    """Project exact frontend callsite service identities into structured C."""
-    surface = cast(_CodegenSurface8616, codegen)
-    stats = SoftwareInterruptTargetMaterializationStats8616()
+def _interrupt_context_8616(
+    surface: _CodegenSurface8616,
+) -> tuple[object, int, _FunctionCallTargetSurface8616] | None:
+    """Resolve the root and owning function's callsite target surface."""
     try:
         root = surface.cfunc.statements
         function_addr = surface.cfunc.addr
         function_manager = surface.project.kb.functions
         function = function_manager.function(addr=function_addr)
     except (AttributeError, KeyError, TypeError, ValueError):
-        get_codegen_side_metadata(codegen)["software_interrupt_target_materialization_8616"] = stats
-        return False
+        return None
     if function is None:
-        get_codegen_side_metadata(codegen)["software_interrupt_target_materialization_8616"] = stats
-        return False
-    changed = False
-    for node in _iter_c_nodes_deep_8616(root):
-        if not isinstance(node, structured_c.CFunctionCall):
-            continue
-        vector = _raw_interrupt_vector_8616(node)
-        if vector is None:
-            continue
-        stats.raw_fact_count += 1
-        callsite_addr = _callsite_addr_8616(node)
-        if callsite_addr is None:
-            continue
-        stats.normalized_fact_count += 1
-        try:
-            target_addr = function.get_call_target(callsite_addr)
-        except (AttributeError, KeyError, TypeError, ValueError):
-            target_addr = None
-        if not isinstance(target_addr, int) or not _service_target_matches_vector_8616(
-            target_addr,
-            vector,
-        ):
-            target_addr = software_interrupt_service_target_8616(
-                surface.project,
-                function_addr=function_addr,
-                callsite_addr=callsite_addr,
-                vector=vector,
-            )
-        if not isinstance(target_addr, int) or not _service_target_matches_vector_8616(
-            target_addr,
-            vector,
-        ):
-            continue
-        stats.classified_fact_count += 1
-        service_fact = software_interrupt_service_fact_8616(
+        return None
+    return root, function_addr, function
+
+
+def _proven_service_target_8616(
+    surface: _CodegenSurface8616,
+    function: _FunctionCallTargetSurface8616,
+    *,
+    function_addr: int,
+    callsite_addr: int,
+    vector: int,
+) -> int | None:
+    """Resolve an exact service target from callsite or project evidence."""
+    try:
+        target_addr = function.get_call_target(callsite_addr)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        target_addr = None
+    if not isinstance(target_addr, int) or not _service_target_matches_vector_8616(
+        target_addr,
+        vector,
+    ):
+        target_addr = software_interrupt_service_target_8616(
             surface.project,
             function_addr=function_addr,
             callsite_addr=callsite_addr,
             vector=vector,
         )
-        cast(_TaggedCallSurface8616, node).callee_target = (
-            service_fact.helper_name
-            if service_fact is not None and service_fact.target_addr == target_addr
-            else target_addr
-        )
-        stats.materialized_count += 1
-        changed = True
+    if not isinstance(target_addr, int) or not _service_target_matches_vector_8616(
+        target_addr,
+        vector,
+    ):
+        return None
+    return target_addr
+
+
+def _materialize_service_target_8616(
+    surface: _CodegenSurface8616,
+    node: object,
+    *,
+    function: _FunctionCallTargetSurface8616,
+    function_addr: int,
+    stats: SoftwareInterruptTargetMaterializationStats8616,
+) -> bool:
+    """Rewrite one interrupt call to its proven service target."""
+    if not isinstance(node, structured_c.CFunctionCall):
+        return False
+    vector = _raw_interrupt_vector_8616(node)
+    if vector is None:
+        return False
+    stats.raw_fact_count += 1
+    callsite_addr = _callsite_addr_8616(node)
+    if callsite_addr is None:
+        return False
+    stats.normalized_fact_count += 1
+    target_addr = _proven_service_target_8616(
+        surface,
+        function,
+        function_addr=function_addr,
+        callsite_addr=callsite_addr,
+        vector=vector,
+    )
+    if target_addr is None:
+        return False
+    stats.classified_fact_count += 1
+    service_fact = software_interrupt_service_fact_8616(
+        surface.project,
+        function_addr=function_addr,
+        callsite_addr=callsite_addr,
+        vector=vector,
+    )
+    cast(_TaggedCallSurface8616, node).callee_target = (
+        service_fact.helper_name
+        if service_fact is not None and service_fact.target_addr == target_addr
+        else target_addr
+    )
+    stats.materialized_count += 1
+    return True
+
+
+def materialize_software_interrupt_service_targets_8616(
+    codegen: object,
+) -> bool:
+    """Project exact frontend callsite service identities into structured C."""
+    surface = cast(_CodegenSurface8616, codegen)
+    stats = SoftwareInterruptTargetMaterializationStats8616()
+    context = _interrupt_context_8616(surface)
+    if context is None:
+        get_codegen_side_metadata(codegen)["software_interrupt_target_materialization_8616"] = stats
+        return False
+    root, function_addr, function = context
+    changed = False
+    for node in _iter_c_nodes_deep_8616(root):
+        if _materialize_service_target_8616(
+            surface,
+            node,
+            function=function,
+            function_addr=function_addr,
+            stats=stats,
+        ):
+            changed = True
     get_codegen_side_metadata(codegen)["software_interrupt_target_materialization_8616"] = stats
     if stats.classified_fact_count != stats.materialized_count:
         stats.failure_count = stats.classified_fact_count - stats.materialized_count

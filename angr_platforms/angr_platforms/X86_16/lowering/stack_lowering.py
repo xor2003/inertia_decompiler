@@ -100,6 +100,82 @@ def _record_stack_lowering_refusal_8616(codegen: _StackLoweringCodegen8616 | Non
     record_stable_ss_lowering_refusal_8616(codegen)
 
 
+def _lower_global_segment_accesses_8616(
+    codegen: _StackLoweringCodegen8616,
+    project: object | None,
+) -> bool:
+    """Lower stable DS/ES globals and recount post-address dereferences."""
+    round_changed = False
+    if lower_stable_ds_es_linear_global_dereferences_8616(codegen, project=project):
+        _record_lowering_change_8616(codegen)
+        round_changed = True
+    if lower_stable_ds_es_linear_global_addresses_8616(codegen, project=project):
+        _record_lowering_change_8616(codegen)
+        round_changed = True
+        if lower_stable_ds_es_linear_global_dereferences_8616(codegen, project=project):
+            current_global_deref_count = _dynamic_codegen_attr_8616(
+                codegen,
+                "_inertia_global_deref_after_address_materialized_count",
+                0,
+            )
+            codegen._inertia_global_deref_after_address_materialized_count = (
+                current_global_deref_count if isinstance(current_global_deref_count, int) else 0
+            ) + 1
+            _record_lowering_change_8616(codegen)
+            round_changed = True
+    return round_changed
+
+
+def _round_impl_8616(
+    *,
+    rewrite_ss_stack_byte_offsets: Callable[[], bool],
+    canonicalize_stack_cvars: Callable[[], bool],
+    lower_stable_ss_stack_accesses: Callable[[], bool] | None,
+    codegen: _StackLoweringCodegen8616 | None,
+    project: object | None,
+    typed_fact_count: int,
+    lower_global_segment_accesses: bool,
+    lower_runtime_segment_accesses: bool,
+) -> bool:
+    """Run the ordered lowering steps for one round."""
+    round_changed = False
+    if codegen is not None and lower_stable_ss_linear_stack_dereferences_8616(codegen, project=project):
+        _record_lowering_change_8616(codegen)
+        round_changed = True
+    # Preserve DS/ES provenance before anonymous global projection can
+    # collapse a segmented address into a plain SimMemoryVariable.
+    if (
+        lower_runtime_segment_accesses
+        and codegen is not None
+        and apply_runtime_segment_lowering_8616(
+            codegen,
+            target=str(_dynamic_codegen_attr_8616(project, "_inertia_c_target", "portable-flat") or "portable-flat"),
+        )
+    ):
+        _record_lowering_change_8616(codegen)
+        round_changed = True
+    if (
+        lower_global_segment_accesses
+        and codegen is not None
+        and _lower_global_segment_accesses_8616(codegen, project)
+    ):
+        round_changed = True
+    if lower_stable_ss_stack_accesses is not None:
+        lowered = lower_stable_ss_stack_accesses()
+        if lowered:
+            _record_lowering_change_8616(codegen)
+            round_changed = True
+        elif codegen is not None and typed_fact_count > 0:
+            _record_stack_lowering_refusal_8616(codegen)
+    if rewrite_ss_stack_byte_offsets():
+        _record_lowering_change_8616(codegen)
+        round_changed = True
+    if canonicalize_stack_cvars():
+        _record_lowering_change_8616(codegen)
+        round_changed = True
+    return round_changed
+
+
 def _run_single_stack_lowering_round_8616(
     *,
     rewrite_ss_stack_byte_offsets: Callable[[], bool],
@@ -112,65 +188,16 @@ def _run_single_stack_lowering_round_8616(
     lower_runtime_segment_accesses: bool,
 ) -> bool:
     """Run one ordered stack/global lowering round."""
-
-    def _impl() -> bool:
-        round_changed = False
-        if codegen is not None and lower_stable_ss_linear_stack_dereferences_8616(codegen, project=project):
-            _record_lowering_change_8616(codegen)
-            round_changed = True
-        # Preserve DS/ES provenance before anonymous global projection can
-        # collapse a segmented address into a plain SimMemoryVariable.
-        if (
-            lower_runtime_segment_accesses
-            and codegen is not None
-            and apply_runtime_segment_lowering_8616(
-                codegen,
-                target=str(_dynamic_codegen_attr_8616(project, "_inertia_c_target", "portable-flat") or "portable-flat"),
-            )
-        ):
-            _record_lowering_change_8616(codegen)
-            round_changed = True
-        if (
-            lower_global_segment_accesses
-            and codegen is not None
-            and lower_stable_ds_es_linear_global_dereferences_8616(codegen, project=project)
-        ):
-            _record_lowering_change_8616(codegen)
-            round_changed = True
-        if (
-            lower_global_segment_accesses
-            and codegen is not None
-            and lower_stable_ds_es_linear_global_addresses_8616(codegen, project=project)
-        ):
-            _record_lowering_change_8616(codegen)
-            round_changed = True
-            if lower_stable_ds_es_linear_global_dereferences_8616(codegen, project=project):
-                current_global_deref_count = _dynamic_codegen_attr_8616(
-                    codegen,
-                    "_inertia_global_deref_after_address_materialized_count",
-                    0,
-                )
-                codegen._inertia_global_deref_after_address_materialized_count = (
-                    current_global_deref_count if isinstance(current_global_deref_count, int) else 0
-                ) + 1
-                _record_lowering_change_8616(codegen)
-                round_changed = True
-        if lower_stable_ss_stack_accesses is not None:
-            lowered = lower_stable_ss_stack_accesses()
-            if lowered:
-                _record_lowering_change_8616(codegen)
-                round_changed = True
-            elif codegen is not None and typed_fact_count > 0:
-                _record_stack_lowering_refusal_8616(codegen)
-        if rewrite_ss_stack_byte_offsets():
-            _record_lowering_change_8616(codegen)
-            round_changed = True
-        if canonicalize_stack_cvars():
-            _record_lowering_change_8616(codegen)
-            round_changed = True
-        return round_changed
-
-    return _impl()
+    return _round_impl_8616(
+        rewrite_ss_stack_byte_offsets=rewrite_ss_stack_byte_offsets,
+        canonicalize_stack_cvars=canonicalize_stack_cvars,
+        lower_stable_ss_stack_accesses=lower_stable_ss_stack_accesses,
+        codegen=codegen,
+        project=project,
+        typed_fact_count=typed_fact_count,
+        lower_global_segment_accesses=lower_global_segment_accesses,
+        lower_runtime_segment_accesses=lower_runtime_segment_accesses,
+    )
 
 
 def _emit_stack_lowering_debug_summary_8616(codegen: _StackLoweringCodegen8616 | None) -> None:

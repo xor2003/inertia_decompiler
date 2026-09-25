@@ -123,33 +123,41 @@ class IndexedAddressCopyValuePath8616:
     steps: tuple[IndexedAddressCopyStep8616, ...]
     logical_source: LogicalMemoryValueTrace8616 | None = None
 
+    def _indices_ordered_8616(self) -> bool:
+        """Return whether the recorded store/load positions are sane."""
+        return (
+            self.store_instr_index >= 0
+            and self.load_block_addr >= 0
+            and self.load_instr_index >= 0
+            and self.load_instr_addr >= 0
+            and self.load_instr_index < self.store_instr_index
+        )
+
+    def _logical_source_proven_8616(self) -> bool:
+        """Return whether the optional logical source is complete."""
+        if self.logical_source is None:
+            return True
+        logical_loads = tuple(
+            site
+            for site in self.logical_source.definition_path
+            if site.op == "LOAD"
+        )
+        source = self.logical_source.source
+        return bool(
+            self.logical_source.complete
+            and source is not None
+            and source.size == self.load_value.size
+            and len(logical_loads) == 2
+        )
+
     @property
     def complete(self) -> bool:
         """Return whether the path is contiguous and lane-preserving."""
-        logical_loads = (
-            ()
-            if self.logical_source is None
-            else tuple(
-                site for site in self.logical_source.definition_path if site.op == "LOAD"
-            )
-        )
-        if (
-            self.store_instr_index < 0
-            or self.load_block_addr < 0
-            or self.load_instr_index < 0
-            or self.load_instr_addr < 0
-            or self.load_instr_index >= self.store_instr_index
-            or not all(step.complete for step in self.steps)
-            or (
-                self.logical_source is not None
-                and (
-                    not self.logical_source.complete
-                    or self.logical_source.source is None
-                    or self.logical_source.source.size != self.load_value.size
-                    or len(logical_loads) != 2
-                )
-            )
-        ):
+        if not self._indices_ordered_8616():
+            return False
+        if not all(step.complete for step in self.steps):
+            return False
+        if not self._logical_source_proven_8616():
             return False
         if self.steps:
             if (

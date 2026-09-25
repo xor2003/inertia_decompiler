@@ -12,7 +12,7 @@ Forbidden: graph mutation, region collapse, semantic inference, or C mutation.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Protocol
 
@@ -98,23 +98,28 @@ class NaturalLoopTopology8616:
             if self.body or self.entry_edges or self.backedges or self.exit_edges:
                 raise ValueError("refused natural-loop topology cannot publish exact edges")
             return
-        if self.refusal_reason is not None:
-            raise ValueError("proven natural-loop topology cannot carry a refusal reason")
-        if self.header not in self.body or self.latch not in self.body:
-            raise ValueError("proven natural-loop topology must contain header and latch")
-        if self.backedges != ((self.latch, self.header),):
-            raise ValueError("proven natural-loop topology requires one exact backedge")
-        if any(target != self.header for _, target in self.entry_edges):
-            raise ValueError("proven natural-loop topology has a non-header entry")
-        if len({target for _, target in self.exit_edges}) != 1:
-            raise ValueError("proven natural-loop topology requires one exit target")
-        if self.stats != LoopTopologyStats8616(1, 1, 1, 1, 0):
-            raise ValueError("proven natural-loop topology requires closed materialization counters")
+        _validate_proven_topology_8616(self)
 
     @property
     def is_proven(self) -> bool:
         """Return whether all narrow-slice topology requirements were proven."""
         return self.verdict is LoopTopologyVerdict8616.PROVEN
+
+
+def _validate_proven_topology_8616(topology: NaturalLoopTopology8616) -> None:
+    """Enforce the exact-edge invariants of one proven natural loop."""
+    if topology.refusal_reason is not None:
+        raise ValueError("proven natural-loop topology cannot carry a refusal reason")
+    if topology.header not in topology.body or topology.latch not in topology.body:
+        raise ValueError("proven natural-loop topology must contain header and latch")
+    if topology.backedges != ((topology.latch, topology.header),):
+        raise ValueError("proven natural-loop topology requires one exact backedge")
+    if any(target != topology.header for _, target in topology.entry_edges):
+        raise ValueError("proven natural-loop topology has a non-header entry")
+    if len({target for _, target in topology.exit_edges}) != 1:
+        raise ValueError("proven natural-loop topology requires one exit target")
+    if topology.stats != LoopTopologyStats8616(1, 1, 1, 1, 0):
+        raise ValueError("proven natural-loop topology requires closed materialization counters")
 
 
 class _NaturalLoopGraph8616(Protocol):
@@ -176,6 +181,94 @@ def _header_dominated_nodes_8616(
     return frozenset({header} | nx.descendants(tree, header))
 
 
+@dataclass(slots=True)
+class _OrderedNeighborCache8616:
+    """Validated deterministic adjacency cache for one integer-node CFG."""
+
+    graph: _NaturalLoopGraph8616
+    successor_cache: dict[int, tuple[int, ...]] = field(default_factory=dict)
+    predecessor_cache: dict[int, tuple[int, ...]] = field(default_factory=dict)
+
+    def ordered(self, node: int, *, predecessors: bool) -> tuple[int, ...]:
+        """Read, validate, deduplicate, and sort one adjacency list."""
+        cache = self.predecessor_cache if predecessors else self.successor_cache
+        if node in cache:
+            return cache[node]
+        values = self.graph.predecessors(node) if predecessors else self.graph.successors(node)
+        observed = tuple(values)
+        if any(not isinstance(value, int) or isinstance(value, bool) for value in observed):
+            raise TypeError("natural-loop topology requires integer CFG node ids")
+        ordered = tuple(sorted(set(observed)))
+        cache[node] = ordered
+        return ordered
+
+    def forward_without_header_return(self, header: int) -> set[int]:
+        """Collect nodes reachable from the header before taking a backedge."""
+        visited: set[int] = set()
+        pending = [header]
+        while pending:
+            node = pending.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            pending.extend(
+                reversed(
+                    tuple(
+                        target
+                        for target in self.ordered(node, predecessors=False)
+                        if target != header
+                    )
+                )
+            )
+        return visited
+
+    def reverse_to_latch(self, latch: int, header: int) -> set[int]:
+        """Collect nodes that can reach the latch without crossing the header."""
+        visited: set[int] = set()
+        pending = [latch]
+        while pending:
+            node = pending.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            if node == header:
+                continue
+            pending.extend(reversed(self.ordered(node, predecessors=True)))
+        return visited
+
+
+def _boundary_edges_8616(
+    cache: _OrderedNeighborCache8616,
+    header: int,
+    latch: int,
+    body_set: set[int],
+    latch_candidates: frozenset[int] | set[int],
+) -> tuple[set[LoopTopologyEdge8616], set[LoopTopologyEdge8616]] | str:
+    """Return ``(entry_edges, exit_edges)`` or a refusal reason string."""
+    latches = tuple(
+        source for source in cache.ordered(header, predecessors=True) if source in latch_candidates
+    )
+    if latches != (latch,):
+        return "non-unique-latch"
+
+    entry_edges: set[LoopTopologyEdge8616] = set()
+    for target in sorted(body_set):
+        for source in cache.ordered(target, predecessors=True):
+            if source in body_set:
+                continue
+            if target != header:
+                return "external-non-header-entry"
+            entry_edges.add((source, target))
+
+    exit_edges = {
+        (source, target)
+        for source in body_set
+        for target in cache.ordered(source, predecessors=False)
+        if target not in body_set
+    }
+    return entry_edges, exit_edges
+
+
 def classify_natural_loop_topology_8616(
     graph: _NaturalLoopGraph8616,
     header: int,
@@ -190,55 +283,13 @@ def classify_natural_loop_topology_8616(
     When the function entry is supplied, dominance distinguishes true latches
     from enclosing-loop re-entry. Without it, retain conservative reachability.
     """
-    successor_cache: dict[int, tuple[int, ...]] = {}
-    predecessor_cache: dict[int, tuple[int, ...]] = {}
-
-    def _ordered_neighbors(node: int, *, predecessors: bool) -> tuple[int, ...]:
-        """Read, validate, deduplicate, and sort one adjacency list."""
-        cache = predecessor_cache if predecessors else successor_cache
-        if node in cache:
-            return cache[node]
-        values = graph.predecessors(node) if predecessors else graph.successors(node)
-        observed = tuple(values)
-        if any(not isinstance(value, int) or isinstance(value, bool) for value in observed):
-            raise TypeError("natural-loop topology requires integer CFG node ids")
-        ordered = tuple(sorted(set(observed)))
-        cache[node] = ordered
-        return ordered
-
-    def _forward_without_header_return() -> set[int]:
-        """Collect nodes reachable from the header before taking a backedge."""
-        visited: set[int] = set()
-        pending = [header]
-        while pending:
-            node = pending.pop()
-            if node in visited:
-                continue
-            visited.add(node)
-            pending.extend(
-                reversed(tuple(target for target in _ordered_neighbors(node, predecessors=False) if target != header))
-            )
-        return visited
-
-    def _reverse_to_latch() -> set[int]:
-        """Collect nodes that can reach the latch without crossing the header."""
-        visited: set[int] = set()
-        pending = [latch]
-        while pending:
-            node = pending.pop()
-            if node in visited:
-                continue
-            visited.add(node)
-            if node == header:
-                continue
-            pending.extend(reversed(_ordered_neighbors(node, predecessors=True)))
-        return visited
+    cache = _OrderedNeighborCache8616(graph)
 
     try:
-        if header not in _ordered_neighbors(latch, predecessors=False):
+        if header not in cache.ordered(latch, predecessors=False):
             return _unknown_topology_8616(header, latch, "missing-latch-backedge", normalized=False)
-        forward = _forward_without_header_return()
-        reverse = _reverse_to_latch()
+        forward = cache.forward_without_header_return(header)
+        reverse = cache.reverse_to_latch(latch, header)
     except (AttributeError, KeyError, TypeError, ValueError):
         return _unknown_topology_8616(header, latch, "incomplete-graph-evidence", normalized=False)
 
@@ -249,33 +300,16 @@ def classify_natural_loop_topology_8616(
     try:
         latch_candidates = (
             _header_dominated_nodes_8616(
-                entry, header, lambda node: _ordered_neighbors(node, predecessors=False),
+                entry, header, lambda node: cache.ordered(node, predecessors=False),
             )
             if entry is not None else forward
         )
-        latches = tuple(
-            source for source in _ordered_neighbors(header, predecessors=True) if source in latch_candidates
-        )
-        if latches != (latch,):
-            return _unknown_topology_8616(header, latch, "non-unique-latch", normalized=True)
-
-        entry_edges: set[LoopTopologyEdge8616] = set()
-        for target in sorted(body_set):
-            for source in _ordered_neighbors(target, predecessors=True):
-                if source in body_set:
-                    continue
-                if target != header:
-                    return _unknown_topology_8616(header, latch, "external-non-header-entry", normalized=True)
-                entry_edges.add((source, target))
-
-        exit_edges = {
-            (source, target)
-            for source in body_set
-            for target in _ordered_neighbors(source, predecessors=False)
-            if target not in body_set
-        }
+        boundary = _boundary_edges_8616(cache, header, latch, body_set, latch_candidates)
     except (AttributeError, KeyError, TypeError, ValueError):
         return _unknown_topology_8616(header, latch, "incomplete-graph-evidence", normalized=True)
+    if isinstance(boundary, str):
+        return _unknown_topology_8616(header, latch, boundary, normalized=True)
+    entry_edges, exit_edges = boundary
 
     if len({target for _, target in exit_edges}) != 1:
         return _unknown_topology_8616(header, latch, "non-unique-exit-target", normalized=True)

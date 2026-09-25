@@ -63,21 +63,66 @@ def _path_site_8616(
     )
 
 
+def _stable_bp_address_8616(address: IRAddress) -> bool:
+    """Return whether the address is a proven stable BP-relative cell."""
+    return (
+        address.space is MemSpace.SS
+        and address.base == ("bp",)
+        and address.status is AddressStatus.STABLE
+        and address.segment_origin is SegmentOrigin.PROVEN
+    )
+
+
 def _stable_stack_source_8616(instruction: IRInstr) -> IRAddress | None:
     """Return an exact BP-relative source for one width-coherent SSA LOAD."""
     address = instruction.args[0] if instruction.args else None
+    if instruction.op != "LOAD" or not isinstance(address, IRAddress):
+        return None
     if (
-        instruction.op != "LOAD"
-        or not isinstance(address, IRAddress)
-        or address.space is not MemSpace.SS
-        or address.base != ("bp",)
-        or address.status is not AddressStatus.STABLE
-        or address.segment_origin is not SegmentOrigin.PROVEN
+        not _stable_bp_address_8616(address)
         or address.size <= 0
         or instruction.size != address.size
     ):
         return None
     return address
+
+
+def _index_continuation_8616(
+    instruction: IRInstr,
+    shift: int,
+    next_path: tuple[IndexedAddressDefinitionSite8616, ...],
+) -> tuple[IRValue, int] | _TraceResult8616:
+    """Return the next traced value and shift for exact copy/shift ops."""
+    next_value: IRValue | None = None
+    next_shift = shift
+    if instruction.op == "MOV" and len(instruction.args) == 1:
+        argument = instruction.args[0]
+        next_value = argument if isinstance(argument, IRValue) else None
+    elif instruction.op.startswith("Iop_Shl") and len(instruction.args) == 2:
+        argument, amount = instruction.args
+        if (
+            isinstance(argument, IRValue)
+            and isinstance(amount, IRValue)
+            and amount.space is MemSpace.CONST
+            and amount.const is not None
+        ):
+            next_value = argument
+            next_shift += int(amount.const)
+            if not 0 <= next_shift <= 4:
+                return _TraceResult8616(
+                    None,
+                    next_shift,
+                    next_path,
+                    IndexedAddressFailureKind8616.INDEX_SHIFT_UNSUPPORTED,
+                )
+    if next_value is None:
+        return _TraceResult8616(
+            None,
+            shift,
+            next_path,
+            IndexedAddressFailureKind8616.INDEX_EXPRESSION_UNSUPPORTED,
+        )
+    return next_value, next_shift
 
 
 def _trace_index_source_8616(
@@ -146,35 +191,10 @@ def _trace_index_source_8616(
             (*next_path, *logical_trace.definition_path),
             logical_trace.failure,
         )
-    next_value: IRValue | None = None
-    next_shift = shift
-    if instruction.op == "MOV" and len(instruction.args) == 1:
-        argument = instruction.args[0]
-        next_value = argument if isinstance(argument, IRValue) else None
-    elif instruction.op.startswith("Iop_Shl") and len(instruction.args) == 2:
-        argument, amount = instruction.args
-        if (
-            isinstance(argument, IRValue)
-            and isinstance(amount, IRValue)
-            and amount.space is MemSpace.CONST
-            and amount.const is not None
-        ):
-            next_value = argument
-            next_shift += int(amount.const)
-            if not 0 <= next_shift <= 4:
-                return _TraceResult8616(
-                    None,
-                    next_shift,
-                    next_path,
-                    IndexedAddressFailureKind8616.INDEX_SHIFT_UNSUPPORTED,
-                )
-    if next_value is None:
-        return _TraceResult8616(
-            None,
-            shift,
-            next_path,
-            IndexedAddressFailureKind8616.INDEX_EXPRESSION_UNSUPPORTED,
-        )
+    continued = _index_continuation_8616(instruction, shift, next_path)
+    if isinstance(continued, _TraceResult8616):
+        return continued
+    next_value, next_shift = continued
     return _trace_index_source_8616(
         next_value,
         definitions,

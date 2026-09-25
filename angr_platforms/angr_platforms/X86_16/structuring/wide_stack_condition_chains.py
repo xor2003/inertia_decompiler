@@ -129,50 +129,77 @@ def candidate_wide_stack_operand_pairs_8616(
             )
             if low_left is None or low_right is None:
                 continue
-            orientations = (
-                (low_left, low_right),
-                (low_right, low_left),
+            _pair_orientations_8616(
+                high_left,
+                high_right,
+                low_left,
+                low_right,
+                signed,
+                prove_pair,
+                candidates,
             )
-            for paired_left, paired_right in orientations:
-                if not _adjacent_stack_words_8616(
-                    high_left, paired_left
-                ) or not _adjacent_stack_words_8616(high_right, paired_right):
-                    continue
-                left_pair_proven = prove_pair(high_left, paired_left)
-                right_pair_proven = prove_pair(high_right, paired_right)
-                if not left_pair_proven and not right_pair_proven:
-                    continue
-                candidate = WideStackOperandPair8616(
-                    high_left=high_left,
-                    low_left=paired_left,
-                    high_right=high_right,
-                    low_right=paired_right,
-                    signed=signed,
-                    left_pair_proven=left_pair_proven,
-                    right_pair_proven=right_pair_proven,
-                )
-                same_operands = next(
-                    (
-                        index
-                        for index, existing in enumerate(candidates)
-                        if existing.high_left == candidate.high_left
-                        and existing.low_left == candidate.low_left
-                        and existing.high_right == candidate.high_right
-                        and existing.low_right == candidate.low_right
-                    ),
-                    None,
-                )
-                if same_operands is None:
-                    candidates.append(candidate)
-                elif candidates[same_operands].signed is None and signed is not None:
-                    candidates[same_operands] = candidate
-                elif (
-                    signed is not None
-                    and candidates[same_operands].signed is not None
-                    and candidates[same_operands].signed != signed
-                ):
-                    candidates.append(candidate)
     return tuple(candidates)
+
+
+def _pair_orientations_8616(
+    high_left: IRValue,
+    high_right: IRValue,
+    low_left: IRValue,
+    low_right: IRValue,
+    signed: bool | None,
+    prove_pair: WideStackPairProver8616,
+    candidates: list[WideStackOperandPair8616],
+) -> None:
+    """Append proven oriented candidates for one (high, low) word pair."""
+    for paired_left, paired_right in ((low_left, low_right), (low_right, low_left)):
+        if not _adjacent_stack_words_8616(
+            high_left, paired_left
+        ) or not _adjacent_stack_words_8616(high_right, paired_right):
+            continue
+        left_pair_proven = prove_pair(high_left, paired_left)
+        right_pair_proven = prove_pair(high_right, paired_right)
+        if not left_pair_proven and not right_pair_proven:
+            continue
+        _merge_candidate_8616(
+            candidates,
+            WideStackOperandPair8616(
+                high_left=high_left,
+                low_left=paired_left,
+                high_right=high_right,
+                low_right=paired_right,
+                signed=signed,
+                left_pair_proven=left_pair_proven,
+                right_pair_proven=right_pair_proven,
+            ),
+        )
+
+
+def _merge_candidate_8616(
+    candidates: list[WideStackOperandPair8616],
+    candidate: WideStackOperandPair8616,
+) -> None:
+    """Append or replace one candidate while preserving operand dedup."""
+    same_operands = next(
+        (
+            index
+            for index, existing in enumerate(candidates)
+            if existing.high_left == candidate.high_left
+            and existing.low_left == candidate.low_left
+            and existing.high_right == candidate.high_right
+            and existing.low_right == candidate.low_right
+        ),
+        None,
+    )
+    if same_operands is None:
+        candidates.append(candidate)
+    elif candidates[same_operands].signed is None and candidate.signed is not None:
+        candidates[same_operands] = candidate
+    elif (
+        candidate.signed is not None
+        and candidates[same_operands].signed is not None
+        and candidates[same_operands].signed != candidate.signed
+    ):
+        candidates.append(candidate)
 
 
 def relation_for_wide_stack_condition_8616(
@@ -232,23 +259,41 @@ def _chain_outcome_8616(
         if not isinstance(target, int) or target in visited:
             return None
         visited.add(target)
-        next_condition = conditions_by_block.get(target)
-        if next_condition is not None:
-            condition = next_condition
-            continue
-        next_addrs = successors.get(target, ())
-        if len(next_addrs) != 1:
-            return None
-        target = next_addrs[0]
-        if target == true_target:
-            return True
-        if target == false_target:
-            return False
-        next_condition = conditions_by_block.get(target)
+        verdict, next_condition = _chain_step_8616(
+            target,
+            conditions_by_block,
+            successors,
+            true_target,
+            false_target,
+        )
+        if verdict is not None:
+            return verdict
         if next_condition is None:
             return None
         condition = next_condition
     return None
+
+
+def _chain_step_8616(
+    target: int,
+    conditions_by_block: dict[int, ConditionIR],
+    successors: dict[int, tuple[int, ...]],
+    true_target: int,
+    false_target: int,
+) -> tuple[bool | None, ConditionIR | None]:
+    """Resolve one chain hop to ``(verdict, next)``; ``(None, None)`` refuses."""
+    next_condition = conditions_by_block.get(target)
+    if next_condition is not None:
+        return None, next_condition
+    next_addrs = successors.get(target, ())
+    if len(next_addrs) != 1:
+        return None, None
+    hop = next_addrs[0]
+    if hop == true_target:
+        return True, None
+    if hop == false_target:
+        return False, None
+    return None, conditions_by_block.get(hop)
 
 
 def candidate_wide_stack_ops_8616(signed: bool | None) -> tuple[ConditionOp, ...]:

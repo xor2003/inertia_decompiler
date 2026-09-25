@@ -76,6 +76,18 @@ def _canonical_stack_offset_8616(offset: int) -> int:
     return normalized - 0x10000 if normalized >= 0x8000 else normalized
 
 
+def _exact_object_destination_8616(destination: object, width: object) -> bool:
+    """Return whether the pair is an exact ``(str-base, int-offset)`` + positive width."""
+    return (
+        isinstance(destination, tuple)
+        and len(destination) == 2
+        and isinstance(destination[0], str)
+        and isinstance(destination[1], int)
+        and isinstance(width, int)
+        and width > 0
+    )
+
+
 def _is_exact_summary_destination_8616(expression: object, summary: CallsiteSummary8616) -> bool:
     """Match one C lvalue to the summary's exact object and width."""
     current = expression
@@ -85,15 +97,9 @@ def _is_exact_summary_destination_8616(expression: object, summary: CallsiteSumm
         return False
     destination = summary.return_store_destination
     width = summary.return_store_width
-    if (
-        not isinstance(destination, tuple)
-        or len(destination) != 2
-        or not isinstance(destination[0], str)
-        or not isinstance(destination[1], int)
-        or not isinstance(width, int)
-        or width <= 0
-    ):
+    if not _exact_object_destination_8616(destination, width):
         return False
+    assert isinstance(destination, tuple) and isinstance(width, int)
     variable = current.variable
     if destination[0] == "bp" and isinstance(variable, SimStackVariable):
         return (
@@ -248,6 +254,75 @@ def _remove_standalone_8616(occurrence: _DirectCallOccurrence8616) -> None:
     occurrence.parent.statements = statements
 
 
+def _process_callsite_8616(
+    root: object,
+    callsite_addr: int,
+    occurrences: list[_DirectCallOccurrence8616],
+    standalone: tuple[_DirectCallOccurrence8616, ...],
+    assigned: tuple[_DirectCallOccurrence8616, ...],
+    summary_inventory: dict[int, CallsiteSummary8616],
+    summary_map: dict[int, CallsiteSummary8616],
+    stats: StoredCallResultOccurrenceStats8616,
+    refusals: list[StoredCallResultRefusal8616],
+) -> None:
+    """Apply the clone-removal evidence ladder to one callsite group."""
+    stats.raw_fact_count += 1
+    if len(occurrences) != 2 or len(standalone) != 1 or len(assigned) != 1:
+        _refuse_8616(
+            stats,
+            refusals,
+            callsite_addr,
+            StoredCallResultRefusalReason8616.OCCURRENCE_SET_AMBIGUOUS,
+        )
+        return
+    summary = summary_inventory.get(callsite_addr)
+    if summary is None:
+        _refuse_8616(
+            stats,
+            refusals,
+            callsite_addr,
+            StoredCallResultRefusalReason8616.SUMMARY_MISSING_OR_CONFLICTING,
+        )
+        return
+    assignment_statement = assigned[0].statement
+    if (
+        summary.return_used is not True
+        or not isinstance(assignment_statement, CAssignment)
+        or not _is_exact_summary_destination_8616(assignment_statement.lhs, summary)
+    ):
+        _refuse_8616(
+            stats,
+            refusals,
+            callsite_addr,
+            StoredCallResultRefusalReason8616.RETURN_STORE_NOT_PROVEN,
+        )
+        return
+    stats.normalized_fact_count += 1
+    if not _same_call_surface_8616(standalone[0].call, assigned[0].call):
+        _refuse_8616(
+            stats,
+            refusals,
+            callsite_addr,
+            StoredCallResultRefusalReason8616.CALL_SURFACE_CONFLICT,
+        )
+        return
+    if not _has_unique_adjacent_order_witness_8616(root, standalone[0], assigned[0]):
+        _refuse_8616(
+            stats,
+            refusals,
+            callsite_addr,
+            StoredCallResultRefusalReason8616.STRUCTURED_ORDER_UNKNOWN,
+        )
+        return
+    stats.classified_fact_count += 1
+    _remove_standalone_8616(standalone[0])
+    summary_map[id(assigned[0].call)] = summary
+    if standalone[0].call is not assigned[0].call:
+        summary_map.pop(id(standalone[0].call), None)
+    stats.materialized_count += 1
+    stats.removed_standalone_count += 1
+
+
 def materialize_stored_call_result_occurrences_8616(
     codegen: object,
 ) -> StoredCallResultOccurrenceResult8616:
@@ -278,61 +353,17 @@ def materialize_stored_call_result_occurrences_8616(
         assigned = tuple(occurrence for occurrence in occurrences if not occurrence.is_standalone)
         if not standalone or not assigned:
             continue
-        stats.raw_fact_count += 1
-        if len(occurrences) != 2 or len(standalone) != 1 or len(assigned) != 1:
-            _refuse_8616(
-                stats,
-                refusals,
-                callsite_addr,
-                StoredCallResultRefusalReason8616.OCCURRENCE_SET_AMBIGUOUS,
-            )
-            continue
-        summary = summary_inventory.get(callsite_addr)
-        if summary is None:
-            _refuse_8616(
-                stats,
-                refusals,
-                callsite_addr,
-                StoredCallResultRefusalReason8616.SUMMARY_MISSING_OR_CONFLICTING,
-            )
-            continue
-        assignment_statement = assigned[0].statement
-        if (
-            summary.return_used is not True
-            or not isinstance(assignment_statement, CAssignment)
-            or not _is_exact_summary_destination_8616(assignment_statement.lhs, summary)
-        ):
-            _refuse_8616(
-                stats,
-                refusals,
-                callsite_addr,
-                StoredCallResultRefusalReason8616.RETURN_STORE_NOT_PROVEN,
-            )
-            continue
-        stats.normalized_fact_count += 1
-        if not _same_call_surface_8616(standalone[0].call, assigned[0].call):
-            _refuse_8616(
-                stats,
-                refusals,
-                callsite_addr,
-                StoredCallResultRefusalReason8616.CALL_SURFACE_CONFLICT,
-            )
-            continue
-        if not _has_unique_adjacent_order_witness_8616(root, standalone[0], assigned[0]):
-            _refuse_8616(
-                stats,
-                refusals,
-                callsite_addr,
-                StoredCallResultRefusalReason8616.STRUCTURED_ORDER_UNKNOWN,
-            )
-            continue
-        stats.classified_fact_count += 1
-        _remove_standalone_8616(standalone[0])
-        summary_map[id(assigned[0].call)] = summary
-        if standalone[0].call is not assigned[0].call:
-            summary_map.pop(id(standalone[0].call), None)
-        stats.materialized_count += 1
-        stats.removed_standalone_count += 1
+        _process_callsite_8616(
+            root,
+            callsite_addr,
+            occurrences,
+            standalone,
+            assigned,
+            summary_inventory,
+            summary_map,
+            stats,
+            refusals,
+        )
 
     verdict = (
         StoredCallResultOccurrenceVerdict8616.UNKNOWN_REFUSE

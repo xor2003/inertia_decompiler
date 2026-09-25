@@ -19,6 +19,7 @@ from .core import (
     IRAddress,
     IRAtom,
     IRBinaryValue,
+    IRBlock,
     IRCondition,
     IRFunctionArtifact,
     IRInstr,
@@ -265,42 +266,75 @@ def _exit_clobbers(
     )
 
 
-def build_x86_16_segment_function_contract(
-    artifact: IRFunctionArtifact,
-    segment_state: SegmentStateArtifact,
-) -> SegmentFunctionContract:
-    """Build an exact function-local segment contract from typed IR facts."""
-    accesses: list[SegmentAccessFact] = []
-    writes: list[SegmentWriteFact] = []
-    instruction_states: list[SegmentInstructionStateFact] = []
-    entry_requirements: set[str] = set()
-    for block in artifact.blocks:
+@dataclass(slots=True)
+class _SegmentFactScan8616:
+    """Mutable collector for per-block segment fact extraction."""
+
+    accesses: list[SegmentAccessFact] = field(default_factory=list)
+    writes: list[SegmentWriteFact] = field(default_factory=list)
+    instruction_states: list[SegmentInstructionStateFact] = field(default_factory=list)
+    entry_requirements: set[str] = field(default_factory=set)
+
+    def scan(self, block: IRBlock, segment_state: SegmentStateArtifact) -> None:
+        """Collect all segment facts owned by one IR block."""
         for instruction in block.instrs:
             if instruction.addr is not None:
                 for register in _SEGMENT_REGISTERS:
                     source = _proven_source(_state_before(segment_state, instruction.addr, register))
                     verdict = SegmentFactVerdict.PROVEN if source is not None else SegmentFactVerdict.UNKNOWN_REFUSE
-                    instruction_states.append(
+                    self.instruction_states.append(
                         SegmentInstructionStateFact(block.addr, instruction.addr, register, source, verdict)
                     )
-            for argument_index, argument in enumerate(instruction.args):
-                if isinstance(argument, IRAddress):
-                    kind = (
-                        SegmentAccessKind.WRITE
-                        if instruction.op == "STORE" and argument_index == 0
-                        else SegmentAccessKind.READ
-                    )
-                    access = _access_fact(block.addr, instruction, argument, kind, segment_state)
-                    accesses.append(access)
-                    if access.physical_source in _SEGMENT_REGISTERS:
-                        entry_requirements.add(access.physical_source)
-                for register in _segment_reads(argument):
-                    source = _proven_source(_state_before(segment_state, instruction.addr, register))
-                    if source in _SEGMENT_REGISTERS:
-                        entry_requirements.add(source)
-            dst = instruction.dst
-            if isinstance(dst, IRValue) and dst.space is MemSpace.REG and dst.name in _SEGMENT_REGISTERS:
-                writes.append(_write_fact(block.addr, instruction, dst.name, segment_state))
+            self._scan_accesses(block.addr, instruction, segment_state)
+            self._scan_write(block.addr, instruction, segment_state)
+
+    def _scan_accesses(
+        self,
+        block_addr: int,
+        instruction: IRInstr,
+        segment_state: SegmentStateArtifact,
+    ) -> None:
+        """Collect typed access facts and segment entry requirements."""
+        for argument_index, argument in enumerate(instruction.args):
+            if isinstance(argument, IRAddress):
+                kind = (
+                    SegmentAccessKind.WRITE
+                    if instruction.op == "STORE" and argument_index == 0
+                    else SegmentAccessKind.READ
+                )
+                access = _access_fact(block_addr, instruction, argument, kind, segment_state)
+                self.accesses.append(access)
+                if access.physical_source in _SEGMENT_REGISTERS:
+                    self.entry_requirements.add(access.physical_source)
+            for register in _segment_reads(argument):
+                source = _proven_source(_state_before(segment_state, instruction.addr, register))
+                if source in _SEGMENT_REGISTERS:
+                    self.entry_requirements.add(source)
+
+    def _scan_write(
+        self,
+        block_addr: int,
+        instruction: IRInstr,
+        segment_state: SegmentStateArtifact,
+    ) -> None:
+        """Collect one typed segment-register write fact."""
+        dst = instruction.dst
+        if isinstance(dst, IRValue) and dst.space is MemSpace.REG and dst.name in _SEGMENT_REGISTERS:
+            self.writes.append(_write_fact(block_addr, instruction, dst.name, segment_state))
+
+
+def build_x86_16_segment_function_contract(
+    artifact: IRFunctionArtifact,
+    segment_state: SegmentStateArtifact,
+) -> SegmentFunctionContract:
+    """Build an exact function-local segment contract from typed IR facts."""
+    scan = _SegmentFactScan8616()
+    for block in artifact.blocks:
+        scan.scan(block, segment_state)
+    accesses = scan.accesses
+    writes = scan.writes
+    instruction_states = scan.instruction_states
+    entry_requirements = scan.entry_requirements
 
     clobbered = _exit_clobbers(artifact, segment_state)
     restored = tuple(

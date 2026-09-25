@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -192,6 +193,69 @@ def _identity_parent_contexts_8616(
     return tuple(sorted(contexts))
 
 
+@dataclass(slots=True)
+class _CarrierPruneScan8616:
+    """Mutable per-statement prune verdicts and evidence counters."""
+
+    root: object
+    debug_identity_filter: frozenset[int]
+    raw: int = 0
+    normalized: int = 0
+    classified: int = 0
+    materialized: int = 0
+    failures: int = 0
+    live_refusals: int = 0
+    side_effect_refusals: int = 0
+
+    def keep(
+        self,
+        statement: object,
+        definitions: Mapping[VirtualConditionCarrierIdentity8616, int],
+        reads: Mapping[VirtualConditionCarrierIdentity8616, int],
+    ) -> bool:
+        """Return whether one statement survives the carrier prune."""
+        if not isinstance(statement, CAssignment) or not isinstance(statement.rhs, CBinaryOp):
+            return True
+        if statement.rhs.op not in _CONDITION_OPS_8616:
+            return True
+        identity = _carrier_identity_8616(statement.lhs)
+        if identity is None:
+            return True
+        definition_count = definitions.get(identity, 0)
+        read_count = reads.get(identity, 0)
+        pure = _is_pure_expression_8616(statement.rhs)
+        if os.environ.get("INERTIA_DEBUG_DEAD_CONDITION_CARRIERS") == "1" and (
+            not self.debug_identity_filter or identity.vvar_id in self.debug_identity_filter
+        ):
+            log.warning(
+                "[dead-condition-carrier] varid=%d lhs_type=%s definitions=%d reads=%d pure=%s "
+                "parents=%r tags=%r",
+                identity.vvar_id,
+                type(statement.lhs).__name__,
+                definition_count,
+                read_count,
+                pure,
+                _identity_parent_contexts_8616(self.root, identity),
+                statement.tags,
+            )
+        self.raw += 1
+        if definition_count != 1:
+            self.failures += 1
+            return True
+        self.normalized += 1
+        if read_count > 0:
+            self.classified += 1
+            self.live_refusals += 1
+            return True
+        if not pure:
+            self.classified += 1
+            self.side_effect_refusals += 1
+            return True
+        self.classified += 1
+        self.materialized += 1
+        return False
+
+
 def prune_unread_pure_condition_carriers_8616(codegen: object) -> DeadConditionCarrierStats8616:
     """Remove uniquely defined, unread, pure virtual comparison assignments."""
     boundary = cast(_DeadConditionCarrierCodegen8616, codegen)
@@ -205,68 +269,25 @@ def prune_unread_pure_condition_carriers_8616(codegen: object) -> DeadConditionC
     blocks = _statement_blocks_8616(root)
     definitions = _definition_counts_8616(blocks)
     reads = _read_counts_8616(root, definitions)
-    debug_identity_filter = _debug_identity_filter_8616()
-    raw = normalized = classified = materialized = failures = live_refusals = side_effect_refusals = 0
+    scan = _CarrierPruneScan8616(root, _debug_identity_filter_8616())
 
     for block in blocks:
-        kept: list[object] = []
-        for statement in block.statements:
-            if not isinstance(statement, CAssignment) or not isinstance(statement.rhs, CBinaryOp):
-                kept.append(statement)
-                continue
-            if statement.rhs.op not in _CONDITION_OPS_8616:
-                kept.append(statement)
-                continue
-            identity = _carrier_identity_8616(statement.lhs)
-            if identity is None:
-                kept.append(statement)
-                continue
-            definition_count = definitions.get(identity, 0)
-            read_count = reads.get(identity, 0)
-            pure = _is_pure_expression_8616(statement.rhs)
-            if os.environ.get("INERTIA_DEBUG_DEAD_CONDITION_CARRIERS") == "1" and (
-                not debug_identity_filter or identity.vvar_id in debug_identity_filter
-            ):
-                log.warning(
-                    "[dead-condition-carrier] varid=%d lhs_type=%s definitions=%d reads=%d pure=%s "
-                    "parents=%r tags=%r",
-                    identity.vvar_id,
-                    type(statement.lhs).__name__,
-                    definition_count,
-                    read_count,
-                    pure,
-                    _identity_parent_contexts_8616(root, identity),
-                    statement.tags,
-                )
-            raw += 1
-            if definition_count != 1:
-                failures += 1
-                kept.append(statement)
-                continue
-            normalized += 1
-            if read_count > 0:
-                classified += 1
-                live_refusals += 1
-                kept.append(statement)
-                continue
-            if not pure:
-                classified += 1
-                side_effect_refusals += 1
-                kept.append(statement)
-                continue
-            classified += 1
-            materialized += 1
+        kept = [
+            statement
+            for statement in block.statements
+            if scan.keep(statement, definitions, reads)
+        ]
         if len(kept) != len(block.statements):
             block.statements = kept
 
     current = DeadConditionCarrierStats8616(
-        raw_fact_count=raw,
-        normalized_fact_count=normalized,
-        classified_fact_count=classified,
-        materialized_count=materialized,
-        failure_count=failures,
-        live_refusal_count=live_refusals,
-        side_effect_refusal_count=side_effect_refusals,
+        raw_fact_count=scan.raw,
+        normalized_fact_count=scan.normalized,
+        classified_fact_count=scan.classified,
+        materialized_count=scan.materialized,
+        failure_count=scan.failures,
+        live_refusal_count=scan.live_refusals,
+        side_effect_refusal_count=scan.side_effect_refusals,
     )
     try:
         previous = boundary._inertia_dead_condition_carrier_stats_8616

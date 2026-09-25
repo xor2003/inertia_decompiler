@@ -105,6 +105,69 @@ def _summary_for_call_8616(
     return summary
 
 
+def _retained_callsite_counts_8616(
+    root: object,
+    summary_map: dict[int, CallsiteSummary8616],
+    inventory: dict[int, CallsiteSummary8616],
+) -> dict[int, int]:
+    """Count retained direct-call occurrences per proven callsite."""
+    retained_counts: dict[int, int] = {}
+    for node in _iter_c_nodes_deep_8616(root):
+        call = _direct_call_8616(node)
+        if call is None:
+            continue
+        summary = _summary_for_call_8616(call, summary_map, inventory)
+        if summary is not None:
+            retained_counts[summary.callsite_addr] = retained_counts.get(summary.callsite_addr, 0) + 1
+    return retained_counts
+
+
+@dataclass(slots=True)
+class _SelfXorReplace8616:
+    """Classify and replace nested exact-call self-XOR candidates."""
+
+    codegen: object
+    stats: UnusedCallResultSelfXorStats8616
+    summary_map: dict[int, CallsiteSummary8616]
+    inventory: dict[int, CallsiteSummary8616]
+    retained_counts: dict[int, int]
+
+    def replace(self, node: object) -> object:
+        """Classify and replace one nested exact-call self-XOR candidate."""
+        if (
+            not isinstance(node, structured_c.CBinaryOp)
+            or node.op != "Xor"
+            or not isinstance(node.lhs, structured_c.CFunctionCall)
+            or not isinstance(node.rhs, structured_c.CFunctionCall)
+        ):
+            return node
+        lhs_addr = structured_callsite_addr_8616(node.lhs)
+        rhs_addr = structured_callsite_addr_8616(node.rhs)
+        if node.lhs is not node.rhs and (
+            not isinstance(lhs_addr, int) or lhs_addr != rhs_addr
+        ):
+            return node
+        self.stats.raw_fact_count += 1
+        lhs_summary = _summary_for_call_8616(node.lhs, self.summary_map, self.inventory)
+        rhs_summary = _summary_for_call_8616(node.rhs, self.summary_map, self.inventory)
+        if lhs_summary is None or rhs_summary is None or lhs_summary != rhs_summary:
+            self.stats.failure_count += 1
+            return node
+        self.stats.normalized_fact_count += 1
+        if lhs_summary.return_used is not False or self.retained_counts.get(
+            lhs_summary.callsite_addr
+        ) != 1:
+            self.stats.failure_count += 1
+            return node
+        result_type = node.type
+        if result_type is None:
+            self.stats.failure_count += 1
+            return node
+        self.stats.classified_fact_count += 1
+        self.stats.materialized_count += 1
+        return structured_c.CConstant(0, result_type, codegen=self.codegen)
+
+
 def materialize_unused_call_result_self_xor_8616(
     codegen: object,
 ) -> UnusedCallResultSelfXorResult8616:
@@ -135,49 +198,10 @@ def materialize_unused_call_result_self_xor_8616(
     ):
         raise TypeError("unused call-result self-XOR received an invalid owned contract")
 
-    retained_counts: dict[int, int] = {}
-    for node in _iter_c_nodes_deep_8616(root):
-        call = _direct_call_8616(node)
-        if call is None:
-            continue
-        summary = _summary_for_call_8616(call, summary_map, inventory)
-        if summary is not None:
-            retained_counts[summary.callsite_addr] = retained_counts.get(summary.callsite_addr, 0) + 1
+    retained_counts = _retained_callsite_counts_8616(root, summary_map, inventory)
 
-    def _replace_self_xor_8616(node: object) -> object:
-        """Classify and replace one nested exact-call self-XOR candidate."""
-        if (
-            not isinstance(node, structured_c.CBinaryOp)
-            or node.op != "Xor"
-            or not isinstance(node.lhs, structured_c.CFunctionCall)
-            or not isinstance(node.rhs, structured_c.CFunctionCall)
-        ):
-            return node
-        lhs_addr = structured_callsite_addr_8616(node.lhs)
-        rhs_addr = structured_callsite_addr_8616(node.rhs)
-        if node.lhs is not node.rhs and (
-            not isinstance(lhs_addr, int) or lhs_addr != rhs_addr
-        ):
-            return node
-        stats.raw_fact_count += 1
-        lhs_summary = _summary_for_call_8616(node.lhs, summary_map, inventory)
-        rhs_summary = _summary_for_call_8616(node.rhs, summary_map, inventory)
-        if lhs_summary is None or rhs_summary is None or lhs_summary != rhs_summary:
-            stats.failure_count += 1
-            return node
-        stats.normalized_fact_count += 1
-        if lhs_summary.return_used is not False or retained_counts.get(lhs_summary.callsite_addr) != 1:
-            stats.failure_count += 1
-            return node
-        result_type = node.type
-        if result_type is None:
-            stats.failure_count += 1
-            return node
-        stats.classified_fact_count += 1
-        stats.materialized_count += 1
-        return structured_c.CConstant(0, result_type, codegen=codegen)
-
-    _replace_c_children_8616(root, _replace_self_xor_8616)
+    scan = _SelfXorReplace8616(codegen, stats, summary_map, inventory, retained_counts)
+    _replace_c_children_8616(root, scan.replace)
     verdict = (
         UnusedCallResultSelfXorVerdict8616.UNKNOWN_REFUSE
         if stats.failure_count

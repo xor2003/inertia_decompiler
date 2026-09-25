@@ -71,59 +71,59 @@ def prune_unreachable_total_return_suffixes_8616(
     root: object,
 ) -> TotalReturnSuffixPruneResult8616:
     """Remove label-free suffixes after every proved total-return conditional."""
-    raw_count = 0
-    normalized_count = 0
-    classified_count = 0
-    materialized_count = 0
-    failure_count = 0
-    removed_count = 0
+    scan = _ReturnSuffixPruneScan8616()
+    if isinstance(root, CStatements):
+        scan.prune_container(root)
+    return TotalReturnSuffixPruneResult8616(
+        removed_statement_count=scan.removed_count,
+        stats=TotalReturnSuffixPruneStats8616(
+            raw_fact_count=scan.raw_count,
+            normalized_fact_count=scan.normalized_count,
+            classified_fact_count=scan.classified_count,
+            materialized_count=scan.materialized_count,
+            failure_count=scan.failure_count,
+        ),
+    )
 
-    def prune_container(container: CStatements) -> None:
-        nonlocal raw_count
-        nonlocal normalized_count
-        nonlocal classified_count
-        nonlocal materialized_count
-        nonlocal failure_count
-        nonlocal removed_count
 
+@dataclass(slots=True)
+class _ReturnSuffixPruneScan8616:
+    """Mutable counters for one total-return suffix prune scan."""
+
+    raw_count: int = 0
+    normalized_count: int = 0
+    classified_count: int = 0
+    materialized_count: int = 0
+    failure_count: int = 0
+    removed_count: int = 0
+
+    def prune_container(self, container: CStatements) -> None:
+        """Prune unreachable suffixes inside one statement container."""
         statements = list(cast(Iterable[object], container.statements or ()))
         for index, statement in enumerate(tuple(statements)):
             if isinstance(statement, CStatements):
-                prune_container(statement)
+                self.prune_container(statement)
             elif isinstance(statement, CIfElse):
                 for _condition, body in tuple(statement.condition_and_nodes or ()):
                     if isinstance(body, CStatements):
-                        prune_container(body)
+                        self.prune_container(body)
                 if isinstance(statement.else_node, CStatements):
-                    prune_container(statement.else_node)
+                    self.prune_container(statement.else_node)
                 arms = tuple(statement.condition_and_nodes or ())
                 if not is_materialized_multi_arm_return_chain_8616(
                     arms, statement.else_node
                 ):
                     continue
-                raw_count += 1
-                normalized_count += 1
+                self.raw_count += 1
+                self.normalized_count += 1
                 suffix = statements[index + 1 :]
                 if not suffix:
                     continue
                 if any(_contains_label_8616(item) for item in suffix):
-                    failure_count += 1
+                    self.failure_count += 1
                     continue
-                classified_count += 1
-                removed_count += len(suffix)
-                materialized_count += 1
+                self.classified_count += 1
+                self.removed_count += len(suffix)
+                self.materialized_count += 1
                 container.statements = statements[: index + 1]
                 return
-
-    if isinstance(root, CStatements):
-        prune_container(root)
-    return TotalReturnSuffixPruneResult8616(
-        removed_statement_count=removed_count,
-        stats=TotalReturnSuffixPruneStats8616(
-            raw_fact_count=raw_count,
-            normalized_fact_count=normalized_count,
-            classified_fact_count=classified_count,
-            materialized_count=materialized_count,
-            failure_count=failure_count,
-        ),
-    )

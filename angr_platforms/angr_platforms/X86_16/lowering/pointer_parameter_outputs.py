@@ -26,11 +26,15 @@ from ..semantics.terminal_pointer_outputs import (
 )
 from ..widening.terminal_pointer_output_contracts import (
     TerminalPointerOutputViewEvidence8616,
+    TerminalPointerOutputViewFact8616,
 )
 from ..widening.terminal_pointer_output_views import (
     widen_terminal_pointer_output_views_8616,
 )
-from .callee_argument_width_evidence import collect_callee_argument_width_evidence_8616
+from .callee_argument_width_evidence import (
+    CalleeArgumentWidthEvidence8616,
+    collect_callee_argument_width_evidence_8616,
+)
 from .pointer_parameter_output_contracts import (
     PointerParameterOutputContract8616,
     PointerParameterOutputEvidence8616,
@@ -130,6 +134,101 @@ def pointer_parameter_output_evidence_8616(
     return _registry_8616(project).get(function_addr)
 
 
+def _output_contract_8616(
+    view: TerminalPointerOutputViewFact8616,
+    widths: CalleeArgumentWidthEvidence8616,
+    function_addr: int,
+    raw_count: int,
+    normalized_count: int,
+    terminal: TerminalPointerOutputEvidence8616,
+    aliases: TerminalPointerAliasEvidence8616,
+    views: TerminalPointerOutputViewEvidence8616,
+) -> PointerParameterOutputContract8616 | PointerParameterOutputEvidence8616:
+    """Bind one terminal view to its unique logical-input storage or refuse."""
+    matches = tuple(
+        (logical_index, storage)
+        for logical_index, storage in enumerate(widths.argument_storage)
+        if storage.space is view.parameter_storage.space
+        and storage.base == view.parameter_storage.base
+        and storage.offset == view.parameter_storage.offset
+        and storage.size == view.parameter_storage.size
+    )
+    if len(matches) != 1:
+        failure = (
+            PointerParameterOutputFailure8616.PARAMETER_STORAGE_UNMATCHED
+            if not matches
+            else PointerParameterOutputFailure8616.PARAMETER_STORAGE_CONFLICT
+        )
+        return _refused_8616(
+            function_addr,
+            failure,
+            raw_count=raw_count,
+            normalized_count=normalized_count,
+            terminal=terminal,
+            aliases=aliases,
+            views=views,
+        )
+    logical_index, storage = matches[0]
+    return PointerParameterOutputContract8616(logical_index, storage, view)
+
+
+def _proven_views_8616(
+    project: object,
+    function_addr: int,
+    owner: object,
+) -> (
+    tuple[
+        TerminalPointerOutputEvidence8616,
+        TerminalPointerAliasEvidence8616,
+        TerminalPointerOutputViewEvidence8616,
+    ]
+    | PointerParameterOutputEvidence8616
+):
+    """Run semantics→alias→widening stages or return one typed refusal."""
+    ssa = semantic_function_ssa_artifact_at_address_8616(
+        project,
+        function_addr,
+        function=owner,
+    )
+    if ssa.artifact is None:
+        return _refused_8616(
+            function_addr,
+            PointerParameterOutputFailure8616.CALLEE_SSA_UNAVAILABLE,
+            ssa_failure=ssa.failure,
+        )
+    terminal = collect_terminal_pointer_output_evidence_8616(project, ssa.artifact)
+    if not terminal.complete:
+        return _refused_8616(
+            function_addr,
+            PointerParameterOutputFailure8616.SEMANTICS_REFUSED,
+            raw_count=terminal.stats.raw_fact_count,
+            normalized_count=terminal.stats.normalized_fact_count,
+            terminal=terminal,
+        )
+    aliases = classify_terminal_pointer_output_aliases_8616(owner, terminal)
+    if not aliases.complete:
+        return _refused_8616(
+            function_addr,
+            PointerParameterOutputFailure8616.ALIAS_REFUSED,
+            raw_count=aliases.stats.raw_fact_count,
+            normalized_count=aliases.stats.normalized_fact_count,
+            terminal=terminal,
+            aliases=aliases,
+        )
+    views = widen_terminal_pointer_output_views_8616(aliases)
+    if not views.complete:
+        return _refused_8616(
+            function_addr,
+            PointerParameterOutputFailure8616.WIDENING_REFUSED,
+            raw_count=views.stats.raw_fact_count,
+            normalized_count=views.stats.normalized_fact_count,
+            terminal=terminal,
+            aliases=aliases,
+            views=views,
+        )
+    return terminal, aliases, views
+
+
 def publish_pointer_parameter_outputs_8616(
     project: object,
     function_addr: int,
@@ -155,59 +254,10 @@ def publish_pointer_parameter_outputs_8616(
             ),
         )
 
-    ssa = semantic_function_ssa_artifact_at_address_8616(
-        project,
-        function_addr,
-        function=owner,
-    )
-    if ssa.artifact is None:
-        return _publish_8616(
-            project,
-            _refused_8616(
-                function_addr,
-                PointerParameterOutputFailure8616.CALLEE_SSA_UNAVAILABLE,
-                ssa_failure=ssa.failure,
-            ),
-        )
-    terminal = collect_terminal_pointer_output_evidence_8616(project, ssa.artifact)
-    if not terminal.complete:
-        return _publish_8616(
-            project,
-            _refused_8616(
-                function_addr,
-                PointerParameterOutputFailure8616.SEMANTICS_REFUSED,
-                raw_count=terminal.stats.raw_fact_count,
-                normalized_count=terminal.stats.normalized_fact_count,
-                terminal=terminal,
-            ),
-        )
-    aliases = classify_terminal_pointer_output_aliases_8616(owner, terminal)
-    if not aliases.complete:
-        return _publish_8616(
-            project,
-            _refused_8616(
-                function_addr,
-                PointerParameterOutputFailure8616.ALIAS_REFUSED,
-                raw_count=aliases.stats.raw_fact_count,
-                normalized_count=aliases.stats.normalized_fact_count,
-                terminal=terminal,
-                aliases=aliases,
-            ),
-        )
-    views = widen_terminal_pointer_output_views_8616(aliases)
-    if not views.complete:
-        return _publish_8616(
-            project,
-            _refused_8616(
-                function_addr,
-                PointerParameterOutputFailure8616.WIDENING_REFUSED,
-                raw_count=views.stats.raw_fact_count,
-                normalized_count=views.stats.normalized_fact_count,
-                terminal=terminal,
-                aliases=aliases,
-                views=views,
-            ),
-        )
+    upstream = _proven_views_8616(project, function_addr, owner)
+    if isinstance(upstream, PointerParameterOutputEvidence8616):
+        return _publish_8616(project, upstream)
+    terminal, aliases, views = upstream
     if not views.facts:
         return _publish_8616(
             project,
@@ -237,34 +287,19 @@ def publish_pointer_parameter_outputs_8616(
         )
     facts: list[PointerParameterOutputContract8616] = []
     for view in views.facts:
-        matches = tuple(
-            (logical_index, storage)
-            for logical_index, storage in enumerate(widths.argument_storage)
-            if storage.space is view.parameter_storage.space
-            and storage.base == view.parameter_storage.base
-            and storage.offset == view.parameter_storage.offset
-            and storage.size == view.parameter_storage.size
+        outcome = _output_contract_8616(
+            view,
+            widths,
+            function_addr,
+            len(views.facts),
+            len(facts),
+            terminal,
+            aliases,
+            views,
         )
-        if len(matches) != 1:
-            failure = (
-                PointerParameterOutputFailure8616.PARAMETER_STORAGE_UNMATCHED
-                if not matches
-                else PointerParameterOutputFailure8616.PARAMETER_STORAGE_CONFLICT
-            )
-            return _publish_8616(
-                project,
-                _refused_8616(
-                    function_addr,
-                    failure,
-                    raw_count=len(views.facts),
-                    normalized_count=len(facts),
-                    terminal=terminal,
-                    aliases=aliases,
-                    views=views,
-                ),
-            )
-        logical_index, storage = matches[0]
-        facts.append(PointerParameterOutputContract8616(logical_index, storage, view))
+        if isinstance(outcome, PointerParameterOutputEvidence8616):
+            return _publish_8616(project, outcome)
+        facts.append(outcome)
 
     count = len(facts)
     result = PointerParameterOutputEvidence8616(

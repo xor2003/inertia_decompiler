@@ -93,29 +93,34 @@ def _stack_ir_value_8616(value: _StackReturnSlice8616, *, size: int | None = Non
     )
 
 
-def recover_branch_target_return_expression_8616(
-    project: object,
-    codegen: object,
-    target_addr: int,
-) -> CExpression | None:
-    """Recover one CFG leaf return expression from classified semantic effects."""
-    typed_project = cast(_Project8616, project)
+@dataclass(slots=True)
+class _BranchReturnLowering8616:
+    """Bound project/codegen context for branch-target return recovery."""
 
-    def _lower_stack(value: _StackReturnSlice8616, *, size: int | None = None) -> CExpression | None:
+    project: object
+    codegen: object
+
+    def lower_stack(
+        self, value: _StackReturnSlice8616, *, size: int | None = None
+    ) -> CExpression | None:
+        """Lower one stack return slice to a C expression."""
         lowered = lower_ir_value_to_c_expr_8616(
-            _stack_ir_value_8616(value, size=size), project, codegen
+            _stack_ir_value_8616(value, size=size), self.project, self.codegen
         )
         return lowered if isinstance(lowered, CExpression) else None
 
-    def _combine(ax_value: object | None, dx_value: object | None) -> CExpression | None:
+    def combine(
+        self, ax_value: object | None, dx_value: object | None
+    ) -> CExpression | None:
+        """Combine proven AX/DX return halves into one expression."""
         if isinstance(ax_value, _StackReturnSlice8616):
             if dx_value is None:
-                return _lower_stack(ax_value)
+                return self.lower_stack(ax_value)
             if (
                 isinstance(dx_value, _StackReturnSlice8616)
                 and dx_value.offset == ax_value.offset + 2
             ):
-                return _lower_stack(ax_value, size=4)
+                return self.lower_stack(ax_value, size=4)
             return None
         if not isinstance(ax_value, CExpression):
             return None
@@ -127,36 +132,49 @@ def recover_branch_target_return_expression_8616(
             )
             if combined & 0x80000000:
                 combined -= 0x100000000
-            return CConstant(combined, SimTypeLong(True), codegen=codegen)
+            return CConstant(combined, SimTypeLong(True), codegen=self.codegen)
         return None
 
-    def _reg_imm(value: int) -> CExpression:
-        return CConstant(_signed_i16_8616(value), SimTypeShort(True), codegen=codegen)
+    def reg_imm(self, value: int) -> CExpression:
+        """Materialize one signed register immediate."""
+        return CConstant(_signed_i16_8616(value), SimTypeShort(True), codegen=self.codegen)
 
-    def _stack_load(offset: int, size: int) -> _StackReturnSlice8616:
+    def stack_load(self, offset: int, size: int) -> _StackReturnSlice8616:
+        """Materialize one deferred stack return slice."""
         return _StackReturnSlice8616(offset, size)
 
-    def _ax_alu_imm(ax_value: object, op: str, value: int) -> CExpression | None:
-        expression = _combine(ax_value, None)
+    def ax_alu_imm(self, ax_value: object, op: str, value: int) -> CExpression | None:
+        """Materialize one proven AX-immediate ALU return expression."""
+        expression = self.combine(ax_value, None)
         if expression is None:
             return None
-        immediate = CConstant(_signed_i16_8616(value), SimTypeShort(False), codegen=codegen)
-        return CBinaryOp(op, expression, immediate, codegen=codegen)
+        immediate = CConstant(_signed_i16_8616(value), SimTypeShort(False), codegen=self.codegen)
+        return CBinaryOp(op, expression, immediate, codegen=self.codegen)
 
-    def _ax_incdec(ax_value: object, op: str) -> CExpression | None:
-        expression = _combine(ax_value, None)
+    def ax_incdec(self, ax_value: object, op: str) -> CExpression | None:
+        """Materialize one proven AX increment/decrement return expression."""
+        expression = self.combine(ax_value, None)
         if expression is None:
             return None
-        return CBinaryOp(op, expression, CConstant(1, SimTypeShort(False), codegen=codegen), codegen=codegen)
+        return CBinaryOp(op, expression, CConstant(1, SimTypeShort(False), codegen=self.codegen), codegen=self.codegen)
 
+
+def recover_branch_target_return_expression_8616(
+    project: object,
+    codegen: object,
+    target_addr: int,
+) -> CExpression | None:
+    """Recover one CFG leaf return expression from classified semantic effects."""
+    typed_project = cast(_Project8616, project)
+    lowering = _BranchReturnLowering8616(project, codegen)
     callbacks = BranchTargetReturnScanCallbacks8616(
         branch_target_imm=branch_target_imm_8616,
-        combine_return_expr=_combine,
-        materialize_reg_imm=_reg_imm,
-        materialize_stack_load=_stack_load,
+        combine_return_expr=lowering.combine,
+        materialize_reg_imm=lowering.reg_imm,
+        materialize_stack_load=lowering.stack_load,
         materialize_direct_global_load=lambda _offset, _size: None,
-        materialize_ax_alu_imm=_ax_alu_imm,
-        materialize_ax_incdec=_ax_incdec,
+        materialize_ax_alu_imm=lowering.ax_alu_imm,
+        materialize_ax_incdec=lowering.ax_incdec,
     )
 
     def _load_block(addr: int) -> object:

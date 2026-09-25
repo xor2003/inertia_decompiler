@@ -135,6 +135,67 @@ def _unified_declaration_types(entries: object) -> frozenset[object] | None:
         return None
 
 
+def _dedupe_variables_in_use_8616(cfunc: _CFunctionLike, debug: bool) -> bool:
+    """Drop duplicate variables_in_use entries sharing identity and C type."""
+    variables_in_use = cfunc.variables_in_use
+    if not isinstance(variables_in_use, dict):
+        return False
+    changed = False
+    canonical_by_identity: dict[tuple[object, ...], structured_c.CVariable] = {}
+    for variable, cvar in tuple(variables_in_use.items()):
+        identity = _stack_declaration_identity(variable, cvar)
+        if identity is None:
+            continue
+        if debug:
+            print(
+                "[local-declaration] "
+                f"surface=variables_in_use identity={identity!r} type={cvar.variable_type!r} "
+                f"variable={variable!r} unified={cvar.unified_variable!r}",
+                file=sys.stderr,
+                flush=True,
+            )
+        canonical = canonical_by_identity.get(identity)
+        if canonical is None:
+            canonical_by_identity[identity] = cvar
+            continue
+        if cvar.variable_type != canonical.variable_type:
+            continue
+        del variables_in_use[variable]
+        changed = True
+    return changed
+
+
+def _dedupe_unified_local_vars_8616(cfunc: _CFunctionLike, debug: bool) -> bool:
+    """Drop duplicate unified_local_vars entries sharing identity and types."""
+    unified_local_vars = cfunc.unified_local_vars
+    if not isinstance(unified_local_vars, dict):
+        return False
+    changed = False
+    canonical_unified: dict[tuple[object, ...], frozenset[object]] = {}
+    for variable, entries in tuple(unified_local_vars.items()):
+        identity = _unified_stack_declaration_identity(variable)
+        declared_types = _unified_declaration_types(entries)
+        if identity is None or declared_types is None:
+            continue
+        if debug:
+            print(
+                "[local-declaration] "
+                f"surface=unified_local_vars identity={identity!r} types={declared_types!r} "
+                f"variable={variable!r}",
+                file=sys.stderr,
+                flush=True,
+            )
+        canonical_types = canonical_unified.get(identity)
+        if canonical_types is None:
+            canonical_unified[identity] = declared_types
+            continue
+        if declared_types != canonical_types:
+            continue
+        del unified_local_vars[variable]
+        changed = True
+    return changed
+
+
 def dedupe_equivalent_stack_local_declarations_8616(codegen: _CodegenLike) -> bool:
     """Remove only exact duplicate stack declarations with equivalent C types."""
     cfunc = codegen.cfunc
@@ -142,56 +203,8 @@ def dedupe_equivalent_stack_local_declarations_8616(codegen: _CodegenLike) -> bo
         return False
 
     debug = os.environ.get("INERTIA_DEBUG_LOCAL_DECLARATIONS") == "1"
-    changed = False
-    variables_in_use = cfunc.variables_in_use
-    if isinstance(variables_in_use, dict):
-        canonical_by_identity: dict[tuple[object, ...], structured_c.CVariable] = {}
-        for variable, cvar in tuple(variables_in_use.items()):
-            identity = _stack_declaration_identity(variable, cvar)
-            if identity is None:
-                continue
-            if debug:
-                print(
-                    "[local-declaration] "
-                    f"surface=variables_in_use identity={identity!r} type={cvar.variable_type!r} "
-                    f"variable={variable!r} unified={cvar.unified_variable!r}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-            canonical = canonical_by_identity.get(identity)
-            if canonical is None:
-                canonical_by_identity[identity] = cvar
-                continue
-            if cvar.variable_type != canonical.variable_type:
-                continue
-            del variables_in_use[variable]
-            changed = True
-
-    unified_local_vars = cfunc.unified_local_vars
-    if isinstance(unified_local_vars, dict):
-        canonical_unified: dict[tuple[object, ...], frozenset[object]] = {}
-        for variable, entries in tuple(unified_local_vars.items()):
-            identity = _unified_stack_declaration_identity(variable)
-            declared_types = _unified_declaration_types(entries)
-            if identity is None or declared_types is None:
-                continue
-            if debug:
-                print(
-                    "[local-declaration] "
-                    f"surface=unified_local_vars identity={identity!r} types={declared_types!r} "
-                    f"variable={variable!r}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-            canonical_types = canonical_unified.get(identity)
-            if canonical_types is None:
-                canonical_unified[identity] = declared_types
-                continue
-            if declared_types != canonical_types:
-                continue
-            del unified_local_vars[variable]
-            changed = True
-    return changed
+    changed = _dedupe_variables_in_use_8616(cfunc, debug)
+    return _dedupe_unified_local_vars_8616(cfunc, debug) or changed
 
 
 __all__ = ["dedupe_equivalent_stack_local_declarations_8616", "prune_dce_proven_declarations_8616"]

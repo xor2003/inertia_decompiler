@@ -142,17 +142,28 @@ def _load_byte_8616(
         CarryBorrowConversion8616.WIDEN_BYTE_TO_WORD,
     )
     load = None if source is None else definition_for_8616(source, definitions)
-    if (
-        load is None
-        or ir_op_8616(load.instruction) is not CarryBorrowIROp8616.LOAD
-        or load.instruction.dst is None
-        or load.instruction.dst.size != 1
-        or len(load.instruction.args) != 1
-        or not isinstance(load.instruction.args[0], IRAddress)
-        or load.instruction.args[0].size != 1
-    ):
+    address = _sized_load_address_8616(load, 1)
+    if address is None:
         return None
-    return load, load.instruction.args[0]
+    assert load is not None
+    return load, address
+
+
+def _sized_load_address_8616(
+    site: CarryBorrowDefinitionSite8616 | None,
+    width: int,
+) -> IRAddress | None:
+    """Return the exact `width`-byte address of a proven LOAD site."""
+    if site is None or ir_op_8616(site.instruction) is not CarryBorrowIROp8616.LOAD:
+        return None
+    instruction = site.instruction
+    dst = instruction.dst
+    if dst is None or dst.size != width or len(instruction.args) != 1:
+        return None
+    arg = instruction.args[0]
+    if not isinstance(arg, IRAddress) or arg.size != width:
+        return None
+    return arg
 
 
 def _shifted_high_byte_8616(
@@ -216,20 +227,12 @@ def _memory_word_use_8616(
     logical_memory: IRLogicalMemoryArtifact8616 | None,
 ) -> CarryBorrowMemoryWordUse8616 | None:
     """Retain direct words or exact byte sites with optional logical ownership."""
-    destination = definition.instruction.dst
-    direct_args = definition.instruction.args
-    if (
-        ir_op_8616(definition.instruction) is CarryBorrowIROp8616.LOAD
-        and destination is not None
-        and destination.size == 2
-        and len(direct_args) == 1
-        and isinstance(direct_args[0], IRAddress)
-        and direct_args[0].size == 2
-    ):
-        execution_load = CarryBorrowMemoryLoadUse8616(definition, direct_args[0])
+    logical_address = _sized_load_address_8616(definition, 2)
+    if logical_address is not None:
+        execution_load = CarryBorrowMemoryLoadUse8616(definition, logical_address)
         return CarryBorrowMemoryWordUse8616(
             execution_loads=(execution_load,),
-            logical_address=direct_args[0],
+            logical_address=logical_address,
             address_bits=16,
         )
     if ir_op_8616(definition.instruction) is not CarryBorrowIROp8616.OR16:

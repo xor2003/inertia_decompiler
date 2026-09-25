@@ -229,6 +229,50 @@ def _projection_path_8616(
     return None
 
 
+def _access_candidates_8616(
+    node: object,
+    surface: _GlobalAccessSurface8616,
+    objects: tuple[DosInterruptAggregateObjectFact8616, ...],
+    evidence: tuple[IndexedSegmentedGlobalEvidence8616, ...],
+    identities: tuple[CodGlobalIdentityFact8616, ...],
+    types: DosInterruptAggregateTypes8616,
+    *,
+    alternate_evidence_widths: bool,
+) -> tuple[
+    tuple[DosInterruptAggregateObjectFact8616, tuple[tuple[SimStruct, int, str], ...]], ...
+]:
+    """Collect unique projections for exact or fallback width evidence."""
+    candidates: list[
+        tuple[DosInterruptAggregateObjectFact8616, tuple[tuple[SimStruct, int, str], ...]]
+    ] = []
+    for fact in objects:
+        widths = {surface.width}
+        if alternate_evidence_widths:
+            widths = set()
+            if isinstance(node, structured_c.CVariable) and _name_matches_object_8616(
+                surface.name, fact
+            ):
+                widths.update(
+                    item.width
+                    for item in evidence
+                    if item.base_offset == surface.offset and item.name in fact.canonical_names
+                )
+                widths.update(
+                    item.width
+                    for item in identities
+                    if item.offset == surface.offset and item.source_alias == fact.display_name
+                )
+            widths.discard(surface.width)
+        for width in widths:
+            candidate = _GlobalAccessSurface8616(surface.offset, width, surface.name)
+            if not _evidence_matches_object_8616(candidate, fact, evidence, identities):
+                continue
+            path = _projection_path_8616(fact, surface.offset, width, types)
+            if path is not None:
+                candidates.append((fact, path))
+    return tuple(dict.fromkeys(candidates))
+
+
 def project_dos_interrupt_global_access_8616(
     codegen: object,
     node: object,
@@ -242,47 +286,26 @@ def project_dos_interrupt_global_access_8616(
     if surface is None:
         return None
 
-    def collect_candidates(
-        *,
-        alternate_evidence_widths: bool,
-    ) -> tuple[
-        tuple[DosInterruptAggregateObjectFact8616, tuple[tuple[SimStruct, int, str], ...]], ...
-    ]:
-        """Collect unique projections for exact or fallback width evidence."""
-        candidates: list[
-            tuple[DosInterruptAggregateObjectFact8616, tuple[tuple[SimStruct, int, str], ...]]
-        ] = []
-        for fact in objects:
-            widths = {surface.width}
-            if alternate_evidence_widths:
-                widths = set()
-                if isinstance(node, structured_c.CVariable) and _name_matches_object_8616(
-                    surface.name, fact
-                ):
-                    widths.update(
-                        item.width
-                        for item in evidence
-                        if item.base_offset == surface.offset and item.name in fact.canonical_names
-                    )
-                    widths.update(
-                        item.width
-                        for item in identities
-                        if item.offset == surface.offset and item.source_alias == fact.display_name
-                    )
-                widths.discard(surface.width)
-            for width in widths:
-                candidate = _GlobalAccessSurface8616(surface.offset, width, surface.name)
-                if not _evidence_matches_object_8616(candidate, fact, evidence, identities):
-                    continue
-                path = _projection_path_8616(fact, surface.offset, width, types)
-                if path is not None:
-                    candidates.append((fact, path))
-        return tuple(dict.fromkeys(candidates))
-
-    exact = collect_candidates(alternate_evidence_widths=False)
+    exact = _access_candidates_8616(
+        node,
+        surface,
+        objects,
+        evidence,
+        identities,
+        types,
+        alternate_evidence_widths=False,
+    )
     if len(exact) > 1:
         return None
-    candidates = exact or collect_candidates(alternate_evidence_widths=True)
+    candidates = exact or _access_candidates_8616(
+        node,
+        surface,
+        objects,
+        evidence,
+        identities,
+        types,
+        alternate_evidence_widths=True,
+    )
     if len(candidates) != 1:
         return None
     fact, path = candidates[0]

@@ -31,6 +31,7 @@ from ..c_ast_utils import _clone_c_ast_tree_8616, _iter_c_nodes_deep_8616
 from ..callsite_summary import CallsiteReturnUseKind8616, CallsiteSummary8616
 from ..lowering.stack_variable_coordinates import machine_bp_offset_for_stack_variable_8616
 from .stored_call_result_assignment_ast import (
+    StoredCallResultAssignmentOccurrence8616,
     stored_call_result_assignment_occurrences_8616,
     stored_call_result_summary_for_occurrence_8616,
 )
@@ -141,6 +142,18 @@ def _store_artifacts_8616(
     return tuple(artifacts)
 
 
+def _exact_bp_destination_8616(destination: object, width: object) -> bool:
+    """Return whether the pair is an exact ``("bp", int-offset)`` + positive width."""
+    return (
+        isinstance(destination, tuple)
+        and len(destination) == 2
+        and destination[0] == "bp"
+        and isinstance(destination[1], int)
+        and isinstance(width, int)
+        and width > 0
+    )
+
+
 def _stored_stack_destination_8616(summary: CallsiteSummary8616) -> tuple[int, int] | None:
     """Return one exact BP destination and width from a value-return summary."""
     destination = summary.return_store_destination
@@ -148,14 +161,10 @@ def _stored_stack_destination_8616(summary: CallsiteSummary8616) -> tuple[int, i
     if (
         summary.return_used is not True
         or summary.return_use_kind is not CallsiteReturnUseKind8616.VALUE
-        or not isinstance(destination, tuple)
-        or len(destination) != 2
-        or destination[0] != "bp"
-        or not isinstance(destination[1], int)
-        or not isinstance(width, int)
-        or width <= 0
+        or not _exact_bp_destination_8616(destination, width)
     ):
         return None
+    assert isinstance(destination, tuple) and isinstance(width, int)
     return _canonical_stack_offset_8616(destination[1]), width
 
 
@@ -207,6 +216,127 @@ def _refuse_8616(
     refusals.append(StoredCallResultAssignmentRefusal8616(callsite_addr, reason))
 
 
+def _process_occurrence_8616(
+    codegen: object,
+    root: object,
+    occurrence: StoredCallResultAssignmentOccurrence8616,
+    summary_map: dict[int, CallsiteSummary8616],
+    stats: StoredCallResultAssignmentStats8616,
+    refusals: list[StoredCallResultAssignmentRefusal8616],
+    artifacts_to_remove: dict[int, tuple[CStatements, CAssignment]],
+    owned_call_ids: set[int],
+) -> None:
+    """Apply the binding evidence ladder to one stored call occurrence."""
+    call_id = id(occurrence.call)
+    if call_id in owned_call_ids:
+        return
+    summary = stored_call_result_summary_for_occurrence_8616(occurrence.call, summary_map)
+    if summary is None:
+        return
+    destination = _stored_stack_destination_8616(summary)
+    if destination is None:
+        return
+    if (
+        isinstance(occurrence.statement, CAssignment)
+        and _is_exact_stack_destination_8616(codegen, occurrence.statement.lhs, destination)
+    ):
+        owned_call_ids.add(call_id)
+        return
+    stats.raw_fact_count += 1
+    destination_variable = _stack_destination_variable_8616(codegen, root, destination)
+    if destination_variable is None:
+        _refuse_8616(
+            stats,
+            refusals,
+            summary.callsite_addr,
+            StoredCallResultAssignmentRefusalReason8616.DESTINATION_VARIABLE_MISSING,
+        )
+        return
+    stats.normalized_fact_count += 1
+    exact_store_statement = (
+        isinstance(summary.return_store_instruction_addr, int)
+        and occurrence.statement.tags.get("ins_addr") == summary.return_store_instruction_addr
+    )
+    if (
+        isinstance(occurrence.statement, CAssignment)
+        and not exact_store_statement
+        and not is_stored_call_return_register_destination_8616(
+            codegen,
+            occurrence.statement.lhs,
+            summary,
+            destination[1],
+        )
+    ):
+        _refuse_8616(
+            stats,
+            refusals,
+            summary.callsite_addr,
+            StoredCallResultAssignmentRefusalReason8616.RETURN_REGISTER_CONFLICT,
+        )
+        return
+    stats.classified_fact_count += 1
+    _bind_occurrence_8616(
+        codegen,
+        root,
+        occurrence,
+        summary,
+        call_id,
+        destination,
+        destination_variable,
+        summary_map,
+        artifacts_to_remove,
+        owned_call_ids,
+    )
+    stats.materialized_count += 1
+
+
+def _bind_occurrence_8616(
+    codegen: object,
+    root: object,
+    occurrence: StoredCallResultAssignmentOccurrence8616,
+    summary: CallsiteSummary8616,
+    call_id: int,
+    destination: tuple[int, int],
+    destination_variable: object,
+    summary_map: dict[int, CallsiteSummary8616],
+    artifacts_to_remove: dict[int, tuple[CStatements, CAssignment]],
+    owned_call_ids: set[int],
+) -> None:
+    """Bind one proven occurrence to its stack destination variable."""
+    lhs = cast(CVariable, _clone_c_ast_tree_8616(destination_variable))
+    if isinstance(occurrence.statement, CAssignment):
+        previous_lhs = occurrence.statement.lhs
+        occurrence.statement.lhs = lhs
+        if (
+            isinstance(previous_lhs, CVariable)
+            and isinstance(previous_lhs.variable, SimRegisterVariable)
+            and previous_lhs.variable.size == destination[1]
+        ):
+            capture = CAssignment(
+                previous_lhs, _clone_c_ast_tree_8616(lhs),
+                tags=dict(occurrence.statement.tags), codegen=codegen,
+            )
+            captured_statements = list(occurrence.parent.statements)
+            captured_statements.insert(captured_statements.index(occurrence.statement) + 1, capture)
+            occurrence.parent.statements = captured_statements
+    else:
+        statements: list[object] = list(occurrence.parent.statements or ())
+        statements[occurrence.index] = CAssignment(
+            lhs,
+            occurrence.call,
+            tags=dict(occurrence.statement.tags),
+            codegen=codegen,
+        )
+        occurrence.parent.statements = statements
+    store_ins_addr = summary.return_store_instruction_addr
+    if isinstance(store_ins_addr, int):
+        for parent, artifact in _store_artifacts_8616(root, store_ins_addr):
+            if artifact is not occurrence.statement:
+                artifacts_to_remove[id(artifact)] = (parent, artifact)
+    owned_call_ids.add(call_id)
+    summary_map[call_id] = summary
+
+
 def materialize_stored_call_result_assignments_8616(
     codegen: object,
 ) -> StoredCallResultAssignmentResult8616:
@@ -232,87 +362,16 @@ def materialize_stored_call_result_assignments_8616(
     artifacts_to_remove: dict[int, tuple[CStatements, CAssignment]] = {}
     owned_call_ids: set[int] = set()
     for occurrence in stored_call_result_assignment_occurrences_8616(root):
-        call_id = id(occurrence.call)
-        if call_id in owned_call_ids:
-            continue
-        summary = stored_call_result_summary_for_occurrence_8616(occurrence.call, summary_map)
-        if summary is None:
-            continue
-        destination = _stored_stack_destination_8616(summary)
-        if destination is None:
-            continue
-        if (
-            isinstance(occurrence.statement, CAssignment)
-            and _is_exact_stack_destination_8616(codegen, occurrence.statement.lhs, destination)
-        ):
-            owned_call_ids.add(call_id)
-            continue
-        stats.raw_fact_count += 1
-        destination_variable = _stack_destination_variable_8616(codegen, root, destination)
-        if destination_variable is None:
-            _refuse_8616(
-                stats,
-                refusals,
-                summary.callsite_addr,
-                StoredCallResultAssignmentRefusalReason8616.DESTINATION_VARIABLE_MISSING,
-            )
-            continue
-        stats.normalized_fact_count += 1
-        exact_store_statement = (
-            isinstance(summary.return_store_instruction_addr, int)
-            and occurrence.statement.tags.get("ins_addr") == summary.return_store_instruction_addr
+        _process_occurrence_8616(
+            codegen,
+            root,
+            occurrence,
+            summary_map,
+            stats,
+            refusals,
+            artifacts_to_remove,
+            owned_call_ids,
         )
-        if (
-            isinstance(occurrence.statement, CAssignment)
-            and not exact_store_statement
-            and not is_stored_call_return_register_destination_8616(
-                codegen,
-                occurrence.statement.lhs,
-                summary,
-                destination[1],
-            )
-        ):
-            _refuse_8616(
-                stats,
-                refusals,
-                summary.callsite_addr,
-                StoredCallResultAssignmentRefusalReason8616.RETURN_REGISTER_CONFLICT,
-            )
-            continue
-        stats.classified_fact_count += 1
-        lhs = cast(CVariable, _clone_c_ast_tree_8616(destination_variable))
-        if isinstance(occurrence.statement, CAssignment):
-            previous_lhs = occurrence.statement.lhs
-            occurrence.statement.lhs = lhs
-            if (
-                isinstance(previous_lhs, CVariable)
-                and isinstance(previous_lhs.variable, SimRegisterVariable)
-                and previous_lhs.variable.size == destination[1]
-            ):
-                capture = CAssignment(
-                    previous_lhs, _clone_c_ast_tree_8616(lhs),
-                    tags=dict(occurrence.statement.tags), codegen=codegen,
-                )
-                captured_statements = list(occurrence.parent.statements)
-                captured_statements.insert(captured_statements.index(occurrence.statement) + 1, capture)
-                occurrence.parent.statements = captured_statements
-        else:
-            statements: list[object] = list(occurrence.parent.statements or ())
-            statements[occurrence.index] = CAssignment(
-                lhs,
-                occurrence.call,
-                tags=dict(occurrence.statement.tags),
-                codegen=codegen,
-            )
-            occurrence.parent.statements = statements
-        store_ins_addr = summary.return_store_instruction_addr
-        if isinstance(store_ins_addr, int):
-            for parent, artifact in _store_artifacts_8616(root, store_ins_addr):
-                if artifact is not occurrence.statement:
-                    artifacts_to_remove[id(artifact)] = (parent, artifact)
-        owned_call_ids.add(call_id)
-        summary_map[call_id] = summary
-        stats.materialized_count += 1
 
     for parent, artifact in artifacts_to_remove.values():
         parent.statements = [

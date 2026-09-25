@@ -12,7 +12,13 @@ source, assembly, or rendered C text.
 
 from __future__ import annotations
 
-from ..caller_return_use_contracts import CallerReturnUseVerdict8616, CallsiteReturnUseKind8616
+from dataclasses import dataclass
+
+from ..caller_return_use_contracts import (
+    CallerReturnUseEvidence8616,
+    CallerReturnUseVerdict8616,
+    CallsiteReturnUseKind8616,
+)
 from ..callsite_summary import caller_return_use_evidence_by_addr_8616
 from ..ir.condition_ir import ConditionIR
 from .condition_transfer import collect_typed_condition_artifacts_8616
@@ -70,31 +76,22 @@ def _refused_result_8616(
     )
 
 
-def collect_function_return_storage_type_8616(
+@dataclass(frozen=True, slots=True)
+class _FactClassificationCensus8616:
+    """Classified caller facts plus neutral and processed counters."""
+
+    classifications: tuple[ReturnStorageTypeResult8616, ...]
+    neutral_fact_count: int
+    processed_fact_count: int
+
+
+def _classify_caller_facts_8616(
     project: object,
     function_addr: int,
+    evidence: CallerReturnUseEvidence8616,
     output_storages: tuple[StorageIdentity8616, ...],
-) -> FunctionReturnStorageTypeResult8616:
-    """Prove one scalar return type from every fact in its caller census."""
-    evidence = caller_return_use_evidence_by_addr_8616(project).get(function_addr)
-    if evidence is None or evidence.target_addr != function_addr:
-        return _refused_result_8616(
-            function_addr,
-            FunctionReturnStorageTypeFailure8616.EVIDENCE_UNAVAILABLE,
-        )
-    if (
-        evidence.verdict is CallerReturnUseVerdict8616.UNKNOWN
-        or not evidence.fact_census_complete
-    ):
-        return _refused_result_8616(
-            function_addr,
-            FunctionReturnStorageTypeFailure8616.CENSUS_INCOMPLETE,
-            raw_fact_count=evidence.raw_fact_count,
-            normalized_fact_count=evidence.normalized_fact_count,
-            classified_fact_count=evidence.classified_fact_count,
-            materialized_count=evidence.materialized_count,
-        )
-
+) -> _FactClassificationCensus8616 | FunctionReturnStorageTypeResult8616:
+    """Classify each non-neutral caller fact or return a typed refusal."""
     classifications: list[ReturnStorageTypeResult8616] = []
     neutral_fact_count = 0
     processed_fact_count = 0
@@ -141,6 +138,44 @@ def collect_function_return_storage_type_8616(
             )
         classifications.append(classification)
         processed_fact_count += 1
+    return _FactClassificationCensus8616(
+        classifications=tuple(classifications),
+        neutral_fact_count=neutral_fact_count,
+        processed_fact_count=processed_fact_count,
+    )
+
+
+def collect_function_return_storage_type_8616(
+    project: object,
+    function_addr: int,
+    output_storages: tuple[StorageIdentity8616, ...],
+) -> FunctionReturnStorageTypeResult8616:
+    """Prove one scalar return type from every fact in its caller census."""
+    evidence = caller_return_use_evidence_by_addr_8616(project).get(function_addr)
+    if evidence is None or evidence.target_addr != function_addr:
+        return _refused_result_8616(
+            function_addr,
+            FunctionReturnStorageTypeFailure8616.EVIDENCE_UNAVAILABLE,
+        )
+    if (
+        evidence.verdict is CallerReturnUseVerdict8616.UNKNOWN
+        or not evidence.fact_census_complete
+    ):
+        return _refused_result_8616(
+            function_addr,
+            FunctionReturnStorageTypeFailure8616.CENSUS_INCOMPLETE,
+            raw_fact_count=evidence.raw_fact_count,
+            normalized_fact_count=evidence.normalized_fact_count,
+            classified_fact_count=evidence.classified_fact_count,
+            materialized_count=evidence.materialized_count,
+        )
+
+    census = _classify_caller_facts_8616(project, function_addr, evidence, output_storages)
+    if isinstance(census, FunctionReturnStorageTypeResult8616):
+        return census
+    classifications = list(census.classifications)
+    neutral_fact_count = census.neutral_fact_count
+    processed_fact_count = census.processed_fact_count
 
     if not classifications:
         return _refused_result_8616(

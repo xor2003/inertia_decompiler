@@ -289,24 +289,26 @@ def _existing_stack_cvars_by_offset_8616(codegen: object) -> dict[int, structure
     variables_in_use = typed_cfunc.variables_in_use
     if isinstance(variables_in_use, Mapping):
         for cvar in variables_in_use.values():
-            if not isinstance(cvar, structured_c.CVariable):
-                continue
-            variable = cvar.variable
-            if not isinstance(variable, SimStackVariable):
-                continue
-            offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
-            if isinstance(offset, int):
-                cvars.setdefault(offset, cvar)
+            _collect_stack_cvar_by_offset_8616(codegen, cvar, cvars)
     for cvar in typed_cfunc.arg_list or ():
-        if not isinstance(cvar, structured_c.CVariable):
-            continue
-        variable = cvar.variable
-        if not isinstance(variable, SimStackVariable):
-            continue
-        offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
-        if isinstance(offset, int):
-            cvars.setdefault(offset, cvar)
+        _collect_stack_cvar_by_offset_8616(codegen, cvar, cvars)
     return cvars
+
+
+def _collect_stack_cvar_by_offset_8616(
+    codegen: object,
+    cvar: object,
+    cvars: dict[int, structured_c.CVariable],
+) -> None:
+    """Record one stack C variable under its machine BP offset."""
+    if not isinstance(cvar, structured_c.CVariable):
+        return
+    variable = cvar.variable
+    if not isinstance(variable, SimStackVariable):
+        return
+    offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
+    if isinstance(offset, int):
+        cvars.setdefault(offset, cvar)
 
 
 def _iter_existing_stack_cvars_at_offset_8616(codegen: object, offset: int) -> tuple[structured_c.CVariable, ...]:
@@ -375,16 +377,21 @@ def _reconciled_positive_arg_name_8616(
     """Replace provisional local names once a positive BP slot is proven an argument."""
     variable_name = variable.name
     for candidate in (prototype_name, variable_name):
-        if (
-            isinstance(candidate, str)
-            and candidate
-            and candidate != "local"
-            and not candidate.startswith("local_")
-            and not _is_generated_argument_name_8616(candidate)
-            and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", candidate) is not None
-        ):
+        if _is_usable_arg_name_8616(candidate):
             return candidate
     return f"arg_{bp_offset:x}" if bp_offset >= 0 else f"arg_n{abs(bp_offset):x}"
+
+
+def _is_usable_arg_name_8616(candidate: object) -> bool:
+    """Return whether a candidate is a concrete, non-generated argument name."""
+    if not isinstance(candidate, str) or not candidate:
+        return False
+    return (
+        candidate != "local"
+        and not candidate.startswith("local_")
+        and not _is_generated_argument_name_8616(candidate)
+        and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", candidate) is not None
+    )
 
 
 def _exact_incoming_argument_selection_8616(
@@ -528,6 +535,62 @@ def _parameter_width_fact_8616(
     return None if width is None else FunctionParameterWidthFact8616(offset, width)
 
 
+def _arg_stack_object_widths_8616(cfunc: object) -> dict[int, int]:
+    """Positive-BP arg_list object extents for grouped-width reconciliation."""
+    widths: dict[int, int] = {}
+    for cvar in tuple(cast(_StackPrototypeCFunction8616, cfunc).arg_list or ()):
+        variable = cvar.variable
+        if (
+            isinstance(variable, SimStackVariable)
+            and isinstance(variable.offset, int)
+            and isinstance(variable.size, int)
+            and variable.offset >= 4
+            and variable.size > 0
+        ):
+            widths[variable.offset] = variable.size
+    return widths
+
+
+def _bp_source_width_8616(source: object, width: object) -> bool:
+    """Return whether one typed callsite source is a positive BP slice."""
+    if not (
+        isinstance(source, tuple)
+        and len(source) >= 2
+        and source[0] == "bp"
+        and isinstance(source[1], int)
+    ):
+        return False
+    return source[1] >= 4 and isinstance(width, int) and width > 0
+
+
+def _collect_summary_source_widths_8616(
+    summary: _CallsiteSummary8616,
+    stack_object_widths: dict[int, int],
+    widths_by_offset: dict[int, set[int]],
+    grouped_widths_by_offset: dict[int, set[int]],
+) -> None:
+    """Accumulate per-offset and fully-tiled object widths from one summary."""
+    source_slices: set[tuple[int, int]] = set()
+    for source, width in zip(tuple(summary.push_arg_sources or ()), tuple(summary.arg_widths or ()), strict=False):
+        if _bp_source_width_8616(source, width):
+            widths_by_offset.setdefault(source[1], set()).add(width)
+            source_slices.add((source[1], width))
+    for object_offset, object_width in stack_object_widths.items():
+        object_end = object_offset + object_width
+        contained = sorted(
+            (offset, width)
+            for offset, width in source_slices
+            if object_offset <= offset and offset + width <= object_end
+        )
+        cursor = object_offset
+        for offset, width in contained:
+            if offset != cursor:
+                break
+            cursor += width
+        if cursor == object_end and len(contained) > 1:
+            grouped_widths_by_offset.setdefault(object_offset, set()).add(object_width)
+
+
 def _callsite_stack_arg_widths_8616(codegen: object) -> dict[int, int]:
     """Return unambiguous BP-source widths from typed callsite summaries."""
     typed_codegen = cast(_StackPrototypeCodegen8616, codegen)
@@ -538,49 +601,16 @@ def _callsite_stack_arg_widths_8616(codegen: object) -> dict[int, int]:
     if not isinstance(summaries, Mapping):
         return {}
     cfunc = typed_codegen.cfunc
-    stack_object_widths: dict[int, int] = {}
-    if cfunc is not None:
-        for cvar in tuple(cast(_StackPrototypeCFunction8616, cfunc).arg_list or ()):
-            variable = cvar.variable
-            if (
-                isinstance(variable, SimStackVariable)
-                and isinstance(variable.offset, int)
-                and isinstance(variable.size, int)
-                and variable.offset >= 4
-                and variable.size > 0
-            ):
-                stack_object_widths[variable.offset] = variable.size
+    stack_object_widths = _arg_stack_object_widths_8616(cfunc) if cfunc is not None else {}
     widths_by_offset: dict[int, set[int]] = {}
     grouped_widths_by_offset: dict[int, set[int]] = {}
     for summary_value in summaries.values():
-        summary = cast(_CallsiteSummary8616, summary_value)
-        source_slices: set[tuple[int, int]] = set()
-        for source, width in zip(tuple(summary.push_arg_sources or ()), tuple(summary.arg_widths or ()), strict=False):
-            if (
-                isinstance(source, tuple)
-                and len(source) >= 2
-                and source[0] == "bp"
-                and isinstance(source[1], int)
-                and source[1] >= 4
-                and isinstance(width, int)
-                and width > 0
-            ):
-                widths_by_offset.setdefault(source[1], set()).add(width)
-                source_slices.add((source[1], width))
-        for object_offset, object_width in stack_object_widths.items():
-            object_end = object_offset + object_width
-            contained = sorted(
-                (offset, width)
-                for offset, width in source_slices
-                if object_offset <= offset and offset + width <= object_end
-            )
-            cursor = object_offset
-            for offset, width in contained:
-                if offset != cursor:
-                    break
-                cursor += width
-            if cursor == object_end and len(contained) > 1:
-                grouped_widths_by_offset.setdefault(object_offset, set()).add(object_width)
+        _collect_summary_source_widths_8616(
+            cast(_CallsiteSummary8616, summary_value),
+            stack_object_widths,
+            widths_by_offset,
+            grouped_widths_by_offset,
+        )
     widths = {
         offset: next(iter(widths))
         for offset, widths in widths_by_offset.items()
@@ -741,23 +771,40 @@ def _prune_stack_slots_covered_by_wide_args_8616(
     }
     if not covered_offsets:
         return False
+    changed = _prune_covered_stack_variables_8616(
+        codegen,
+        typed_cfunc.variables_in_use,
+        owner_variables,
+        retained_variables,
+        covered_offsets,
+    )
+    changed = _prune_covered_stack_variables_8616(
+        codegen,
+        typed_cfunc.unified_local_vars,
+        owner_variables,
+        retained_variables,
+        covered_offsets,
+    ) or changed
+    return changed
+
+
+def _prune_covered_stack_variables_8616(
+    codegen: object,
+    variables: object,
+    owner_variables: set[SimStackVariable],
+    retained_variables: frozenset[SimStackVariable],
+    covered_offsets: set[int],
+) -> bool:
+    """Drop non-owned stack variables covered by proven wide-argument ranges."""
+    if not isinstance(variables, dict):
+        return False
     changed = False
-    variables_in_use = typed_cfunc.variables_in_use
-    if isinstance(variables_in_use, dict):
-        for variable in tuple(variables_in_use):
-            if variable in owner_variables or variable in retained_variables or not isinstance(variable, SimStackVariable):
-                continue
-            if machine_bp_offset_for_stack_variable_8616(codegen, variable) in covered_offsets:
-                del variables_in_use[variable]
-                changed = True
-    unified = typed_cfunc.unified_local_vars
-    if isinstance(unified, dict):
-        for variable in tuple(unified):
-            if variable in owner_variables or variable in retained_variables or not isinstance(variable, SimStackVariable):
-                continue
-            if machine_bp_offset_for_stack_variable_8616(codegen, variable) in covered_offsets:
-                del unified[variable]
-                changed = True
+    for variable in tuple(variables):
+        if variable in owner_variables or variable in retained_variables or not isinstance(variable, SimStackVariable):
+            continue
+        if machine_bp_offset_for_stack_variable_8616(codegen, variable) in covered_offsets:
+            del variables[variable]
+            changed = True
     return changed
 
 
@@ -798,6 +845,39 @@ def materialize_exact_trailing_stack_argument_8616(
     refused without mutation.
     """
     typed_codegen = cast(_StackPrototypeCodegen8616, codegen)
+    gate = _trailing_stack_arg_gate_8616(typed_codegen, candidate, stack_offset, width)
+    if gate is None:
+        return None
+    typed_cfunc, prototype, _prototype_args, existing_args, candidate_variable = gate
+
+    name = f"arg_{stack_offset:x}"
+    candidate_variable.size = width
+    _apply_arg_cvar_surface_8616(candidate, name=name, variable_type=argument_type)
+    for sibling in _iter_existing_stack_cvars_at_offset_8616(codegen, stack_offset):
+        _apply_arg_cvar_surface_8616(sibling, name=name, variable_type=argument_type)
+    typed_cfunc.arg_list = [*existing_args, candidate]
+
+    arg_names = _trailing_arg_names_8616(prototype, existing_args)
+    if arg_names is None:
+        return None
+    _publish_trailing_arg_prototype_8616(
+        project,
+        typed_codegen,
+        typed_cfunc,
+        prototype,
+        argument_type,
+        (*arg_names, name),
+    )
+    return candidate
+
+
+def _trailing_stack_arg_gate_8616(
+    typed_codegen: _StackPrototypeCodegen8616,
+    candidate: structured_c.CVariable,
+    stack_offset: int,
+    width: int,
+) -> tuple[object, SimTypeFunction, tuple[object, ...], tuple[object, ...], SimStackVariable] | None:
+    """Validate the contiguous trailing-slot contract; return context or refuse."""
     cfunc = typed_codegen.cfunc
     if cfunc is None:
         return None
@@ -835,37 +915,48 @@ def materialize_exact_trailing_stack_argument_8616(
         expected_offset += max(2, variable.size)
     if stack_offset != expected_offset:
         return None
+    return typed_cfunc, prototype, prototype_args, existing_args, candidate_variable
 
-    name = f"arg_{stack_offset:x}"
-    candidate_variable.size = width
-    _apply_arg_cvar_surface_8616(candidate, name=name, variable_type=argument_type)
-    for sibling in _iter_existing_stack_cvars_at_offset_8616(codegen, stack_offset):
-        _apply_arg_cvar_surface_8616(sibling, name=name, variable_type=argument_type)
-    typed_cfunc.arg_list = [*existing_args, candidate]
 
+def _trailing_arg_names_8616(
+    prototype: SimTypeFunction,
+    existing_args: tuple[object, ...],
+) -> tuple[str, ...] | None:
+    """Prototype arg names, recovered from variable names when the arity drifts."""
     arg_names = tuple(prototype.arg_names or ())
-    if len(arg_names) != len(existing_args):
-        recovered_names: list[str] = []
-        for existing in existing_args:
-            variable = existing.variable
-            if not isinstance(variable, SimStackVariable) or not isinstance(variable.offset, int):
-                return None
-            recovered_names.append(variable.name or f"arg_{variable.offset:x}")
-        arg_names = tuple(recovered_names)
+    if len(arg_names) == len(existing_args):
+        return arg_names
+    recovered_names: list[str] = []
+    for existing in existing_args:
+        variable = existing.variable
+        if not isinstance(variable, SimStackVariable) or not isinstance(variable.offset, int):
+            return None
+        recovered_names.append(variable.name or f"arg_{variable.offset:x}")
+    return tuple(recovered_names)
+
+
+def _publish_trailing_arg_prototype_8616(
+    project: object,
+    typed_codegen: _StackPrototypeCodegen8616,
+    typed_cfunc: _StackPrototypeCFunction8616,
+    prototype: SimTypeFunction,
+    argument_type: SimType,
+    arg_names: tuple[str, ...],
+) -> None:
+    """Publish the extended prototype to the cfunc and owning angr function."""
     arch = cast(_ProjectArch8616, project).arch
     new_prototype = SimTypeFunction(
-        [*prototype_args, argument_type],
+        [*tuple(prototype.args or ()), argument_type],
         prototype.returnty,
-        arg_names=(*arg_names, name),
+        arg_names=arg_names,
         variadic=prototype.variadic,
     )
     new_prototype = cast(SimTypeFunction, _with_arch_8616(new_prototype, arch))
     typed_cfunc.functy = new_prototype
-    func = _function_for_codegen_8616(project, codegen)
+    func = _function_for_codegen_8616(project, typed_codegen)
     if func is not None:
         cast(_PrototypeFunction8616, func).prototype = new_prototype
     typed_codegen._inertia_codegen_decl_refresh_required_8616 = True
-    return candidate
 
 
 def _materialize_annotated_zero_arg_prototype_8616(
@@ -902,6 +993,266 @@ def _materialize_annotated_zero_arg_prototype_8616(
     return changed
 
 
+@dataclass(frozen=True, slots=True)
+class _ReconcileEvidence8616:
+    """Typed width evidence collected before per-argument reconciliation."""
+
+    callsite_widths: dict[int, int]
+    incoming_widths: dict[int, int]
+    body_widths: dict[int, int]
+    body_access_widths: object
+    wide_evidence: WideStackArgumentWidthEvidence8616
+    incoming_width_evidence: CalleeArgumentWidthEvidence8616
+
+
+def _reconcile_width_evidence_8616(
+    project: object,
+    codegen: object,
+    typed_cfunc: _StackPrototypeCFunction8616,
+    func: object | None,
+) -> _ReconcileEvidence8616:
+    """Collect callsite, incoming, wide, and body width evidence once."""
+    callsite_widths = _callsite_stack_arg_widths_8616(codegen)
+    incoming_width_evidence = (
+        CalleeArgumentWidthEvidence8616(-1, CalleeArgumentWidthVerdict8616.UNKNOWN)
+        if func is None
+        else collect_callee_argument_width_evidence_8616(project, typed_cfunc.addr)
+    )
+    accepted_layout = accepted_stack_input_layout_8616(project, typed_cfunc.addr)
+    incoming_widths = dict(accepted_layout) if accepted_layout is not None else (
+        dict(incoming_width_evidence.widths_by_offset)
+        if incoming_width_evidence.closes_census
+        else {}
+    )
+    wide_evidence = (
+        WideStackArgumentWidthEvidence8616(0, 0, ())
+        if func is None
+        else collect_wide_stack_argument_width_evidence_8616(project, func)
+    )
+    body_widths = dict.fromkeys(wide_evidence.classified_offsets, 4)
+    body_access_widths = collect_bp_stack_access_widths_from_instructions_8616(project, codegen)
+    return _ReconcileEvidence8616(
+        callsite_widths,
+        incoming_widths,
+        body_widths,
+        body_access_widths,
+        wide_evidence,
+        incoming_width_evidence,
+    )
+
+
+def _conflicting_body_offsets_8616(
+    body_widths: Mapping[int, int],
+    incoming_widths: Mapping[int, int],
+    callsite_widths: Mapping[int, int],
+) -> set[int]:
+    """Body-decoded widths that contradict incoming or callsite evidence."""
+    return {
+        offset
+        for offset, width in body_widths.items()
+        if (offset in incoming_widths and incoming_widths[offset] != width)
+        or (
+            not incoming_widths
+            and offset in callsite_widths
+            and callsite_widths[offset] != width
+        )
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class _ReconcileArgResult8616:
+    """Per-argument reconciliation outcome shared back to the caller."""
+
+    reconciled: SimType
+    name: str
+    failed: bool
+    wide_offset: int | None
+    changed: bool
+    debug_row: tuple[object, ...]
+
+
+def _reconcile_one_arg_8616(
+    codegen: object,
+    arg_type: SimType,
+    cvar: structured_c.CVariable,
+    fact: FunctionParameterWidthFact8616,
+    prototype_name: str | None,
+    body_widths: Mapping[int, int],
+    arch: object,
+) -> _ReconcileArgResult8616:
+    """Reconcile one argument surface, type, size, and coordinate binding."""
+    variable = cast(SimStackVariable, cvar.variable)
+    canonical_offset = fact.stack_offset
+    exact_width = fact.width_bytes
+    reconciled_name = _reconciled_positive_arg_name_8616(
+        variable,
+        prototype_name,
+        canonical_offset,
+    )
+    changed = _apply_arg_cvar_surface_8616(
+        cvar,
+        name=reconciled_name,
+        variable_type=cvar.variable_type,
+    )
+    reconciled, materialized, failed = _constrain_scalar_arg_type_to_stack_slot_8616(
+        arg_type,
+        slot_width=exact_width,
+        arch=arch,
+    )
+    wide_offset = (
+        canonical_offset
+        if not failed and canonical_offset in body_widths and exact_width == body_widths[canonical_offset]
+        else None
+    )
+    reconciled_width = _type_size_bytes_8616(reconciled, arch=arch)
+    if (
+        materialized
+        or isinstance(reconciled, SimTypePointer)
+        or reconciled_width == exact_width
+    ) and cvar.variable_type != reconciled:
+        typing.cast(typing.Any, cvar).variable_type = reconciled
+        changed = True
+    debug_row = (
+        canonical_offset,
+        variable.size,
+        repr(arg_type),
+        repr(cvar.variable_type),
+        exact_width,
+        materialized,
+        failed,
+    )
+    if (
+        not failed
+        and reconciled_width == exact_width
+        and variable.size != exact_width
+    ):
+        variable.size = exact_width
+        changed = True
+    if not failed:
+        refresh_stack_variable_coordinate_cvar_8616(codegen, cvar)
+    return _ReconcileArgResult8616(
+        reconciled, reconciled_name, failed, wide_offset, changed, debug_row
+    )
+
+
+def _select_incoming_args_8616(
+    typed_codegen: _StackPrototypeCodegen8616,
+    codegen: object,
+    args: tuple[SimType, ...],
+    arg_cvars: tuple[structured_c.CVariable, ...],
+    prototype_names: tuple[object, ...],
+    evidence: _ReconcileEvidence8616,
+    original_arg_count: int,
+) -> tuple[tuple[SimType, ...], tuple[structured_c.CVariable, ...], tuple[object, ...], int] | None:
+    """Prune args to the closed incoming layout; refuse ambiguous selections."""
+    if not evidence.incoming_widths:
+        return args, arg_cvars, prototype_names, 0
+    selection = _exact_incoming_argument_selection_8616(
+        arg_cvars,
+        evidence.incoming_widths,
+        evidence.body_access_widths,
+        codegen,
+    )
+    if selection is None:
+        typed_codegen._inertia_wide_stack_argument_width_evidence_8616 = evidence.wide_evidence
+        typed_codegen._inertia_stack_prototype_width_stats_8616 = StackPrototypeWidthStats8616(
+            raw_fact_count=original_arg_count,
+            normalized_fact_count=original_arg_count,
+            failure_count=1,
+        )
+        return None
+    return (
+        tuple(args[index] for index in selection),
+        tuple(arg_cvars[index] for index in selection),
+        tuple(
+            prototype_names[index] if index < len(prototype_names) else None
+            for index in selection
+        ),
+        original_arg_count - len(selection),
+    )
+
+
+def _reconcile_width_facts_8616(
+    codegen: object,
+    typed_codegen: _StackPrototypeCodegen8616,
+    args: tuple[SimType, ...],
+    arg_cvars: tuple[structured_c.CVariable, ...],
+    arch: object,
+    evidence: _ReconcileEvidence8616,
+) -> list[FunctionParameterWidthFact8616] | None:
+    """Compute per-argument width facts; refuse conflicting layouts."""
+    conflicting_offsets = _conflicting_body_offsets_8616(
+        evidence.body_widths, evidence.incoming_widths, evidence.callsite_widths
+    )
+    if conflicting_offsets:
+        typed_codegen._inertia_wide_stack_argument_width_evidence_8616 = evidence.wide_evidence
+        typed_codegen._inertia_stack_prototype_width_stats_8616 = StackPrototypeWidthStats8616(
+            raw_fact_count=len(arg_cvars),
+            normalized_fact_count=len(arg_cvars),
+            failure_count=len(conflicting_offsets),
+        )
+        return None
+    width_facts: list[FunctionParameterWidthFact8616] = []
+    for arg_type, cvar in zip(args, arg_cvars, strict=True):
+        fact = _parameter_width_fact_8616(
+            codegen, cvar, arg_type, arch, evidence.body_widths, evidence.incoming_widths, evidence.callsite_widths,
+        )
+        if fact is None:
+            return None
+        width_facts.append(fact)
+    proposed_layout = {fact.stack_offset: fact.width_bytes for fact in width_facts}
+    if _exact_incoming_argument_selection_8616(
+        arg_cvars, proposed_layout, evidence.body_access_widths, codegen,
+    ) != tuple(range(len(arg_cvars))):
+        return None
+    return width_facts
+
+
+@dataclass(slots=True)
+class _ReconciledArgs8616:
+    """Accumulated per-argument reconciliation results."""
+
+    reconciled_args: list[SimType]
+    reconciled_names: list[str]
+    debug_rows: list[tuple[object, ...]]
+    materialized_wide_offsets: set[int]
+    classified_count: int
+    failure_count: int
+    changed: bool
+
+
+def _reconcile_args_8616(
+    codegen: object,
+    args: tuple[SimType, ...],
+    arg_cvars: tuple[structured_c.CVariable, ...],
+    width_facts: list[FunctionParameterWidthFact8616],
+    prototype_names: tuple[object, ...],
+    body_widths: Mapping[int, int],
+    arch: object,
+) -> _ReconciledArgs8616:
+    """Reconcile every argument surface and collect stats/debug rows."""
+    state = _ReconciledArgs8616([], [], [], set(), 0, 0, False)
+    for index, (arg_type, cvar, fact) in enumerate(zip(args, arg_cvars, width_facts, strict=True)):
+        result = _reconcile_one_arg_8616(
+            codegen,
+            arg_type,
+            cvar,
+            fact,
+            prototype_names[index] if index < len(prototype_names) else None,
+            body_widths,
+            arch,
+        )
+        state.reconciled_names.append(result.name)
+        state.reconciled_args.append(result.reconciled)
+        state.classified_count += int(not result.failed)
+        state.failure_count += int(result.failed)
+        if result.wide_offset is not None:
+            state.materialized_wide_offsets.add(result.wide_offset)
+        state.changed = result.changed or state.changed
+        state.debug_rows.append(result.debug_row)
+    return state
+
+
 def reconcile_exact_stack_argument_prototype_8616(project: object, codegen: object) -> bool:
     """Reconcile a prototype with exact typed argument C variables.
 
@@ -924,147 +1275,45 @@ def reconcile_exact_stack_argument_prototype_8616(project: object, codegen: obje
     original_arg_count = len(arg_cvars)
     prototype_names = tuple(prototype.arg_names or ())
     arch = cast(_ProjectArch8616, project).arch
-    reconciled_args: list[SimType] = []
-    classified_count = 0
-    failure_count = 0
-    callsite_widths = _callsite_stack_arg_widths_8616(codegen)
     func = _function_for_codegen_8616(project, codegen)
-    incoming_width_evidence = (
-        CalleeArgumentWidthEvidence8616(-1, CalleeArgumentWidthVerdict8616.UNKNOWN)
-        if func is None
-        else collect_callee_argument_width_evidence_8616(project, typed_cfunc.addr)
-    )
-    typed_codegen._inertia_callee_argument_width_evidence_8616 = incoming_width_evidence
+    evidence = _reconcile_width_evidence_8616(project, codegen, typed_cfunc, func)
+    typed_codegen._inertia_callee_argument_width_evidence_8616 = evidence.incoming_width_evidence
     storage_resolution = function_storage_resolution_8616(project, typed_cfunc.addr)
     if storage_resolution is not None and storage_resolution.contract is None:
         return False
-    accepted_layout = accepted_stack_input_layout_8616(project, typed_cfunc.addr)
-    incoming_widths = dict(accepted_layout) if accepted_layout is not None else (
-        dict(incoming_width_evidence.widths_by_offset)
-        if incoming_width_evidence.closes_census
-        else {}
+    wide_evidence = evidence.wide_evidence
+    selected = _select_incoming_args_8616(
+        typed_codegen,
+        codegen,
+        args,
+        arg_cvars,
+        prototype_names,
+        evidence,
+        original_arg_count,
     )
-    wide_evidence = (
-        WideStackArgumentWidthEvidence8616(0, 0, ())
-        if func is None
-        else collect_wide_stack_argument_width_evidence_8616(project, func)
+    if selected is None:
+        return False
+    args, arg_cvars, prototype_names, pruned_arg_count = selected
+    width_facts = _reconcile_width_facts_8616(
+        codegen,
+        typed_codegen,
+        args,
+        arg_cvars,
+        arch,
+        evidence,
     )
-    body_widths = dict.fromkeys(wide_evidence.classified_offsets, 4)
-    body_access_widths = collect_bp_stack_access_widths_from_instructions_8616(project, codegen)
-    pruned_arg_count = 0
-    if incoming_widths:
-        selection = _exact_incoming_argument_selection_8616(
-            arg_cvars,
-            incoming_widths,
-            body_access_widths,
-            codegen,
-        )
-        if selection is None:
-            typed_codegen._inertia_wide_stack_argument_width_evidence_8616 = wide_evidence
-            typed_codegen._inertia_stack_prototype_width_stats_8616 = StackPrototypeWidthStats8616(
-                raw_fact_count=original_arg_count,
-                normalized_fact_count=original_arg_count,
-                failure_count=1,
-            )
-            return False
-        args = tuple(args[index] for index in selection)
-        arg_cvars = tuple(arg_cvars[index] for index in selection)
-        prototype_names = tuple(
-            prototype_names[index] if index < len(prototype_names) else None
-            for index in selection
-        )
-        pruned_arg_count = original_arg_count - len(arg_cvars)
-    conflicting_offsets = {
-        offset
-        for offset, width in body_widths.items()
-        if (offset in incoming_widths and incoming_widths[offset] != width)
-        or (
-            not incoming_widths
-            and offset in callsite_widths
-            and callsite_widths[offset] != width
-        )
-    }
-    if conflicting_offsets:
-        typed_codegen._inertia_wide_stack_argument_width_evidence_8616 = wide_evidence
-        typed_codegen._inertia_stack_prototype_width_stats_8616 = StackPrototypeWidthStats8616(
-            raw_fact_count=len(arg_cvars),
-            normalized_fact_count=len(arg_cvars),
-            failure_count=len(conflicting_offsets),
-        )
+    if width_facts is None:
         return False
-    width_facts: list[FunctionParameterWidthFact8616] = []
-    for arg_type, cvar in zip(args, arg_cvars, strict=True):
-        fact = _parameter_width_fact_8616(
-            codegen, cvar, arg_type, arch, body_widths, incoming_widths, callsite_widths,
-        )
-        if fact is None:
-            return False
-        width_facts.append(fact)
-    proposed_layout = {fact.stack_offset: fact.width_bytes for fact in width_facts}
-    if _exact_incoming_argument_selection_8616(
-        arg_cvars, proposed_layout, body_access_widths, codegen,
-    ) != tuple(range(len(arg_cvars))):
-        return False
-    materialized_wide_offsets: set[int] = set()
-    reconciled_names: list[str] = []
-    debug_rows: list[tuple[object, ...]] = []
-    changed = False
-    for index, (arg_type, cvar, fact) in enumerate(zip(args, arg_cvars, width_facts, strict=True)):
-        variable = cast(SimStackVariable, cvar.variable)
-        canonical_offset = fact.stack_offset
-        exact_width = fact.width_bytes
-        reconciled_name = _reconciled_positive_arg_name_8616(
-            variable,
-            prototype_names[index] if index < len(prototype_names) else None,
-            canonical_offset,
-        )
-        reconciled_names.append(reconciled_name)
-        changed = (
-            _apply_arg_cvar_surface_8616(
-                cvar,
-                name=reconciled_name,
-                variable_type=cvar.variable_type,
-            )
-            or changed
-        )
-        reconciled, materialized, failed = _constrain_scalar_arg_type_to_stack_slot_8616(
-            arg_type,
-            slot_width=exact_width,
-            arch=arch,
-        )
-        reconciled_args.append(reconciled)
-        classified_count += int(not failed)
-        failure_count += int(failed)
-        if not failed and canonical_offset in body_widths and exact_width == body_widths[canonical_offset]:
-            materialized_wide_offsets.add(canonical_offset)
-        reconciled_width = _type_size_bytes_8616(reconciled, arch=arch)
-        if (
-            materialized
-            or isinstance(reconciled, SimTypePointer)
-            or reconciled_width == exact_width
-        ) and cvar.variable_type != reconciled:
-            typing.cast(typing.Any, cvar).variable_type = reconciled
-            changed = True
-        debug_rows.append(
-            (
-                canonical_offset,
-                variable.size,
-                repr(arg_type),
-                repr(cvar.variable_type),
-                exact_width,
-                materialized,
-                failed,
-            )
-        )
-        if (
-            not failed
-            and reconciled_width == exact_width
-            and variable.size != exact_width
-        ):
-            variable.size = exact_width
-            changed = True
-        if not failed:
-            refresh_stack_variable_coordinate_cvar_8616(codegen, cvar)
+    reconciled = _reconcile_args_8616(
+        codegen, args, arg_cvars, width_facts, prototype_names, evidence.body_widths, arch
+    )
+    materialized_wide_offsets = reconciled.materialized_wide_offsets
+    reconciled_names = reconciled.reconciled_names
+    reconciled_args = reconciled.reconciled_args
+    debug_rows = reconciled.debug_rows
+    classified_count = reconciled.classified_count
+    failure_count = reconciled.failure_count
+    changed = reconciled.changed
     parameter_width_facts = tuple(width_facts)
     typed_codegen._inertia_function_parameter_width_facts_8616 = parameter_width_facts
     materialized_wide_evidence = wide_evidence.with_materialized_count(len(materialized_wide_offsets))
@@ -1085,6 +1334,35 @@ def reconcile_exact_stack_argument_prototype_8616(project: object, codegen: obje
     )
     if failure_count or classified_count == 0:
         return False
+    return _publish_reconciled_prototype_8616(
+        typed_codegen,
+        typed_cfunc,
+        func,
+        prototype,
+        arg_cvars,
+        width_facts,
+        reconciled_args,
+        reconciled_names,
+        arch,
+        pruned_arg_count,
+        changed,
+    )
+
+
+def _publish_reconciled_prototype_8616(
+    typed_codegen: _StackPrototypeCodegen8616,
+    typed_cfunc: _StackPrototypeCFunction8616,
+    func: object | None,
+    prototype: SimTypeFunction,
+    arg_cvars: tuple[object, ...],
+    width_facts: list[FunctionParameterWidthFact8616],
+    reconciled_args: list[SimType],
+    reconciled_names: list[str],
+    arch: object,
+    pruned_arg_count: int,
+    changed: bool,
+) -> bool:
+    """Publish the reconciled prototype, wide subviews, and pruned arg list."""
     if pruned_arg_count:
         typed_cfunc.arg_list = list(arg_cvars)
         changed = True
@@ -1128,7 +1406,7 @@ def reconcile_exact_stack_argument_prototype_8616(project: object, codegen: obje
         WideStackArgumentOwner8616(fact.stack_offset, fact.width_bytes, cvar)
         for cvar, fact in zip(arg_cvars, width_facts, strict=True)
     )
-    changed = materialize_wide_stack_argument_subviews_8616(codegen, subview_owners).changed or changed
+    changed = materialize_wide_stack_argument_subviews_8616(typed_codegen, subview_owners).changed or changed
     if changed:
         typed_codegen._inertia_codegen_decl_refresh_required_8616 = True
     return changed
@@ -1192,6 +1470,37 @@ def materialize_annotated_stack_prototype_8616(
         argument_count=len(entries),
     )
     current_proto = authoritative_prototype or typed_cfunc.functy or typed_func.prototype
+    current_args, current_arg_names, return_type, variadic = _current_prototype_surface_8616(current_proto)
+    current_surfaces_by_offset = _current_arg_surfaces_8616(
+        codegen, typed_cfunc, current_args, current_arg_names
+    )
+    entry_ctx = _AnnotatedEntryCtx8616(
+        codegen=codegen,
+        arch=arch,
+        current_surfaces_by_offset=current_surfaces_by_offset,
+        current_args=tuple(current_args),
+        current_arg_names=current_arg_names,
+        annotated_names=tuple(name for _offset, name in entries),
+        normalized_header_widths=_normalized_header_arg_widths_8616(codegen, entries, arch=arch),
+        annotated_object_widths=_annotated_stack_object_widths_8616(entries),
+    )
+    outcome = _materialize_annotated_entries_8616(entry_ctx, entries)
+    return _commit_annotated_materialization_8616(
+        typed_codegen,
+        typed_cfunc,
+        typed_func,
+        codegen,
+        outcome,
+        return_type,
+        variadic,
+        arch,
+    )
+
+
+def _current_prototype_surface_8616(
+    current_proto: object,
+) -> tuple[list[object], tuple[object, ...], object, bool]:
+    """Decompose the current prototype surface, defaulting when absent."""
     if isinstance(current_proto, SimTypeFunction):
         current_args = list(current_proto.args or ())
         current_arg_names = tuple(current_proto.arg_names or ())
@@ -1202,7 +1511,125 @@ def materialize_annotated_stack_prototype_8616(
         current_arg_names = ()
         return_type = None
         variadic = False
-    current_surfaces_by_offset: dict[int, tuple[SimType, str | None]] = {}
+    if return_type is None or (isinstance(return_type, SimTypeBottom) and return_type.label != "void"):
+        return_type = SimTypeShort(False)
+    return current_args, current_arg_names, return_type, variadic
+
+
+@dataclass(slots=True)
+class _AnnotatedMaterialization8616:
+    """Accumulated annotated-entry materialization results."""
+
+    arg_cvars: list[structured_c.CVariable]
+    arg_types: list[SimType]
+    arg_names: list[str]
+    owned_ranges: dict[int, int]
+    owner_variables: set[SimStackVariable]
+    wide_argument_owners: list[WideStackArgumentOwner8616]
+    width_stats: StackPrototypeWidthStats8616
+    width_facts: list[FunctionParameterWidthFact8616]
+    changed: bool
+
+
+def _materialize_annotated_entries_8616(
+    ctx: _AnnotatedEntryCtx8616,
+    entries: tuple[tuple[int, str | None], ...],
+) -> _AnnotatedMaterialization8616:
+    """Materialize all annotated entries, accumulating stats and evidence."""
+    arg_cvars: list[structured_c.CVariable] = []
+    arg_types: list[SimType] = []
+    arg_names: list[str] = []
+    owned_ranges: dict[int, int] = {}
+    owner_variables: set[SimStackVariable] = set()
+    wide_argument_owners: list[WideStackArgumentOwner8616] = []
+    width_stats = StackPrototypeWidthStats8616()
+    width_facts: list[FunctionParameterWidthFact8616] = []
+    changed = False
+    for index, (offset, maybe_name) in enumerate(entries):
+        result = _materialize_annotated_entry_8616(ctx, index, offset, maybe_name, arg_names)
+        if result.width_fact is not None:
+            width_facts.append(result.width_fact)
+        width_stats = StackPrototypeWidthStats8616(
+            raw_fact_count=width_stats.raw_fact_count + result.raw_width_fact,
+            normalized_fact_count=width_stats.normalized_fact_count + result.normalized_width_fact,
+            classified_fact_count=width_stats.classified_fact_count + int(result.width_classified),
+            materialized_count=width_stats.materialized_count + int(result.width_classified),
+            failure_count=width_stats.failure_count + int(result.width_failure),
+        )
+        if result.cvar is None:
+            continue
+        changed = result.changed or changed
+        owned_ranges[offset] = result.width
+        if isinstance(result.variable, SimStackVariable):
+            owner_variables.add(result.variable)
+        wide_argument_owners.append(WideStackArgumentOwner8616(offset, result.width, result.cvar))
+        arg_cvars.append(result.cvar)
+        arg_types.append(result.arg_type)
+        arg_names.append(result.name)
+    return _AnnotatedMaterialization8616(
+        arg_cvars,
+        arg_types,
+        arg_names,
+        owned_ranges,
+        owner_variables,
+        wide_argument_owners,
+        width_stats,
+        width_facts,
+        changed,
+    )
+
+
+def _commit_annotated_materialization_8616(
+    typed_codegen: _StackPrototypeCodegen8616,
+    typed_cfunc: _StackPrototypeCFunction8616,
+    typed_func: _PrototypeFunction8616,
+    codegen: object,
+    outcome: _AnnotatedMaterialization8616,
+    return_type: object,
+    variadic: bool,
+    arch: object,
+) -> bool:
+    """Publish stats, subviews, pruning, and the annotated prototype."""
+    changed = outcome.changed
+    typed_codegen._inertia_stack_prototype_width_stats_8616 = outcome.width_stats
+    parameter_width_facts = tuple(outcome.width_facts)
+    typed_codegen._inertia_function_parameter_width_facts_8616 = parameter_width_facts
+    if not outcome.arg_cvars:
+        _debug_parameter_width_facts_8616("materialize-empty", parameter_width_facts)
+        return changed
+    _debug_parameter_width_facts_8616("materialize", parameter_width_facts)
+    if outcome.width_stats.classified_fact_count > 0 and outcome.width_stats.materialized_count == 0:
+        raise RuntimeError("stack prototype width evidence was classified but not materialized")
+    subview_result = materialize_wide_stack_argument_subviews_8616(codegen, tuple(outcome.wide_argument_owners))
+    changed = subview_result.changed or changed
+    changed = _prune_stack_slots_covered_by_wide_args_8616(
+        codegen,
+        outcome.owned_ranges,
+        outcome.owner_variables,
+        frozenset(subview_result.retained_variables),
+    ) or changed
+    return _publish_annotated_prototype_8616(
+        typed_codegen,
+        typed_cfunc,
+        typed_func,
+        outcome.arg_cvars,
+        outcome.arg_types,
+        outcome.arg_names,
+        return_type,
+        variadic,
+        arch,
+        changed,
+    )
+
+
+def _current_arg_surfaces_8616(
+    codegen: object,
+    typed_cfunc: _StackPrototypeCFunction8616,
+    current_args: list[object],
+    current_arg_names: tuple[object, ...],
+) -> dict[int, tuple[SimType, str | None]]:
+    """Map existing positive-BP args to their current type/name surfaces."""
+    surfaces: dict[int, tuple[SimType, str | None]] = {}
     for physical_index, current_cvar in enumerate(typed_cfunc.arg_list):
         if physical_index >= len(current_args):
             break
@@ -1214,175 +1641,203 @@ def materialize_annotated_stack_prototype_8616(
         if not isinstance(machine_bp_offset, int):
             continue
         current_name = current_arg_names[physical_index] if physical_index < len(current_arg_names) else None
-        current_surfaces_by_offset.setdefault(machine_bp_offset, (current_type, current_name))
-    if return_type is None or (isinstance(return_type, SimTypeBottom) and return_type.label != "void"):
-        return_type = SimTypeShort(False)
-    arg_cvars: list[structured_c.CVariable] = []
-    arg_types: list[SimType] = []
-    arg_names: list[str] = []
-    owned_ranges: dict[int, int] = {}
-    owner_variables: set[SimStackVariable] = set()
-    wide_argument_owners: list[WideStackArgumentOwner8616] = []
-    width_stats = StackPrototypeWidthStats8616()
-    width_facts: list[FunctionParameterWidthFact8616] = []
-    normalized_header_widths = _normalized_header_arg_widths_8616(codegen, entries, arch=arch)
-    annotated_object_widths = _annotated_stack_object_widths_8616(entries)
-    annotated_names = tuple(name for _offset, name in entries)
-    changed = False
-    for index, (offset, maybe_name) in enumerate(entries):
-        current_surface = current_surfaces_by_offset.get(offset)
-        prototype_name = (
-            current_surface[1]
-            if current_surface is not None
-            else current_arg_names[index] if index < len(current_arg_names) else None
-        )
-        prototype_name_is_unique = bool(
-            isinstance(prototype_name, str)
-            and prototype_name
-            and prototype_name != "local"
-            and not prototype_name.startswith("local_")
-            and not _is_generated_argument_name_8616(prototype_name)
-            and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", prototype_name)
-            is not None
-            and current_arg_names.count(prototype_name) == 1
-        )
-        annotated_name_is_unique = bool(
-            isinstance(maybe_name, str)
-            and maybe_name
-            and maybe_name != "local"
-            and not maybe_name.startswith("local_")
-            and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", maybe_name) is not None
-            and annotated_names.count(maybe_name) == 1
-        )
-        name: str
-        if prototype_name_is_unique:
-            name = cast(str, prototype_name)
-        elif annotated_name_is_unique:
-            name = cast(str, maybe_name)
-        else:
-            name = f"arg_{offset:x}"
-        arg_type = (
-            current_surface[0]
-            if current_surface is not None
-            else current_args[index] if index < len(current_args) else SimTypeShort(False)
-        )
-        if arch is not None:
-            arg_type = _with_arch_8616(arg_type, arch)
-        if not isinstance(arg_type, SimType):
-            arg_type = SimTypeShort(False)
-        slot_width = (
-            normalized_header_widths[index]
-            if index < len(normalized_header_widths)
-            else annotated_object_widths.get(offset)
-        )
-        if slot_width is None:
-            slot_width = _exact_stack_slot_width_8616(codegen, offset, arch=arch)
-        exact_existing_types = tuple(
-            cvar.variable_type
-            for cvar in _iter_existing_stack_cvars_at_offset_8616(codegen, offset)
-            if isinstance(cvar.variable_type, SimType)
-            and (
-                _exact_typed_cvar_width_8616(cvar, arch) == slot_width
-                or (
-                    isinstance(cvar.variable_type, SimTypeChar)
-                    and isinstance(slot_width, int)
-                    and (_exact_typed_cvar_width_8616(cvar, arch) or 0) < slot_width
-                )
+        surfaces.setdefault(machine_bp_offset, (current_type, current_name))
+    return surfaces
+
+
+@dataclass(frozen=True, slots=True)
+class _AnnotatedEntryCtx8616:
+    """Read-only annotation context shared by per-entry materialization."""
+
+    codegen: object
+    arch: object
+    current_surfaces_by_offset: Mapping[int, tuple[SimType, str | None]]
+    current_args: tuple[object, ...]
+    current_arg_names: tuple[object, ...]
+    annotated_names: tuple[object, ...]
+    normalized_header_widths: tuple[int, ...]
+    annotated_object_widths: Mapping[int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class _AnnotatedEntryResult8616:
+    """One materialized annotated entry shared back to the materializer."""
+
+    cvar: structured_c.CVariable | None
+    variable: object
+    arg_type: SimType
+    name: str
+    width: int
+    changed: bool
+    raw_width_fact: int
+    normalized_width_fact: int
+    width_classified: bool
+    width_failure: bool
+    width_fact: FunctionParameterWidthFact8616 | None
+
+
+def _annotated_entry_name_8616(
+    ctx: _AnnotatedEntryCtx8616,
+    index: int,
+    offset: int,
+    maybe_name: object,
+    current_surface: tuple[SimType, str | None] | None,
+) -> str:
+    """Pick the proven prototype, annotated, or generated argument name."""
+    prototype_name = (
+        current_surface[1]
+        if current_surface is not None
+        else ctx.current_arg_names[index] if index < len(ctx.current_arg_names) else None
+    )
+    if _is_usable_arg_name_8616(prototype_name) and ctx.current_arg_names.count(prototype_name) == 1:
+        return cast(str, prototype_name)
+    if (
+        _is_usable_annotated_name_8616(maybe_name)
+        and ctx.annotated_names.count(maybe_name) == 1
+    ):
+        return cast(str, maybe_name)
+    return f"arg_{offset:x}"
+
+
+def _is_usable_annotated_name_8616(candidate: object) -> bool:
+    """Return whether an annotated name is a concrete C identifier."""
+    if not isinstance(candidate, str) or not candidate:
+        return False
+    return (
+        candidate != "local"
+        and not candidate.startswith("local_")
+        and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", candidate) is not None
+    )
+
+
+def _annotated_entry_arg_type_8616(
+    ctx: _AnnotatedEntryCtx8616,
+    index: int,
+    offset: int,
+    slot_width: int | None,
+    current_surface: tuple[SimType, str | None] | None,
+) -> SimType:
+    """Resolve the annotated entry type, honoring exact existing surfaces."""
+    arg_type = (
+        current_surface[0]
+        if current_surface is not None
+        else ctx.current_args[index] if index < len(ctx.current_args) else SimTypeShort(False)
+    )
+    if ctx.arch is not None:
+        arg_type = _with_arch_8616(arg_type, ctx.arch)
+    if not isinstance(arg_type, SimType):
+        arg_type = SimTypeShort(False)
+    exact_existing_types = tuple(
+        cvar.variable_type
+        for cvar in _iter_existing_stack_cvars_at_offset_8616(ctx.codegen, offset)
+        if isinstance(cvar.variable_type, SimType)
+        and (
+            _exact_typed_cvar_width_8616(cvar, ctx.arch) == slot_width
+            or (
+                isinstance(cvar.variable_type, SimTypeChar)
+                and isinstance(slot_width, int)
+                and (_exact_typed_cvar_width_8616(cvar, ctx.arch) or 0) < slot_width
             )
         )
-        if _type_size_bytes_8616(arg_type, arch=arch) != slot_width and exact_existing_types and all(
-            candidate == exact_existing_types[0] for candidate in exact_existing_types[1:]
-        ):
-            arg_type = exact_existing_types[0]
-        value_width = (
-            _type_size_bytes_8616(arg_type, arch=arch)
-            if isinstance(arg_type, SimTypeChar)
-            else slot_width
+    )
+    if _type_size_bytes_8616(arg_type, arch=ctx.arch) != slot_width and exact_existing_types and all(
+        candidate == exact_existing_types[0] for candidate in exact_existing_types[1:]
+    ):
+        arg_type = exact_existing_types[0]
+    return arg_type
+
+
+def _materialize_annotated_entry_8616(
+    ctx: _AnnotatedEntryCtx8616,
+    index: int,
+    offset: int,
+    maybe_name: object,
+    arg_names: list[str],
+) -> _AnnotatedEntryResult8616:
+    """Materialize one annotated entry's name, type, width fact, and cvar."""
+    current_surface = ctx.current_surfaces_by_offset.get(offset)
+    name = _annotated_entry_name_8616(ctx, index, offset, maybe_name, current_surface)
+    slot_width = (
+        ctx.normalized_header_widths[index]
+        if index < len(ctx.normalized_header_widths)
+        else ctx.annotated_object_widths.get(offset)
+    )
+    if slot_width is None:
+        slot_width = _exact_stack_slot_width_8616(ctx.codegen, offset, arch=ctx.arch)
+    arg_type = _annotated_entry_arg_type_8616(ctx, index, offset, slot_width, current_surface)
+    value_width = (
+        _type_size_bytes_8616(arg_type, arch=ctx.arch)
+        if isinstance(arg_type, SimTypeChar)
+        else slot_width
+    )
+    raw_width_fact = int(value_width is not None)
+    normalized_width_fact = int(isinstance(value_width, int) and value_width > 0)
+    width_fact = (
+        FunctionParameterWidthFact8616(stack_offset=offset, width_bytes=value_width)
+        if normalized_width_fact and isinstance(value_width, int)
+        else None
+    )
+    arg_type, _, width_failure = _constrain_scalar_arg_type_to_stack_slot_8616(
+        arg_type,
+        slot_width=value_width,
+        arch=ctx.arch,
+    )
+    width_classified = bool(normalized_width_fact and not width_failure)
+    width = (
+        slot_width
+        if isinstance(slot_width, int) and slot_width > 0
+        else max(2, _type_size_bytes_8616(arg_type, arch=ctx.arch))
+    )
+    cvar, cvar_changed = _ensure_arg_cvar_8616(
+        codegen=ctx.codegen,
+        offset=offset,
+        name=name,
+        variable_type=arg_type,
+        width=width,
+    )
+    if cvar is None:
+        return _AnnotatedEntryResult8616(
+            None, None, arg_type, name, width, False,
+            raw_width_fact, normalized_width_fact, width_classified, width_failure, width_fact,
         )
-        raw_width_fact = int(value_width is not None)
-        normalized_width_fact = int(isinstance(value_width, int) and value_width > 0)
-        if normalized_width_fact:
-            assert isinstance(value_width, int)
-            width_facts.append(
-                FunctionParameterWidthFact8616(
-                    stack_offset=offset,
-                    width_bytes=value_width,
-                )
-            )
-        arg_type, _, width_failure = _constrain_scalar_arg_type_to_stack_slot_8616(
-            arg_type,
-            slot_width=value_width,
-            arch=arch,
+    variable = cvar.variable
+    if isinstance(variable, SimStackVariable):
+        name = _reconciled_positive_arg_name_8616(
+            variable,
+            name,
+            offset,
         )
-        width_classified = bool(normalized_width_fact and not width_failure)
-        width_stats = StackPrototypeWidthStats8616(
-            raw_fact_count=width_stats.raw_fact_count + raw_width_fact,
-            normalized_fact_count=width_stats.normalized_fact_count + normalized_width_fact,
-            classified_fact_count=width_stats.classified_fact_count + int(width_classified),
-            materialized_count=width_stats.materialized_count + int(width_classified),
-            failure_count=width_stats.failure_count + int(width_failure),
-        )
-        width = (
-            slot_width
-            if isinstance(slot_width, int) and slot_width > 0
-            else max(2, _type_size_bytes_8616(arg_type, arch=arch))
-        )
-        cvar, cvar_changed = _ensure_arg_cvar_8616(
-            codegen=codegen,
-            offset=offset,
+    if name in arg_names:
+        name = f"arg_{offset:x}"
+    cvar_changed = (
+        _apply_arg_cvar_surface_8616(
+            cvar,
             name=name,
             variable_type=arg_type,
-            width=width,
         )
-        if cvar is None:
-            continue
-        variable = cvar.variable
-        if isinstance(variable, SimStackVariable):
-            name = _reconciled_positive_arg_name_8616(
-                variable,
-                name,
-                offset,
-            )
-        if name in arg_names:
-            name = f"arg_{offset:x}"
-        cvar_changed = (
-            _apply_arg_cvar_surface_8616(
-                cvar,
-                name=name,
-                variable_type=arg_type,
-            )
-            or cvar_changed
-        )
-        for sibling_cvar in _iter_existing_stack_cvars_at_offset_8616(codegen, offset):
-            cvar_changed = _apply_arg_cvar_surface_8616(sibling_cvar, name=name, variable_type=arg_type) or cvar_changed
-        changed = cvar_changed or changed
-        owned_ranges[offset] = width
-        if isinstance(variable, SimStackVariable):
-            owner_variables.add(variable)
-        wide_argument_owners.append(WideStackArgumentOwner8616(offset, width, cvar))
-        arg_cvars.append(cvar)
-        arg_types.append(arg_type)
-        arg_names.append(name)
-    if not arg_cvars:
-        typed_codegen._inertia_stack_prototype_width_stats_8616 = width_stats
-        parameter_width_facts = tuple(width_facts)
-        typed_codegen._inertia_function_parameter_width_facts_8616 = parameter_width_facts
-        _debug_parameter_width_facts_8616("materialize-empty", parameter_width_facts)
-        return changed
-    typed_codegen._inertia_stack_prototype_width_stats_8616 = width_stats
-    parameter_width_facts = tuple(width_facts)
-    typed_codegen._inertia_function_parameter_width_facts_8616 = parameter_width_facts
-    _debug_parameter_width_facts_8616("materialize", parameter_width_facts)
-    if width_stats.classified_fact_count > 0 and width_stats.materialized_count == 0:
-        raise RuntimeError("stack prototype width evidence was classified but not materialized")
-    subview_result = materialize_wide_stack_argument_subviews_8616(codegen, tuple(wide_argument_owners))
-    changed = subview_result.changed or changed
-    changed = _prune_stack_slots_covered_by_wide_args_8616(
-        codegen,
-        owned_ranges,
-        owner_variables,
-        frozenset(subview_result.retained_variables),
-    ) or changed
+        or cvar_changed
+    )
+    for sibling_cvar in _iter_existing_stack_cvars_at_offset_8616(ctx.codegen, offset):
+        cvar_changed = _apply_arg_cvar_surface_8616(sibling_cvar, name=name, variable_type=arg_type) or cvar_changed
+    return _AnnotatedEntryResult8616(
+        cvar, variable, arg_type, name, width, cvar_changed,
+        raw_width_fact, normalized_width_fact, width_classified, width_failure, width_fact,
+    )
+
+
+def _publish_annotated_prototype_8616(
+    typed_codegen: _StackPrototypeCodegen8616,
+    typed_cfunc: _StackPrototypeCFunction8616,
+    typed_func: _PrototypeFunction8616,
+    arg_cvars: list[structured_c.CVariable],
+    arg_types: list[SimType],
+    arg_names: list[str],
+    return_type: object,
+    variadic: bool,
+    arch: object,
+    changed: bool,
+) -> bool:
+    """Publish the annotated arg list and prototype across angr boundaries."""
     existing_args = list(typed_cfunc.arg_list or ())
     if len(existing_args) != len(arg_cvars) or any(existing is not desired for existing, desired in zip(existing_args, arg_cvars, strict=False)):
         typed_cfunc.arg_list = arg_cvars

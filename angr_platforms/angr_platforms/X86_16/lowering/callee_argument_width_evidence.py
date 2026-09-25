@@ -54,22 +54,33 @@ class CalleeArgumentWidthEvidence8616:
         compare=False,
     )
 
-    @property
-    def closes_census(self) -> bool:
-        """Return whether all callers prove one exact callee stack layout."""
+    def _verdict_and_evidence_close_8616(self) -> bool:
+        """Prove the width verdict and retained count census agree."""
         count_evidence = self.count_evidence
-        if (
-            self.verdict is not CalleeArgumentWidthVerdict8616.CONSISTENT
-            or count_evidence is None
-            or not count_evidence.closes_census
-            or self.argument_count != count_evidence.argument_count
-            or self.raw_fact_count <= 0
-            or not self.raw_fact_count
+        return (
+            self.verdict is CalleeArgumentWidthVerdict8616.CONSISTENT
+            and count_evidence is not None
+            and count_evidence.closes_census
+            and self.argument_count == count_evidence.argument_count
+        )
+
+    def _census_counts_clean_8616(self) -> bool:
+        """Prove every collected fact classified and materialized exactly."""
+        return (
+            self.raw_fact_count > 0
+            and self.raw_fact_count
             == self.normalized_fact_count
             == self.classified_fact_count
             == self.materialized_count
-            or self.failure_count != 0
-        ):
+            and self.failure_count == 0
+        )
+
+    @property
+    def closes_census(self) -> bool:
+        """Return whether all callers prove one exact callee stack layout."""
+        if not self._verdict_and_evidence_close_8616():
+            return False
+        if not self._census_counts_clean_8616():
             return False
         return len(self.argument_storage) == self.argument_count
 

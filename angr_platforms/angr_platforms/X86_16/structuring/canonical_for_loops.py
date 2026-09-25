@@ -271,6 +271,57 @@ def _break_control_node_ids_8616(statement: CStatement) -> frozenset[int]:
     return frozenset(node_ids)
 
 
+def _direct_pretest_components_8616(
+    loop: CWhileLoop,
+    guard_condition: object,
+    induction: CVariable,
+    iterator: CAssignment,
+) -> tuple[CVariable, CExpression, CStatement | None, CAssignment] | None:
+    """Prove an unguarded pretest condition over the induction storage."""
+    if guard_condition is not None or _unconditional_while_8616(loop):
+        return None
+    condition = loop.condition
+    if not isinstance(condition, CExpression):
+        return None
+    nonzero = _nonzero_loop_induction_8616(condition)
+    if (
+        (nonzero is not None
+        and _same_variable_8616(nonzero, induction))
+        or _ordered_comparison_uses_induction_8616(condition, induction)
+    ):
+        return induction, condition, None, iterator
+    return None
+
+
+def _guarded_pretest_components_8616(
+    loop: CWhileLoop,
+    body_locations: list[_StatementLocation8616],
+    guard: CStatement,
+    guard_condition: object,
+    induction: CVariable,
+    iterator: CAssignment,
+) -> tuple[CVariable, CExpression, CStatement | None, CAssignment] | None:
+    """Prove a break-guarded pretest continuation over the induction storage."""
+    if len(body_locations) < 2:
+        return None
+    if not isinstance(guard_condition, CExpression):
+        return None
+    continuation = _pretest_continuation_condition_8616(
+        guard_condition,
+        induction,
+    )
+    if continuation is None:
+        return None
+    if not _unconditional_while_8616(loop):
+        if not isinstance(loop.condition, CExpression) or not _same_c_expression_8616(
+            loop.condition,
+            continuation,
+        ):
+            return None
+        continuation = loop.condition
+    return induction, continuation, guard, iterator
+
+
 def _pretest_loop_components_8616(
     loop: CWhileLoop,
 ) -> tuple[CVariable, CExpression, CStatement | None, CAssignment] | None:
@@ -290,35 +341,14 @@ def _pretest_loop_components_8616(
     induction = iterator.lhs
     guard = body_locations[0].statement
     guard_condition = _pretest_break_condition_8616(guard)
-    if guard_condition is None and not _unconditional_while_8616(loop):
-        condition = loop.condition
-        if not isinstance(condition, CExpression):
-            return None
-        nonzero = _nonzero_loop_induction_8616(condition)
-        if (
-            (nonzero is not None
-            and _same_variable_8616(nonzero, induction))
-            or _ordered_comparison_uses_induction_8616(condition, induction)
-        ):
-            return induction, condition, None, iterator
-    if len(body_locations) < 2:
-        return None
-    if not isinstance(guard_condition, CExpression):
-        return None
-    continuation = _pretest_continuation_condition_8616(
-        guard_condition,
-        induction,
+    direct = _direct_pretest_components_8616(
+        loop, guard_condition, induction, iterator,
     )
-    if continuation is None:
-        return None
-    if not _unconditional_while_8616(loop):
-        if not isinstance(loop.condition, CExpression) or not _same_c_expression_8616(
-            loop.condition,
-            continuation,
-        ):
-            return None
-        continuation = loop.condition
-    return induction, continuation, guard, iterator
+    if direct is not None:
+        return direct
+    return _guarded_pretest_components_8616(
+        loop, body_locations, guard, guard_condition, induction, iterator,
+    )
 
 
 def _for_loop_induction_8616(loop: CForLoop) -> CVariable | None:
@@ -400,75 +430,53 @@ def _identity_index_8616(location: _StatementLocation8616) -> int | None:
     )
 
 
-def _materialize_canonical_for_loop_8616(
+def _materialize_into_for_loop_8616(
+    initializer: CAssignment,
+    loop: CForLoop,
     initializer_location: _StatementLocation8616,
-    loop_location: _StatementLocation8616,
-    codegen: _CodegenBoundary8616,
     counts: _RecoveryCounts8616,
 ) -> bool:
-    """Replace one projected initializer-loop pair after complete proof."""
-    initializer = initializer_location.statement
-    loop = loop_location.statement
-    if not isinstance(initializer, CAssignment):
-        return False
-    if isinstance(loop, CForLoop):
-        if loop.initializer is not None:
-            return False
-        counts.raw += 1
-        induction = _for_loop_induction_8616(loop)
-        iterator = loop.iterator
-        if (
-            not isinstance(initializer.lhs, CVariable)
-            or induction is None
-            or not isinstance(iterator, CAssignment)
-            or not _same_variable_8616(initializer.lhs, induction)
-            or not _affine_self_update_8616(iterator, induction)
-        ):
-            return False
-        counts.normalized += 1
-        if _contains_current_loop_continue_8616(loop.body):
-            return False
-        counts.classified += 1
-        initializer_index = _identity_index_8616(initializer_location)
-        if initializer_index is None:
-            counts.failures += 1
-            return False
-        loop.initializer = initializer
-        del initializer_location.parent.statements[initializer_index]
-        counts.materialized += 1
-        return True
-    if not isinstance(loop, CWhileLoop):
-        return False
-    if not isinstance(loop.body, CStatements):
-        return False
-    body_locations = _linear_statement_locations_8616(loop.body)
-    if not body_locations:
-        return False
-    iterator_location = body_locations[-1]
-    iterator = iterator_location.statement
-    if not isinstance(iterator, CAssignment):
+    """Fold a proven initializer into an existing for loop."""
+    if loop.initializer is not None:
         return False
     counts.raw += 1
-    components = _pretest_loop_components_8616(loop)
-    induction = components[0] if components is not None else None
-    continuation = components[1] if components is not None else None
-    guard = components[2] if components is not None else None
-    guard_location = next(
-        (location for location in body_locations if location.statement is guard),
-        None,
-    )
+    induction = _for_loop_induction_8616(loop)
+    iterator = loop.iterator
     if (
         not isinstance(initializer.lhs, CVariable)
         or induction is None
+        or not isinstance(iterator, CAssignment)
         or not _same_variable_8616(initializer.lhs, induction)
-        or continuation is None
-        or not _affine_self_update_8616(iterator, initializer.lhs)
+        or not _affine_self_update_8616(iterator, induction)
     ):
         return False
     counts.normalized += 1
     if _contains_current_loop_continue_8616(loop.body):
         return False
     counts.classified += 1
+    initializer_index = _identity_index_8616(initializer_location)
+    if initializer_index is None:
+        counts.failures += 1
+        return False
+    loop.initializer = initializer
+    del initializer_location.parent.statements[initializer_index]
+    counts.materialized += 1
+    return True
+
+
+def _splice_for_loop_8616(
+    initializer: CAssignment,
+    continuation: CExpression,
+    iterator: CAssignment,
+    loop: CWhileLoop,
+    initializer_location: _StatementLocation8616,
+    loop_location: _StatementLocation8616,
+    iterator_location: _StatementLocation8616,
+    guard_location: _StatementLocation8616 | None,
+    codegen: _CodegenBoundary8616,
+    counts: _RecoveryCounts8616,
+) -> bool:
+    """Build the canonical for loop and remove the consumed statements."""
     try:
         canonical = CForLoop(
             initializer,
@@ -501,6 +509,86 @@ def _materialize_canonical_for_loop_8616(
         del location.parent.statements[index]
     counts.materialized += 1
     return True
+
+
+def _materialize_while_pair_8616(
+    initializer: CAssignment,
+    initializer_location: _StatementLocation8616,
+    loop: CWhileLoop,
+    loop_location: _StatementLocation8616,
+    codegen: _CodegenBoundary8616,
+    counts: _RecoveryCounts8616,
+) -> bool:
+    """Prove a while-loop pair and splice it into a canonical for loop."""
+    if not isinstance(loop.body, CStatements):
+        return False
+    body_locations = _linear_statement_locations_8616(loop.body)
+    if not body_locations:
+        return False
+    iterator_location = body_locations[-1]
+    iterator = iterator_location.statement
+    if not isinstance(iterator, CAssignment):
+        return False
+    counts.raw += 1
+    components = _pretest_loop_components_8616(loop)
+    induction = components[0] if components is not None else None
+    continuation = components[1] if components is not None else None
+    guard = components[2] if components is not None else None
+    guard_location = next(
+        (location for location in body_locations if location.statement is guard),
+        None,
+    )
+    if (
+        not isinstance(initializer.lhs, CVariable)
+        or induction is None
+        or not _same_variable_8616(initializer.lhs, induction)
+        or continuation is None
+        or not _affine_self_update_8616(iterator, initializer.lhs)
+    ):
+        return False
+    counts.normalized += 1
+    if _contains_current_loop_continue_8616(loop.body):
+        return False
+    counts.classified += 1
+    return _splice_for_loop_8616(
+        initializer,
+        continuation,
+        iterator,
+        loop,
+        initializer_location,
+        loop_location,
+        iterator_location,
+        guard_location,
+        codegen,
+        counts,
+    )
+
+
+def _materialize_canonical_for_loop_8616(
+    initializer_location: _StatementLocation8616,
+    loop_location: _StatementLocation8616,
+    codegen: _CodegenBoundary8616,
+    counts: _RecoveryCounts8616,
+) -> bool:
+    """Replace one projected initializer-loop pair after complete proof."""
+    initializer = initializer_location.statement
+    loop = loop_location.statement
+    if not isinstance(initializer, CAssignment):
+        return False
+    if isinstance(loop, CForLoop):
+        return _materialize_into_for_loop_8616(
+            initializer, loop, initializer_location, counts,
+        )
+    if not isinstance(loop, CWhileLoop):
+        return False
+    return _materialize_while_pair_8616(
+        initializer,
+        initializer_location,
+        loop,
+        loop_location,
+        codegen,
+        counts,
+    )
 
 
 def _recover_nested_loops_8616(

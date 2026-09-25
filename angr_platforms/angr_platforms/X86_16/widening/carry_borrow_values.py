@@ -209,10 +209,11 @@ def _source_alias_matches(fact: CarryBorrowAliasFact8616) -> bool:
     )
 
 
-def _materialize_fact(
+def _fact_gate_8616(
     alias: CarryBorrowAliasResolution8616,
     fact: CarryBorrowAliasFact8616,
-) -> WideCarryBorrowResolution8616:
+) -> WideCarryBorrowResolution8616 | None:
+    """Refuse when the alias fact and arithmetic link do not close."""
     link = fact.link
     low_result = link.low_result_write.instruction.dst
     high_result = link.high_result_write.instruction.dst
@@ -238,6 +239,13 @@ def _materialize_fact(
         return _refusal(alias, WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH)
     if not _source_alias_matches(fact):
         return _refusal(alias, WideCarryBorrowFailure8616.ALIAS_EVIDENCE_MISMATCH)
+    if not _arithmetic_link_proven_8616(link):
+        return _refusal(alias, WideCarryBorrowFailure8616.ARITHMETIC_LINK_MISMATCH)
+    return None
+
+
+def _arithmetic_link_proven_8616(link: CarryBorrowLink8616) -> bool:
+    """Return whether the three arithmetic sites and operands chain exactly."""
     expected_op = (
         CarryBorrowIROp8616.ADD16
         if link.kind is CarryBorrowKind8616.ADD_WITH_CARRY
@@ -247,17 +255,30 @@ def _materialize_fact(
         site.instruction.op != expected_op.value
         for site in (link.low_arithmetic, link.high_base_arithmetic, link.high_final_arithmetic)
     ):
-        return _refusal(alias, WideCarryBorrowFailure8616.ARITHMETIC_LINK_MISMATCH)
+        return False
     if not _operation_source_matches(link.low_result_write, link.low_arithmetic):
-        return _refusal(alias, WideCarryBorrowFailure8616.ARITHMETIC_LINK_MISMATCH)
+        return False
     if not _operation_source_matches(link.high_result_write, link.high_final_arithmetic):
-        return _refusal(alias, WideCarryBorrowFailure8616.ARITHMETIC_LINK_MISMATCH)
+        return False
     final_args = link.high_final_arithmetic.instruction.args
     base_dst = link.high_base_arithmetic.instruction.dst
-    if base_dst is None or not any(
+    return base_dst is not None and any(
         isinstance(arg, IRValue) and arg.source_tmp == base_dst.source_tmp for arg in final_args
-    ):
-        return _refusal(alias, WideCarryBorrowFailure8616.ARITHMETIC_LINK_MISMATCH)
+    )
+
+
+def _materialize_fact(
+    alias: CarryBorrowAliasResolution8616,
+    fact: CarryBorrowAliasFact8616,
+) -> WideCarryBorrowResolution8616:
+    """Materialize one proven carry/borrow alias fact as a wide register pair."""
+    link = fact.link
+    gate = _fact_gate_8616(alias, fact)
+    if gate is not None:
+        return gate
+    low_result = link.low_result_write.instruction.dst
+    high_result = link.high_result_write.instruction.dst
+    assert low_result is not None and high_result is not None
     low_slice = WideRegisterSlice8616(
         result=low_result,
         result_domain=fact.low_result_domain,

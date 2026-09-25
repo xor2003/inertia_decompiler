@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -118,6 +119,72 @@ def _ast_field_8616(
     return getattr(node, name, default)
 
 
+@dataclass
+class _PretestBodySiteScan8616:
+    """Walk owned structured nodes and collect exact pretest-loop matches."""
+
+    project: object
+    codegen: object
+    evidence: DirectStackMovePretestBodyEvidence8616
+    dst_offset: int
+    matches: list[_DirectStackMovePretestBodySite8616] = field(default_factory=list)
+    seen: set[int] = field(default_factory=set)
+
+    def visit(self, node: object, depth: int) -> None:
+        """Walk owned structured nodes and collect exact pretest-loop matches."""
+        if node is None or id(node) in self.seen:
+            return
+        self.seen.add(id(node))
+        body = _ast_field_8616(node, "body")
+        statements = _ast_field_8616(body, "statements")
+        if isinstance(node, (structured_c.CForLoop, structured_c.CWhileLoop)) and isinstance(
+            statements,
+            list,
+        ):
+            self._loop_match(node, body, statements, depth)
+        statements_value = _ast_field_8616(node, "statements")
+        if isinstance(statements_value, list):
+            for statement in tuple(statements_value):
+                self.visit(statement, depth + 1)
+        for attr in ("body", "else_node"):
+            child = _ast_field_8616(node, attr)
+            if child is not None:
+                self.visit(child, depth + 1)
+        pairs = _ast_field_8616(node, "condition_and_nodes")
+        if pairs:
+            for _condition, guarded_body in boundary_tuple_8616(pairs):
+                self.visit(guarded_body, depth + 1)
+
+    def _loop_match(
+        self,
+        node: object,
+        body: object,
+        statements: list[object],
+        depth: int,
+    ) -> None:
+        """Record one structured loop when its exact block origins match."""
+        surface = pretest_condition_surface_8616(node)
+        condition_tags = frozenset(
+            comparable_address_8616(self.project, address, self.evidence.move_addr)
+            for condition in surface.conditions
+            for address in _tree_tag_addresses_8616(condition)
+        )
+        body_tags = frozenset(
+            comparable_address_8616(self.project, address, self.evidence.move_addr)
+            for address in _tree_tag_addresses_8616(body)
+        )
+        if (
+            condition_tags & frozenset(self.evidence.header_instruction_addrs)
+            and body_tags & frozenset(self.evidence.body_entry_instruction_addrs)
+            and _tree_reads_stack_offset_8616(
+                self.codegen, statements, self.dst_offset,
+            )
+        ):
+            self.matches.append(
+                _DirectStackMovePretestBodySite8616(statements, depth),
+            )
+
+
 def _pretest_body_sites_8616(
     project: object,
     codegen: object,
@@ -126,56 +193,12 @@ def _pretest_body_sites_8616(
     dst_offset: int,
 ) -> tuple[_DirectStackMovePretestBodySite8616, ...]:
     """Find the unique deepest structured loop matching exact block origins."""
-    matches: list[_DirectStackMovePretestBodySite8616] = []
-    seen: set[int] = set()
-    header_addresses = frozenset(evidence.header_instruction_addrs)
-    body_entry_addresses = frozenset(evidence.body_entry_instruction_addrs)
-
-    def visit(node: object, depth: int) -> None:
-        """Walk owned structured nodes and collect exact pretest-loop matches."""
-        if node is None or id(node) in seen:
-            return
-        seen.add(id(node))
-        body = _ast_field_8616(node, "body")
-        statements = _ast_field_8616(body, "statements")
-        if isinstance(node, (structured_c.CForLoop, structured_c.CWhileLoop)) and isinstance(
-            statements,
-            list,
-        ):
-            surface = pretest_condition_surface_8616(node)
-            condition_tags = frozenset(
-                comparable_address_8616(project, address, evidence.move_addr)
-                for condition in surface.conditions
-                for address in _tree_tag_addresses_8616(condition)
-            )
-            body_tags = frozenset(
-                comparable_address_8616(project, address, evidence.move_addr)
-                for address in _tree_tag_addresses_8616(body)
-            )
-            if (
-                condition_tags & header_addresses
-                and body_tags & body_entry_addresses
-                and _tree_reads_stack_offset_8616(codegen, statements, dst_offset)
-            ):
-                matches.append(_DirectStackMovePretestBodySite8616(statements, depth))
-        statements_value = _ast_field_8616(node, "statements")
-        if isinstance(statements_value, list):
-            for statement in tuple(statements_value):
-                visit(statement, depth + 1)
-        for attr in ("body", "else_node"):
-            child = _ast_field_8616(node, attr)
-            if child is not None:
-                visit(child, depth + 1)
-        pairs = _ast_field_8616(node, "condition_and_nodes")
-        if pairs:
-            for _condition, guarded_body in boundary_tuple_8616(pairs):
-                visit(guarded_body, depth + 1)
-
-    visit(root, 0)
-    if not matches:
+    scan = _PretestBodySiteScan8616(project, codegen, evidence, dst_offset)
+    scan.visit(root, 0)
+    if not scan.matches:
         return ()
-    deepest = max(site.depth for site in matches)
-    return tuple(site for site in matches if site.depth == deepest)
+    deepest = max(site.depth for site in scan.matches)
+    return tuple(site for site in scan.matches if site.depth == deepest)
 
 
 def _place_pretest_body_assignment_8616(
@@ -255,6 +278,116 @@ def place_direct_stack_move_pretest_body_assignment_8616(
     return placed
 
 
+class _PretestBodyOutcome8616(Enum):
+    """Per-fact placement outcome for the pretest-body stats contract."""
+
+    REFUSED_BRANCH_OWNER = "refused_branch_owner"
+    REFUSED_NO_EVIDENCE = "refused_no_evidence"
+    REFUSED_NO_SITE = "refused_no_site"
+    REFUSED_ASSIGNMENT = "refused_assignment"
+    NOT_PLACED = "not_placed"
+    ALREADY_MATERIALIZED = "already_materialized"
+    MATERIALIZED = "materialized"
+
+
+@dataclass(slots=True)
+class _PretestBodyTally8616:
+    """Accumulated stats for the pretest-body placement pass."""
+
+    normalized: int = 0
+    classified: int = 0
+    materialized: int = 0
+    already_materialized: int = 0
+    refused_no_evidence: int = 0
+    refused_no_site: int = 0
+    refused_assignment: int = 0
+    refused_branch_owner: int = 0
+    changed: bool = False
+
+    def record(self, outcome: _PretestBodyOutcome8616) -> None:
+        """Fold one fact outcome into the placement stats."""
+        if outcome in {
+            _PretestBodyOutcome8616.REFUSED_NO_SITE,
+            _PretestBodyOutcome8616.REFUSED_ASSIGNMENT,
+            _PretestBodyOutcome8616.NOT_PLACED,
+            _PretestBodyOutcome8616.ALREADY_MATERIALIZED,
+            _PretestBodyOutcome8616.MATERIALIZED,
+        }:
+            self.normalized += 1
+        if outcome in {
+            _PretestBodyOutcome8616.NOT_PLACED,
+            _PretestBodyOutcome8616.ALREADY_MATERIALIZED,
+            _PretestBodyOutcome8616.MATERIALIZED,
+        }:
+            self.classified += 1
+        if outcome is _PretestBodyOutcome8616.REFUSED_BRANCH_OWNER:
+            self.refused_branch_owner += 1
+        elif outcome is _PretestBodyOutcome8616.REFUSED_NO_EVIDENCE:
+            self.refused_no_evidence += 1
+        elif outcome is _PretestBodyOutcome8616.REFUSED_NO_SITE:
+            self.refused_no_site += 1
+        elif outcome is _PretestBodyOutcome8616.REFUSED_ASSIGNMENT:
+            self.refused_assignment += 1
+        elif outcome in {
+            _PretestBodyOutcome8616.ALREADY_MATERIALIZED,
+            _PretestBodyOutcome8616.MATERIALIZED,
+        }:
+            self.materialized += 1
+            self.already_materialized += int(
+                outcome is _PretestBodyOutcome8616.ALREADY_MATERIALIZED
+            )
+            self.changed = (
+                self.changed or outcome is _PretestBodyOutcome8616.MATERIALIZED
+            )
+
+
+def _process_pretest_fact_8616(
+    fact: DirectStackMoveFact8616,
+    project: object,
+    codegen: object,
+    function: object,
+    root: object,
+    branch_owned: frozenset[int],
+) -> _PretestBodyOutcome8616:
+    """Place one pretest-body move fact at its unique proven site."""
+    if fact.ins_addr in branch_owned:
+        return _PretestBodyOutcome8616.REFUSED_BRANCH_OWNER
+    evidence = recover_direct_stack_move_pretest_body_evidence_8616(
+        project,
+        function,
+        fact.ins_addr,
+    )
+    if len(evidence) != 1:
+        return _PretestBodyOutcome8616.REFUSED_NO_EVIDENCE
+    sites = _pretest_body_sites_8616(
+        project,
+        codegen,
+        root,
+        evidence[0],
+        fact.dst_offset,
+    )
+    if len(sites) != 1:
+        return _PretestBodyOutcome8616.REFUSED_NO_SITE
+    locations = tagged_assignment_locations_8616(project, codegen, root, fact)
+    if len(locations) != 1:
+        return _PretestBodyOutcome8616.REFUSED_ASSIGNMENT
+    placed, already = _place_pretest_body_assignment_8616(
+        project,
+        codegen,
+        sites[0],
+        fact,
+        locations[0].assignment,
+        locations[0],
+    )
+    if not placed:
+        return _PretestBodyOutcome8616.NOT_PLACED
+    return (
+        _PretestBodyOutcome8616.ALREADY_MATERIALIZED
+        if already
+        else _PretestBodyOutcome8616.MATERIALIZED
+    )
+
+
 def materialize_direct_stack_move_pretest_body_ownership_8616(
     project: object,
     codegen: object,
@@ -278,56 +411,18 @@ def materialize_direct_stack_move_pretest_body_ownership_8616(
         codegen,
         function,
     )
-    normalized = 0
-    classified = 0
-    materialized = 0
-    already_materialized = 0
-    refused_no_evidence = 0
-    refused_no_site = 0
-    refused_assignment = 0
-    refused_branch_owner = 0
-    changed = False
+    tally = _PretestBodyTally8616()
     for fact in sorted(facts, key=lambda candidate: candidate.ins_addr):
-        if fact.ins_addr in branch_owned:
-            refused_branch_owner += 1
-            continue
-        evidence = recover_direct_stack_move_pretest_body_evidence_8616(
-            project,
-            function,
-            fact.ins_addr,
+        tally.record(
+            _process_pretest_fact_8616(
+                fact, project, codegen, function, root, branch_owned,
+            )
         )
-        if len(evidence) != 1:
-            refused_no_evidence += 1
-            continue
-        normalized += 1
-        sites = _pretest_body_sites_8616(
-            project,
-            codegen,
-            root,
-            evidence[0],
-            fact.dst_offset,
-        )
-        if len(sites) != 1:
-            refused_no_site += 1
-            continue
-        locations = tagged_assignment_locations_8616(project, codegen, root, fact)
-        if len(locations) != 1:
-            refused_assignment += 1
-            continue
-        classified += 1
-        placed, already = _place_pretest_body_assignment_8616(
-            project,
-            codegen,
-            sites[0],
-            fact,
-            locations[0].assignment,
-            locations[0],
-        )
-        if not placed:
-            continue
-        materialized += 1
-        already_materialized += int(already)
-        changed = changed or not already
+    normalized = tally.normalized
+    classified = tally.classified
+    materialized = tally.materialized
+    already_materialized = tally.already_materialized
+    changed = tally.changed
     stats = DirectStackMovePretestBodyStats8616(
         raw_fact_count=len(facts),
         normalized_fact_count=normalized,
@@ -335,10 +430,10 @@ def materialize_direct_stack_move_pretest_body_ownership_8616(
         materialized_count=materialized,
         failure_count=len(facts) - materialized,
         already_materialized_count=already_materialized,
-        refused_no_evidence_count=refused_no_evidence,
-        refused_no_site_count=refused_no_site,
-        refused_assignment_count=refused_assignment,
-        refused_branch_owner_count=refused_branch_owner,
+        refused_no_evidence_count=tally.refused_no_evidence,
+        refused_no_site_count=tally.refused_no_site,
+        refused_assignment_count=tally.refused_assignment,
+        refused_branch_owner_count=tally.refused_branch_owner,
     )
     codegen_boundary._inertia_direct_stack_move_pretest_body_placement_8616 = stats
     if not stats.closed:

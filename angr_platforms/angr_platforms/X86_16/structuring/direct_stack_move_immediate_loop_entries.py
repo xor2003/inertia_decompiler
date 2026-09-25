@@ -72,37 +72,58 @@ def classify_immediate_loop_entry_relocation_8616(
         return ImmediateLoopEntryRelocationVerdict8616.REFUSED_NONEXACT_BACKEDGE
     if location.statements is site.statements:
         return ImmediateLoopEntryRelocationVerdict8616.ALREADY_OWNED
+    return _loop_entry_predecessor_scan_8616(root, site, location)
 
+
+def _loop_entry_predecessor_scan_8616(
+    root: object,
+    site: DirectStackMoveLoopEntrySite8616,
+    location: DirectStackMoveAssignmentLocation8616,
+) -> ImmediateLoopEntryRelocationVerdict8616:
+    """Walk the structured tree for the loop body owning the site."""
     seen: set[int] = set()
-    stack = [root]
+    stack: list[object] = [root]
     while stack:
         node = stack.pop()
         if node is None or id(node) in seen:
             continue
         seen.add(id(node))
-        statements = _ast_field_8616(node, "statements")
-        if isinstance(statements, list):
-            for index, statement in enumerate(tuple(statements)):
-                if isinstance(
-                    statement,
-                    (structured_c.CDoWhileLoop, structured_c.CWhileLoop),
-                ):
-                    body = _ast_field_8616(statement, "body")
-                    body_statements = _ast_field_8616(body, "statements")
-                    if body_statements is site.statements:
-                        if (
-                            location.statements is statements
-                            and location.index + 1 == index
-                        ):
-                            return ImmediateLoopEntryRelocationVerdict8616.PROVEN_ADJACENT_PREDECESSOR
-                        return ImmediateLoopEntryRelocationVerdict8616.REFUSED_NONADJACENT_ASSIGNMENT
-                stack.append(statement)
-        for attr in ("body", "else_node"):
-            child = _ast_field_8616(node, attr)
-            if child is not None:
-                stack.append(child)
-        for _condition, body in boundary_tuple_8616(
-            _ast_field_8616(node, "condition_and_nodes") or (),
-        ):
-            stack.append(body)
+        verdict = _visit_scan_node_8616(node, site, location, stack)
+        if verdict is not None:
+            return verdict
     return ImmediateLoopEntryRelocationVerdict8616.REFUSED_NONADJACENT_ASSIGNMENT
+
+
+def _visit_scan_node_8616(
+    node: object,
+    site: DirectStackMoveLoopEntrySite8616,
+    location: DirectStackMoveAssignmentLocation8616,
+    stack: list[object],
+) -> ImmediateLoopEntryRelocationVerdict8616 | None:
+    """Match loop-body ownership for one node or push its children."""
+    statements = _ast_field_8616(node, "statements")
+    if isinstance(statements, list):
+        for index, statement in enumerate(tuple(statements)):
+            if isinstance(
+                statement,
+                (structured_c.CDoWhileLoop, structured_c.CWhileLoop),
+            ):
+                body = _ast_field_8616(statement, "body")
+                body_statements = _ast_field_8616(body, "statements")
+                if body_statements is site.statements:
+                    if (
+                        location.statements is statements
+                        and location.index + 1 == index
+                    ):
+                        return ImmediateLoopEntryRelocationVerdict8616.PROVEN_ADJACENT_PREDECESSOR
+                    return ImmediateLoopEntryRelocationVerdict8616.REFUSED_NONADJACENT_ASSIGNMENT
+            stack.append(statement)
+    for attr in ("body", "else_node"):
+        child = _ast_field_8616(node, attr)
+        if child is not None:
+            stack.append(child)
+    for _condition, body in boundary_tuple_8616(
+        _ast_field_8616(node, "condition_and_nodes") or (),
+    ):
+        stack.append(body)
+    return None

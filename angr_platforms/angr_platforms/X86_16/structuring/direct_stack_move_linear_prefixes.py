@@ -23,7 +23,7 @@ work here.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, cast
 
@@ -149,48 +149,61 @@ def _placement_sites_8616(
     snapshot: DirectStackMoveLinearCfgSnapshot8616,
 ) -> tuple[_PlacementSite8616, ...]:
     """Return non-loop statement boundaries with exact linear CFG evidence."""
-    candidates: list[_PlacementSite8616] = []
-    seen: set[tuple[int, bool]] = set()
+    scan = _PlacementSiteScan8616(project, move_addr, snapshot)
+    scan.visit(root, 0, False)
+    return tuple(scan.candidates)
 
-    def visit(node: object, depth: int, inside_loop_body: bool) -> None:
+
+@dataclass(slots=True)
+class _PlacementSiteScan8616:
+    """Mutable non-loop placement-site scan over structured containers."""
+
+    project: object
+    move_addr: int
+    snapshot: DirectStackMoveLinearCfgSnapshot8616
+    candidates: list[_PlacementSite8616] = field(default_factory=list)
+    seen: set[tuple[int, bool]] = field(default_factory=set)
+
+    def visit(self, node: object, depth: int, inside_loop_body: bool) -> None:
         """Walk structured statement containers without crossing loop ownership."""
-        if node is None or (id(node), inside_loop_body) in seen:
+        if node is None or (id(node), inside_loop_body) in self.seen:
             return
-        seen.add((id(node), inside_loop_body))
+        self.seen.add((id(node), inside_loop_body))
         if isinstance(node, structured_c.CStatements):
             if not inside_loop_body:
-                for index, statement in enumerate(tuple(node.statements)):
-                    following_addr = _following_address_8616(
-                        project,
-                        statement,
-                        move_addr,
-                    )
-                    if following_addr is not None and linear_cfg_successor_proven_8616(
-                        snapshot,
-                        move_addr,
-                        following_addr,
-                    ):
-                        candidates.append(
-                            _PlacementSite8616(
-                                node.statements,
-                                index,
-                                following_addr,
-                                depth,
-                            )
-                        )
+                self._scan_container(node, depth)
             for statement in tuple(node.statements):
-                visit(statement, depth + 1, inside_loop_body)
+                self.visit(statement, depth + 1, inside_loop_body)
             return
         if isinstance(node, _LOOP_TYPES_8616):
-            visit(node.body, depth + 1, True)
+            self.visit(node.body, depth + 1, True)
             return
         if isinstance(node, structured_c.CIfElse):
             for _condition, body in tuple(node.condition_and_nodes):
-                visit(body, depth + 1, inside_loop_body)
-            visit(node.else_node, depth + 1, inside_loop_body)
+                self.visit(body, depth + 1, inside_loop_body)
+            self.visit(node.else_node, depth + 1, inside_loop_body)
 
-    visit(root, 0, False)
-    return tuple(candidates)
+    def _scan_container(self, node: structured_c.CStatements, depth: int) -> None:
+        """Record each proven linear successor boundary in one container."""
+        for index, statement in enumerate(tuple(node.statements)):
+            following_addr = _following_address_8616(
+                self.project,
+                statement,
+                self.move_addr,
+            )
+            if following_addr is not None and linear_cfg_successor_proven_8616(
+                self.snapshot,
+                self.move_addr,
+                following_addr,
+            ):
+                self.candidates.append(
+                    _PlacementSite8616(
+                        node.statements,
+                        index,
+                        following_addr,
+                        depth,
+                    )
+                )
 
 
 def _same_tagged_assignment_8616(

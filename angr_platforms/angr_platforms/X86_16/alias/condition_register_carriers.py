@@ -85,6 +85,154 @@ def _unique_values_8616(values: list[IRValue]) -> tuple[IRValue, ...]:
     return tuple(unique)
 
 
+def _register_lhs_values_8616(group: list[ConditionIR]) -> tuple[IRValue, ...]:
+    """Return the unique named-register lhs values of one branch group."""
+    return _unique_values_8616(
+        [
+            condition.lhs
+            for condition in group
+            if isinstance(condition.lhs, IRValue)
+            and condition.lhs.space is MemSpace.REG
+            and isinstance(condition.lhs.name, str)
+        ]
+    )
+
+
+def _storage_lhs_values_8616(group: list[ConditionIR]) -> tuple[IRValue, ...]:
+    """Return the unique segmented-memory lhs values of one branch group."""
+    return _unique_values_8616(
+        [
+            condition.lhs
+            for condition in group
+            if isinstance(condition.lhs, IRValue)
+            and condition.lhs.space in {MemSpace.SS, MemSpace.DS, MemSpace.ES}
+        ]
+    )
+
+
+def _memory_lhs_width_8616(operand: object, width_bits: int) -> bool:
+    """Return whether one bound operand is a width-exact segmented memory lhs."""
+    return (
+        isinstance(operand, IRValue)
+        and operand.space in {MemSpace.SS, MemSpace.DS, MemSpace.ES}
+        and operand.size == max(1, width_bits // 8)
+    )
+
+
+def _binding_proofs_8616(group: list[ConditionIR]) -> list[tuple[str, IRValue]]:
+    """Collect proven register→storage bindings from self-test facts."""
+    proofs: list[tuple[str, IRValue]] = []
+    for condition in group:
+        binding = condition_self_test_register_binding_8616(condition)
+        if binding is not None:
+            register_name, operand = binding
+            if _memory_lhs_width_8616(operand, condition.width_bits):
+                proofs.append((register_name, operand))
+        for bound_register, bound_operand in condition_self_test_storage_bindings_8616(
+            condition
+        ):
+            if _memory_lhs_width_8616(bound_operand, condition.width_bits):
+                proofs.append((bound_register, bound_operand))
+    return proofs
+
+
+def _group_unique_proof_8616(
+    group: list[ConditionIR],
+    register_values: tuple[IRValue, ...],
+    storage_values: tuple[IRValue, ...],
+) -> tuple[tuple[str, IRValue] | None, bool]:
+    """Return the unique proven register→storage pair, or a counted refusal."""
+    proofs: list[tuple[str, IRValue]] = []
+    if register_values and storage_values:
+        register = register_values[0]
+        register_name = register.name
+        if not isinstance(register_name, str) or register.size != storage_values[0].size:
+            return None, True
+        proofs.append((register_name.lower(), storage_values[0]))
+    proofs.extend(_binding_proofs_8616(group))
+    unique_proofs = tuple(dict.fromkeys(proofs))
+    if not unique_proofs:
+        return None, False
+    if len(unique_proofs) != 1:
+        return None, True
+    register_name, storage = unique_proofs[0]
+    if storage_values and storage_values[0] != storage:
+        return None, True
+    return (register_name, storage), False
+
+
+def _group_carrier_seed_8616(
+    group: list[ConditionIR],
+    proof: tuple[str, IRValue],
+    by_block: dict[int, list[tuple[int, ConditionIR]]],
+) -> _CarrierSeed8616 | None:
+    """Return the seed when the DEC successor and rhs consensus are proven."""
+    register_name, storage = proof
+    representative = group[0]
+    next_block, ambiguous = _next_dec_block_8616(
+        representative, by_block, register_name=register_name,
+        width_bits=representative.width_bits,
+    )
+    if ambiguous:
+        return None
+    if next_block is None:
+        next_block = representative.fallthrough_target
+    if not isinstance(next_block, int):
+        return None
+    if any(condition.rhs != representative.rhs for condition in group):
+        return None
+    return _CarrierSeed8616(
+        next_block=next_block,
+        register_name=register_name,
+        value=storage,
+        width_bits=representative.width_bits,
+    )
+
+
+def _group_seed_8616(
+    group: list[ConditionIR],
+    by_block: dict[int, list[tuple[int, ConditionIR]]],
+) -> tuple[_CarrierSeed8616 | None, bool]:
+    """Return the proven seed for one branch group, or a counted refusal."""
+    register_values = _register_lhs_values_8616(group)
+    storage_values = _storage_lhs_values_8616(group)
+    if len(register_values) > 1 or len(storage_values) > 1:
+        return None, True
+    proof, proof_failed = _group_unique_proof_8616(
+        group,
+        register_values,
+        storage_values,
+    )
+    if proof_failed:
+        return None, True
+    if proof is None:
+        return None, False
+    seed = _group_carrier_seed_8616(group, proof, by_block)
+    if seed is None:
+        return None, True
+    return seed, False
+
+
+def _dedupe_seeds_8616(candidates: list[_CarrierSeed8616]) -> tuple[list[_CarrierSeed8616], int]:
+    """Return unique seeds keyed by (next_block, register_name) plus refusals."""
+    by_key: dict[tuple[int, str], list[_CarrierSeed8616]] = {}
+    for seed in candidates:
+        by_key.setdefault((seed.next_block, seed.register_name), []).append(seed)
+    seeds: list[_CarrierSeed8616] = []
+    failures = 0
+    for grouped_seeds in by_key.values():
+        unique: list[_CarrierSeed8616] = []
+        for seed in grouped_seeds:
+            if seed not in unique:
+                unique.append(seed)
+        if len(unique) == 1:
+            seeds.append(unique[0])
+        else:
+            failures += 1
+    seeds.sort(key=lambda seed: (seed.next_block, seed.register_name))
+    return seeds, failures
+
+
 def _carrier_seeds_8616(
     conditions: tuple[ConditionIR, ...],
     by_block: dict[int, list[tuple[int, ConditionIR]]],
@@ -97,104 +245,14 @@ def _carrier_seeds_8616(
     candidates: list[_CarrierSeed8616] = []
     failures = 0
     for group in grouped.values():
-        register_values = _unique_values_8616(
-            [
-                condition.lhs
-                for condition in group
-                if isinstance(condition.lhs, IRValue)
-                and condition.lhs.space is MemSpace.REG
-                and isinstance(condition.lhs.name, str)
-            ]
-        )
-        storage_values = _unique_values_8616(
-            [
-                condition.lhs
-                for condition in group
-                if isinstance(condition.lhs, IRValue)
-                and condition.lhs.space in {MemSpace.SS, MemSpace.DS, MemSpace.ES}
-            ]
-        )
-        if len(register_values) > 1 or len(storage_values) > 1:
+        seed, failed = _group_seed_8616(group, by_block)
+        if failed:
             failures += 1
             continue
-        proofs: list[tuple[str, IRValue]] = []
-        if register_values and storage_values:
-            register = register_values[0]
-            register_name = register.name
-            if not isinstance(register_name, str) or register.size != storage_values[0].size:
-                failures += 1
-                continue
-            proofs.append((register_name.lower(), storage_values[0]))
-        for condition in group:
-            binding = condition_self_test_register_binding_8616(condition)
-            if binding is None:
-                continue
-            register_name, operand = binding
-            if (
-                isinstance(operand, IRValue)
-                and operand.space in {MemSpace.SS, MemSpace.DS, MemSpace.ES}
-                and operand.size == max(1, condition.width_bits // 8)
-            ):
-                proofs.append((register_name, operand))
-            for bound_register, bound_operand in condition_self_test_storage_bindings_8616(
-                condition
-            ):
-                if (
-                    isinstance(bound_operand, IRValue)
-                    and bound_operand.space in {MemSpace.SS, MemSpace.DS, MemSpace.ES}
-                    and bound_operand.size == max(1, condition.width_bits // 8)
-                ):
-                    proofs.append((bound_register, bound_operand))
-        unique_proofs = tuple(dict.fromkeys(proofs))
-        if not unique_proofs:
-            continue
-        if len(unique_proofs) != 1:
-            failures += 1
-            continue
-        register_name, storage = unique_proofs[0]
-        if storage_values and storage_values[0] != storage:
-            failures += 1
-            continue
-        representative = group[0]
-        next_block, ambiguous = _next_dec_block_8616(
-            representative, by_block, register_name=register_name,
-            width_bits=representative.width_bits,
-        )
-        if ambiguous:
-            failures += 1
-            continue
-        if next_block is None:
-            next_block = representative.fallthrough_target
-        if not isinstance(next_block, int):
-            failures += 1
-            continue
-        if any(condition.rhs != representative.rhs for condition in group):
-            failures += 1
-            continue
-        candidates.append(
-            _CarrierSeed8616(
-                next_block=next_block,
-                register_name=register_name,
-                value=storage,
-                width_bits=representative.width_bits,
-            )
-        )
-
-    by_key: dict[tuple[int, str], list[_CarrierSeed8616]] = {}
-    for seed in candidates:
-        by_key.setdefault((seed.next_block, seed.register_name), []).append(seed)
-    seeds: list[_CarrierSeed8616] = []
-    for grouped_seeds in by_key.values():
-        unique: list[_CarrierSeed8616] = []
-        for seed in grouped_seeds:
-            if seed not in unique:
-                unique.append(seed)
-        if len(unique) == 1:
-            seeds.append(unique[0])
-        else:
-            failures += 1
-    seeds.sort(key=lambda seed: (seed.next_block, seed.register_name))
-    return tuple(seeds), failures
+        if seed is not None:
+            candidates.append(seed)
+    seeds, dedup_failures = _dedupe_seeds_8616(candidates)
+    return tuple(seeds), failures + dedup_failures
 
 
 def _dec_semantics_8616(condition: ConditionIR) -> tuple[str, int] | None:
@@ -204,10 +262,9 @@ def _dec_semantics_8616(condition: ConditionIR) -> tuple[str, int] | None:
         not isinstance(semantics, tuple)
         or len(semantics) != 3
         or semantics[0] != "dec_reg16"
-        or not isinstance(semantics[1], str)
-        or not isinstance(semantics[2], int)
-        or semantics[2] <= 0
     ):
+        return None
+    if not isinstance(semantics[1], str) or not isinstance(semantics[2], int) or semantics[2] <= 0:
         return None
     return semantics[1].lower(), semantics[2]
 

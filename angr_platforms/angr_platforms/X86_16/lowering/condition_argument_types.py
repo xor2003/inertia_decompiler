@@ -26,6 +26,7 @@ from ..c_ast_utils import _iter_c_nodes_deep_8616
 from .authoritative_function_prototypes import publish_codegen_function_prototype_8616
 from .condition_argument_type_facts import (
     StackArgumentSignedness8616,
+    StackArgumentTypeFact8616,
     collect_condition_argument_type_facts_8616,
     record_wide_condition_argument_type_evidence_8616,
 )
@@ -212,26 +213,14 @@ def _set_argument_surface_type_8616(
     return changed
 
 
-def apply_condition_argument_types_8616(
-    project: object,
+def _desired_argument_signedness_8616(
     codegen: object,
-) -> ConditionArgumentTypeResult8616:
-    """Materialize condition-proven signedness on logical stack arguments."""
-    project_surface = cast(_ProjectSurface8616, project)
-    codegen_surface = cast(_CodegenSurface8616, codegen)
-    try:
-        cfunc = cast(_CFunctionSurface8616, codegen_surface.cfunc)
-        arch = project_surface.arch
-    except AttributeError:
-        result = ConditionArgumentTypeResult8616(False, (), ConditionArgumentTypeStats8616(failure_count=1))
-        codegen_surface._inertia_condition_argument_type_result_8616 = result
-        return result
-    fact_result = collect_condition_argument_type_facts_8616(codegen)
-    facts = fact_result.facts
-    raw_count = fact_result.raw_fact_count
-    failures = fact_result.failure_count
-    arguments = _argument_cvars_8616(codegen, cfunc)
+    arguments: tuple[CVariable, ...],
+    facts: tuple[StackArgumentTypeFact8616, ...],
+) -> tuple[dict[int, tuple[int, StackArgumentSignedness8616]], int]:
+    """Census one unambiguous signedness proof per BP argument offset."""
     desired: dict[int, tuple[int, StackArgumentSignedness8616]] = {}
+    failures = 0
     for argument in arguments:
         variable = cast(SimStackVariable, argument.variable)
         base = machine_bp_offset_for_stack_variable_8616(codegen, variable)
@@ -242,32 +231,29 @@ def apply_condition_argument_types_8616(
         matches = {
             fact.signedness
             for fact in facts
-            if width > 0 and base <= fact.offset and fact.offset + fact.size <= base + width
+            if width > 0
+            and base <= fact.offset
+            and fact.offset + fact.size <= base + width
         }
         if len(matches) == 1:
             desired[base] = (width, matches.pop())
         elif len(matches) > 1:
             failures += 1
-    function: _FunctionSurface8616 | None = None
-    try:
-        knowledge_base = cast(_KnowledgeBaseSurface8616, project_surface.kb)
-        function = knowledge_base.functions.function(addr=cfunc.addr, create=False)
-    except AttributeError:
-        pass
-    prototype = cfunc.functy
-    if not isinstance(prototype, SimTypeFunction) and function is not None:
-        prototype = function.prototype
-    if not isinstance(prototype, SimTypeFunction):
-        result = ConditionArgumentTypeResult8616(
-            False,
-            (),
-            ConditionArgumentTypeStats8616(raw_count, len(facts), len(desired), 0, failures + bool(desired)),
-        )
-        codegen_surface._inertia_condition_argument_type_result_8616 = result
-        return result
-    new_args = list(prototype.args)
+    return desired, failures
+
+
+def _apply_desired_types_8616(
+    codegen: object,
+    cfunc: _CFunctionSurface8616,
+    arch: object,
+    arguments: tuple[CVariable, ...],
+    desired: dict[int, tuple[int, StackArgumentSignedness8616]],
+    new_args: list[SimType],
+) -> tuple[list[int], int, int]:
+    """Apply each desired signedness to the surface and prototype args."""
     changed_offsets: list[int] = []
     materialized = 0
+    failures = 0
     for index, argument in enumerate(arguments):
         variable = cast(SimStackVariable, argument.variable)
         base = machine_bp_offset_for_stack_variable_8616(codegen, variable)
@@ -287,6 +273,59 @@ def apply_condition_argument_types_8616(
         new_args[index] = type_
         changed_offsets.append(base)
         materialized += 1
+    return changed_offsets, materialized, failures
+
+
+def apply_condition_argument_types_8616(
+    project: object,
+    codegen: object,
+) -> ConditionArgumentTypeResult8616:
+    """Materialize condition-proven signedness on logical stack arguments."""
+    project_surface = cast(_ProjectSurface8616, project)
+    codegen_surface = cast(_CodegenSurface8616, codegen)
+    try:
+        cfunc = cast(_CFunctionSurface8616, codegen_surface.cfunc)
+        arch = project_surface.arch
+    except AttributeError:
+        result = ConditionArgumentTypeResult8616(False, (), ConditionArgumentTypeStats8616(failure_count=1))
+        codegen_surface._inertia_condition_argument_type_result_8616 = result
+        return result
+    fact_result = collect_condition_argument_type_facts_8616(codegen)
+    facts = fact_result.facts
+    raw_count = fact_result.raw_fact_count
+    failures = fact_result.failure_count
+    arguments = _argument_cvars_8616(codegen, cfunc)
+    desired, census_failures = _desired_argument_signedness_8616(
+        codegen, arguments, facts
+    )
+    failures += census_failures
+    function: _FunctionSurface8616 | None = None
+    try:
+        knowledge_base = cast(_KnowledgeBaseSurface8616, project_surface.kb)
+        function = knowledge_base.functions.function(addr=cfunc.addr, create=False)
+    except AttributeError:
+        pass
+    prototype = cfunc.functy
+    if not isinstance(prototype, SimTypeFunction) and function is not None:
+        prototype = function.prototype
+    if not isinstance(prototype, SimTypeFunction):
+        result = ConditionArgumentTypeResult8616(
+            False,
+            (),
+            ConditionArgumentTypeStats8616(raw_count, len(facts), len(desired), 0, failures + bool(desired)),
+        )
+        codegen_surface._inertia_condition_argument_type_result_8616 = result
+        return result
+    new_args = list(prototype.args)
+    changed_offsets, materialized, apply_failures = _apply_desired_types_8616(
+        codegen,
+        cfunc,
+        arch,
+        arguments,
+        desired,
+        new_args,
+    )
+    failures += apply_failures
     changed = new_args != list(prototype.args)
     if changed:
         rebuilt = SimTypeFunction(

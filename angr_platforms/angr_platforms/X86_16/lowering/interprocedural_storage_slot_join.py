@@ -144,6 +144,27 @@ def _pieces_key_8616(slot: StorageSlotContract8616) -> _StoragePiecesKey8616:
     return tuple(piece.key for piece in slot.pieces)
 
 
+def _join_one_site_8616(
+    joined: list[StorageSlotContract8616],
+    current: tuple[StorageSlotContract8616, ...],
+) -> StorageTrialFailureKind8616 | None:
+    """Merge one callsite's slots into the joined shape or return the conflict."""
+    if len(current) != len(joined):
+        return StorageTrialFailureKind8616.ARGUMENT_ORDER_CONFLICT
+    for index, (left, right) in enumerate(zip(joined, current, strict=True)):
+        if _pieces_key_8616(left) != _pieces_key_8616(right):
+            return StorageTrialFailureKind8616.STORAGE_CONFLICT
+        signedness = _joined_signedness_8616(
+            {left.signedness, right.signedness}
+        )
+        if signedness is None:
+            return StorageTrialFailureKind8616.SIGNEDNESS_CONFLICT
+        if left.value_class is not right.value_class:
+            return StorageTrialFailureKind8616.VALUE_CLASS_CONFLICT
+        joined[index] = replace(left, signedness=signedness)
+    return None
+
+
 def _uniform_slot_contracts_8616(
     callsites: tuple[CallsiteStorageTrials8616, ...],
     role: StorageTrialRole8616,
@@ -166,19 +187,9 @@ def _uniform_slot_contracts_8616(
         site_contracts.append(slots)
     joined = list(site_contracts[0])
     for current in site_contracts[1:]:
-        if len(current) != len(joined):
-            return None, StorageTrialFailureKind8616.ARGUMENT_ORDER_CONFLICT
-        for index, (left, right) in enumerate(zip(joined, current, strict=True)):
-            if _pieces_key_8616(left) != _pieces_key_8616(right):
-                return None, StorageTrialFailureKind8616.STORAGE_CONFLICT
-            signedness = _joined_signedness_8616(
-                {left.signedness, right.signedness}
-            )
-            if signedness is None:
-                return None, StorageTrialFailureKind8616.SIGNEDNESS_CONFLICT
-            if left.value_class is not right.value_class:
-                return None, StorageTrialFailureKind8616.VALUE_CLASS_CONFLICT
-            joined[index] = replace(left, signedness=signedness)
+        failure = _join_one_site_8616(joined, current)
+        if failure is not None:
+            return None, failure
     return tuple(joined), None
 
 

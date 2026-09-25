@@ -126,46 +126,59 @@ def _register_domain_and_view(variable: SimRegisterVariable) -> tuple[DomainKey 
     return _impl()
 
 
+def _positive_matching_versions_8616(candidate_proof: _RegisterWideningProofLike) -> bool:
+    """Check both slices carry equal positive version evidence."""
+    return (
+        candidate_proof.left_version is not None
+        and candidate_proof.right_version is not None
+        and candidate_proof.left_version > 0
+        and candidate_proof.right_version > 0
+        and candidate_proof.left_version == candidate_proof.right_version
+    )
+
+
+def _can_join_slices_8616(
+    low_expr: object,
+    high_expr: object,
+    alias_state: AliasState | None,
+    proof: object | None,
+) -> bool:
+    """Run the join-evidence ladder over proof, candidates, and domain."""
+    if alias_state is None:
+        return False
+    candidate_proof = proof
+    if candidate_proof is None:
+        from .. import widening_model as _widening_model
+
+        candidate_proof = _widening_model.prove_adjacent_storage_slices(
+            low_expr, high_expr, alias_state=alias_state
+        )
+    if not _is_register_widening_proof_like(candidate_proof):
+        return False
+    if not candidate_proof.ok:
+        return False
+    if candidate_proof.register_pair is None:
+        return False
+    if not _positive_matching_versions_8616(candidate_proof):
+        return False
+    try:
+        low_candidate = RegisterWideningCandidate.from_expr(low_expr)
+        high_candidate = RegisterWideningCandidate.from_expr(high_expr)
+    except ValueError:
+        return False
+    expected_domain = register_domain_for_name(candidate_proof.register_pair)
+    if expected_domain is None:
+        return False
+    if low_candidate.domain != expected_domain or high_candidate.domain != expected_domain:
+        return False
+    return low_candidate.is_joinable_with(high_candidate)
+
+
 def can_join_adjacent_register_slices(
     low_expr: object, high_expr: object, *, alias_state: AliasState | None = None, proof: object | None = None
 ) -> bool:
     """Return whether alias/version evidence proves two register slices join."""
-
-    def _impl() -> bool:
-        if alias_state is None:
-            return False
-        candidate_proof = proof
-        if candidate_proof is None:
-            from .. import widening_model as _widening_model
-
-            candidate_proof = _widening_model.prove_adjacent_storage_slices(
-                low_expr, high_expr, alias_state=alias_state
-            )
-        if not _is_register_widening_proof_like(candidate_proof):
-            return False
-        if not candidate_proof.ok:
-            return False
-        if candidate_proof.register_pair is None:
-            return False
-        if candidate_proof.left_version is None or candidate_proof.right_version is None:
-            return False
-        if candidate_proof.left_version <= 0 or candidate_proof.right_version <= 0:
-            return False
-        if candidate_proof.left_version != candidate_proof.right_version:
-            return False
-        try:
-            low_candidate = RegisterWideningCandidate.from_expr(low_expr)
-            high_candidate = RegisterWideningCandidate.from_expr(high_expr)
-        except ValueError:
-            return False
-        expected_domain = register_domain_for_name(candidate_proof.register_pair)
-        if expected_domain is None:
-            return False
-        if low_candidate.domain != expected_domain or high_candidate.domain != expected_domain:
-            return False
-        return low_candidate.is_joinable_with(high_candidate)
-
-    return _impl()
+    return _can_join_slices_8616(low_expr, high_expr, alias_state, proof)
 
 
 def join_adjacent_register_slices(

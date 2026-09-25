@@ -230,86 +230,82 @@ def _materialize_orphaned_carry_uses_8616(
     )
 
 
-def materialize_carry_borrow_bit_value_8616(
+def _missing_occurrence_resolution_8616(
     root: object,
     source: WideCarryBorrowValue8616,
     fact: CarryBorrowBitLoweringFact8616,
     ownership: CFGOwnershipArtifact,
 ) -> CarryBorrowBitLoweringResolution8616:
-    """Materialize one proven carry predicate or return an explicit refusal."""
-    occurrences = carry_bit_occurrences_8616(root, fact, ownership)
-    if not occurrences:
-        inlined_occurrences = inlined_carry_bit_occurrences_8616(root, fact, ownership)
-        if inlined_occurrences:
-            return _materialize_inlined_carry_use_8616(root, source, fact, ownership, inlined_occurrences)
-        if _already_materialized_8616(root, fact):
-            return CarryBorrowBitLoweringResolution8616(
-                source,
-                CarryBorrowBitLoweringVerdict8616.MATERIALIZED,
-                fact=fact,
-                placement_classified=True,
-                already_materialized=True,
-            )
-        return refused_carry_borrow_bit_lowering_8616(
+    """Resolve inlined or already-materialized uses when none remain visible."""
+    inlined_occurrences = inlined_carry_bit_occurrences_8616(root, fact, ownership)
+    if inlined_occurrences:
+        return _materialize_inlined_carry_use_8616(root, source, fact, ownership, inlined_occurrences)
+    if _already_materialized_8616(root, fact):
+        return CarryBorrowBitLoweringResolution8616(
             source,
-            CarryBorrowBitLoweringFailure8616.CARRY_USE_MISSING,
+            CarryBorrowBitLoweringVerdict8616.MATERIALIZED,
             fact=fact,
+            placement_classified=True,
+            already_materialized=True,
         )
-    only_unowned_carriers = all(
-        key is not None
-        and all(
-            node_instruction_site_8616(definition, ownership)
-            is CFGInstructionReachability8616.OWNER_MISSING
-            for definition in assignment_map_8616(occurrence).get(key, ())
-        )
-        for occurrence in occurrences
-        for key in (variable_key_8616(occurrence.flag_variable),)
+    return refused_carry_borrow_bit_lowering_8616(
+        source,
+        CarryBorrowBitLoweringFailure8616.CARRY_USE_MISSING,
+        fact=fact,
     )
-    if not _one_semantic_carry_use_8616(occurrences) or only_unowned_carriers:
-        return _materialize_orphaned_carry_uses_8616(root, source, fact, ownership, occurrences)
 
+
+def _carrier_closures_8616(
+    occurrences: tuple[CarryBitOccurrence8616, ...],
+    fact: CarryBorrowBitLoweringFact8616,
+    ownership: CFGOwnershipArtifact,
+) -> list[CarryBitCarrierClosure8616] | CarryBorrowBitLoweringFailure8616:
+    """Return every occurrence's carrier closure or the first failure."""
     closures: list[CarryBitCarrierClosure8616] = []
     for occurrence in occurrences:
         closure = carry_bit_carrier_closure_8616(occurrence, fact, ownership)
         if isinstance(closure, CarryBorrowBitLoweringFailure8616):
-            return refused_carry_borrow_bit_lowering_8616(source, closure, fact=fact, placement_classified=True)
+            return closure
         closures.append(closure)
-    predicates: list[CBinaryOp] = []
+    return closures
+
+
+def _carry_use_predicates_8616(
+    root: object,
+    fact: CarryBorrowBitLoweringFact8616,
+    ownership: CFGOwnershipArtifact,
+    occurrences: tuple[CarryBitOccurrence8616, ...],
+    closures: list[CarryBitCarrierClosure8616],
+) -> list[CBinaryOp] | CarryBorrowBitLoweringFailure8616:
+    """Collect one proven predicate per occurrence or the first failure."""
     if len(occurrences) > 1 and fact.kind is CarryBorrowKind8616.SUB_WITH_BORROW:
         nodes = tuple(_iter_c_node_occurrences_8616(root))
         predicate = carry_bit_predicate_from_arithmetic_8616(nodes, fact, ownership)
         if isinstance(predicate, CarryBorrowBitLoweringFailure8616):
-            return refused_carry_borrow_bit_lowering_8616(
-                source,
-                predicate,
-                fact=fact,
-                placement_classified=True,
-            )
-        predicates.extend(predicate for _occurrence in occurrences)
-    else:
-        all_nodes: tuple[object, ...] | None = None
-        for closure in closures:
-            predicate = carry_bit_predicate_8616(closure.definition_nodes, fact, ownership)
-            if predicate is CarryBorrowBitLoweringFailure8616.CARRY_PREDICATE_MISSING:
-                if all_nodes is None:
-                    all_nodes = tuple(_iter_c_node_occurrences_8616(root))
-                predicate = carry_bit_predicate_from_arithmetic_8616(all_nodes, fact, ownership)
-            if isinstance(predicate, CarryBorrowBitLoweringFailure8616):
-                return refused_carry_borrow_bit_lowering_8616(
-                    source,
-                    predicate,
-                    fact=fact,
-                    placement_classified=True,
-                )
-            predicates.append(predicate)
-    if any(not _same_c_expression_8616(predicate, predicates[0]) for predicate in predicates[1:]):
-        return refused_carry_borrow_bit_lowering_8616(
-            source,
-            CarryBorrowBitLoweringFailure8616.CARRY_PREDICATE_AMBIGUOUS,
-            fact=fact,
-            placement_classified=True,
-        )
+            return predicate
+        return [predicate for _occurrence in occurrences]
+    predicates: list[CBinaryOp] = []
+    all_nodes: tuple[object, ...] | None = None
+    for closure in closures:
+        predicate = carry_bit_predicate_8616(closure.definition_nodes, fact, ownership)
+        if predicate is CarryBorrowBitLoweringFailure8616.CARRY_PREDICATE_MISSING:
+            if all_nodes is None:
+                all_nodes = tuple(_iter_c_node_occurrences_8616(root))
+            predicate = carry_bit_predicate_from_arithmetic_8616(all_nodes, fact, ownership)
+        if isinstance(predicate, CarryBorrowBitLoweringFailure8616):
+            return predicate
+        predicates.append(predicate)
+    return predicates
 
+
+def _replace_occurrence_nodes_8616(
+    root: object,
+    source: WideCarryBorrowValue8616,
+    fact: CarryBorrowBitLoweringFact8616,
+    occurrences: tuple[CarryBitOccurrence8616, ...],
+    predicates: list[CBinaryOp],
+) -> CarryBorrowBitLoweringResolution8616 | None:
+    """Swap each classified occurrence for its cloned proven predicate."""
     replacements: dict[int, CBinaryOp] = {}
     for occurrence, predicate in zip(occurrences, predicates, strict=True):
         replacement = cast(CBinaryOp, _clone_c_ast_tree_8616(predicate))
@@ -333,6 +329,55 @@ def materialize_carry_borrow_bit_value_8616(
             fact=fact,
             placement_classified=True,
         )
+    return None
+
+
+def materialize_carry_borrow_bit_value_8616(
+    root: object,
+    source: WideCarryBorrowValue8616,
+    fact: CarryBorrowBitLoweringFact8616,
+    ownership: CFGOwnershipArtifact,
+) -> CarryBorrowBitLoweringResolution8616:
+    """Materialize one proven carry predicate or return an explicit refusal."""
+    occurrences = carry_bit_occurrences_8616(root, fact, ownership)
+    if not occurrences:
+        return _missing_occurrence_resolution_8616(root, source, fact, ownership)
+    only_unowned_carriers = all(
+        key is not None
+        and all(
+            node_instruction_site_8616(definition, ownership)
+            is CFGInstructionReachability8616.OWNER_MISSING
+            for definition in assignment_map_8616(occurrence).get(key, ())
+        )
+        for occurrence in occurrences
+        for key in (variable_key_8616(occurrence.flag_variable),)
+    )
+    if not _one_semantic_carry_use_8616(occurrences) or only_unowned_carriers:
+        return _materialize_orphaned_carry_uses_8616(root, source, fact, ownership, occurrences)
+
+    closures = _carrier_closures_8616(occurrences, fact, ownership)
+    if isinstance(closures, CarryBorrowBitLoweringFailure8616):
+        return refused_carry_borrow_bit_lowering_8616(
+            source, closures, fact=fact, placement_classified=True
+        )
+    predicates = _carry_use_predicates_8616(
+        root, fact, ownership, occurrences, closures
+    )
+    if isinstance(predicates, CarryBorrowBitLoweringFailure8616):
+        return refused_carry_borrow_bit_lowering_8616(
+            source, predicates, fact=fact, placement_classified=True
+        )
+    if any(not _same_c_expression_8616(predicate, predicates[0]) for predicate in predicates[1:]):
+        return refused_carry_borrow_bit_lowering_8616(
+            source,
+            CarryBorrowBitLoweringFailure8616.CARRY_PREDICATE_AMBIGUOUS,
+            fact=fact,
+            placement_classified=True,
+        )
+
+    replaced = _replace_occurrence_nodes_8616(root, source, fact, occurrences, predicates)
+    if replaced is not None:
+        return replaced
     for occurrence, closure in zip(occurrences, closures, strict=True):
         prune_dead_carry_bit_carriers_8616(occurrence, closure, fact, ownership)
     finalize_low_arithmetic_copies_8616(root, fact, ownership)

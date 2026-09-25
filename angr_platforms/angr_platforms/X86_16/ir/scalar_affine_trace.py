@@ -147,6 +147,176 @@ def _combine_nodes_8616(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _AffineTraceContext8616:
+    """Shared recursion state for exact scalar affine normalization."""
+
+    artifact: SSAFunctionArtifact
+    definitions: ScalarDefinitionIndex8616
+    block_addr: int
+    width: int
+    mask: int
+    allow_entry_registers: bool
+
+
+def _trace_argument_8616(
+    ctx: _AffineTraceContext8616,
+    argument: IRValue,
+    definition: ScalarDefinition8616,
+    seen: frozenset[ScalarDefinitionKey8616],
+) -> _NodeTrace8616:
+    """Recurse into one exact scalar argument at the definition boundary."""
+    return _trace_value_8616(
+        ctx.artifact,
+        ctx.definitions,
+        argument,
+        block_addr=ctx.block_addr,
+        before_index=definition.instr_index,
+        width=ctx.width,
+        mask=ctx.mask,
+        seen=seen,
+        allow_entry_registers=ctx.allow_entry_registers,
+    )
+
+
+def _proven_affine_definition_8616(
+    artifact: SSAFunctionArtifact,
+    definitions: ScalarDefinitionIndex8616,
+    value: IRValue,
+    *,
+    block_addr: int,
+    before_index: int,
+    allow_entry_registers: bool,
+) -> tuple[ScalarDefinition8616, IndexedAddressDefinitionSite8616] | _NodeTrace8616:
+    """Resolve the unique reaching definition or the entry-register leaf."""
+    definition, failure = _definition_8616(
+        definitions,
+        value,
+        block_addr=block_addr,
+        before_index=before_index,
+    )
+    if failure is not None or definition is None:
+        if (allow_entry_registers and failure is ScalarAffineFailure8616.DEFINITION_MISSING
+                and not artifact.predecessor_map.get(block_addr)):
+            term = entry_register_affine_term_8616(value, function_addr=artifact.function_addr, block_addr=block_addr)
+            if term is not None:
+                return _NodeTrace8616(_AffineNode8616(0, (term,), ()), None)
+        return _NodeTrace8616(None, failure or ScalarAffineFailure8616.DEFINITION_MISSING)
+    site = _site_8616(definition)
+    if site is None:
+        return _NodeTrace8616(None, ScalarAffineFailure8616.SOURCE_UNPROVEN)
+    return definition, site
+
+
+def _leaf_term_trace_8616(
+    ctx: _AffineTraceContext8616,
+    definition: ScalarDefinition8616,
+    site: IndexedAddressDefinitionSite8616,
+) -> _NodeTrace8616 | None:
+    """Return the leaf term for direct stack loads or closed word reads."""
+    instruction = definition.instruction
+    source = stack_affine_source_8616(instruction, ctx.width)
+    if source is not None and instruction.dst is not None:
+        term = ScalarAffineTerm8616(instruction.dst, source, 1)
+        return _NodeTrace8616(_AffineNode8616(0, (term,), (site,)), None)
+    if instruction.op != "Iop_Or16" or ctx.width != 2:
+        return None
+    logical = trace_logical_word_load_8616(
+        instruction,
+        ctx.definitions,
+        ctx.artifact.logical_memory,
+        function_addr=ctx.artifact.function_addr,
+        block_addr=ctx.block_addr,
+        before_index=definition.instr_index,
+    )
+    if not logical.complete or logical.source is None or instruction.dst is None:
+        return _NodeTrace8616(None, _logical_failure_8616(logical.failure))
+    term = ScalarAffineTerm8616(instruction.dst, logical.source, 1)
+    return _NodeTrace8616(
+        _AffineNode8616(0, (term,), (site, *logical.definition_path)),
+        None,
+    )
+
+
+def _mov_copy_trace_8616(
+    ctx: _AffineTraceContext8616,
+    definition: ScalarDefinition8616,
+    site: IndexedAddressDefinitionSite8616,
+    next_seen: frozenset[ScalarDefinitionKey8616],
+) -> _NodeTrace8616:
+    """Trace through one exact MOV copy, retaining the copy site."""
+    argument = definition.instruction.args[0]
+    if not isinstance(argument, IRValue):
+        return _NodeTrace8616(None, ScalarAffineFailure8616.EXPRESSION_UNSUPPORTED)
+    traced = _trace_argument_8616(ctx, argument, definition, next_seen)
+    if traced.node is None:
+        return traced
+    return _NodeTrace8616(
+        _AffineNode8616(
+            traced.node.constant,
+            traced.node.terms,
+            (site, *traced.node.path),
+        ),
+        None,
+    )
+
+
+def _addsub_trace_8616(
+    ctx: _AffineTraceContext8616,
+    definition: ScalarDefinition8616,
+    site: IndexedAddressDefinitionSite8616,
+    next_seen: frozenset[ScalarDefinitionKey8616],
+) -> _NodeTrace8616:
+    """Combine both operand traces under modular addition or subtraction."""
+    instruction = definition.instruction
+    if len(instruction.args) != 2:
+        return _NodeTrace8616(None, ScalarAffineFailure8616.EXPRESSION_UNSUPPORTED)
+    left, right = instruction.args
+    if not isinstance(left, IRValue) or not isinstance(right, IRValue):
+        return _NodeTrace8616(None, ScalarAffineFailure8616.EXPRESSION_UNSUPPORTED)
+    left_trace = _trace_argument_8616(ctx, left, definition, next_seen)
+    if left_trace.node is None:
+        return left_trace
+    right_trace = _trace_argument_8616(ctx, right, definition, next_seen)
+    if right_trace.node is None:
+        return right_trace
+    combined = _combine_nodes_8616(
+        left_trace.node,
+        right_trace.node,
+        sign=1 if instruction.op.startswith("Iop_Add") else -1,
+        mask=ctx.mask,
+    )
+    return _NodeTrace8616(
+        _AffineNode8616(combined.constant, combined.terms, (site, *combined.path)),
+        None,
+    )
+
+
+def _shl_trace_8616(
+    ctx: _AffineTraceContext8616,
+    definition: ScalarDefinition8616,
+    site: IndexedAddressDefinitionSite8616,
+    next_seen: frozenset[ScalarDefinitionKey8616],
+) -> _NodeTrace8616:
+    """Trace through one constant left shift as a modular scale."""
+    argument, amount = definition.instruction.args
+    if (
+        not isinstance(argument, IRValue)
+        or not isinstance(amount, IRValue)
+        or not isinstance(amount.const, int)
+        or not 0 <= amount.const < ctx.width * 8
+    ):
+        return _NodeTrace8616(None, ScalarAffineFailure8616.EXPRESSION_UNSUPPORTED)
+    traced = _trace_argument_8616(ctx, argument, definition, next_seen)
+    if traced.node is None:
+        return traced
+    scaled = _scale_node_8616(traced.node, 1 << amount.const, ctx.mask)
+    return _NodeTrace8616(
+        _AffineNode8616(scaled.constant, scaled.terms, (site, *scaled.path)),
+        None,
+    )
+
+
 def _trace_value_8616(
     artifact: SSAFunctionArtifact,
     definitions: ScalarDefinitionIndex8616,
@@ -167,139 +337,32 @@ def _trace_value_8616(
     key = scalar_definition_key_8616(value)
     if key in seen:
         return _NodeTrace8616(None, ScalarAffineFailure8616.DEFINITION_CONFLICT)
-    definition, failure = _definition_8616(
+    resolved = _proven_affine_definition_8616(
+        artifact,
         definitions,
         value,
         block_addr=block_addr,
         before_index=before_index,
+        allow_entry_registers=allow_entry_registers,
     )
-    if failure is not None or definition is None:
-        if (allow_entry_registers and failure is ScalarAffineFailure8616.DEFINITION_MISSING
-                and not artifact.predecessor_map.get(block_addr)):
-            term = entry_register_affine_term_8616(value, function_addr=artifact.function_addr, block_addr=block_addr)
-            if term is not None:
-                return _NodeTrace8616(_AffineNode8616(0, (term,), ()), None)
-        return _NodeTrace8616(None, failure or ScalarAffineFailure8616.DEFINITION_MISSING)
-    site = _site_8616(definition)
-    if site is None:
-        return _NodeTrace8616(None, ScalarAffineFailure8616.SOURCE_UNPROVEN)
+    if isinstance(resolved, _NodeTrace8616):
+        return resolved
+    definition, site = resolved
+    ctx = _AffineTraceContext8616(
+        artifact, definitions, block_addr, width, mask, allow_entry_registers
+    )
+    leaf = _leaf_term_trace_8616(ctx, definition, site)
+    if leaf is not None:
+        return leaf
     instruction = definition.instruction
-    source = stack_affine_source_8616(instruction, width)
-    if source is not None and instruction.dst is not None:
-        term = ScalarAffineTerm8616(instruction.dst, source, 1)
-        return _NodeTrace8616(_AffineNode8616(0, (term,), (site,)), None)
-    if instruction.op == "Iop_Or16" and width == 2:
-        logical = trace_logical_word_load_8616(
-            instruction,
-            definitions,
-            artifact.logical_memory,
-            function_addr=artifact.function_addr,
-            block_addr=block_addr,
-            before_index=definition.instr_index,
-        )
-        if not logical.complete or logical.source is None or instruction.dst is None:
-            return _NodeTrace8616(None, _logical_failure_8616(logical.failure))
-        term = ScalarAffineTerm8616(instruction.dst, logical.source, 1)
-        return _NodeTrace8616(
-            _AffineNode8616(0, (term,), (site, *logical.definition_path)),
-            None,
-        )
     next_seen = seen | {key}
-    if instruction.op == "MOV" and len(instruction.args) == 1:
-        argument = instruction.args[0]
-        if not isinstance(argument, IRValue):
-            return _NodeTrace8616(None, ScalarAffineFailure8616.EXPRESSION_UNSUPPORTED)
-        traced = _trace_value_8616(
-            artifact,
-            definitions,
-            argument,
-            block_addr=block_addr,
-            before_index=definition.instr_index,
-            width=width,
-            mask=mask,
-            seen=next_seen,
-            allow_entry_registers=allow_entry_registers,
-        )
-        if traced.node is None:
-            return traced
-        return _NodeTrace8616(
-            _AffineNode8616(
-                traced.node.constant,
-                traced.node.terms,
-                (site, *traced.node.path),
-            ),
-            None,
-        )
     expected_suffix = str(width * 8)
+    if instruction.op == "MOV" and len(instruction.args) == 1:
+        return _mov_copy_trace_8616(ctx, definition, site, next_seen)
     if instruction.op in {f"Iop_Add{expected_suffix}", f"Iop_Sub{expected_suffix}"}:
-        if len(instruction.args) != 2:
-            return _NodeTrace8616(None, ScalarAffineFailure8616.EXPRESSION_UNSUPPORTED)
-        left, right = instruction.args
-        if not isinstance(left, IRValue) or not isinstance(right, IRValue):
-            return _NodeTrace8616(None, ScalarAffineFailure8616.EXPRESSION_UNSUPPORTED)
-        left_trace = _trace_value_8616(
-            artifact,
-            definitions,
-            left,
-            block_addr=block_addr,
-            before_index=definition.instr_index,
-            width=width,
-            mask=mask,
-            seen=next_seen,
-            allow_entry_registers=allow_entry_registers,
-        )
-        if left_trace.node is None:
-            return left_trace
-        right_trace = _trace_value_8616(
-            artifact,
-            definitions,
-            right,
-            block_addr=block_addr,
-            before_index=definition.instr_index,
-            width=width,
-            mask=mask,
-            seen=next_seen,
-            allow_entry_registers=allow_entry_registers,
-        )
-        if right_trace.node is None:
-            return right_trace
-        combined = _combine_nodes_8616(
-            left_trace.node,
-            right_trace.node,
-            sign=1 if instruction.op.startswith("Iop_Add") else -1,
-            mask=mask,
-        )
-        return _NodeTrace8616(
-            _AffineNode8616(combined.constant, combined.terms, (site, *combined.path)),
-            None,
-        )
+        return _addsub_trace_8616(ctx, definition, site, next_seen)
     if instruction.op == f"Iop_Shl{expected_suffix}" and len(instruction.args) == 2:
-        argument, amount = instruction.args
-        if (
-            not isinstance(argument, IRValue)
-            or not isinstance(amount, IRValue)
-            or not isinstance(amount.const, int)
-            or not 0 <= amount.const < width * 8
-        ):
-            return _NodeTrace8616(None, ScalarAffineFailure8616.EXPRESSION_UNSUPPORTED)
-        traced = _trace_value_8616(
-            artifact,
-            definitions,
-            argument,
-            block_addr=block_addr,
-            before_index=definition.instr_index,
-            width=width,
-            mask=mask,
-            seen=next_seen,
-            allow_entry_registers=allow_entry_registers,
-        )
-        if traced.node is None:
-            return traced
-        scaled = _scale_node_8616(traced.node, 1 << amount.const, mask)
-        return _NodeTrace8616(
-            _AffineNode8616(scaled.constant, scaled.terms, (site, *scaled.path)),
-            None,
-        )
+        return _shl_trace_8616(ctx, definition, site, next_seen)
     return _NodeTrace8616(None, ScalarAffineFailure8616.EXPRESSION_UNSUPPORTED)
 
 

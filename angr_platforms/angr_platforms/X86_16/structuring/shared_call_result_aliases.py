@@ -129,6 +129,18 @@ def _canonical_stack_offset_8616(offset: int) -> int:
     return normalized - 0x10000 if normalized >= 0x8000 else normalized
 
 
+def _exact_bp_destination_8616(destination: object, width: object) -> bool:
+    """Return whether the pair is an exact ``("bp", int-offset)`` + positive width."""
+    return (
+        isinstance(destination, tuple)
+        and len(destination) == 2
+        and destination[0] == "bp"
+        and isinstance(destination[1], int)
+        and isinstance(width, int)
+        and width > 0
+    )
+
+
 def _is_exact_summary_destination_8616(
     codegen: object,
     expression: object,
@@ -140,17 +152,13 @@ def _is_exact_summary_destination_8616(
     current = expression
     while isinstance(current, CTypeCast):
         current = current.expr
-    if (
-        not isinstance(destination, tuple)
-        or len(destination) != 2
-        or destination[0] != "bp"
-        or not isinstance(destination[1], int)
-        or not isinstance(width, int)
-        or width <= 0
-        or not isinstance(current, CVariable)
-        or not isinstance(current.variable, SimStackVariable)
+    if not (
+        _exact_bp_destination_8616(destination, width)
+        and isinstance(current, CVariable)
+        and isinstance(current.variable, SimStackVariable)
     ):
         return False
+    assert isinstance(destination, tuple) and isinstance(width, int)
     variable = current.variable
     machine_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
     return (
@@ -219,6 +227,71 @@ def _refuse_8616(
     refusals.append(CallResultAliasRefusal8616(summary.callsite_addr, reason))
 
 
+def _process_call_group_8616(
+    codegen: object,
+    summary: CallsiteSummary8616,
+    occurrences: tuple[_DirectCallAssignmentOccurrence8616, ...],
+    stats: CallResultAliasOwnershipStats8616,
+    refusals: list[CallResultAliasRefusal8616],
+) -> None:
+    """Apply the alias-ownership evidence ladder to one call group."""
+    stats.raw_fact_count += 1
+    if not _exact_bp_destination_8616(
+        summary.return_store_destination,
+        summary.return_store_width,
+    ):
+        _refuse_8616(
+            stats,
+            refusals,
+            summary,
+            CallResultAliasRefusalReason8616.DESTINATION_NOT_EXACT_STACK,
+        )
+        return
+    stats.normalized_fact_count += 1
+    destinations = tuple(
+        occurrence
+        for occurrence in occurrences
+        if _is_exact_summary_destination_8616(codegen, occurrence.assignment.lhs, summary)
+    )
+    if len(destinations) != 1:
+        _refuse_8616(
+            stats,
+            refusals,
+            summary,
+            CallResultAliasRefusalReason8616.DESTINATION_NOT_UNIQUE,
+        )
+        return
+    owner = destinations[0]
+    aliases = tuple(occurrence for occurrence in occurrences if occurrence is not owner)
+    refusal_reason = next(
+        (
+            reason
+            for alias in aliases
+            if (reason := _structured_alias_refusal_8616(codegen, owner, alias, summary))
+            is not None
+        ),
+        None,
+    )
+    if refusal_reason is not None:
+        _refuse_8616(
+            stats,
+            refusals,
+            summary,
+            refusal_reason,
+        )
+        return
+    stats.classified_fact_count += 1
+    rewritten_assignments: set[int] = set()
+    for alias in aliases:
+        assignment = alias.assignment
+        if id(assignment) in rewritten_assignments:
+            continue
+        assignment.rhs = cast(CVariable, _clone_c_ast_tree_8616(owner.assignment.lhs))
+        rewritten_assignments.add(id(assignment))
+        stats.rewritten_assignment_count += 1
+    stats.materialized_count += 1
+
+
 def materialize_shared_call_result_aliases_8616(
     codegen: object,
 ) -> CallResultAliasOwnershipResult8616:
@@ -277,64 +350,7 @@ def materialize_shared_call_result_aliases_8616(
         )
         if summary is None or summary.return_used is not True or len(occurrences) < 2:
             continue
-        stats.raw_fact_count += 1
-        if not (
-            isinstance(summary.return_store_destination, tuple)
-            and len(summary.return_store_destination) == 2
-            and summary.return_store_destination[0] == "bp"
-            and isinstance(summary.return_store_width, int)
-            and summary.return_store_width > 0
-        ):
-            _refuse_8616(
-                stats,
-                refusals,
-                summary,
-                CallResultAliasRefusalReason8616.DESTINATION_NOT_EXACT_STACK,
-            )
-            continue
-        stats.normalized_fact_count += 1
-        destinations = tuple(
-            occurrence
-            for occurrence in occurrences
-            if _is_exact_summary_destination_8616(codegen, occurrence.assignment.lhs, summary)
-        )
-        if len(destinations) != 1:
-            _refuse_8616(
-                stats,
-                refusals,
-                summary,
-                CallResultAliasRefusalReason8616.DESTINATION_NOT_UNIQUE,
-            )
-            continue
-        owner = destinations[0]
-        aliases = tuple(occurrence for occurrence in occurrences if occurrence is not owner)
-        refusal_reason = next(
-            (
-                reason
-                for alias in aliases
-                if (reason := _structured_alias_refusal_8616(codegen, owner, alias, summary))
-                is not None
-            ),
-            None,
-        )
-        if refusal_reason is not None:
-            _refuse_8616(
-                stats,
-                refusals,
-                summary,
-                refusal_reason,
-            )
-            continue
-        stats.classified_fact_count += 1
-        rewritten_assignments: set[int] = set()
-        for alias in aliases:
-            assignment = alias.assignment
-            if id(assignment) in rewritten_assignments:
-                continue
-            assignment.rhs = cast(CVariable, _clone_c_ast_tree_8616(owner.assignment.lhs))
-            rewritten_assignments.add(id(assignment))
-            stats.rewritten_assignment_count += 1
-        stats.materialized_count += 1
+        _process_call_group_8616(codegen, summary, occurrences, stats, refusals)
 
     verdict = (
         CallResultAliasOwnershipVerdict8616.UNKNOWN_REFUSE

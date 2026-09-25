@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import cast
 
 from angr.analyses.decompiler.structured_codegen.c import (
     CExpression,
@@ -115,6 +116,54 @@ def _result_8616(
     )
 
 
+def _nested_continuation_8616(
+    node: CIfElse,
+    nested: CIfElse,
+    else_statements: tuple[object, ...],
+) -> object | WideCallReturnGuardCollapseResult8616:
+    """Resolve the proven continuation or refuse on unsupported shape."""
+    if (
+        len(node.condition_and_nodes) != 1
+        or len(nested.condition_and_nodes) != 1
+    ):
+        return _result_8616(
+            WideCallReturnGuardCollapseStatus8616.REFUSED,
+            WideCallReturnGuardCollapseReason8616.UNSUPPORTED_BRANCH_SHAPE,
+        )
+    if nested.else_node is not None:
+        if len(else_statements) != 1:
+            return _result_8616(
+                WideCallReturnGuardCollapseStatus8616.REFUSED,
+                WideCallReturnGuardCollapseReason8616.UNSUPPORTED_BRANCH_SHAPE,
+            )
+        return cast(object, nested.else_node)
+    if len(else_statements) != 2:
+        return _result_8616(
+            WideCallReturnGuardCollapseStatus8616.REFUSED,
+            WideCallReturnGuardCollapseReason8616.UNSUPPORTED_BRANCH_SHAPE,
+        )
+    return else_statements[1]
+
+
+def _proven_matching_returns_8616(
+    node: CIfElse,
+    nested: CIfElse,
+    same_expression: SameExpression8616,
+) -> bool | WideCallReturnGuardCollapseResult8616:
+    """Return whether both exits return identically or the refusal result."""
+    outer_return = sole_return_statement_8616(node.condition_and_nodes[0][1])
+    nested_return = sole_return_statement_8616(nested.condition_and_nodes[0][1])
+    if outer_return is None or nested_return is None:
+        return _result_8616(
+            WideCallReturnGuardCollapseStatus8616.REFUSED,
+            WideCallReturnGuardCollapseReason8616.EXIT_BODY_NOT_RETURN,
+            normalized=1,
+        )
+    if outer_return.retval is None or nested_return.retval is None:
+        return outer_return.retval is nested_return.retval
+    return same_expression(outer_return.retval, nested_return.retval)
+
+
 def collapse_wide_call_return_guard_chain_8616(
     node: CIfElse,
     conditions: tuple[ConditionIR, ConditionIR, ConditionIR],
@@ -147,28 +196,9 @@ def collapse_wide_call_return_guard_chain_8616(
             WideCallReturnGuardCollapseStatus8616.NOT_APPLICABLE,
             WideCallReturnGuardCollapseReason8616.NESTED_SOURCE_OUTSIDE_CHAIN,
         )
-    if (
-        len(node.condition_and_nodes) != 1
-        or len(nested.condition_and_nodes) != 1
-    ):
-        return _result_8616(
-            WideCallReturnGuardCollapseStatus8616.REFUSED,
-            WideCallReturnGuardCollapseReason8616.UNSUPPORTED_BRANCH_SHAPE,
-        )
-    if nested.else_node is not None:
-        if len(else_statements) != 1:
-            return _result_8616(
-                WideCallReturnGuardCollapseStatus8616.REFUSED,
-                WideCallReturnGuardCollapseReason8616.UNSUPPORTED_BRANCH_SHAPE,
-            )
-        continuation = nested.else_node
-    else:
-        if len(else_statements) != 2:
-            return _result_8616(
-                WideCallReturnGuardCollapseStatus8616.REFUSED,
-                WideCallReturnGuardCollapseReason8616.UNSUPPORTED_BRANCH_SHAPE,
-            )
-        continuation = else_statements[1]
+    continuation = _nested_continuation_8616(node, nested, else_statements)
+    if isinstance(continuation, WideCallReturnGuardCollapseResult8616):
+        return continuation
 
     nested_condition = nested.condition_and_nodes[0][0]
     if any(
@@ -181,18 +211,9 @@ def collapse_wide_call_return_guard_chain_8616(
             normalized=1,
         )
 
-    outer_return = sole_return_statement_8616(node.condition_and_nodes[0][1])
-    nested_return = sole_return_statement_8616(nested.condition_and_nodes[0][1])
-    if outer_return is None or nested_return is None:
-        return _result_8616(
-            WideCallReturnGuardCollapseStatus8616.REFUSED,
-            WideCallReturnGuardCollapseReason8616.EXIT_BODY_NOT_RETURN,
-            normalized=1,
-        )
-    if outer_return.retval is None or nested_return.retval is None:
-        returns_match = outer_return.retval is nested_return.retval
-    else:
-        returns_match = same_expression(outer_return.retval, nested_return.retval)
+    returns_match = _proven_matching_returns_8616(node, nested, same_expression)
+    if isinstance(returns_match, WideCallReturnGuardCollapseResult8616):
+        return returns_match
     if not returns_match:
         return _result_8616(
             WideCallReturnGuardCollapseStatus8616.REFUSED,

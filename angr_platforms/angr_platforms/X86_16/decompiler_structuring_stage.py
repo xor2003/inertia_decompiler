@@ -22,8 +22,14 @@ from typing import Any, Protocol, cast
 from angr.analyses.decompiler.decompiler import Decompiler
 from angr.analyses.decompiler.structured_codegen.c import (
     CAssignment,
+    CBinaryOp,
+    CConstant,
     CExpression,
     CFunctionCall,
+    CIfElse,
+    CStatements,
+    CTypeCast,
+    CUnaryOp,
 )
 from angr.sim_type import SimTypeBottom, SimTypeFunction, SimTypeShort
 
@@ -270,6 +276,7 @@ from .structuring.wide_stack_return_predicates import (
     wide_stack_return_predicate_validation_delta_is_proven_8616,
 )
 from .tail_validation import (
+    X86_16TailValidationSummary,
     build_x86_16_tail_validation_cached_result,
     build_x86_16_tail_validation_verdict,
     collect_x86_16_tail_validation_summary,
@@ -320,6 +327,7 @@ type AngrCodegenSurface = Any
 type AngrDecompilerSurface = Any
 type AngrConditionProcessorSurface = Any
 type ClaripyConditionSurface = Any
+type AngrCFuncNodeSurface = Any
 
 __all__ = [
     "DECOMPILER_STRUCTURING_PASSES",
@@ -778,6 +786,87 @@ def prepare_typed_edge_switch_artifacts_8616(codegen: AngrCodegenSurface, *, for
         }
 
 
+def _switch_replacement_refusal_8616(
+    codegen: AngrCodegenSurface,
+    attempted_count: int,
+    reason: str,
+    refused_count: int,
+    extra: dict[str, object] | None = None,
+) -> bool:
+    """Record a refused typed-switch replacement payload and return False."""
+    payload: dict[str, object] = {
+        "attempted_count": attempted_count,
+        "changed": False,
+        "refusal_reasons": (reason,),
+        "refused_count": refused_count,
+        "replaced_count": 0,
+        "owner": "structuring.stage",
+    }
+    if extra:
+        payload.update(extra)
+    codegen._inertia_typed_edge_switch_ast_replacement_8616 = payload
+    return False
+
+
+def _commit_validated_switch_replacement_8616(
+    project: AngrProjectSurface | None,
+    codegen: AngrCodegenSurface,
+    root: AngrCFuncNodeSurface,
+    original_statements: list[object] | None,
+    before_summary: X86_16TailValidationSummary | None,
+    result: _codegen.TypedEdgeSwitchAstReplacementResult8616,
+) -> bool:
+    """Keep a changed switch replacement only when tail validation stays stable."""
+    if project is None or root is None or original_statements is None or before_summary is None:
+        if (
+            root is not None
+            and isinstance(getattr(root, "statements", None), list)
+            and original_statements is not None
+        ):
+            root.statements[:] = original_statements
+        return _switch_replacement_refusal_8616(
+            codegen,
+            int(result.attempted_count),
+            "tail_validation_unavailable",
+            int(result.replaced_count or result.refused_count or 1),
+        )
+    try:
+        after_fingerprint = fingerprint_x86_16_tail_validation_boundary(project, codegen, mode="live_out")
+        after_summary = collect_x86_16_tail_validation_summary(
+            project,
+            codegen,
+            mode="live_out",
+            boundary_fingerprint=after_fingerprint,
+        )
+        validation = compare_x86_16_tail_validation_summaries(before_summary, after_summary)
+    except Exception as ex:
+        root.statements[:] = original_statements
+        return _switch_replacement_refusal_8616(
+            codegen,
+            int(result.attempted_count),
+            f"tail_validation_after_failed:{type(ex).__name__}",
+            int(result.replaced_count or result.refused_count or 1),
+        )
+    if bool(validation.get("changed", False)):
+        root.statements[:] = original_statements
+        return _switch_replacement_refusal_8616(
+            codegen,
+            int(result.attempted_count),
+            "tail_validation_changed",
+            int(result.replaced_count or result.refused_count or 1),
+            {
+                "tail_validation_status": validation.get("status"),
+                "tail_validation_summary": format_x86_16_tail_validation_diff(validation),
+            },
+        )
+    replacement_payload = getattr(codegen, "_inertia_typed_edge_switch_ast_replacement_8616", None)
+    if isinstance(replacement_payload, dict):
+        replacement_payload["tail_validation_status"] = validation.get("status", "stable")
+    codegen._inertia_codegen_decl_refresh_required_8616 = True
+    codegen._inertia_force_codegen_regeneration_8616 = True
+    return True
+
+
 def apply_typed_edge_switch_ast_replacement_if_enabled_8616(codegen: AngrCodegenSurface) -> bool:
     """Apply typed switch C AST replacement behind opt-in and tail validation.
 
@@ -805,83 +894,23 @@ def apply_typed_edge_switch_ast_replacement_if_enabled_8616(codegen: AngrCodegen
                 boundary_fingerprint=before_fingerprint,
             )
         except Exception as ex:
-            codegen._inertia_typed_edge_switch_ast_replacement_8616 = {
-                "attempted_count": 0,
-                "changed": False,
-                "refusal_reasons": (f"tail_validation_baseline_failed:{type(ex).__name__}",),
-                "refused_count": 1,
-                "replaced_count": 0,
-                "owner": "structuring.stage",
-            }
-            return False
+            return _switch_replacement_refusal_8616(
+                codegen, 0, f"tail_validation_baseline_failed:{type(ex).__name__}", 1
+            )
     try:
         result = _codegen.replace_typed_edge_switch_ast_8616(codegen)
     except Exception as ex:
-        codegen._inertia_typed_edge_switch_ast_replacement_8616 = {
-            "attempted_count": 0,
-            "changed": False,
-            "refusal_reasons": (f"{type(ex).__name__}: {ex}",),
-            "refused_count": 1,
-            "replaced_count": 0,
-            "owner": "structuring.stage",
-        }
+        return _switch_replacement_refusal_8616(codegen, 0, f"{type(ex).__name__}: {ex}", 1)
+    if not result.changed:
         return False
-    if result.changed:
-        if project is None or root is None or original_statements is None or before_summary is None:
-            if (
-                root is not None
-                and isinstance(getattr(root, "statements", None), list)
-                and original_statements is not None
-            ):
-                root.statements[:] = original_statements
-            codegen._inertia_typed_edge_switch_ast_replacement_8616 = {
-                "attempted_count": int(result.attempted_count),
-                "changed": False,
-                "refusal_reasons": ("tail_validation_unavailable",),
-                "refused_count": int(result.replaced_count or result.refused_count or 1),
-                "replaced_count": 0,
-                "owner": "structuring.stage",
-            }
-            return False
-        try:
-            after_fingerprint = fingerprint_x86_16_tail_validation_boundary(project, codegen, mode="live_out")
-            after_summary = collect_x86_16_tail_validation_summary(
-                project,
-                codegen,
-                mode="live_out",
-                boundary_fingerprint=after_fingerprint,
-            )
-            validation = compare_x86_16_tail_validation_summaries(before_summary, after_summary)
-        except Exception as ex:
-            root.statements[:] = original_statements
-            codegen._inertia_typed_edge_switch_ast_replacement_8616 = {
-                "attempted_count": int(result.attempted_count),
-                "changed": False,
-                "refusal_reasons": (f"tail_validation_after_failed:{type(ex).__name__}",),
-                "refused_count": int(result.replaced_count or result.refused_count or 1),
-                "replaced_count": 0,
-                "owner": "structuring.stage",
-            }
-            return False
-        if bool(validation.get("changed", False)):
-            root.statements[:] = original_statements
-            codegen._inertia_typed_edge_switch_ast_replacement_8616 = {
-                "attempted_count": int(result.attempted_count),
-                "changed": False,
-                "refusal_reasons": ("tail_validation_changed",),
-                "refused_count": int(result.replaced_count or result.refused_count or 1),
-                "replaced_count": 0,
-                "tail_validation_status": validation.get("status"),
-                "tail_validation_summary": format_x86_16_tail_validation_diff(validation),
-                "owner": "structuring.stage",
-            }
-            return False
-        replacement_payload = getattr(codegen, "_inertia_typed_edge_switch_ast_replacement_8616", None)
-        if isinstance(replacement_payload, dict):
-            replacement_payload["tail_validation_status"] = validation.get("status", "stable")
-        codegen._inertia_codegen_decl_refresh_required_8616 = True
-        codegen._inertia_force_codegen_regeneration_8616 = True
-    return bool(result.changed)
+    return _commit_validated_switch_replacement_8616(
+        project,
+        codegen,
+        root,
+        original_statements,
+        before_summary,
+        result,
+    )
 
 
 def record_typed_edge_switch_replacement_diagnostics_8616(codegen: AngrCodegenSurface) -> None:
@@ -1348,13 +1377,62 @@ def _materialize_structuring_selector_return_branches_8616(project: AngrProjectS
     )
 
 
-def _terminal_call_result_return_callbacks_8616(
-    project: AngrProjectSurface,
+@dataclass
+class _TerminalGraphCallbacks8616:
+    """Adapted angr function-graph surface for terminal call-result proofs."""
+
+    project: AngrProjectSurface
+    graph: object
+    nodes_by_addr: dict[int, list[object]]
+
+    def load_block(self, block_addr: int, block_size: int) -> object | None:
+        """Load one exact-size block through angr's dynamic project factory."""
+        factory = getattr(self.project, "factory", None)
+        block_builder = getattr(factory, "block", None)
+        if not callable(block_builder):
+            return None
+        return cast(object, block_builder(block_addr, size=block_size))
+
+    def successor_addrs(self, block_addr: int) -> tuple[int, ...]:
+        """Return exact in-function successor addresses or raise on ambiguity."""
+        candidates = tuple(self.nodes_by_addr.get(block_addr, ()))
+        successor_reader = getattr(self.graph, "successors", None)
+        if len(candidates) != 1 or not callable(successor_reader):
+            raise ValueError(f"ambiguous Structuring graph node at {block_addr:#x}")
+        raw_successors = successor_reader(candidates[0])
+        if not isinstance(raw_successors, Iterable):
+            raise ValueError(f"missing Structuring successors at {block_addr:#x}")
+        successors = tuple(raw_successors)
+        successor_addrs: list[int] = []
+        for successor in successors:
+            successor_addr = getattr(successor, "addr", None)
+            if not isinstance(successor_addr, int):
+                raise ValueError(f"missing Structuring successor address at {block_addr:#x}")
+            successor_addrs.append(successor_addr)
+        return tuple(successor_addrs)
+
+    @staticmethod
+    def branch_target_imm(insn: object) -> int | None:
+        """Read one direct branch target through the Capstone operand boundary."""
+        raw_operands = getattr(insn, "operands", ())
+        operands = tuple(raw_operands) if isinstance(raw_operands, Iterable) else ()
+        if not operands:
+            return None
+        first_operand = operands[0]
+        if int(getattr(first_operand, "type", -1)) != 2:
+            return None
+        return int(getattr(first_operand, "imm", 0))
+
+    @staticmethod
+    def call_result_contract(call: CFunctionCall) -> TerminalCallResultContract8616:
+        """Consume the Types/Lowering-owned callee result verdict."""
+        return callee_result_contract_8616(call.callee_func)
+
+
+def _terminal_graph_census_8616(
     function: object,
-) -> TerminalCallResultReturnCallbacks8616:
-    """Adapt the exact active angr function graph to the typed Structuring proof."""
-    # Dynamic boundary: networkx and angr Function/BlockNode objects are
-    # third-party surfaces. Normalize them once before the owning proof runs.
+) -> tuple[object, dict[int, list[object]], list[tuple[int, int]]]:
+    """Normalize the angr function graph into node map and block ranges."""
     graph = getattr(function, "graph", None)
     nodes_view = getattr(graph, "nodes", ()) if graph is not None else ()
     try:
@@ -1371,57 +1449,25 @@ def _terminal_call_result_return_callbacks_8616(
             continue
         nodes_by_addr.setdefault(node_addr, []).append(node)
         block_ranges.append((node_addr, node_size))
+    return graph, nodes_by_addr, block_ranges
 
-    def _load_block(block_addr: int, block_size: int) -> object | None:
-        """Load one exact-size block through angr's dynamic project factory."""
-        factory = getattr(project, "factory", None)
-        block_builder = getattr(factory, "block", None)
-        if not callable(block_builder):
-            return None
-        return cast(object, block_builder(block_addr, size=block_size))
 
-    def _successor_addrs(block_addr: int) -> tuple[int, ...]:
-        """Return exact in-function successor addresses or raise on ambiguity."""
-        candidates = tuple(nodes_by_addr.get(block_addr, ()))
-        successor_reader = getattr(graph, "successors", None)
-        if len(candidates) != 1 or not callable(successor_reader):
-            raise ValueError(f"ambiguous Structuring graph node at {block_addr:#x}")
-        raw_successors = successor_reader(candidates[0])
-        if not isinstance(raw_successors, Iterable):
-            raise ValueError(f"missing Structuring successors at {block_addr:#x}")
-        successors = tuple(raw_successors)
-        successor_addrs: list[int] = []
-        for successor in successors:
-            successor_addr = getattr(successor, "addr", None)
-            if not isinstance(successor_addr, int):
-                raise ValueError(f"missing Structuring successor address at {block_addr:#x}")
-            successor_addrs.append(successor_addr)
-        return tuple(successor_addrs)
-
-    def _branch_target_imm(insn: object) -> int | None:
-        """Read one direct branch target through the Capstone operand boundary."""
-        raw_operands = getattr(insn, "operands", ())
-        operands = tuple(raw_operands) if isinstance(raw_operands, Iterable) else ()
-        if not operands:
-            return None
-        first_operand = operands[0]
-        if int(getattr(first_operand, "type", -1)) != 2:
-            return None
-        return int(getattr(first_operand, "imm", 0))
-
-    def _call_result_contract(
-        call: CFunctionCall,
-    ) -> TerminalCallResultContract8616:
-        """Consume the Types/Lowering-owned callee result verdict."""
-        return callee_result_contract_8616(call.callee_func)
-
+def _terminal_call_result_return_callbacks_8616(
+    project: AngrProjectSurface,
+    function: object,
+) -> TerminalCallResultReturnCallbacks8616:
+    """Adapt the exact active angr function graph to the typed Structuring proof."""
+    # Dynamic boundary: networkx and angr Function/BlockNode objects are
+    # third-party surfaces. Normalize them once before the owning proof runs.
+    graph, nodes_by_addr, block_ranges = _terminal_graph_census_8616(function)
+    surface = _TerminalGraphCallbacks8616(project, graph, nodes_by_addr)
     return TerminalCallResultReturnCallbacks8616(
         iter_c_nodes_deep=_iter_c_nodes_deep_8616,
         function_block_ranges=lambda: tuple(block_ranges),
-        load_block=_load_block,
-        successor_addrs=_successor_addrs,
-        branch_target_imm=_branch_target_imm,
-        call_result_contract=_call_result_contract,
+        load_block=surface.load_block,
+        successor_addrs=surface.successor_addrs,
+        branch_target_imm=surface.branch_target_imm,
+        call_result_contract=surface.call_result_contract,
     )
 
 
@@ -1967,7 +2013,6 @@ def _guard_condition_processor_multibit_bool_predicates_8616(project: AngrProjec
     recovery.
     """
     try:
-        import claripy
         from angr.analyses.decompiler.condition_processor import ConditionProcessor
     except Exception:
         yield
@@ -1979,8 +2024,7 @@ def _guard_condition_processor_multibit_bool_predicates_8616(project: AngrProjec
         yield
         return
 
-    normalized_count = 0
-    refused_count = 0
+    tally = _MultibitBoolTally8616()
 
     def _claripy_ast_from_ail_condition_8616(
         self: AngrConditionProcessorSurface,
@@ -1990,25 +2034,15 @@ def _guard_condition_processor_multibit_bool_predicates_8616(project: AngrProjec
         must_bool: bool = False,
         ins_addr: int = 0,
     ) -> ClaripyConditionSurface:
-        nonlocal normalized_count, refused_count
-        from .structuring.symbolic_ite import convert_symbolic_ite_8616
-
-        result = convert_symbolic_ite_8616(self, condition, must_bool=must_bool)
-        if result is None:
-            result = orig(self, condition, nobool=nobool, must_bool=must_bool, ins_addr=ins_addr)
-        if must_bool and isinstance(result, claripy.ast.Bool):
-            from .structuring.symbolic_condition_origin import preserve_symbolic_condition_origin_8616
-
-            return preserve_symbolic_condition_origin_8616(self, condition, result)
-        if not must_bool or isinstance(result, claripy.ast.Bool):
-            return result
-        if isinstance(result, claripy.ast.BV):
-            size = int(result.size())
-            if size > 0:
-                normalized_count += 1
-                return result != claripy.BVV(0, size)
-        refused_count += 1
-        return result
+        return _multibit_bool_ast_from_ail_8616(
+            self,
+            condition,
+            orig,
+            tally,
+            nobool=nobool,
+            must_bool=must_bool,
+            ins_addr=ins_addr,
+        )
 
     cast(Any, _claripy_ast_from_ail_condition_8616)._inertia_8616_multibit_bool_guard = True
     condition_processor_cls.claripy_ast_from_ail_condition = _claripy_ast_from_ail_condition_8616
@@ -2016,12 +2050,53 @@ def _guard_condition_processor_multibit_bool_predicates_8616(project: AngrProjec
         yield
     finally:
         condition_processor_cls.claripy_ast_from_ail_condition = orig
-        if normalized_count:
+        if tally.normalized_count:
             current = int(getattr(project, "_inertia_condition_predicate_multibit_bool_normalized", 0) or 0)
-            project._inertia_condition_predicate_multibit_bool_normalized = current + normalized_count
-        if refused_count:
+            project._inertia_condition_predicate_multibit_bool_normalized = current + tally.normalized_count
+        if tally.refused_count:
             current = int(getattr(project, "_inertia_condition_predicate_multibit_bool_refused", 0) or 0)
-            project._inertia_condition_predicate_multibit_bool_refused = current + refused_count
+            project._inertia_condition_predicate_multibit_bool_refused = current + tally.refused_count
+
+
+@dataclass
+class _MultibitBoolTally8616:
+    """Mutable normalization/refusal counts for the bool-predicate monkeypatch."""
+
+    normalized_count: int = 0
+    refused_count: int = 0
+
+
+def _multibit_bool_ast_from_ail_8616(
+    self: AngrConditionProcessorSurface,
+    condition: object,
+    orig: Callable[..., ClaripyConditionSurface],
+    tally: _MultibitBoolTally8616,
+    *,
+    nobool: bool = False,
+    must_bool: bool = False,
+    ins_addr: int = 0,
+) -> ClaripyConditionSurface:
+    """Return a Bool predicate for multi-bit AIL branch conditions."""
+    import claripy
+
+    from .structuring.symbolic_ite import convert_symbolic_ite_8616
+
+    result = convert_symbolic_ite_8616(self, condition, must_bool=must_bool)
+    if result is None:
+        result = orig(self, condition, nobool=nobool, must_bool=must_bool, ins_addr=ins_addr)
+    if must_bool and isinstance(result, claripy.ast.Bool):
+        from .structuring.symbolic_condition_origin import preserve_symbolic_condition_origin_8616
+
+        return preserve_symbolic_condition_origin_8616(self, condition, result)
+    if not must_bool or isinstance(result, claripy.ast.Bool):
+        return result
+    if isinstance(result, claripy.ast.BV):
+        size = int(result.size())
+        if size > 0:
+            tally.normalized_count += 1
+            return result != claripy.BVV(0, size)
+    tally.refused_count += 1
+    return result
 
 
 def _semantic_validation_pass_names_8616() -> tuple[str, ...]:
@@ -2535,172 +2610,218 @@ def _replay_structuring_gp_state_after_late_cleanup_8616(
     return lower_architectural_gp_register_state_8616(codegen)
 
 
+def _prime_validation_pipeline_prefix_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+    """Run the proven Structuring consumers up to the return-shape replay."""
+    changed = False
+    _vex_ir.apply_x86_16_vex_ir_artifact(project, codegen)
+    _indexed_address_ir.apply_x86_16_indexed_address_evidence_8616(project, codegen)
+    apply_x86_16_call_stack_effects_8616(project, codegen)
+    _indexed_address_aliases.apply_x86_16_indexed_address_aliases_8616(project, codegen)
+    _stack_memory_ssa.apply_x86_16_stack_memory_ssa_alias_artifact(project, codegen)
+    _segment_stack_restore.apply_x86_16_segment_stack_restore_artifact(project, codegen)
+    _segment_stack_restore.apply_x86_16_stack_register_restore_artifact_8616(
+        project,
+        codegen,
+    )
+    changed = bool(prune_proven_segment_stack_restore_carriers_8616(project, codegen)) or changed
+    _segment_state.apply_x86_16_segment_state_artifact(project, codegen)
+    _segment_contract.apply_x86_16_segment_function_contract(project, codegen)
+    _segment_function_summary.apply_x86_16_segment_function_summary(project, codegen)
+    from .lowering.real_mode_linear import (
+        lower_stable_ds_es_linear_global_dereferences_8616,
+    )
+
+    changed = bool(_apply_structuring_stable_stack_semantics_8616(project, codegen))
+    changed = bool(_apply_structuring_direct_stack_materialization_8616(project, codegen)) or changed
+    changed = bool(_prime_structuring_segment_global_semantics_8616(project, codegen)) or changed
+    if changed:
+        codegen._inertia_codegen_decl_refresh_required_8616 = True
+    lower_stable_ds_es_linear_global_dereferences_8616(codegen, project=project)
+    _segmented_mem.apply_x86_16_segmented_memory_reasoning(codegen)
+    # Keep structuring-tail validation stable: if priming already applied
+    # SS stack lowering and alias-fact lowering, skip re-running it in the
+    # structuring body to avoid representation-only drift.
+    codegen._inertia_ss_stack_lowered = True
+    if not getattr(codegen, "_inertia_typed_conditions_transferred", False):
+        func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
+        if isinstance(func_addr, int):
+            transfer_typed_conditions_to_codegen_8616(project, func_addr, codegen)
+        codegen._inertia_typed_conditions_transferred = True
+    func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
+    if isinstance(func_addr, int):
+        changed = bool(_materialize_structuring_wide_stack_return_predicate_8616(project, codegen)) or changed
+        changed = bool(run_structuring_condition_cleanup_8616(project, codegen, func_addr)) or changed
+    else:
+        _structuring_conditions.apply_structuring_condition_materialization_8616(project, codegen)
+    changed = materialize_annotated_stack_prototype_8616(project, codegen) or changed
+    changed = bool(_materialize_structuring_pointer_arg_indirect_loads_8616(project, codegen)) or changed
+    changed = bool(_materialize_structuring_callsite_prototypes_8616(project, codegen)) or changed
+    changed = materialize_call_return_conditions_8616(project, codegen) or changed
+    changed = bool(_materialize_structuring_callsite_stack_arguments_8616(project, codegen)) or changed
+    # Callsite lowering publishes return-use evidence consumed by JCC
+    # condition materialization; replay conditions only after that contract exists.
+    changed = bool(_structuring_conditions.apply_structuring_condition_materialization_8616(project, codegen)) or changed
+    changed = materialize_call_return_conditions_8616(project, codegen) or changed
+    changed = bool(_materialize_structuring_selector_return_branches_8616(project, codegen)) or changed
+    changed = bool(
+        _materialize_structuring_return_chains_8616(
+            project,
+            codegen,
+            materialize_wide_return_predicate=False,
+        )
+    ) or changed
+    # Call lowering may rebuild condition/loop subtrees from an older angr
+    # tree. Replay already-proven direct stack effects before establishing
+    # the Structuring validation baseline.
+    advance_direct_stack_consumer_generation_8616(codegen)
+    changed = bool(_apply_structuring_direct_stack_materialization_8616(project, codegen)) or changed
+    changed = bool(_prime_structuring_segment_global_semantics_8616(project, codegen)) or changed
+    changed = bool(_repair_structuring_synthetic_internal_calls_8616(project, codegen)) or changed
+    changed = bool(_materialize_structuring_stdlib_call_chains_8616(project, codegen)) or changed
+    changed = bool(reconcile_callsite_interface_declarations_8616(project, codegen)) or changed
+    # Pointer-memory idioms are Types/Lowering facts. Materialize them
+    # before loop Structuring and its per-pass validation baselines. The
+    # post-Structuring replay remains an idempotence guard for rebuilt ASTs.
+    changed = bool(_apply_structuring_pointer_memory_idioms_8616(project, codegen)) or changed
+    changed = bool(_materialize_structuring_loop_idioms_8616(project, codegen)) or changed
+    changed = bool(_repair_structuring_loop_exit_return_guards_8616(codegen)) or changed
+    changed = bool(_repair_structuring_unresolved_function_exit_gotos_8616(project, codegen)) or changed
+    changed = bool(_materialize_structuring_unconsumed_loop_break_jcc_8616(project, codegen)) or changed
+    changed = bool(_repair_structuring_conditional_continue_guards_8616(project, codegen)) or changed
+    changed = bool(_repair_structuring_pretest_loop_break_guards_8616(project, codegen)) or changed
+    changed = bool(_repair_structuring_hoisted_jcc_target_copies_8616(project, codegen)) or changed
+    changed = bool(_materialize_structuring_return_shape_8616(project, codegen)) or changed
+    return changed
+
+
+def _prime_terminal_return_shape_8616(
+    project: AngrProjectSurface,
+    codegen: AngrCodegenSurface,
+    terminal_call_return_changed: bool,
+) -> bool:
+    """Replay return-shape materialization only when terminal call-result changed."""
+    if not terminal_call_return_changed:
+        return False
+    return bool(_materialize_structuring_return_shape_8616(project, codegen))
+
+
+def _prime_return_closure_segment_replay_8616(
+    project: AngrProjectSurface,
+    codegen: AngrCodegenSurface,
+    switch_exit_changed: bool,
+    terminal_call_return_changed: bool,
+    terminal_return_shape_changed: bool,
+) -> bool:
+    """Replay segment/global semantics when the return closure mutated the AST."""
+    if not structuring_return_closure_requires_segment_replay_8616(
+        switch_exit_changed=switch_exit_changed,
+        terminal_call_return_changed=terminal_call_return_changed,
+        terminal_return_shape_changed=terminal_return_shape_changed,
+    ):
+        return False
+    return bool(_prime_structuring_segment_global_semantics_8616(project, codegen))
+
+
+def _prime_validation_pipeline_suffix_8616(
+    project: AngrProjectSurface, codegen: AngrCodegenSurface, changed: bool
+) -> bool:
+    """Run the post-return-closure carriers, refresh, and publish phases."""
+    changed = bool(prune_unread_stack_lowered_register_carriers_8616(codegen)) or changed
+    # Loop, return, callsite, and Lowering replay above may replace C AST
+    # subtrees after the early condition cleanup. Refresh exact owned
+    # condition facts last so the validation baseline cannot retain stale
+    # register carriers or pre-materialization guard expressions.
+    changed = bool(_replay_structuring_lowering_after_condition_refresh_8616(project, codegen)) or changed
+    # The refresh above may rebuild a condition from its typed CFG fact and
+    # reintroduce pre-lowering stack or segment carriers. Match the
+    # per-pass finalizer's refresh-then-Lowering order before fingerprinting.
+    # The final Lowering replay can create a proven wide stack owner after
+    # the preceding condition refresh. Rebind typed conditions once more
+    # so their 16-bit projections consume that owner before fingerprinting.
+    changed = bool(_replay_structuring_lowering_after_condition_refresh_8616(project, codegen)) or changed
+    # Alias-backed copy propagation is Widening, not a semantic Structuring
+    # delta. The declared pass remains an idempotent replay after the final
+    # proof-consuming Lowering pass.
+    changed = bool(_run_structuring_widening_copy_propagation_8616(codegen)) or changed
+    changed = bool(prune_unread_stack_lowered_register_carriers_8616(codegen)) or changed
+    # Later Structuring passes may replace the C AST while retaining the
+    # selector-return marker. Reassert the exact CFG-proven projection last,
+    # before validation captures the authoritative Structuring baseline.
+    changed = bool(_materialize_structuring_selector_return_branches_8616(project, codegen)) or changed
+    late_flag_cleanup = _structuring_conditions.prune_dead_flag_assignments_after_structuring_8616(
+        project,
+        codegen,
+    )
+    changed = late_flag_cleanup.changed or changed
+    # The late FLAGS owner can retain or restore angr's pointer-shaped
+    # high-byte register views inside packed-FLAGS expressions. Reconsume
+    # those typed GP projections before the validation baseline is frozen.
+    changed = _replay_structuring_gp_state_after_late_cleanup_8616(codegen) or changed
+    # The terminal far-return frame pop is machine return semantics; its
+    # structured CS carrier must leave the AST before the validation
+    # baseline is frozen. Subtree rebuilds are re-pruned by the pass-table
+    # copy of the same evidence-owned consumer.
+    changed = (
+        bool(consume_terminal_far_return_boundary_carriers_8616(project, codegen)) or changed
+    )
+    # Publish the callsite materialization contract before any per-pass
+    # validation baseline is captured. Rebased direct slices can otherwise
+    # expose complete generated calls while leaving validation with only
+    # stale missing-callsite carriers.
+    callsite_stats = getattr(codegen, "_inertia_callsite_materialization_stats", None)
+    if callsite_stats is not None:
+        codegen._inertia_callsite_materialization_complete_8616 = bool(
+            int(getattr(callsite_stats, "classified_fact_count", 0) or 0) <= int(
+                getattr(callsite_stats, "materialized_count", 0) or 0
+            )
+            and int(getattr(callsite_stats, "failure_count", 0) or 0) == 0
+        )
+    if changed:
+        codegen._inertia_codegen_decl_refresh_required_8616 = True
+
+    return changed
+
+
 def _prime_structuring_validation_semantics_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
     """Prime proven Structuring consumers and report every resulting AST change."""
     if getattr(codegen, "_inertia_structuring_validation_semantics_primed", False):
         return False
-    changed = False
     consumer_generation_scope = begin_direct_stack_consumer_generation_scope_8616(
         codegen
     )
     try:
-        _vex_ir.apply_x86_16_vex_ir_artifact(project, codegen)
-        _indexed_address_ir.apply_x86_16_indexed_address_evidence_8616(project, codegen)
-        apply_x86_16_call_stack_effects_8616(project, codegen)
-        _indexed_address_aliases.apply_x86_16_indexed_address_aliases_8616(project, codegen)
-        _stack_memory_ssa.apply_x86_16_stack_memory_ssa_alias_artifact(project, codegen)
-        _segment_stack_restore.apply_x86_16_segment_stack_restore_artifact(project, codegen)
-        _segment_stack_restore.apply_x86_16_stack_register_restore_artifact_8616(
-            project,
-            codegen,
-        )
-        changed = bool(prune_proven_segment_stack_restore_carriers_8616(project, codegen)) or changed
-        _segment_state.apply_x86_16_segment_state_artifact(project, codegen)
-        _segment_contract.apply_x86_16_segment_function_contract(project, codegen)
-        _segment_function_summary.apply_x86_16_segment_function_summary(project, codegen)
-        from .lowering.real_mode_linear import (
-            lower_stable_ds_es_linear_global_dereferences_8616,
-        )
-
-        changed = bool(_apply_structuring_stable_stack_semantics_8616(project, codegen))
-        changed = bool(_apply_structuring_direct_stack_materialization_8616(project, codegen)) or changed
-        changed = bool(_prime_structuring_segment_global_semantics_8616(project, codegen)) or changed
-        if changed:
-            codegen._inertia_codegen_decl_refresh_required_8616 = True
-        lower_stable_ds_es_linear_global_dereferences_8616(codegen, project=project)
-        _segmented_mem.apply_x86_16_segmented_memory_reasoning(codegen)
-        # Keep structuring-tail validation stable: if priming already applied
-        # SS stack lowering and alias-fact lowering, skip re-running it in the
-        # structuring body to avoid representation-only drift.
-        codegen._inertia_ss_stack_lowered = True
-        if not getattr(codegen, "_inertia_typed_conditions_transferred", False):
-            func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
-            if isinstance(func_addr, int):
-                transfer_typed_conditions_to_codegen_8616(project, func_addr, codegen)
-            codegen._inertia_typed_conditions_transferred = True
-        func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
-        if isinstance(func_addr, int):
-            changed = bool(_materialize_structuring_wide_stack_return_predicate_8616(project, codegen)) or changed
-            changed = bool(run_structuring_condition_cleanup_8616(project, codegen, func_addr)) or changed
-        else:
-            _structuring_conditions.apply_structuring_condition_materialization_8616(project, codegen)
-        changed = materialize_annotated_stack_prototype_8616(project, codegen) or changed
-        changed = bool(_materialize_structuring_pointer_arg_indirect_loads_8616(project, codegen)) or changed
-        changed = bool(_materialize_structuring_callsite_prototypes_8616(project, codegen)) or changed
-        changed = materialize_call_return_conditions_8616(project, codegen) or changed
-        changed = bool(_materialize_structuring_callsite_stack_arguments_8616(project, codegen)) or changed
-        # Callsite lowering publishes return-use evidence consumed by JCC
-        # condition materialization; replay conditions only after that contract exists.
-        changed = bool(_structuring_conditions.apply_structuring_condition_materialization_8616(project, codegen)) or changed
-        changed = materialize_call_return_conditions_8616(project, codegen) or changed
-        changed = bool(_materialize_structuring_selector_return_branches_8616(project, codegen)) or changed
-        changed = bool(
-            _materialize_structuring_return_chains_8616(
-                project,
-                codegen,
-                materialize_wide_return_predicate=False,
-            )
-        ) or changed
-        # Call lowering may rebuild condition/loop subtrees from an older angr
-        # tree. Replay already-proven direct stack effects before establishing
-        # the Structuring validation baseline.
-        advance_direct_stack_consumer_generation_8616(codegen)
-        changed = bool(_apply_structuring_direct_stack_materialization_8616(project, codegen)) or changed
-        changed = bool(_prime_structuring_segment_global_semantics_8616(project, codegen)) or changed
-        changed = bool(_repair_structuring_synthetic_internal_calls_8616(project, codegen)) or changed
-        changed = bool(_materialize_structuring_stdlib_call_chains_8616(project, codegen)) or changed
-        changed = bool(reconcile_callsite_interface_declarations_8616(project, codegen)) or changed
-        # Pointer-memory idioms are Types/Lowering facts. Materialize them
-        # before loop Structuring and its per-pass validation baselines. The
-        # post-Structuring replay remains an idempotence guard for rebuilt ASTs.
-        changed = bool(_apply_structuring_pointer_memory_idioms_8616(project, codegen)) or changed
-        changed = bool(_materialize_structuring_loop_idioms_8616(project, codegen)) or changed
-        changed = bool(_repair_structuring_loop_exit_return_guards_8616(codegen)) or changed
-        changed = bool(_repair_structuring_unresolved_function_exit_gotos_8616(project, codegen)) or changed
-        changed = bool(_materialize_structuring_unconsumed_loop_break_jcc_8616(project, codegen)) or changed
-        changed = bool(_repair_structuring_conditional_continue_guards_8616(project, codegen)) or changed
-        changed = bool(_repair_structuring_pretest_loop_break_guards_8616(project, codegen)) or changed
-        changed = bool(_repair_structuring_hoisted_jcc_target_copies_8616(project, codegen)) or changed
-        changed = bool(_materialize_structuring_return_shape_8616(project, codegen)) or changed
+        changed = _prime_validation_pipeline_prefix_8616(project, codegen)
         # Structuring passes above may rebuild subtrees from angr nodes that
         # predate typed segmented-global materialization. Replay the owning
         # Lowering stage before establishing the validation baseline.
-        changed = bool(_replay_structuring_lowering_before_validation_8616(project, codegen)) or changed
+        changed |= bool(_replay_structuring_lowering_before_validation_8616(project, codegen))
         switch_exit_changed = bool(
             _repair_structuring_switch_loop_exit_returns_8616(project, codegen)
         )
-        changed = switch_exit_changed or changed
-        terminal_call_return_changed = _materialize_structuring_terminal_call_result_return_8616(
-            project,
-            codegen,
-        )
-        changed = bool(terminal_call_return_changed) or changed
-        terminal_return_shape_changed = False
-        if terminal_call_return_changed:
-            terminal_return_shape_changed = bool(
-                _materialize_structuring_return_shape_8616(project, codegen)
+        changed |= switch_exit_changed
+        terminal_call_return_changed = bool(
+            _materialize_structuring_terminal_call_result_return_8616(
+                project,
+                codegen,
             )
-            changed = terminal_return_shape_changed or changed
+        )
+        changed |= terminal_call_return_changed
+        terminal_return_shape_changed = _prime_terminal_return_shape_8616(
+            project, codegen, terminal_call_return_changed
+        )
+        changed |= terminal_return_shape_changed
         # Final return/prototype shaping may rebuild expressions from an older
         # angr subtree after the general Lowering replay. Consume any recreated
         # segmented-global expressions at their owning Types/Lowering layer
         # before establishing the Structuring validation baseline.
-        if structuring_return_closure_requires_segment_replay_8616(
-            switch_exit_changed=switch_exit_changed,
-            terminal_call_return_changed=bool(terminal_call_return_changed),
-            terminal_return_shape_changed=terminal_return_shape_changed,
-        ):
-            changed = bool(_prime_structuring_segment_global_semantics_8616(project, codegen)) or changed
-        changed = bool(prune_unread_stack_lowered_register_carriers_8616(codegen)) or changed
-        # Loop, return, callsite, and Lowering replay above may replace C AST
-        # subtrees after the early condition cleanup. Refresh exact owned
-        # condition facts last so the validation baseline cannot retain stale
-        # register carriers or pre-materialization guard expressions.
-        changed = bool(_replay_structuring_lowering_after_condition_refresh_8616(project, codegen)) or changed
-        # The refresh above may rebuild a condition from its typed CFG fact and
-        # reintroduce pre-lowering stack or segment carriers. Match the
-        # per-pass finalizer's refresh-then-Lowering order before fingerprinting.
-        # The final Lowering replay can create a proven wide stack owner after
-        # the preceding condition refresh. Rebind typed conditions once more
-        # so their 16-bit projections consume that owner before fingerprinting.
-        changed = bool(_replay_structuring_lowering_after_condition_refresh_8616(project, codegen)) or changed
-        # Alias-backed copy propagation is Widening, not a semantic Structuring
-        # delta. The declared pass remains an idempotent replay after the final
-        # proof-consuming Lowering pass.
-        changed = bool(_run_structuring_widening_copy_propagation_8616(codegen)) or changed
-        changed = bool(prune_unread_stack_lowered_register_carriers_8616(codegen)) or changed
-        # Later Structuring passes may replace the C AST while retaining the
-        # selector-return marker. Reassert the exact CFG-proven projection last,
-        # before validation captures the authoritative Structuring baseline.
-        changed = bool(_materialize_structuring_selector_return_branches_8616(project, codegen)) or changed
-        late_flag_cleanup = _structuring_conditions.prune_dead_flag_assignments_after_structuring_8616(
+        changed |= _prime_return_closure_segment_replay_8616(
             project,
             codegen,
+            switch_exit_changed,
+            terminal_call_return_changed,
+            terminal_return_shape_changed,
         )
-        changed = late_flag_cleanup.changed or changed
-        # The late FLAGS owner can retain or restore angr's pointer-shaped
-        # high-byte register views inside packed-FLAGS expressions. Reconsume
-        # those typed GP projections before the validation baseline is frozen.
-        changed = _replay_structuring_gp_state_after_late_cleanup_8616(codegen) or changed
-        # The terminal far-return frame pop is machine return semantics; its
-        # structured CS carrier must leave the AST before the validation
-        # baseline is frozen. Subtree rebuilds are re-pruned by the pass-table
-        # copy of the same evidence-owned consumer.
-        changed = (
-            bool(consume_terminal_far_return_boundary_carriers_8616(project, codegen)) or changed
-        )
-        # Publish the callsite materialization contract before any per-pass
-        # validation baseline is captured. Rebased direct slices can otherwise
-        # expose complete generated calls while leaving validation with only
-        # stale missing-callsite carriers.
-        callsite_stats = getattr(codegen, "_inertia_callsite_materialization_stats", None)
-        if callsite_stats is not None:
-            codegen._inertia_callsite_materialization_complete_8616 = bool(
-                int(getattr(callsite_stats, "classified_fact_count", 0) or 0) <= int(
-                    getattr(callsite_stats, "materialized_count", 0) or 0
-                )
-                and int(getattr(callsite_stats, "failure_count", 0) or 0) == 0
-            )
+        changed = _prime_validation_pipeline_suffix_8616(project, codegen, changed)
         if changed:
             codegen._inertia_codegen_decl_refresh_required_8616 = True
     except PipelineHardError:
@@ -2832,6 +2953,42 @@ def _is_structuring_call_chain_materialization_delta_8616(
     """
     if not isinstance(validation, dict):
         return False
+    gate = _call_chain_evidence_gate_8616(codegen)
+    if gate is None:
+        return False
+    call_return_materialization_proven, call_return_stats = gate
+    delta = validation.get("delta")
+    if not isinstance(delta, dict):
+        return False
+    touched = {
+        key
+        for key, field in delta.items()
+        if isinstance(field, dict) and ((field.get("added") or ()) or (field.get("removed") or ()))
+    }
+    if touched - {"conditions", "helper_calls", "register_writes", "control_flow_effects"}:
+        return False
+    register_delta = delta.get("register_writes")
+    if _call_chain_store_bridge_accept_8616(
+        codegen,
+        register_delta,
+        touched,
+        call_return_materialization_proven,
+        call_return_stats,
+    ):
+        return True
+    helpers = _call_chain_helper_deltas_8616(delta)
+    if helpers is None:
+        return False
+    added_helpers, _removed_helpers = helpers
+    if not _call_chain_condition_gate_8616(delta, added_helpers, call_return_materialization_proven):
+        return False
+    return _call_chain_residual_gate_8616(delta, register_delta, call_return_materialization_proven)
+
+
+def _call_chain_evidence_gate_8616(
+    codegen: AngrCodegenSurface,
+) -> tuple[bool, object] | None:
+    """Return (call-return-proven, stats) when the materialization evidence is complete."""
     call_return_stats = getattr(codegen, "_inertia_call_return_condition_stats_8616", None)
     call_return_materialization_proven = (
         int(getattr(call_return_stats, "classified_fact_count", 0) or 0) > 0
@@ -2845,7 +3002,7 @@ def _is_structuring_call_chain_materialization_delta_8616(
         materialized = int(getattr(stats, "materialized_count", 0) or 0)
         failures = int(getattr(stats, "failure_count", 0) or 0)
         if (classified <= 0 or materialized < classified or failures != 0) and not call_return_materialization_proven:
-            return False
+            return None
     else:
         summaries = getattr(codegen, "_inertia_callsite_summaries", None)
         if not (
@@ -2853,103 +3010,132 @@ def _is_structuring_call_chain_materialization_delta_8616(
             and summaries
             and bool(getattr(codegen, "_inertia_callsite_stack_arguments_structuring_pass_ran_8616", False))
         ) and not call_return_materialization_proven:
-            return False
-    delta = validation.get("delta")
-    if not isinstance(delta, dict):
-        return False
-    touched = {
-        key
-        for key, field in delta.items()
-        if isinstance(field, dict) and ((field.get("added") or ()) or (field.get("removed") or ()))
-    }
-    if touched - {"conditions", "helper_calls", "register_writes", "control_flow_effects"}:
-        return False
-    register_delta = delta.get("register_writes")
+            return None
+    return call_return_materialization_proven, call_return_stats
+
+
+def _call_chain_store_bridge_accept_8616(
+    codegen: AngrCodegenSurface,
+    register_delta: object,
+    touched: set[str],
+    call_return_materialization_proven: bool,
+    call_return_stats: object,
+) -> bool:
+    """Accept a pure register-writes delta covered by proven store-bridge carriers."""
     store_bridge_count = int(getattr(call_return_stats, "store_bridge_materialized_count", 0) or 0)
     return_registers = tuple(getattr(call_return_stats, "store_bridge_return_registers", ()) or ())
-    if (
+    if not (
         call_return_materialization_proven
         and store_bridge_count > 0
         and touched == {"register_writes"}
         and isinstance(register_delta, dict)
         and not tuple(register_delta.get("added") or ())
     ):
-        project = getattr(codegen, "project", None)
-        arch = getattr(project, "arch", None)
-        registers = getattr(arch, "registers", None)
-        allowed_register_tokens: set[str] = set()
-        if isinstance(registers, dict):
-            for return_register in return_registers:
-                register = registers.get(return_register)
-                if not isinstance(register, tuple) or len(register) < 2:
-                    continue
-                offset, width = register[:2]
-                if not isinstance(offset, int) or not isinstance(width, int):
-                    continue
-                allowed_register_tokens.update(
-                    f"reg:{name.lower()}"
-                    for name, alias in registers.items()
-                    if isinstance(name, str)
-                    and isinstance(alias, tuple)
-                    and len(alias) >= 2
-                    and alias[0] == offset
-                    and isinstance(alias[1], int)
-                    and alias[1] >= width
-                )
-        removed_registers = tuple(register_delta.get("removed") or ())
-        if removed_registers and set(removed_registers) <= allowed_register_tokens:
-            return True
+        return False
+    project = getattr(codegen, "project", None)
+    arch = getattr(project, "arch", None)
+    registers = getattr(arch, "registers", None)
+    allowed_register_tokens = _return_register_alias_tokens_8616(registers, return_registers)
+    removed_registers = tuple(register_delta.get("removed") or ())
+    return bool(removed_registers) and set(removed_registers) <= allowed_register_tokens
+
+
+def _return_register_alias_tokens_8616(registers: object, return_registers: tuple[object, ...]) -> set[str]:
+    """Return reg: token aliases covering each proven store-bridge return register."""
+    allowed: set[str] = set()
+    if not isinstance(registers, dict):
+        return allowed
+    for return_register in return_registers:
+        register = registers.get(return_register)
+        if not isinstance(register, tuple) or len(register) < 2:
+            continue
+        offset, width = register[:2]
+        if not isinstance(offset, int) or not isinstance(width, int):
+            continue
+        allowed.update(
+            f"reg:{name.lower()}"
+            for name, alias in registers.items()
+            if isinstance(name, str)
+            and isinstance(alias, tuple)
+            and len(alias) >= 2
+            and alias[0] == offset
+            and isinstance(alias[1], int)
+            and alias[1] >= width
+        )
+    return allowed
+
+
+def _call_chain_target_token_8616(item: str, prefix: str) -> str:
+    """Normalize one helper token to its lowercase call target."""
+    value = item[len(prefix) :]
+    if value.startswith("addr:"):
+        value = value[len("addr:") :]
+    value = value.split(":", 1)[0]
+    return value.lower()
+
+
+def _call_chain_helper_deltas_8616(
+    delta: dict[str, object],
+) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """Return added/removed helper tokens only for a carrier-rebuild shape."""
     helper_delta = delta.get("helper_calls")
     if not isinstance(helper_delta, dict):
-        return False
+        return None
     added_helpers = tuple(str(item) for item in tuple(helper_delta.get("added") or ()))
     removed_helpers = tuple(str(item) for item in tuple(helper_delta.get("removed") or ()))
     if not added_helpers or not removed_helpers:
-        return False
+        return None
     if not all(item.startswith("addr:") for item in added_helpers):
-        return False
+        return None
     if not all(item.startswith("missing-callsite:addr:") for item in removed_helpers):
-        return False
-
-    def _target(item: str, prefix: str) -> str:
-        value = item[len(prefix) :]
-        if value.startswith("addr:"):
-            value = value[len("addr:") :]
-        value = value.split(":", 1)[0]
-        return value.lower()
-
-    if Counter(_target(item, "addr:") for item in added_helpers) != Counter(
-        _target(item, "missing-callsite:") for item in removed_helpers
+        return None
+    if Counter(_call_chain_target_token_8616(item, "addr:") for item in added_helpers) != Counter(
+        _call_chain_target_token_8616(item, "missing-callsite:") for item in removed_helpers
     ):
+        return None
+    return added_helpers, removed_helpers
+
+
+def _call_chain_condition_gate_8616(
+    delta: dict[str, object],
+    added_helpers: tuple[str, ...],
+    call_return_materialization_proven: bool,
+) -> bool:
+    """Gate added call conditions against the proven helper-target multiset."""
+    if not call_return_materialization_proven:
+        return True
+    condition_delta = delta.get("conditions")
+    if not isinstance(condition_delta, dict):
         return False
-    if call_return_materialization_proven:
-        delta = validation.get("delta")
-        if not isinstance(delta, dict):
+    added_conditions = tuple(str(item) for item in tuple(condition_delta.get("added") or ()))
+    removed_conditions = tuple(str(item) for item in tuple(condition_delta.get("removed") or ()))
+    if not (added_conditions or removed_conditions):
+        return True
+    if not added_conditions:
+        return False
+    helper_targets = Counter(_call_chain_target_token_8616(item, "addr:") for item in added_helpers)
+    condition_targets: Counter[str] = Counter()
+    for condition in added_conditions:
+        for helper_target in helper_targets:
+            marker = f"call:addr:{helper_target}"
+            occurrences = condition.count(marker)
+            condition_targets[helper_target] += occurrences
+        if not any(condition.count(f"call:addr:{target}") for target in helper_targets):
             return False
-        condition_delta = delta.get("conditions")
-        if not isinstance(condition_delta, dict):
-            return False
-        added_conditions = tuple(str(item) for item in tuple(condition_delta.get("added") or ()))
-        removed_conditions = tuple(str(item) for item in tuple(condition_delta.get("removed") or ()))
-        if added_conditions or removed_conditions:
-            if not added_conditions:
-                return False
-            helper_targets = Counter(_target(item, "addr:") for item in added_helpers)
-            condition_targets: Counter[str] = Counter()
-            for condition in added_conditions:
-                for helper_target in helper_targets:
-                    marker = f"call:addr:{helper_target}"
-                    occurrences = condition.count(marker)
-                    condition_targets[helper_target] += occurrences
-                if not any(condition.count(f"call:addr:{target}") for target in helper_targets):
-                    return False
-            if condition_targets != helper_targets:
-                return False
-            if any(
-                condition not in {"CmpNE(const:1,const:0)", "CmpNE(const:True,const:0)"}
-                for condition in removed_conditions
-            ):
-                return False
+    if condition_targets != helper_targets:
+        return False
+    return not any(
+        condition not in {"CmpNE(const:1,const:0)", "CmpNE(const:True,const:0)"}
+        for condition in removed_conditions
+    )
+
+
+def _call_chain_residual_gate_8616(
+    delta: dict[str, object],
+    register_delta: object,
+    call_return_materialization_proven: bool,
+) -> bool:
+    """Gate residual register/control-flow effects for the call-chain rebuild."""
     if isinstance(register_delta, dict):
         if tuple(register_delta.get("added") or ()):
             return False
@@ -2969,35 +3155,594 @@ def _is_structuring_call_chain_materialization_delta_8616(
     return True
 
 
-def _try_accept_structuring_validation_delta_from_evidence_8616(
+def _accept_structuring_delta_8616(validation: dict[str, object], spec_name: str) -> bool:
+    """Mark a validation delta as accepted-stable and return True."""
+    validation["changed"] = False
+    validation["status"] = "stable"
+    validation["summary_text"] = "no observable whole-tail changes"
+    validation.pop("delta", None)
+    validation["verdict"] = build_x86_16_tail_validation_verdict(
+        f"structuring:{spec_name}", validation
+    )
+    return True
+
+
+def _bump_validation_accept_8616(codegen: AngrCodegenSurface, name: str) -> None:
+    """Increment a dynamic codegen boundary validation-accept counter."""
+    setattr(codegen, name, int(getattr(codegen, name, 0) or 0) + 1)
+
+
+def _append_validation_delta_8616(
+    codegen: AngrCodegenSurface, name: str, entry: dict[str, object]
+) -> None:
+    """Append one accepted-delta record to a dynamic codegen boundary tuple."""
+    previous = getattr(codegen, name, ()) or ()
+    accepted = list(previous)
+    accepted.append(entry)
+    setattr(codegen, name, tuple(accepted))
+
+
+_VOID_TAIL_CALL_ALLOWED_PREFIXES_8616 = ("if-body-calls:", "if-else-body-calls:else:")
+
+
+def _void_tail_call_targets_8616(effect: str) -> tuple[int, ...]:
+    """Extract addr:0x call targets from one allowed control-flow effect string."""
+    if not effect.startswith(_VOID_TAIL_CALL_ALLOWED_PREFIXES_8616):
+        return ()
+    targets: list[int] = []
+    offset = 0
+    token = "addr:0x"
+    while True:
+        pos = effect.find(token, offset)
+        if pos < 0:
+            break
+        start = pos + len(token)
+        end = start
+        while end < len(effect) and effect[end].lower() in "0123456789abcdef":
+            end += 1
+        if end > start:
+            targets.append(int(effect[start:end], 16))
+        offset = end
+    return tuple(targets)
+
+
+def _void_tail_call_target_multiset_8616(effects: tuple[str, ...]) -> Counter[int]:
+    """Return the call-target multiset for a list of effects, empty on disallowed shapes."""
+    targets: Counter[int] = Counter()
+    for effect in effects:
+        effect_targets = _void_tail_call_targets_8616(effect)
+        if not effect_targets:
+            return Counter()
+        targets.update(effect_targets)
+    return targets
+
+
+def _void_tail_call_suffix_diamond_delta_8616(
+    added: tuple[str, ...], removed: tuple[str, ...]
+) -> bool:
+    """Return whether added/removed call effects share the same target multiset."""
+    added_targets = _void_tail_call_target_multiset_8616(added)
+    removed_targets = _void_tail_call_target_multiset_8616(removed)
+    return bool(added_targets) and added_targets == removed_targets
+
+
+def _void_tail_call_guard_structuring_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object]
+) -> bool:
+    """Return whether the delta matches a proven void tail-call guard materialization."""
+    if int(getattr(codegen, "_inertia_void_tail_call_guard_materialized_8616", 0) or 0) <= 0:
+        return False
+    delta = validation.get("delta")
+    if not isinstance(delta, dict):
+        return False
+    for field_name in (
+        "conditions",
+        "global_writes",
+        "helper_calls",
+        "register_writes",
+        "returns",
+        "segmented_writes",
+        "stack_writes",
+    ):
+        field_delta = delta.get(field_name)
+        if not isinstance(field_delta, dict):
+            continue
+        if tuple(field_delta.get("added", ()) or ()) or tuple(field_delta.get("removed", ()) or ()):
+            return False
+    control_delta = delta.get("control_flow_effects")
+    if not isinstance(control_delta, dict):
+        return False
+    added = tuple(str(item) for item in tuple(control_delta.get("added", ()) or ()))
+    removed = tuple(str(item) for item in tuple(control_delta.get("removed", ()) or ()))
+    if not added or not removed:
+        return False
+    decision = getattr(codegen, "_inertia_void_tail_call_guard_decision_8616", None)
+    if decision == _VoidTailCallGuardDecision8616.MATERIALIZE_SUFFIX_DIAMOND.value:
+        return _void_tail_call_suffix_diamond_delta_8616(added, removed)
+
+    if not all(item.startswith("if-body-calls:") for item in added):
+        return False
+    allowed_removed_prefixes = ("if-else-body-calls:else:",)
+    allowed_removed_exact = {"if:else"}
+    return all(
+        item in allowed_removed_exact or item.startswith(allowed_removed_prefixes)
+        for item in removed
+    )
+
+
+def _accept_callsite_completeness_delta_8616(
+    codegen: AngrCodegenSurface,
+    validation: dict[str, object],
+    spec_name: str,
+    before_summary: TailValidationCallsiteSummary8616 | None,
+    after_summary: TailValidationCallsiteSummary8616 | None,
+) -> bool:
+    """Classify the callsite completeness delta and accept it when complete."""
+    if before_summary is None or after_summary is None:
+        return False
+    completeness = classify_callsite_completeness_delta_8616(
+        before_summary,
+        after_summary,
+        validation,
+    )
+    codegen._inertia_structuring_callsite_completeness_delta_8616 = completeness
+    validation["callsite_completeness_delta"] = completeness.as_dict()
+    if not completeness.accepted:
+        return False
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_identical_return_guard_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Consume the identical-return-guard collapse result and accept a clean delta."""
+    identical_return_result = getattr(
+        codegen, "_inertia_identical_return_guard_collapse_result_8616", None
+    )
+    identical_return_validation = consume_identical_return_guard_validation_delta_8616(
+        identical_return_result,
+        validation,
+    )
+    codegen._inertia_identical_return_guard_validation_result_8616 = identical_return_validation
+    if not (
+        identical_return_validation.accepted
+        and not identical_return_validation.residual_changed
+    ):
+        return False
+    validation["verdict"] = build_x86_16_tail_validation_verdict(
+        f"structuring:{spec_name}",
+        validation,
+    )
+    return True
+
+
+def _accept_frame_prune_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept a callee-saved frame prune delta when the record proves it."""
+    frame_prune_record = getattr(
+        codegen, "_inertia_callee_saved_frame_prune_record_8616", None
+    )
+    if not callee_saved_frame_prune_delta_8616(
+        frame_prune_record
+        if isinstance(frame_prune_record, CalleeSavedFramePruneRecord8616)
+        else None,
+        validation,
+    ):
+        return False
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_callee_saved_frame_validation_accepts_8616"
+    )
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_switch_tail_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Consume the switch loop-tail break result and accept a clean delta."""
+    switch_tail_result = getattr(
+        codegen, "_inertia_structuring_switch_loop_tail_break_result_8616", None
+    )
+    switch_tail_validation = consume_switch_loop_tail_break_validation_delta_8616(
+        switch_tail_result
+        if isinstance(switch_tail_result, SwitchLoopTailBreakResult8616)
+        else None,
+        validation,
+    )
+    if not switch_tail_validation.accepted:
+        return False
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_switch_loop_tail_break_validation_accepts_8616"
+    )
+    if not switch_tail_validation.residual_changed:
+        validation["summary_text"] = "no observable whole-tail changes"
+        validation.pop("delta", None)
+        validation["verdict"] = build_x86_16_tail_validation_verdict(
+            f"structuring:{spec_name}", validation
+        )
+        return True
+    validation["verdict"] = build_x86_16_tail_validation_verdict(
+        f"structuring:{spec_name}", validation
+    )
+    return False
+
+
+def _codegen_function_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> object:
+    """Resolve the angr function for the current codegen boundary, if available."""
+    func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
+    functions = getattr(getattr(project, "kb", None), "functions", None)
+    if not isinstance(func_addr, int) or functions is None:
+        return None
+    with contextlib.suppress(Exception):
+        return functions.function(addr=func_addr, create=False)
+    return None
+
+
+def _accept_terminal_return_delta_8616(
     project: AngrProjectSurface,
     codegen: AngrCodegenSurface,
     validation: dict[str, object],
-    *,
     spec_name: str,
-    before_summary: TailValidationCallsiteSummary8616 | None = None,
-    after_summary: TailValidationCallsiteSummary8616 | None = None,
 ) -> bool:
-    """Accept a structuring delta only through an existing consumed-evidence validator."""
-    if not isinstance(validation, dict) or x86_16_tail_validation_result_passed(validation):
+    """Consume the terminal return-value materialization result and accept its delta."""
+    terminal_return_materialization = getattr(
+        codegen, "_inertia_terminal_return_value_materialization_result_8616", None
+    )
+    if not isinstance(
+        terminal_return_materialization,
+        _terminal_register_values.TerminalReturnValueMaterializationResult8616,
+    ):
+        terminal_return_materialization = None
+    terminal_return_validation = terminal_return_value_validation_delta_8616(
+        project,
+        codegen,
+        terminal_return_materialization,
+        validation,
+    )
+    codegen._inertia_terminal_return_value_validation_result_8616 = terminal_return_validation
+    if not terminal_return_validation.accepted:
         return False
-    if before_summary is not None and after_summary is not None:
-        completeness = classify_callsite_completeness_delta_8616(
-            before_summary,
-            after_summary,
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_terminal_return_validation_accepts_8616"
+    )
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_selector_return_delta_8616(
+    project: AngrProjectSurface,
+    codegen: AngrCodegenSurface,
+    validation: dict[str, object],
+    spec_name: str,
+    is_selector_delta: Callable[..., bool],
+) -> bool:
+    """Accept a selector-return expression-chain materialization delta."""
+    if not is_selector_delta(project, None, codegen, validation):
+        return False
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_selector_return_validation_accepts_8616"
+    )
+    delta = validation.get("delta")
+    if isinstance(delta, dict):
+        _append_validation_delta_8616(
+            codegen,
+            "_inertia_structuring_selector_return_validation_deltas_8616",
+            {
+                "conditions": delta.get("conditions"),
+                "control_flow_effects": delta.get("control_flow_effects"),
+                "helper_calls": delta.get("helper_calls"),
+                "returns": delta.get("returns"),
+                "stage": f"structuring:{spec_name}",
+            },
+        )
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_call_chain_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept a structuring call-chain materialization delta."""
+    if not _is_structuring_call_chain_materialization_delta_8616(codegen, validation):
+        return False
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_call_chain_validation_accepts_8616"
+    )
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_wide_stack_predicate_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept a proven wide-stack return-predicate delta."""
+    wide_predicate_result = getattr(
+        codegen,
+        "_inertia_wide_stack_return_predicate_result_8616",
+        None,
+    )
+    if not wide_stack_return_predicate_validation_delta_is_proven_8616(
+        wide_predicate_result,
+        validation,
+    ):
+        return False
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_wide_stack_predicate_validation_accepts_8616"
+    )
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_dword_zero_test_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept the dword global zero-test materialization delta when proven."""
+    record = getattr(codegen, "_inertia_dword_global_zero_test_materialization_record_8616", None)
+    if not (
+        isinstance(record, DwordGlobalZeroTestMaterializationRecord8616)
+        and dword_global_zero_test_precision_delta_8616(
+            record.materialized_count,
+            record.evidence,
             validation,
         )
-        codegen._inertia_structuring_callsite_completeness_delta_8616 = completeness
-        validation["callsite_completeness_delta"] = completeness.as_dict()
-        if completeness.accepted:
-            validation["changed"] = False
-            validation["status"] = "stable"
-            validation["summary_text"] = "no observable whole-tail changes"
-            validation.pop("delta", None)
-            validation["verdict"] = build_x86_16_tail_validation_verdict(
-                f"structuring:{spec_name}", validation
-            )
-            return True
+    ):
+        return False
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_dword_zero_test_validation_accepts_8616"
+    )
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_indexed_read_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept the indexed global-read carrier materialization delta when proven."""
+    record = getattr(codegen, "_inertia_indexed_global_read_carrier_record_8616", None)
+    if not (
+        isinstance(record, IndexedGlobalReadCarrierMaterializationRecord8616)
+        and indexed_global_read_carrier_precision_delta_8616(record, validation)
+    ):
+        return False
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_indexed_global_read_validation_accepts_8616"
+    )
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_indexed_global_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept the indexed segmented-global materialization delta when proven."""
+    record = getattr(codegen, "_inertia_indexed_global_materialization_record_8616", None)
+    accepted = (
+        isinstance(record, IndexedSegmentedGlobalMaterializationRecord8616)
+        and all(isinstance(item, IndexedSegmentedGlobalEvidence8616) for item in record.evidence)
+        and indexed_segmented_global_precision_delta_8616(
+            record.materialized_count,
+            record.evidence,
+            validation,
+        )
+    )
+    if os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOADS"):
+        logging.getLogger(__name__).warning(
+            "[structuring-indexed-validation] accepted=%s record=%r delta=%r",
+            accepted,
+            record,
+            validation.get("delta"),
+        )
+    if not accepted:
+        return False
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_indexed_global_validation_accepts_8616"
+    )
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_pointer_swap_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept the pointer-swap splice delta when it is precision-only."""
+    stats = getattr(codegen, "_inertia_pointer_swap_splice_stats_8616", None)
+    if not (
+        isinstance(stats, PointerSwapSpliceStats8616)
+        and pointer_swap_validation_delta_is_precision_only_8616(stats, validation)
+    ):
+        return False
+    codegen._inertia_structuring_pointer_swap_validation_accepts_8616 = 1
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _pointer_memory_arm_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool | None:
+    """Return accept for a proven pointer-memory idiom delta, refuse on segmented writes."""
+    facts = getattr(codegen, "_inertia_pointer_memory_idiom_facts_8616", ())
+    fact = (
+        facts[0]
+        if isinstance(facts, tuple)
+        and len(facts) == 1
+        and isinstance(facts[0], PointerMemoryIdiomMaterializationFact8616)
+        else None
+    )
+    if fact is None:
+        return None
+    delta = validation.get("delta")
+    segmented_delta = delta.get("segmented_writes") if isinstance(delta, dict) else None
+    segmented_changed = isinstance(segmented_delta, dict) and bool(
+        segmented_delta.get("added") or segmented_delta.get("removed")
+    )
+    if pointer_memory_loop_validation_delta_is_precision_only_8616(fact, validation):
+        codegen._inertia_structuring_pointer_memory_validation_accepts_8616 = 1
+        return _accept_structuring_delta_8616(validation, spec_name)
+    if segmented_changed:
+        return False
+    return None
+
+
+def _accept_void_tail_call_guard_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept a proven void tail-call guard materialization delta."""
+    if not _void_tail_call_guard_structuring_delta_8616(codegen, validation):
+        return False
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_void_tail_call_guard_validation_accepts_8616"
+    )
+    delta = validation.get("delta")
+    if isinstance(delta, dict):
+        _append_validation_delta_8616(
+            codegen,
+            "_inertia_structuring_void_tail_call_guard_validation_deltas_8616",
+            {
+                "control_flow_effects": delta.get("control_flow_effects"),
+                "stage": f"structuring:{spec_name}",
+            },
+        )
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_loop_header_guard_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept a loop-header duplicate-guard removal delta for gated passes."""
+    facts = (
+        loop_header_duplicate_guard_removal_facts_8616(codegen)
+        if spec_name in {"_unconsumed_loop_break_jcc_materialization_8616", "final"}
+        else ()
+    )
+    if not loop_header_duplicate_guard_removal_delta_8616(facts, validation):
+        return False
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_loop_header_duplicate_guard_validation_accepts_8616"
+    )
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_loop_exit_guard_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept a loop-exit return-guard repair delta when repaired guards exist."""
+    stats = getattr(codegen, "_inertia_loop_exit_guard_stats_8616", None)
+    repaired = int(stats.get("repaired", 0) or 0) if isinstance(stats, dict) else 0
+    if not (repaired > 0 and loop_exit_return_guard_repair_delta_8616(repaired, validation)):
+        return False
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_loop_exit_return_guard_validation_accepts_8616"
+    )
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_stack_move_update_delta_8616(
+    codegen: AngrCodegenSurface,
+    validation: dict[str, object],
+    spec_name: str,
+    is_move_delta: Callable[..., bool],
+    is_update_delta: Callable[..., bool],
+) -> bool:
+    """Accept a direct stack move/update materialization delta."""
+    move_accepted = is_move_delta(codegen, validation)
+    update_accepted = is_update_delta(codegen, validation)
+    if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+        logging.getLogger(__name__).warning(
+            "[structuring-stack-validation] move=%s update=%s stats=%r evidence=%r delta=%r",
+            move_accepted,
+            update_accepted,
+            getattr(codegen, "_inertia_direct_stack_move_lowering_8616", None),
+            getattr(codegen, "_inertia_direct_stack_move_evidence_8616", None),
+            validation.get("delta"),
+        )
+    if not (move_accepted or update_accepted):
+        return False
+    if move_accepted:
+        _bump_validation_accept_8616(
+            codegen, "_inertia_structuring_direct_stack_move_validation_accepts_8616"
+        )
+    if update_accepted:
+        _bump_validation_accept_8616(
+            codegen, "_inertia_structuring_direct_stack_update_validation_accepts_8616"
+        )
+    delta = validation.get("delta")
+    if isinstance(delta, dict):
+        entry = {
+            "conditions": delta.get("conditions"),
+            "control_flow_effects": delta.get("control_flow_effects"),
+            "segmented_writes": delta.get("segmented_writes"),
+            "stack_writes": delta.get("stack_writes"),
+            "stage": f"structuring:{spec_name}",
+        }
+        previous = getattr(
+            codegen,
+            "_inertia_structuring_direct_stack_move_validation_deltas_8616"
+            if move_accepted
+            else "_inertia_structuring_direct_stack_update_validation_deltas_8616",
+            (),
+        )
+        accepted = (*previous, entry) if previous else (entry,)
+        if move_accepted:
+            codegen._inertia_structuring_direct_stack_move_validation_deltas_8616 = accepted
+        if update_accepted:
+            codegen._inertia_structuring_direct_stack_update_validation_deltas_8616 = accepted
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_precision_closure_delta_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept a condition-precision or closure-complete validation delta."""
+    precision_result = condition_precision_validation_delta_8616(codegen, validation)
+    closure = getattr(codegen, "_inertia_structuring_condition_evidence_closure_8616", None)
+    closure_result = validate_condition_closure_delta_8616(closure, validation)
+    codegen._inertia_structuring_condition_closure_validation_result_8616 = closure_result
+    closure_complete = (
+        closure is not None and bool(closure.required_keys) and closure.complete
+    )
+    if not (
+        (precision_result.accepted and closure_complete)
+        or (spec_name == "final" and closure_result.accepted)
+    ):
+        return False
+    if precision_result.accepted:
+        codegen._inertia_structuring_condition_precision_validation_accepts_8616 = 1
+    if closure_result.accepted:
+        codegen._inertia_structuring_condition_closure_validation_accepts_8616 = 1
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _accept_jcc_condition_delta_8616(
+    project: AngrProjectSurface,
+    codegen: AngrCodegenSurface,
+    validation: dict[str, object],
+    function: object,
+    spec_name: str,
+    is_jcc_delta: Callable[..., bool],
+) -> bool:
+    """Accept a JCC condition materialization delta when proven."""
+    if not is_jcc_delta(
+        project,
+        codegen,
+        validation,
+        function=function,
+    ):
+        return False
+    _bump_validation_accept_8616(
+        codegen, "_inertia_structuring_jcc_condition_validation_accepts_8616"
+    )
+    delta = validation.get("delta")
+    if isinstance(delta, dict):
+        _append_validation_delta_8616(
+            codegen,
+            "_inertia_structuring_jcc_condition_validation_deltas_8616",
+            {
+                "conditions": delta.get("conditions"),
+                "control_flow_effects": delta.get("control_flow_effects"),
+                "stage": f"structuring:{spec_name}",
+            },
+        )
+    return _accept_structuring_delta_8616(validation, spec_name)
+
+
+def _postprocess_delta_predicates_8616(
+    codegen: AngrCodegenSurface,
+    validation: dict[str, object],
+    spec_name: str,
+) -> tuple[Callable[..., bool], ...] | None:
+    """Debug-log the loop-guard context and import postprocess delta predicates."""
     if os.environ.get("INERTIA_DEBUG_LOOP_GUARD_VALIDATION") == "1":
         logging.getLogger(__name__).warning(
             "[structuring-loop-guard-validation] pass=%s branch_facts=%r "
@@ -3017,609 +3762,135 @@ def _try_accept_structuring_validation_delta_from_evidence_8616(
             _is_jcc_condition_materialization_validation_delta_8616,
         )
     except Exception:
+        return None
+    return (
+        _is_cfg_return_expr_chain_materialization_delta_8616,
+        _is_direct_stack_move_materialization_delta_8616,
+        _is_direct_stack_update_materialization_delta_8616,
+        _is_jcc_condition_materialization_validation_delta_8616,
+    )
+
+
+def _accept_result_consumption_deltas_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept deltas proven by consumed structuring results."""
+    return (
+        _accept_identical_return_guard_delta_8616(codegen, validation, spec_name)
+        or _accept_frame_prune_delta_8616(codegen, validation, spec_name)
+        or _accept_switch_tail_delta_8616(codegen, validation, spec_name)
+    )
+
+
+def _accept_materialization_deltas_8616(
+    project: AngrProjectSurface,
+    codegen: AngrCodegenSurface,
+    validation: dict[str, object],
+    spec_name: str,
+    is_selector_delta: Callable[..., bool],
+) -> bool:
+    """Accept deltas proven by materialization records and predicates."""
+    return (
+        _accept_terminal_return_delta_8616(project, codegen, validation, spec_name)
+        or _accept_selector_return_delta_8616(
+            project, codegen, validation, spec_name, is_selector_delta
+        )
+        or _accept_call_chain_delta_8616(codegen, validation, spec_name)
+        or _accept_wide_stack_predicate_delta_8616(codegen, validation, spec_name)
+    )
+
+
+def _accept_indexed_write_deltas_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool | None:
+    """Accept indexed/pointer write deltas; None keeps the ladder running."""
+    if _accept_dword_zero_test_delta_8616(codegen, validation, spec_name):
+        return True
+    if _accept_indexed_read_delta_8616(codegen, validation, spec_name):
+        return True
+    if _accept_indexed_global_delta_8616(codegen, validation, spec_name):
+        return True
+    if _accept_pointer_swap_delta_8616(codegen, validation, spec_name):
+        return True
+    return _pointer_memory_arm_8616(codegen, validation, spec_name)
+
+
+def _accept_loop_repair_deltas_8616(
+    codegen: AngrCodegenSurface, validation: dict[str, object], spec_name: str
+) -> bool:
+    """Accept deltas proven by void tail-call and loop-guard repairs."""
+    return (
+        _accept_void_tail_call_guard_delta_8616(codegen, validation, spec_name)
+        or _accept_loop_header_guard_delta_8616(codegen, validation, spec_name)
+        or _accept_loop_exit_guard_delta_8616(codegen, validation, spec_name)
+    )
+
+
+def _accept_residual_deltas_8616(
+    project: AngrProjectSurface,
+    codegen: AngrCodegenSurface,
+    validation: dict[str, object],
+    function: object,
+    spec_name: str,
+    is_move_delta: Callable[..., bool],
+    is_update_delta: Callable[..., bool],
+    is_jcc_delta: Callable[..., bool],
+) -> bool:
+    """Accept stack-update, condition-closure, or JCC materialization deltas."""
+    if _accept_stack_move_update_delta_8616(
+        codegen, validation, spec_name, is_move_delta, is_update_delta
+    ):
+        return True
+    if _accept_precision_closure_delta_8616(codegen, validation, spec_name):
+        return True
+    return _accept_jcc_condition_delta_8616(
+        project, codegen, validation, function, spec_name, is_jcc_delta
+    )
+
+
+def _try_accept_structuring_validation_delta_from_evidence_8616(
+    project: AngrProjectSurface,
+    codegen: AngrCodegenSurface,
+    validation: dict[str, object],
+    *,
+    spec_name: str,
+    before_summary: TailValidationCallsiteSummary8616 | None = None,
+    after_summary: TailValidationCallsiteSummary8616 | None = None,
+) -> bool:
+    """Accept a structuring delta only through an existing consumed-evidence validator."""
+    if not isinstance(validation, dict) or x86_16_tail_validation_result_passed(validation):
         return False
-
-    try:
-        identical_return_result = (
-            codegen._inertia_identical_return_guard_collapse_result_8616
-        )
-    except AttributeError:
-        identical_return_result = None
-    identical_return_validation = (
-        consume_identical_return_guard_validation_delta_8616(
-            identical_return_result,
-            validation,
-        )
-    )
-    codegen._inertia_identical_return_guard_validation_result_8616 = (
-        identical_return_validation
-    )
-    if (
-        identical_return_validation.accepted
-        and not identical_return_validation.residual_changed
+    if _accept_callsite_completeness_delta_8616(
+        codegen, validation, spec_name, before_summary, after_summary
     ):
-        validation["verdict"] = build_x86_16_tail_validation_verdict(
-            f"structuring:{spec_name}",
-            validation,
-        )
         return True
+    predicates = _postprocess_delta_predicates_8616(codegen, validation, spec_name)
+    if predicates is None:
+        return False
+    is_cfg_return_delta, is_move_delta, is_update_delta, is_jcc_delta = predicates
 
-    try:
-        frame_prune_record = codegen._inertia_callee_saved_frame_prune_record_8616
-    except AttributeError:
-        frame_prune_record = None
-    if callee_saved_frame_prune_delta_8616(
-        frame_prune_record
-        if isinstance(frame_prune_record, CalleeSavedFramePruneRecord8616)
-        else None,
-        validation,
+    if _accept_result_consumption_deltas_8616(codegen, validation, spec_name):
+        return True
+    function = _codegen_function_8616(project, codegen)
+    if _accept_materialization_deltas_8616(
+        project, codegen, validation, spec_name, is_cfg_return_delta
     ):
-        try:
-            frame_prune_accepts = codegen._inertia_structuring_callee_saved_frame_validation_accepts_8616
-        except AttributeError:
-            frame_prune_accepts = 0
-        codegen._inertia_structuring_callee_saved_frame_validation_accepts_8616 = (
-            int(frame_prune_accepts or 0) + 1
-        )
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(
-            f"structuring:{spec_name}",
-            validation,
-        )
         return True
-
-    try:
-        switch_tail_result = codegen._inertia_structuring_switch_loop_tail_break_result_8616
-    except AttributeError:
-        switch_tail_result = None
-    switch_tail_validation = consume_switch_loop_tail_break_validation_delta_8616(
-        switch_tail_result
-        if isinstance(switch_tail_result, SwitchLoopTailBreakResult8616)
-        else None,
-        validation,
-    )
-    if switch_tail_validation.accepted:
-        try:
-            switch_tail_accepts = (
-                codegen._inertia_structuring_switch_loop_tail_break_validation_accepts_8616
-            )
-        except AttributeError:
-            switch_tail_accepts = 0
-        codegen._inertia_structuring_switch_loop_tail_break_validation_accepts_8616 = (
-            int(switch_tail_accepts or 0) + 1
-        )
-        if not switch_tail_validation.residual_changed:
-            validation["summary_text"] = "no observable whole-tail changes"
-            validation.pop("delta", None)
-            validation["verdict"] = build_x86_16_tail_validation_verdict(
-                f"structuring:{spec_name}", validation
-            )
-            return True
-        validation["verdict"] = build_x86_16_tail_validation_verdict(
-            f"structuring:{spec_name}", validation
-        )
-
-    def _is_void_tail_call_guard_structuring_delta_8616() -> bool:
-        if int(getattr(codegen, "_inertia_void_tail_call_guard_materialized_8616", 0) or 0) <= 0:
-            return False
-        delta = validation.get("delta")
-        if not isinstance(delta, dict):
-            return False
-        for field_name in (
-            "conditions",
-            "global_writes",
-            "helper_calls",
-            "register_writes",
-            "returns",
-            "segmented_writes",
-            "stack_writes",
-        ):
-            field_delta = delta.get(field_name)
-            if not isinstance(field_delta, dict):
-                continue
-            if tuple(field_delta.get("added", ()) or ()) or tuple(field_delta.get("removed", ()) or ()):
-                return False
-        control_delta = delta.get("control_flow_effects")
-        if not isinstance(control_delta, dict):
-            return False
-        added = tuple(str(item) for item in tuple(control_delta.get("added", ()) or ()))
-        removed = tuple(str(item) for item in tuple(control_delta.get("removed", ()) or ()))
-        if not added or not removed:
-            return False
-        decision = getattr(codegen, "_inertia_void_tail_call_guard_decision_8616", None)
-        if decision == _VoidTailCallGuardDecision8616.MATERIALIZE_SUFFIX_DIAMOND.value:
-            allowed_call_prefixes = ("if-body-calls:", "if-else-body-calls:else:")
-
-            def _call_targets_from_effect(effect: str) -> tuple[int, ...]:
-                if not effect.startswith(allowed_call_prefixes):
-                    return ()
-                targets: list[int] = []
-                offset = 0
-                token = "addr:0x"
-                while True:
-                    pos = effect.find(token, offset)
-                    if pos < 0:
-                        break
-                    start = pos + len(token)
-                    end = start
-                    while end < len(effect) and effect[end].lower() in "0123456789abcdef":
-                        end += 1
-                    if end > start:
-                        targets.append(int(effect[start:end], 16))
-                    offset = end
-                return tuple(targets)
-
-            def _call_target_multiset(effects: tuple[str, ...]) -> Counter[int]:
-                targets: Counter[int] = Counter()
-                for effect in effects:
-                    effect_targets = _call_targets_from_effect(effect)
-                    if not effect_targets:
-                        return Counter()
-                    targets.update(effect_targets)
-                return targets
-
-            added_targets = _call_target_multiset(added)
-            removed_targets = _call_target_multiset(removed)
-            return bool(added_targets) and added_targets == removed_targets
-
-        if not all(item.startswith("if-body-calls:") for item in added):
-            return False
-        allowed_removed_prefixes = ("if-else-body-calls:else:",)
-        allowed_removed_exact = {"if:else"}
-        return all(
-            item in allowed_removed_exact or item.startswith(allowed_removed_prefixes)
-            for item in removed
-        )
-
-    function = None
-    func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
-    functions = getattr(getattr(project, "kb", None), "functions", None)
-    if isinstance(func_addr, int) and functions is not None:
-        with contextlib.suppress(Exception):
-            function = functions.function(addr=func_addr, create=False)
-    try:
-        terminal_return_materialization = codegen._inertia_terminal_return_value_materialization_result_8616
-    except AttributeError:
-        terminal_return_materialization = None
-    if not isinstance(
-        terminal_return_materialization,
-        _terminal_register_values.TerminalReturnValueMaterializationResult8616,
-    ):
-        terminal_return_materialization = None
-    terminal_return_validation = terminal_return_value_validation_delta_8616(
-        project,
-        codegen,
-        terminal_return_materialization,
-        validation,
-    )
-    codegen._inertia_terminal_return_value_validation_result_8616 = terminal_return_validation
-    if terminal_return_validation.accepted:
-        codegen._inertia_structuring_terminal_return_validation_accepts_8616 = (
-            int(getattr(codegen, "_inertia_structuring_terminal_return_validation_accepts_8616", 0) or 0) + 1
-        )
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(f"structuring:{spec_name}", validation)
+    indexed_verdict = _accept_indexed_write_deltas_8616(codegen, validation, spec_name)
+    if indexed_verdict is not None:
+        return indexed_verdict
+    if _accept_loop_repair_deltas_8616(codegen, validation, spec_name):
         return True
-    if _is_cfg_return_expr_chain_materialization_delta_8616(project, None, codegen, validation):
-        codegen._inertia_structuring_selector_return_validation_accepts_8616 = (
-            int(getattr(codegen, "_inertia_structuring_selector_return_validation_accepts_8616", 0) or 0) + 1
-        )
-        delta = validation.get("delta")
-        if isinstance(delta, dict):
-            accepted_deltas: list[object] = list(
-                getattr(codegen, "_inertia_structuring_selector_return_validation_deltas_8616", ()) or ()
-            )
-            accepted_deltas.append(
-                {
-                    "conditions": delta.get("conditions"),
-                    "control_flow_effects": delta.get("control_flow_effects"),
-                    "helper_calls": delta.get("helper_calls"),
-                    "returns": delta.get("returns"),
-                    "stage": f"structuring:{spec_name}",
-                }
-            )
-            codegen._inertia_structuring_selector_return_validation_deltas_8616 = tuple(accepted_deltas)
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(f"structuring:{spec_name}", validation)
-        return True
-
-    if _is_structuring_call_chain_materialization_delta_8616(codegen, validation):
-        codegen._inertia_structuring_call_chain_validation_accepts_8616 = (
-            int(getattr(codegen, "_inertia_structuring_call_chain_validation_accepts_8616", 0) or 0) + 1
-        )
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(
-            f"structuring:{spec_name}", validation
-        )
-        return True
-
-    wide_predicate_result = getattr(
-        codegen,
-        "_inertia_wide_stack_return_predicate_result_8616",
-        None,
-    )
-    if wide_stack_return_predicate_validation_delta_is_proven_8616(
-        wide_predicate_result,
-        validation,
-    ):
-        codegen._inertia_structuring_wide_stack_predicate_validation_accepts_8616 = (
-            int(
-                getattr(
-                    codegen,
-                    "_inertia_structuring_wide_stack_predicate_validation_accepts_8616",
-                    0,
-                )
-                or 0
-            )
-            + 1
-        )
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(
-            f"structuring:{spec_name}",
-            validation,
-        )
-        return True
-
-    try:
-        dword_zero_test_record = codegen._inertia_dword_global_zero_test_materialization_record_8616
-    except AttributeError:
-        dword_zero_test_record = None
-    dword_zero_test_delta_accepted = (
-        isinstance(
-            dword_zero_test_record,
-            DwordGlobalZeroTestMaterializationRecord8616,
-        )
-        and dword_global_zero_test_precision_delta_8616(
-            dword_zero_test_record.materialized_count,
-            dword_zero_test_record.evidence,
-            validation,
-        )
-    )
-    if dword_zero_test_delta_accepted:
-        codegen._inertia_structuring_dword_zero_test_validation_accepts_8616 = (
-            int(getattr(codegen, "_inertia_structuring_dword_zero_test_validation_accepts_8616", 0) or 0) + 1
-        )
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(
-            f"structuring:{spec_name}",
-            validation,
-        )
-        return True
-
-    try:
-        indexed_read_record = codegen._inertia_indexed_global_read_carrier_record_8616
-    except AttributeError:
-        indexed_read_record = None
-    indexed_read_delta_accepted = (
-        isinstance(
-            indexed_read_record,
-            IndexedGlobalReadCarrierMaterializationRecord8616,
-        )
-        and indexed_global_read_carrier_precision_delta_8616(
-            indexed_read_record,
-            validation,
-        )
-    )
-    if indexed_read_delta_accepted:
-        try:
-            indexed_read_accepts = codegen._inertia_structuring_indexed_global_read_validation_accepts_8616
-        except AttributeError:
-            indexed_read_accepts = 0
-        codegen._inertia_structuring_indexed_global_read_validation_accepts_8616 = (
-            int(indexed_read_accepts or 0) + 1
-        )
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(
-            f"structuring:{spec_name}",
-            validation,
-        )
-        return True
-
-    indexed_record = getattr(codegen, "_inertia_indexed_global_materialization_record_8616", None)
-    indexed_delta_accepted = (
-        isinstance(indexed_record, IndexedSegmentedGlobalMaterializationRecord8616)
-        and all(isinstance(item, IndexedSegmentedGlobalEvidence8616) for item in indexed_record.evidence)
-        and indexed_segmented_global_precision_delta_8616(
-            indexed_record.materialized_count,
-            indexed_record.evidence,
-            validation,
-        )
-    )
-    if os.environ.get("INERTIA_DEBUG_SEGMENTED_GLOBAL_LOADS"):
-        logging.getLogger(__name__).warning(
-            "[structuring-indexed-validation] accepted=%s record=%r delta=%r",
-            indexed_delta_accepted,
-            indexed_record,
-            validation.get("delta"),
-        )
-    if indexed_delta_accepted:
-        codegen._inertia_structuring_indexed_global_validation_accepts_8616 = (
-            int(getattr(codegen, "_inertia_structuring_indexed_global_validation_accepts_8616", 0) or 0) + 1
-        )
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(f"structuring:{spec_name}", validation)
-        return True
-
-    try:
-        pointer_swap_stats = codegen._inertia_pointer_swap_splice_stats_8616
-    except AttributeError:
-        pointer_swap_stats = None
-    if isinstance(pointer_swap_stats, PointerSwapSpliceStats8616) and pointer_swap_validation_delta_is_precision_only_8616(
-        pointer_swap_stats,
-        validation,
-    ):
-        codegen._inertia_structuring_pointer_swap_validation_accepts_8616 = 1
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(f"structuring:{spec_name}", validation)
-        return True
-
-    try:
-        pointer_memory_facts = codegen._inertia_pointer_memory_idiom_facts_8616
-    except AttributeError:
-        pointer_memory_facts = ()
-    pointer_memory_fact = (
-        pointer_memory_facts[0]
-        if isinstance(pointer_memory_facts, tuple)
-        and len(pointer_memory_facts) == 1
-        and isinstance(pointer_memory_facts[0], PointerMemoryIdiomMaterializationFact8616)
-        else None
-    )
-    if pointer_memory_fact is not None:
-        delta = validation.get("delta")
-        segmented_delta = delta.get("segmented_writes") if isinstance(delta, dict) else None
-        segmented_changed = isinstance(segmented_delta, dict) and bool(
-            segmented_delta.get("added") or segmented_delta.get("removed")
-        )
-        if pointer_memory_loop_validation_delta_is_precision_only_8616(
-            pointer_memory_fact,
-            validation,
-        ):
-            codegen._inertia_structuring_pointer_memory_validation_accepts_8616 = 1
-            validation["changed"] = False
-            validation["status"] = "stable"
-            validation["summary_text"] = "no observable whole-tail changes"
-            validation.pop("delta", None)
-            validation["verdict"] = build_x86_16_tail_validation_verdict(
-                f"structuring:{spec_name}",
-                validation,
-            )
-            return True
-        if segmented_changed:
-            return False
-
-    if _is_void_tail_call_guard_structuring_delta_8616():
-        codegen._inertia_structuring_void_tail_call_guard_validation_accepts_8616 = (
-            int(getattr(codegen, "_inertia_structuring_void_tail_call_guard_validation_accepts_8616", 0) or 0) + 1
-        )
-        delta = validation.get("delta")
-        if isinstance(delta, dict):
-            accepted_deltas = list(
-                getattr(codegen, "_inertia_structuring_void_tail_call_guard_validation_deltas_8616", ()) or ()
-            )
-            accepted_deltas.append(
-                {
-                    "control_flow_effects": delta.get("control_flow_effects"),
-                    "stage": f"structuring:{spec_name}",
-                }
-            )
-            codegen._inertia_structuring_void_tail_call_guard_validation_deltas_8616 = tuple(accepted_deltas)
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(f"structuring:{spec_name}", validation)
-        return True
-
-    loop_guard_removal_facts = (
-        loop_header_duplicate_guard_removal_facts_8616(codegen)
-        if spec_name
-        in {
-            "_unconsumed_loop_break_jcc_materialization_8616",
-            "final",
-        }
-        else ()
-    )
-    if loop_header_duplicate_guard_removal_delta_8616(
-        loop_guard_removal_facts,
-        validation,
-    ):
-        try:
-            loop_guard_accepts = (
-                codegen._inertia_structuring_loop_header_duplicate_guard_validation_accepts_8616
-            )
-        except AttributeError:
-            loop_guard_accepts = 0
-        codegen._inertia_structuring_loop_header_duplicate_guard_validation_accepts_8616 = (
-            int(loop_guard_accepts or 0) + 1
-        )
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(
-            f"structuring:{spec_name}",
-            validation,
-        )
-        return True
-
-    loop_exit_guard_stats = getattr(codegen, "_inertia_loop_exit_guard_stats_8616", None)
-    loop_exit_guard_repaired = (
-        int(loop_exit_guard_stats.get("repaired", 0) or 0)
-        if isinstance(loop_exit_guard_stats, dict)
-        else 0
-    )
-    if loop_exit_guard_repaired > 0 and loop_exit_return_guard_repair_delta_8616(
-        loop_exit_guard_repaired,
-        validation,
-    ):
-        codegen._inertia_structuring_loop_exit_return_guard_validation_accepts_8616 = (
-            int(
-                getattr(
-                    codegen,
-                    "_inertia_structuring_loop_exit_return_guard_validation_accepts_8616",
-                    0,
-                )
-                or 0
-            )
-            + 1
-        )
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(
-            f"structuring:{spec_name}", validation
-        )
-        return True
-
-    stack_move_delta_accepted = _is_direct_stack_move_materialization_delta_8616(codegen, validation)
-    stack_update_delta_accepted = _is_direct_stack_update_materialization_delta_8616(codegen, validation)
-    if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-        try:
-            move_stats = codegen._inertia_direct_stack_move_lowering_8616
-        except AttributeError:
-            move_stats = None
-        try:
-            move_evidence = codegen._inertia_direct_stack_move_evidence_8616
-        except AttributeError:
-            move_evidence = None
-        logging.getLogger(__name__).warning(
-            "[structuring-stack-validation] move=%s update=%s stats=%r evidence=%r delta=%r",
-            stack_move_delta_accepted,
-            stack_update_delta_accepted,
-            move_stats,
-            move_evidence,
-            validation.get("delta"),
-        )
-    if stack_move_delta_accepted or stack_update_delta_accepted:
-        if stack_move_delta_accepted:
-            try:
-                move_accepts = codegen._inertia_structuring_direct_stack_move_validation_accepts_8616
-            except AttributeError:
-                move_accepts = 0
-            codegen._inertia_structuring_direct_stack_move_validation_accepts_8616 = int(move_accepts or 0) + 1
-        if stack_update_delta_accepted:
-            try:
-                update_accepts = codegen._inertia_structuring_direct_stack_update_validation_accepts_8616
-            except AttributeError:
-                update_accepts = 0
-            codegen._inertia_structuring_direct_stack_update_validation_accepts_8616 = int(update_accepts or 0) + 1
-        delta = validation.get("delta")
-        if isinstance(delta, dict):
-            try:
-                previous_deltas = (
-                    codegen._inertia_structuring_direct_stack_move_validation_deltas_8616
-                    if stack_move_delta_accepted
-                    else codegen._inertia_structuring_direct_stack_update_validation_deltas_8616
-                )
-            except AttributeError:
-                previous_deltas = ()
-            accepted_deltas = list(previous_deltas or ())
-            accepted_deltas.append(
-                {
-                    "conditions": delta.get("conditions"),
-                    "control_flow_effects": delta.get("control_flow_effects"),
-                    "segmented_writes": delta.get("segmented_writes"),
-                    "stack_writes": delta.get("stack_writes"),
-                    "stage": f"structuring:{spec_name}",
-                }
-            )
-            if stack_move_delta_accepted:
-                codegen._inertia_structuring_direct_stack_move_validation_deltas_8616 = tuple(accepted_deltas)
-            if stack_update_delta_accepted:
-                codegen._inertia_structuring_direct_stack_update_validation_deltas_8616 = tuple(accepted_deltas)
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(f"structuring:{spec_name}", validation)
-        return True
-
-    precision_result = condition_precision_validation_delta_8616(codegen, validation)
-    try:
-        condition_closure = codegen._inertia_structuring_condition_evidence_closure_8616
-    except AttributeError:
-        condition_closure = None
-    closure_result = validate_condition_closure_delta_8616(condition_closure, validation)
-    codegen._inertia_structuring_condition_closure_validation_result_8616 = closure_result
-    precision_closure_complete = (
-        condition_closure is not None
-        and bool(condition_closure.required_keys)
-        and condition_closure.complete
-    )
-    if (precision_result.accepted and precision_closure_complete) or (
-        spec_name == "final" and closure_result.accepted
-    ):
-        if precision_result.accepted:
-            codegen._inertia_structuring_condition_precision_validation_accepts_8616 = 1
-        if closure_result.accepted:
-            codegen._inertia_structuring_condition_closure_validation_accepts_8616 = 1
-        validation["changed"] = False
-        validation["status"] = "stable"
-        validation["summary_text"] = "no observable whole-tail changes"
-        validation.pop("delta", None)
-        validation["verdict"] = build_x86_16_tail_validation_verdict(
-            f"structuring:{spec_name}", validation
-        )
-        return True
-
-    if not _is_jcc_condition_materialization_validation_delta_8616(
+    return _accept_residual_deltas_8616(
         project,
         codegen,
         validation,
-        function=function,
-    ):
-        return False
-
-    codegen._inertia_structuring_jcc_condition_validation_accepts_8616 = (
-        int(getattr(codegen, "_inertia_structuring_jcc_condition_validation_accepts_8616", 0) or 0) + 1
+        function,
+        spec_name,
+        is_move_delta,
+        is_update_delta,
+        is_jcc_delta,
     )
-    delta = validation.get("delta")
-    if isinstance(delta, dict):
-        accepted_deltas = list(
-            getattr(codegen, "_inertia_structuring_jcc_condition_validation_deltas_8616", ()) or ()
-        )
-        accepted_deltas.append(
-            {
-                "conditions": delta.get("conditions"),
-                "control_flow_effects": delta.get("control_flow_effects"),
-                "stage": f"structuring:{spec_name}",
-            }
-        )
-        codegen._inertia_structuring_jcc_condition_validation_deltas_8616 = tuple(accepted_deltas)
-    validation["changed"] = False
-    validation["status"] = "stable"
-    validation["summary_text"] = "no observable whole-tail changes"
-    validation.pop("delta", None)
-    validation["verdict"] = build_x86_16_tail_validation_verdict(f"structuring:{spec_name}", validation)
-    return True
 
 
 def _maybe_validate_structuring_pass_8616(
@@ -3647,78 +3918,115 @@ def _maybe_validate_structuring_pass_8616(
         mode=mode,
         boundary_fingerprint=before_fingerprint,
     )
+    return _StructuringPassValidation8616(
+        project,
+        codegen,
+        spec_name,
+        mode,
+        before_fingerprint,
+        before_summary,
+    ).finalize
 
-    def finalize(pass_changed: bool) -> None:
+
+@dataclass
+class _StructuringPassValidation8616:
+    """Per-pass tail-validation closure bound to its captured baseline."""
+
+    project: AngrProjectSurface
+    codegen: AngrCodegenSurface
+    spec_name: str
+    mode: str
+    before_fingerprint: str
+    before_summary: X86_16TailValidationSummary
+
+    def finalize(self, pass_changed: bool) -> None:
+        """Close the per-pass tail-validation comparison and publish its result."""
         # Only a reported AST mutation needs closure. Semantic no-op passes are
         # still validated, but cannot invalidate the already-primed surface.
         if pass_changed:
-            if spec_name == "_unconsumed_loop_break_jcc_materialization_8616":
-                _materialize_structuring_unconsumed_loop_break_jcc_8616(
-                    project,
-                    codegen,
-                )
-            _replay_structuring_lowering_after_condition_refresh_8616(project, codegen)
-            _repair_structuring_switch_loop_exit_returns_8616(project, codegen)
-            _materialize_structuring_selector_return_branches_8616(project, codegen)
-        after_fingerprint = fingerprint_x86_16_tail_validation_boundary(project, codegen, mode=mode)
+            self._replay_changed_pass_repairs()
+        after_fingerprint = fingerprint_x86_16_tail_validation_boundary(
+            self.project, self.codegen, mode=self.mode
+        )
         after_summary = collect_x86_16_tail_validation_summary(
-            project,
-            codegen,
-            mode=mode,
+            self.project,
+            self.codegen,
+            mode=self.mode,
             boundary_fingerprint=after_fingerprint,
         )
         validation = build_x86_16_tail_validation_cached_result(
             owner=None,
-            stage=f"structuring:{spec_name}",
-            mode=mode,
-            before_fingerprint=before_fingerprint,
+            stage=f"structuring:{self.spec_name}",
+            mode=self.mode,
+            before_fingerprint=self.before_fingerprint,
             after_fingerprint=after_fingerprint,
-            before_summary=before_summary,
+            before_summary=self.before_summary,
             after_summary=after_summary,
             semantic_failure_scope=TailSemanticFailureScope8616.INTRODUCED,
         )
-        validation["verdict"] = build_x86_16_tail_validation_verdict(f"structuring:{spec_name}", validation)
+        validation["verdict"] = build_x86_16_tail_validation_verdict(
+            f"structuring:{self.spec_name}", validation
+        )
+        self._publish(validation, after_summary)
+
+    def _replay_changed_pass_repairs(self) -> None:
+        """Re-run proof-consuming repairs after a reported AST mutation."""
+        if self.spec_name == "_unconsumed_loop_break_jcc_materialization_8616":
+            _materialize_structuring_unconsumed_loop_break_jcc_8616(
+                self.project,
+                self.codegen,
+            )
+        _replay_structuring_lowering_after_condition_refresh_8616(self.project, self.codegen)
+        _repair_structuring_switch_loop_exit_returns_8616(self.project, self.codegen)
+        _materialize_structuring_selector_return_branches_8616(self.project, self.codegen)
+
+    def _publish(
+        self,
+        validation: dict[str, object],
+        after_summary: TailValidationCallsiteSummary8616 | None,
+    ) -> None:
+        """Attempt evidence acceptance, store the result, and mark failures."""
+        codegen = self.codegen
         existing = getattr(codegen, "_inertia_structuring_pass_validation", None)
         if not isinstance(existing, dict):
             existing = {}
             codegen._inertia_structuring_pass_validation = existing
         if _try_accept_structuring_validation_delta_from_evidence_8616(
-            project,
+            self.project,
             codegen,
             validation,
-            spec_name=spec_name,
-            before_summary=before_summary,
+            spec_name=self.spec_name,
+            before_summary=self.before_summary,
             after_summary=after_summary,
         ):
             logging.getLogger(__name__).warning(
                 "structuring pass validation delta accepted from consumed evidence function=%#x pass=%s verdict=%s",
                 getattr(getattr(codegen, "cfunc", None), "addr", -1) or -1,
-                spec_name,
+                self.spec_name,
                 validation.get("verdict"),
             )
-        existing[spec_name] = validation
-        if not x86_16_tail_validation_result_passed(validation):
-            if os.environ.get("INERTIA_DEBUG_TV_SUMMARY") == "1":
-                logging.getLogger(__name__).warning(
-                    "structuring validation details function=%#x pass=%s delta=%r semantic_failures=%r",
-                    getattr(getattr(codegen, "cfunc", None), "addr", -1) or -1,
-                    spec_name,
-                    validation.get("delta"),
-                    validation.get("semantic_failures"),
-                )
+        existing[self.spec_name] = validation
+        if x86_16_tail_validation_result_passed(validation):
+            return
+        if os.environ.get("INERTIA_DEBUG_TV_SUMMARY") == "1":
             logging.getLogger(__name__).warning(
-                "structuring pass validation changed function=%#x pass=%s verdict=%s",
+                "structuring validation details function=%#x pass=%s delta=%r semantic_failures=%r",
                 getattr(getattr(codegen, "cfunc", None), "addr", -1) or -1,
-                spec_name,
-                validation.get("verdict"),
+                self.spec_name,
+                validation.get("delta"),
+                validation.get("semantic_failures"),
             )
-            codegen._inertia_structuring_validation_failed = True
-            codegen._inertia_structuring_validation_failure_pass = spec_name
-            codegen._inertia_structuring_validation_failure_error = (
-                validation.get("summary_text") or f"tail-validation status={validation.get('status', 'unknown')}"
-            )
-
-    return finalize
+        logging.getLogger(__name__).warning(
+            "structuring pass validation changed function=%#x pass=%s verdict=%s",
+            getattr(getattr(codegen, "cfunc", None), "addr", -1) or -1,
+            self.spec_name,
+            validation.get("verdict"),
+        )
+        codegen._inertia_structuring_validation_failed = True
+        codegen._inertia_structuring_validation_failure_pass = self.spec_name
+        codegen._inertia_structuring_validation_failure_error = (
+            validation.get("summary_text") or f"tail-validation status={validation.get('status', 'unknown')}"
+        )
 
 
 def _decompiler_structuring_passes_for_function(
@@ -3748,16 +4056,129 @@ def describe_x86_16_decompiler_structuring_stage() -> tuple[tuple[str, bool], ..
     return tuple((spec.name, spec.needs_project) for spec in DECOMPILER_STRUCTURING_PASSES)
 
 
-def _restore_not_shift_conditions_structuring_8616(codegen: AngrCodegenSurface) -> bool:
-    from angr.analyses.decompiler.structured_codegen.c import (
-        CBinaryOp,
-        CConstant,
-        CIfElse,
-        CStatements,
-        CTypeCast,
-        CUnaryOp,
-    )
+@dataclass
+class _NotShiftConditionRestore8616:
+    """Rewrite ``~(x) >> k`` conditions back to ``(x >> k) == 0`` comparisons."""
 
+    codegen: AngrCodegenSurface
+
+    @staticmethod
+    def _unwrap(expr: object) -> object:
+        while isinstance(expr, CTypeCast):
+            expr = getattr(expr, "expr", None)
+        return expr
+
+    def _constant_int(self, expr: object) -> int | None:
+        expr = self._unwrap(expr)
+        value = getattr(expr, "value", None)
+        return int(value) if isinstance(value, int) else None
+
+    def _restore_expr(self, expr: object) -> tuple[object, bool]:
+        expr = self._unwrap(expr)
+        if isinstance(expr, CBinaryOp):
+            return self._restore_binop(expr)
+        if isinstance(expr, CUnaryOp):
+            operand, operand_changed = self._restore_expr(expr.operand)
+            if operand_changed:
+                cast(Any, expr).operand = operand
+            return expr, operand_changed
+        if isinstance(expr, CTypeCast):
+            inner, inner_changed = self._restore_expr(expr.expr)
+            if inner_changed:
+                cast(Any, expr).expr = inner
+            return expr, inner_changed
+        return expr, False
+
+    def _restore_binop(self, expr: CBinaryOp) -> tuple[object, bool]:
+        lhs, lhs_changed = self._restore_expr(expr.lhs)
+        rhs, rhs_changed = self._restore_expr(expr.rhs)
+        if lhs_changed:
+            expr.lhs = lhs
+        if rhs_changed:
+            expr.rhs = rhs
+        if expr.op in {"Shr", "Sar"}:
+            restored = self._restored_not_shift(expr)
+            if restored is not None:
+                return restored, True
+        return expr, lhs_changed or rhs_changed
+
+    def _restored_not_shift(self, expr: CBinaryOp) -> CBinaryOp | None:
+        lhs_node = self._unwrap(expr.lhs)
+        shift = self._constant_int(expr.rhs)
+        if not (
+            isinstance(lhs_node, CUnaryOp)
+            and lhs_node.op == "Not"
+            and isinstance(shift, int)
+            and shift > 0
+        ):
+            return None
+        restored_shift = CBinaryOp(
+            expr.op,
+            lhs_node.operand,
+            expr.rhs,
+            codegen=self.codegen,
+            tags=expr.tags,
+        )
+        return CBinaryOp(
+            "CmpEQ",
+            restored_shift,
+            CConstant(0, SimTypeShort(False), codegen=self.codegen),
+            codegen=self.codegen,
+            tags=lhs_node.tags or expr.tags,
+        )
+
+    def _visit(self, node: object) -> bool:
+        changed = self._visit_condition_attrs(node)
+        changed = self._visit_condition_pairs(node) or changed
+        changed = self._visit_children(node) or changed
+        return changed
+
+    def _visit_condition_attrs(self, node: object) -> bool:
+        changed = False
+        for attr in ("condition", "cond"):
+            condition = getattr(node, attr, None)
+            if condition is None:
+                continue
+            new_condition, condition_changed = self._restore_expr(condition)
+            if condition_changed:
+                setattr(node, attr, new_condition)
+                changed = True
+        return changed
+
+    def _visit_condition_pairs(self, node: object) -> bool:
+        pairs = getattr(node, "condition_and_nodes", None)
+        if not pairs:
+            return False
+        new_pairs = []
+        pair_changed = False
+        child_changed = False
+        for condition, body in pairs:
+            new_condition, condition_changed = self._restore_expr(condition)
+            pair_changed = pair_changed or condition_changed
+            if body is not None:
+                child_changed = self._visit(body) or child_changed
+            new_pairs.append((new_condition, body))
+        if pair_changed:
+            cast(Any, node).condition_and_nodes = new_pairs
+        return pair_changed or child_changed
+
+    def _visit_children(self, node: object) -> bool:
+        changed = False
+        for attr in ("body", "else_node"):
+            child = getattr(node, attr, None)
+            if child is not None:
+                changed = self._visit(child) or changed
+        if isinstance(node, CStatements):
+            for statement in tuple(node.statements or ()):
+                changed = self._visit(statement) or changed
+        elif isinstance(node, CIfElse):
+            else_node = node.else_node
+            if else_node is not None:
+                changed = self._visit(else_node) or changed
+        return changed
+
+
+def _restore_not_shift_conditions_structuring_8616(codegen: AngrCodegenSurface) -> bool:
     cfunc = getattr(codegen, "cfunc", None)
     roots = []
     seen_roots: set[int] = set()
@@ -3770,98 +4191,10 @@ def _restore_not_shift_conditions_structuring_8616(codegen: AngrCodegenSurface) 
     if not roots:
         return False
 
-    def _unwrap(expr: object) -> object:
-        while isinstance(expr, CTypeCast):
-            expr = getattr(expr, "expr", None)
-        return expr
-
-    def _constant_int(expr: object) -> int | None:
-        expr = _unwrap(expr)
-        value = getattr(expr, "value", None)
-        return int(value) if isinstance(value, int) else None
-
-    def _restore_expr(expr: object) -> tuple[object, bool]:
-        expr = _unwrap(expr)
-        if isinstance(expr, CBinaryOp):
-            lhs, lhs_changed = _restore_expr(expr.lhs)
-            rhs, rhs_changed = _restore_expr(expr.rhs)
-            if lhs_changed:
-                expr.lhs = lhs
-            if rhs_changed:
-                expr.rhs = rhs
-            if expr.op in {"Shr", "Sar"}:
-                lhs_node = _unwrap(expr.lhs)
-                shift = _constant_int(expr.rhs)
-                if isinstance(lhs_node, CUnaryOp) and lhs_node.op == "Not" and isinstance(shift, int) and shift > 0:
-                    restored_shift = CBinaryOp(
-                        expr.op,
-                        lhs_node.operand,
-                        expr.rhs,
-                        codegen=codegen,
-                        tags=expr.tags,
-                    )
-                    return (
-                        CBinaryOp(
-                            "CmpEQ",
-                            restored_shift,
-                            CConstant(0, SimTypeShort(False), codegen=codegen),
-                            codegen=codegen,
-                            tags=lhs_node.tags or expr.tags,
-                        ),
-                        True,
-                    )
-            return expr, lhs_changed or rhs_changed
-        if isinstance(expr, CUnaryOp):
-            operand, operand_changed = _restore_expr(expr.operand)
-            if operand_changed:
-                cast(Any, expr).operand = operand
-            return expr, operand_changed
-        if isinstance(expr, CTypeCast):
-            inner, inner_changed = _restore_expr(expr.expr)
-            if inner_changed:
-                cast(Any, expr).expr = inner
-            return expr, inner_changed
-        return expr, False
-
-    def _visit(node: object) -> bool:
-        changed = False
-        for attr in ("condition", "cond"):
-            condition = getattr(node, attr, None)
-            if condition is None:
-                continue
-            new_condition, condition_changed = _restore_expr(condition)
-            if condition_changed:
-                setattr(node, attr, new_condition)
-                changed = True
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            new_pairs = []
-            pair_changed = False
-            for condition, body in pairs:
-                new_condition, condition_changed = _restore_expr(condition)
-                pair_changed = pair_changed or condition_changed
-                if body is not None:
-                    changed = _visit(body) or changed
-                new_pairs.append((new_condition, body))
-            if pair_changed:
-                cast(Any, node).condition_and_nodes = new_pairs
-                changed = True
-        for attr in ("body", "else_node"):
-            child = getattr(node, attr, None)
-            if child is not None:
-                changed = _visit(child) or changed
-        if isinstance(node, CStatements):
-            for statement in tuple(node.statements or ()):
-                changed = _visit(statement) or changed
-        elif isinstance(node, CIfElse):
-            else_node = node.else_node
-            if else_node is not None:
-                changed = _visit(else_node) or changed
-        return changed
-
+    restore = _NotShiftConditionRestore8616(codegen)
     changed = False
     for root in roots:
-        changed = _visit(root) or changed
+        changed = restore._visit(root) or changed
     if changed:
         codegen._inertia_not_shift_condition_restored_count_8616 = (
             int(getattr(codegen, "_inertia_not_shift_condition_restored_count_8616", 0) or 0) + 1
@@ -3871,30 +4204,61 @@ def _restore_not_shift_conditions_structuring_8616(codegen: AngrCodegenSurface) 
     return changed
 
 
-def _structuring_codegen_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
-    def _impl() -> bool:
-        if getattr(codegen, "cfunc", None) is None:
-            return False
-        if not bool(getattr(project, "_inertia_structuring_enabled", True)):
-            codegen._inertia_structuring_passes = ()
-            codegen._inertia_structuring_changed = False
-            codegen._inertia_structuring_failed = False
-            codegen._inertia_last_structuring_pass = None
-            return False
+@dataclass
+class _StructuringCodegenRun8616:
+    """One structuring-codegen run: gates, pass loop, and cycle tracking."""
 
-        # Alias-completeness gate: structuring cannot run with provisional SS stack.
-        # AGENTS rule #1: SS:BP+offset → stack slot → variable, never guess.
-        func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
-        cycle_at_entry = _c_ast_cycle_path_8616(getattr(getattr(codegen, "cfunc", None), "statements", None))
-        known_cycle_path = cycle_at_entry
-        if cycle_at_entry:
+    project: AngrProjectSurface
+    codegen: AngrCodegenSurface
+    func_addr: object
+    cycle_at_entry: tuple[str, ...]
+    known_cycle_path: tuple[str, ...] | None = None
+    changed: bool = False
+    last_changed_pass: str | None = None
+    lowering_replay_impact: StructuringLoweringReplayImpact8616 = (
+        StructuringLoweringReplayImpact8616.NONE
+    )
+    last_spec_changed: bool = False
+
+    def run(self) -> bool:
+        """Run the gated structuring pipeline and report AST change."""
+        if not self._alias_gate():
+            return False
+        if not self._stack_lowering_gate():
+            return False
+        if not self._contract_gate():
+            return False
+        self._reset_state()
+        codegen = self.codegen
+        pass_specs = _decompiler_structuring_passes_for_function(self.project, codegen)
+        codegen._inertia_structuring_passes = tuple(spec.name for spec in pass_specs)
+        structuring_start = time.perf_counter()
+        for spec in pass_specs:
+            if not self._run_one_pass(spec, structuring_start):
+                break
+            if self.last_spec_changed:
+                self.changed = True
+                self.last_changed_pass = spec.name
+                self.lowering_replay_impact = self.lowering_replay_impact.merged(
+                    spec.lowering_replay_impact
+                )
+                codegen._inertia_last_structuring_pass = spec.name
+        codegen._inertia_structuring_changed = self.changed
+        codegen._inertia_structuring_lowering_replay_impact_8616 = self.lowering_replay_impact
+        self.project._inertia_decompiler_stage = "structuring"
+        return self.changed
+
+    def _alias_gate(self) -> bool:
+        """Block structuring when the SS stack alias surface is incomplete."""
+        codegen = self.codegen
+        if self.cycle_at_entry:
             logging.getLogger(__name__).warning(
                 "structuring entered with cyclic C AST function=%#x path=%s",
-                func_addr if isinstance(func_addr, int) else -1,
-                " -> ".join(cycle_at_entry),
+                self.func_addr if isinstance(self.func_addr, int) else -1,
+                " -> ".join(self.cycle_at_entry),
             )
         try:
-            with span("x86_16.structuring.codegen.alias_complete", function=func_addr):
+            with span("x86_16.structuring.codegen.alias_complete", function=self.func_addr):
                 _assert_alias_complete_8616(codegen)
         except PipelineHardError as ex:
             codegen._inertia_structuring_failed = True
@@ -3906,56 +4270,61 @@ def _structuring_codegen_8616(project: AngrProjectSurface, codegen: AngrCodegenS
                 ex,
             )
             return False
+        return True
 
-        # ── Stack lowering (before structuring) ──
-        # Must run early: alias facts → stack variables → SS linear derefs →
-        # structuring sees named variables. Running SS linear lowering before
-        # alias fact materialization leaves stack_base carriers unresolved.
-        if not getattr(codegen, "_inertia_ss_stack_lowered", False):
-            try:
-                with span("x86_16.structuring.codegen.stack_lowering", function=func_addr):
-                    changed = bool(_apply_structuring_stable_stack_semantics_8616(project, codegen))
-                    alias_facts = getattr(codegen, "_inertia_semantic_alias_facts", None)
-                    annotate_current_span(
-                        changed=bool(changed),
-                        alias_facts=len(alias_facts) if isinstance(alias_facts, list) else 0,
-                        materialized=int(getattr(codegen, "_inertia_semantic_stack_materialized_count", 0) or 0),
-                    )
-                    if changed:
-                        codegen._inertia_codegen_decl_refresh_required_8616 = True
-            except PipelineHardError:
-                raise
-            except Exception as ex:
-                codegen._inertia_structuring_failed = True
-                codegen._inertia_structuring_failure_pass = "stack_alias_materialization_and_ss_linear_lowering"
-                codegen._inertia_structuring_failure_error = f"{type(ex).__name__}: {ex}"
-                logging.getLogger(__name__).warning(
-                    "stack lowering from facts failed function=%#x stage=%s: %s: %s",
-                    getattr(getattr(codegen, "cfunc", None), "addr", 0),
-                    "stack_alias_materialization_and_ss_linear_lowering",
-                    type(ex).__name__,
-                    ex,
+    def _stack_lowering_gate(self) -> bool:
+        """Lower SS stack facts into variables before structuring runs."""
+        codegen = self.codegen
+        if getattr(codegen, "_inertia_ss_stack_lowered", False):
+            return True
+        try:
+            with span("x86_16.structuring.codegen.stack_lowering", function=self.func_addr):
+                changed = bool(_apply_structuring_stable_stack_semantics_8616(self.project, codegen))
+                alias_facts = getattr(codegen, "_inertia_semantic_alias_facts", None)
+                annotate_current_span(
+                    changed=bool(changed),
+                    alias_facts=len(alias_facts) if isinstance(alias_facts, list) else 0,
+                    materialized=int(getattr(codegen, "_inertia_semantic_stack_materialized_count", 0) or 0),
                 )
-                return False
-            codegen._inertia_ss_stack_lowered = True
-            cycle_after_stack = _c_ast_cycle_path_8616(
-                getattr(getattr(codegen, "cfunc", None), "statements", None)
+                if changed:
+                    codegen._inertia_codegen_decl_refresh_required_8616 = True
+        except PipelineHardError:
+            raise
+        except Exception as ex:
+            codegen._inertia_structuring_failed = True
+            codegen._inertia_structuring_failure_pass = "stack_alias_materialization_and_ss_linear_lowering"
+            codegen._inertia_structuring_failure_error = f"{type(ex).__name__}: {ex}"
+            logging.getLogger(__name__).warning(
+                "stack lowering from facts failed function=%#x stage=%s: %s: %s",
+                getattr(getattr(codegen, "cfunc", None), "addr", 0),
+                "stack_alias_materialization_and_ss_linear_lowering",
+                type(ex).__name__,
+                ex,
             )
-            known_cycle_path = cycle_after_stack
-            if cycle_after_stack and not cycle_at_entry:
-                logging.getLogger(__name__).warning(
-                    "structuring stack lowering introduced C AST cycle function=%#x path=%s",
-                    func_addr if isinstance(func_addr, int) else -1,
-                    " -> ".join(cycle_after_stack),
-                )
+            return False
+        codegen._inertia_ss_stack_lowered = True
+        cycle_after_stack = _c_ast_cycle_path_8616(
+            getattr(getattr(codegen, "cfunc", None), "statements", None)
+        )
+        self.known_cycle_path = cycle_after_stack
+        if cycle_after_stack and not self.cycle_at_entry:
+            logging.getLogger(__name__).warning(
+                "structuring stack lowering introduced C AST cycle function=%#x path=%s",
+                self.func_addr if isinstance(self.func_addr, int) else -1,
+                " -> ".join(cycle_after_stack),
+            )
+        return True
 
+    def _contract_gate(self) -> bool:
+        """Enforce the pipeline classified-vs-materialized hard contract."""
         # ── Hard contract gate: classified > 0 && materialized == 0 → PipelineHardError ──
         # PipelineHardError MUST propagate — never silently caught.
         # Only non-fatal errors (import, attribute) are logged and cause structuring abort.
         from .pipeline.contracts import assert_pipeline_contracts_8616
 
+        codegen = self.codegen
         try:
-            with span("x86_16.structuring.codegen.contracts", function=func_addr):
+            with span("x86_16.structuring.codegen.contracts", function=self.func_addr):
                 assert_pipeline_contracts_8616(codegen)
         except PipelineHardError:
             raise
@@ -3969,10 +4338,10 @@ def _structuring_codegen_8616(project: AngrProjectSurface, codegen: AngrCodegenS
                 e,
             )
             return False
+        return True
 
-        changed = False
-        last_changed_pass = None
-        lowering_replay_impact = StructuringLoweringReplayImpact8616.NONE
+    def _reset_state(self) -> None:
+        codegen = self.codegen
         codegen._inertia_structuring_failed = False
         codegen._inertia_structuring_failure_pass = None
         codegen._inertia_structuring_failure_error = None
@@ -3980,83 +4349,115 @@ def _structuring_codegen_8616(project: AngrProjectSurface, codegen: AngrCodegenS
         codegen._inertia_structuring_validation_failure_pass = None
         codegen._inertia_structuring_validation_failure_error = None
         codegen._inertia_last_structuring_pass = None
-        pass_specs = _decompiler_structuring_passes_for_function(project, codegen)
-        codegen._inertia_structuring_passes = tuple(spec.name for spec in pass_specs)
-        _t_structuring_start = time.perf_counter()
-        for spec in pass_specs:
-            try:
-                cycle_before_pass = known_cycle_path
-                project._inertia_decompiler_stage = f"structuring:{spec.name}"
-                # Structuring must remain semantics-preserving under tail validation.
-                # Expression simplification is allowed in postprocess; in structuring it
-                # can rewrite boundary-visible conditions (e.g. 32-bit compare forms),
-                # so keep this step analysis-only here.
-                if spec.name == "_simplify_structured_expressions_8616":
-                    continue
-                pass_started = time.perf_counter()
-                if timing_output_enabled() and os.environ.get("INERTIA_TAIL_VALIDATION_STDERR_JSON") != "1":
-                    sys.stderr.write(
-                        f"[{time.strftime('%H:%M:%S')}] structuring pass: {spec.name} (+{time.perf_counter() - _t_structuring_start:.1f}s)\n"
-                    )
-                    sys.stderr.flush()
-                with span(f"x86_16.structuring.pass.{spec.name}", function=func_addr):
-                    finalize_validation = _maybe_validate_structuring_pass_8616(project, codegen, spec.name)
-                    spec_changed = spec.func(project, codegen) if spec.needs_project else spec.func(codegen)
-                    annotate_current_span(changed=bool(spec_changed))
-                    if finalize_validation is not None:  # noqa: SIM102
-                        if spec_changed or spec.name in _semantic_validation_pass_names_8616():
-                            # Validation is meaningful only when this pass changed the AST.
-                            # For non-semantic no-op passes, semantic output is unchanged;
-                            # skipping validation keeps speed while preserving correctness.
-                            with span(f"x86_16.structuring.pass_validation.{spec.name}", function=func_addr):
-                                finalize_validation(bool(spec_changed))
-                                annotate_current_span(
-                                    failed=bool(getattr(codegen, "_inertia_structuring_validation_failed", False))
-                                )
-                cycle_after_pass = _c_ast_cycle_path_8616(
-                    getattr(getattr(codegen, "cfunc", None), "statements", None)
-                )
-                known_cycle_path = cycle_after_pass
-                if timing_output_enabled() and os.environ.get("INERTIA_TAIL_VALIDATION_STDERR_JSON") != "1":
-                    sys.stderr.write(
-                        f"[{time.strftime('%H:%M:%S')}] structuring pass done: {spec.name} "
-                        f"changed={bool(spec_changed)} elapsed={time.perf_counter() - pass_started:.3f}s\n"
-                    )
-                    sys.stderr.flush()
-                if cycle_after_pass and not cycle_before_pass:
-                    logging.getLogger(__name__).warning(
-                        "structuring pass introduced C AST cycle function=%#x pass=%s path=%s",
-                        func_addr if isinstance(func_addr, int) else -1,
-                        spec.name,
-                        " -> ".join(cycle_after_pass),
-                    )
-            except PipelineHardError:
-                raise
-            except Exception as ex:
-                codegen._inertia_structuring_failed = True
-                codegen._inertia_structuring_failure_pass = spec.name
-                codegen._inertia_structuring_failure_error = str(ex)
-                logging.getLogger(__name__).warning(
-                    "Skipping 86_16 structuring pass %s after %s: %s",
-                    spec.name,
-                    last_changed_pass or "no earlier structuring",
-                    ex,
-                    exc_info=True,
-                )
-                break
-            if spec_changed:
-                changed = True
-                last_changed_pass = spec.name
-                lowering_replay_impact = lowering_replay_impact.merged(
-                    spec.lowering_replay_impact
-                )
-                codegen._inertia_last_structuring_pass = spec.name
-        codegen._inertia_structuring_changed = changed
-        codegen._inertia_structuring_lowering_replay_impact_8616 = lowering_replay_impact
-        project._inertia_decompiler_stage = "structuring"
-        return changed
 
-    return _impl()
+    def _run_one_pass(self, spec: DecompilerStructuringPassSpec, structuring_start: float) -> bool:
+        """Run one pass under validation; return False when the loop must break."""
+        codegen = self.codegen
+        self.last_spec_changed = False
+        try:
+            spec_changed = self._execute_pass(spec, structuring_start)
+        except PipelineHardError:
+            raise
+        except Exception as ex:
+            codegen._inertia_structuring_failed = True
+            codegen._inertia_structuring_failure_pass = spec.name
+            codegen._inertia_structuring_failure_error = str(ex)
+            logging.getLogger(__name__).warning(
+                "Skipping 86_16 structuring pass %s after %s: %s",
+                spec.name,
+                self.last_changed_pass or "no earlier structuring",
+                ex,
+                exc_info=True,
+            )
+            return False
+        self.last_spec_changed = bool(spec_changed)
+        return True
+
+    def _execute_pass(self, spec: DecompilerStructuringPassSpec, structuring_start: float) -> bool:
+        """Execute one structuring pass body with validation and cycle tracking."""
+        project = self.project
+        codegen = self.codegen
+        cycle_before_pass = self.known_cycle_path
+        project._inertia_decompiler_stage = f"structuring:{spec.name}"
+        # Structuring must remain semantics-preserving under tail validation.
+        # Expression simplification is allowed in postprocess; in structuring it
+        # can rewrite boundary-visible conditions (e.g. 32-bit compare forms),
+        # so keep this step analysis-only here.
+        if spec.name == "_simplify_structured_expressions_8616":
+            return False
+        pass_started = time.perf_counter()
+        if timing_output_enabled() and os.environ.get("INERTIA_TAIL_VALIDATION_STDERR_JSON") != "1":
+            sys.stderr.write(
+                f"[{time.strftime('%H:%M:%S')}] structuring pass: {spec.name} (+{time.perf_counter() - structuring_start:.1f}s)\n"
+            )
+            sys.stderr.flush()
+        spec_changed = self._run_pass_body(spec)
+        cycle_after_pass = _c_ast_cycle_path_8616(
+            getattr(getattr(codegen, "cfunc", None), "statements", None)
+        )
+        self.known_cycle_path = cycle_after_pass
+        if timing_output_enabled() and os.environ.get("INERTIA_TAIL_VALIDATION_STDERR_JSON") != "1":
+            sys.stderr.write(
+                f"[{time.strftime('%H:%M:%S')}] structuring pass done: {spec.name} "
+                f"changed={bool(spec_changed)} elapsed={time.perf_counter() - pass_started:.3f}s\n"
+            )
+            sys.stderr.flush()
+        if cycle_after_pass and not cycle_before_pass:
+            logging.getLogger(__name__).warning(
+                "structuring pass introduced C AST cycle function=%#x pass=%s path=%s",
+                self.func_addr if isinstance(self.func_addr, int) else -1,
+                spec.name,
+                " -> ".join(cycle_after_pass),
+            )
+        return bool(spec_changed)
+
+    def _run_pass_body(self, spec: DecompilerStructuringPassSpec) -> bool:
+        """Invoke the pass under its span and per-pass validation closure."""
+        codegen = self.codegen
+        with span(f"x86_16.structuring.pass.{spec.name}", function=self.func_addr):
+            finalize_validation = _maybe_validate_structuring_pass_8616(
+                self.project, codegen, spec.name
+            )
+            spec_changed = spec.func(self.project, codegen) if spec.needs_project else spec.func(codegen)
+            annotate_current_span(changed=bool(spec_changed))
+            if finalize_validation is not None:  # noqa: SIM102
+                if spec_changed or spec.name in _semantic_validation_pass_names_8616():
+                    # Validation is meaningful only when this pass changed the AST.
+                    # For non-semantic no-op passes, semantic output is unchanged;
+                    # skipping validation keeps speed while preserving correctness.
+                    with span(
+                        f"x86_16.structuring.pass_validation.{spec.name}",
+                        function=self.func_addr,
+                    ):
+                        finalize_validation(bool(spec_changed))
+                        annotate_current_span(
+                            failed=bool(getattr(codegen, "_inertia_structuring_validation_failed", False))
+                        )
+        return bool(spec_changed)
+
+
+def _structuring_codegen_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> bool:
+    if getattr(codegen, "cfunc", None) is None:
+        return False
+    if not bool(getattr(project, "_inertia_structuring_enabled", True)):
+        codegen._inertia_structuring_passes = ()
+        codegen._inertia_structuring_changed = False
+        codegen._inertia_structuring_failed = False
+        codegen._inertia_last_structuring_pass = None
+        return False
+
+    # Alias-completeness gate: structuring cannot run with provisional SS stack.
+    # AGENTS rule #1: SS:BP+offset → stack slot → variable, never guess.
+    func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
+    cycle_at_entry = _c_ast_cycle_path_8616(getattr(getattr(codegen, "cfunc", None), "statements", None))
+    run = _StructuringCodegenRun8616(
+        project,
+        codegen,
+        func_addr,
+        cycle_at_entry,
+        known_cycle_path=cycle_at_entry,
+    )
+    return run.run()
 
 
 def _ensure_structuring_typed_conditions_transferred_8616(project: AngrProjectSurface, codegen: AngrCodegenSurface) -> None:
@@ -4077,645 +4478,894 @@ def _ensure_structuring_typed_conditions_transferred_8616(project: AngrProjectSu
     codegen._inertia_typed_conditions_transferred = True
 
 
-def _decompile_structuring_8616(self: AngrDecompilerSurface) -> None:
-    def _impl() -> None:
-        def _ensure_function_prototype_8616() -> None:
-            func = getattr(self, "func", None) or getattr(self, "function", None)
-            if func is None:
-                return
-            prototype = getattr(func, "prototype", None)
-            needs_fallback = (
-                prototype is None or not hasattr(prototype, "returnty") or getattr(prototype, "returnty", None) is None
-            )
-            if not needs_fallback:
-                return
-            arch = getattr(getattr(self, "project", None), "arch", None)
-            fallback = SimTypeFunction([], SimTypeBottom())
-            if arch is not None:
-                fallback = fallback.with_arch(arch)
-            func.prototype = fallback
+def _ensure_decompiler_prototype_8616(self: AngrDecompilerSurface) -> None:
+    """Install a fallback prototype when angr left the function untyped."""
+    func = getattr(self, "func", None) or getattr(self, "function", None)
+    if func is None:
+        return
+    prototype = getattr(func, "prototype", None)
+    needs_fallback = (
+        prototype is None or not hasattr(prototype, "returnty") or getattr(prototype, "returnty", None) is None
+    )
+    if not needs_fallback:
+        return
+    arch = getattr(getattr(self, "project", None), "arch", None)
+    fallback = SimTypeFunction([], SimTypeBottom())
+    if arch is not None:
+        fallback = fallback.with_arch(arch)
+    func.prototype = fallback
 
-        _orig_decompiler_decompile = getattr(_decompile_structuring_8616, "_orig_decompiler_decompile", None)
-        if _orig_decompiler_decompile is None:
-            _orig_decompiler_decompile = Decompiler._decompile
-            cast(Any, _decompile_structuring_8616)._orig_decompiler_decompile = _orig_decompiler_decompile
-        structuring_started = time.perf_counter()
-        self.project._inertia_decompiler_stage = "core"
-        _ensure_function_prototype_8616()
-        with span(
-            "x86_16.structuring.angr_core",
-            function=getattr(getattr(self, "function", None) or getattr(self, "func", None), "addr", None),
-        ), _guard_condition_processor_multibit_bool_predicates_8616(self.project):
-            _orig_decompiler_decompile(self)
-        structuring_elapsed = time.perf_counter() - structuring_started
-        if self.project.arch.name != "86_16" or self.codegen is None:
-            return
-        install_materialized_return_chain_integrity_guard_8616(self.codegen)
-        clinic = getattr(self, "clinic", None)
-        if clinic is not None:
-            self.codegen._clinic = clinic
-        _bind_structuring_callsite_consumers_8616(self.codegen)
-        if not bool(getattr(self.project, "_inertia_tail_validation_enabled", True)):
-            changed = _structuring_codegen_8616(self.project, self.codegen)
-            changed = _restore_not_shift_conditions_structuring_8616(self.codegen) or changed
-            changed = _apply_structuring_pointer_memory_idioms_8616(self.project, self.codegen) or changed
-            changed = finalize_shared_call_occurrences_8616(self.project, self.codegen) or changed
-            changed = _materialize_structuring_selector_return_branches_8616(
-                self.project,
-                self.codegen,
-            ) or changed
-            identical_return_guards = collapse_pure_identical_return_guards_8616(
-                getattr(self.codegen.cfunc, "statements", None)
-            )
-            self.codegen._inertia_identical_return_guard_collapse_result_8616 = (
-                identical_return_guards
-            )
-            changed = identical_return_guards.changed or changed
-            changed = (
-                bool(_run_structuring_widening_copy_propagation_8616(self.codegen))
-                or changed
-            )
-            changed = (
-                bool(prune_unread_stack_lowered_register_carriers_8616(self.codegen))
-                or changed
-            )
-            late_flag_cleanup = (
-                _structuring_conditions.prune_dead_flag_assignments_after_structuring_8616(
-                    self.project,
-                    self.codegen,
-                )
-            )
-            changed = late_flag_cleanup.changed or changed
-            function = getattr(self, "function", None) or getattr(self, "func", None)
-            if function is not None:
-                info = getattr(function, "info", None)
-                if isinstance(info, MutableMapping):
-                    structuring_info = info.setdefault("x86_16_decompiler_structuring", {})
-                    structuring_info["elapsed"] = structuring_elapsed
-                    structuring_info["last_pass"] = getattr(self.codegen, "_inertia_last_structuring_pass", None)
-                    structuring_info["changed"] = bool(changed)
-                    structuring_info["failed"] = bool(getattr(self.codegen, "_inertia_structuring_failed", False))
-                    structuring_info["failure_pass"] = getattr(self.codegen, "_inertia_structuring_failure_pass", None)
-                    structuring_info["failure_error"] = getattr(
-                        self.codegen, "_inertia_structuring_failure_error", None
-                    )
-                    structuring_info["validation_failed"] = bool(
-                        getattr(self.codegen, "_inertia_structuring_validation_failed", False)
-                    )
-                    structuring_info["validation_failure_pass"] = getattr(
-                        self.codegen, "_inertia_structuring_validation_failure_pass", None
-                    )
-                    structuring_info["validation_failure_error"] = getattr(
-                        self.codegen, "_inertia_structuring_validation_failure_error", None
-                    )
-                    structuring_info["pass_names"] = getattr(self.codegen, "_inertia_structuring_passes", ())
-                    structuring_info["last_stage"] = getattr(self.project, "_inertia_decompiler_stage", None)
-                    structuring_info["struct_merging_stats"] = getattr(
-                        self.codegen, "_inertia_struct_merging_stats", None
-                    )
-                    structuring_info["struct_merging_changed"] = bool(
-                        getattr(self.codegen, "_inertia_struct_merging_changed", False)
-                    )
-            self.codegen._inertia_tail_validation_snapshot = None
-            self.project._inertia_decompiler_stage = "structuring_done"
-            return
 
-        validation_mode = "live_out"
-        func_addr = getattr(getattr(self.codegen, "cfunc", None), "addr", None)
-        with span("x86_16.structuring.validation_prime", function=func_addr):
-            prime_changed = bool(_prime_structuring_validation_semantics_8616(self.project, self.codegen))
-            annotate_current_span(changed=prime_changed)
-            _ensure_structuring_typed_conditions_transferred_8616(self.project, self.codegen)
-        with span("x86_16.structuring.validation.before_fingerprint", function=func_addr):
-            before_fingerprint = fingerprint_x86_16_tail_validation_boundary(
-                self.project, self.codegen, mode=validation_mode
-            )
-        before_collect_started = time.perf_counter()
-        with span("x86_16.structuring.validation.before_summary", function=func_addr):
-            before_summary = collect_x86_16_tail_validation_summary(
-                self.project,
-                self.codegen,
-                mode=validation_mode,
-                boundary_fingerprint=before_fingerprint,
-            )
-        before_collect_elapsed = time.perf_counter() - before_collect_started
-        with span("x86_16.structuring.codegen", function=func_addr):
-            changed = bool(_structuring_codegen_8616(self.project, self.codegen)) or prime_changed
-            annotate_current_span(
-                changed=bool(changed),
-                last_pass=getattr(self.codegen, "_inertia_last_structuring_pass", None),
-            )
-        lowering_replay_impact = getattr(
+def _run_angr_core_decompile_8616(self: AngrDecompilerSurface) -> float:
+    """Run angr's core decompiler under the bool-predicate guard; return elapsed."""
+    orig = getattr(_decompile_structuring_8616, "_orig_decompiler_decompile", None)
+    if orig is None:
+        orig = Decompiler._decompile
+        cast(Any, _decompile_structuring_8616)._orig_decompiler_decompile = orig
+    structuring_started = time.perf_counter()
+    self.project._inertia_decompiler_stage = "core"
+    _ensure_decompiler_prototype_8616(self)
+    with span(
+        "x86_16.structuring.angr_core",
+        function=getattr(getattr(self, "function", None) or getattr(self, "func", None), "addr", None),
+    ), _guard_condition_processor_multibit_bool_predicates_8616(self.project):
+        orig(self)
+    return time.perf_counter() - structuring_started
+
+
+def _populate_structuring_info_8616(
+    self: AngrDecompilerSurface,
+    info: MutableMapping[str, object],
+    structuring_elapsed: float,
+    changed: bool,
+    tail_validation: dict[str, object] | None = None,
+) -> object:
+    """Publish the common per-function structuring diagnostics payload."""
+    structuring_info = cast(
+        dict[str, object], info.setdefault("x86_16_decompiler_structuring", {})
+    )
+    structuring_info["elapsed"] = structuring_elapsed
+    if tail_validation is not None:
+        structuring_info["tail_validation_timings"] = tail_validation["timings"]
+    structuring_info["last_pass"] = getattr(self.codegen, "_inertia_last_structuring_pass", None)
+    structuring_info["changed"] = bool(changed)
+    structuring_info["failed"] = bool(getattr(self.codegen, "_inertia_structuring_failed", False))
+    structuring_info["failure_pass"] = getattr(self.codegen, "_inertia_structuring_failure_pass", None)
+    structuring_info["failure_error"] = getattr(
+        self.codegen, "_inertia_structuring_failure_error", None
+    )
+    structuring_info["validation_failed"] = bool(
+        getattr(self.codegen, "_inertia_structuring_validation_failed", False)
+    )
+    structuring_info["validation_failure_pass"] = getattr(
+        self.codegen, "_inertia_structuring_validation_failure_pass", None
+    )
+    structuring_info["validation_failure_error"] = getattr(
+        self.codegen, "_inertia_structuring_validation_failure_error", None
+    )
+    structuring_info["pass_names"] = getattr(self.codegen, "_inertia_structuring_passes", ())
+    structuring_info["last_stage"] = getattr(self.project, "_inertia_decompiler_stage", None)
+    if tail_validation is not None:
+        structuring_info["tail_validation_verdict"] = tail_validation["verdict"]
+        structuring_info["tail_validation_cache_hit"] = tail_validation["cache_hit"]
+    structuring_info["struct_merging_stats"] = getattr(
+        self.codegen, "_inertia_struct_merging_stats", None
+    )
+    structuring_info["struct_merging_changed"] = bool(
+        getattr(self.codegen, "_inertia_struct_merging_changed", False)
+    )
+    return structuring_info
+
+
+def _decompile_structuring_unvalidated_8616(
+    self: AngrDecompilerSurface, structuring_elapsed: float
+) -> None:
+    """Run structuring without tail validation and publish diagnostics."""
+    changed = _structuring_codegen_8616(self.project, self.codegen)
+    changed = _restore_not_shift_conditions_structuring_8616(self.codegen) or changed
+    changed = _apply_structuring_pointer_memory_idioms_8616(self.project, self.codegen) or changed
+    changed = finalize_shared_call_occurrences_8616(self.project, self.codegen) or changed
+    changed = _materialize_structuring_selector_return_branches_8616(
+        self.project,
+        self.codegen,
+    ) or changed
+    identical_return_guards = collapse_pure_identical_return_guards_8616(
+        getattr(self.codegen.cfunc, "statements", None)
+    )
+    self.codegen._inertia_identical_return_guard_collapse_result_8616 = (
+        identical_return_guards
+    )
+    changed = identical_return_guards.changed or changed
+    changed = (
+        bool(_run_structuring_widening_copy_propagation_8616(self.codegen))
+        or changed
+    )
+    changed = (
+        bool(prune_unread_stack_lowered_register_carriers_8616(self.codegen))
+        or changed
+    )
+    late_flag_cleanup = (
+        _structuring_conditions.prune_dead_flag_assignments_after_structuring_8616(
+            self.project,
             self.codegen,
-            "_inertia_structuring_lowering_replay_impact_8616",
-            StructuringLoweringReplayImpact8616.FULL_AST,
         )
-        if lowering_replay_impact == StructuringLoweringReplayImpact8616.FULL_AST:
-            with span("x86_16.structuring.direct_stack_materialization", function=func_addr):
-                direct_stack_changed = _apply_structuring_direct_stack_materialization_8616(
-                    self.project,
-                    self.codegen,
-                )
-                changed = bool(direct_stack_changed) or changed
-                annotate_current_span(changed=bool(direct_stack_changed))
-            with span("x86_16.structuring.segment_global_after_direct_stack", function=func_addr):
-                segment_global_changed = _prime_structuring_segment_global_semantics_8616(
-                    self.project,
-                    self.codegen,
-                )
-                changed = bool(segment_global_changed) or changed
-                annotate_current_span(changed=bool(segment_global_changed))
-        with span("x86_16.structuring.selector_return", function=func_addr):
-            selector_return_changed = _materialize_structuring_selector_return_branches_8616(
+    )
+    changed = late_flag_cleanup.changed or changed
+    function = getattr(self, "function", None) or getattr(self, "func", None)
+    if function is not None:
+        info = getattr(function, "info", None)
+        if isinstance(info, MutableMapping):
+            _populate_structuring_info_8616(self, info, structuring_elapsed, changed)
+    self.codegen._inertia_tail_validation_snapshot = None
+    self.project._inertia_decompiler_stage = "structuring_done"
+
+
+@dataclass
+class _ValidatedStructuringFlags8616:
+    """Named per-phase change flags consumed by the lowering-replay policy."""
+
+    selector_return: bool = False
+    return_chains: bool = False
+    loop_exit_guard: bool = False
+    unresolved_exit_goto: bool = False
+    unconsumed_loop_break_jcc: bool = False
+    conditional_continue: bool = False
+    pretest_loop_guard: bool = False
+    canonical_for: bool = False
+    hoisted_jcc_target_copy: bool = False
+    void_tail_call_guard: bool = False
+    return_shape: bool = False
+    condition_broad_replay: bool = False
+    restored_not_shift: bool = False
+    pointer_memory: bool = False
+    shared_call: bool = False
+    terminal_call_return: bool = False
+    final_condition_broad_replay: bool = False
+    final_loop_break_jcc: bool = False
+    boolean_ite: bool = False
+
+
+
+def _validated_codegen_run_8616(
+    self: AngrDecompilerSurface,
+    func_addr: object,
+    prime_changed: bool,
+) -> tuple[bool, StructuringLoweringReplayImpact8616]:
+    """Run structuring codegen and report the pass-declared lowering replay impact."""
+    with span("x86_16.structuring.codegen", function=func_addr):
+        changed = bool(_structuring_codegen_8616(self.project, self.codegen)) or prime_changed
+        annotate_current_span(
+            changed=bool(changed),
+            last_pass=getattr(self.codegen, "_inertia_last_structuring_pass", None),
+        )
+    lowering_replay_impact = getattr(
+        self.codegen,
+        "_inertia_structuring_lowering_replay_impact_8616",
+        StructuringLoweringReplayImpact8616.FULL_AST,
+    )
+    return changed, lowering_replay_impact
+
+def _validated_guard_repair_phases_8616(
+    self: AngrDecompilerSurface,
+    func_addr: object,
+    changed: bool,
+    flags: _ValidatedStructuringFlags8616,
+) -> bool:
+    """Run the selector/return/loop-guard repair spans and accumulate changes."""
+    with span("x86_16.structuring.selector_return", function=func_addr):
+        flags.selector_return = bool(
+            _materialize_structuring_selector_return_branches_8616(
                 self.project,
                 self.codegen,
             )
-            changed = bool(selector_return_changed) or changed
-            annotate_current_span(changed=bool(selector_return_changed))
-        with span("x86_16.structuring.return_chains", function=func_addr):
-            return_chains_changed = _materialize_structuring_return_chains_8616(
+        )
+        changed = flags.selector_return or changed
+        annotate_current_span(changed=flags.selector_return)
+    with span("x86_16.structuring.return_chains", function=func_addr):
+        flags.return_chains = bool(
+            _materialize_structuring_return_chains_8616(
                 self.project,
                 self.codegen,
                 materialize_wide_return_predicate=False,
             )
-            changed = bool(return_chains_changed) or changed
-            annotate_current_span(changed=bool(return_chains_changed))
-        with span("x86_16.structuring.loop_exit_return_guards", function=func_addr):
-            loop_exit_guard_changed = _repair_structuring_loop_exit_return_guards_8616(self.codegen)
-            changed = bool(loop_exit_guard_changed) or changed
-            annotate_current_span(changed=bool(loop_exit_guard_changed))
-        with span("x86_16.structuring.unresolved_exit_gotos", function=func_addr):
-            unresolved_exit_goto_changed = _repair_structuring_unresolved_function_exit_gotos_8616(
+        )
+        changed = flags.return_chains or changed
+        annotate_current_span(changed=flags.return_chains)
+    with span("x86_16.structuring.loop_exit_return_guards", function=func_addr):
+        flags.loop_exit_guard = bool(
+            _repair_structuring_loop_exit_return_guards_8616(self.codegen)
+        )
+        changed = flags.loop_exit_guard or changed
+        annotate_current_span(changed=flags.loop_exit_guard)
+    with span("x86_16.structuring.unresolved_exit_gotos", function=func_addr):
+        flags.unresolved_exit_goto = bool(
+            _repair_structuring_unresolved_function_exit_gotos_8616(
                 self.project,
                 self.codegen,
-            )
-            changed = bool(unresolved_exit_goto_changed) or changed
-            annotate_current_span(changed=bool(unresolved_exit_goto_changed))
-        with span("x86_16.structuring.unconsumed_loop_break_jcc", function=func_addr):
-            unconsumed_loop_break_jcc_changed = _materialize_structuring_unconsumed_loop_break_jcc_8616(
-                self.project,
-                self.codegen,
-            )
-            changed = bool(unconsumed_loop_break_jcc_changed) or changed
-            annotate_current_span(changed=bool(unconsumed_loop_break_jcc_changed))
-        with span("x86_16.structuring.conditional_continue", function=func_addr):
-            conditional_continue_changed = _repair_structuring_conditional_continue_guards_8616(
-                self.project,
-                self.codegen,
-            )
-            changed = bool(conditional_continue_changed) or changed
-            annotate_current_span(changed=bool(conditional_continue_changed))
-        with span("x86_16.structuring.pretest_loop_break", function=func_addr):
-            pretest_loop_guard_changed = _repair_structuring_pretest_loop_break_guards_8616(
-                self.project,
-                self.codegen,
-            )
-            changed = bool(pretest_loop_guard_changed) or changed
-            annotate_current_span(changed=bool(pretest_loop_guard_changed))
-        with span("x86_16.structuring.canonical_for_loops", function=func_addr):
-            canonical_for_changed = recover_structuring_canonical_for_loops_8616(self.codegen)
-            changed = canonical_for_changed or changed
-            annotate_current_span(changed=canonical_for_changed)
-        with span("x86_16.structuring.hoisted_jcc_target_copy", function=func_addr):
-            hoisted_jcc_target_copy_changed = _repair_structuring_hoisted_jcc_target_copies_8616(
-                self.project,
-                self.codegen,
-            )
-            changed = bool(hoisted_jcc_target_copy_changed) or changed
-            annotate_current_span(changed=bool(hoisted_jcc_target_copy_changed))
-        with span("x86_16.structuring.return_shape", function=func_addr):
-            return_shape_changed = _materialize_structuring_return_shape_8616(
-                self.project,
-                self.codegen,
-            )
-            changed = bool(return_shape_changed) or changed
-            annotate_current_span(changed=bool(return_shape_changed))
-        with span("x86_16.structuring.void_tail_call_guard", function=func_addr):
-            void_tail_call_guard_changed = _materialize_structuring_void_tail_call_guard_8616(
-                self.project,
-                self.codegen,
-            )
-            changed = bool(void_tail_call_guard_changed) or changed
-            annotate_current_span(changed=bool(void_tail_call_guard_changed))
-        with span("x86_16.structuring.condition_refresh", function=func_addr):
-            condition_refresh_result = _refresh_structuring_condition_semantics_8616(
-                self.project,
-                self.codegen,
-            )
-            condition_refresh_changed = condition_refresh_result.changed
-            restored_not_shift = _restore_not_shift_conditions_structuring_8616(self.codegen)
-            changed = bool(condition_refresh_changed or restored_not_shift) or changed
-            annotate_current_span(
-                changed=bool(condition_refresh_changed),
-                not_shift_restored=bool(restored_not_shift),
-            )
-            record_ast_condition_trace_8616(self.project, self.codegen, stage="structured")
-        with span("x86_16.structuring.pointer_memory_lowering", function=func_addr):
-            pointer_memory_changed = _apply_structuring_pointer_memory_idioms_8616(self.project, self.codegen)
-            changed = bool(pointer_memory_changed) or changed
-            annotate_current_span(changed=bool(pointer_memory_changed))
-            if os.environ.get("INERTIA_DEBUG_POINTER_MEMORY_IDIOMS") == "1":
-                try:
-                    pointer_text = str(self.codegen.cfunc.c_repr())
-                except (AttributeError, TypeError):
-                    pointer_text = ""
-                logging.getLogger(__name__).warning(
-                    "[pointer-memory-structuring-final] lines=%r",
-                    tuple(
-                        line.strip()
-                        for line in pointer_text.splitlines()
-                        if "[0]" in line or "SEG_U16" in line
-                    ),
-                )
-        with span("x86_16.structuring.shared_call_occurrences", function=func_addr):
-            shared_call_changed = finalize_shared_call_occurrences_8616(
-                self.project,
-                self.codegen,
-            )
-            changed = bool(shared_call_changed) or changed
-            annotate_current_span(changed=bool(shared_call_changed))
-        post_codegen_lowering_replay_impact = (
-            structuring_lowering_replay_impact_after_changes_8616(
-                lowering_replay_impact,
-                return_liveness_changed=bool(return_shape_changed),
-                full_ast_changes=(
-                    bool(selector_return_changed),
-                    bool(return_chains_changed),
-                    bool(loop_exit_guard_changed),
-                    bool(unresolved_exit_goto_changed),
-                    bool(unconsumed_loop_break_jcc_changed),
-                    bool(conditional_continue_changed),
-                    bool(pretest_loop_guard_changed),
-                    bool(canonical_for_changed),
-                    bool(hoisted_jcc_target_copy_changed),
-                    bool(void_tail_call_guard_changed),
-                    condition_refresh_result.requires_broad_lowering_replay,
-                    bool(restored_not_shift),
-                    bool(pointer_memory_changed),
-                    bool(shared_call_changed),
-                ),
             )
         )
-        if changed:
-            with span("x86_16.structuring.regenerate_text", function=func_addr):
-                regenerated = _regenerate_structuring_text_safely_8616(
-                    self.codegen,
-                    context="structuring:post-codegen-ast-mutation",
-                )
-                annotate_current_span(regenerated=bool(regenerated))
-        with span("x86_16.structuring.post_regeneration_lowering_replay", function=func_addr):
-            if post_codegen_lowering_replay_impact is StructuringLoweringReplayImpact8616.FULL_AST:
-                post_regeneration_lowering_changed = _replay_structuring_lowering_before_validation_8616(
-                    self.project,
-                    self.codegen,
-                )
-            elif (
-                post_codegen_lowering_replay_impact
-                is StructuringLoweringReplayImpact8616.RETURN_LIVENESS_ONLY
-            ):
-                post_regeneration_lowering_changed = replay_return_liveness_lowering_8616(
-                    self.codegen
-                ).changed
-            else:
-                post_regeneration_lowering_changed = False
-            changed = bool(post_regeneration_lowering_changed) or changed
-            annotate_current_span(
-                changed=bool(post_regeneration_lowering_changed),
-                replay_impact=post_codegen_lowering_replay_impact.name,
-            )
-        with span("x86_16.structuring.terminal_call_result_return", function=func_addr):
-            terminal_call_return_changed = _materialize_structuring_terminal_call_result_return_8616(
+        changed = flags.unresolved_exit_goto or changed
+        annotate_current_span(changed=flags.unresolved_exit_goto)
+    with span("x86_16.structuring.unconsumed_loop_break_jcc", function=func_addr):
+        flags.unconsumed_loop_break_jcc = bool(
+            _materialize_structuring_unconsumed_loop_break_jcc_8616(
                 self.project,
                 self.codegen,
             )
-            terminal_call_return_shape_changed = (
-                _materialize_structuring_return_shape_8616(
-                    self.project,
-                    self.codegen,
-                )
-                if terminal_call_return_changed
-                else False
-            )
-            changed = bool(terminal_call_return_changed or terminal_call_return_shape_changed) or changed
-            annotate_current_span(
-                changed=bool(terminal_call_return_changed),
-                return_shape_changed=bool(terminal_call_return_shape_changed),
-            )
-        with span("x86_16.structuring.final_condition_refresh", function=func_addr):
-            final_condition_result = _refresh_structuring_condition_semantics_8616(
+        )
+        changed = flags.unconsumed_loop_break_jcc or changed
+        annotate_current_span(changed=flags.unconsumed_loop_break_jcc)
+    with span("x86_16.structuring.conditional_continue", function=func_addr):
+        flags.conditional_continue = bool(
+            _repair_structuring_conditional_continue_guards_8616(
                 self.project,
                 self.codegen,
             )
-            final_condition_changed = final_condition_result.changed
-            changed = final_condition_changed or changed
-            record_ast_condition_trace_8616(self.project, self.codegen, stage="structured-final")
-        with span("x86_16.structuring.final_loop_break_jcc_closure", function=func_addr):
-            final_loop_break_jcc_changed = (
-                _materialize_structuring_unconsumed_loop_break_jcc_8616(
-                    self.project,
-                    self.codegen,
-                )
-            )
-            changed = bool(final_loop_break_jcc_changed) or changed
-            annotate_current_span(changed=bool(final_loop_break_jcc_changed))
-        with span("x86_16.structuring.boolean_condition_ites", function=func_addr):
-            boolean_ite_stats = normalize_boolean_condition_ites_8616(self.codegen)
-            changed = boolean_ite_stats.changed or changed
-            annotate_current_span(
-                raw_fact_count=boolean_ite_stats.raw_fact_count,
-                classified_fact_count=boolean_ite_stats.classified_fact_count,
-                materialized_count=boolean_ite_stats.materialized_count,
-                failure_count=boolean_ite_stats.failure_count,
-            )
-        with span("x86_16.structuring.final_lowering_replay", function=func_addr):
-            final_boundary_changed = bool(
-                terminal_call_return_changed
-                or final_loop_break_jcc_changed
-                or final_condition_result.requires_broad_lowering_replay
-                or boolean_ite_stats.changed
-            )
-            final_lowering_changed = (
-                _replay_structuring_lowering_before_validation_8616(self.project, self.codegen)
-                if final_boundary_changed
-                else False
-            )
-            changed = bool(final_lowering_changed) or changed
-            annotate_current_span(changed=bool(final_lowering_changed))
-        with span("x86_16.structuring.final_switch_loop_exit_return", function=func_addr):
-            final_switch_exit_changed = _repair_structuring_switch_loop_exit_returns_8616(
+        )
+        changed = flags.conditional_continue or changed
+        annotate_current_span(changed=flags.conditional_continue)
+    with span("x86_16.structuring.pretest_loop_break", function=func_addr):
+        flags.pretest_loop_guard = bool(
+            _repair_structuring_pretest_loop_break_guards_8616(
                 self.project,
                 self.codegen,
             )
-            changed = bool(final_switch_exit_changed) or changed
-            annotate_current_span(changed=bool(final_switch_exit_changed))
-        with span("x86_16.structuring.final_wide_stack_predicate", function=func_addr):
-            final_wide_predicate_changed = _materialize_structuring_wide_stack_return_predicate_8616(
+        )
+        changed = flags.pretest_loop_guard or changed
+        annotate_current_span(changed=flags.pretest_loop_guard)
+    return changed
+
+def _validated_jcc_repair_phases_8616(
+    self: AngrDecompilerSurface,
+    func_addr: object,
+    changed: bool,
+    flags: _ValidatedStructuringFlags8616,
+) -> bool:
+    """Run the canonical-for/JCC/return-shape/void-tail-call repair spans."""
+    with span("x86_16.structuring.canonical_for_loops", function=func_addr):
+        flags.canonical_for = bool(
+            recover_structuring_canonical_for_loops_8616(self.codegen)
+        )
+        changed = flags.canonical_for or changed
+        annotate_current_span(changed=flags.canonical_for)
+    with span("x86_16.structuring.hoisted_jcc_target_copy", function=func_addr):
+        flags.hoisted_jcc_target_copy = bool(
+            _repair_structuring_hoisted_jcc_target_copies_8616(
                 self.project,
                 self.codegen,
             )
-            changed = bool(final_wide_predicate_changed) or changed
-            annotate_current_span(changed=bool(final_wide_predicate_changed))
-        with span("x86_16.structuring.final_selector_return_projection", function=func_addr):
-            final_selector_return_changed = _materialize_structuring_selector_return_branches_8616(
+        )
+        changed = flags.hoisted_jcc_target_copy or changed
+        annotate_current_span(changed=flags.hoisted_jcc_target_copy)
+    with span("x86_16.structuring.return_shape", function=func_addr):
+        flags.return_shape = bool(
+            _materialize_structuring_return_shape_8616(
                 self.project,
                 self.codegen,
             )
-            changed = bool(final_selector_return_changed) or changed
-            annotate_current_span(changed=bool(final_selector_return_changed))
-        with span("x86_16.structuring.identical_return_guards", function=func_addr):
-            identical_return_guards = collapse_pure_identical_return_guards_8616(
-                getattr(self.codegen.cfunc, "statements", None)
-            )
-            self.codegen._inertia_identical_return_guard_collapse_result_8616 = (
-                identical_return_guards
-            )
-            changed = identical_return_guards.changed or changed
-            widening_replay_changed = _run_structuring_widening_copy_propagation_8616(
-                self.codegen
-            )
-            changed = bool(widening_replay_changed) or changed
-            dead_carrier_changed = prune_unread_stack_lowered_register_carriers_8616(
-                self.codegen
-            )
-            changed = bool(dead_carrier_changed) or changed
-            late_flag_cleanup = (
-                _structuring_conditions.prune_dead_flag_assignments_after_structuring_8616(
-                    self.project,
-                    self.codegen,
-                )
-            )
-            changed = late_flag_cleanup.changed or changed
-            # Widening replay, carrier pruning, and FLAGS cleanup can rebuild
-            # raw AL/AH-style views after the earlier typed GP replay. Close
-            # the same Lowering contract immediately before validation.
-            final_gp_state_changed = (
-                _replay_structuring_gp_state_after_late_cleanup_8616(self.codegen)
-            )
-            changed = bool(final_gp_state_changed) or changed
-            annotate_current_span(
-                raw_fact_count=identical_return_guards.stats.raw_fact_count,
-                materialized_count=identical_return_guards.stats.materialized_count,
-                failure_count=identical_return_guards.stats.failure_count,
-                widening_changed=bool(widening_replay_changed),
-                carrier_changed=bool(dead_carrier_changed),
-                flags_changed=late_flag_cleanup.changed,
-                gp_state_changed=bool(final_gp_state_changed),
-            )
-        with span("x86_16.structuring.final_callsite_closure", function=func_addr):
-            final_callsite_changed = _close_final_structuring_callsites_8616(
+        )
+        changed = flags.return_shape or changed
+        annotate_current_span(changed=flags.return_shape)
+    with span("x86_16.structuring.void_tail_call_guard", function=func_addr):
+        flags.void_tail_call_guard = bool(
+            _materialize_structuring_void_tail_call_guard_8616(
                 self.project,
                 self.codegen,
             )
-            changed = bool(final_callsite_changed) or changed
-            annotate_current_span(changed=bool(final_callsite_changed))
-        with span("x86_16.structuring.final_shared_call_ownership", function=func_addr):
-            final_shared_call_changed = finalize_shared_call_occurrences_8616(
-                self.project,
-                self.codegen,
-            )
-            annotate_current_span(changed=bool(final_shared_call_changed))
-            if final_shared_call_changed:
-                regenerated = _regenerate_structuring_text_safely_8616(
-                    self.codegen,
-                    context="structuring:shared-call-occurrence-normalization",
-                )
-                annotate_current_span(regenerated=bool(regenerated))
-            final_pointer_memory_changed = _apply_structuring_pointer_memory_idioms_8616(
-                self.project, self.codegen
-            )
-            changed = bool(final_pointer_memory_changed) or changed
-            annotate_current_span(pointer_memory_changed=bool(final_pointer_memory_changed))
-        with span("x86_16.structuring.return_chain_integrity", function=func_addr):
-            return_chain_integrity = require_materialized_return_chain_integrity_8616(
-                self.codegen,
-                context="structuring:final-ast",
-            )
-            annotate_current_span(verdict=return_chain_integrity.verdict.value)
-        with span("x86_16.structuring.validation.after_fingerprint", function=func_addr):
-            after_fingerprint = fingerprint_x86_16_tail_validation_boundary(
-                self.project, self.codegen, mode=validation_mode
-            )
-        after_collect_started = time.perf_counter()
-        with span("x86_16.structuring.validation.after_summary", function=func_addr):
-            after_summary = collect_x86_16_tail_validation_summary(
-                self.project,
-                self.codegen,
-                mode=validation_mode,
-                boundary_fingerprint=after_fingerprint,
-            )
-        after_collect_elapsed = time.perf_counter() - after_collect_started
-        self.codegen._inertia_structuring_tail_validation_artifacts_8616 = {
-            "mode": validation_mode,
-            "before_fingerprint": before_fingerprint,
-            "before_summary": before_summary,
-            "after_fingerprint": after_fingerprint,
-            "after_summary": after_summary,
-        }
-        function = getattr(self, "function", None) or getattr(self, "func", None)
-        if function is None and getattr(getattr(self, "codegen", None), "cfunc", None) is not None:
-            addr = getattr(self.codegen.cfunc, "addr", None)
-            kb_functions = getattr(getattr(self, "project", None), "kb", None)
-            kb_functions = getattr(kb_functions, "functions", None)
-            if isinstance(addr, int) and kb_functions is not None:
-                with contextlib.suppress(Exception):
-                    function = kb_functions.function(addr, create=False)
-        owner = getattr(function, "info", None) if function is not None else None
-        validation_started = time.perf_counter()
-        with span("x86_16.structuring.validation.compare", function=func_addr):
-            validation = build_x86_16_tail_validation_cached_result(
-                owner=owner if isinstance(owner, MutableMapping) else None,
-                stage="structuring",
-                mode=validation_mode,
-                before_fingerprint=before_fingerprint,
-                after_fingerprint=after_fingerprint,
-                before_summary=before_summary,
-                after_summary=after_summary,
-                semantic_failure_scope=TailSemanticFailureScope8616.INTRODUCED,
-            )
-        validation_compare_elapsed = time.perf_counter() - validation_started
-        validation_timings = {
-            "collect_before_ms": round(before_collect_elapsed * 1000.0, 3),
-            "collect_after_ms": round(after_collect_elapsed * 1000.0, 3),
-            "compare_ms": round(validation_compare_elapsed * 1000.0, 3),
-            "total_ms": round(
-                (before_collect_elapsed + after_collect_elapsed + validation_compare_elapsed) * 1000.0, 3
-            ),
-        }
-        validation["timings"] = validation_timings
-        validation["verdict"] = build_x86_16_tail_validation_verdict("structuring", validation)
-        log = logging.getLogger(__name__)
-        if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
-            log.warning(
-                "[structuring-tail-validation] function=%#x status=%r changed=%r "
-                "cache_hit=%r delta=%r semantic_failures=%r",
-                func_addr if isinstance(func_addr, int) else -1,
-                validation.get("status"),
-                validation.get("changed"),
-                validation.get("cache_hit"),
-                validation.get("delta"),
-                validation.get("semantic_failures"),
-            )
-        if _try_accept_structuring_validation_delta_from_evidence_8616(
+        )
+        changed = flags.void_tail_call_guard or changed
+        annotate_current_span(changed=flags.void_tail_call_guard)
+    return changed
+
+def _validated_refresh_cleanup_phases_8616(
+    self: AngrDecompilerSurface,
+    func_addr: object,
+    changed: bool,
+    flags: _ValidatedStructuringFlags8616,
+) -> bool:
+    """Run condition refresh, pointer-memory, and shared-call cleanup spans."""
+    with span("x86_16.structuring.condition_refresh", function=func_addr):
+        condition_refresh_result = _refresh_structuring_condition_semantics_8616(
             self.project,
             self.codegen,
-            validation,
-            spec_name="final",
+        )
+        condition_refresh_changed = condition_refresh_result.changed
+        flags.condition_broad_replay = bool(
+            condition_refresh_result.requires_broad_lowering_replay
+        )
+        flags.restored_not_shift = bool(
+            _restore_not_shift_conditions_structuring_8616(self.codegen)
+        )
+        changed = bool(condition_refresh_changed or flags.restored_not_shift) or changed
+        annotate_current_span(
+            changed=bool(condition_refresh_changed),
+            not_shift_restored=flags.restored_not_shift,
+        )
+        record_ast_condition_trace_8616(self.project, self.codegen, stage="structured")
+    with span("x86_16.structuring.pointer_memory_lowering", function=func_addr):
+        flags.pointer_memory = bool(
+            _apply_structuring_pointer_memory_idioms_8616(self.project, self.codegen)
+        )
+        changed = flags.pointer_memory or changed
+        annotate_current_span(changed=flags.pointer_memory)
+        if os.environ.get("INERTIA_DEBUG_POINTER_MEMORY_IDIOMS") == "1":
+            try:
+                pointer_text = str(self.codegen.cfunc.c_repr())
+            except (AttributeError, TypeError):
+                pointer_text = ""
+            logging.getLogger(__name__).warning(
+                "[pointer-memory-structuring-final] lines=%r",
+                tuple(
+                    line.strip()
+                    for line in pointer_text.splitlines()
+                    if "[0]" in line or "SEG_U16" in line
+                ),
+            )
+    with span("x86_16.structuring.shared_call_occurrences", function=func_addr):
+        flags.shared_call = bool(
+            finalize_shared_call_occurrences_8616(
+                self.project,
+                self.codegen,
+            )
+        )
+        changed = flags.shared_call or changed
+        annotate_current_span(changed=flags.shared_call)
+    return changed
+
+def _regenerate_if_structuring_changed_8616(
+    codegen: AngrCodegenSurface, func_addr: object, changed: bool
+) -> None:
+    """Regenerate rendered text only when a pass mutated the structured AST."""
+    if changed:
+        with span("x86_16.structuring.regenerate_text", function=func_addr):
+            regenerated = _regenerate_structuring_text_safely_8616(
+                codegen,
+                context="structuring:post-codegen-ast-mutation",
+            )
+            annotate_current_span(regenerated=bool(regenerated))
+
+
+def _post_regen_narrow_lowering_replay_8616(
+    post_codegen_lowering_replay_impact: StructuringLoweringReplayImpact8616,
+    codegen: AngrCodegenSurface,
+) -> bool:
+    """Run the narrower-than-full post-regeneration lowering replay arms."""
+    if (
+        post_codegen_lowering_replay_impact
+        is StructuringLoweringReplayImpact8616.RETURN_LIVENESS_ONLY
+    ):
+        return bool(replay_return_liveness_lowering_8616(codegen).changed)
+    return False
+
+
+def _materialize_terminal_call_result_return_delta_8616(
+    project: AngrProjectSurface, codegen: AngrCodegenSurface
+) -> tuple[bool, bool]:
+    """Materialize terminal call-result returns; return (flag, combined changed)."""
+    terminal_call_return = bool(
+        _materialize_structuring_terminal_call_result_return_8616(
+            project,
+            codegen,
+        )
+    )
+    terminal_call_return_shape_changed = (
+        _materialize_structuring_return_shape_8616(
+            project,
+            codegen,
+        )
+        if terminal_call_return
+        else False
+    )
+    annotate_current_span(
+        changed=terminal_call_return,
+        return_shape_changed=bool(terminal_call_return_shape_changed),
+    )
+    return terminal_call_return, bool(
+        terminal_call_return or terminal_call_return_shape_changed
+    )
+
+
+def _final_lowering_boundary_changed_8616(flags: _ValidatedStructuringFlags8616) -> bool:
+    """Return whether any final boundary flag requires the last lowering replay."""
+    return bool(
+        flags.terminal_call_return
+        or flags.final_loop_break_jcc
+        or flags.final_condition_broad_replay
+        or flags.boolean_ite
+    )
+
+
+def _validated_terminal_mid_phases_8616(
+    self: AngrDecompilerSurface,
+    func_addr: object,
+    changed: bool,
+    flags: _ValidatedStructuringFlags8616,
+) -> bool:
+    """Run the final condition-refresh, loop-break closure, and ite spans."""
+    with span("x86_16.structuring.final_condition_refresh", function=func_addr):
+        final_condition_result = _refresh_structuring_condition_semantics_8616(
+            self.project,
+            self.codegen,
+        )
+        final_condition_changed = final_condition_result.changed
+        flags.final_condition_broad_replay = bool(
+            final_condition_result.requires_broad_lowering_replay
+        )
+        changed = final_condition_changed or changed
+        record_ast_condition_trace_8616(self.project, self.codegen, stage="structured-final")
+    with span("x86_16.structuring.final_loop_break_jcc_closure", function=func_addr):
+        flags.final_loop_break_jcc = bool(
+            _materialize_structuring_unconsumed_loop_break_jcc_8616(
+                self.project,
+                self.codegen,
+            )
+        )
+        changed = flags.final_loop_break_jcc or changed
+        annotate_current_span(changed=flags.final_loop_break_jcc)
+    with span("x86_16.structuring.boolean_condition_ites", function=func_addr):
+        boolean_ite_stats = normalize_boolean_condition_ites_8616(self.codegen)
+        flags.boolean_ite = bool(boolean_ite_stats.changed)
+        changed = flags.boolean_ite or changed
+        annotate_current_span(
+            raw_fact_count=boolean_ite_stats.raw_fact_count,
+            classified_fact_count=boolean_ite_stats.classified_fact_count,
+            materialized_count=boolean_ite_stats.materialized_count,
+            failure_count=boolean_ite_stats.failure_count,
+        )
+    return changed
+
+def _validated_selector_phases_8616(
+    self: AngrDecompilerSurface,
+    func_addr: object,
+    changed: bool,
+) -> bool:
+    """Run the final switch-exit and wide-stack predicate spans."""
+    with span("x86_16.structuring.final_switch_loop_exit_return", function=func_addr):
+        final_switch_exit_changed = _repair_structuring_switch_loop_exit_returns_8616(
+            self.project,
+            self.codegen,
+        )
+        changed = bool(final_switch_exit_changed) or changed
+        annotate_current_span(changed=bool(final_switch_exit_changed))
+    with span("x86_16.structuring.final_wide_stack_predicate", function=func_addr):
+        final_wide_predicate_changed = _materialize_structuring_wide_stack_return_predicate_8616(
+            self.project,
+            self.codegen,
+        )
+        changed = bool(final_wide_predicate_changed) or changed
+        annotate_current_span(changed=bool(final_wide_predicate_changed))
+    return changed
+
+def _validated_callsite_closure_phases_8616(
+    self: AngrDecompilerSurface,
+    func_addr: object,
+    changed: bool,
+) -> bool:
+    """Run the identical-return-guard collapse and callsite closure spans."""
+    with span("x86_16.structuring.identical_return_guards", function=func_addr):
+        identical_return_guards = collapse_pure_identical_return_guards_8616(
+            getattr(self.codegen.cfunc, "statements", None)
+        )
+        self.codegen._inertia_identical_return_guard_collapse_result_8616 = (
+            identical_return_guards
+        )
+        changed = identical_return_guards.changed or changed
+        widening_replay_changed = _run_structuring_widening_copy_propagation_8616(
+            self.codegen
+        )
+        changed = bool(widening_replay_changed) or changed
+        dead_carrier_changed = prune_unread_stack_lowered_register_carriers_8616(
+            self.codegen
+        )
+        changed = bool(dead_carrier_changed) or changed
+        late_flag_cleanup = (
+            _structuring_conditions.prune_dead_flag_assignments_after_structuring_8616(
+                self.project,
+                self.codegen,
+            )
+        )
+        changed = late_flag_cleanup.changed or changed
+        # Widening replay, carrier pruning, and FLAGS cleanup can rebuild
+        # raw AL/AH-style views after the earlier typed GP replay. Close
+        # the same Lowering contract immediately before validation.
+        final_gp_state_changed = (
+            _replay_structuring_gp_state_after_late_cleanup_8616(self.codegen)
+        )
+        changed = bool(final_gp_state_changed) or changed
+        annotate_current_span(
+            raw_fact_count=identical_return_guards.stats.raw_fact_count,
+            materialized_count=identical_return_guards.stats.materialized_count,
+            failure_count=identical_return_guards.stats.failure_count,
+            widening_changed=bool(widening_replay_changed),
+            carrier_changed=bool(dead_carrier_changed),
+            flags_changed=late_flag_cleanup.changed,
+            gp_state_changed=bool(final_gp_state_changed),
+        )
+    with span("x86_16.structuring.final_callsite_closure", function=func_addr):
+        final_callsite_changed = _close_final_structuring_callsites_8616(
+            self.project,
+            self.codegen,
+        )
+        changed = bool(final_callsite_changed) or changed
+        annotate_current_span(changed=bool(final_callsite_changed))
+    return changed
+
+def _finalize_shared_call_ownership_8616(
+    self: AngrDecompilerSurface, codegen: AngrCodegenSurface
+) -> bool:
+    """Close shared-call ownership and rerun pointer-memory; return its delta."""
+    final_shared_call_changed = finalize_shared_call_occurrences_8616(
+        self.project,
+        codegen,
+    )
+    annotate_current_span(changed=bool(final_shared_call_changed))
+    if final_shared_call_changed:
+        regenerated = _regenerate_structuring_text_safely_8616(
+            codegen,
+            context="structuring:shared-call-occurrence-normalization",
+        )
+        annotate_current_span(regenerated=bool(regenerated))
+    final_pointer_memory_changed = _apply_structuring_pointer_memory_idioms_8616(
+        self.project, codegen
+    )
+    annotate_current_span(pointer_memory_changed=bool(final_pointer_memory_changed))
+    return bool(final_pointer_memory_changed)
+
+def _validated_decompile_function_8616(self: AngrDecompilerSurface) -> object:
+    """Resolve the angr function for diagnostics, with a kb fallback."""
+    function = getattr(self, "function", None) or getattr(self, "func", None)
+    if function is None and getattr(getattr(self, "codegen", None), "cfunc", None) is not None:
+        addr = getattr(self.codegen.cfunc, "addr", None)
+        kb_functions = getattr(getattr(self, "project", None), "kb", None)
+        kb_functions = getattr(kb_functions, "functions", None)
+        if isinstance(addr, int) and kb_functions is not None:
+            with contextlib.suppress(Exception):
+                function = kb_functions.function(addr, create=False)
+    return function
+
+@dataclass
+class _StructuringValidationBaseline8616:
+    """Tail-validation baseline captured before the structuring pass pipeline."""
+
+    prime_changed: bool
+    before_fingerprint: str
+    before_summary: X86_16TailValidationSummary
+    before_collect_elapsed: float
+
+
+def _structuring_validation_baseline_8616(
+    self: AngrDecompilerSurface,
+    codegen: AngrCodegenSurface,
+    func_addr: object,
+    validation_mode: str,
+) -> _StructuringValidationBaseline8616:
+    """Prime validation semantics and capture the pre-structuring baseline."""
+    with span("x86_16.structuring.validation_prime", function=func_addr):
+        prime_changed = bool(_prime_structuring_validation_semantics_8616(self.project, codegen))
+        annotate_current_span(changed=prime_changed)
+        _ensure_structuring_typed_conditions_transferred_8616(self.project, codegen)
+    with span("x86_16.structuring.validation.before_fingerprint", function=func_addr):
+        before_fingerprint = fingerprint_x86_16_tail_validation_boundary(
+            self.project, codegen, mode=validation_mode
+        )
+    before_collect_started = time.perf_counter()
+    with span("x86_16.structuring.validation.before_summary", function=func_addr):
+        before_summary = collect_x86_16_tail_validation_summary(
+            self.project,
+            codegen,
+            mode=validation_mode,
+            boundary_fingerprint=before_fingerprint,
+        )
+    return _StructuringValidationBaseline8616(
+        prime_changed=prime_changed,
+        before_fingerprint=before_fingerprint,
+        before_summary=before_summary,
+        before_collect_elapsed=time.perf_counter() - before_collect_started,
+    )
+
+
+def _validated_structuring_publish_8616(
+    self: AngrDecompilerSurface,
+    func_addr: object,
+    validation_mode: str,
+    baseline: _StructuringValidationBaseline8616,
+    after_fingerprint: str,
+    structuring_elapsed: float,
+    changed: bool,
+) -> None:
+    """Collect the after snapshot, run final tail validation, and publish results."""
+    codegen = self.codegen
+    before_fingerprint = baseline.before_fingerprint
+    before_summary = baseline.before_summary
+    before_collect_elapsed = baseline.before_collect_elapsed
+    after_collect_started = time.perf_counter()
+    with span("x86_16.structuring.validation.after_summary", function=func_addr):
+        after_summary = collect_x86_16_tail_validation_summary(
+            self.project,
+            codegen,
+            mode=validation_mode,
+            boundary_fingerprint=after_fingerprint,
+        )
+    after_collect_elapsed = time.perf_counter() - after_collect_started
+    codegen._inertia_structuring_tail_validation_artifacts_8616 = {
+        "mode": validation_mode,
+        "before_fingerprint": before_fingerprint,
+        "before_summary": before_summary,
+        "after_fingerprint": after_fingerprint,
+        "after_summary": after_summary,
+    }
+    function = _validated_decompile_function_8616(self)
+    owner = getattr(function, "info", None) if function is not None else None
+    validation_started = time.perf_counter()
+    with span("x86_16.structuring.validation.compare", function=func_addr):
+        validation = build_x86_16_tail_validation_cached_result(
+            owner=owner if isinstance(owner, MutableMapping) else None,
+            stage="structuring",
+            mode=validation_mode,
+            before_fingerprint=before_fingerprint,
+            after_fingerprint=after_fingerprint,
             before_summary=before_summary,
             after_summary=after_summary,
-        ):
-            log.warning(
-                "structuring final validation delta accepted from consumed evidence function=%#x verdict=%s",
-                getattr(getattr(self.codegen, "cfunc", None), "addr", -1) or -1,
-                validation.get("verdict"),
-            )
-        final_validation_failed = not x86_16_tail_validation_result_passed(validation)
-        self.codegen._inertia_structuring_validation_failed = final_validation_failed
-        self.codegen._inertia_structuring_validation_failure_pass = "final" if final_validation_failed else None
-        self.codegen._inertia_structuring_validation_failure_error = (
-            validation.get("summary_text") or f"tail-validation status={validation.get('status', 'unknown')}"
-            if final_validation_failed
-            else None
+            semantic_failure_scope=TailSemanticFailureScope8616.INTRODUCED,
         )
-        if function is not None:
-            info = getattr(function, "info", None)
-            if isinstance(info, MutableMapping):
-                structuring_info = info.setdefault("x86_16_decompiler_structuring", {})
-                structuring_info["elapsed"] = structuring_elapsed
-                structuring_info["tail_validation_timings"] = validation_timings
-                structuring_info["last_pass"] = getattr(self.codegen, "_inertia_last_structuring_pass", None)
-                structuring_info["changed"] = bool(changed)
-                structuring_info["failed"] = bool(getattr(self.codegen, "_inertia_structuring_failed", False))
-                structuring_info["failure_pass"] = getattr(self.codegen, "_inertia_structuring_failure_pass", None)
-                structuring_info["failure_error"] = getattr(self.codegen, "_inertia_structuring_failure_error", None)
-                structuring_info["validation_failed"] = bool(
-                    getattr(self.codegen, "_inertia_structuring_validation_failed", False)
-                )
-                structuring_info["validation_failure_pass"] = getattr(
-                    self.codegen, "_inertia_structuring_validation_failure_pass", None
-                )
-                structuring_info["validation_failure_error"] = getattr(
-                    self.codegen, "_inertia_structuring_validation_failure_error", None
-                )
-                structuring_info["pass_names"] = getattr(self.codegen, "_inertia_structuring_passes", ())
-                structuring_info["last_stage"] = getattr(self.project, "_inertia_decompiler_stage", None)
-                structuring_info["tail_validation_verdict"] = validation["verdict"]
-                structuring_info["tail_validation_cache_hit"] = bool(validation.get("cache_hit", False))
-                structuring_info["struct_merging_stats"] = getattr(self.codegen, "_inertia_struct_merging_stats", None)
-                structuring_info["struct_merging_changed"] = bool(
-                    getattr(self.codegen, "_inertia_struct_merging_changed", False)
-                )
-                persist_x86_16_tail_validation_snapshot(
-                    function_info=info,
-                    codegen=self.codegen,
-                    stage="structuring",
-                    validation=validation,
-                )
-        if not x86_16_tail_validation_result_passed(validation):
-            log.warning("%s", validation["verdict"])
-        else:
-            log.info("%s", validation["verdict"])
-        self.project._inertia_decompiler_stage = "structuring_done"
+    validation_compare_elapsed = time.perf_counter() - validation_started
+    validation_timings = {
+        "collect_before_ms": round(before_collect_elapsed * 1000.0, 3),
+        "collect_after_ms": round(after_collect_elapsed * 1000.0, 3),
+        "compare_ms": round(validation_compare_elapsed * 1000.0, 3),
+        "total_ms": round(
+            (before_collect_elapsed + after_collect_elapsed + validation_compare_elapsed) * 1000.0, 3
+        ),
+    }
+    validation["timings"] = validation_timings
+    validation["verdict"] = build_x86_16_tail_validation_verdict("structuring", validation)
+    log = logging.getLogger(__name__)
+    if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
+        log.warning(
+            "[structuring-tail-validation] function=%#x status=%r changed=%r "
+            "cache_hit=%r delta=%r semantic_failures=%r",
+            func_addr if isinstance(func_addr, int) else -1,
+            validation.get("status"),
+            validation.get("changed"),
+            validation.get("cache_hit"),
+            validation.get("delta"),
+            validation.get("semantic_failures"),
+        )
+    if _try_accept_structuring_validation_delta_from_evidence_8616(
+        self.project,
+        codegen,
+        validation,
+        spec_name="final",
+        before_summary=before_summary,
+        after_summary=after_summary,
+    ):
+        log.warning(
+            "structuring final validation delta accepted from consumed evidence function=%#x verdict=%s",
+            getattr(getattr(codegen, "cfunc", None), "addr", -1) or -1,
+            validation.get("verdict"),
+        )
+    final_validation_failed = not x86_16_tail_validation_result_passed(validation)
+    codegen._inertia_structuring_validation_failed = final_validation_failed
+    codegen._inertia_structuring_validation_failure_pass = "final" if final_validation_failed else None
+    codegen._inertia_structuring_validation_failure_error = (
+        validation.get("summary_text") or f"tail-validation status={validation.get('status', 'unknown')}"
+        if final_validation_failed
+        else None
+    )
+    if function is not None:
+        info = getattr(function, "info", None)
+        if isinstance(info, MutableMapping):
+            _populate_structuring_info_8616(
+                self,
+                info,
+                structuring_elapsed,
+                changed,
+                tail_validation={
+                    "timings": validation_timings,
+                    "verdict": validation["verdict"],
+                    "cache_hit": bool(validation.get("cache_hit", False)),
+                },
+            )
+            persist_x86_16_tail_validation_snapshot(
+                function_info=info,
+                codegen=codegen,
+                stage="structuring",
+                validation=validation,
+            )
+    if not x86_16_tail_validation_result_passed(validation):
+        log.warning("%s", validation["verdict"])
+    else:
+        log.info("%s", validation["verdict"])
+    self.project._inertia_decompiler_stage = "structuring_done"
 
-    return _impl()
+def _decompile_structuring_8616(self: AngrDecompilerSurface) -> None:
+    structuring_elapsed = _run_angr_core_decompile_8616(self)
+    if self.project.arch.name != "86_16" or self.codegen is None:
+        return
+    install_materialized_return_chain_integrity_guard_8616(self.codegen)
+    clinic = getattr(self, "clinic", None)
+    if clinic is not None:
+        self.codegen._clinic = clinic
+    _bind_structuring_callsite_consumers_8616(self.codegen)
+    if not bool(getattr(self.project, "_inertia_tail_validation_enabled", True)):
+        _decompile_structuring_unvalidated_8616(self, structuring_elapsed)
+        return
+
+    codegen = self.codegen
+    func_addr = getattr(getattr(codegen, "cfunc", None), "addr", None)
+    validation_mode = "live_out"
+    baseline = _structuring_validation_baseline_8616(self, codegen, func_addr, validation_mode)
+    flags = _ValidatedStructuringFlags8616()
+    changed, lowering_replay_impact = _validated_codegen_run_8616(
+        self, func_addr, baseline.prime_changed
+    )
+    if lowering_replay_impact == StructuringLoweringReplayImpact8616.FULL_AST:
+        with span("x86_16.structuring.direct_stack_materialization", function=func_addr):
+            direct_stack_changed = _apply_structuring_direct_stack_materialization_8616(
+                self.project,
+                codegen,
+            )
+            changed |= bool(direct_stack_changed)
+            annotate_current_span(changed=bool(direct_stack_changed))
+        with span("x86_16.structuring.segment_global_after_direct_stack", function=func_addr):
+            segment_global_changed = _prime_structuring_segment_global_semantics_8616(
+                self.project,
+                codegen,
+            )
+            changed |= bool(segment_global_changed)
+            annotate_current_span(changed=bool(segment_global_changed))
+    changed = _validated_guard_repair_phases_8616(self, func_addr, changed, flags)
+    changed = _validated_jcc_repair_phases_8616(self, func_addr, changed, flags)
+    changed = _validated_refresh_cleanup_phases_8616(self, func_addr, changed, flags)
+    post_codegen_lowering_replay_impact = (
+        structuring_lowering_replay_impact_after_changes_8616(
+            lowering_replay_impact,
+            return_liveness_changed=flags.return_shape,
+            full_ast_changes=(
+                flags.selector_return,
+                flags.return_chains,
+                flags.loop_exit_guard,
+                flags.unresolved_exit_goto,
+                flags.unconsumed_loop_break_jcc,
+                flags.conditional_continue,
+                flags.pretest_loop_guard,
+                flags.canonical_for,
+                flags.hoisted_jcc_target_copy,
+                flags.void_tail_call_guard,
+                flags.condition_broad_replay,
+                flags.restored_not_shift,
+                flags.pointer_memory,
+                flags.shared_call,
+            ),
+        )
+    )
+    _regenerate_if_structuring_changed_8616(codegen, func_addr, changed)
+    with span("x86_16.structuring.post_regeneration_lowering_replay", function=func_addr):
+        post_regeneration_lowering_changed = (
+            _replay_structuring_lowering_before_validation_8616(self.project, codegen)
+            if post_codegen_lowering_replay_impact is StructuringLoweringReplayImpact8616.FULL_AST
+            else _post_regen_narrow_lowering_replay_8616(
+                post_codegen_lowering_replay_impact, codegen
+            )
+        )
+        changed |= bool(post_regeneration_lowering_changed)
+        annotate_current_span(
+            changed=bool(post_regeneration_lowering_changed),
+            replay_impact=post_codegen_lowering_replay_impact.name,
+        )
+    with span("x86_16.structuring.terminal_call_result_return", function=func_addr):
+        flags.terminal_call_return, terminal_call_return_delta = (
+            _materialize_terminal_call_result_return_delta_8616(self.project, codegen)
+        )
+        changed |= terminal_call_return_delta
+    changed = _validated_terminal_mid_phases_8616(self, func_addr, changed, flags)
+    with span("x86_16.structuring.final_lowering_replay", function=func_addr):
+        final_lowering_changed = (
+            _replay_structuring_lowering_before_validation_8616(self.project, self.codegen)
+            if _final_lowering_boundary_changed_8616(flags)
+            else False
+        )
+        changed |= bool(final_lowering_changed)
+        annotate_current_span(changed=bool(final_lowering_changed))
+    changed = _validated_selector_phases_8616(self, func_addr, changed)
+    with span("x86_16.structuring.final_selector_return_projection", function=func_addr):
+        final_selector_return_changed = _materialize_structuring_selector_return_branches_8616(
+            self.project,
+            codegen,
+        )
+        changed |= bool(final_selector_return_changed)
+        annotate_current_span(changed=bool(final_selector_return_changed))
+    changed = _validated_callsite_closure_phases_8616(self, func_addr, changed)
+    with span("x86_16.structuring.final_shared_call_ownership", function=func_addr):
+        changed |= _finalize_shared_call_ownership_8616(self, codegen)
+    with span("x86_16.structuring.return_chain_integrity", function=func_addr):
+        return_chain_integrity = require_materialized_return_chain_integrity_8616(
+            codegen,
+            context="structuring:final-ast",
+        )
+        annotate_current_span(verdict=return_chain_integrity.verdict.value)
+    with span("x86_16.structuring.validation.after_fingerprint", function=func_addr):
+        after_fingerprint = fingerprint_x86_16_tail_validation_boundary(
+            self.project, codegen, mode=validation_mode
+        )
+    _validated_structuring_publish_8616(
+        self,
+        func_addr,
+        validation_mode,
+        baseline,
+        after_fingerprint,
+        structuring_elapsed,
+        changed,
+    )
+
+
+@dataclass
+class _SsAliasCensus8616:
+    """SS-space tallies from the module alias fact cache."""
+
+    has_ss: bool = False
+    has_ss_stable: bool = False
+    has_ss_failure: bool = False
+    first_ss_failure_reason: object = None
+
+
+def _ss_alias_census_8616(facts: list[object]) -> _SsAliasCensus8616:
+    """Census SS-space alias facts, skipping provisional SP-relative failures."""
+    from .alias.alias_model_impl import AliasFailure, AliasStorageFacts
+
+    census = _SsAliasCensus8616()
+    for fact in facts:
+        if isinstance(fact, AliasFailure):
+            if fact.space in {"ss", "SS"}:
+                census.has_ss = True
+                address = fact.address
+                if isinstance(address, IRAddress) and address.status == AddressStatus.PROVISIONAL:
+                    continue
+                census.has_ss_failure = True
+                if census.first_ss_failure_reason is None:
+                    census.first_ss_failure_reason = fact.reason
+        elif isinstance(fact, AliasStorageFacts) and fact.domain.space == "stack":
+            census.has_ss = True
+            census.has_ss_stable = True
+    return census
 
 
 def _assert_alias_complete_8616(codegen: AngrCodegenSurface) -> None:
-    def _impl() -> None:
-        """Block structuring when SS stack alias facts are incomplete.
+    """Block structuring when SS stack alias facts are incomplete.
 
-        AGENTS rule #1: SS:BP+offset → stack slot → variable, never guess.
-        AGENTS rule #8: validation must be honest — unreviewed SS is not safe.
+    AGENTS rule #1: SS:BP+offset → stack slot → variable, never guess.
+    AGENTS rule #8: validation must be honest — unreviewed SS is not safe.
 
-        Consults the module-level alias fact cache populated during VEX lifting
-        (access._inertia_module_alias_fact_cache).  Returns without error when
-        no SS accesses are present (e.g. pure register / DS-only functions).
+    Consults the module-level alias fact cache populated during VEX lifting
+    (access._inertia_module_alias_fact_cache).  Returns without error when
+    no SS accesses are present (e.g. pure register / DS-only functions).
 
-        Raises PipelineHardError if any proven SS access lacks stable stack alias.
-        """
-        from .access import _inertia_module_alias_fact_cache
-        from .alias.alias_model_impl import AliasFailure, AliasStorageFacts
-        from .pipeline.errors import PipelineHardError
+    Raises PipelineHardError if any proven SS access lacks stable stack alias.
+    """
+    from .access import _inertia_module_alias_fact_cache
+    from .pipeline.errors import PipelineHardError
 
-        cfunc = getattr(codegen, "cfunc", None)
-        func_addr = getattr(cfunc, "addr", None) if cfunc is not None else None
-        if not isinstance(func_addr, int):
-            return
+    cfunc = getattr(codegen, "cfunc", None)
+    func_addr = getattr(cfunc, "addr", None) if cfunc is not None else None
+    if not isinstance(func_addr, int):
+        return
 
-        facts = _inertia_module_alias_fact_cache.get(func_addr, None)
-        if not isinstance(facts, list):
-            return  # No facts recorded for this function — likely not yet lifted with typed IR.
+    facts = _inertia_module_alias_fact_cache.get(func_addr, None)
+    if not isinstance(facts, list):
+        return  # No facts recorded for this function — likely not yet lifted with typed IR.
 
-        has_ss = False
-        has_ss_stable = False
-        has_ss_failure = False
-        _first_ss_failure_reason = None
-        for fact in facts:
-            if isinstance(fact, AliasFailure):
-                if fact.space in {"ss", "SS"}:
-                    has_ss = True
-                    address = fact.address
-                    if isinstance(address, IRAddress) and address.status == AddressStatus.PROVISIONAL:
-                        continue
-                    has_ss_failure = True
-                    if _first_ss_failure_reason is None:
-                        _first_ss_failure_reason = fact.reason
-            elif isinstance(fact, AliasStorageFacts) and fact.domain.space == "stack":
-                has_ss = True
-                has_ss_stable = True
+    census = _ss_alias_census_8616(facts)
+    if not census.has_ss:
+        return  # No SS accesses — nothing to block.
 
-        if not has_ss:
-            return  # No SS accesses — nothing to block.
-
-        # Only block when SS accesses exist but NONE are successfully classified.
-        # Provisional SP-relative AliasFailures (push/pop/ret) are expected and
-        # should not prevent structuring when BP-relative stack accesses are resolved.
-        if not has_ss_stable and has_ss_failure:
-            raise PipelineHardError(
-                f"structuring before stable stack alias: {_first_ss_failure_reason}",
-                layer="structuring",
-            )
-
-    return _impl()
+    # Only block when SS accesses exist but NONE are successfully classified.
+    # Provisional SP-relative AliasFailures (push/pop/ret) are expected and
+    # should not prevent structuring when BP-relative stack accesses are resolved.
+    if not census.has_ss_stable and census.has_ss_failure:
+        raise PipelineHardError(
+            f"structuring before stable stack alias: {census.first_ss_failure_reason}",
+            layer="structuring",
+        )
 
 
 def _decompiler_wrapper_chain_contains_8616(root: object, wrapper_name: str) -> bool:

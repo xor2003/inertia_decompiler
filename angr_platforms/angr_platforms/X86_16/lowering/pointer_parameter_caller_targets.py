@@ -13,10 +13,12 @@ from __future__ import annotations
 
 from typing import Protocol, cast
 
+from ..callsite_summary import CallsiteSummary8616
 from ..ir.function_ssa_registry import (
     FunctionSSAArtifactFailure8616,
     FunctionSSAArtifactVerdict8616,
 )
+from ..ir.ssa_function import SSAFunctionArtifact
 from ..pipeline.errors import PipelineHardError
 from ..semantics.call_stack_effect_pipeline import (
     semantic_function_ssa_artifact_at_address_8616,
@@ -25,6 +27,7 @@ from .callee_callsite_census import (
     CalleeCallsiteCensus8616,
     collect_callee_callsite_census_8616,
 )
+from .callee_callsite_contracts import CalleeCallsiteFact8616
 from .interprocedural_storage_reaching_contracts import (
     CallArgumentDefinitionFailure8616,
     CallArgumentDefinitionVerdict8616,
@@ -38,7 +41,10 @@ from .pointer_parameter_caller_target_contracts import (
     PointerParameterCallerTargetFailure8616,
     PointerParameterCallerTargetStats8616,
 )
-from .pointer_parameter_output_contracts import PointerParameterOutputEvidence8616
+from .pointer_parameter_output_contracts import (
+    PointerParameterOutputContract8616,
+    PointerParameterOutputEvidence8616,
+)
 from .pointer_parameter_outputs import publish_pointer_parameter_outputs_8616
 
 
@@ -128,6 +134,171 @@ def pointer_parameter_caller_target_evidence_8616(
     return _registry_8616(project).get(callee_addr)
 
 
+def _output_target_8616(
+    project: object,
+    callee_addr: int,
+    caller: CalleeCallsiteFact8616,
+    caller_addr: int,
+    summary: CallsiteSummary8616,
+    artifact: SSAFunctionArtifact,
+    output: PointerParameterOutputContract8616,
+    outputs: PointerParameterOutputEvidence8616,
+    census: CalleeCallsiteCensus8616,
+    expected_count: int,
+    normalized_count: int,
+) -> tuple[PointerParameterCallerTarget8616 | None, PointerParameterCallerTargetEvidence8616 | None]:
+    """Project one callee output through one proven caller callsite."""
+    reaching = resolve_call_argument_reaching_definition_8616(
+        artifact,
+        summary,
+        output.logical_index,
+        project=caller.evidence_project,
+        expected_target_addr=caller.evidence_target_addr,
+    )
+    if (
+        reaching.verdict is not CallArgumentDefinitionVerdict8616.PROVEN
+        or reaching.use is None
+    ):
+        return None, _refused_8616(
+            project,
+            callee_addr,
+            PointerParameterCallerTargetFailure8616.REACHING_DEFINITION_REFUSED,
+            outputs=outputs,
+            census=census,
+            raw_count=expected_count,
+            normalized_count=normalized_count,
+            caller_addr=caller_addr,
+            callsite_addr=caller.callsite_addr,
+            logical_index=output.logical_index,
+            reaching_failure=reaching.failure,
+        )
+    near_offset = reaching.affine_expression
+    if near_offset is None or not near_offset.complete:
+        return None, _refused_8616(
+            project,
+            callee_addr,
+            PointerParameterCallerTargetFailure8616.NEAR_OFFSET_UNPROVEN,
+            outputs=outputs,
+            census=census,
+            raw_count=expected_count,
+            normalized_count=normalized_count,
+            caller_addr=caller_addr,
+            callsite_addr=caller.callsite_addr,
+            logical_index=output.logical_index,
+        )
+    view = output.output_view
+    if near_offset.width != output.argument_storage.size:
+        failure = PointerParameterCallerTargetFailure8616.TARGET_WIDTH_CONFLICT
+    elif not view.complete:
+        failure = PointerParameterCallerTargetFailure8616.TARGET_SEGMENT_UNPROVEN
+    else:
+        failure = None
+    if failure is not None:
+        return None, _refused_8616(
+            project,
+            callee_addr,
+            failure,
+            outputs=outputs,
+            census=census,
+            raw_count=expected_count,
+            normalized_count=normalized_count,
+            caller_addr=caller_addr,
+            callsite_addr=caller.callsite_addr,
+            logical_index=output.logical_index,
+        )
+    target = PointerParameterCallerTarget8616(
+        callee_addr,
+        caller_addr,
+        caller.callsite_addr,
+        output.logical_index,
+        view.segment,
+        near_offset,
+        view.relative_offset,
+        view.width,
+        reaching.definitions,
+        reaching.use,
+        output,
+    )
+    if not target.complete:
+        return None, _refused_8616(
+            project,
+            callee_addr,
+            PointerParameterCallerTargetFailure8616.CALLSITE_PROJECTION_INCOMPLETE,
+            outputs=outputs,
+            census=census,
+            raw_count=expected_count,
+            normalized_count=normalized_count,
+            caller_addr=caller_addr,
+            callsite_addr=caller.callsite_addr,
+            logical_index=output.logical_index,
+        )
+    return target, None
+
+
+def _caller_targets_8616(
+    project: object,
+    callee_addr: int,
+    caller: CalleeCallsiteFact8616,
+    outputs: PointerParameterOutputEvidence8616,
+    census: CalleeCallsiteCensus8616,
+    expected_count: int,
+    normalized_count: int,
+) -> tuple[tuple[PointerParameterCallerTarget8616, ...], PointerParameterCallerTargetEvidence8616 | None]:
+    """Project every callee output through one proven caller callsite."""
+    summary = caller.summary
+    caller_addr = caller.caller_addr
+    if summary is None or caller_addr is None:
+        return (), _refused_8616(
+            project,
+            callee_addr,
+            PointerParameterCallerTargetFailure8616.CALLER_IDENTITY_UNPROVEN,
+            outputs=outputs,
+            census=census,
+            raw_count=expected_count,
+            normalized_count=normalized_count,
+            caller_addr=caller_addr,
+            callsite_addr=caller.callsite_addr,
+        )
+    ssa = semantic_function_ssa_artifact_at_address_8616(
+        caller.evidence_project,
+        caller_addr,
+        function=caller.caller_function,
+    )
+    if ssa.verdict is not FunctionSSAArtifactVerdict8616.PROVEN or ssa.artifact is None:
+        return (), _refused_8616(
+            project,
+            callee_addr,
+            PointerParameterCallerTargetFailure8616.CALLER_SSA_UNAVAILABLE,
+            outputs=outputs,
+            census=census,
+            raw_count=expected_count,
+            normalized_count=normalized_count,
+            caller_addr=caller_addr,
+            callsite_addr=caller.callsite_addr,
+            ssa_failure=ssa.failure,
+        )
+    targets: list[PointerParameterCallerTarget8616] = []
+    for output in outputs.facts:
+        target, refusal = _output_target_8616(
+            project,
+            callee_addr,
+            caller,
+            caller_addr,
+            summary,
+            ssa.artifact,
+            output,
+            outputs,
+            census,
+            expected_count,
+            normalized_count + len(targets),
+        )
+        if refusal is not None:
+            return (), refusal
+        assert target is not None
+        targets.append(target)
+    return tuple(targets), None
+
+
 def publish_pointer_parameter_caller_targets_8616(
     project: object,
     callee_addr: int,
@@ -177,124 +348,18 @@ def publish_pointer_parameter_caller_targets_8616(
 
     targets: list[PointerParameterCallerTarget8616] = []
     for caller in census.facts:
-        summary = caller.summary
-        caller_addr = caller.caller_addr
-        if summary is None or caller_addr is None:
-            return _refused_8616(
-                project,
-                callee_addr,
-                PointerParameterCallerTargetFailure8616.CALLER_IDENTITY_UNPROVEN,
-                outputs=outputs,
-                census=census,
-                raw_count=expected_count,
-                normalized_count=len(targets),
-                caller_addr=caller_addr,
-                callsite_addr=caller.callsite_addr,
-            )
-        ssa = semantic_function_ssa_artifact_at_address_8616(
-            caller.evidence_project,
-            caller_addr,
-            function=caller.caller_function,
+        caller_targets, refusal = _caller_targets_8616(
+            project,
+            callee_addr,
+            caller,
+            outputs,
+            census,
+            expected_count,
+            len(targets),
         )
-        if ssa.verdict is not FunctionSSAArtifactVerdict8616.PROVEN or ssa.artifact is None:
-            return _refused_8616(
-                project,
-                callee_addr,
-                PointerParameterCallerTargetFailure8616.CALLER_SSA_UNAVAILABLE,
-                outputs=outputs,
-                census=census,
-                raw_count=expected_count,
-                normalized_count=len(targets),
-                caller_addr=caller_addr,
-                callsite_addr=caller.callsite_addr,
-                ssa_failure=ssa.failure,
-            )
-        for output in outputs.facts:
-            reaching = resolve_call_argument_reaching_definition_8616(
-                ssa.artifact,
-                summary,
-                output.logical_index,
-                project=caller.evidence_project,
-                expected_target_addr=caller.evidence_target_addr,
-            )
-            if (
-                reaching.verdict is not CallArgumentDefinitionVerdict8616.PROVEN
-                or reaching.use is None
-            ):
-                return _refused_8616(
-                    project,
-                    callee_addr,
-                    PointerParameterCallerTargetFailure8616.REACHING_DEFINITION_REFUSED,
-                    outputs=outputs,
-                    census=census,
-                    raw_count=expected_count,
-                    normalized_count=len(targets),
-                    caller_addr=caller_addr,
-                    callsite_addr=caller.callsite_addr,
-                    logical_index=output.logical_index,
-                    reaching_failure=reaching.failure,
-                )
-            near_offset = reaching.affine_expression
-            if near_offset is None or not near_offset.complete:
-                return _refused_8616(
-                    project,
-                    callee_addr,
-                    PointerParameterCallerTargetFailure8616.NEAR_OFFSET_UNPROVEN,
-                    outputs=outputs,
-                    census=census,
-                    raw_count=expected_count,
-                    normalized_count=len(targets),
-                    caller_addr=caller_addr,
-                    callsite_addr=caller.callsite_addr,
-                    logical_index=output.logical_index,
-                )
-            view = output.output_view
-            if near_offset.width != output.argument_storage.size:
-                failure = PointerParameterCallerTargetFailure8616.TARGET_WIDTH_CONFLICT
-            elif not view.complete:
-                failure = PointerParameterCallerTargetFailure8616.TARGET_SEGMENT_UNPROVEN
-            else:
-                failure = None
-            if failure is not None:
-                return _refused_8616(
-                    project,
-                    callee_addr,
-                    failure,
-                    outputs=outputs,
-                    census=census,
-                    raw_count=expected_count,
-                    normalized_count=len(targets),
-                    caller_addr=caller_addr,
-                    callsite_addr=caller.callsite_addr,
-                    logical_index=output.logical_index,
-                )
-            target = PointerParameterCallerTarget8616(
-                callee_addr,
-                caller_addr,
-                caller.callsite_addr,
-                output.logical_index,
-                view.segment,
-                near_offset,
-                view.relative_offset,
-                view.width,
-                reaching.definitions,
-                reaching.use,
-                output,
-            )
-            if not target.complete:
-                return _refused_8616(
-                    project,
-                    callee_addr,
-                    PointerParameterCallerTargetFailure8616.CALLSITE_PROJECTION_INCOMPLETE,
-                    outputs=outputs,
-                    census=census,
-                    raw_count=expected_count,
-                    normalized_count=len(targets),
-                    caller_addr=caller_addr,
-                    callsite_addr=caller.callsite_addr,
-                    logical_index=output.logical_index,
-                )
-            targets.append(target)
+        if refusal is not None:
+            return refusal
+        targets.extend(caller_targets)
     count = len(targets)
     evidence = PointerParameterCallerTargetEvidence8616(
         callee_addr,

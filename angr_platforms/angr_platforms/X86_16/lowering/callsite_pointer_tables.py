@@ -194,6 +194,73 @@ def callsite_pointer_table_argument_type_8616(
     return matches[0]
 
 
+def _collect_call_slot_evidence_8616(
+    call: CFunctionCall,
+    summary: CallsiteSummary8616,
+    stats: CallsitePointerTableStats8616,
+    candidates_by_slot: dict[tuple[int, int], list[_PointerTableCandidate8616]],
+    anchors_by_slot: dict[tuple[int, int], list[SimType]],
+) -> None:
+    """Collect indexed candidates and anchor pointees from one resolved call."""
+    args = tuple(cast(Sequence[object], call.args or ()))
+    push_sources = cast(
+        tuple[CallsitePushSource8616 | None, ...],
+        tuple(reversed(summary.push_arg_sources)),
+    )
+    stats.raw_fact_count += len(args)
+    if not isinstance(summary.target_addr, int) or len(push_sources) != len(args):
+        stats.failure_count += 1
+        return
+    for index, (argument, source) in enumerate(zip(args, push_sources, strict=True)):
+        if not _has_segment_companion_8616(push_sources, index):
+            continue
+        slot = (summary.target_addr, index)
+        source_kind = _source_kind_8616(source)
+        candidate = _indexed_global_candidate_8616(argument, source)
+        if candidate is not None:
+            stats.normalized_fact_count += 1
+            candidates_by_slot.setdefault(slot, []).append(candidate)
+            continue
+        if source_kind not in {
+            CallsitePushSourceKind8616.BP_ADDRESS.value,
+            CallsitePushSourceKind8616.BP_INDEX_ADDRESS.value,
+        }:
+            continue
+        pointee = _pointer_anchor_pointee_8616(argument)
+        if pointee is not None:
+            stats.normalized_fact_count += 1
+            anchors_by_slot.setdefault(slot, []).append(pointee)
+
+
+def _materialize_slot_candidates_8616(
+    codegen: object,
+    project_surface: _ProjectSurface8616,
+    candidates: list[_PointerTableCandidate8616],
+    anchors: Sequence[SimType],
+    stats: CallsitePointerTableStats8616,
+    materialized_facts: list[CallsitePointerTableTypeFact8616],
+) -> None:
+    """Materialize one slot's candidates under its compatible pointee type."""
+    pointee = _compatible_pointee_8616(anchors)
+    if pointee is None:
+        stats.failure_count += len(candidates)
+        return
+    pointer_type = cast(SimTypePointer, SimTypePointer(pointee).with_arch(project_surface.arch))
+    ctype = pointer_type.c_repr(name="").strip()
+    for candidate in candidates:
+        stats.classified_fact_count += 1
+        materialized_facts.append(
+            CallsitePointerTableTypeFact8616(candidate.base_offset, candidate.name, pointer_type)
+        )
+        replace_global_declaration_spec_from_stronger_typed_evidence_8616(
+            codegen,
+            ctype=ctype,
+            name=candidate.name,
+            array_len=candidate.array_len,
+        )
+        stats.materialized_count += 1
+
+
 def materialize_callsite_pointer_table_types_8616(
     project: object,
     codegen: object,
@@ -211,36 +278,10 @@ def materialize_callsite_pointer_table_types_8616(
     anchors_by_slot: dict[tuple[int, int], list[SimType]] = {}
 
     for call, summary in resolved_calls:
-        args = tuple(cast(Sequence[object], call.args or ()))
-        push_sources = cast(
-            tuple[CallsitePushSource8616 | None, ...],
-            tuple(reversed(summary.push_arg_sources)),
+        _collect_call_slot_evidence_8616(
+            call, summary, stats, candidates_by_slot, anchors_by_slot
         )
-        stats.raw_fact_count += len(args)
-        if not isinstance(summary.target_addr, int) or len(push_sources) != len(args):
-            stats.failure_count += 1
-            continue
-        for index, (argument, source) in enumerate(zip(args, push_sources, strict=True)):
-            if not _has_segment_companion_8616(push_sources, index):
-                continue
-            slot = (summary.target_addr, index)
-            source_kind = _source_kind_8616(source)
-            candidate = _indexed_global_candidate_8616(argument, source)
-            if candidate is not None:
-                stats.normalized_fact_count += 1
-                candidates_by_slot.setdefault(slot, []).append(candidate)
-                continue
-            if source_kind not in {
-                CallsitePushSourceKind8616.BP_ADDRESS.value,
-                CallsitePushSourceKind8616.BP_INDEX_ADDRESS.value,
-            }:
-                continue
-            pointee = _pointer_anchor_pointee_8616(argument)
-            if pointee is not None:
-                stats.normalized_fact_count += 1
-                anchors_by_slot.setdefault(slot, []).append(pointee)
 
-    changed = False
     codegen_surface = cast(_CodegenSurface8616, codegen)
     project_surface = cast(_ProjectSurface8616, project)
     try:
@@ -249,25 +290,14 @@ def materialize_callsite_pointer_table_types_8616(
         previous_facts = ()
     materialized_facts: list[CallsitePointerTableTypeFact8616] = []
     for slot, candidates in candidates_by_slot.items():
-        anchors = anchors_by_slot.get(slot, ())
-        pointee = _compatible_pointee_8616(anchors)
-        if pointee is None:
-            stats.failure_count += len(candidates)
-            continue
-        pointer_type = cast(SimTypePointer, SimTypePointer(pointee).with_arch(project_surface.arch))
-        ctype = pointer_type.c_repr(name="").strip()
-        for candidate in candidates:
-            stats.classified_fact_count += 1
-            materialized_facts.append(
-                CallsitePointerTableTypeFact8616(candidate.base_offset, candidate.name, pointer_type)
-            )
-            replace_global_declaration_spec_from_stronger_typed_evidence_8616(
-                codegen,
-                ctype=ctype,
-                name=candidate.name,
-                array_len=candidate.array_len,
-            )
-            stats.materialized_count += 1
+        _materialize_slot_candidates_8616(
+            codegen,
+            project_surface,
+            candidates,
+            anchors_by_slot.get(slot, ()),
+            stats,
+            materialized_facts,
+        )
 
     unique_facts = tuple(dict.fromkeys(materialized_facts))
     codegen_surface._inertia_callsite_pointer_table_types_8616 = unique_facts

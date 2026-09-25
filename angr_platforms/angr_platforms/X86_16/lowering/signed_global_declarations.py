@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CIndexedVariable, CVariable
@@ -30,7 +30,10 @@ from .global_declarations import (
     initialize_global_declaration_specs_8616,
     replace_global_declaration_spec_from_stronger_typed_evidence_8616,
 )
-from .project_global_signedness import collect_project_global_signedness_evidence_8616
+from .project_global_signedness import (
+    ProjectGlobalSignednessEvidence8616,
+    collect_project_global_signedness_evidence_8616,
+)
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -225,20 +228,84 @@ def _comparison_high_word_candidate_8616(
     return candidates[0]
 
 
-def materialize_signed_global_declarations_8616(project: object, codegen: object) -> bool:
-    """Materialize signed wide globals from exact high-word condition evidence.
+@dataclass(slots=True)
+class _SignedCandidateCensus8616:
+    """Join signedness evidence into signed/unsigned candidate buckets."""
 
-    A signed ordering comparison of the high word gives the sign semantics of
-    an already-proven four-byte scalar. An unsigned comparison of that same
-    high word is a conflict and causes conservative refusal. The body AST is
-    intentionally unchanged so validation continues to compare semantics, not
-    declaration representation.
-    """
-    surface = cast(_CodegenSurface8616, codegen)
-    initialize_global_declaration_specs_8616(codegen)
-    project_evidence = collect_project_global_signedness_evidence_8616(project)
-    conditions = _typed_conditions_8616(surface)
-    stats = SignedGlobalDeclarationStats8616(raw_fact_count=len(conditions))
+    scalar_names: frozenset[str]
+    signed_keys: set[tuple[int, int]]
+    unsigned_keys: set[tuple[int, int]]
+    signed_candidates: set[_WideScalarCandidate8616] = field(default_factory=set)
+    unsigned_candidates: set[_WideScalarCandidate8616] = field(default_factory=set)
+    normalized_joins: set[tuple[tuple[int, int], _WideScalarCandidate8616]] = field(
+        default_factory=set
+    )
+
+    def bucket_project_bases(
+        self,
+        scalar_candidates: frozenset[_WideScalarCandidate8616],
+        project_evidence: ProjectGlobalSignednessEvidence8616,
+    ) -> None:
+        """Bucket candidates by proven project-level ordering contracts."""
+        signed_bases = {
+            contract.base_offset
+            for contract in project_evidence.contracts
+            if contract.ordering is DirectGlobalOrdering8616.SIGNED
+        }
+        unsigned_bases = {
+            contract.base_offset
+            for contract in project_evidence.contracts
+            if contract.ordering is DirectGlobalOrdering8616.UNSIGNED
+        }
+        conflicting_bases = set(project_evidence.conflicting_base_offsets)
+        for candidate in scalar_candidates:
+            if candidate.base_offset in signed_bases:
+                self.signed_candidates.add(candidate)
+            if candidate.base_offset in unsigned_bases:
+                self.unsigned_candidates.add(candidate)
+            if candidate.base_offset in conflicting_bases:
+                self.signed_candidates.add(candidate)
+                self.unsigned_candidates.add(candidate)
+
+    def join_ast(self, node: object) -> None:
+        """Join one AST comparison node into the candidate buckets."""
+        if not isinstance(node, CBinaryOp):
+            return
+        key = _ast_condition_key_8616(node)
+        if key not in self.signed_keys and key not in self.unsigned_keys:
+            return
+        candidate = _comparison_high_word_candidate_8616(node, self.scalar_names)
+        if candidate is None:
+            return
+        self.normalized_joins.add((key, candidate))
+        if key in self.signed_keys:
+            self.signed_candidates.add(candidate)
+        if key in self.unsigned_keys:
+            self.unsigned_candidates.add(candidate)
+
+    def join_condition(
+        self,
+        condition: ConditionIR,
+        scalar_candidates: frozenset[_WideScalarCandidate8616],
+    ) -> None:
+        """Join one typed condition into the candidate buckets."""
+        key = _condition_key_8616(condition)
+        if key is None:
+            return
+        candidate = _condition_high_word_candidate_8616(condition, scalar_candidates)
+        if candidate is None:
+            return
+        self.normalized_joins.add((key, candidate))
+        if condition.is_signed:
+            self.signed_candidates.add(candidate)
+        if condition.is_unsigned:
+            self.unsigned_candidates.add(candidate)
+
+
+def _condition_key_sets_8616(
+    conditions: tuple[ConditionIR, ...],
+) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
+    """Bucket proven condition keys by signedness."""
     signed_keys: set[tuple[int, int]] = set()
     unsigned_keys: set[tuple[int, int]] = set()
     for condition in conditions:
@@ -247,99 +314,44 @@ def materialize_signed_global_declarations_8616(project: object, codegen: object
             continue
         target = signed_keys if condition.is_signed else unsigned_keys
         target.add(key)
+    return signed_keys, unsigned_keys
 
-    try:
-        previous_facts = surface._inertia_signed_global_declaration_facts_8616
-    except AttributeError:
-        previous_facts = ()
-    before_specs = _global_declaration_specs_8616(surface)
-    scalar_names = _canonical_scalar_names_8616(surface)
-    if os.environ.get("INERTIA_DEBUG_SIGNED_GLOBAL_DECLARATIONS") == "1":
-        log.warning(
-            "signed-global inputs conditions=%d signed=%d unsigned=%d declaration_specs=%r",
-            len(conditions),
-            len(signed_keys),
-            len(unsigned_keys),
-            before_specs,
-        )
-    signed_candidates: set[_WideScalarCandidate8616] = set()
-    unsigned_candidates: set[_WideScalarCandidate8616] = set()
-    try:
-        cfunc = surface.cfunc
-    except AttributeError:
-        cfunc = None
-    c_nodes = tuple(_iter_c_nodes_deep_8616(cfunc))
-    scalar_candidates = frozenset(
-        candidate
-        for node in c_nodes
-        if (candidate := _wide_scalar_variable_candidate_8616(node, scalar_names)) is not None
-    )
-    signed_project_bases = {
+
+def _project_candidate_fact_count_8616(
+    scalar_candidates: frozenset[_WideScalarCandidate8616],
+    project_evidence: ProjectGlobalSignednessEvidence8616,
+) -> int:
+    """Count scalar candidates backed by any project-level ordering evidence."""
+    signed_bases = {
         contract.base_offset
         for contract in project_evidence.contracts
         if contract.ordering is DirectGlobalOrdering8616.SIGNED
     }
-    unsigned_project_bases = {
+    unsigned_bases = {
         contract.base_offset
         for contract in project_evidence.contracts
         if contract.ordering is DirectGlobalOrdering8616.UNSIGNED
     }
-    conflicting_project_bases = set(project_evidence.conflicting_base_offsets)
-    for candidate in scalar_candidates:
-        if candidate.base_offset in signed_project_bases:
-            signed_candidates.add(candidate)
-        if candidate.base_offset in unsigned_project_bases:
-            unsigned_candidates.add(candidate)
-        if candidate.base_offset in conflicting_project_bases:
-            signed_candidates.add(candidate)
-            unsigned_candidates.add(candidate)
-    normalized_joins: set[tuple[tuple[int, int], _WideScalarCandidate8616]] = set()
-    for node in c_nodes:
-        if not isinstance(node, CBinaryOp):
-            continue
-        key = _ast_condition_key_8616(node)
-        if key not in signed_keys and key not in unsigned_keys:
-            continue
-        candidate = _comparison_high_word_candidate_8616(node, scalar_names)
-        if candidate is None:
-            continue
-        normalized_joins.add((key, candidate))
-        if key in signed_keys:
-            signed_candidates.add(candidate)
-        if key in unsigned_keys:
-            unsigned_candidates.add(candidate)
-
-    for condition in conditions:
-        key = _condition_key_8616(condition)
-        if key is None:
-            continue
-        candidate = _condition_high_word_candidate_8616(condition, scalar_candidates)
-        if candidate is None:
-            continue
-        normalized_joins.add((key, candidate))
-        if condition.is_signed:
-            signed_candidates.add(candidate)
-        if condition.is_unsigned:
-            unsigned_candidates.add(candidate)
-
-    project_candidate_fact_count = sum(
-        candidate.base_offset in signed_project_bases | unsigned_project_bases | conflicting_project_bases
+    conflicting_bases = set(project_evidence.conflicting_base_offsets)
+    return sum(
+        candidate.base_offset in signed_bases | unsigned_bases | conflicting_bases
         for candidate in scalar_candidates
     )
-    stats.raw_fact_count += project_candidate_fact_count
-    stats.normalized_fact_count = len(normalized_joins) + project_candidate_fact_count
 
-    if os.environ.get("INERTIA_DEBUG_SIGNED_GLOBAL_DECLARATIONS") == "1":
-        log.warning(
-            "signed-global candidates signed=%r unsigned=%r stats=%r",
-            signed_candidates,
-            unsigned_candidates,
-            stats,
-        )
 
+def _materialize_signed_facts_8616(
+    codegen: object,
+    surface: _CodegenSurface8616,
+    census: _SignedCandidateCensus8616,
+    previous_facts: tuple[SignedGlobalDeclarationFact8616, ...],
+    stats: SignedGlobalDeclarationStats8616,
+) -> tuple[SignedGlobalDeclarationFact8616, ...]:
+    """Materialize proven signed-only candidates into declaration specs."""
     materialized_facts: list[SignedGlobalDeclarationFact8616] = []
-    for candidate in sorted(signed_candidates, key=lambda item: (item.base_offset, item.name)):
-        if candidate in unsigned_candidates:
+    for candidate in sorted(
+        census.signed_candidates, key=lambda item: (item.base_offset, item.name)
+    ):
+        if candidate in census.unsigned_candidates:
             stats.failure_count += 1
             continue
         stats.classified_fact_count += 1
@@ -356,8 +368,71 @@ def materialize_signed_global_declarations_8616(project: object, codegen: object
             continue
         materialized_facts.append(fact)
         stats.materialized_count += 1
+    return tuple(dict.fromkeys(materialized_facts))
 
-    facts = tuple(dict.fromkeys(materialized_facts))
+
+def materialize_signed_global_declarations_8616(project: object, codegen: object) -> bool:
+    """Materialize signed wide globals from exact high-word condition evidence.
+
+    A signed ordering comparison of the high word gives the sign semantics of
+    an already-proven four-byte scalar. An unsigned comparison of that same
+    high word is a conflict and causes conservative refusal. The body AST is
+    intentionally unchanged so validation continues to compare semantics, not
+    declaration representation.
+    """
+    surface = cast(_CodegenSurface8616, codegen)
+    initialize_global_declaration_specs_8616(codegen)
+    project_evidence = collect_project_global_signedness_evidence_8616(project)
+    conditions = _typed_conditions_8616(surface)
+    stats = SignedGlobalDeclarationStats8616(raw_fact_count=len(conditions))
+    signed_keys, unsigned_keys = _condition_key_sets_8616(conditions)
+
+    try:
+        previous_facts = surface._inertia_signed_global_declaration_facts_8616
+    except AttributeError:
+        previous_facts = ()
+    before_specs = _global_declaration_specs_8616(surface)
+    scalar_names = _canonical_scalar_names_8616(surface)
+    if os.environ.get("INERTIA_DEBUG_SIGNED_GLOBAL_DECLARATIONS") == "1":
+        log.warning(
+            "signed-global inputs conditions=%d signed=%d unsigned=%d declaration_specs=%r",
+            len(conditions),
+            len(signed_keys),
+            len(unsigned_keys),
+            before_specs,
+        )
+    try:
+        cfunc = surface.cfunc
+    except AttributeError:
+        cfunc = None
+    c_nodes = tuple(_iter_c_nodes_deep_8616(cfunc))
+    scalar_candidates = frozenset(
+        candidate
+        for node in c_nodes
+        if (candidate := _wide_scalar_variable_candidate_8616(node, scalar_names)) is not None
+    )
+    census = _SignedCandidateCensus8616(scalar_names, signed_keys, unsigned_keys)
+    census.bucket_project_bases(scalar_candidates, project_evidence)
+    for node in c_nodes:
+        census.join_ast(node)
+    for condition in conditions:
+        census.join_condition(condition, scalar_candidates)
+
+    project_candidate_fact_count = _project_candidate_fact_count_8616(
+        scalar_candidates, project_evidence
+    )
+    stats.raw_fact_count += project_candidate_fact_count
+    stats.normalized_fact_count = len(census.normalized_joins) + project_candidate_fact_count
+
+    if os.environ.get("INERTIA_DEBUG_SIGNED_GLOBAL_DECLARATIONS") == "1":
+        log.warning(
+            "signed-global candidates signed=%r unsigned=%r stats=%r",
+            census.signed_candidates,
+            census.unsigned_candidates,
+            stats,
+        )
+
+    facts = _materialize_signed_facts_8616(codegen, surface, census, previous_facts, stats)
     surface._inertia_signed_global_declaration_facts_8616 = facts
     surface._inertia_signed_global_declaration_stats_8616 = stats
     if stats.classified_fact_count > 0 and stats.materialized_count == 0:

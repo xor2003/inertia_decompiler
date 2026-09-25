@@ -50,6 +50,30 @@ class ZeroArgCallReturnStackStoreEvidence8616:
     source_register_name: str
 
 
+def _bp_destination_identity_8616(
+    summary: CallsiteSummary8616,
+    destination: object,
+) -> bool:
+    """Prove the summary targets one BP-relative stack destination."""
+    return (
+        isinstance(summary.target_addr, int)
+        and isinstance(summary.return_addr, int)
+        and isinstance(destination, tuple)
+        and len(destination) == 2
+        and destination[0] == "bp"
+        and isinstance(destination[1], int)
+    )
+
+
+def _ax_value_return_8616(summary: CallsiteSummary8616) -> bool:
+    """Prove the summary is one used AX-class value return."""
+    return (
+        summary.return_register == "ax"
+        and summary.return_used is True
+        and summary.return_use_kind is CallsiteReturnUseKind8616.VALUE
+    )
+
+
 def classify_call_return_stack_store_8616(
     summary: CallsiteSummary8616,
 ) -> CallReturnStackStoreEvidence8616 | None:
@@ -59,19 +83,13 @@ def classify_call_return_stack_store_8616(
     if not isinstance(width, int):
         return None
     source_register = {1: "al", 2: "ax"}.get(width)
-    if (
-        not isinstance(summary.target_addr, int)
-        or not isinstance(summary.return_addr, int)
-        or not isinstance(destination, tuple)
-        or len(destination) != 2
-        or destination[0] != "bp"
-        or not isinstance(destination[1], int)
-        or source_register is None
-        or summary.return_register != "ax"
-        or summary.return_used is not True
-        or summary.return_use_kind is not CallsiteReturnUseKind8616.VALUE
-    ):
+    if not _bp_destination_identity_8616(summary, destination):
         return None
+    if source_register is None or not _ax_value_return_8616(summary):
+        return None
+    assert isinstance(summary.target_addr, int)
+    assert isinstance(summary.return_addr, int)
+    assert isinstance(destination, tuple) and isinstance(destination[1], int)
     return CallReturnStackStoreEvidence8616(
         callsite_addr=summary.callsite_addr,
         target_addr=summary.target_addr,

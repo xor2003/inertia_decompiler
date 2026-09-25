@@ -190,10 +190,41 @@ def _sunk_returned_call_candidates_8616(
     fact: SoftwareInterruptInputFact8616,
 ) -> tuple[_SunkReturnedCallCandidate8616, ...]:
     """Find exact calls whose structured return moved past a later condition."""
+    containers = _statement_containers_8616(root)
+    returned_calls = _returned_call_owners_8616(containers, fact.callsite_addr)
+    if len(returned_calls) != 1:
+        return ()
+    return_container, return_index, return_statement, call = returned_calls[0]
+    return_addr = _statement_addr_8616(return_statement)
+    if return_addr is None or return_addr <= fact.callsite_addr:
+        return ()
+
+    candidates: list[_SunkReturnedCallCandidate8616] = []
+    for container in containers:
+        candidate = _sunk_candidate_in_container_8616(
+            container,
+            return_container=return_container,
+            return_index=return_index,
+            return_statement=return_statement,
+            return_addr=return_addr,
+            call=call,
+            callsite_addr=fact.callsite_addr,
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+    return tuple(candidates)
+
+
+def _returned_call_owners_8616(
+    containers: tuple[structured_c.CStatements, ...],
+    callsite_addr: int,
+) -> list[
+    tuple[structured_c.CStatements, int, structured_c.CReturn, structured_c.CFunctionCall]
+]:
+    """Find return statements whose retval embeds the exact callsite call."""
     returned_calls: list[
         tuple[structured_c.CStatements, int, structured_c.CReturn, structured_c.CFunctionCall]
     ] = []
-    containers = _statement_containers_8616(root)
     for container in containers:
         statements = tuple(cast(Iterable[structured_c.CStatement], container.statements or ()))
         for index, statement in enumerate(statements):
@@ -206,53 +237,52 @@ def _sunk_returned_call_candidates_8616(
                     *_iter_c_nodes_deep_8616(statement.retval),
                 )
                 if isinstance(node, structured_c.CFunctionCall)
-                and _callsite_addr_8616(node) == fact.callsite_addr
+                and _callsite_addr_8616(node) == callsite_addr
             )
             if len(matching_calls) == 1:
                 returned_calls.append((container, index, statement, matching_calls[0]))
-    if len(returned_calls) != 1:
-        return ()
-    return_container, return_index, return_statement, call = returned_calls[0]
-    return_addr = _statement_addr_8616(return_statement)
-    if return_addr is None or return_addr <= fact.callsite_addr:
-        return ()
+    return returned_calls
 
-    candidates: list[_SunkReturnedCallCandidate8616] = []
-    for container in containers:
-        statements = tuple(cast(Iterable[structured_c.CStatement], container.statements or ()))
-        return_owner_indexes = tuple(
-            index
-            for index, statement in enumerate(statements)
-            if statement is return_statement
-            or any(node is return_statement for node in _iter_c_nodes_deep_8616(statement))
-        )
-        if len(return_owner_indexes) != 1:
+
+def _sunk_candidate_in_container_8616(
+    container: structured_c.CStatements,
+    *,
+    return_container: structured_c.CStatements,
+    return_index: int,
+    return_statement: structured_c.CReturn,
+    return_addr: int,
+    call: structured_c.CFunctionCall,
+    callsite_addr: int,
+) -> _SunkReturnedCallCandidate8616 | None:
+    """Return the sunk-call candidate proven for one container."""
+    statements = tuple(cast(Iterable[structured_c.CStatement], container.statements or ()))
+    return_owner_indexes = tuple(
+        index
+        for index, statement in enumerate(statements)
+        if statement is return_statement
+        or any(node is return_statement for node in _iter_c_nodes_deep_8616(statement))
+    )
+    if len(return_owner_indexes) != 1:
+        return None
+    return_owner_index = return_owner_indexes[0]
+    condition_indexes: list[int] = []
+    for index, statement in enumerate(statements[:return_owner_index]):
+        leaf = _leaf_statement_8616(statement)
+        if not isinstance(leaf, structured_c.CIfElse):
             continue
-        return_owner_index = return_owner_indexes[0]
-        condition_indexes: list[int] = []
-        for index, statement in enumerate(statements[:return_owner_index]):
-            leaf = _leaf_statement_8616(statement)
-            if not isinstance(leaf, structured_c.CIfElse):
-                continue
-            condition_addr = _statement_addr_8616(leaf)
-            if (
-                condition_addr is not None
-                and fact.callsite_addr < condition_addr <= return_addr
-            ):
-                condition_indexes.append(index)
-        if not condition_indexes:
-            continue
-        candidates.append(
-            _SunkReturnedCallCandidate8616(
-                ordered_container=container,
-                return_container=return_container,
-                insertion_index=min(condition_indexes),
-                return_index=return_index,
-                call=call,
-                return_statement=return_statement,
-            )
-        )
-    return tuple(candidates)
+        condition_addr = _statement_addr_8616(leaf)
+        if condition_addr is not None and callsite_addr < condition_addr <= return_addr:
+            condition_indexes.append(index)
+    if not condition_indexes:
+        return None
+    return _SunkReturnedCallCandidate8616(
+        ordered_container=container,
+        return_container=return_container,
+        insertion_index=min(condition_indexes),
+        return_index=return_index,
+        call=call,
+        return_statement=return_statement,
+    )
 
 
 def _interrupt_result_variable_8616(

@@ -115,6 +115,46 @@ def initialize_global_declaration_specs_8616(codegen: object) -> None:
         typed_codegen._inertia_global_declaration_specs_8616 = ()
 
 
+def _merge_spec_8616(
+    ctype: GlobalDeclarationCType8616 | NamedAggregateDeclarationCType8616 | str,
+    ctype_name: str,
+    name: str,
+    normalized_len: GlobalDeclarationArrayLength8616,
+    spec: object,
+) -> tuple[tuple[str, str, GlobalDeclarationArrayLength8616], bool]:
+    """Return the stored tuple for one prior spec and whether it merged."""
+    old_ctype, old_name, old_len = cast(tuple[object, object, object], spec)
+    old_ctype_name = " ".join(cast(str, old_ctype).split())
+    old_name_s = cast(str, old_name)
+    old_array_len = _normalize_global_array_len_8616(old_len)
+    if old_name_s != name:
+        return (old_ctype_name, old_name_s, old_array_len), False
+    aggregate_merge = (
+        ctype.merge_with_serialized(old_ctype_name)
+        if isinstance(ctype, NamedAggregateDeclarationCType8616)
+        else None
+    )
+    if (
+        isinstance(ctype, NamedAggregateDeclarationCType8616)
+        and aggregate_merge is None
+        and not _ctype_is_struct_8616(old_ctype_name)
+        and not _ctype_is_pointer_8616(old_ctype_name)
+    ):
+        chosen_ctype = ctype_name
+    else:
+        chosen_ctype = aggregate_merge or _choose_global_ctype_8616(old_ctype_name, ctype_name)
+    if _scalar_global_covers_existing_array_8616(
+        old_ctype_name,
+        old_array_len,
+        ctype_name,
+        normalized_len,
+    ):
+        chosen_len = None
+    else:
+        chosen_len = merge_global_array_extents_8616(old_array_len, normalized_len)
+    return (chosen_ctype, name, chosen_len), True
+
+
 def record_global_declaration_spec_8616(
     codegen: object,
     *,
@@ -154,39 +194,14 @@ def record_global_declaration_spec_8616(
     for spec in specs:
         if not isinstance(spec, (list, tuple)) or len(spec) != 3:
             continue
-        old_ctype, old_name, old_len = spec
+        old_ctype, old_name, _old_len = spec
         if not isinstance(old_ctype, str) or not isinstance(old_name, str):
             continue
-        old_ctype_name = " ".join(old_ctype.split())
-        old_array_len = _normalize_global_array_len_8616(old_len)
-        if old_name != name:
-            merged.append((old_ctype_name, old_name, old_array_len))
-            continue
-        replaced = True
-        aggregate_merge = (
-            ctype.merge_with_serialized(old_ctype_name)
-            if isinstance(ctype, NamedAggregateDeclarationCType8616)
-            else None
+        entry, merged_here = _merge_spec_8616(
+            ctype, ctype_name, name, normalized_len, spec
         )
-        if (
-            isinstance(ctype, NamedAggregateDeclarationCType8616)
-            and aggregate_merge is None
-            and not _ctype_is_struct_8616(old_ctype_name)
-            and not _ctype_is_pointer_8616(old_ctype_name)
-        ):
-            chosen_ctype = ctype_name
-        else:
-            chosen_ctype = aggregate_merge or _choose_global_ctype_8616(old_ctype_name, ctype_name)
-        if _scalar_global_covers_existing_array_8616(
-            old_ctype_name,
-            old_array_len,
-            ctype_name,
-            normalized_len,
-        ):
-            chosen_len = None
-        else:
-            chosen_len = merge_global_array_extents_8616(old_array_len, normalized_len)
-        merged.append((chosen_ctype, name, chosen_len))
+        merged.append(entry)
+        replaced = replaced or merged_here
     if not replaced:
         merged.append((ctype_name, name, normalized_len))
     typed_codegen._inertia_global_declaration_specs_8616 = tuple(dict.fromkeys(merged))

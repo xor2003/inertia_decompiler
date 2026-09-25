@@ -56,43 +56,38 @@ def _refusal(
     )
 
 
-def _carry_chain(
-    carry_value: IRValue,
+def _chain_definition_8616(
+    value: IRValue | None,
     definitions: CarryBorrowDefinitions8616,
-) -> tuple[
-    CarryBorrowDefinitionSite8616,
-    CarryBorrowDefinitionSite8616,
-    CarryBorrowDefinitionSite8616,
-    CarryBorrowDefinitionSite8616,
-    CarryBorrowDefinitionSite8616,
-] | CarryBorrowFailure8616:
-    extend = definition_for_8616(carry_value, definitions)
-    if extend is None:
-        return CarryBorrowFailure8616.TEMP_DEFINITION_MISSING
-    narrow_value = conversion_source_8616(extend, CarryBorrowConversion8616.WIDEN_BIT_TO_WORD)
-    if narrow_value is None:
+) -> CarryBorrowDefinitionSite8616 | CarryBorrowFailure8616:
+    """Resolve one conversion source to its definition site or refusal."""
+    if value is None:
         return CarryBorrowFailure8616.CARRY_CONVERSION_MISMATCH
-    narrow = definition_for_8616(narrow_value, definitions)
-    if narrow is None:
+    site = definition_for_8616(value, definitions)
+    if site is None:
         return CarryBorrowFailure8616.TEMP_DEFINITION_MISSING
-    mask_value = conversion_source_8616(narrow, CarryBorrowConversion8616.NARROW_TO_BIT)
-    if mask_value is None:
-        return CarryBorrowFailure8616.CARRY_CONVERSION_MISMATCH
-    mask = definition_for_8616(mask_value, definitions)
-    if mask is None:
-        return CarryBorrowFailure8616.TEMP_DEFINITION_MISSING
+    return site
+
+
+def _masked_shift_value_8616(
+    mask: CarryBorrowDefinitionSite8616,
+) -> IRValue | CarryBorrowFailure8616:
+    """Return the masked shift operand of a proven AND-by-1 mask site."""
     mask_args = site_value_args_8616(mask)
     if ir_op_8616(mask.instruction) is not CarryBorrowIROp8616.AND16 or len(mask_args) != 2:
         return CarryBorrowFailure8616.CARRY_MASK_MISMATCH
     if is_constant_8616(mask_args[0], 1):
-        shift_value = mask_args[1]
-    elif is_constant_8616(mask_args[1], 1):
-        shift_value = mask_args[0]
-    else:
-        return CarryBorrowFailure8616.CARRY_MASK_MISMATCH
-    shift = definition_for_8616(shift_value, definitions)
-    if shift is None:
-        return CarryBorrowFailure8616.TEMP_DEFINITION_MISSING
+        return mask_args[1]
+    if is_constant_8616(mask_args[1], 1):
+        return mask_args[0]
+    return CarryBorrowFailure8616.CARRY_MASK_MISMATCH
+
+
+def _flags_read_8616(
+    shift: CarryBorrowDefinitionSite8616,
+    definitions: CarryBorrowDefinitions8616,
+) -> CarryBorrowDefinitionSite8616 | CarryBorrowFailure8616:
+    """Resolve the FLAGS register read feeding a proven shift site."""
     shift_args = site_value_args_8616(shift)
     if (
         ir_op_8616(shift.instruction) is not CarryBorrowIROp8616.SHR16
@@ -109,7 +104,61 @@ def _carry_chain(
         or flags_value.name != "flags"
     ):
         return CarryBorrowFailure8616.FLAGS_DEFINITION_MISSING
+    return flags_read
+
+
+def _carry_chain(
+    carry_value: IRValue,
+    definitions: CarryBorrowDefinitions8616,
+) -> tuple[
+    CarryBorrowDefinitionSite8616,
+    CarryBorrowDefinitionSite8616,
+    CarryBorrowDefinitionSite8616,
+    CarryBorrowDefinitionSite8616,
+    CarryBorrowDefinitionSite8616,
+] | CarryBorrowFailure8616:
+    """Prove the full carry-bit link chain FLAGS→shift→mask→narrow→extend."""
+    extend = _chain_definition_8616(carry_value, definitions)
+    if isinstance(extend, CarryBorrowFailure8616):
+        return extend
+    narrow = _chain_definition_8616(
+        conversion_source_8616(extend, CarryBorrowConversion8616.WIDEN_BIT_TO_WORD),
+        definitions,
+    )
+    if isinstance(narrow, CarryBorrowFailure8616):
+        return narrow
+    mask = _chain_definition_8616(
+        conversion_source_8616(narrow, CarryBorrowConversion8616.NARROW_TO_BIT),
+        definitions,
+    )
+    if isinstance(mask, CarryBorrowFailure8616):
+        return mask
+    shift_value = _masked_shift_value_8616(mask)
+    if isinstance(shift_value, CarryBorrowFailure8616):
+        return shift_value
+    shift = _chain_definition_8616(shift_value, definitions)
+    if isinstance(shift, CarryBorrowFailure8616):
+        return shift
+    flags_read = _flags_read_8616(shift, definitions)
+    if isinstance(flags_read, CarryBorrowFailure8616):
+        return flags_read
     return flags_read, shift, mask, narrow, extend
+
+
+def _post_flags_mov_8616(
+    site: CarryBorrowDefinitionSite8616,
+    flags_definition: CarryBorrowDefinitionSite8616,
+) -> bool:
+    """Return whether the site is a post-FLAGS non-flags register MOV."""
+    dst = site.instruction.dst
+    return (
+        site.instr_index > flags_definition.instr_index
+        and site.instruction.addr == flags_definition.instruction.addr
+        and ir_op_8616(site.instruction) is CarryBorrowIROp8616.MOV
+        and dst is not None
+        and dst.space is MemSpace.REG
+        and dst.name != "flags"
+    )
 
 
 def _low_result(
@@ -126,15 +175,7 @@ def _low_result(
     signatures = tuple(site_value_args_8616(site) for site in flag_arithmetic)
     matches: list[tuple[CarryBorrowDefinitionSite8616, CarryBorrowDefinitionSite8616]] = []
     for site in sites:
-        dst = site.instruction.dst
-        if (
-            site.instr_index <= flags_definition.instr_index
-            or site.instruction.addr != flags_definition.instruction.addr
-            or ir_op_8616(site.instruction) is not CarryBorrowIROp8616.MOV
-            or dst is None
-            or dst.space is not MemSpace.REG
-            or dst.name == "flags"
-        ):
+        if not _post_flags_mov_8616(site, flags_definition):
             continue
         source = single_source_8616(site)
         arithmetic = None if source is None else definition_for_8616(source, definitions)

@@ -12,7 +12,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from capstone.x86_const import (
@@ -105,18 +105,7 @@ def apply_far_pointer_constant_instruction_8616(
     operands = instruction.operands
     destination_slot = stack_slot(instruction, operands[0]) if operands else None
     if destination_slot is not None:
-        destination_offset, destination_width = destination_slot
-        state.forget_stack_range(destination_offset, destination_width)
-        if instruction.instruction_id == X86_INS_MOV and len(operands) == 2:
-            source = operands[1]
-            source_name = (
-                register_name(instruction.raw, source.register)
-                if source.kind == X86_OP_REG
-                else None
-            )
-            source_value = state.register_values.get(source_name) if source_name is not None else None
-            if source_value is not None and source_value[1] == destination_width:
-                state.stack_values[destination_offset] = source_value
+        _apply_stack_store_8616(state, instruction, operands, destination_slot, register_name)
         return
 
     if operands and operands[0].kind != X86_OP_REG:
@@ -135,32 +124,99 @@ def apply_far_pointer_constant_instruction_8616(
         return
     width = int(width)
 
+    if _apply_register_mov_8616(
+        state, instruction, operands, destination, width, register_name, stack_slot
+    ):
+        return
+    if _apply_register_arithmetic_8616(
+        state, instruction, operands, destination, width, register_name
+    ):
+        return
+    state.forget_register(destination)
+
+
+def _apply_stack_store_8616(
+    state: FarPointerConstantState8616,
+    instruction: InstructionView8616,
+    operands: Sequence[OperandView8616],
+    destination_slot: tuple[int, int],
+    register_name: RegisterNameResolver8616,
+) -> None:
+    """Apply one proven BP-stack write, retaining only exact MOV sources."""
+    destination_offset, destination_width = destination_slot
+    state.forget_stack_range(destination_offset, destination_width)
     if instruction.instruction_id == X86_INS_MOV and len(operands) == 2:
         source = operands[1]
-        value: _ConstantValue8616 | None = None
-        if source.kind == X86_OP_IMM and isinstance(source.immediate, int):
-            value = (_normalized_constant_8616(source.immediate, width), width)
-        elif source.kind == X86_OP_REG:
-            source_name = register_name(instruction.raw, source.register)
-            candidate = state.register_values.get(source_name) if source_name is not None else None
-            if candidate is not None and candidate[1] == width:
-                value = candidate
-        else:
-            source_slot = stack_slot(instruction, source)
-            if source_slot is not None:
-                candidate = state.stack_values.get(source_slot[0])
-                if candidate is not None and candidate[1] == width == source_slot[1]:
-                    value = candidate
-        state.forget_register(destination)
-        if value is not None:
-            state.register_values[destination] = value
-        return
+        source_name = (
+            register_name(instruction.raw, source.register)
+            if source.kind == X86_OP_REG
+            else None
+        )
+        source_value = state.register_values.get(source_name) if source_name is not None else None
+        if source_value is not None and source_value[1] == destination_width:
+            state.stack_values[destination_offset] = source_value
 
+
+def _mov_source_value_8616(
+    state: FarPointerConstantState8616,
+    instruction: InstructionView8616,
+    source: OperandView8616,
+    width: int,
+    register_name: RegisterNameResolver8616,
+    stack_slot: StackSlotResolver8616,
+) -> _ConstantValue8616 | None:
+    """Resolve one MOV source to an exact constant only at matching width."""
+    if source.kind == X86_OP_IMM and isinstance(source.immediate, int):
+        return (_normalized_constant_8616(source.immediate, width), width)
+    if source.kind == X86_OP_REG:
+        source_name = register_name(instruction.raw, source.register)
+        candidate = state.register_values.get(source_name) if source_name is not None else None
+        if candidate is not None and candidate[1] == width:
+            return candidate
+        return None
+    source_slot = stack_slot(instruction, source)
+    if source_slot is not None:
+        candidate = state.stack_values.get(source_slot[0])
+        if candidate is not None and candidate[1] == width == source_slot[1]:
+            return candidate
+    return None
+
+
+def _apply_register_mov_8616(
+    state: FarPointerConstantState8616,
+    instruction: InstructionView8616,
+    operands: Sequence[OperandView8616],
+    destination: str,
+    width: int,
+    register_name: RegisterNameResolver8616,
+    stack_slot: StackSlotResolver8616,
+) -> bool:
+    """Track one register-destination MOV; return True only for a MOV shape."""
+    if instruction.instruction_id != X86_INS_MOV or len(operands) != 2:
+        return False
+    value = _mov_source_value_8616(
+        state, instruction, operands[1], width, register_name, stack_slot
+    )
+    state.forget_register(destination)
+    if value is not None:
+        state.register_values[destination] = value
+    return True
+
+
+def _apply_register_arithmetic_8616(
+    state: FarPointerConstantState8616,
+    instruction: InstructionView8616,
+    operands: Sequence[OperandView8616],
+    destination: str,
+    width: int,
+    register_name: RegisterNameResolver8616,
+) -> bool:
+    """Track proven SUB-self, ADD/SUB-immediate, and SHL/SAL-immediate updates."""
     if instruction.instruction_id == X86_INS_SUB and len(operands) == 2 and operands[1].kind == X86_OP_REG:
         source_register_name = register_name(instruction.raw, operands[1].register)
         if source_register_name == destination:
             state.set_register(destination, 0, width)
-            return
+            return True
 
     if instruction.instruction_id in {X86_INS_ADD, X86_INS_SUB} and len(operands) == 2:
         immediate = operands[1].immediate if operands[1].kind == X86_OP_IMM else None
@@ -168,13 +224,13 @@ def apply_far_pointer_constant_instruction_8616(
         if isinstance(immediate, int) and previous is not None and previous[1] == width:
             delta = immediate if instruction.instruction_id == X86_INS_ADD else -immediate
             state.set_register(destination, previous[0] + delta, width)
-            return
+            return True
 
     if instruction.instruction_id in {X86_INS_SHL, X86_INS_SAL} and len(operands) == 2:
         amount = operands[1].immediate if operands[1].kind == X86_OP_IMM else None
         previous = state.register_values.get(destination)
         if isinstance(amount, int) and previous is not None and previous[1] == width:
             state.set_register(destination, previous[0] << amount, width)
-            return
+            return True
 
-    state.forget_register(destination)
+    return False

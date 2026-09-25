@@ -167,12 +167,12 @@ def _matching_declaration_8616(
     return matches[0] if len(matches) == 1 else None
 
 
-def _materialize_call_8616(
+def _proven_call_identity_8616(
     codegen: _CodegenSurface8616,
     call: structured_c.CFunctionCall,
     summary: CallsiteSummary8616,
-) -> tuple[bool, bool]:
-    """Materialize one exact register-indirect target and its assignments."""
+) -> _RegisterIdentity8616 | None:
+    """Prove the call's callee variable carries the exact register target."""
     target_source = summary.target_source
     if (
         not isinstance(target_source, tuple)
@@ -181,16 +181,22 @@ def _materialize_call_8616(
         or not isinstance(target_source[1], str)
         or not isinstance(call.callee_target, structured_c.CVariable)
     ):
-        return False, False
+        return None
     arch = cast(_ArchSurface8616, codegen.project.arch)
     expected_shape = _register_shape_8616(arch, target_source[1])
     identity = _cvar_register_identity_8616(call.callee_target)
     if expected_shape is None or identity is None or (identity.offset, identity.size) != expected_shape:
-        return False, False
+        return None
     if summary.arg_count is None or summary.arg_count != len(tuple(cast(Sequence[object], call.args or ()))):
-        return False, False
+        return None
+    return identity
 
-    pointer_type = _function_pointer_type_8616(summary, codegen.project.arch)
+
+def _identity_census_8616(
+    codegen: _CodegenSurface8616,
+    identity: _RegisterIdentity8616,
+) -> tuple[list[structured_c.CAssignment], list[structured_c.CVariable]]:
+    """Collect every variable and assignment matching the register identity."""
     assignments: list[structured_c.CAssignment] = []
     variables: list[structured_c.CVariable] = []
     for root in cfunc_roots_8616(codegen.cfunc):
@@ -202,6 +208,21 @@ def _materialize_call_8616(
                 and _cvar_register_identity_8616(node.lhs) == identity
             ):
                 assignments.append(node)
+    return assignments, variables
+
+
+def _materialize_call_8616(
+    codegen: _CodegenSurface8616,
+    call: structured_c.CFunctionCall,
+    summary: CallsiteSummary8616,
+) -> tuple[bool, bool]:
+    """Materialize one exact register-indirect target and its assignments."""
+    identity = _proven_call_identity_8616(codegen, call, summary)
+    if identity is None:
+        return False, False
+
+    pointer_type = _function_pointer_type_8616(summary, codegen.project.arch)
+    assignments, variables = _identity_census_8616(codegen, identity)
     if not variables or not assignments:
         return False, False
 

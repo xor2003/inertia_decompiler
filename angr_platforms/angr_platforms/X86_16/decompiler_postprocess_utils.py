@@ -41,6 +41,7 @@ import re
 import typing
 from collections.abc import Callable, Iterator
 from contextlib import suppress
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, cast
 
@@ -276,58 +277,101 @@ def _segment_reg_name_8616(node: object, project: object) -> str | None:
     return None
 
 
+def _segment_scale_term_8616(
+    expr: object,
+    expected_op: str,
+    expected_scale: int,
+    resolve: Callable[[object], object],
+    project: object,
+) -> str | None:
+    """Match ``expr op scale`` shaped segment terms; first named base wins."""
+    if not isinstance(expr, CBinaryOp) or expr.op != expected_op:
+        return None
+    for maybe_seg, maybe_scale in ((expr.lhs, expr.rhs), (expr.rhs, expr.lhs)):
+        if _c_constant_value_8616(maybe_scale) != expected_scale:
+            continue
+        seg_name = _segment_reg_name_8616(resolve(maybe_seg), project)
+        if seg_name is not None:
+            return seg_name
+    return None
+
+
+def _match_linear_add_term_8616(
+    node: CBinaryOp,
+    resolve: Callable[[object], object],
+    project: object,
+) -> tuple[str | None, int | None]:
+    """Match ``seg*16 + linear`` / ``seg<<4 + linear`` add-shaped addresses."""
+    for maybe_mul, maybe_const in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
+        linear = _c_constant_value_8616(maybe_const)
+        if linear is None:
+            continue
+        maybe_mul = resolve(maybe_mul)
+        if not isinstance(maybe_mul, CBinaryOp):
+            continue
+        seg_name = _segment_scale_term_8616(maybe_mul, "Mul", 16, resolve, project)
+        if seg_name is None:
+            seg_name = _segment_scale_term_8616(maybe_mul, "Shl", 4, resolve, project)
+        if seg_name is not None:
+            return seg_name, linear
+    return None, None
+
+
 def _match_real_mode_linear_expr_8616(
     node: object, project: object, codegen: object | None = None
 ) -> tuple[str | None, int | None]:
-    def _impl() -> tuple[str | None, int | None]:
-        def _maybe_resolve(term: object) -> object:
-            if codegen is None:
-                return term
-            return _resolve_stack_bp_term_8616(term, project, codegen)
+    def resolve(term: object) -> object:
+        if codegen is None:
+            return term
+        return _resolve_stack_bp_term_8616(term, project, codegen)
 
-        if isinstance(node, CBinaryOp) and node.op == "Shl":
-            for maybe_seg, maybe_scale in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-                if _c_constant_value_8616(maybe_scale) != 4:
-                    continue
-                seg_name = _segment_reg_name_8616(_maybe_resolve(maybe_seg), project)
-                if seg_name is not None:
-                    return seg_name, 0
+    seg_name = _segment_scale_term_8616(node, "Shl", 4, resolve, project)
+    if seg_name is not None:
+        return seg_name, 0
+    seg_name = _segment_scale_term_8616(node, "Mul", 16, resolve, project)
+    if seg_name is not None:
+        return seg_name, 0
 
-        if isinstance(node, CBinaryOp) and node.op == "Mul":
-            for maybe_seg, maybe_scale in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-                if _c_constant_value_8616(maybe_scale) != 16:
-                    continue
-                seg_name = _segment_reg_name_8616(_maybe_resolve(maybe_seg), project)
-                if seg_name is not None:
-                    return seg_name, 0
-
-        if not isinstance(node, CBinaryOp) or node.op != "Add":
-            return None, None
-
-        for maybe_mul, maybe_const in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-            linear = _c_constant_value_8616(maybe_const)
-            if linear is None:
-                continue
-            maybe_mul = _maybe_resolve(maybe_mul)
-            if not isinstance(maybe_mul, CBinaryOp):
-                continue
-            if maybe_mul.op == "Mul":
-                for maybe_seg, maybe_scale in ((maybe_mul.lhs, maybe_mul.rhs), (maybe_mul.rhs, maybe_mul.lhs)):
-                    if _c_constant_value_8616(maybe_scale) != 16:
-                        continue
-                    seg_name = _segment_reg_name_8616(_maybe_resolve(maybe_seg), project)
-                    if seg_name is not None:
-                        return seg_name, linear
-            if maybe_mul.op == "Shl":
-                for maybe_seg, maybe_scale in ((maybe_mul.lhs, maybe_mul.rhs), (maybe_mul.rhs, maybe_mul.lhs)):
-                    if _c_constant_value_8616(maybe_scale) != 4:
-                        continue
-                    seg_name = _segment_reg_name_8616(_maybe_resolve(maybe_seg), project)
-                    if seg_name is not None:
-                        return seg_name, linear
+    if not isinstance(node, CBinaryOp) or node.op != "Add":
         return None, None
+    return _match_linear_add_term_8616(node, resolve, project)
 
-    return _impl()
+
+def _strip_c_casts_8616(expr: object) -> object:
+    """Unwrap nested CTypeCast nodes to their underlying expression."""
+    while isinstance(expr, CTypeCast):
+        expr = expr.expr
+    return expr
+
+
+def _segment_base_name_8616(expr: object, project: object) -> str | None:
+    """Name the segment register of a ``seg<<4``/``seg*16`` shaped term."""
+    expr = _strip_c_casts_8616(expr)
+    if isinstance(expr, CBinaryOp) and expr.op == "Shl":
+        for maybe_seg, maybe_scale in ((expr.lhs, expr.rhs), (expr.rhs, expr.lhs)):
+            if _c_constant_value_8616(maybe_scale) == 4:
+                return _segment_reg_name_8616(maybe_seg, project)
+    if isinstance(expr, CBinaryOp) and expr.op == "Mul":
+        for maybe_seg, maybe_scale in ((expr.lhs, expr.rhs), (expr.rhs, expr.lhs)):
+            if _c_constant_value_8616(maybe_scale) == 16:
+                return _segment_reg_name_8616(maybe_seg, project)
+    return None
+
+
+def _collect_signed_terms_8616(
+    expr: object, sign: int, out: list[tuple[int, object]]
+) -> None:
+    """Flatten an Add/Sub tree into ``(sign, leaf-term)`` pairs."""
+    expr = _strip_c_casts_8616(expr)
+    if isinstance(expr, CBinaryOp) and expr.op == "Add":
+        _collect_signed_terms_8616(expr.lhs, sign, out)
+        _collect_signed_terms_8616(expr.rhs, sign, out)
+        return
+    if isinstance(expr, CBinaryOp) and expr.op == "Sub":
+        _collect_signed_terms_8616(expr.lhs, sign, out)
+        _collect_signed_terms_8616(expr.rhs, -sign, out)
+        return
+    out.append((sign, expr))
 
 
 def _match_real_mode_segmented_store_shape_8616(
@@ -339,47 +383,17 @@ def _match_real_mode_segmented_store_shape_8616(
     memory dereference and its address must decompose into exactly one positive
     segment-base term plus zero or more signed offset terms.
     """
-
-    def _strip_casts(expr: object) -> object:
-        while isinstance(expr, CTypeCast):
-            expr = expr.expr
-        return expr
-
-    def _segment_base_name(expr: object) -> str | None:
-        expr = _strip_casts(expr)
-        if isinstance(expr, CBinaryOp) and expr.op == "Shl":
-            for maybe_seg, maybe_scale in ((expr.lhs, expr.rhs), (expr.rhs, expr.lhs)):
-                if _c_constant_value_8616(maybe_scale) == 4:
-                    return _segment_reg_name_8616(maybe_seg, project)
-        if isinstance(expr, CBinaryOp) and expr.op == "Mul":
-            for maybe_seg, maybe_scale in ((expr.lhs, expr.rhs), (expr.rhs, expr.lhs)):
-                if _c_constant_value_8616(maybe_scale) == 16:
-                    return _segment_reg_name_8616(maybe_seg, project)
-        return None
-
-    def _collect_signed_terms(expr: object, sign: int, out: list[tuple[int, object]]) -> None:
-        expr = _strip_casts(expr)
-        if isinstance(expr, CBinaryOp) and expr.op == "Add":
-            _collect_signed_terms(expr.lhs, sign, out)
-            _collect_signed_terms(expr.rhs, sign, out)
-            return
-        if isinstance(expr, CBinaryOp) and expr.op == "Sub":
-            _collect_signed_terms(expr.lhs, sign, out)
-            _collect_signed_terms(expr.rhs, -sign, out)
-            return
-        out.append((sign, expr))
-
-    node = _strip_casts(node)
+    node = _strip_c_casts_8616(node)
     if not isinstance(node, CUnaryOp) or node.op != "Dereference":
         return None, ()
 
     signed_terms: list[tuple[int, object]] = []
-    _collect_signed_terms(node.operand, 1, signed_terms)
+    _collect_signed_terms_8616(node.operand, 1, signed_terms)
 
     segment_name: str | None = None
     offset_terms: list[tuple[int, object]] = []
     for sign, term in signed_terms:
-        base_name = _segment_base_name(term)
+        base_name = _segment_base_name_8616(term, project)
         if base_name is None:
             offset_terms.append((sign, term))
             continue
@@ -403,6 +417,191 @@ def _match_segmented_dereference_8616(node: object, project: object) -> tuple[st
     return _match_real_mode_linear_expr_8616(operand, project)
 
 
+_C_SCALAR_CHILD_ATTRS_8616 = (
+    "lhs",
+    "rhs",
+    "expr",
+    "operand",
+    "variable",
+    "index",
+    "condition",
+    "cond",
+    "initializer",
+    "iterator",
+    "body",
+    "iffalse",
+    "iftrue",
+    "switch",
+    "default",
+    "callee_target",
+    "else_node",
+    "retval",
+)
+_C_LIST_CHILD_ATTRS_8616 = ("args", "operands", "statements")
+
+
+def _process_scalar_c_child_8616(
+    current: object,
+    attr: str,
+    node_stack: list[object],
+    transform: Callable[[object], object],
+    should_process_child: Callable[[object, str], bool] | None,
+) -> bool:
+    """Transform one scalar C-AST child slot and push it for traversal."""
+    if should_process_child is not None and not bool(should_process_child(current, attr)):
+        return False
+    if not hasattr(current, attr):
+        return False
+    try:
+        value = _dynamic_c_ast_getattr_8616(current, attr)
+    except Exception:
+        return False
+    if not _structured_codegen_node_8616(value):
+        return False
+    new_value = transform(value)
+    changed_local = False
+    if new_value is not value:
+        _dynamic_c_ast_setattr_8616(current, attr, new_value)
+        changed_local = True
+        value = new_value
+    node_stack.append(value)
+    return changed_local
+
+
+def _process_list_c_child_8616(
+    current: object,
+    attr: str,
+    node_stack: list[object],
+    transform: Callable[[object], object],
+) -> bool:
+    """Transform one list-valued C-AST child slot in place."""
+    if not hasattr(current, attr):
+        return False
+    try:
+        items = _dynamic_c_ast_getattr_8616(current, attr)
+    except Exception:
+        return False
+    if not items:
+        return False
+    changed_local = False
+    new_items = None
+    for idx, item in enumerate(items):
+        if not _structured_codegen_node_8616(item):
+            continue
+        transformed_item = transform(item)
+        if transformed_item is not item:
+            if new_items is None:
+                new_items = list(items)
+            new_items[idx] = transformed_item
+            changed_local = True
+        else:
+            transformed_item = item
+        node_stack.append(transformed_item)
+    if new_items is None:
+        return changed_local
+    # Preserve CStatements wrapper on nested 'statements' attributes.
+    # Setting a plain list breaks downstream passes expecting .statements
+    # on structured nodes (e.g. CIfElse, CWhileLoop, CForLoop).
+    if attr == "statements" and isinstance(items, CStatements):
+        new_items = CStatements(statements=new_items, codegen=_dynamic_c_ast_getattr_8616(current, "codegen", None))
+    _dynamic_c_ast_setattr_8616(current, attr, new_items)
+    return changed_local
+
+
+def _process_condition_pair_children_8616(
+    current: object,
+    node_stack: list[object],
+    transform: Callable[[object], object],
+) -> bool:
+    """Transform CIfElse-style condition/body pairs and queue the nodes."""
+    if not hasattr(current, "condition_and_nodes"):
+        return False
+    try:
+        pairs = _dynamic_c_ast_getattr_8616(current, "condition_and_nodes")
+    except Exception:
+        pairs = None
+    if not pairs:
+        return False
+    pair_changed = False
+    new_pairs = []
+    for cond, body in pairs:
+        new_cond = transform(cond) if _structured_codegen_node_8616(cond) else cond
+        new_body = transform(body) if _structured_codegen_node_8616(body) else body
+        if new_cond is not cond or new_body is not body:
+            pair_changed = True
+        if _structured_codegen_node_8616(new_cond):
+            node_stack.append(new_cond)
+        if _structured_codegen_node_8616(new_body):
+            node_stack.append(new_body)
+        new_pairs.append((new_cond, new_body))
+    if pair_changed:
+        typing.cast(typing.Any, current).condition_and_nodes = new_pairs
+    return pair_changed
+
+
+def _process_switch_case_children_8616(
+    current: object,
+    node_stack: list[object],
+    transform: Callable[[object], object],
+) -> bool:
+    """Transform CSwitchCase case value/body pairs and queue the nodes."""
+    if not hasattr(current, "cases"):
+        return False
+    try:
+        # Dynamic angr codegen boundary: CSwitchCase exposes cases structurally.
+        cases = _dynamic_c_ast_getattr_8616(current, "cases")
+    except Exception:
+        return False
+    if not cases:
+        return False
+    changed_local = False
+    new_cases = []
+    for item in cases:
+        if not isinstance(item, tuple) or len(item) != 2:
+            new_cases.append(item)
+            continue
+        case_value, case_body = item
+        new_value = transform(case_value) if _structured_codegen_node_8616(case_value) else case_value
+        new_body = transform(case_body) if _structured_codegen_node_8616(case_body) else case_body
+        if new_value is not case_value or new_body is not case_body:
+            changed_local = True
+        if _structured_codegen_node_8616(new_value):
+            node_stack.append(new_value)
+        if _structured_codegen_node_8616(new_body):
+            node_stack.append(new_body)
+        new_cases.append((new_value, new_body))
+    if changed_local:
+        # Dynamic angr codegen boundary: update CSwitchCase child cases.
+        typing.cast(typing.Any, current).cases = new_cases
+    return changed_local
+
+
+def _replace_one_c_node_children_8616(
+    current: object,
+    child_attrs: frozenset[str],
+    node_stack: list[object],
+    transform: Callable[[object], object],
+    should_process_child: Callable[[object, str], bool] | None,
+) -> bool:
+    """Transform all declared child slots of one structured C node."""
+    changed = False
+    for attr in _C_SCALAR_CHILD_ATTRS_8616:
+        if attr not in child_attrs:
+            continue
+        if _process_scalar_c_child_8616(current, attr, node_stack, transform, should_process_child):
+            changed = True
+    for attr in _C_LIST_CHILD_ATTRS_8616:
+        if attr not in child_attrs:
+            continue
+        if _process_list_c_child_8616(current, attr, node_stack, transform):
+            changed = True
+    if "condition_and_nodes" in child_attrs and _process_condition_pair_children_8616(current, node_stack, transform):
+        changed = True
+    if "cases" in child_attrs and _process_switch_case_children_8616(current, node_stack, transform):
+        changed = True
+    return changed
+
+
 def _replace_c_children_8616(
     node: object,
     transform: Callable[[object], object],
@@ -410,137 +609,6 @@ def _replace_c_children_8616(
     *,
     should_process_child: Callable[[object, str], bool] | None = None,
 ) -> bool:
-    scalar_attrs = (
-        "lhs",
-        "rhs",
-        "expr",
-        "operand",
-        "variable",
-        "index",
-        "condition",
-        "cond",
-        "initializer",
-        "iterator",
-        "body",
-        "iffalse",
-        "iftrue",
-        "switch",
-        "default",
-        "callee_target",
-        "else_node",
-        "retval",
-    )
-    list_attrs = ("args", "operands", "statements")
-
-    def _process_scalar_attr(current: object, attr: str, node_stack: list[object]) -> bool:
-        if should_process_child is not None and not bool(should_process_child(current, attr)):
-            return False
-        if not hasattr(current, attr):
-            return False
-        try:
-            value = _dynamic_c_ast_getattr_8616(current, attr)
-        except Exception:
-            return False
-        if not _structured_codegen_node_8616(value):
-            return False
-        new_value = transform(value)
-        changed_local = False
-        if new_value is not value:
-            _dynamic_c_ast_setattr_8616(current, attr, new_value)
-            changed_local = True
-            value = new_value
-        node_stack.append(value)
-        return changed_local
-
-    def _process_list_attr(current: object, attr: str, node_stack: list[object]) -> bool:
-        if not hasattr(current, attr):
-            return False
-        try:
-            items = _dynamic_c_ast_getattr_8616(current, attr)
-        except Exception:
-            return False
-        if not items:
-            return False
-        changed_local = False
-        new_items = None
-        for idx, item in enumerate(items):
-            if not _structured_codegen_node_8616(item):
-                continue
-            transformed_item = transform(item)
-            if transformed_item is not item:
-                if new_items is None:
-                    new_items = list(items)
-                new_items[idx] = transformed_item
-                changed_local = True
-            else:
-                transformed_item = item
-            node_stack.append(transformed_item)
-        if new_items is None:
-            return changed_local
-        # Preserve CStatements wrapper on nested 'statements' attributes.
-        # Setting a plain list breaks downstream passes expecting .statements
-        # on structured nodes (e.g. CIfElse, CWhileLoop, CForLoop).
-        if attr == "statements" and isinstance(items, CStatements):
-            new_items = CStatements(statements=new_items, codegen=_dynamic_c_ast_getattr_8616(current, "codegen", None))
-        _dynamic_c_ast_setattr_8616(current, attr, new_items)
-        return changed_local
-
-    def _process_condition_pairs(current: object, node_stack: list[object]) -> bool:
-        if not hasattr(current, "condition_and_nodes"):
-            return False
-        try:
-            pairs = _dynamic_c_ast_getattr_8616(current, "condition_and_nodes")
-        except Exception:
-            pairs = None
-        if not pairs:
-            return False
-        pair_changed = False
-        new_pairs = []
-        for cond, body in pairs:
-            new_cond = transform(cond) if _structured_codegen_node_8616(cond) else cond
-            new_body = transform(body) if _structured_codegen_node_8616(body) else body
-            if new_cond is not cond or new_body is not body:
-                pair_changed = True
-            if _structured_codegen_node_8616(new_cond):
-                node_stack.append(new_cond)
-            if _structured_codegen_node_8616(new_body):
-                node_stack.append(new_body)
-            new_pairs.append((new_cond, new_body))
-        if pair_changed:
-            typing.cast(typing.Any, current).condition_and_nodes = new_pairs
-        return pair_changed
-
-    def _process_switch_cases(current: object, node_stack: list[object]) -> bool:
-        if not hasattr(current, "cases"):
-            return False
-        try:
-            # Dynamic angr codegen boundary: CSwitchCase exposes cases structurally.
-            cases = _dynamic_c_ast_getattr_8616(current, "cases")
-        except Exception:
-            return False
-        if not cases:
-            return False
-        changed_local = False
-        new_cases = []
-        for item in cases:
-            if not isinstance(item, tuple) or len(item) != 2:
-                new_cases.append(item)
-                continue
-            case_value, case_body = item
-            new_value = transform(case_value) if _structured_codegen_node_8616(case_value) else case_value
-            new_body = transform(case_body) if _structured_codegen_node_8616(case_body) else case_body
-            if new_value is not case_value or new_body is not case_body:
-                changed_local = True
-            if _structured_codegen_node_8616(new_value):
-                node_stack.append(new_value)
-            if _structured_codegen_node_8616(new_body):
-                node_stack.append(new_body)
-            new_cases.append((new_value, new_body))
-        if changed_local:
-            # Dynamic angr codegen boundary: update CSwitchCase child cases.
-            typing.cast(typing.Any, current).cases = new_cases
-        return changed_local
-
     if seen is None:
         seen = set()
     changed = False
@@ -556,19 +624,9 @@ def _replace_c_children_8616(
         seen.add(current_id)
 
         child_attrs = frozenset(_structured_slot_names_8616(current))
-        for attr in scalar_attrs:
-            if attr not in child_attrs:
-                continue
-            if _process_scalar_attr(current, attr, node_stack):
-                changed = True
-        for attr in list_attrs:
-            if attr not in child_attrs:
-                continue
-            if _process_list_attr(current, attr, node_stack):
-                changed = True
-        if "condition_and_nodes" in child_attrs and _process_condition_pairs(current, node_stack):
-            changed = True
-        if "cases" in child_attrs and _process_switch_cases(current, node_stack):
+        if _replace_one_c_node_children_8616(
+            current, child_attrs, node_stack, transform, should_process_child
+        ):
             changed = True
 
     return changed
@@ -657,47 +715,53 @@ def _is_shifted_high_byte_8616(high_expr: object, low_expr: object) -> bool:
     return _same_c_expression_8616(high_expr.lhs, low_expr)
 
 
+def _push_statement_children_8616(current: object, stack: list[object]) -> None:
+    """Queue the statement-bearing slots of one structured node."""
+    nested_statements = _dynamic_c_ast_getattr_8616(current, "statements", None)
+    if isinstance(nested_statements, (list, tuple)):
+        for item in reversed(tuple(nested_statements)):
+            stack.append(item)  # noqa: PERF402
+
+    body = _dynamic_c_ast_getattr_8616(current, "body", None)
+    if body is not None:
+        stack.append(body)
+
+    else_node = _dynamic_c_ast_getattr_8616(current, "else_node", None)
+    if else_node is not None:
+        stack.append(else_node)
+
+    condition_and_nodes = _dynamic_c_ast_getattr_8616(current, "condition_and_nodes", None)
+    if isinstance(condition_and_nodes, (list, tuple)):
+        for pair in reversed(tuple(condition_and_nodes)):
+            if isinstance(pair, tuple):
+                for item in reversed(pair):
+                    stack.append(item)  # noqa: PERF402
+
+
+def _iter_statement_nodes_8616(node: object) -> Iterator[object]:
+    """Depth-first iteration over statement-bearing structured codegen slots."""
+    stack = [node]
+    seen: set[int] = set()
+    while stack:
+        current = stack.pop()
+        if not _structured_codegen_node_8616(current):
+            continue
+        current_id = id(current)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        yield current
+        _push_statement_children_8616(current, stack)
+
+
 def _single_assignment_expr_for_variable_8616(codegen: object, target: object) -> object | None:
     cfunc = _dynamic_c_ast_getattr_8616(codegen, "cfunc", None)
     root = _dynamic_c_ast_getattr_8616(cfunc, "statements", None)
     if root is None:
         return None
 
-    def _iter_statement_nodes(node: object) -> Iterator[object]:
-        stack = [node]
-        seen: set[int] = set()
-        while stack:
-            current = stack.pop()
-            if not _structured_codegen_node_8616(current):
-                continue
-            current_id = id(current)
-            if current_id in seen:
-                continue
-            seen.add(current_id)
-            yield current
-
-            nested_statements = _dynamic_c_ast_getattr_8616(current, "statements", None)
-            if isinstance(nested_statements, (list, tuple)):
-                for item in reversed(tuple(nested_statements)):
-                    stack.append(item)  # noqa: PERF402
-
-            body = _dynamic_c_ast_getattr_8616(current, "body", None)
-            if body is not None:
-                stack.append(body)
-
-            else_node = _dynamic_c_ast_getattr_8616(current, "else_node", None)
-            if else_node is not None:
-                stack.append(else_node)
-
-            condition_and_nodes = _dynamic_c_ast_getattr_8616(current, "condition_and_nodes", None)
-            if isinstance(condition_and_nodes, (list, tuple)):
-                for pair in reversed(tuple(condition_and_nodes)):
-                    if isinstance(pair, tuple):
-                        for item in reversed(pair):
-                            stack.append(item)  # noqa: PERF402
-
     matches = []
-    for stmt in _iter_statement_nodes(root):
+    for stmt in _iter_statement_nodes_8616(root):
         if not isinstance(stmt, CAssignment):
             continue
         lhs = _dynamic_c_ast_getattr_8616(stmt, "lhs", None)
@@ -711,48 +775,138 @@ def _single_assignment_expr_for_variable_8616(codegen: object, target: object) -
     return matches[0] if len(matches) == 1 else None
 
 
+def _resolve_variable_bp_term_8616(
+    node: CVariable,
+    project: object | None,
+    codegen: object,
+    seen: set[int],
+) -> object:
+    """Follow a single-assignment variable toward its defining BP term."""
+    variable = _dynamic_c_ast_getattr_8616(node, "variable", None)
+    if variable is None:
+        return node
+    name = _strip_typed_name_suffix_8616(_dynamic_c_ast_getattr_8616(node, "name", None) or _dynamic_c_ast_getattr_8616(variable, "name", None))
+    should_follow_single_assignment = _is_linear_temp_name_8616(name)
+    if isinstance(variable, SimStackVariable):
+        should_follow_single_assignment = True
+    if not should_follow_single_assignment:
+        return node
+
+    replacement = _single_assignment_expr_for_variable_8616(codegen, node)
+    if replacement is None:
+        return node
+    resolved_replacement = _resolve_stack_bp_term_8616(replacement, project, codegen, seen)
+    if isinstance(variable, SimStackVariable):
+        stack_disp = _stack_bp_displacement_8616(resolved_replacement, project, codegen, seen=seen)
+        if stack_disp is None:
+            return node
+    return resolved_replacement
+
+
 def _resolve_stack_bp_term_8616(
     node: object,
     project: object | None = None,
     codegen: object | None = None,
     seen: set[int] | None = None,
 ) -> object:
-    def _impl() -> object:
-        nonlocal seen
-        if seen is None:
-            seen = set()
-        if id(node) in seen:
-            return node
-        seen.add(id(node))
+    if seen is None:
+        seen = set()
+    if id(node) in seen:
+        return node
+    seen.add(id(node))
 
-        if isinstance(node, CTypeCast):
-            resolved = _resolve_stack_bp_term_8616(node.expr, project, codegen, seen)
-            return resolved if resolved is not node.expr else node
+    if isinstance(node, CTypeCast):
+        resolved = _resolve_stack_bp_term_8616(node.expr, project, codegen, seen)
+        return resolved if resolved is not node.expr else node
 
-        if not isinstance(node, CVariable) or codegen is None:
-            return node
+    if not isinstance(node, CVariable) or codegen is None:
+        return node
 
-        variable = _dynamic_c_ast_getattr_8616(node, "variable", None)
-        if variable is None:
-            return node
-        name = _strip_typed_name_suffix_8616(_dynamic_c_ast_getattr_8616(node, "name", None) or _dynamic_c_ast_getattr_8616(variable, "name", None))
-        should_follow_single_assignment = _is_linear_temp_name_8616(name)
-        if isinstance(variable, SimStackVariable):
-            should_follow_single_assignment = True
-        if not should_follow_single_assignment:
-            return node
+    return _resolve_variable_bp_term_8616(node, project, codegen, seen)
 
-        replacement = _single_assignment_expr_for_variable_8616(codegen, node)
-        if replacement is None:
-            return node
-        resolved_replacement = _resolve_stack_bp_term_8616(replacement, project, codegen, seen)
-        if isinstance(variable, SimStackVariable):
-            stack_disp = _stack_bp_displacement_8616(resolved_replacement, project, codegen, seen=seen)
-            if stack_disp is None:
-                return node
-        return resolved_replacement
 
-    return _impl()
+@dataclass
+class _StackBpDispCollect8616:
+    """Accumulate the BP-relative displacement of one address expression."""
+
+    project: object | None
+    codegen: object | None
+    seen: set[int]
+    total: int = 0
+    stack_offsets: list[int] = field(default_factory=list)
+    found_stack_ref: bool = False
+
+    def collect(self, term: object) -> None:
+        term = _resolve_stack_bp_term_8616(term, self.project, self.codegen, self.seen)
+
+        if isinstance(term, CTypeCast):
+            self.collect(term.expr)
+            return
+
+        const = _c_constant_value_8616(term)
+        if const is not None:
+            self.total += const
+            return
+
+        if self._collect_reference(term):
+            return
+        if self._collect_pointer_carrier(term):
+            return
+        self._collect_binary(term)
+
+    def _collect_reference(self, term: object) -> bool:
+        if isinstance(term, CVariable):
+            stack_base_bias = _stack_base_bp_bias_8616(term, self.codegen)
+            if isinstance(stack_base_bias, int):
+                self.stack_offsets.append(stack_base_bias)
+                self.found_stack_ref = True
+                return True
+
+        if not isinstance(term, CUnaryOp) or term.op != "Reference":
+            return False
+        operand = term.operand
+        if isinstance(operand, CVariable):
+            variable = _dynamic_c_ast_getattr_8616(operand, "variable", None)
+            if isinstance(variable, SimStackVariable):
+                offset = _dynamic_c_ast_getattr_8616(variable, "offset", None)
+                if isinstance(offset, int):
+                    self.stack_offsets.append(offset)
+                    self.found_stack_ref = True
+            else:
+                stack_base_bias = _stack_base_bp_bias_8616(operand, self.codegen)
+                if isinstance(stack_base_bias, int):
+                    self.stack_offsets.append(stack_base_bias)
+                    self.found_stack_ref = True
+        return True
+
+    def _collect_pointer_carrier(self, term: object) -> bool:
+        if self.project is None or self.codegen is None:
+            return False
+        pointer_offset = _stack_pointer_carrier_offset_8616(term, self.project, self.codegen, self.seen)
+        if isinstance(pointer_offset, int):
+            self.stack_offsets.append(pointer_offset)
+            self.found_stack_ref = True
+            return True
+        return False
+
+    def _collect_binary(self, term: object) -> None:
+        if isinstance(term, CBinaryOp) and term.op == "Add":
+            self.collect(term.lhs)
+            self.collect(term.rhs)
+            return
+
+        if isinstance(term, CBinaryOp) and term.op == "Sub":
+            self.collect(term.lhs)
+            rhs_const = _c_constant_value_8616(term.rhs)
+            if rhs_const is not None:
+                self.total -= rhs_const
+            return
+
+        if isinstance(term, CBinaryOp) and term.op in {"Mul", "Shl"}:
+            # Segment-scale terms and byte-widening terms are not part of the bp displacement itself.
+            if self.project is not None:
+                _match_real_mode_linear_expr_8616(term, self.project, self.codegen)
+            return
 
 
 def _stack_bp_displacement_8616(
@@ -763,172 +917,105 @@ def _stack_bp_displacement_8616(
 ) -> int | None:
     if seen is None:
         seen = set()
-    total = 0
-    stack_offsets: list[int] = []
-    found_stack_ref = False
-
-    def collect(term: object) -> None:
-        nonlocal total
-        nonlocal found_stack_ref
-
-        term = _resolve_stack_bp_term_8616(term, project, codegen, seen)
-
-        if isinstance(term, CTypeCast):
-            collect(term.expr)
-            return
-
-        const = _c_constant_value_8616(term)
-        if const is not None:
-            total += const
-            return
-
-        if isinstance(term, CVariable):
-            stack_base_bias = _stack_base_bp_bias_8616(term, codegen)
-            if isinstance(stack_base_bias, int):
-                stack_offsets.append(stack_base_bias)
-                found_stack_ref = True
-                return
-
-        if isinstance(term, CUnaryOp) and term.op == "Reference":
-            operand = term.operand
-            if isinstance(operand, CVariable):
-                variable = _dynamic_c_ast_getattr_8616(operand, "variable", None)
-                if isinstance(variable, SimStackVariable):
-                    offset = _dynamic_c_ast_getattr_8616(variable, "offset", None)
-                    if isinstance(offset, int):
-                        stack_offsets.append(offset)
-                        found_stack_ref = True
-                else:
-                    stack_base_bias = _stack_base_bp_bias_8616(operand, codegen)
-                    if isinstance(stack_base_bias, int):
-                        stack_offsets.append(stack_base_bias)
-                        found_stack_ref = True
-            return
-
-        if project is not None and codegen is not None:
-            pointer_offset = _stack_pointer_carrier_offset_8616(term, project, codegen, seen)
-            if isinstance(pointer_offset, int):
-                stack_offsets.append(pointer_offset)
-                found_stack_ref = True
-                return
-
-        if isinstance(term, CBinaryOp) and term.op == "Add":
-            collect(term.lhs)
-            collect(term.rhs)
-            return
-
-        if isinstance(term, CBinaryOp) and term.op == "Sub":
-            collect(term.lhs)
-            rhs_const = _c_constant_value_8616(term.rhs)
-            if rhs_const is not None:
-                total -= rhs_const
-                return
-            return
-
-        if isinstance(term, CBinaryOp) and term.op in {"Mul", "Shl"}:
-            # Segment-scale terms and byte-widening terms are not part of the bp displacement itself.
-            if project is not None:
-                seg_name, _linear = _match_real_mode_linear_expr_8616(term, project, codegen)
-                if seg_name == "ss":
-                    return
-            return
-
-        return
-
-    collect(node)
-    if not found_stack_ref:
+    collect = _StackBpDispCollect8616(project=project, codegen=codegen, seen=seen)
+    collect.collect(node)
+    if not collect.found_stack_ref:
         return None
-    if len(stack_offsets) != 1:
+    if len(collect.stack_offsets) != 1:
         return None
-    return stack_offsets[0] + total
+    return collect.stack_offsets[0] + collect.total
+
+
+def _flatten_add_sub_terms_8616(term: object, sign: int = 1) -> list[tuple[object, int]]:
+    """Flatten an Add/Sub tree into ``(leaf-term, sign)`` pairs."""
+    while isinstance(term, CTypeCast):
+        term = term.expr
+    if isinstance(term, CBinaryOp) and term.op == "Add":
+        return _flatten_add_sub_terms_8616(term.lhs, sign) + _flatten_add_sub_terms_8616(term.rhs, sign)
+    if isinstance(term, CBinaryOp) and term.op == "Sub":
+        return _flatten_add_sub_terms_8616(term.lhs, sign) + _flatten_add_sub_terms_8616(term.rhs, -sign)
+    return [(term, sign)]
+
+
+def _classify_deref_terms_8616(
+    terms: list[tuple[object, int]], project: object, codegen: object | None
+) -> tuple[int, bool, list[tuple[object, int]]]:
+    """Split flattened terms into constant total, ss-segment flag, and rest."""
+    const_total = 0
+    has_ss_segment = False
+    non_segment_terms: list[tuple[object, int]] = []
+    for term, sign in terms:
+        value = _c_constant_value_8616(term)
+        if value is not None:
+            const_total += sign * value
+            continue
+        seg_name, linear = _match_real_mode_linear_expr_8616(term, project, codegen)
+        if seg_name == "ss":
+            has_ss_segment = True
+            if isinstance(linear, int):
+                const_total += sign * linear
+            continue
+        non_segment_terms.append((term, sign))
+    return const_total, has_ss_segment, non_segment_terms
 
 
 def _match_bp_stack_dereference_8616(
     node: object, project: object, codegen: object | None = None
 ) -> int | None:
-    def _impl() -> int | None:
-        nonlocal node
-        while isinstance(node, CTypeCast):
-            node = node.expr
-        if not isinstance(node, CUnaryOp) or node.op != "Dereference":
-            return None
+    node = _strip_c_casts_8616(node)
+    if not isinstance(node, CUnaryOp) or node.op != "Dereference":
+        return None
 
-        operand = node.operand
-        while isinstance(operand, CTypeCast):
-            operand = operand.expr
+    operand = _strip_c_casts_8616(node.operand)
+    terms = _flatten_add_sub_terms_8616(operand)
+    if not terms:
+        return None
 
-        def _flatten_add_sub(term: object, sign: int = 1) -> list[tuple[object, int]]:
-            while isinstance(term, CTypeCast):
-                term = term.expr
-            if isinstance(term, CBinaryOp) and term.op == "Add":
-                return _flatten_add_sub(term.lhs, sign) + _flatten_add_sub(term.rhs, sign)
-            if isinstance(term, CBinaryOp) and term.op == "Sub":
-                return _flatten_add_sub(term.lhs, sign) + _flatten_add_sub(term.rhs, -sign)
-            return [(term, sign)]
+    const_total, has_ss_segment, non_segment_terms = _classify_deref_terms_8616(terms, project, codegen)
 
-        terms = _flatten_add_sub(operand)
-        if not terms:
-            return None
+    if not has_ss_segment:
+        return None
+    if len(non_segment_terms) != 1:
+        return None
 
-        const_total = 0
-        has_ss_segment = False
-        non_segment_terms: list[tuple[object, int]] = []
-        for term, sign in terms:
-            value = _c_constant_value_8616(term)
-            if value is not None:
-                const_total += sign * value
-                continue
-            seg_name, linear = _match_real_mode_linear_expr_8616(term, project, codegen)
-            if seg_name == "ss":
-                has_ss_segment = True
-                if isinstance(linear, int):
-                    const_total += sign * linear
-                continue
-            non_segment_terms.append((term, sign))
+    addr_term, sign = non_segment_terms[0]
+    if sign != 1:
+        return None
+    base_disp = _stack_bp_displacement_8616(addr_term, project, codegen)
+    if base_disp is None:
+        return None
+    return base_disp + const_total
 
-        if not has_ss_segment:
-            return None
-        if len(non_segment_terms) != 1:
-            return None
 
-        addr_term, sign = non_segment_terms[0]
-        if sign != 1:
-            return None
-        base_disp = _stack_bp_displacement_8616(addr_term, project, codegen)
-        if base_disp is None:
-            return None
-        return base_disp + const_total
-
-    return _impl()
+def _scaled_deref_bp_disp_8616(
+    node: CBinaryOp,
+    expected_op: str,
+    expected_scale: int,
+    project: object,
+    codegen: object | None,
+) -> int | None:
+    """Match ``deref * scale`` / ``deref << bits`` shaped BP stack loads."""
+    if node.op != expected_op:
+        return None
+    for maybe_load, maybe_scale in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
+        if _c_constant_value_8616(maybe_scale) != expected_scale:
+            continue
+        direct = _match_bp_stack_dereference_8616(maybe_load, project, codegen)
+        if direct is not None:
+            return direct
+    return None
 
 
 def _match_bp_stack_load_8616(node: object, project: object, codegen: object | None = None) -> int | None:
-    def _impl() -> int | None:
-        direct = _match_bp_stack_dereference_8616(node, project, codegen)
-        if direct is not None:
-            return direct
+    direct = _match_bp_stack_dereference_8616(node, project, codegen)
+    if direct is not None:
+        return direct
 
-        if not isinstance(node, CBinaryOp):
-            return None
-
-        if node.op == "Mul":
-            pairs = ((node.lhs, node.rhs), (node.rhs, node.lhs))
-            for maybe_load, maybe_scale in pairs:
-                if _c_constant_value_8616(maybe_scale) != 0x100:
-                    continue
-                direct = _match_bp_stack_dereference_8616(maybe_load, project)
-                if direct is not None:
-                    return direct
-
-        if node.op == "Shl":
-            pairs = ((node.lhs, node.rhs), (node.rhs, node.lhs))
-            for maybe_load, maybe_scale in pairs:
-                if _c_constant_value_8616(maybe_scale) != 8:
-                    continue
-                direct = _match_bp_stack_dereference_8616(maybe_load, project, codegen)
-                if direct is not None:
-                    return direct
-
+    if not isinstance(node, CBinaryOp):
         return None
 
-    return _impl()
+    # The Mul arm intentionally resolves without a codegen context.
+    direct = _scaled_deref_bp_disp_8616(node, "Mul", 0x100, project, None)
+    if direct is not None:
+        return direct
+    return _scaled_deref_bp_disp_8616(node, "Shl", 8, project, codegen)

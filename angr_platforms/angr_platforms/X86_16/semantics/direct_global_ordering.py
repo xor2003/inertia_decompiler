@@ -31,7 +31,10 @@ from capstone.x86_const import (
     X86_REG_DS,
 )
 
-from .direct_call_result_storage import DirectCallResultInstructionView8616
+from .direct_call_result_storage import (
+    DirectCallResultInstructionView8616,
+    DirectCallResultOperandView8616,
+)
 
 
 class DirectGlobalOrdering8616(Enum):
@@ -64,19 +67,29 @@ def _direct_ds_word_compare_offset_8616(
         return None
     memory_operand, constant_operand = instruction.operands[:2]
     memory = memory_operand.memory
+    if not _direct_ds_word_memory_8616(memory_operand) or memory is None:
+        return None
+    assert isinstance(memory.displacement, int)
     if (
-        memory_operand.kind != X86_OP_MEM
-        or memory_operand.size != 2
-        or memory is None
-        or memory.segment not in {None, 0, X86_REG_DS}
-        or memory.base not in {None, 0}
-        or memory.index not in {None, 0}
-        or not isinstance(memory.displacement, int)
-        or constant_operand.kind != X86_OP_IMM
+        constant_operand.kind != X86_OP_IMM
         or not isinstance(constant_operand.immediate, int)
     ):
         return None
     return memory.displacement & 0xFFFF
+
+
+def _direct_ds_word_memory_8616(operand: DirectCallResultOperandView8616) -> bool:
+    """Return whether one operand is a direct DS word memory reference."""
+    memory = operand.memory
+    return (
+        operand.kind == X86_OP_MEM
+        and operand.size == 2
+        and memory is not None
+        and memory.segment in {None, 0, X86_REG_DS}
+        and memory.base in {None, 0}
+        and memory.index in {None, 0}
+        and isinstance(memory.displacement, int)
+    )
 
 
 def _branch_ordering_8616(instruction_id: int | None) -> DirectGlobalOrdering8616 | None:

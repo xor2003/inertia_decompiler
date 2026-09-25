@@ -217,31 +217,69 @@ def callee_saved_frame_pairs_8616(
         if key in seen_addresses:
             continue
         seen_addresses.add(key)
-        register_name = _decoded_register_name_8616(instruction_surface, X86_INS_PUSH)
-        if register_name is not None and register_name in normalized_saved:
-            next_instruction_id = None
-            if instruction_index + 1 < len(decoded_instructions):
-                with contextlib.suppress(AttributeError):
-                    next_instruction_id = cast(
-                        _CapstoneInstruction8616,
-                        decoded_instructions[instruction_index + 1],
-                    ).id
-            if next_instruction_id != X86_INS_CALL:
-                pending_pushes.setdefault(register_name, address)
-        register_name = _decoded_register_name_8616(instruction_surface, X86_INS_POP)
-        if register_name is not None and register_name in normalized_saved:
-            push_addr = pending_pushes.pop(register_name, None)
-            if push_addr is not None:
-                pairs.append(
-                    CalleeSavedFramePair8616(
-                        register_name=register_name,
-                        push_addr=push_addr,
-                        pop_addr=address,
-                    )
-                )
+        _track_saved_push_8616(
+            instruction_index,
+            instruction_surface,
+            address,
+            decoded_instructions,
+            normalized_saved,
+            pending_pushes,
+        )
+        _match_saved_pop_8616(
+            instruction_surface,
+            address,
+            normalized_saved,
+            pending_pushes,
+            pairs,
+        )
         if instruction_id == X86_INS_RET:
             break
     return tuple(sorted(pairs, key=lambda pair: (pair.push_addr, pair.pop_addr, pair.register_name)))
+
+
+def _track_saved_push_8616(
+    instruction_index: int,
+    instruction_surface: _CapstoneInstruction8616,
+    address: int,
+    decoded_instructions: tuple[object, ...],
+    normalized_saved: frozenset[str],
+    pending_pushes: dict[str, int],
+) -> None:
+    """Record one saved-register PUSH not immediately consumed by a CALL."""
+    register_name = _decoded_register_name_8616(instruction_surface, X86_INS_PUSH)
+    if register_name is None or register_name not in normalized_saved:
+        return
+    next_instruction_id = None
+    if instruction_index + 1 < len(decoded_instructions):
+        with contextlib.suppress(AttributeError):
+            next_instruction_id = cast(
+                _CapstoneInstruction8616,
+                decoded_instructions[instruction_index + 1],
+            ).id
+    if next_instruction_id != X86_INS_CALL:
+        pending_pushes.setdefault(register_name, address)
+
+
+def _match_saved_pop_8616(
+    instruction_surface: _CapstoneInstruction8616,
+    address: int,
+    normalized_saved: frozenset[str],
+    pending_pushes: dict[str, int],
+    pairs: list[CalleeSavedFramePair8616],
+) -> None:
+    """Pair one saved-register POP with its pending PUSH."""
+    register_name = _decoded_register_name_8616(instruction_surface, X86_INS_POP)
+    if register_name is None or register_name not in normalized_saved:
+        return
+    push_addr = pending_pushes.pop(register_name, None)
+    if push_addr is not None:
+        pairs.append(
+            CalleeSavedFramePair8616(
+                register_name=register_name,
+                push_addr=push_addr,
+                pop_addr=address,
+            )
+        )
 
 
 __all__ = [

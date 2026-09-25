@@ -122,55 +122,95 @@ def _emptyish_loop_guard_else_node_8616(node: object) -> bool:
     return True
 
 
+def _log_guard_debug_8616(enabled: object, message: str, *args: object) -> None:
+    """Emit one loop-guard debug line when the env flag is set."""
+    if enabled:
+        logging.getLogger(__name__).warning("[loop-guard-debug] " + message, *args)
+
+
+def _guard_body_statements_8616(body: object, debug: object) -> list[object] | None:
+    """Return the single return body of one guard arm, or refuse."""
+    if isinstance(body, CStatements):
+        return list(_dynamic_sequence_8616(_dynamic_attr_8616(body, "statements", ())))
+    if isinstance(body, CReturn):
+        return [body]
+    _log_guard_debug_8616(debug, "extract-if-guard reject-body-type=%s", type(body).__name__)
+    return None
+
+
+def _else_node_rejected_8616(else_node: object, debug: object) -> bool:
+    """Return whether a guard else-node carries real control flow."""
+    if (
+        else_node is None
+        or isinstance(else_node, CBreak)
+        or _emptyish_loop_guard_else_node_8616(else_node)
+    ):
+        return False
+    else_statements = list(_dynamic_sequence_8616(_dynamic_attr_8616(else_node, "statements", ())))
+    _log_guard_debug_8616(
+        debug,
+        "extract-if-guard reject-non-empty-else len=%d kinds=%r",
+        len(else_statements),
+        [type(child).__name__ for child in else_statements],
+    )
+    return True
+
+
 def _extract_if_return_guard_8616(stmt: object) -> object | None:
     """Extract the condition from ``if (cond) return;`` loop-exit guard shapes."""
     debug = os.environ.get("INERTIA_DEBUG_LOOP_EXIT_GUARD")
-
-    def _log(message: str, *args: object) -> None:
-        if debug:
-            logging.getLogger(__name__).warning("[loop-guard-debug] " + message, *args)
-
-    _log("extract-if-guard node=%s", type(stmt).__name__)
+    _log_guard_debug_8616(debug, "extract-if-guard node=%s", type(stmt).__name__)
     if not isinstance(stmt, CIfElse):
         return None
     cond_nodes = _dynamic_sequence_8616(_dynamic_attr_8616(stmt, "condition_and_nodes", None))
     if len(cond_nodes) != 1:
-        _log("extract-if-guard reject-cond-count=%d", len(cond_nodes))
+        _log_guard_debug_8616(debug, "extract-if-guard reject-cond-count=%d", len(cond_nodes))
         return None
 
     cond_body = cond_nodes[0]
     if not isinstance(cond_body, tuple) or len(cond_body) != 2:
-        _log("extract-if-guard reject-cond-shape=%s", type(cond_body).__name__)
+        _log_guard_debug_8616(debug, "extract-if-guard reject-cond-shape=%s", type(cond_body).__name__)
         return None
     cond, body = cond_body
-    body_statements: list[object]
-    if isinstance(body, CStatements):
-        body_statements = list(_dynamic_sequence_8616(_dynamic_attr_8616(body, "statements", ())))
-    elif isinstance(body, CReturn):
-        body_statements = [body]
-    else:
-        _log("extract-if-guard reject-body-type=%s", type(body).__name__)
+    body_statements = _guard_body_statements_8616(body, debug)
+    if body_statements is None:
         return None
 
     if len(body_statements) != 1 or not isinstance(body_statements[0], CReturn):
-        _log("extract-if-guard reject-body-kind=%s len=%d", type(body).__name__, len(body_statements))
+        _log_guard_debug_8616(debug, "extract-if-guard reject-body-kind=%s len=%d", type(body).__name__, len(body_statements))
         return None
     if _dynamic_attr_8616(body_statements[0], "retval", None) is not None:
-        _log("extract-if-guard reject-return-value=%r", _dynamic_attr_8616(body_statements[0], "retval", None))
+        _log_guard_debug_8616(debug, "extract-if-guard reject-return-value=%r", _dynamic_attr_8616(body_statements[0], "retval", None))
         return None
 
     else_node = _dynamic_attr_8616(stmt, "else_node", None)
-    if else_node is not None and not isinstance(else_node, CBreak) and not _emptyish_loop_guard_else_node_8616(else_node):
-        else_statements = list(_dynamic_sequence_8616(_dynamic_attr_8616(else_node, "statements", ())))
-        _log(
-            "extract-if-guard reject-non-empty-else len=%d kinds=%r",
-            len(else_statements),
-            [type(child).__name__ for child in else_statements],
-        )
+    if _else_node_rejected_8616(else_node, debug):
         return None
 
-    _log("extract-if-guard accepted")
+    _log_guard_debug_8616(debug, "extract-if-guard accepted")
     return cast(object | None, cond)
+
+
+def _loop_call_nodes_8616(
+    statements: Sequence[object],
+    callbacks: LoopExitReturnGuardCallbacks8616,
+    debug_all: bool,
+    logger: logging.Logger,
+) -> Iterator[tuple[int, CFunctionCall]]:
+    """Yield non-runtime-helper calls with their owning statement index."""
+    for stmt_idx, stmt in enumerate(statements):
+        for node in _iter_c_nodes_deep_8616(stmt):
+            if not isinstance(node, CFunctionCall):
+                continue
+            if callbacks.is_runtime_segment_helper_call(node):
+                if debug_all:
+                    logger.warning(
+                        "[loop-guard-debug] callable-scan-skip-helper stmt=%d call=%s",
+                        stmt_idx,
+                        callbacks.call_node_name(node),
+                    )
+                continue
+            yield stmt_idx, node
 
 
 def _has_callable_after_guard_8616(
@@ -187,22 +227,7 @@ def _has_callable_after_guard_8616(
     }
     logger = logging.getLogger(__name__)
 
-    def _iter_loop_calls() -> Iterator[tuple[int, CFunctionCall]]:
-        for stmt_idx, stmt in enumerate(statements):
-            for node in _iter_c_nodes_deep_8616(stmt):
-                if not isinstance(node, CFunctionCall):
-                    continue
-                if callbacks.is_runtime_segment_helper_call(node):
-                    if debug_all:
-                        logger.warning(
-                            "[loop-guard-debug] callable-scan-skip-helper stmt=%d call=%s",
-                            stmt_idx,
-                            callbacks.call_node_name(node),
-                        )
-                    continue
-                yield stmt_idx, node
-
-    for stmt_idx, node in _iter_loop_calls():
+    for stmt_idx, node in _loop_call_nodes_8616(statements, callbacks, debug_all, logger):
         if stmt_idx <= start_idx:
             continue
         if debug_all:
@@ -214,7 +239,7 @@ def _has_callable_after_guard_8616(
         return True
 
     observed_user_calls: list[tuple[int, CFunctionCall]] = []
-    for stmt_idx, node in _iter_loop_calls():
+    for stmt_idx, node in _loop_call_nodes_8616(statements, callbacks, debug_all, logger):
         observed_user_calls.append((stmt_idx, node))
         if debug_all:
             logger.warning(
@@ -241,18 +266,147 @@ def _post_loop_only_returns_8616(statements: Sequence[object], loop_idx: int) ->
     return True
 
 
+def _debug_all_guard_enabled_8616() -> bool:
+    """Return whether the exhaustive loop-guard debug flag is set."""
+    return os.environ.get("INERTIA_DEBUG_LOOP_EXIT_GUARD_DEBUG_ALL", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+@dataclass(slots=True)
+class _LoopExitGuardRepair8616:
+    """Shared state for the loop-exit return-guard repair pass."""
+
+    codegen: object
+    callbacks: LoopExitReturnGuardCallbacks8616
+    cfunc: object
+    root_statements: list[object]
+    stats: LoopExitGuardStats8616
+    debug: object
+    debug_all: bool
+
+    def log_debug(self, message: str, *args: object) -> None:
+        """Emit one loop-guard debug line when the env flag is set."""
+        _log_guard_debug_8616(self.debug, message, *args)
+
+    def _dump_loop_body_8616(self, body_statements: list[object]) -> None:
+        """Debug-dump per-statement call kinds inside one loop body."""
+        loop_calls: list[str] = []
+        for stmt_idx, stmt in enumerate(body_statements):
+            stmt_calls = 0
+            for node in _iter_c_nodes_deep_8616(stmt):
+                if isinstance(node, CFunctionCall):
+                    loop_calls.append(type(node).__name__)
+                    stmt_calls += 1
+            self.log_debug(
+                "loop-body-stmt-dump idx=%d kind=%s call_count=%d text=%r",
+                stmt_idx,
+                type(stmt).__name__,
+                stmt_calls,
+                str(stmt)[:220],
+            )
+        if loop_calls:
+            self.log_debug("loop-body-call-kinds=%r", loop_calls)
+
+    def _log_loop_addr_8616(
+        self,
+        loop_node: object,
+        body_statements: list[object],
+    ) -> None:
+        """Debug-log one loop boundary address and body size."""
+        if_code_addr = _dynamic_attr_8616(loop_node, "addr", None)
+        if if_code_addr is None:
+            condition = _dynamic_attr_8616(loop_node, "condition", None)
+            if_code_addr = _dynamic_attr_8616(condition, "addr", -1)
+        self.log_debug(
+            "inspect-loop addr=%#x kind=%s body_len=%d",
+            if_code_addr if isinstance(if_code_addr, int) else -1,
+            type(loop_node).__name__,
+            len(body_statements),
+        )
+
+    def _repair_guard_8616(
+        self,
+        candidate: object,
+        guard_idx: int,
+        body_statements: list[object],
+        loop_body: CStatements,
+        loop_idx: int,
+    ) -> bool:
+        """Repair one proven loop-exit return guard into a break."""
+        guard_cond = _extract_if_return_guard_8616(candidate)
+        if guard_cond is None:
+            self.log_debug(
+                "loop-body-stmt-miss kind=%s idx=%d node=%s",
+                hex(_dynamic_int_8616(_dynamic_attr_8616(self.cfunc, "addr", -1))),
+                guard_idx,
+                type(candidate).__name__,
+            )
+            if self.debug_all:
+                self.stats["candidate_node_mismatch"] += 1
+            return False
+        self.stats["candidates"] += 1
+        self.log_debug(
+            "loop-body-guard-candidate idx=%d func=%#x cond=%r",
+            guard_idx,
+            _dynamic_attr_8616(self.cfunc, "addr", -1),
+            guard_cond,
+        )
+        if not _has_callable_after_guard_8616(body_statements, guard_idx, self.callbacks):
+            self.stats["refused_no_call"] += 1
+            self.log_debug(
+                "loop-body-guard-refused-no-call idx=%d func=%#x",
+                guard_idx,
+                _dynamic_attr_8616(self.cfunc, "addr", -1),
+            )
+            return False
+        if not _post_loop_only_returns_8616(self.root_statements, loop_idx):
+            self.stats["refused_post_loop_flow"] += 1
+            self.log_debug(
+                "loop-body-guard-refused-postflow idx=%d func=%#x",
+                guard_idx,
+                _dynamic_attr_8616(self.cfunc, "addr", -1),
+            )
+            return False
+        body_statements[guard_idx] = CIfBreak(guard_cond, codegen=self.codegen, cstyle_ifs=True)
+        loop_body.statements = body_statements
+        self.stats["repaired"] += 1
+        self.stats["preserved_exit_polarity"] = self.stats.get("preserved_exit_polarity", 0) + 1
+        self.log_debug(
+            "loop-body-guard-repaired-preserve-exit-polarity idx=%d func=%#x",
+            guard_idx,
+            _dynamic_attr_8616(self.cfunc, "addr", -1),
+        )
+        return True
+
+    def repair_loop(self, loop_node: object, loop_idx: int) -> bool:
+        """Repair the first proven exit-return guard inside one loop body."""
+        loop_body = _dynamic_attr_8616(loop_node, "body", None)
+        if not isinstance(loop_body, CStatements):
+            return False
+        body_statements = list(_dynamic_sequence_8616(_dynamic_attr_8616(loop_body, "statements", ())))
+        if len(body_statements) < 1:
+            return False
+        self._dump_loop_body_8616(body_statements)
+        self._log_loop_addr_8616(loop_node, body_statements)
+        for guard_idx, candidate in enumerate(body_statements):
+            if self._repair_guard_8616(
+                candidate, guard_idx, body_statements, loop_body, loop_idx,
+            ):
+                return True
+        loop_body.statements = body_statements
+        return False
+
+
 def repair_loop_exit_return_guards_8616(
     codegen: object,
     callbacks: LoopExitReturnGuardCallbacks8616,
 ) -> bool:
     """Convert proven loop-local ``if (exit) return;`` guards into breaks."""
     typed_codegen = cast(_LoopExitGuardCodegenLike8616, codegen)
-    debug = os.environ.get("INERTIA_DEBUG_LOOP_EXIT_GUARD")
-
-    def _log_debug(message: str, *args: object) -> None:
-        if debug:
-            logging.getLogger(__name__).warning("[loop-guard-debug] " + message, *args)
-
     cfunc = _dynamic_attr_8616(typed_codegen, "cfunc", None)
     if cfunc is None:
         return False
@@ -279,97 +433,17 @@ def repair_loop_exit_return_guards_8616(
         if isinstance(root, CStatements)
         else list(root)
     )
-
-    def _repair_loop(loop_node: object, loop_idx: int) -> bool:
-        loop_body = _dynamic_attr_8616(loop_node, "body", None)
-        if not isinstance(loop_body, CStatements):
-            return False
-        body_statements = list(_dynamic_sequence_8616(_dynamic_attr_8616(loop_body, "statements", ())))
-        if len(body_statements) < 1:
-            return False
-        loop_calls: list[str] = []
-        for stmt_idx, stmt in enumerate(body_statements):
-            stmt_calls = 0
-            for node in _iter_c_nodes_deep_8616(stmt):
-                if isinstance(node, CFunctionCall):
-                    loop_calls.append(type(node).__name__)
-                    stmt_calls += 1
-            _log_debug(
-                "loop-body-stmt-dump idx=%d kind=%s call_count=%d text=%r",
-                stmt_idx,
-                type(stmt).__name__,
-                stmt_calls,
-                str(stmt)[:220],
-            )
-        if loop_calls:
-            _log_debug("loop-body-call-kinds=%r", loop_calls)
-
-        if_code_addr = _dynamic_attr_8616(loop_node, "addr", None)
-        if if_code_addr is None:
-            condition = _dynamic_attr_8616(loop_node, "condition", None)
-            if_code_addr = _dynamic_attr_8616(condition, "addr", -1)
-        _log_debug(
-            "inspect-loop addr=%#x kind=%s body_len=%d",
-            if_code_addr if isinstance(if_code_addr, int) else -1,
-            type(loop_node).__name__,
-            len(body_statements),
-        )
-        for guard_idx, candidate in enumerate(body_statements):
-            guard_cond = _extract_if_return_guard_8616(candidate)
-            if guard_cond is None:
-                _log_debug(
-                    "loop-body-stmt-miss kind=%s idx=%d node=%s",
-                    hex(_dynamic_int_8616(_dynamic_attr_8616(cfunc, "addr", -1))),
-                    guard_idx,
-                    type(candidate).__name__,
-                )
-                if os.environ.get("INERTIA_DEBUG_LOOP_EXIT_GUARD_DEBUG_ALL", "").strip().lower() in {
-                    "1",
-                    "true",
-                    "yes",
-                    "on",
-                }:
-                    stats["candidate_node_mismatch"] += 1
-                continue
-            stats["candidates"] += 1
-            _log_debug(
-                "loop-body-guard-candidate idx=%d func=%#x cond=%r",
-                guard_idx,
-                _dynamic_attr_8616(cfunc, "addr", -1),
-                guard_cond,
-            )
-            if not _has_callable_after_guard_8616(body_statements, guard_idx, callbacks):
-                stats["refused_no_call"] += 1
-                _log_debug(
-                    "loop-body-guard-refused-no-call idx=%d func=%#x",
-                    guard_idx,
-                    _dynamic_attr_8616(cfunc, "addr", -1),
-                )
-                continue
-            if not _post_loop_only_returns_8616(root_statements, loop_idx):
-                stats["refused_post_loop_flow"] += 1
-                _log_debug(
-                    "loop-body-guard-refused-postflow idx=%d func=%#x",
-                    guard_idx,
-                    _dynamic_attr_8616(cfunc, "addr", -1),
-                )
-                continue
-            body_statements[guard_idx] = CIfBreak(guard_cond, codegen=codegen, cstyle_ifs=True)
-            loop_body.statements = body_statements
-            stats["repaired"] += 1
-            stats["preserved_exit_polarity"] = stats.get("preserved_exit_polarity", 0) + 1
-            _log_debug(
-                "loop-body-guard-repaired-preserve-exit-polarity idx=%d func=%#x",
-                guard_idx,
-                _dynamic_attr_8616(cfunc, "addr", -1),
-            )
-            return True
-
-        loop_body.statements = body_statements
-        return False
-
+    repair = _LoopExitGuardRepair8616(
+        codegen=codegen,
+        callbacks=callbacks,
+        cfunc=cfunc,
+        root_statements=root_statements,
+        stats=cast(LoopExitGuardStats8616, stats),
+        debug=os.environ.get("INERTIA_DEBUG_LOOP_EXIT_GUARD"),
+        debug_all=_debug_all_guard_enabled_8616(),
+    )
     for idx, stmt in enumerate(tuple(root_statements)):
-        if isinstance(stmt, (CForLoop, CWhileLoop, CDoWhileLoop)) and _repair_loop(stmt, idx):
+        if isinstance(stmt, (CForLoop, CWhileLoop, CDoWhileLoop)) and repair.repair_loop(stmt, idx):
             changed = True
     if not changed:
         return False

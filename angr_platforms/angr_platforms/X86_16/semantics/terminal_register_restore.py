@@ -127,15 +127,7 @@ def terminal_register_restore_sites_8616(
     immediately preceding the first address-ordered return. The Frontend owns
     byte decoding; this owner only classifies register-transfer meaning.
     """
-    entry_instructions = instructions_by_block.get(entry_addr, ())
-    entry_saves: list[str] = []
-    for instruction in entry_instructions:
-        if _instruction_mnemonic_8616(instruction) != "push":
-            break
-        register_name = _register_operand_name_8616(instruction)
-        if register_name is None:
-            break
-        entry_saves.append(register_name)
+    entry_saves = _entry_save_registers_8616(instructions_by_block.get(entry_addr, ()))
     if not entry_saves:
         return frozenset()
 
@@ -153,8 +145,31 @@ def terminal_register_restore_sites_8616(
     if terminal_index is None:
         return frozenset()
 
+    restores = _terminal_restore_registers_8616(ordered[:terminal_index])
+    if tuple(name for name, _address in restores) != tuple(entry_saves):
+        return frozenset()
+    return frozenset(address for _name, address in restores)
+
+
+def _entry_save_registers_8616(entry_instructions: tuple[object, ...]) -> list[str]:
+    """Collect the leading PUSH register sequence for the entry block."""
+    entry_saves: list[str] = []
+    for instruction in entry_instructions:
+        if _instruction_mnemonic_8616(instruction) != "push":
+            break
+        register_name = _register_operand_name_8616(instruction)
+        if register_name is None:
+            break
+        entry_saves.append(register_name)
+    return entry_saves
+
+
+def _terminal_restore_registers_8616(
+    pre_terminal: tuple[object, ...] | list[object],
+) -> list[tuple[str, int]]:
+    """Collect the POP register/address sequence before the first return."""
     restores: list[tuple[str, int]] = []
-    for instruction in reversed(ordered[:terminal_index]):
+    for instruction in reversed(pre_terminal):
         if _instruction_mnemonic_8616(instruction) != "pop":
             break
         register_name = _register_operand_name_8616(instruction)
@@ -162,6 +177,4 @@ def terminal_register_restore_sites_8616(
         if register_name is None or address is None:
             break
         restores.append((register_name, address))
-    if tuple(name for name, _address in restores) != tuple(entry_saves):
-        return frozenset()
-    return frozenset(address for _name, address in restores)
+    return restores

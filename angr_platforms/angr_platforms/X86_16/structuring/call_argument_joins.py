@@ -99,20 +99,25 @@ class _NormalizedJoin8616:
     immediate_values: tuple[int, ...]
 
 
+def _complete_join_stats_8616(join: CallsiteRegisterJoin8616) -> bool:
+    """Check the upstream register-join counters describe one binary join."""
+    return (
+        join.raw_fact_count == 2
+        and join.normalized_fact_count == 2
+        and join.classified_fact_count == 1
+        and join.materialized_count == 1
+        and join.failure_count == 0
+        and len(join.traces) == 2
+    )
+
+
 def _normalize_join_8616(summary: CallsiteSummary8616) -> _NormalizedJoin8616 | None:
     """Validate that one summary completely describes a binary register join."""
     merge = summary.predecessor_stack_merge
     if merge is None or merge.register_join is None:
         return None
     join = merge.register_join
-    if (
-        join.raw_fact_count != 2
-        or join.normalized_fact_count != 2
-        or join.classified_fact_count != 1
-        or join.materialized_count != 1
-        or join.failure_count != 0
-        or len(join.traces) != 2
-    ):
+    if not _complete_join_stats_8616(join):
         return None
     trace_values = tuple(exact_call_argument_immediate_8616(trace.source) for trace in join.traces)
     if any(value is None for value in trace_values):
@@ -160,18 +165,22 @@ def _expected_arguments_8616(
     return tuple(reversed(physical))
 
 
-def materialize_call_argument_joins_8616(project: object, codegen: object) -> bool:
-    """Bind exact Alias register joins to unique existing structured calls."""
-    typed_codegen = cast(_CallArgumentJoinCodegen8616, codegen)
-    try:
-        root = typed_codegen.cfunc.statements
-        summary_map = typed_codegen._inertia_callsite_summaries
-    except (AttributeError, TypeError):
-        return False
-    if not isinstance(summary_map, dict):
-        raise TypeError("structured callsite summary map must be a dict")
-    summary_inventory = callsite_summary_inventory_8616(typed_codegen)
+_PATH_TO_JOIN_DECISION_8616: dict[
+    CallArgumentPathJoinDecision8616, CallArgumentJoinDecision8616
+] = {
+    CallArgumentPathJoinDecision8616.MATERIALIZED: CallArgumentJoinDecision8616.MATERIALIZED,
+    CallArgumentPathJoinDecision8616.ALREADY_MATERIALIZED: CallArgumentJoinDecision8616.ALREADY_MATERIALIZED,
+    CallArgumentPathJoinDecision8616.REFUSED_CONDITION: CallArgumentJoinDecision8616.REFUSED_CONDITION,
+    CallArgumentPathJoinDecision8616.REFUSED_EVIDENCE: CallArgumentJoinDecision8616.REFUSED_EVIDENCE,
+}
 
+
+def _grouped_join_callsites_8616(
+    root: object,
+    summary_map: dict[int, CallsiteSummary8616],
+    summary_inventory: dict[int, CallsiteSummary8616],
+) -> dict[int, list[tuple[CFunctionCall, CallsiteSummary8616]]]:
+    """Group structured calls carrying merge evidence by callsite address."""
     grouped: dict[int, list[tuple[CFunctionCall, CallsiteSummary8616]]] = {}
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, CFunctionCall):
@@ -186,83 +195,143 @@ def materialize_call_argument_joins_8616(project: object, codegen: object) -> bo
         if merge is None or (merge.register_join is None and not merge.traces):
             continue
         grouped.setdefault(summary.callsite_addr, []).append((node, summary))
+    return grouped
+
+
+def _join_expression_8616(
+    project: object,
+    codegen: object,
+    root: object,
+    normalized: _NormalizedJoin8616,
+    call: CFunctionCall,
+) -> tuple[CExpression | None, CallArgumentJoinDecision8616]:
+    """Resolve the join expression, preferring a dominating branch carrier."""
+    values = cast(tuple[int, int], normalized.immediate_values)
+    branch_carrier = unique_branch_carrier_8616(root, values)
+    join_expression: CExpression | None = None
+    refusal = CallArgumentJoinDecision8616.REFUSED_BRANCH
+    if branch_carrier is not None:
+        branch, carrier = branch_carrier
+        if branch_dominates_call_8616(root, branch, carrier, call):
+            join_expression = carrier
+        else:
+            refusal = CallArgumentJoinDecision8616.REFUSED_ORDER
+    if join_expression is None:
+        join_expression = conditional_call_argument_join_expression_8616(
+            project,
+            codegen,
+            normalized.join,
+        )
+        if join_expression is None and branch_carrier is None:
+            refusal = CallArgumentJoinDecision8616.REFUSED_CONDITION
+    return join_expression, refusal
+
+
+@dataclass(frozen=True, slots=True)
+class _JoinGroupResult8616:
+    """Counter deltas and decision from processing one callsite group."""
+
+    decision: CallArgumentJoinDecision8616
+    normalized: int = 0
+    classified: int = 0
+    materialized: int = 0
+    failed: int = 0
+    changed: bool = False
+
+
+def _process_join_group_8616(
+    pairs: list[tuple[CFunctionCall, CallsiteSummary8616]],
+    project: object,
+    codegen: object,
+    root: object,
+) -> _JoinGroupResult8616:
+    """Run one callsite group through path-join then branch-join evidence."""
+    if len(pairs) != 1:
+        return _JoinGroupResult8616(
+            CallArgumentJoinDecision8616.REFUSED_CALL_IDENTITY,
+            failed=1,
+        )
+    call, summary = pairs[0]
+    path_result = materialize_call_argument_path_join_8616(
+        project,
+        codegen,
+        call,
+        summary,
+    )
+    if path_result.decision is not CallArgumentPathJoinDecision8616.NOT_APPLICABLE:
+        return _JoinGroupResult8616(
+            _PATH_TO_JOIN_DECISION_8616[path_result.decision],
+            normalized=path_result.normalized_fact_count,
+            classified=path_result.classified_fact_count,
+            materialized=path_result.materialized_count,
+            failed=path_result.failure_count,
+            changed=path_result.changed,
+        )
+    normalized = _normalize_join_8616(summary)
+    if normalized is None:
+        return _JoinGroupResult8616(
+            CallArgumentJoinDecision8616.REFUSED_EVIDENCE,
+            failed=1,
+        )
+    join_expression, refusal = _join_expression_8616(
+        project, codegen, root, normalized, call,
+    )
+    if join_expression is None:
+        return _JoinGroupResult8616(refusal, normalized=1, failed=1)
+    expected = _expected_arguments_8616(summary, normalized, join_expression, codegen)
+    if expected is None:
+        return _JoinGroupResult8616(
+            CallArgumentJoinDecision8616.REFUSED_EVIDENCE,
+            normalized=1,
+            classified=1,
+            failed=1,
+        )
+    existing = tuple(call.args or ())
+    if len(existing) == len(expected) and all(
+        _same_c_expression_8616(lhs, rhs) for lhs, rhs in zip(existing, expected, strict=True)
+    ):
+        return _JoinGroupResult8616(
+            CallArgumentJoinDecision8616.ALREADY_MATERIALIZED,
+            normalized=1,
+            classified=1,
+            materialized=1,
+        )
+    call.args = list(expected)
+    return _JoinGroupResult8616(
+        CallArgumentJoinDecision8616.MATERIALIZED,
+        normalized=1,
+        classified=1,
+        materialized=1,
+        changed=True,
+    )
+
+
+def materialize_call_argument_joins_8616(project: object, codegen: object) -> bool:
+    """Bind exact Alias register joins to unique existing structured calls."""
+    typed_codegen = cast(_CallArgumentJoinCodegen8616, codegen)
+    try:
+        root = typed_codegen.cfunc.statements
+        summary_map = typed_codegen._inertia_callsite_summaries
+    except (AttributeError, TypeError):
+        return False
+    if not isinstance(summary_map, dict):
+        raise TypeError("structured callsite summary map must be a dict")
+    summary_inventory = callsite_summary_inventory_8616(typed_codegen)
+
+    grouped = _grouped_join_callsites_8616(root, summary_map, summary_inventory)
 
     raw = normalized_count = classified = materialized = failed = 0
     changed = False
     decisions: list[CallArgumentJoinDecision8616] = []
     for pairs in grouped.values():
         raw += 1
-        if len(pairs) != 1:
-            failed += 1
-            decisions.append(CallArgumentJoinDecision8616.REFUSED_CALL_IDENTITY)
-            continue
-        call, summary = pairs[0]
-        path_result = materialize_call_argument_path_join_8616(
-            project,
-            codegen,
-            call,
-            summary,
-        )
-        if path_result.decision is not CallArgumentPathJoinDecision8616.NOT_APPLICABLE:
-            normalized_count += path_result.normalized_fact_count
-            classified += path_result.classified_fact_count
-            materialized += path_result.materialized_count
-            failed += path_result.failure_count
-            changed |= path_result.changed
-            decisions.append(
-                {
-                    CallArgumentPathJoinDecision8616.MATERIALIZED: CallArgumentJoinDecision8616.MATERIALIZED,
-                    CallArgumentPathJoinDecision8616.ALREADY_MATERIALIZED: CallArgumentJoinDecision8616.ALREADY_MATERIALIZED,
-                    CallArgumentPathJoinDecision8616.REFUSED_CONDITION: CallArgumentJoinDecision8616.REFUSED_CONDITION,
-                    CallArgumentPathJoinDecision8616.REFUSED_EVIDENCE: CallArgumentJoinDecision8616.REFUSED_EVIDENCE,
-                }[path_result.decision]
-            )
-            continue
-        normalized = _normalize_join_8616(summary)
-        if normalized is None:
-            failed += 1
-            decisions.append(CallArgumentJoinDecision8616.REFUSED_EVIDENCE)
-            continue
-        normalized_count += 1
-        values = cast(tuple[int, int], normalized.immediate_values)
-        branch_carrier = unique_branch_carrier_8616(root, values)
-        join_expression: CExpression | None = None
-        refusal = CallArgumentJoinDecision8616.REFUSED_BRANCH
-        if branch_carrier is not None:
-            branch, carrier = branch_carrier
-            if branch_dominates_call_8616(root, branch, carrier, call):
-                join_expression = carrier
-            else:
-                refusal = CallArgumentJoinDecision8616.REFUSED_ORDER
-        if join_expression is None:
-            join_expression = conditional_call_argument_join_expression_8616(
-                project,
-                codegen,
-                normalized.join,
-            )
-            if join_expression is None and branch_carrier is None:
-                refusal = CallArgumentJoinDecision8616.REFUSED_CONDITION
-        if join_expression is None:
-            failed += 1
-            decisions.append(refusal)
-            continue
-        expected = _expected_arguments_8616(summary, normalized, join_expression, codegen)
-        classified += 1
-        if expected is None:
-            failed += 1
-            decisions.append(CallArgumentJoinDecision8616.REFUSED_EVIDENCE)
-            continue
-        existing = tuple(call.args or ())
-        if len(existing) == len(expected) and all(
-            _same_c_expression_8616(lhs, rhs) for lhs, rhs in zip(existing, expected, strict=True)
-        ):
-            materialized += 1
-            decisions.append(CallArgumentJoinDecision8616.ALREADY_MATERIALIZED)
-            continue
-        call.args = list(expected)
-        materialized += 1
-        changed = True
-        decisions.append(CallArgumentJoinDecision8616.MATERIALIZED)
+        result = _process_join_group_8616(pairs, project, codegen, root)
+        normalized_count += result.normalized
+        classified += result.classified
+        materialized += result.materialized
+        failed += result.failed
+        changed |= result.changed
+        decisions.append(result.decision)
 
     stats = CallArgumentJoinStats8616(
         raw,

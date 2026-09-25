@@ -14,7 +14,8 @@ Refuse ambiguous facts; never infer calls from rendered C, names, or samples.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import partial
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import (
@@ -35,6 +36,7 @@ from archinfo import Arch
 
 from ..c_ast_utils import _iter_c_nodes_deep_8616, _replace_c_children_8616
 from ..call_target_identity import (
+    _FunctionSurface8616,
     resolve_x86_16_call_target_function_8616,
     x86_16_call_targets_equivalent_8616,
 )
@@ -61,6 +63,7 @@ from .call_return_register_index import (
     build_call_return_register_index_8616,
 )
 from .call_return_register_placement import (
+    CallReturnRegisterPlacement8616,
     CallReturnRegisterPlacementVerdict8616,
     classify_call_return_register_placement_8616,
     consume_exact_call_return_register_placement_8616,
@@ -368,27 +371,27 @@ def _unique_call_assignment_8616(root: object, call: CFunctionCall) -> CAssignme
     return assignments[0] if len(assignments) == 1 else None
 
 
-def _materialize_stored_return_condition_8616(
-    project: object,
-    codegen: object,
+@dataclass(frozen=True, slots=True)
+class _StoreBinding8616:
+    """Resolved store assignment and its placement provenance."""
+
+    evidence: CallReturnStackStoreEvidence8616
+    call: CFunctionCall
+    assignment: CAssignment
+    store_placement: CallReturnStorePlacement8616 | None
+    bridge_placement: CallReturnStorePlacement8616 | None
+
+
+def _resolve_store_assignment_8616(
     root: object,
-    expression: CExpression,
-    body: object,
-    summary: CallsiteSummary8616,
-    register_slice: tuple[int, int],
-    summary_map: dict[int, CallsiteSummary8616],
-) -> _StoredCallReturnConditionResult8616 | None:
-    """Bind a value-return store and its branch to one exact stack local."""
-    evidence = classify_call_return_stack_store_8616(summary)
-    if evidence is None or evidence.width != register_slice[1]:
-        return None
-    call = _unique_summary_call_8616(project, root, summary)
-    if call is None:
-        return None
+    call: CFunctionCall,
+    evidence: CallReturnStackStoreEvidence8616,
+    codegen: object,
+) -> _StoreBinding8616 | None:
+    """Resolve the store assignment plus any bridge/adjacent placement."""
     assignment = _unique_call_assignment_8616(root, call)
     store_placement: CallReturnStorePlacement8616 | None = None
     bridge_placement: CallReturnStorePlacement8616 | None = None
-    bridge_reused_carrier_count = 0
     if assignment is None:
         bridge_placement = find_proven_call_result_bridge_8616(
             root, call, evidence, codegen=codegen
@@ -411,67 +414,96 @@ def _materialize_stored_return_condition_8616(
         )
         if store_placement is not None:
             assignment = store_placement.store_assignment
-    if is_exact_call_return_stack_destination_8616(codegen, assignment.lhs, evidence):
-        destination = assignment.lhs
-        if not isinstance(destination, CVariable):
-            return None
-        register_count = _expression_return_register_count_8616(expression, register_slice)
-        destination_count = _stack_destination_count_8616(codegen, expression, evidence)
-        if not (
-            (register_count == 1 and destination_count == 0)
-            or (register_count == 0 and destination_count == 1)
-        ):
-            return None
-        changed = False
-        if register_count == 1:
-            expression = _replace_return_register_8616(expression, register_slice, destination)
+    return _StoreBinding8616(
+        evidence, call, assignment, store_placement, bridge_placement,
+    )
+
+
+def _retarget_return_slice_8616(
+    root: object,
+    register_slice: tuple[int, int],
+    destination: CVariable,
+) -> bool:
+    """Retarget returns carrying the proven register slice to the local."""
+    changed = False
+    for node in _iter_c_nodes_deep_8616(root):
+        if not isinstance(node, CReturn):
+            continue
+        retval = node.retval
+        if not isinstance(retval, CVariable) or not isinstance(retval.variable, SimRegisterVariable):
+            continue
+        variable = retval.variable
+        if (int(variable.reg), int(variable.size)) == register_slice:
+            node.retval = destination
             changed = True
-        for node in _iter_c_nodes_deep_8616(root):
-            if not isinstance(node, CReturn):
-                continue
-            retval = node.retval
-            if not isinstance(retval, CVariable) or not isinstance(retval.variable, SimRegisterVariable):
-                continue
-            variable = retval.variable
-            if (int(variable.reg), int(variable.size)) == register_slice:
-                node.retval = destination
-                changed = True
-        if _stack_destination_count_8616(codegen, expression, evidence) != 1:
-            return None
-        if store_placement is not None:
-            if bridge_placement is not None:
-                reused_carrier_count = bind_proven_call_result_bridge_8616(
-                    root,
-                    bridge_placement,
-                    call,
-                    destination,
-                )
-                if reused_carrier_count is None:
-                    return None
-                bridge_reused_carrier_count = reused_carrier_count
-                assignment = bridge_placement.store_assignment
-            else:
-                assignment = bind_adjacent_standalone_call_store_8616(
-                    store_placement,
-                    call,
-                )
-            changed = True
-        _remove_redundant_return_bridge_8616(root, destination, register_slice, assignment)
-        bind_structured_callsite_identity_8616(call, summary)
-        summary_map[id(call)] = summary
-        return _StoredCallReturnConditionResult8616(
-            expression,
-            changed,
-            store_bridge_materialized=bridge_placement is not None,
-            reused_carrier_count=bridge_reused_carrier_count,
-        )
-    old_lhs = assignment.lhs
-    if not isinstance(old_lhs, CVariable) or not isinstance(old_lhs.variable, SimRegisterVariable):
+    return changed
+
+
+def _materialize_stack_destination_8616(
+    codegen: object,
+    root: object,
+    expression: CExpression,
+    summary: CallsiteSummary8616,
+    register_slice: tuple[int, int],
+    summary_map: dict[int, CallsiteSummary8616],
+    binding: _StoreBinding8616,
+) -> _StoredCallReturnConditionResult8616 | None:
+    """Bind a proven stack destination store and retarget return carriers."""
+    assignment = binding.assignment
+    destination = assignment.lhs
+    if not isinstance(destination, CVariable):
         return None
-    old_variable = old_lhs.variable
-    if (int(old_variable.reg), int(old_variable.size)) != register_slice:
+    register_count = _expression_return_register_count_8616(expression, register_slice)
+    destination_count = _stack_destination_count_8616(codegen, expression, binding.evidence)
+    if not (
+        (register_count == 1 and destination_count == 0)
+        or (register_count == 0 and destination_count == 1)
+    ):
         return None
-    definitions = sum(
+    changed = False
+    if register_count == 1:
+        expression = _replace_return_register_8616(expression, register_slice, destination)
+        changed = True
+    changed = _retarget_return_slice_8616(root, register_slice, destination) or changed
+    if _stack_destination_count_8616(codegen, expression, binding.evidence) != 1:
+        return None
+    bridge_reused_carrier_count = 0
+    if binding.store_placement is not None:
+        if binding.bridge_placement is not None:
+            reused_carrier_count = bind_proven_call_result_bridge_8616(
+                root,
+                binding.bridge_placement,
+                binding.call,
+                destination,
+            )
+            if reused_carrier_count is None:
+                return None
+            bridge_reused_carrier_count = reused_carrier_count
+            assignment = binding.bridge_placement.store_assignment
+        else:
+            assignment = bind_adjacent_standalone_call_store_8616(
+                binding.store_placement,
+                binding.call,
+            )
+        changed = True
+    _remove_redundant_return_bridge_8616(root, destination, register_slice, assignment)
+    bind_structured_callsite_identity_8616(binding.call, summary)
+    summary_map[id(binding.call)] = summary
+    return _StoredCallReturnConditionResult8616(
+        expression,
+        changed,
+        store_bridge_materialized=binding.bridge_placement is not None,
+        reused_carrier_count=bridge_reused_carrier_count,
+    )
+
+
+def _register_slice_call_definitions_8616(
+    root: object,
+    call: CFunctionCall,
+    register_slice: tuple[int, int],
+) -> int:
+    """Count assignments defining the register slice from this call."""
+    return sum(
         1
         for node in _iter_c_nodes_deep_8616(root)
         if isinstance(node, CAssignment)
@@ -480,40 +512,85 @@ def _materialize_stored_return_condition_8616(
         and (int(node.lhs.variable.reg), int(node.lhs.variable.size)) == register_slice
         and any(candidate is call for candidate in _iter_c_nodes_deep_8616(node.rhs))
     )
-    if definitions != 1 or _expression_return_register_count_8616(expression, register_slice) != 1:
+
+
+def _replace_return_slice_node_8616(
+    node: object,
+    register_slice: tuple[int, int],
+    destination: CVariable,
+) -> object:
+    """Replace a cloned register carrier in the condition or return branch."""
+    if not isinstance(node, CVariable) or not isinstance(node.variable, SimRegisterVariable):
+        return node
+    variable = node.variable
+    if (int(variable.reg), int(variable.size)) == register_slice:
+        return destination
+    return node
+
+
+def _replace_return_statement_node_8616(
+    node: object,
+    register_slice: tuple[int, int],
+    destination: CVariable,
+) -> object:
+    """Replace only return statements carrying this proven call result."""
+    if not isinstance(node, CReturn):
+        return node
+    retval = node.retval
+    if isinstance(retval, CVariable) and isinstance(retval.variable, SimRegisterVariable):
+        variable = retval.variable
+        if (int(variable.reg), int(variable.size)) == register_slice:
+            node.retval = destination
+    return node
+
+
+def _materialize_register_slice_8616(
+    codegen: object,
+    root: object,
+    expression: CExpression,
+    summary: CallsiteSummary8616,
+    register_slice: tuple[int, int],
+    summary_map: dict[int, CallsiteSummary8616],
+    binding: _StoreBinding8616,
+) -> _StoredCallReturnConditionResult8616 | None:
+    """Rebind a cloned register-slice assignment to a fresh stack local."""
+    assignment = binding.assignment
+    old_lhs = assignment.lhs
+    if not isinstance(old_lhs, CVariable) or not isinstance(old_lhs.variable, SimRegisterVariable):
+        return None
+    old_variable = old_lhs.variable
+    if (int(old_variable.reg), int(old_variable.size)) != register_slice:
+        return None
+    if (
+        _register_slice_call_definitions_8616(root, binding.call, register_slice) != 1
+        or _expression_return_register_count_8616(expression, register_slice) != 1
+    ):
         return None
     destination = materialize_call_return_stack_destination_8616(
         codegen,
-        evidence,
+        binding.evidence,
         preferred_name="err",
     )
     if not isinstance(destination, CVariable):
         return None
-
-    def replace_return_slice(node: object) -> object:
-        """Replace a cloned AX carrier in the condition or return branch."""
-        if not isinstance(node, CVariable) or not isinstance(node.variable, SimRegisterVariable):
-            return node
-        variable = node.variable
-        if (int(variable.reg), int(variable.size)) == register_slice:
-            return destination
-        return node
-
     assignment.lhs = destination
     changed = True
-    changed = _replace_c_children_8616(expression, replace_return_slice) or changed
-    def replace_return_statement(node: object) -> object:
-        """Replace only return statements carrying this proven call result."""
-        if not isinstance(node, CReturn):
-            return node
-        retval = node.retval
-        if isinstance(retval, CVariable) and isinstance(retval.variable, SimRegisterVariable):
-            variable = retval.variable
-            if (int(variable.reg), int(variable.size)) == register_slice:
-                node.retval = destination
-        return node
-
-    changed = _replace_c_children_8616(root, replace_return_statement) or changed
+    changed = _replace_c_children_8616(
+        expression,
+        partial(
+            _replace_return_slice_node_8616,
+            register_slice=register_slice,
+            destination=destination,
+        ),
+    ) or changed
+    changed = _replace_c_children_8616(
+        root,
+        partial(
+            _replace_return_statement_node_8616,
+            register_slice=register_slice,
+            destination=destination,
+        ),
+    ) or changed
     remaining_registers = _expression_return_register_count_8616(expression, register_slice)
     if remaining_registers == 1:
         expression = _replace_return_register_8616(expression, register_slice, destination)
@@ -521,15 +598,46 @@ def _materialize_stored_return_condition_8616(
     elif remaining_registers != 0:
         return None
     if not changed or not is_exact_call_return_stack_destination_8616(
-        codegen, assignment.lhs, evidence
+        codegen, assignment.lhs, binding.evidence
     ):
         return None
-    if _stack_destination_count_8616(codegen, expression, evidence) != 1:
+    if _stack_destination_count_8616(codegen, expression, binding.evidence) != 1:
         return None
     _remove_redundant_return_bridge_8616(root, destination, register_slice, assignment)
-    bind_structured_callsite_identity_8616(call, summary)
-    summary_map[id(call)] = summary
+    bind_structured_callsite_identity_8616(binding.call, summary)
+    summary_map[id(binding.call)] = summary
     return _StoredCallReturnConditionResult8616(expression, True)
+
+
+def _materialize_stored_return_condition_8616(
+    project: object,
+    codegen: object,
+    root: object,
+    expression: CExpression,
+    body: object,
+    summary: CallsiteSummary8616,
+    register_slice: tuple[int, int],
+    summary_map: dict[int, CallsiteSummary8616],
+) -> _StoredCallReturnConditionResult8616 | None:
+    """Bind a value-return store and its branch to one exact stack local."""
+    evidence = classify_call_return_stack_store_8616(summary)
+    if evidence is None or evidence.width != register_slice[1]:
+        return None
+    call = _unique_summary_call_8616(project, root, summary)
+    if call is None:
+        return None
+    binding = _resolve_store_assignment_8616(root, call, evidence, codegen)
+    if binding is None:
+        return None
+    if is_exact_call_return_stack_destination_8616(
+        codegen, binding.assignment.lhs, evidence,
+    ):
+        return _materialize_stack_destination_8616(
+            codegen, root, expression, summary, register_slice, summary_map, binding,
+        )
+    return _materialize_register_slice_8616(
+        codegen, root, expression, summary, register_slice, summary_map, binding,
+    )
 
 
 def _remove_redundant_return_bridge_8616(
@@ -571,6 +679,396 @@ def _remove_redundant_return_bridge_8616(
             container.statements = filtered
 
 
+def _return_summaries_8616(
+    inventory: dict[int, CallsiteSummary8616],
+) -> dict[int, CallsiteSummary8616]:
+    """Index return-used condition/value summaries by return address."""
+    return {
+        summary.return_addr: summary
+        for summary in inventory.values()
+        if isinstance(summary, CallsiteSummary8616)
+        and isinstance(summary.return_addr, int)
+        and summary.return_used is True
+        and summary.return_use_kind
+        in {
+            CallsiteReturnUseKind8616.CONDITION,
+            CallsiteReturnUseKind8616.VALUE,
+        }
+        and isinstance(summary.target_addr, int)
+    }
+
+
+def _condition_indexes_8616(
+    conditions: tuple[ConditionIR, ...],
+) -> tuple[dict[tuple[int, int], ConditionIR], dict[int, ConditionIR]]:
+    """Index conditions by (src, block) key and unique block membership."""
+    condition_by_key = {
+        (condition.src_insn, condition.block_addr): condition
+        for condition in conditions
+        if isinstance(condition.src_insn, int) and isinstance(condition.block_addr, int)
+    }
+    conditions_by_block_candidates: dict[int, list[ConditionIR]] = {}
+    for recorded_condition in conditions:
+        if isinstance(recorded_condition.block_addr, int):
+            conditions_by_block_candidates.setdefault(recorded_condition.block_addr, []).append(recorded_condition)
+    conditions_by_block = {
+        block_addr: candidates[0]
+        for block_addr, candidates in conditions_by_block_candidates.items()
+        if len(candidates) == 1
+    }
+    return condition_by_key, conditions_by_block
+
+
+@dataclass
+class _CallReturnConditionRun8616:
+    """Mutable run state for the call-return condition pass."""
+
+    project: object
+    codegen: object
+    typed_project: _CallReturnProject8616
+    root: object
+    inventory: dict[int, CallsiteSummary8616]
+    condition_by_key: dict[tuple[int, int], ConditionIR]
+    conditions_by_block: dict[int, ConditionIR]
+    summaries_by_return: dict[int, CallsiteSummary8616]
+    summary_map: dict[int, CallsiteSummary8616]
+    store_bridge_records: dict[int, CallReturnStoreBridgeRecord8616]
+    raw: int = 0
+    normalized: int = 0
+    classified: int = 0
+    materialized: int = 0
+    failed: int = 0
+    store_bridges: int = 0
+    reused_carriers: int = 0
+    store_bridge_return_registers: set[str] = field(default_factory=set)
+    changed: bool = False
+    register_assignment_index: CallReturnRegisterIndex8616 | None = None
+
+    def process_node(self, node: object) -> None:
+        """Process one structured if/else node against return-used evidence."""
+        if not isinstance(node, CIfElse) or len(node.condition_and_nodes) != 1:
+            return
+        expression, body = node.condition_and_nodes[0]
+        key = structured_condition_key_8616(expression)
+        condition = _condition_from_structured_callsite_identity_8616(
+            expression,
+            self.inventory,
+            self.conditions_by_block,
+        )
+        if condition is None:
+            condition = self.condition_by_key.get(key) if key is not None else None
+        if condition is None or not isinstance(condition.block_addr, int):
+            return
+        summary = self.summaries_by_return.get(condition.block_addr)
+        if summary is None:
+            return
+        self.raw += 1
+        target_addr = summary.target_addr
+        if not isinstance(target_addr, int):
+            self.failed += 1
+            return
+        register_slice = _return_register_slice_8616(self.typed_project, summary)
+        if register_slice is None or not _condition_tests_return_register_8616(
+            condition, register_slice,
+        ):
+            self.failed += 1
+            return
+        self.normalized += 1
+        bind_condition_replay_identity_8616(expression, condition)
+        if summary.return_use_kind is CallsiteReturnUseKind8616.VALUE:
+            self._value_arm(node, expression, body, summary, register_slice)
+            return
+        self._condition_arm(
+            node, expression, body, condition, summary, register_slice, target_addr,
+        )
+
+    def _value_arm(
+        self,
+        node: CIfElse,
+        expression: CExpression,
+        body: object,
+        summary: CallsiteSummary8616,
+        register_slice: tuple[int, int],
+    ) -> None:
+        """Materialize a value-return callsite store into the condition."""
+        stored_result = _materialize_stored_return_condition_8616(
+            self.project,
+            self.codegen,
+            self.root,
+            expression,
+            body,
+            summary,
+            register_slice,
+            self.summary_map,
+        )
+        if stored_result is None:
+            self.failed += 1
+            return
+        replacement = stored_result.expression
+        node.condition_and_nodes = [(replacement, body)]
+        self.classified += 1
+        self.materialized += 1
+        if stored_result.store_bridge_materialized and isinstance(
+            summary.return_register, str,
+        ):
+            self.store_bridge_records[summary.callsite_addr] = (
+                CallReturnStoreBridgeRecord8616(
+                    callsite_addr=summary.callsite_addr,
+                    return_register=summary.return_register.lower(),
+                    reused_carrier_count=stored_result.reused_carrier_count,
+                )
+            )
+        bridge_record = self.store_bridge_records.get(summary.callsite_addr)
+        if (
+            bridge_record is not None
+            and isinstance(summary.return_register, str)
+            and bridge_record.return_register == summary.return_register.lower()
+        ):
+            self.store_bridges += 1
+            self.reused_carriers += bridge_record.reused_carrier_count
+            self.store_bridge_return_registers.add(bridge_record.return_register)
+        self.changed = stored_result.changed or self.changed
+        if self.register_assignment_index is not None:
+            self.register_assignment_index.invalidate()
+        self.register_assignment_index = None
+
+    def _exact_placement_arm(
+        self,
+        node: CIfElse,
+        expression: CExpression,
+        body: object,
+        summary: CallsiteSummary8616,
+        register_slice: tuple[int, int],
+        target_addr: int,
+        existing_count: int,
+        placement: CallReturnRegisterPlacement8616,
+    ) -> None:
+        """Retarget an exact placed register assignment to the callsite call."""
+        existing_call = placement.call
+        if (
+            existing_call is None
+            or len(_target_calls_8616(self.project, existing_call, target_addr)) != 1
+            or any(
+                len(_target_calls_8616(self.project, duplicate.call, target_addr)) != 1
+                for duplicate in placement.redundant_assignments
+            )
+        ):
+            self.failed += 1
+            return
+        if existing_count == 1:
+            condition_calls = _target_calls_8616(self.project, expression, target_addr)
+            if len(condition_calls) != 1:
+                self.failed += 1
+                return
+            replacement = replace_exact_expression_8616(
+                expression,
+                condition_calls[0],
+                existing_call,
+            )
+        elif existing_count == 0:
+            replacement = self._unbound_placement_replacement(
+                expression, register_slice, target_addr, existing_call,
+            )
+            if replacement is None:
+                self.failed += 1
+                return
+        else:
+            self.failed += 1
+            return
+        if not consume_exact_call_return_register_placement_8616(placement):
+            self.failed += 1
+            return
+        self.register_assignment_index = None
+        node.condition_and_nodes = [(replacement, body)]
+        bind_structured_callsite_identity_8616(existing_call, summary)
+        self.summary_map[id(existing_call)] = summary
+        self.classified += 1
+        self.materialized += 1
+        self.changed = True
+
+    def _unbound_placement_replacement(
+        self,
+        expression: CExpression,
+        register_slice: tuple[int, int],
+        target_addr: int,
+        existing_call: CFunctionCall,
+    ) -> CExpression | None:
+        """Resolve the replacement for an exact placement with no bound call."""
+        unbound_target_calls = _target_calls_8616(self.project, expression, target_addr)
+        return_register_count = _expression_return_register_count_8616(
+            expression, register_slice,
+        )
+        if len(unbound_target_calls) == 1 and return_register_count == 0:
+            return replace_exact_expression_8616(
+                expression, unbound_target_calls[0], existing_call,
+            )
+        if not unbound_target_calls and return_register_count == 1:
+            return _replace_return_register_8616(
+                expression, register_slice, existing_call,
+            )
+        return None
+
+    def _bound_callsite_arm(
+        self,
+        node: CIfElse,
+        expression: CExpression,
+        body: object,
+        condition: ConditionIR,
+        summary: CallsiteSummary8616,
+        target_addr: int,
+    ) -> None:
+        """Bind an already-structured callsite inside the condition."""
+        exact_calls = _target_calls_8616(self.project, expression, target_addr)
+        if len(exact_calls) != 1:
+            self.failed += 1
+            return
+        bind_structured_callsite_identity_8616(exact_calls[0], summary)
+        self.summary_map[id(exact_calls[0])] = summary
+        replacement = materialize_bound_call_condition_8616(
+            expression, exact_calls[0], condition, self.codegen,
+        )
+        node.condition_and_nodes = [(replacement, body)]
+        self.changed = replacement is not expression or self.changed
+        self.classified += 1
+        self.materialized += 1
+
+    def _unbound_callsite_arm(
+        self,
+        node: CIfElse,
+        expression: CExpression,
+        body: object,
+        summary: CallsiteSummary8616,
+        register_slice: tuple[int, int],
+        target_addr: int,
+    ) -> None:
+        """Introduce the proven callsite into a condition lacking the call."""
+        index = self.register_assignment_index
+        if index is None or index.bound_callsite_count(summary.callsite_addr) != 0:
+            self.failed += 1
+            return
+        target_calls = _target_calls_8616(self.project, expression, target_addr)
+        if len(target_calls) == 1:
+            callee = self._resolved_callee_8616(target_addr)
+            if callee is None:
+                self.failed += 1
+                return
+            call = self._bind_new_call(summary, callee)
+            replacement = replace_exact_expression_8616(
+                expression, target_calls[0], call,
+            )
+            node.condition_and_nodes = [(replacement, body)]
+            self.classified += 1
+            self.materialized += 1
+            self.changed = True
+            index.invalidate()
+            self.register_assignment_index = None
+            return
+        if target_calls or _expression_return_register_count_8616(
+            expression, register_slice,
+        ) != 1:
+            self.failed += 1
+            return
+        callee = self._resolved_callee_8616(target_addr)
+        if callee is None:
+            self.failed += 1
+            return
+        self.classified += 1
+        call = self._bind_new_call(summary, callee)
+        original_tags = copy_structured_tags_8616(expression.tags) or {}
+        replacement = _replace_return_register_8616(expression, register_slice, call)
+        if replacement is call:
+            replacement = CBinaryOp(
+                "CmpNE",
+                call,
+                CConstant(0, SimTypeShort(False), codegen=self.codegen),
+                codegen=self.codegen,
+                tags=original_tags,
+            )
+        node.condition_and_nodes = [(replacement, body)]
+        self.materialized += 1
+        self.changed = True
+        index.invalidate()
+        self.register_assignment_index = None
+
+    def _resolved_callee_8616(self, target_addr: int) -> _FunctionSurface8616 | None:
+        """Resolve the proven callee function or refuse without one."""
+        callee = resolve_x86_16_call_target_function_8616(self.project, target_addr)
+        if callee is None or not isinstance(callee.name, str) or not callee.name:
+            return None
+        return callee
+
+    def _bind_new_call(
+        self,
+        summary: CallsiteSummary8616,
+        callee: _FunctionSurface8616,
+    ) -> CFunctionCall:
+        """Build and bind a fresh structured call for a resolved callee."""
+        call = CFunctionCall(callee.name, callee, [], codegen=self.codegen)
+        bind_structured_callsite_identity_8616(call, summary)
+        self.summary_map[id(call)] = summary
+        return call
+
+    def _condition_arm(
+        self,
+        node: CIfElse,
+        expression: CExpression,
+        body: object,
+        condition: ConditionIR,
+        summary: CallsiteSummary8616,
+        register_slice: tuple[int, int],
+        target_addr: int,
+    ) -> None:
+        """Materialize a condition-return callsite into the if/else node."""
+        existing_count = _existing_callsite_count_8616(
+            expression, summary.callsite_addr,
+        )
+        placement = (
+            classify_call_return_register_placement_8616(
+                self.root,
+                node,
+                callsite_addr=summary.callsite_addr,
+                condition_producer_insn=condition.producer_insn,
+                register_slice=register_slice,
+                assignment_index=(
+                    self.register_assignment_index
+                    if self.register_assignment_index is not None
+                    else (
+                        self._build_assignment_index()
+                    )
+                ),
+            )
+            if isinstance(condition.producer_insn, int)
+            else None
+        )
+        if placement is not None and placement.verdict is CallReturnRegisterPlacementVerdict8616.EXACT:
+            self._exact_placement_arm(
+                node, expression, body, summary, register_slice, target_addr,
+                existing_count, placement,
+            )
+            return
+        if placement is not None and placement.verdict is not CallReturnRegisterPlacementVerdict8616.MISSING:
+            self.failed += 1
+            return
+        if existing_count == 1:
+            self._bound_callsite_arm(
+                node, expression, body, condition, summary, target_addr,
+            )
+            return
+        if existing_count != 0:
+            self.failed += 1
+            return
+        self._unbound_callsite_arm(
+            node, expression, body, summary, register_slice, target_addr,
+        )
+
+    def _build_assignment_index(self) -> CallReturnRegisterIndex8616:
+        """Build the register-assignment index on first use."""
+        self.register_assignment_index = build_call_return_register_index_8616(
+            self.root,
+        )
+        return self.register_assignment_index
+
+
 def materialize_call_return_conditions_8616(project: object, codegen: object) -> bool:
     """Bind exact return-used callsites to their structured AX conditions."""
     typed_project = cast(_CallReturnProject8616, project)
@@ -587,38 +1085,8 @@ def materialize_call_return_conditions_8616(project: object, codegen: object) ->
         return False
     if not isinstance(inventory, dict):
         raise TypeError("callsite summary inventory must be a dict")
-    condition_by_key = {
-        (condition.src_insn, condition.block_addr): condition
-        for condition in conditions
-        if isinstance(condition.src_insn, int) and isinstance(condition.block_addr, int)
-    }
-    conditions_by_block_candidates: dict[int, list[ConditionIR]] = {}
-    for recorded_condition in conditions:
-        if isinstance(recorded_condition.block_addr, int):
-            conditions_by_block_candidates.setdefault(recorded_condition.block_addr, []).append(recorded_condition)
-    conditions_by_block = {
-        block_addr: candidates[0]
-        for block_addr, candidates in conditions_by_block_candidates.items()
-        if len(candidates) == 1
-    }
-    summaries_by_return = {
-        summary.return_addr: summary
-        for summary in inventory.values()
-        if isinstance(summary, CallsiteSummary8616)
-        and isinstance(summary.return_addr, int)
-        and summary.return_used is True
-        and summary.return_use_kind
-        in {
-            CallsiteReturnUseKind8616.CONDITION,
-            CallsiteReturnUseKind8616.VALUE,
-        }
-        and isinstance(summary.target_addr, int)
-    }
-    raw = normalized = classified = materialized = failed = 0
-    store_bridges = reused_carriers = 0
-    store_bridge_return_registers: set[str] = set()
-    changed = False
-    register_assignment_index: CallReturnRegisterIndex8616 | None = None
+    condition_by_key, conditions_by_block = _condition_indexes_8616(conditions)
+    summaries_by_return = _return_summaries_8616(inventory)
     try:
         summary_map = typed_codegen._inertia_callsite_summaries
     except AttributeError:
@@ -636,234 +1104,31 @@ def materialize_call_return_conditions_8616(project: object, codegen: object) ->
         for callsite_addr, record in store_bridge_records.items()
     ):
         raise TypeError("call-return store bridge carrier must contain typed records")
+    run = _CallReturnConditionRun8616(
+        project=project,
+        codegen=codegen,
+        typed_project=typed_project,
+        root=root,
+        inventory=inventory,
+        condition_by_key=condition_by_key,
+        conditions_by_block=conditions_by_block,
+        summaries_by_return=summaries_by_return,
+        summary_map=summary_map,
+        store_bridge_records=store_bridge_records,
+    )
     for node in _iter_c_nodes_deep_8616(root):
-        if not isinstance(node, CIfElse) or len(node.condition_and_nodes) != 1:
-            continue
-        expression, body = node.condition_and_nodes[0]
-        key = structured_condition_key_8616(expression)
-        condition = _condition_from_structured_callsite_identity_8616(
-            expression,
-            inventory,
-            conditions_by_block,
-        )
-        if condition is None:
-            condition = condition_by_key.get(key) if key is not None else None
-        if condition is None or not isinstance(condition.block_addr, int):
-            continue
-        summary = summaries_by_return.get(condition.block_addr)
-        if summary is None:
-            continue
-        raw += 1
-        target_addr = summary.target_addr
-        if not isinstance(target_addr, int):
-            failed += 1
-            continue
-        register_slice = _return_register_slice_8616(typed_project, summary)
-        if register_slice is None or not _condition_tests_return_register_8616(condition, register_slice):
-            failed += 1
-            continue
-        normalized += 1
-        bind_condition_replay_identity_8616(expression, condition)
-        if summary.return_use_kind is CallsiteReturnUseKind8616.VALUE:
-            stored_result = _materialize_stored_return_condition_8616(
-                project,
-                codegen,
-                root,
-                expression,
-                body,
-                summary,
-                register_slice,
-                summary_map,
-            )
-            if stored_result is None:
-                failed += 1
-                continue
-            replacement = stored_result.expression
-            node.condition_and_nodes = [(replacement, body)]
-            classified += 1
-            materialized += 1
-            if stored_result.store_bridge_materialized and isinstance(summary.return_register, str):
-                store_bridge_records[summary.callsite_addr] = CallReturnStoreBridgeRecord8616(
-                    callsite_addr=summary.callsite_addr,
-                    return_register=summary.return_register.lower(),
-                    reused_carrier_count=stored_result.reused_carrier_count,
-                )
-            bridge_record = store_bridge_records.get(summary.callsite_addr)
-            if (
-                bridge_record is not None
-                and isinstance(summary.return_register, str)
-                and bridge_record.return_register == summary.return_register.lower()
-            ):
-                store_bridges += 1
-                reused_carriers += bridge_record.reused_carrier_count
-                store_bridge_return_registers.add(bridge_record.return_register)
-            changed = stored_result.changed or changed
-            if register_assignment_index is not None:
-                register_assignment_index.invalidate()
-            register_assignment_index = None
-            continue
-        existing_count = _existing_callsite_count_8616(expression, summary.callsite_addr)
-        placement = (
-            classify_call_return_register_placement_8616(
-                root,
-                node,
-                callsite_addr=summary.callsite_addr,
-                condition_producer_insn=condition.producer_insn,
-                register_slice=register_slice,
-                assignment_index=(
-                    register_assignment_index
-                    if register_assignment_index is not None
-                    else (
-                        register_assignment_index := build_call_return_register_index_8616(
-                            root
-                        )
-                    )
-                ),
-            )
-            if isinstance(condition.producer_insn, int)
-            else None
-        )
-        if placement is not None and placement.verdict is CallReturnRegisterPlacementVerdict8616.EXACT:
-            existing_call = placement.call
-            if (
-                existing_call is None
-                or len(_target_calls_8616(project, existing_call, target_addr)) != 1
-                or any(
-                    len(_target_calls_8616(project, duplicate.call, target_addr)) != 1
-                    for duplicate in placement.redundant_assignments
-                )
-            ):
-                failed += 1
-                continue
-            if existing_count == 1:
-                condition_calls = _target_calls_8616(project, expression, target_addr)
-                if len(condition_calls) != 1:
-                    failed += 1
-                    continue
-                replacement = replace_exact_expression_8616(
-                    expression,
-                    condition_calls[0],
-                    existing_call,
-                )
-            elif existing_count == 0:
-                unbound_target_calls = _target_calls_8616(
-                    project,
-                    expression,
-                    target_addr,
-                )
-                return_register_count = _expression_return_register_count_8616(
-                    expression,
-                    register_slice,
-                )
-                if len(unbound_target_calls) == 1 and return_register_count == 0:
-                    replacement = replace_exact_expression_8616(
-                        expression,
-                        unbound_target_calls[0],
-                        existing_call,
-                    )
-                elif not unbound_target_calls and return_register_count == 1:
-                    replacement = _replace_return_register_8616(
-                        expression,
-                        register_slice,
-                        existing_call,
-                    )
-                else:
-                    failed += 1
-                    continue
-            else:
-                failed += 1
-                continue
-            if not consume_exact_call_return_register_placement_8616(placement):
-                failed += 1
-                continue
-            register_assignment_index = None
-            node.condition_and_nodes = [(replacement, body)]
-            bind_structured_callsite_identity_8616(existing_call, summary)
-            summary_map[id(existing_call)] = summary
-            classified += 1
-            materialized += 1
-            changed = True
-            continue
-        if placement is not None and placement.verdict is not CallReturnRegisterPlacementVerdict8616.MISSING:
-            failed += 1
-            continue
-        if existing_count == 1:
-            exact_calls = _target_calls_8616(project, expression, target_addr)
-            if len(exact_calls) != 1:
-                failed += 1
-                continue
-            bind_structured_callsite_identity_8616(exact_calls[0], summary)
-            summary_map[id(exact_calls[0])] = summary
-            replacement = materialize_bound_call_condition_8616(expression, exact_calls[0], condition, codegen)
-            node.condition_and_nodes = [(replacement, body)]
-            changed = replacement is not expression or changed
-            classified += 1
-            materialized += 1
-            continue
-        if existing_count != 0:
-            failed += 1
-            continue
-        if (
-            register_assignment_index is None
-            or register_assignment_index.bound_callsite_count(summary.callsite_addr)
-            != 0
-        ):
-            failed += 1
-            continue
-        target_calls = _target_calls_8616(project, expression, target_addr)
-        if len(target_calls) == 1:
-            callee = resolve_x86_16_call_target_function_8616(project, target_addr)
-            if callee is None or not isinstance(callee.name, str) or not callee.name:
-                failed += 1
-                continue
-            call = CFunctionCall(callee.name, callee, [], codegen=codegen)
-            bind_structured_callsite_identity_8616(call, summary)
-            summary_map[id(call)] = summary
-            replacement = replace_exact_expression_8616(expression, target_calls[0], call)
-            node.condition_and_nodes = [(replacement, body)]
-            classified += 1
-            materialized += 1
-            changed = True
-            register_assignment_index.invalidate()
-            register_assignment_index = None
-            continue
-        if target_calls or _expression_return_register_count_8616(expression, register_slice) != 1:
-            failed += 1
-            continue
-        callee = resolve_x86_16_call_target_function_8616(project, target_addr)
-        if callee is None or not isinstance(callee.name, str) or not callee.name:
-            failed += 1
-            continue
-        classified += 1
-        call = CFunctionCall(callee.name, callee, [], codegen=codegen)
-        bind_structured_callsite_identity_8616(call, summary)
-        summary_map[id(call)] = summary
-        original_tags = copy_structured_tags_8616(expression.tags) or {}
-        replacement = _replace_return_register_8616(expression, register_slice, call)
-        if replacement is call:
-            replacement = CBinaryOp(
-                "CmpNE",
-                call,
-                CConstant(0, SimTypeShort(False), codegen=codegen),
-                codegen=codegen,
-                tags=original_tags,
-            )
-        node.condition_and_nodes = [(replacement, body)]
-        materialized += 1
-        changed = True
-        register_assignment_index.invalidate()
-        register_assignment_index = None
+        run.process_node(node)
     stats = CallReturnConditionStats8616(
-        raw_fact_count=raw,
-        normalized_fact_count=normalized,
-        classified_fact_count=classified,
-        materialized_count=materialized,
-        failure_count=failed,
-        store_bridge_materialized_count=store_bridges,
-        store_bridge_reused_carrier_count=reused_carriers,
-        store_bridge_return_registers=tuple(sorted(store_bridge_return_registers)),
+        raw_fact_count=run.raw,
+        normalized_fact_count=run.normalized,
+        classified_fact_count=run.classified,
+        materialized_count=run.materialized,
+        failure_count=run.failed,
+        store_bridge_materialized_count=run.store_bridges,
+        store_bridge_reused_carrier_count=run.reused_carriers,
+        store_bridge_return_registers=tuple(sorted(run.store_bridge_return_registers)),
     )
     typed_codegen._inertia_call_return_condition_stats_8616 = stats
     if stats.classified_fact_count > 0 and stats.materialized_count == 0:
         raise PipelineHardError("classified call-return conditions were not materialized")
-    return changed
+    return run.changed

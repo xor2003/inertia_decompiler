@@ -90,13 +90,56 @@ def direct_stack_move_linear_cfg_snapshot_8616(
         return None
     if unresolved is not False:
         return None
+    surface = _cfg_surface_8616(boundary)
+    if surface is None:
+        return None
+    raw_block_addrs, blocks, source_graph, graph_nodes = surface
+    block_set = _proven_block_set_8616(project, raw_block_addrs, reference_addr)
+    if block_set is None:
+        return None
+    node_by_addr = _node_map_8616(project, graph_nodes, block_set, reference_addr)
+    if node_by_addr is None:
+        return None
+    successors_by_block = _successor_map_8616(
+        project, source_graph, node_by_addr, block_set, reference_addr
+    )
+    if successors_by_block is None:
+        return None
+    instructions_by_block = _instruction_map_8616(
+        project, blocks, block_set, reference_addr
+    )
+    if instructions_by_block is None:
+        return None
+    return DirectStackMoveLinearCfgSnapshot8616(
+        instructions_by_block,
+        successors_by_block,
+    )
+
+
+def _cfg_surface_8616(
+    boundary: _FunctionBoundary8616,
+) -> (
+    tuple[tuple[object, ...], tuple[object, ...], _GraphBoundary8616, tuple[object, ...]]
+    | None
+):
+    """Fetch the raw block/instruction/graph surfaces from the function."""
     try:
-        raw_block_addrs = tuple(boundary.block_addrs_set)
-        blocks = tuple(boundary.blocks)
-        source_graph = boundary.transition_graph
-        graph_nodes = tuple(source_graph.nodes)
+        return (
+            tuple(boundary.block_addrs_set),
+            tuple(boundary.blocks),
+            boundary.transition_graph,
+            tuple(boundary.transition_graph.nodes),
+        )
     except (AttributeError, TypeError):
         return None
+
+
+def _proven_block_set_8616(
+    project: object,
+    raw_block_addrs: tuple[object, ...],
+    reference_addr: int,
+) -> frozenset[int] | None:
+    """Return the unique comparable block set or refuse."""
     if not raw_block_addrs or any(
         not isinstance(address, int) or isinstance(address, bool)
         for address in raw_block_addrs
@@ -108,7 +151,16 @@ def direct_stack_move_linear_cfg_snapshot_8616(
     )
     if len(set(block_addrs)) != len(block_addrs):
         return None
-    block_set = frozenset(block_addrs)
+    return frozenset(block_addrs)
+
+
+def _node_map_8616(
+    project: object,
+    graph_nodes: tuple[object, ...],
+    block_set: frozenset[int],
+    reference_addr: int,
+) -> dict[int, object] | None:
+    """Map each proven block address to its unique graph node."""
     node_by_addr: dict[int, object] = {}
     for node in graph_nodes:
         address = _node_address_8616(node)
@@ -121,7 +173,17 @@ def direct_stack_move_linear_cfg_snapshot_8616(
             node_by_addr[comparable] = node
     if frozenset(node_by_addr) != block_set:
         return None
+    return node_by_addr
 
+
+def _successor_map_8616(
+    project: object,
+    source_graph: _GraphBoundary8616,
+    node_by_addr: dict[int, object],
+    block_set: frozenset[int],
+    reference_addr: int,
+) -> dict[int, tuple[int, ...]] | None:
+    """Project exact in-set CFG successors per block."""
     successors_by_block: dict[int, tuple[int, ...]] = {}
     try:
         for source_addr, source_node in node_by_addr.items():
@@ -135,7 +197,16 @@ def direct_stack_move_linear_cfg_snapshot_8616(
             successors_by_block[source_addr] = tuple(dict.fromkeys(successors))
     except (AttributeError, KeyError, TypeError, ValueError):
         return None
+    return successors_by_block
 
+
+def _instruction_map_8616(
+    project: object,
+    blocks: tuple[object, ...],
+    block_set: frozenset[int],
+    reference_addr: int,
+) -> dict[int, tuple[int, ...]] | None:
+    """Project decoded instruction addresses per proven block."""
     instructions_by_block: dict[int, tuple[int, ...]] = {}
     for block in blocks:
         raw_addr = _node_address_8616(block)
@@ -151,10 +222,7 @@ def direct_stack_move_linear_cfg_snapshot_8616(
         )
     if frozenset(instructions_by_block) != block_set:
         return None
-    return DirectStackMoveLinearCfgSnapshot8616(
-        instructions_by_block,
-        successors_by_block,
-    )
+    return instructions_by_block
 
 
 def _instruction_block_8616(

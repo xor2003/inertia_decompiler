@@ -194,33 +194,47 @@ def _refused_result_8616(
     )
 
 
-def materialize_stored_call_return_early_exit_8616(
+@dataclass(slots=True)
+class _EarlyExitPrelude8616:
+    """Validated boundary evidence for one stored-call early exit."""
+
+    typed_codegen: _StoredReturnCodegen8616
+    branch: CIfElse
+    return_operand: CExpression
+    true_body: object
+    true_return: CReturn | None
+    statement_container: CStatements
+    branch_index: int
+    final_expression: CExpression
+    true_ready: bool
+
+
+def _not_applicable_result_8616(
+    typed_codegen: _StoredReturnCodegen8616,
+) -> StoredCallReturnEarlyExitResult8616:
+    """Publish one empty not-applicable result for a missing boundary."""
+    return _result_8616(
+        typed_codegen,
+        StoredCallReturnEarlyExitStatus8616.NOT_APPLICABLE,
+        StoredCallReturnEarlyExitEvidence8616(),
+    )
+
+
+def _early_exit_prelude_8616(
     project: object,
     codegen: object,
-) -> StoredCallReturnEarlyExitResult8616:
-    """Materialize a stored error return and its proven continuation return."""
+) -> _EarlyExitPrelude8616 | StoredCallReturnEarlyExitResult8616:
+    """Resolve and validate the early-exit boundary or produce the result."""
     typed_codegen = cast(_StoredReturnCodegen8616, codegen)
     try:
         root = typed_codegen.cfunc.statements
     except AttributeError:
-        return _result_8616(
-            typed_codegen,
-            StoredCallReturnEarlyExitStatus8616.NOT_APPLICABLE,
-            StoredCallReturnEarlyExitEvidence8616(),
-        )
+        return _not_applicable_result_8616(typed_codegen)
     if not isinstance(root, CStatements):
-        return _result_8616(
-            typed_codegen,
-            StoredCallReturnEarlyExitStatus8616.NOT_APPLICABLE,
-            StoredCallReturnEarlyExitEvidence8616(),
-        )
+        return _not_applicable_result_8616(typed_codegen)
     candidate = _matching_candidate_8616(project, codegen, root)
     if candidate is None:
-        return _result_8616(
-            typed_codegen,
-            StoredCallReturnEarlyExitStatus8616.NOT_APPLICABLE,
-            StoredCallReturnEarlyExitEvidence8616(),
-        )
+        return _not_applicable_result_8616(typed_codegen)
     branch, condition, stored_evidence = candidate
     return_operand = stored_return_operand_8616(
         condition,
@@ -269,64 +283,110 @@ def materialize_stored_call_return_early_exit_8616(
         true_return.retval is return_operand
         or _same_c_expression_8616(true_return.retval, return_operand)
     )
-    if branch.else_node is None:
-        final_return = _terminal_return_after_8616(statement_container, branch_index)
-        suffix = tuple(statement_container.statements or ())[branch_index + 1 :]
-        has_suffix_return = any(
-            isinstance(node, CReturn)
-            for statement in suffix
-            for node in (statement, *_iter_c_nodes_deep_8616(statement))
-        )
-        if true_return is None:
-            if not isinstance(true_body, CStatements) or tuple(true_body.statements or ()):
-                return _refused_result_8616(typed_codegen)
-        elif not true_ready:
+    return _EarlyExitPrelude8616(
+        typed_codegen=typed_codegen,
+        branch=branch,
+        return_operand=return_operand,
+        true_body=true_body,
+        true_return=true_return,
+        statement_container=statement_container,
+        branch_index=branch_index,
+        final_expression=final_expression,
+        true_ready=true_ready,
+    )
+
+
+def _materialize_flattened_exit_8616(
+    prelude: _EarlyExitPrelude8616,
+) -> StoredCallReturnEarlyExitResult8616:
+    """Materialize or validate the flattened early exit without an else node."""
+    typed_codegen = prelude.typed_codegen
+    true_body = prelude.true_body
+    true_return = prelude.true_return
+    statement_container = prelude.statement_container
+    branch_index = prelude.branch_index
+    final_expression = prelude.final_expression
+    final_return = _terminal_return_after_8616(statement_container, branch_index)
+    suffix = tuple(statement_container.statements or ())[branch_index + 1 :]
+    has_suffix_return = any(
+        isinstance(node, CReturn)
+        for statement in suffix
+        for node in (statement, *_iter_c_nodes_deep_8616(statement))
+    )
+    if true_return is None:
+        if not isinstance(true_body, CStatements) or tuple(true_body.statements or ()):
             return _refused_result_8616(typed_codegen)
-        if final_return is None and has_suffix_return:
-            return _refused_result_8616(typed_codegen)
-        if final_return is not None and not _same_c_expression_8616(
-            final_return.retval,
-            final_expression,
-        ):
-            return _refused_result_8616(typed_codegen)
-        if true_return is not None and final_return is not None:
-            return _result_8616(
-                typed_codegen,
-                StoredCallReturnEarlyExitStatus8616.ALREADY_MATERIALIZED,
-                StoredCallReturnEarlyExitEvidence8616(1, 1, 1, 1, 0),
-            )
-        if true_return is None:
-            true_body.statements = [CReturn(return_operand, codegen=codegen)]
-        if final_return is None:
-            statements = list(statement_container.statements or ())
-            statements.append(CReturn(final_expression, codegen=codegen))
-            statement_container.statements = statements
+    elif not prelude.true_ready:
+        return _refused_result_8616(typed_codegen)
+    if final_return is None and has_suffix_return:
+        return _refused_result_8616(typed_codegen)
+    if final_return is not None and not _same_c_expression_8616(
+        final_return.retval,
+        final_expression,
+    ):
+        return _refused_result_8616(typed_codegen)
+    if true_return is not None and final_return is not None:
         return _result_8616(
             typed_codegen,
-            StoredCallReturnEarlyExitStatus8616.MATERIALIZED,
+            StoredCallReturnEarlyExitStatus8616.ALREADY_MATERIALIZED,
             StoredCallReturnEarlyExitEvidence8616(1, 1, 1, 1, 0),
-            changed=True,
         )
-    if not isinstance(branch.else_node, CStatements) or true_return is None:
-        return _refused_result_8616(typed_codegen)
-    false_return = _terminal_return_8616(branch.else_node)
-    if false_return is None:
-        return _refused_result_8616(typed_codegen)
-    false_ready = _same_c_expression_8616(false_return.retval, final_expression)
-    if true_return.retval is not None and not true_ready:
-        return _refused_result_8616(typed_codegen)
-    if false_return.retval is not None and not false_ready:
-        return _refused_result_8616(typed_codegen)
-    true_return.retval = return_operand
-    false_return.retval = final_expression
-    continuation = tuple(branch.else_node.statements or ())
-    branch.else_node = None
-    statements = list(statement_container.statements or ())
-    statements[branch_index : branch_index + 1] = [branch, *continuation]
-    statement_container.statements = statements
+    if true_return is None:
+        assert isinstance(true_body, CStatements)
+        true_body.statements = [CReturn(prelude.return_operand, codegen=typed_codegen)]
+    if final_return is None:
+        statements = list(statement_container.statements or ())
+        statements.append(CReturn(final_expression, codegen=typed_codegen))
+        statement_container.statements = statements
     return _result_8616(
         typed_codegen,
         StoredCallReturnEarlyExitStatus8616.MATERIALIZED,
         StoredCallReturnEarlyExitEvidence8616(1, 1, 1, 1, 0),
         changed=True,
     )
+
+
+def _materialize_spliced_exit_8616(
+    prelude: _EarlyExitPrelude8616,
+) -> StoredCallReturnEarlyExitResult8616:
+    """Splice the proven continuation out of an else-body early exit."""
+    typed_codegen = prelude.typed_codegen
+    branch = prelude.branch
+    else_node = branch.else_node
+    true_return = prelude.true_return
+    if not isinstance(else_node, CStatements) or true_return is None:
+        return _refused_result_8616(typed_codegen)
+    false_return = _terminal_return_8616(else_node)
+    if false_return is None:
+        return _refused_result_8616(typed_codegen)
+    false_ready = _same_c_expression_8616(false_return.retval, prelude.final_expression)
+    if true_return.retval is not None and not prelude.true_ready:
+        return _refused_result_8616(typed_codegen)
+    if false_return.retval is not None and not false_ready:
+        return _refused_result_8616(typed_codegen)
+    true_return.retval = prelude.return_operand
+    false_return.retval = prelude.final_expression
+    continuation = tuple(else_node.statements or ())
+    branch.else_node = None
+    statements = list(prelude.statement_container.statements or ())
+    statements[prelude.branch_index : prelude.branch_index + 1] = [branch, *continuation]
+    prelude.statement_container.statements = statements
+    return _result_8616(
+        typed_codegen,
+        StoredCallReturnEarlyExitStatus8616.MATERIALIZED,
+        StoredCallReturnEarlyExitEvidence8616(1, 1, 1, 1, 0),
+        changed=True,
+    )
+
+
+def materialize_stored_call_return_early_exit_8616(
+    project: object,
+    codegen: object,
+) -> StoredCallReturnEarlyExitResult8616:
+    """Materialize a stored error return and its proven continuation return."""
+    prelude = _early_exit_prelude_8616(project, codegen)
+    if isinstance(prelude, StoredCallReturnEarlyExitResult8616):
+        return prelude
+    if prelude.branch.else_node is None:
+        return _materialize_flattened_exit_8616(prelude)
+    return _materialize_spliced_exit_8616(prelude)

@@ -98,20 +98,24 @@ def _register_range_8616(storage: StorageIdentity8616) -> _RegisterRange8616 | N
     view = register_view_for_name(storage.register)
     pair_name = register_pair_name(storage.register)
     base_offset = register_offset_for_name(pair_name)
-    if (
-        domain is None
-        or view is None
-        or base_offset is None
-        or view.bit_offset % 8 != 0
-        or view.bit_width % 8 != 0
-        or storage.width != view.bit_width // 8
-    ):
+    if domain is None or view is None or base_offset is None:
+        return None
+    if not _byte_aligned_view_8616(view, storage):
         return None
     return _RegisterRange8616(
         offset=base_offset + view.bit_offset // 8,
         width=storage.width,
         domain=domain,
         view=view,
+    )
+
+
+def _byte_aligned_view_8616(view: View, storage: StorageIdentity8616) -> bool:
+    """Return whether one register view is a byte-aligned exact-width piece."""
+    return bool(
+        view.bit_offset % 8 == 0
+        and view.bit_width % 8 == 0
+        and storage.width == view.bit_width // 8
     )
 
 
@@ -253,31 +257,57 @@ def classify_return_storage_type_8616(
             ReturnStorageTypeFailure8616.RETURN_USE_NOT_CONDITION,
             normalized=True,
         )
+    register_range, range_refusal = _output_register_range_8616(output_storages)
+    if range_refusal is not None:
+        return range_refusal
+    assert register_range is not None
+    witness = fact.witness_instruction_addr
+    if witness is None:
+        return _refused_result_8616(ReturnStorageTypeFailure8616.RETURN_USE_UNKNOWN)
+    condition, condition_refusal = _witness_condition_8616(
+        conditions, witness, register_range,
+    )
+    if condition_refusal is not None:
+        return condition_refusal
+    assert condition is not None
+    return _signedness_result_8616(condition, register_range)
+
+
+def _output_register_range_8616(
+    output_storages: tuple[StorageIdentity8616, ...],
+) -> tuple[_RegisterRange8616 | None, ReturnStorageTypeResult8616 | None]:
+    """Resolve the single exact AX output register range or its refusal."""
     if not output_storages:
-        return _refused_result_8616(
+        return None, _refused_result_8616(
             ReturnStorageTypeFailure8616.OUTPUT_STORAGE_UNKNOWN,
             normalized=True,
         )
     if len(output_storages) != 1:
-        return _refused_result_8616(
+        return None, _refused_result_8616(
             ReturnStorageTypeFailure8616.SPLIT_OUTPUT_UNSUPPORTED,
             normalized=True,
         )
     register_range = _register_range_8616(output_storages[0])
     if register_range is None:
-        return _refused_result_8616(
+        return None, _refused_result_8616(
             ReturnStorageTypeFailure8616.OUTPUT_STORAGE_CONFLICT,
             verdict=ReturnStorageTypeVerdict8616.CONFLICT,
             normalized=True,
         )
     if register_range.domain != AX:
-        return _refused_result_8616(
+        return None, _refused_result_8616(
             ReturnStorageTypeFailure8616.OUTPUT_CARRIER_UNSUPPORTED,
             normalized=True,
         )
-    witness = fact.witness_instruction_addr
-    if witness is None:
-        return _refused_result_8616(ReturnStorageTypeFailure8616.RETURN_USE_UNKNOWN)
+    return register_range, None
+
+
+def _witness_condition_8616(
+    conditions: Sequence[ConditionIR],
+    witness: int,
+    register_range: _RegisterRange8616,
+) -> tuple[ConditionIR | None, ReturnStorageTypeResult8616 | None]:
+    """Select the unique condition matching the witness and output range."""
     matching = _unique_conditions_8616(
         tuple(
             condition
@@ -288,17 +318,24 @@ def classify_return_storage_type_8616(
         )
     )
     if not matching:
-        return _refused_result_8616(
+        return None, _refused_result_8616(
             ReturnStorageTypeFailure8616.CONDITION_NOT_FOUND,
             normalized=True,
         )
     if len(matching) != 1:
-        return _refused_result_8616(
+        return None, _refused_result_8616(
             ReturnStorageTypeFailure8616.CONDITION_CONFLICT,
             verdict=ReturnStorageTypeVerdict8616.CONFLICT,
             normalized=True,
         )
-    condition = matching[0]
+    return matching[0], None
+
+
+def _signedness_result_8616(
+    condition: ConditionIR,
+    register_range: _RegisterRange8616,
+) -> ReturnStorageTypeResult8616:
+    """Classify the proven condition's signedness or refuse unknown classes."""
     if condition.is_signed:
         return _proven_scalar_result_8616(
             StorageTrialSignedness8616.SIGNED,

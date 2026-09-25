@@ -130,40 +130,32 @@ class _StructuredAstGenerationBuilder8616:
             self._text(name)
             self._value(field_value)
 
-    def _value(self, value: object) -> None:
-        """Append one structured value without following known owner cycles."""
-        if value is None or isinstance(value, bool | int | float | str | bytes):
-            self._text(type(value).__qualname__)
-            self._text(repr(value))
-            return
-        if isinstance(value, Enum):
-            self._text("enum")
-            self._text(f"{type(value).__module__}.{type(value).__qualname__}")
-            self._value(value.value)
-            return
-        if self._reference(value):
-            return
+    def _container_value(self, value: object) -> bool:
+        """Append a mapping/set/sequence value; return False for objects."""
         if isinstance(value, Mapping):
             self._text("mapping")
             self._text(str(len(value)))
             for key, item in value.items():
                 self._value(key)
                 self._value(item)
-            return
+            return True
         if isinstance(value, Set) and not isinstance(value, str | bytes | bytearray):
             self._text("set")
             self._text(str(len(value)))
             for item in sorted(value, key=repr):
                 self._value(item)
-            return
+            return True
         if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
             self._text("sequence")
             self._text(type(value).__qualname__)
             self._text(str(len(value)))
             for item in value:
                 self._value(item)
-            return
+            return True
+        return False
 
+    def _object_value(self, value: object) -> None:
+        """Append one non-container object's typed boundary fields."""
         value_type = type(value)
         self._text(f"{value_type.__module__}.{value_type.__qualname__}")
         if _structured_codegen_node_8616(value):
@@ -184,6 +176,23 @@ class _StructuredAstGenerationBuilder8616:
             self._fields(value, boundary_fields, stored_only=True)
             return
         self._text("opaque")
+
+    def _value(self, value: object) -> None:
+        """Append one structured value without following known owner cycles."""
+        if value is None or isinstance(value, bool | int | float | str | bytes):
+            self._text(type(value).__qualname__)
+            self._text(repr(value))
+            return
+        if isinstance(value, Enum):
+            self._text("enum")
+            self._text(f"{type(value).__module__}.{type(value).__qualname__}")
+            self._value(value.value)
+            return
+        if self._reference(value):
+            return
+        if self._container_value(value):
+            return
+        self._object_value(value)
 
     def build(self, value: object) -> StructuredAstGeneration8616:
         """Return the completed structured-C generation for ``value``."""

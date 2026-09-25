@@ -265,16 +265,14 @@ def materialize_proven_terminal_return_value_8616(
     return result
 
 
-def materialize_linear_terminal_return_value_8616(
-    project: object,
-    codegen: object,
+def _materialization_context_8616(
+    codegen_surface: _TerminalReturnCodegenSurface8616,
     function: object | None,
-    *,
-    recover_proven_value: Callable[[object, object, object], object | None],
-    expressions_equivalent: Callable[[object, object], bool],
-) -> TerminalReturnValueMaterializationResult8616:
-    """Consume one linear terminal-register proof at the Structuring boundary."""
-    codegen_surface = cast(_TerminalReturnCodegenSurface8616, codegen)
+) -> (
+    tuple[_TerminalReturnCFunctionSurface8616, object, tuple[CReturn, ...]]
+    | TerminalReturnValueMaterializationResult8616
+):
+    """Resolve cfunc, AST root, and return nodes or produce the refusal."""
     try:
         cfunc_value = codegen_surface.cfunc
     except AttributeError:
@@ -301,7 +299,14 @@ def materialize_linear_terminal_return_value_8616(
             TerminalReturnValueMaterializationRefusal8616.RETURN_COUNT,
             raw_fact_count=len(return_nodes),
         )
-    function_surface = cast(_TerminalReturnFunctionSurface8616, function)
+    return cfunc, root, return_nodes
+
+
+def _return_widths_8616(
+    function_surface: _TerminalReturnFunctionSurface8616,
+    cfunc: _TerminalReturnCFunctionSurface8616,
+) -> tuple[int | None, ...] | TerminalReturnValueMaterializationResult8616:
+    """Collect concrete return widths or produce the width refusal."""
     try:
         function_prototype = function_surface.prototype
     except AttributeError:
@@ -328,6 +333,30 @@ def materialize_linear_terminal_return_value_8616(
             raw_fact_count=1,
             normalized_fact_count=1,
         )
+    return return_widths
+
+
+def materialize_linear_terminal_return_value_8616(
+    project: object,
+    codegen: object,
+    function: object | None,
+    *,
+    recover_proven_value: Callable[[object, object, object], object | None],
+    expressions_equivalent: Callable[[object, object], bool],
+) -> TerminalReturnValueMaterializationResult8616:
+    """Consume one linear terminal-register proof at the Structuring boundary."""
+    codegen_surface = cast(_TerminalReturnCodegenSurface8616, codegen)
+    context = _materialization_context_8616(codegen_surface, function)
+    if isinstance(context, TerminalReturnValueMaterializationResult8616):
+        return context
+    cfunc, root, return_nodes = context
+    widths = _return_widths_8616(
+        cast(_TerminalReturnFunctionSurface8616, function),
+        cfunc,
+    )
+    if isinstance(widths, TerminalReturnValueMaterializationResult8616):
+        return widths
+    return_widths = widths
     proven_value = recover_proven_value(project, codegen, function)
     if not isinstance(proven_value, CExpression):
         return _refused_result_8616(

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from capstone.x86_const import X86_OP_IMM, X86_OP_MEM, X86_OP_REG
@@ -153,17 +153,47 @@ def recover_counted_stack_loop_from_summaries_8616(
     repeated BP-relative instruction evidence. Unknown or partial patterns are
     refused rather than guessed.
     """
-    zero_inits: set[int] = set()
-    inc_slots: set[int] = set()
-    cmp_pairs: list[tuple[int, int]] = []
-    test_pairs: list[tuple[int, int]] = []
-    add_pairs: list[tuple[int, int]] = []
-    dec_slots: set[int] = set()
-    ax_loads: list[int] = []
-
-    previous_ax_load: int | None = None
+    census = _LoopCensus8616()
     for insn in summaries:
+        census.collect(insn)
+    return _match_counted_loop_8616(census)
+
+
+@dataclass(slots=True)
+class _LoopCensus8616:
+    """Mutable per-instruction census for the counted-stack-loop recognizer."""
+
+    zero_inits: set[int] = field(default_factory=set)
+    inc_slots: set[int] = field(default_factory=set)
+    cmp_pairs: list[tuple[int, int]] = field(default_factory=list)
+    test_pairs: list[tuple[int, int]] = field(default_factory=list)
+    add_pairs: list[tuple[int, int]] = field(default_factory=list)
+    dec_slots: set[int] = field(default_factory=set)
+    ax_loads: list[int] = field(default_factory=list)
+    previous_ax_load: int | None = None
+
+    def collect(self, insn: InsnSummary8616) -> None:
+        """Fold one instruction summary into the census."""
         mnemonic = insn.mnemonic.lower()
+        if self._zero_init(insn, mnemonic):
+            return
+        if self._inc_slot(insn, mnemonic):
+            return
+        if self._ax_load(insn, mnemonic):
+            return
+        if self._cmp_pair(insn, mnemonic):
+            return
+        if self._test_pair(insn, mnemonic):
+            return
+        if self._add_pair(insn, mnemonic):
+            return
+        if self._dec_slot(insn, mnemonic):
+            return
+        if mnemonic not in {"mov", "cmp", "test", "add"}:
+            self.previous_ax_load = None
+
+    def _zero_init(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+        """Record a `mov word [bp+disp], 0` slot initialization."""
         if (
             mnemonic == "mov"
             and insn.op0_kind == "bp_mem"
@@ -171,56 +201,106 @@ def recover_counted_stack_loop_from_summaries_8616(
             and _summary_int_8616(insn.op1_value) == 0
             and (insn.op0_size in {None, 2})
         ):
-            zero_inits.add(_summary_int_8616(insn.op0_value))
-        elif mnemonic == "inc" and insn.op0_kind == "bp_mem" and (insn.op0_size in {None, 2}):
-            inc_slots.add(_summary_int_8616(insn.op0_value))
-        elif mnemonic == "mov" and insn.op0_kind == "reg" and insn.op0_value == "ax" and insn.op1_kind == "bp_mem":
-            previous_ax_load = _summary_int_8616(insn.op1_value)
-            ax_loads.append(previous_ax_load)
-        elif (
+            self.zero_inits.add(_summary_int_8616(insn.op0_value))
+            return True
+        return False
+
+    def _inc_slot(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+        """Record an `inc word [bp+disp]` induction step."""
+        if mnemonic == "inc" and insn.op0_kind == "bp_mem" and (insn.op0_size in {None, 2}):
+            self.inc_slots.add(_summary_int_8616(insn.op0_value))
+            return True
+        return False
+
+    def _ax_load(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+        """Record a `mov ax, [bp+disp]` induction-source load."""
+        if mnemonic == "mov" and insn.op0_kind == "reg" and insn.op0_value == "ax" and insn.op1_kind == "bp_mem":
+            self.previous_ax_load = _summary_int_8616(insn.op1_value)
+            self.ax_loads.append(self.previous_ax_load)
+            return True
+        return False
+
+    def _cmp_pair(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+        """Record a `cmp [bp+disp], ax` induction-limit comparison."""
+        if (
             mnemonic == "cmp"
             and insn.op0_kind == "bp_mem"
             and insn.op1_kind == "reg"
             and insn.op1_value == "ax"
-            and previous_ax_load is not None
+            and self.previous_ax_load is not None
         ):
-            cmp_pairs.append((_summary_int_8616(insn.op0_value), previous_ax_load))
-        elif mnemonic == "test" and insn.op0_kind == "bp_mem" and insn.op1_kind == "imm":
-            test_pairs.append((_summary_int_8616(insn.op0_value), _summary_int_8616(insn.op1_value)))
-        elif (
+            self.cmp_pairs.append((_summary_int_8616(insn.op0_value), self.previous_ax_load))
+            return True
+        return False
+
+    def _test_pair(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+        """Record a `test [bp+disp], mask` parity check."""
+        if mnemonic == "test" and insn.op0_kind == "bp_mem" and insn.op1_kind == "imm":
+            self.test_pairs.append((_summary_int_8616(insn.op0_value), _summary_int_8616(insn.op1_value)))
+            return True
+        return False
+
+    def _add_pair(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+        """Record an `add [bp+disp], ax` accumulator step."""
+        if (
             mnemonic == "add"
             and insn.op0_kind == "bp_mem"
             and insn.op1_kind == "reg"
             and insn.op1_value == "ax"
-            and previous_ax_load is not None
+            and self.previous_ax_load is not None
         ):
-            add_pairs.append((_summary_int_8616(insn.op0_value), previous_ax_load))
-        elif mnemonic == "dec" and insn.op0_kind == "bp_mem" and (insn.op0_size in {None, 2}):
-            dec_slots.add(_summary_int_8616(insn.op0_value))
-        elif mnemonic not in {"mov", "cmp", "test", "add"}:
-            previous_ax_load = None
+            self.add_pairs.append((_summary_int_8616(insn.op0_value), self.previous_ax_load))
+            return True
+        return False
 
-    for induction_disp, limit_disp in cmp_pairs:
+    def _dec_slot(self, insn: InsnSummary8616, mnemonic: str) -> bool:
+        """Record a `dec word [bp+disp]` accumulator drain."""
+        if mnemonic == "dec" and insn.op0_kind == "bp_mem" and (insn.op0_size in {None, 2}):
+            self.dec_slots.add(_summary_int_8616(insn.op0_value))
+            return True
+        return False
+
+
+def _match_counted_loop_8616(census: _LoopCensus8616) -> CountedStackLoop8616 | None:
+    """Match the census against the counted-loop shape."""
+    for induction_disp, limit_disp in census.cmp_pairs:
         if induction_disp >= 0 or limit_disp <= 0:
             continue
-        if induction_disp not in zero_inits or induction_disp not in inc_slots:
+        if induction_disp not in census.zero_inits or induction_disp not in census.inc_slots:
             continue
-        parity_masks = [mask for disp, mask in test_pairs if disp == induction_disp and mask > 0]
+        parity_masks = [
+            mask
+            for disp, mask in census.test_pairs
+            if disp == induction_disp and mask > 0
+        ]
         if not parity_masks:
             continue
-        for accumulator_disp, add_source_disp in add_pairs:
-            if accumulator_disp >= 0 or add_source_disp != induction_disp:
-                continue
-            if accumulator_disp not in zero_inits or accumulator_disp not in dec_slots:
-                continue
-            if accumulator_disp not in ax_loads:
-                continue
-            return CountedStackLoop8616(
-                induction_disp=induction_disp,
-                accumulator_disp=accumulator_disp,
-                limit_disp=limit_disp,
-                parity_mask=int(parity_masks[0]),
-            )
+        loop = _match_accumulator_8616(census, induction_disp, limit_disp, parity_masks)
+        if loop is not None:
+            return loop
+    return None
+
+
+def _match_accumulator_8616(
+    census: _LoopCensus8616,
+    induction_disp: int,
+    limit_disp: int,
+    parity_masks: list[int],
+) -> CountedStackLoop8616 | None:
+    """Match the accumulator step for one induction/limit candidate."""
+    for accumulator_disp, add_source_disp in census.add_pairs:
+        if accumulator_disp >= 0 or add_source_disp != induction_disp:
+            continue
+        if accumulator_disp not in census.zero_inits or accumulator_disp not in census.dec_slots:
+            continue
+        if accumulator_disp not in census.ax_loads:
+            continue
+        return CountedStackLoop8616(
+            induction_disp=induction_disp,
+            accumulator_disp=accumulator_disp,
+            limit_disp=limit_disp,
+            parity_mask=int(parity_masks[0]),
+        )
     return None
 
 

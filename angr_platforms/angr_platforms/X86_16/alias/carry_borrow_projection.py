@@ -34,7 +34,9 @@ from .carry_borrow_sources import (
     register_domain_for_value_8616,
     resolve_carry_borrow_source_alias_8616,
 )
+from .domains import DomainKey
 from .storage_fact_join import (
+    SegmentedAliasRange8616,
     join_adjacent_segmented_alias_facts_8616,
 )
 
@@ -69,10 +71,13 @@ def _valid_call_output_definition_8616(
     if (
         instruction.op != "CALL_OUTPUT"
         or destination is None
-        or destination.call_output != provenance
         or instruction.addr != provenance.callsite_addr
-        or _ssa_identity_8616(destination) != _ssa_identity_8616(expected)
         or len(instruction.args) != 1
+    ):
+        return False
+    if (
+        destination.call_output != provenance
+        or _ssa_identity_8616(destination) != _ssa_identity_8616(expected)
     ):
         return False
     target = instruction.args[0]
@@ -144,11 +149,11 @@ def _resolve_lhs_call_output_8616(
     )
 
 
-def _project_link(
+def _result_domains_8616(
     semantics: CarryBorrowResolution8616,
     link: CarryBorrowLink8616,
-    function_ssa: SSAFunctionArtifact | None,
-) -> CarryBorrowAliasResolution8616:
+) -> tuple[DomainKey, DomainKey] | CarryBorrowAliasResolution8616:
+    """Prove distinct low/high result-register domains for one link."""
     low_result = link.low_result_write.instruction.dst
     high_result = link.high_result_write.instruction.dst
     if low_result is None or high_result is None:
@@ -161,7 +166,14 @@ def _project_link(
         return _refusal(semantics, CarryBorrowAliasFailure8616.WIDTH_MISMATCH)
     if low_result_domain == high_result_domain:
         return _refusal(semantics, CarryBorrowAliasFailure8616.CARRIER_ALIAS_MISMATCH)
+    return low_result_domain, high_result_domain
 
+
+def _operand_aliases_8616(
+    semantics: CarryBorrowResolution8616,
+    link: CarryBorrowLink8616,
+) -> tuple[CarryBorrowOperandAlias8616, ...] | CarryBorrowAliasResolution8616:
+    """Resolve all four operand aliases; any operand failure aborts the link."""
     operand_uses = (
         (CarryBorrowOperandRole8616.LOW_LHS, link.low_lhs),
         (CarryBorrowOperandRole8616.LOW_RHS, link.low_rhs),
@@ -190,6 +202,51 @@ def _project_link(
     )
     if len(aliases) != 4:
         return _refusal(semantics, CarryBorrowAliasFailure8616.SOURCE_DEFINITION_MISMATCH)
+    return aliases
+
+
+def _rhs_source_8616(
+    semantics: CarryBorrowResolution8616,
+    low_rhs: CarryBorrowOperandAlias8616,
+    high_rhs: CarryBorrowOperandAlias8616,
+) -> tuple[SegmentedAliasRange8616 | None, int | None] | CarryBorrowAliasResolution8616:
+    """Join the low/high right-hand operand sources into one 32-bit source."""
+    if low_rhs.register_domain is not None and high_rhs.register_domain is not None:
+        if low_rhs.register_domain == high_rhs.register_domain:
+            return _refusal(semantics, CarryBorrowAliasFailure8616.CARRIER_ALIAS_MISMATCH)
+        return None, None
+    if low_rhs.memory is not None and high_rhs.memory is not None:
+        if low_rhs.memory.space is not high_rhs.memory.space:
+            return _refusal(semantics, CarryBorrowAliasFailure8616.SEGMENT_MISMATCH)
+        source_memory = join_adjacent_segmented_alias_facts_8616(
+            low_rhs.memory.addresses + high_rhs.memory.addresses,
+            low_rhs.memory.source_facts + high_rhs.memory.source_facts,
+        )
+        if source_memory is None or source_memory.size != 4:
+            return _refusal(semantics, CarryBorrowAliasFailure8616.SOURCE_RANGE_MISMATCH)
+        return source_memory, None
+    if low_rhs.constant is not None and high_rhs.constant is not None:
+        low_constant = low_rhs.constant.const
+        high_constant = high_rhs.constant.const
+        if not isinstance(low_constant, int) or not isinstance(high_constant, int):
+            return _refusal(semantics, CarryBorrowAliasFailure8616.SOURCE_CARRIER_MISMATCH)
+        return None, ((high_constant & 0xFFFF) << 16) | (low_constant & 0xFFFF)
+    return _refusal(semantics, CarryBorrowAliasFailure8616.SOURCE_CARRIER_MISMATCH)
+
+
+def _project_link(
+    semantics: CarryBorrowResolution8616,
+    link: CarryBorrowLink8616,
+    function_ssa: SSAFunctionArtifact | None,
+) -> CarryBorrowAliasResolution8616:
+    result_domains = _result_domains_8616(semantics, link)
+    if isinstance(result_domains, CarryBorrowAliasResolution8616):
+        return result_domains
+    low_result_domain, high_result_domain = result_domains
+
+    aliases = _operand_aliases_8616(semantics, link)
+    if isinstance(aliases, CarryBorrowAliasResolution8616):
+        return aliases
     low_lhs, low_rhs, high_lhs, high_rhs = aliases
     if (
         not all(alias.complete for alias in (low_lhs, low_rhs, high_lhs, high_rhs))
@@ -202,28 +259,10 @@ def _project_link(
     lhs_call_output = _resolve_lhs_call_output_8616(function_ssa, link)
     if isinstance(lhs_call_output, CarryBorrowAliasFailure8616):
         return _refusal(semantics, lhs_call_output)
-    source_memory = None
-    source_constant = None
-    if low_rhs.register_domain is not None and high_rhs.register_domain is not None:
-        if low_rhs.register_domain == high_rhs.register_domain:
-            return _refusal(semantics, CarryBorrowAliasFailure8616.CARRIER_ALIAS_MISMATCH)
-    elif low_rhs.memory is not None and high_rhs.memory is not None:
-        if low_rhs.memory.space is not high_rhs.memory.space:
-            return _refusal(semantics, CarryBorrowAliasFailure8616.SEGMENT_MISMATCH)
-        source_memory = join_adjacent_segmented_alias_facts_8616(
-            low_rhs.memory.addresses + high_rhs.memory.addresses,
-            low_rhs.memory.source_facts + high_rhs.memory.source_facts,
-        )
-        if source_memory is None or source_memory.size != 4:
-            return _refusal(semantics, CarryBorrowAliasFailure8616.SOURCE_RANGE_MISMATCH)
-    elif low_rhs.constant is not None and high_rhs.constant is not None:
-        low_constant = low_rhs.constant.const
-        high_constant = high_rhs.constant.const
-        if not isinstance(low_constant, int) or not isinstance(high_constant, int):
-            return _refusal(semantics, CarryBorrowAliasFailure8616.SOURCE_CARRIER_MISMATCH)
-        source_constant = ((high_constant & 0xFFFF) << 16) | (low_constant & 0xFFFF)
-    else:
-        return _refusal(semantics, CarryBorrowAliasFailure8616.SOURCE_CARRIER_MISMATCH)
+    rhs_source = _rhs_source_8616(semantics, low_rhs, high_rhs)
+    if isinstance(rhs_source, CarryBorrowAliasResolution8616):
+        return rhs_source
+    source_memory, source_constant = rhs_source
     return CarryBorrowAliasResolution8616(
         semantics=semantics,
         verdict=CarryBorrowAliasVerdict8616.PROVEN,

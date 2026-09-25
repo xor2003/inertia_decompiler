@@ -104,56 +104,48 @@ def _ir_canonicalize_expr_8616(expr: object) -> object:
     return canonicalize_expr_8616(expr)
 
 
+def _canonicalize_binop_dispatch_8616(op: str, lhs: object, rhs: object, expr: object) -> object | None:
+    """Dispatch to the per-op canonicalizer."""
+    if op in {"Add", "Sub"}:
+        return _canonicalize_add_sub_8616(lhs, rhs, op, expr)
+    if op == "Mul":
+        return _canonicalize_mul_8616(lhs, rhs, expr)
+    if op in {"And", "Or"}:
+        return _canonicalize_bitwise_assoc_8616(lhs, rhs, op, expr)
+    if op == "Xor":
+        return _canonicalize_xor_8616(lhs, rhs, expr)
+    return None
+
+
+def __ir_canonicalize_expr_once_8616___impl(expr: object) -> object:
+    """Single canonicalization pass over one binary expression."""
+    from angr.analyses.decompiler.structured_codegen import c as structured_c
+
+    if not isinstance(expr, structured_c.CBinaryOp):
+        return expr
+
+    lhs = canonicalize_expr_8616(_c_lhs(expr))
+    rhs = canonicalize_expr_8616(_c_rhs(expr))
+    op = _c_op(expr)
+
+    lhs_val = _c_constant_value(lhs)
+    rhs_val = _c_constant_value(rhs)
+    folded = _fold_binary_constants_8616(op, lhs_val, rhs_val, expr)
+    if folded is not None:
+        return folded
+
+    out = _canonicalize_binop_dispatch_8616(op, lhs, rhs, expr)
+    if out is not None:
+        return out
+
+    if op in {"Shl", "Shr", "Sar"} and rhs_val == 0:
+        return lhs
+
+    return _rebuild_binary_8616(expr, op, lhs, rhs)
+
+
 def _ir_canonicalize_expr_once_8616(expr: object) -> object:
-    def _impl() -> object:
-        from angr.analyses.decompiler.structured_codegen import c as structured_c
-
-        if not isinstance(expr, structured_c.CBinaryOp):
-            return expr
-
-        lhs = canonicalize_expr_8616(_c_lhs(expr))
-        rhs = canonicalize_expr_8616(_c_rhs(expr))
-        op = _c_op(expr)
-
-        lhs_val = _c_constant_value(lhs)
-        rhs_val = _c_constant_value(rhs)
-        folded = _fold_binary_constants_8616(op, lhs_val, rhs_val, expr)
-        if folded is not None:
-            return folded
-
-        if op in {"Add", "Sub"}:
-            out = _canonicalize_add_sub_8616(lhs, rhs, op, expr)
-            if out is not None:
-                return out
-
-        if op == "Mul":
-            out = _canonicalize_mul_8616(lhs, rhs, expr)
-            if out is not None:
-                return out
-
-        if op == "And":
-            out = _canonicalize_bitwise_assoc_8616(lhs, rhs, "And", expr)
-            if out is not None:
-                return out
-
-        if op == "Or":
-            out = _canonicalize_bitwise_assoc_8616(lhs, rhs, "Or", expr)
-            if out is not None:
-                return out
-
-        if op == "Xor":
-            out = _canonicalize_xor_8616(lhs, rhs, expr)
-            if out is not None:
-                return out
-
-        if op == "Shl" and rhs_val == 0:
-            return lhs
-        if op in {"Shr", "Sar"} and rhs_val == 0:
-            return lhs
-
-        return _rebuild_binary_8616(expr, op, lhs, rhs)
-
-    return _impl()
+    return __ir_canonicalize_expr_once_8616___impl(expr)
 
 
 def _canonicalize_add_sub_8616(lhs: object, rhs: object, op: str, template: object) -> object | None:
@@ -271,73 +263,98 @@ def _canonicalize_mul_8616(lhs: object, rhs: object, template: object) -> object
     return _make_binop_8616("Mul", base, _make_const_8616(const, template), template)
 
 
-def _canonicalize_bitwise_assoc_8616(lhs: object, rhs: object, op: str, template: object) -> object | None:
-    def _impl() -> object | None:
-        lhs_val = _c_constant_value(lhs)
-        rhs_val = _c_constant_value(rhs)
+def _assoc_combine_8616(op: str, a: int, b: int) -> int:
+    """Fold ``a`` and ``b`` with the associative ``op``."""
+    if op == "And":
+        return a & b
+    if op == "Or":
+        return a | b
+    raise AssertionError(op)
 
-        if op == "And":
-            if isinstance(rhs_val, int) and is_proven_full_width_mask_8616(rhs_val, _c_width_bytes(lhs)):
-                return lhs
-            if isinstance(lhs_val, int) and is_proven_full_width_mask_8616(lhs_val, _c_width_bytes(rhs)):
-                return rhs
-            if rhs_val == 0 or lhs_val == 0:
-                return _make_const_8616(0, template)
 
-        if op == "Or":
-            if rhs_val == 0:
-                return lhs
-            if lhs_val == 0:
-                return rhs
+def _assoc_walk_8616(node: object, op: str, terms: list[object], const: int | None) -> int | None:
+    """Flatten ``op``-chained binops; return the folded constant accumulator."""
+    value = _c_constant_value(node)
+    if isinstance(value, int):
+        return value if const is None else _assoc_combine_8616(op, const, value)
+    from angr.analyses.decompiler.structured_codegen import c as structured_c
 
-        terms: list[object] = []
-        const: int | None = None
+    if isinstance(node, structured_c.CBinaryOp) and _c_op(node) == op:
+        const = _assoc_walk_8616(_c_lhs(node), op, terms, const)
+        return _assoc_walk_8616(_c_rhs(node), op, terms, const)
+    terms.append(node)
+    return const
 
-        def combine(a: int, b: int) -> int:
-            if op == "And":
-                return a & b
-            if op == "Or":
-                return a | b
-            raise AssertionError(op)
 
-        def walk(node: object) -> None:
-            nonlocal const
-            value = _c_constant_value(node)
-            if isinstance(value, int):
-                const = value if const is None else combine(const, value)
-                return
-
-            from angr.analyses.decompiler.structured_codegen import c as structured_c
-
-            if isinstance(node, structured_c.CBinaryOp) and _c_op(node) == op:
-                walk(_c_lhs(node))
-                walk(_c_rhs(node))
-                return
-
-            terms.append(node)
-
-        walk(lhs)
-        walk(rhs)
-
-        if const is None:
-            return None
-
-        if op == "And" and const == 0:
+def _assoc_const_gate_8616(lhs: object, rhs: object, op: str, template: object) -> object | None:
+    """Constant-elimination gates for ``And``/``Or``; None means flatten."""
+    lhs_val = _c_constant_value(lhs)
+    rhs_val = _c_constant_value(rhs)
+    if op == "And":
+        if isinstance(rhs_val, int) and is_proven_full_width_mask_8616(rhs_val, _c_width_bytes(lhs)):
+            return lhs
+        if isinstance(lhs_val, int) and is_proven_full_width_mask_8616(lhs_val, _c_width_bytes(rhs)):
+            return rhs
+        if rhs_val == 0 or lhs_val == 0:
             return _make_const_8616(0, template)
+    if op == "Or":
+        if rhs_val == 0:
+            return lhs
+        if lhs_val == 0:
+            return rhs
+    return None
 
-        if not terms:
-            return _make_const_8616(const, template)
 
-        base = _rebuild_left_assoc_8616(tuple(terms), op, template)
+def _assoc_rebuild_8616(terms: list[object], const: int, op: str, template: object) -> object:
+    """Rebuild the flattened ``terms`` plus folded ``const`` under ``op``."""
+    if not terms:
+        return _make_const_8616(const, template)
+    base = _rebuild_left_assoc_8616(tuple(terms), op, template)
+    if op == "Or" and const == 0:
+        return base
+    if op == "And" and is_proven_full_width_mask_8616(const, _c_width_bytes(base)):
+        return base
+    return _make_binop_8616(op, base, _make_const_8616(const, template), template)
 
-        if op == "Or" and const == 0:
-            return base
-        if op == "And" and is_proven_full_width_mask_8616(const, _c_width_bytes(base)):
-            return base
 
-        return _make_binop_8616(op, base, _make_const_8616(const, template), template)
+def __canonicalize_bitwise_assoc_8616___impl(
+    lhs: object, rhs: object, op: str, template: object
+) -> object | None:
+    """Canonicalize an ``And``/``Or``-assoc expression."""
+    gated = _assoc_const_gate_8616(lhs, rhs, op, template)
+    if gated is not None:
+        return gated
+    terms: list[object] = []
+    const = _assoc_walk_8616(rhs, op, terms, _assoc_walk_8616(lhs, op, terms, None))
+    if const is None:
+        return None
+    if op == "And" and const == 0:
+        return _make_const_8616(0, template)
+    return _assoc_rebuild_8616(terms, const, op, template)
 
-    return _impl()
+
+def _canonicalize_bitwise_assoc_8616(lhs: object, rhs: object, op: str, template: object) -> object | None:
+    return __canonicalize_bitwise_assoc_8616___impl(lhs, rhs, op, template)
+
+
+def _xor_walk_8616(node: object, terms: list[object], const: int) -> int:
+    """Flatten ``Xor``-chains; remove same-expr pairs; return folded const."""
+    value = _c_constant_value(node)
+    if isinstance(value, int):
+        return const ^ value
+
+    from angr.analyses.decompiler.structured_codegen import c as structured_c
+
+    if isinstance(node, structured_c.CBinaryOp) and _c_op(node) == "Xor":
+        const = _xor_walk_8616(_c_lhs(node), terms, const)
+        return _xor_walk_8616(_c_rhs(node), terms, const)
+
+    for idx, existing in enumerate(terms):
+        if _same_c_expr_8616(existing, node):
+            del terms[idx]
+            return const
+    terms.append(node)
+    return const
 
 
 def _canonicalize_xor_8616(lhs: object, rhs: object, template: object) -> object | None:
@@ -352,30 +369,7 @@ def _canonicalize_xor_8616(lhs: object, rhs: object, template: object) -> object
         return _make_const_8616(0, template)
 
     terms: list[object] = []
-    const = 0
-
-    def walk(node: object) -> None:
-        nonlocal const
-        value = _c_constant_value(node)
-        if isinstance(value, int):
-            const ^= value
-            return
-
-        from angr.analyses.decompiler.structured_codegen import c as structured_c
-
-        if isinstance(node, structured_c.CBinaryOp) and _c_op(node) == "Xor":
-            walk(_c_lhs(node))
-            walk(_c_rhs(node))
-            return
-
-        for idx, existing in enumerate(terms):
-            if _same_c_expr_8616(existing, node):
-                del terms[idx]
-                return
-        terms.append(node)
-
-    walk(lhs)
-    walk(rhs)
+    const = _xor_walk_8616(rhs, terms, _xor_walk_8616(lhs, terms, 0))
 
     if not terms:
         return _make_const_8616(const, template)
@@ -388,42 +382,49 @@ def _canonicalize_xor_8616(lhs: object, rhs: object, template: object) -> object
     return _make_binop_8616("Xor", base, _make_const_8616(const, template), template)
 
 
+_CONST_FOLD_TABLE_8616 = {
+    "Add": int.__add__,
+    "Sub": int.__sub__,
+    "Mul": int.__mul__,
+    "And": int.__and__,
+    "Or": int.__or__,
+    "Xor": int.__xor__,
+    "Shl": int.__lshift__,
+}
+
+
+def _fold_const_pair_8616(op: str, lhs_val: int, rhs_val: int) -> int | None:
+    """Compute ``lhs_val OP rhs_val``; return None when unsafe or unknown."""
+    if op in _CONST_FOLD_TABLE_8616:
+        return int(_CONST_FOLD_TABLE_8616[op](lhs_val, rhs_val))
+    if op in {"Shr", "Sar"}:
+        if rhs_val < 0:
+            return None
+        return lhs_val >> rhs_val
+    if op in {"Div", "Mod"}:
+        if rhs_val == 0:
+            return None
+        return lhs_val // rhs_val if op == "Div" else lhs_val % rhs_val
+    return None
+
+
+def __fold_binary_constants_8616___impl(
+    op: str, lhs_val: int | None, rhs_val: int | None, template: object
+) -> object | None:
+    """Fold a binary op when both operands are constants."""
+    if not isinstance(lhs_val, int) or not isinstance(rhs_val, int):
+        return None
+    try:
+        value = _fold_const_pair_8616(op, lhs_val, rhs_val)
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+    if value is None:
+        return None
+    return _make_const_8616(value, template)
+
+
 def _fold_binary_constants_8616(op: str, lhs_val: int | None, rhs_val: int | None, template: object) -> object | None:
-    def _impl() -> object | None:
-        if not isinstance(lhs_val, int) or not isinstance(rhs_val, int):
-            return None
-
-        try:
-            if op == "Add":
-                value = lhs_val + rhs_val
-            elif op == "Sub":
-                value = lhs_val - rhs_val
-            elif op == "Mul":
-                value = lhs_val * rhs_val
-            elif op == "And":
-                value = lhs_val & rhs_val
-            elif op == "Or":
-                value = lhs_val | rhs_val
-            elif op == "Xor":
-                value = lhs_val ^ rhs_val
-            elif op == "Shl":
-                value = lhs_val << rhs_val
-            elif op in {"Shr", "Sar"}:
-                if rhs_val < 0:
-                    return None
-                value = lhs_val >> rhs_val
-            elif op in {"Div", "Mod"}:
-                if rhs_val == 0:
-                    return None
-                value = lhs_val // rhs_val if op == "Div" else lhs_val % rhs_val
-            else:
-                return None
-        except Exception:
-            return None
-
-        return _make_const_8616(value, template)
-
-    return _impl()
+    return __fold_binary_constants_8616___impl(op, lhs_val, rhs_val, template)
 
 
 def _rebuild_left_assoc_8616(terms: tuple[object, ...], op: str, template: object) -> object:

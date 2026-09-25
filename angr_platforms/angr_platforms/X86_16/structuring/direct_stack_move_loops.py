@@ -17,7 +17,7 @@ import contextlib
 import logging
 import os
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -203,6 +203,112 @@ def _tree_tag_addresses_8616(root: object) -> frozenset[int]:
     return frozenset(addresses)
 
 
+@dataclass(slots=True)
+class _LoopTailSiteScan8616:
+    """Structured-loop tail-site scan state for one loopback edge.
+
+    Dynamic boundary: codegen loop nodes are traversed through optional
+    attributes for safety.
+    """
+
+    project: object
+    edge: _LoopbackEdge8616
+    sites: list[_LoopTailSite8616] = field(default_factory=list)
+    seen: set[int] = field(default_factory=set)
+
+    def _debug_site_8616(
+        self,
+        class_name: str,
+        depth: int,
+        body_addresses: set[int],
+        condition_addresses: set[int],
+    ) -> None:
+        """Emit one loop-site debug record when the env flag is set."""
+        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+            log.warning(
+                "[direct-stack-move-loop-site] move=%#x target=%#x loop=%s depth=%d "
+                "body_range=%r condition_range=%r",
+                self.edge.move_addr,
+                self.edge.target_addr,
+                class_name,
+                depth,
+                (
+                    min(body_addresses, default=None),
+                    max(body_addresses, default=None),
+                ),
+                (
+                    min(condition_addresses, default=None),
+                    max(condition_addresses, default=None),
+                ),
+            )
+
+    def _evaluate_loop_8616(
+        self,
+        node: object,
+        body: object,
+        statements: list[object],
+        class_name: str,
+        depth: int,
+    ) -> None:
+        """Record proven tail sites owned by one structured loop body."""
+        body_addresses = {
+            candidate
+            for address in _tree_tag_addresses_8616(body)
+            for candidate in _candidate_addresses_8616(self.project, address)
+        }
+        condition_addresses = {
+            candidate
+            for address in _tree_tag_addresses_8616(getattr(node, "condition", None))
+            for candidate in _candidate_addresses_8616(self.project, address)
+        }
+        self._debug_site_8616(class_name, depth, body_addresses, condition_addresses)
+        for move_addr in _candidate_addresses_8616(self.project, self.edge.move_addr):
+            move_candidates = _candidate_addresses_8616(self.project, self.edge.move_addr)
+            ordered_body_addresses = body_addresses - move_candidates
+            before_move = tuple(address for address in ordered_body_addresses if address < move_addr)
+            if not before_move or max(ordered_body_addresses, default=move_addr) >= move_addr:
+                continue
+            envelope = body_addresses | condition_addresses
+            target_candidates = _candidate_addresses_8616(self.project, self.edge.target_addr)
+            target_in_envelope = bool(envelope) and any(
+                min(envelope) <= target <= max(envelope) for target in target_candidates
+            )
+            target_at_pretest = class_name in {"CWhileLoop", "CForLoop"} and any(
+                0 < min(body_addresses) - target <= 32
+                for target in target_candidates
+            )
+            if not target_in_envelope and not target_at_pretest:
+                continue
+            self.sites.append(
+                _LoopTailSite8616(
+                    statements=statements,
+                    gap=move_addr - max(before_move),
+                    depth=depth,
+                )
+            )
+
+    def visit(self, node: object, depth: int) -> None:
+        """Collect candidate loop bodies recursively."""
+        if node is None or id(node) in self.seen:
+            return
+        self.seen.add(id(node))
+        body = getattr(node, "body", None)
+        statements = getattr(body, "statements", None)
+        class_name = node.__class__.__name__
+        if class_name in {"CWhileLoop", "CDoWhileLoop", "CForLoop"} and isinstance(statements, list):
+            self._evaluate_loop_8616(node, body, statements, class_name, depth)
+        statements_value = getattr(node, "statements", None)
+        if isinstance(statements_value, list):
+            for statement in tuple(statements_value):
+                self.visit(statement, depth + 1)
+        for attr in ("body", "else_node"):
+            self.visit(getattr(node, attr, None), depth + 1)
+        pairs = getattr(node, "condition_and_nodes", None)
+        if pairs:
+            for _condition, guarded_body in _boundary_tuple_8616(pairs):
+                self.visit(guarded_body, depth + 1)
+
+
 def _loop_tail_sites_8616(
     project: object,
     root: object,
@@ -212,86 +318,9 @@ def _loop_tail_sites_8616(
 
     Dynamic boundary: this traversal reads optional codegen node fields.
     """
-    sites: list[_LoopTailSite8616] = []
-    seen: set[int] = set()
-
-    def visit(node: object, depth: int) -> None:
-        """Collect candidate loop bodies recursively.
-
-        Dynamic boundary: codegen loop nodes are traversed through optional
-        attributes for safety.
-        """
-        if node is None or id(node) in seen:
-            return
-        seen.add(id(node))
-        body = getattr(node, "body", None)
-        statements = getattr(body, "statements", None)
-        class_name = node.__class__.__name__
-        if class_name in {"CWhileLoop", "CDoWhileLoop", "CForLoop"} and isinstance(statements, list):
-            body_addresses = {
-                candidate
-                for address in _tree_tag_addresses_8616(body)
-                for candidate in _candidate_addresses_8616(project, address)
-            }
-            condition_addresses = {
-                candidate
-                for address in _tree_tag_addresses_8616(getattr(node, "condition", None))
-                for candidate in _candidate_addresses_8616(project, address)
-            }
-            if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                log.warning(
-                    "[direct-stack-move-loop-site] move=%#x target=%#x loop=%s depth=%d "
-                    "body_range=%r condition_range=%r",
-                    edge.move_addr,
-                    edge.target_addr,
-                    class_name,
-                    depth,
-                    (
-                        min(body_addresses, default=None),
-                        max(body_addresses, default=None),
-                    ),
-                    (
-                        min(condition_addresses, default=None),
-                        max(condition_addresses, default=None),
-                    ),
-                )
-            for move_addr in _candidate_addresses_8616(project, edge.move_addr):
-                move_candidates = _candidate_addresses_8616(project, edge.move_addr)
-                ordered_body_addresses = body_addresses - move_candidates
-                before_move = tuple(address for address in ordered_body_addresses if address < move_addr)
-                if not before_move or max(ordered_body_addresses, default=move_addr) >= move_addr:
-                    continue
-                envelope = body_addresses | condition_addresses
-                target_candidates = _candidate_addresses_8616(project, edge.target_addr)
-                target_in_envelope = bool(envelope) and any(
-                    min(envelope) <= target <= max(envelope) for target in target_candidates
-                )
-                target_at_pretest = class_name in {"CWhileLoop", "CForLoop"} and any(
-                    0 < min(body_addresses) - target <= 32
-                    for target in target_candidates
-                )
-                if not target_in_envelope and not target_at_pretest:
-                    continue
-                sites.append(
-                    _LoopTailSite8616(
-                        statements=statements,
-                        gap=move_addr - max(before_move),
-                        depth=depth,
-                    )
-                )
-        statements_value = getattr(node, "statements", None)
-        if isinstance(statements_value, list):
-            for statement in tuple(statements_value):
-                visit(statement, depth + 1)
-        for attr in ("body", "else_node"):
-            visit(getattr(node, attr, None), depth + 1)
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, guarded_body in _boundary_tuple_8616(pairs):
-                visit(guarded_body, depth + 1)
-
-    visit(root, 0)
-    return tuple(sites)
+    scan = _LoopTailSiteScan8616(project, edge)
+    scan.visit(root, 0)
+    return tuple(scan.sites)
 
 
 def place_direct_stack_move_loop_tail_assignment_8616(

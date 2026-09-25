@@ -11,7 +11,7 @@ Do not recover semantics from COD, source, assembly, or rendered C text.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..alias.domains import register_domain_for_name, register_view_for_name
 from ..ir import IRValue, MemSpace
@@ -281,18 +281,34 @@ def _equality_candidate_8616(
     ), None
 
 
-def select_split_return_condition_8616(
+@dataclass(slots=True)
+class _SplitCandidateCensus8616:
+    """Collected split-condition candidates and first retained refusal."""
+
+    structural_count: int = 0
+    candidates: list[SplitReturnConditionCandidate8616] = field(default_factory=list)
+    retained_failure: ReturnStorageTypeFailure8616 | None = None
+
+    def record(
+        self,
+        candidate: SplitReturnConditionCandidate8616 | None,
+        failure: ReturnStorageTypeFailure8616 | None,
+    ) -> None:
+        """Retain one unique candidate or remember the first refusal."""
+        if candidate is not None and candidate not in self.candidates:
+            self.candidates.append(candidate)
+        self.retained_failure = failure or self.retained_failure
+
+
+def _ordering_candidates_8616(
     artifact: SSAFunctionArtifact,
+    unique: tuple[ConditionIR, ...],
     witness_addr: int,
-    conditions: Sequence[ConditionIR],
     dx_storage: StorageIdentity8616,
     ax_storage: StorageIdentity8616,
-) -> tuple[SplitReturnConditionCandidate8616 | None, ReturnStorageTypeFailure8616 | None]:
-    """Select exactly one evidence-complete split-return decision graph."""
-    unique = tuple(dict.fromkeys(conditions))
-    structural_count = 0
-    candidates: list[SplitReturnConditionCandidate8616] = []
-    retained_failure: ReturnStorageTypeFailure8616 | None = None
+    census: _SplitCandidateCensus8616,
+) -> None:
+    """Collect candidates matching each high/low ordering pattern."""
     for pattern in _ORDERING_PATTERNS_8616:
         for first in unique:
             first_norm = _normalized_condition_8616(first, dx_storage)
@@ -306,13 +322,22 @@ def select_split_return_condition_8616(
                     low_norm = _normalized_condition_8616(low, ax_storage)
                     if low in {first, second} or low_norm is None or low_norm[0] != pattern.low_op:
                         continue
-                    structural_count += 1
+                    census.structural_count += 1
                     candidate, failure = _ordering_candidate_8616(
                         artifact, pattern, first, second, low, dx_storage, ax_storage,
                     )
-                    if candidate is not None and candidate not in candidates:
-                        candidates.append(candidate)
-                    retained_failure = failure or retained_failure
+                    census.record(candidate, failure)
+
+
+def _equality_candidates_8616(
+    artifact: SSAFunctionArtifact,
+    unique: tuple[ConditionIR, ...],
+    witness_addr: int,
+    dx_storage: StorageIdentity8616,
+    ax_storage: StorageIdentity8616,
+    census: _SplitCandidateCensus8616,
+) -> None:
+    """Collect candidates matching each equality low-word pattern."""
     equality_patterns = (
         (SplitReturnRelation8616.EQ, "eq"),
         (SplitReturnRelation8616.NE, "ne"),
@@ -326,15 +351,27 @@ def select_split_return_condition_8616(
                 low_norm = _normalized_condition_8616(low, ax_storage)
                 if low is first or low_norm is None or low_norm[0] != low_op:
                     continue
-                structural_count += 1
+                census.structural_count += 1
                 candidate, failure = _equality_candidate_8616(
                     artifact, first, low, relation, dx_storage, ax_storage,
                 )
-                if candidate is not None and candidate not in candidates:
-                    candidates.append(candidate)
-                retained_failure = failure or retained_failure
-    if structural_count > 1 or len(candidates) > 1:
+                census.record(candidate, failure)
+
+
+def select_split_return_condition_8616(
+    artifact: SSAFunctionArtifact,
+    witness_addr: int,
+    conditions: Sequence[ConditionIR],
+    dx_storage: StorageIdentity8616,
+    ax_storage: StorageIdentity8616,
+) -> tuple[SplitReturnConditionCandidate8616 | None, ReturnStorageTypeFailure8616 | None]:
+    """Select exactly one evidence-complete split-return decision graph."""
+    unique = tuple(dict.fromkeys(conditions))
+    census = _SplitCandidateCensus8616()
+    _ordering_candidates_8616(artifact, unique, witness_addr, dx_storage, ax_storage, census)
+    _equality_candidates_8616(artifact, unique, witness_addr, dx_storage, ax_storage, census)
+    if census.structural_count > 1 or len(census.candidates) > 1:
         return None, ReturnStorageTypeFailure8616.SPLIT_CONDITION_CONFLICT
-    if len(candidates) == 1:
-        return candidates[0], None
-    return None, retained_failure or ReturnStorageTypeFailure8616.SPLIT_CONDITION_NOT_FOUND
+    if len(census.candidates) == 1:
+        return census.candidates[0], None
+    return None, census.retained_failure or ReturnStorageTypeFailure8616.SPLIT_CONDITION_NOT_FOUND

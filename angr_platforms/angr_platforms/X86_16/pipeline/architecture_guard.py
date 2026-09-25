@@ -27,6 +27,7 @@ __all__ = [
 
 import os
 import re
+from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from ..validation_semantics import assert_known_call_semantics_8616
@@ -86,6 +87,74 @@ def _strip_c_comments_8616(c_text: str) -> str:
     return "\n".join(line for line in c_text.splitlines() if not line.lstrip().startswith("///"))
 
 
+@dataclass(slots=True)
+class _ReturnDepthScan8616:
+    """Brace-depth state for the post-return call emission scan."""
+
+    returned_depths: set[int] = field(default_factory=set)
+    pending_single_stmt_control_depths: set[int] = field(default_factory=set)
+    depth: int = 0
+
+    def process_line(
+        self,
+        raw_line: str,
+        call_re: re.Pattern[str],
+        ignored_calls: frozenset[str],
+    ) -> bool:
+        """Return whether one line emits a call after a same-depth return."""
+        stripped = raw_line.strip()
+        if not stripped:
+            return False
+
+        line_depth = self.depth
+        controlled_by_single_stmt = line_depth in self.pending_single_stmt_control_depths
+        if line_depth > 0 and line_depth in self.returned_depths:
+            for match in call_re.finditer(stripped):
+                name = match.group(1)
+                if name not in ignored_calls:
+                    return True
+
+        self._update_control_state(stripped, line_depth, controlled_by_single_stmt)
+        self._advance_depth(raw_line)
+        return False
+
+    def _update_control_state(
+        self,
+        stripped: str,
+        line_depth: int,
+        controlled_by_single_stmt: bool,
+    ) -> None:
+        """Track return markers and single-statement control parents."""
+        if line_depth > 0 and not controlled_by_single_stmt and re.match(r"^return\b[^;]*;", stripped):
+            self.returned_depths.add(line_depth)
+
+        if controlled_by_single_stmt:
+            self.pending_single_stmt_control_depths.discard(line_depth)
+        if (
+            line_depth > 0
+            and "{" not in stripped
+            and not stripped.endswith(";")
+            and re.match(r"^(?:if|else\s+if|else|for|while)\b", stripped)
+        ):
+            self.pending_single_stmt_control_depths.add(line_depth)
+
+    def _advance_depth(self, raw_line: str) -> None:
+        """Apply the line's brace delta and prune stale tracked depths."""
+        self.depth += raw_line.count("{") - raw_line.count("}")
+        if self.depth < 0:
+            self.depth = 0
+        if self.returned_depths:
+            self.returned_depths = {
+                returned_depth for returned_depth in self.returned_depths if returned_depth <= self.depth
+            }
+        if self.pending_single_stmt_control_depths:
+            self.pending_single_stmt_control_depths = {
+                pending_depth
+                for pending_depth in self.pending_single_stmt_control_depths
+                if pending_depth <= self.depth
+            }
+
+
 def final_c_has_unreachable_call_after_return_8616(c_text: str) -> bool:
     """Detect same-block call statements emitted after a terminal return.
 
@@ -97,46 +166,12 @@ def final_c_has_unreachable_call_after_return_8616(c_text: str) -> bool:
 
     text = _strip_c_comments_8616(c_text)
     call_re = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
-    ignored_calls = {"if", "for", "while", "switch", "return", "sizeof"}
-    returned_depths: set[int] = set()
-    pending_single_stmt_control_depths: set[int] = set()
-    depth = 0
+    ignored_calls = frozenset({"if", "for", "while", "switch", "return", "sizeof"})
+    scan = _ReturnDepthScan8616()
 
     for raw_line in text.splitlines():
-        stripped = raw_line.strip()
-        if not stripped:
-            continue
-
-        line_depth = depth
-        controlled_by_single_stmt = line_depth in pending_single_stmt_control_depths
-        if line_depth > 0 and line_depth in returned_depths:
-            for match in call_re.finditer(stripped):
-                name = match.group(1)
-                if name not in ignored_calls:
-                    return True
-
-        if line_depth > 0 and not controlled_by_single_stmt and re.match(r"^return\b[^;]*;", stripped):
-            returned_depths.add(line_depth)
-
-        if controlled_by_single_stmt:
-            pending_single_stmt_control_depths.discard(line_depth)
-        if (
-            line_depth > 0
-            and "{" not in stripped
-            and not stripped.endswith(";")
-            and re.match(r"^(?:if|else\s+if|else|for|while)\b", stripped)
-        ):
-            pending_single_stmt_control_depths.add(line_depth)
-
-        depth += raw_line.count("{") - raw_line.count("}")
-        if depth < 0:
-            depth = 0
-        if returned_depths:
-            returned_depths = {returned_depth for returned_depth in returned_depths if returned_depth <= depth}
-        if pending_single_stmt_control_depths:
-            pending_single_stmt_control_depths = {
-                pending_depth for pending_depth in pending_single_stmt_control_depths if pending_depth <= depth
-            }
+        if scan.process_line(raw_line, call_re, ignored_calls):
+            return True
 
     return False
 

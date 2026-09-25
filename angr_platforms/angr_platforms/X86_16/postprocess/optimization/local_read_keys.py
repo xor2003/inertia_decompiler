@@ -27,6 +27,44 @@ class AliasReadStorage8616(Protocol):
     identity: tuple[object, ...] | None
 
 
+def _collect_variable_keys_8616(
+    node: structured_c.CVariable,
+    keys: set[LocalReadKey8616],
+    allow_variable_read: bool,
+    describe_alias_storage: Callable[[object], AliasReadStorage8616],
+) -> None:
+    """Record variable, unified, storage, and liveness keys for one read."""
+    if not allow_variable_read or node.variable is None:
+        return
+    keys.add(("var", id(node.variable)))
+    if node.unified_variable is not None:
+        keys.add(("unified", id(node.unified_variable)))
+    identity = describe_alias_storage(node).identity
+    if identity is not None:
+        keys.add(("storage", identity))
+    liveness = local_liveness_key_8616(node)
+    if liveness is not None:
+        keys.add(("liveness", liveness))
+
+
+def _collect_dirty_keys_8616(
+    node: structured_c.CDirtyExpression,
+    keys: set[LocalReadKey8616],
+    allow_variable_read: bool,
+) -> None:
+    """Record dirty payload identity keys for one read."""
+    dirty = node.dirty
+    # Dynamic codegen boundary: dirty payload identity fields vary by angr version.
+    varid = getattr(dirty, "varid", None)
+    # Dynamic codegen boundary: dirty payloads may lack a display name.
+    name = getattr(dirty, "name", None)
+    if allow_variable_read:
+        if isinstance(varid, int):
+            keys.add(("dirty_varid", varid))
+        if isinstance(name, str) and name:
+            keys.add(("dirty_name", name))
+
+
 def collect_local_read_keys_8616(
     node: object,
     keys: set[LocalReadKey8616],
@@ -56,32 +94,16 @@ def collect_local_read_keys_8616(
 
     try:
         if isinstance(node, structured_c.CVariable):
-            if allow_variable_read and node.variable is not None:
-                keys.add(("var", id(node.variable)))
-                if node.unified_variable is not None:
-                    keys.add(("unified", id(node.unified_variable)))
-                identity = describe_alias_storage(node).identity
-                if identity is not None:
-                    keys.add(("storage", identity))
-                liveness = local_liveness_key_8616(node)
-                if liveness is not None:
-                    keys.add(("liveness", liveness))
+            _collect_variable_keys_8616(
+                node, keys, allow_variable_read, describe_alias_storage
+            )
             return
         if isinstance(node, structured_c.CAssignment):
             collect(node.lhs, value_read=False)
             collect(node.rhs)
             return
         if isinstance(node, structured_c.CDirtyExpression):
-            dirty = node.dirty
-            # Dynamic codegen boundary: dirty payload identity fields vary by angr version.
-            varid = getattr(dirty, "varid", None)
-            # Dynamic codegen boundary: dirty payloads may lack a display name.
-            name = getattr(dirty, "name", None)
-            if allow_variable_read:
-                if isinstance(varid, int):
-                    keys.add(("dirty_varid", varid))
-                if isinstance(name, str) and name:
-                    keys.add(("dirty_name", name))
+            _collect_dirty_keys_8616(node, keys, allow_variable_read)
             return
         for attr in _structured_slot_names_8616(node):
             # Dynamic boundary: the shared inventory names version-dependent angr children.

@@ -26,49 +26,52 @@ def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> Any:  
     return getattr(obj, name, default)
 
 
+def _binary_op_domain_8616(expr: object) -> _StorageDomainSignature:
+    """Join the operand domains of one binary expression."""
+    from angr.analyses.decompiler.structured_codegen import c as structured_c
+
+    assert isinstance(expr, structured_c.CBinaryOp)
+    domains: set[_StorageDomainSignature] = set()
+    domain_list: list[_StorageDomainSignature] = []
+    for child in (expr.lhs, expr.rhs):
+        domain = _storage_domain_for_expr(child)
+        if domain.is_const():
+            continue
+        if domain.is_unknown():
+            return _StorageDomainSignature("unknown")
+        domains.add(domain)
+        domain_list.append(domain)
+    if not domains:
+        return _StorageDomainSignature("const")
+    if len(domains) == 1:
+        return next(iter(domains))
+    if len(domain_list) == 2:
+        joined = domain_list[0].join(domain_list[1])
+        if joined is not None:
+            return joined
+    return _StorageDomainSignature("mixed")
+
+
 def _storage_domain_for_expr(expr: object) -> _StorageDomainSignature:
     """Return the alias storage domain represented by a structured C expression."""
+    expr = _unwrap_c_casts(expr)
+    from angr.analyses.decompiler.structured_codegen import c as structured_c
 
-    def _impl() -> _StorageDomainSignature:
-        nonlocal expr
-        expr = _unwrap_c_casts(expr)
-        from angr.analyses.decompiler.structured_codegen import c as structured_c
-
-        if isinstance(expr, structured_c.CVariable):
-            variable = _dynamic_attr_8616(expr, "variable", None)
-            if variable is None:
-                return _StorageDomainSignature("unknown")
-            return _storage_domain_for_variable(variable)
-        if isinstance(expr, structured_c.CConstant):
-            return _StorageDomainSignature("const")
-        mk_fp_components = _mk_fp_components(expr)
-        if mk_fp_components is not None:
-            return _StorageDomainSignature("far_pointer", 32, _StorageView(0, 32))
-        if isinstance(expr, structured_c.CUnaryOp):
-            return _storage_domain_for_expr(expr.operand)
-        if isinstance(expr, structured_c.CBinaryOp):
-            domains: set[_StorageDomainSignature] = set()
-            domain_list: list[_StorageDomainSignature] = []
-            for child in (expr.lhs, expr.rhs):
-                domain = _storage_domain_for_expr(child)
-                if domain.is_const():
-                    continue
-                if domain.is_unknown():
-                    return _StorageDomainSignature("unknown")
-                domains.add(domain)
-                domain_list.append(domain)
-            if not domains:
-                return _StorageDomainSignature("const")
-            if len(domains) == 1:
-                return next(iter(domains))
-            if len(domain_list) == 2:
-                joined = domain_list[0].join(domain_list[1])
-                if joined is not None:
-                    return joined
-            return _StorageDomainSignature("mixed")
-        return _StorageDomainSignature("unknown")
-
-    return _impl()
+    if isinstance(expr, structured_c.CVariable):
+        variable = _dynamic_attr_8616(expr, "variable", None)
+        if variable is None:
+            return _StorageDomainSignature("unknown")
+        return _storage_domain_for_variable(variable)
+    if isinstance(expr, structured_c.CConstant):
+        return _StorageDomainSignature("const")
+    mk_fp_components = _mk_fp_components(expr)
+    if mk_fp_components is not None:
+        return _StorageDomainSignature("far_pointer", 32, _StorageView(0, 32))
+    if isinstance(expr, structured_c.CUnaryOp):
+        return _storage_domain_for_expr(expr.operand)
+    if isinstance(expr, structured_c.CBinaryOp):
+        return _binary_op_domain_8616(expr)
+    return _StorageDomainSignature("unknown")
 
 
 def describe_alias_storage(expr: object) -> AliasStorageFacts:

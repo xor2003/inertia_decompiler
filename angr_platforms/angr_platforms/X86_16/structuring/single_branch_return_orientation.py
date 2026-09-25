@@ -133,21 +133,14 @@ def _cfg_reaches_target_8616(
     return False
 
 
-def classify_cfg_arm_orientation_8616(
+def _classify_targets_8616(
     condition: ConditionIR,
     body_targets: Iterable[int],
     successors: Mapping[int, tuple[int, ...]],
-) -> StructuredArmOrientationEvidence8616:
-    """Classify one whole arm from exclusive reachability or an immediate shared exit."""
-    if not isinstance(condition.taken_target, int) or not isinstance(condition.fallthrough_target, int):
-        return StructuredArmOrientationEvidence8616(
-            SingleBranchReturnOrientation8616.UNKNOWN_REFUSE,
-            (),
-            (),
-            (),
-            tuple(sorted(set(body_targets))),
-            (),
-        )
+) -> tuple[list[int], list[int], list[int], list[int]]:
+    """Bucket each body target by exclusive or shared reachability."""
+    assert isinstance(condition.taken_target, int)
+    assert isinstance(condition.fallthrough_target, int)
     taken: list[int] = []
     fallthrough: list[int] = []
     shared: list[int] = []
@@ -173,6 +166,29 @@ def classify_cfg_arm_orientation_8616(
             shared.append(target)
         else:
             unreachable.append(target)
+    return taken, fallthrough, shared, unreachable
+
+
+def classify_cfg_arm_orientation_8616(
+    condition: ConditionIR,
+    body_targets: Iterable[int],
+    successors: Mapping[int, tuple[int, ...]],
+) -> StructuredArmOrientationEvidence8616:
+    """Classify one whole arm from exclusive reachability or an immediate shared exit."""
+    if not isinstance(condition.taken_target, int) or not isinstance(condition.fallthrough_target, int):
+        return StructuredArmOrientationEvidence8616(
+            SingleBranchReturnOrientation8616.UNKNOWN_REFUSE,
+            (),
+            (),
+            (),
+            tuple(sorted(set(body_targets))),
+            (),
+        )
+    taken, fallthrough, shared, unreachable = _classify_targets_8616(
+        condition,
+        body_targets,
+        successors,
+    )
     orientation = SingleBranchReturnOrientation8616.UNKNOWN_REFUSE
     direct_shared: tuple[bool, ...] = ()
     if unreachable:

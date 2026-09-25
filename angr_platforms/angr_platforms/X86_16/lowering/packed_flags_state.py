@@ -29,6 +29,7 @@ from angr.sim_variable import SimMemoryVariable, SimRegisterVariable
 
 from ..c_ast_utils import _iter_c_nodes_deep_8616
 from ..ir.status_flag_lift_context import (
+    StatusFlagLiftArtifact8616,
     active_status_flag_lift_artifact_8616,
     resolve_status_flag_lift_artifact_8616,
 )
@@ -123,38 +124,21 @@ def _flags_inputs_8616(
     return inputs
 
 
-def lower_packed_flags_live_in_8616(codegen: object) -> bool:
-    """Initialize proven packed-FLAGS update inputs from runtime FLAGS."""
-    boundary = cast(_FlagsCodegen8616, codegen)
-    boundary._inertia_packed_flags_state_live_ins_8616 = ()
-    project = boundary.project
-    cfunc = boundary.cfunc
-    empty = PackedFlagsStateStats8616(0, 0, 0, 0, 0)
-    if (
-        project is None
-        or cfunc is None
-        or not isinstance(cfunc.statements, structured_c.CStatement)
-    ):
-        boundary._inertia_packed_flags_state_stats_8616 = empty
-        return False
-    shape = project.arch.registers.get("flags")
-    artifact = active_status_flag_lift_artifact_8616(cfunc.addr)
-    if artifact is None:
-        resolution = resolve_status_flag_lift_artifact_8616(project, cfunc.addr)
-        artifact = resolution.artifact if resolution is not None else None
-    if shape is None or len(shape) < 2 or artifact is None:
-        boundary._inertia_packed_flags_state_stats_8616 = empty
-        return False
-    flags_shape = shape[:2]
-    candidates: dict[tuple[int, int, int, int | str], structured_c.CExpression] = {}
-    defined_identities: set[tuple[int, int, int, int | str]] = set()
-    definition_counts: dict[tuple[int, int, int, int | str], int] = {}
-    self_dependent_roots: dict[
-        tuple[int, int, int, int | str],
-        structured_c.CExpression,
-    ] = {}
-    all_inputs: dict[tuple[int, int, int, int | str], structured_c.CExpression] = {}
-    for node in _iter_c_nodes_deep_8616(cfunc.statements):
+_FlagsIdentity8616 = tuple[int, int, int, int | str]
+
+
+def _lift_candidates_8616(
+    statements: structured_c.CStatement,
+    artifact: StatusFlagLiftArtifact8616,
+    flags_shape: tuple[int, int],
+) -> dict[_FlagsIdentity8616, structured_c.CExpression]:
+    """Collect FLAGS-input exemplars at artifact-covered instruction sites."""
+    candidates: dict[_FlagsIdentity8616, structured_c.CExpression] = {}
+    defined_identities: set[_FlagsIdentity8616] = set()
+    definition_counts: dict[_FlagsIdentity8616, int] = {}
+    self_dependent_roots: dict[_FlagsIdentity8616, structured_c.CExpression] = {}
+    all_inputs: dict[_FlagsIdentity8616, structured_c.CExpression] = {}
+    for node in _iter_c_nodes_deep_8616(statements):
         if not isinstance(node, structured_c.CAssignment):
             continue
         lhs_identity = _identity_8616(node.lhs)
@@ -182,14 +166,30 @@ def lower_packed_flags_live_in_8616(codegen: object) -> bool:
         for identity, exemplar in self_dependent_roots.items()
         if definition_counts.get(identity) == 1
     )
-    existing = {
+    return candidates
+
+
+def _existing_flag_identities_8616(
+    statements: structured_c.CStatement,
+) -> set[_FlagsIdentity8616 | None]:
+    """Return identities already bound to a runtime FLAGS-state variable."""
+    return {
         _identity_8616(node.lhs)
-        for node in _iter_c_nodes_deep_8616(cfunc.statements)
+        for node in _iter_c_nodes_deep_8616(statements)
         if isinstance(node, structured_c.CAssignment)
         and isinstance(node.rhs, structured_c.CVariable)
         and isinstance(node.rhs.variable, SimMemoryVariable)
         and node.rhs.variable.category == "inertia_flags_state"
     }
+
+
+def _materialize_flag_initializers_8616(
+    codegen: object,
+    cfunc: _FlagsCFunction8616,
+    candidates: dict[_FlagsIdentity8616, structured_c.CExpression],
+    existing: set[_FlagsIdentity8616 | None],
+) -> int:
+    """Insert runtime FLAGS initializers for candidates not already bound."""
     materialized = 0
     initializers: list[structured_c.CAssignment] = []
     for identity, exemplar in sorted(candidates.items(), key=lambda item: repr(item[0])):
@@ -217,15 +217,13 @@ def lower_packed_flags_live_in_8616(codegen: object) -> bool:
                 [*initializers, cfunc.statements],
                 codegen=codegen,
             )
-    if materialized:
-        record_global_declaration_spec_8616(
-            codegen,
-            ctype=GlobalDeclarationCType8616.UNSIGNED_SHORT,
-            name=_RUNTIME_FLAGS_NAME_8616,
-            array_len=None,
-        )
+    return materialized
+
+
+def _flags_live_in_owners_8616(statements: structured_c.CStatement) -> tuple[object, ...]:
+    """Collect owners of every runtime FLAGS-state assignment."""
     live_in_owners: list[object] = []
-    for node in _iter_c_nodes_deep_8616(cfunc.statements):
+    for node in _iter_c_nodes_deep_8616(statements):
         if not (
             isinstance(node, structured_c.CAssignment)
             and isinstance(node.rhs, structured_c.CVariable)
@@ -236,7 +234,78 @@ def lower_packed_flags_live_in_8616(codegen: object) -> bool:
         live_in_owners.append(node.lhs)
         if isinstance(node.lhs, structured_c.CVariable) and isinstance(node.lhs.variable.ident, (int, str)):
             live_in_owners.append(node.lhs.variable.ident)
-    boundary._inertia_packed_flags_state_live_ins_8616 = tuple(live_in_owners)
+    return tuple(live_in_owners)
+
+
+def _debug_packed_flags_8616(
+    cfunc: _FlagsCFunction8616,
+    artifact: StatusFlagLiftArtifact8616,
+    flags_shape: tuple[int, int],
+    candidates: dict[_FlagsIdentity8616, structured_c.CExpression],
+    existing: set[_FlagsIdentity8616 | None],
+    stats: PackedFlagsStateStats8616,
+) -> None:
+    """Emit the optional packed-FLAGS census dump for debugging."""
+    logging.getLogger(__name__).warning(
+        "[packed-flags-state] function=%#x sites=%s lift_candidates=%s candidates=%s existing=%s stats=%s assignments=%s",
+        cfunc.addr,
+        tuple(sorted(artifact.packed_preservation_addresses)),
+        artifact.candidates,
+        tuple(sorted(candidates, key=repr)),
+        tuple(sorted((item for item in existing if item is not None), key=repr)),
+        stats,
+        tuple(
+            (
+                _identity_8616(node.lhs),
+                node.tags.get("ins_addr"),
+                tuple(sorted(_flags_inputs_8616(node.rhs, flags_shape), key=repr)),
+            )
+            for node in _iter_c_nodes_deep_8616(cfunc.statements)
+            if isinstance(node, structured_c.CAssignment)
+            and (_identity_8616(node.lhs) or (None, None))[:2] == flags_shape
+        ),
+    )
+
+
+def lower_packed_flags_live_in_8616(codegen: object) -> bool:
+    """Initialize proven packed-FLAGS update inputs from runtime FLAGS."""
+    boundary = cast(_FlagsCodegen8616, codegen)
+    boundary._inertia_packed_flags_state_live_ins_8616 = ()
+    project = boundary.project
+    cfunc = boundary.cfunc
+    empty = PackedFlagsStateStats8616(0, 0, 0, 0, 0)
+    if (
+        project is None
+        or cfunc is None
+        or not isinstance(cfunc.statements, structured_c.CStatement)
+    ):
+        boundary._inertia_packed_flags_state_stats_8616 = empty
+        return False
+    shape = project.arch.registers.get("flags")
+    artifact = active_status_flag_lift_artifact_8616(cfunc.addr)
+    if artifact is None:
+        resolution = resolve_status_flag_lift_artifact_8616(project, cfunc.addr)
+        artifact = resolution.artifact if resolution is not None else None
+    if shape is None or len(shape) < 2 or artifact is None:
+        boundary._inertia_packed_flags_state_stats_8616 = empty
+        return False
+    flags_shape = shape[:2]
+    statements = cfunc.statements
+    candidates = _lift_candidates_8616(statements, artifact, flags_shape)
+    existing = _existing_flag_identities_8616(statements)
+    materialized = _materialize_flag_initializers_8616(
+        codegen, cfunc, candidates, existing
+    )
+    if materialized:
+        record_global_declaration_spec_8616(
+            codegen,
+            ctype=GlobalDeclarationCType8616.UNSIGNED_SHORT,
+            name=_RUNTIME_FLAGS_NAME_8616,
+            array_len=None,
+        )
+    boundary._inertia_packed_flags_state_live_ins_8616 = _flags_live_in_owners_8616(
+        cfunc.statements
+    )
     count = len(candidates)
     boundary._inertia_packed_flags_state_stats_8616 = PackedFlagsStateStats8616(
         count,
@@ -246,23 +315,12 @@ def lower_packed_flags_live_in_8616(codegen: object) -> bool:
         count - materialized if not existing else 0,
     )
     if os.environ.get("INERTIA_DEBUG_PACKED_FLAGS") == "1":
-        logging.getLogger(__name__).warning(
-            "[packed-flags-state] function=%#x sites=%s lift_candidates=%s candidates=%s existing=%s stats=%s assignments=%s",
-            cfunc.addr,
-            tuple(sorted(artifact.packed_preservation_addresses)),
-            artifact.candidates,
-            tuple(sorted(candidates, key=repr)),
-            tuple(sorted((item for item in existing if item is not None), key=repr)),
+        _debug_packed_flags_8616(
+            cfunc,
+            artifact,
+            flags_shape,
+            candidates,
+            existing,
             boundary._inertia_packed_flags_state_stats_8616,
-            tuple(
-                (
-                    _identity_8616(node.lhs),
-                    node.tags.get("ins_addr"),
-                    tuple(sorted(_flags_inputs_8616(node.rhs, flags_shape), key=repr)),
-                )
-                for node in _iter_c_nodes_deep_8616(cfunc.statements)
-                if isinstance(node, structured_c.CAssignment)
-                and (_identity_8616(node.lhs) or (None, None))[:2] == flags_shape
-            ),
         )
     return materialized > 0

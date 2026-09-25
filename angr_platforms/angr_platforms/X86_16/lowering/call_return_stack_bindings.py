@@ -171,21 +171,11 @@ def materialize_call_return_stack_destination_8616(
     return materialized if isinstance(materialized, structured_c.CVariable) else None
 
 
-def bind_call_return_stack_assignment_8616(
-    node: object,
+def _proven_stack_store_evidence_8616(
+    node: structured_c.CAssignment,
     codegen: object,
-) -> CallReturnStackBindingResult8616:
-    """Bind one exact stack call-result assignment without rebuilding its call.
-
-    A callsite tag identifies the typed summary. The current left side must be
-    either its exact return-register carrier or the proven machine-BP stack
-    destination. The call expression and its arguments remain unchanged.
-    """
-    if not isinstance(node, structured_c.CAssignment):
-        return CallReturnStackBindingResult8616(
-            node,
-            CallReturnStackBindingStatus8616.NOT_APPLICABLE,
-        )
+) -> CallReturnStackStoreEvidence8616 | CallReturnStackBindingResult8616:
+    """Return the proven stack store evidence or an early binding refusal."""
     call = _direct_call_8616(node.rhs)
     lhs = node.lhs
     if call is None or not isinstance(lhs, structured_c.CVariable):
@@ -237,6 +227,29 @@ def bind_call_return_stack_assignment_8616(
             raw_fact_count=1,
             normalized_fact_count=1,
         )
+    return evidence
+
+
+def bind_call_return_stack_assignment_8616(
+    node: object,
+    codegen: object,
+) -> CallReturnStackBindingResult8616:
+    """Bind one exact stack call-result assignment without rebuilding its call.
+
+    A callsite tag identifies the typed summary. The current left side must be
+    either its exact return-register carrier or the proven machine-BP stack
+    destination. The call expression and its arguments remain unchanged.
+    """
+    if not isinstance(node, structured_c.CAssignment):
+        return CallReturnStackBindingResult8616(
+            node,
+            CallReturnStackBindingStatus8616.NOT_APPLICABLE,
+        )
+    gated = _proven_stack_store_evidence_8616(node, codegen)
+    if isinstance(gated, CallReturnStackBindingResult8616):
+        return gated
+    evidence = gated
+    lhs = cast(structured_c.CVariable, node.lhs)
     projected = materialize_call_return_stack_destination_8616(
         codegen,
         evidence,

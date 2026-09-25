@@ -7,7 +7,7 @@ Forbidden: inventing string helper calls without artifact evidence and recorded 
 from __future__ import annotations
 
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from .string_instruction_artifact import (
@@ -170,87 +170,100 @@ def _scan_tail_family(records: tuple[StringInstructionRecord, ...]) -> StringInt
     )
 
 
+def _strlen_copy_pair_8616(records: tuple[StringInstructionRecord, ...]) -> StringIntrinsicArtifact | None:
+    """Merge a proven strlen+copy record pair into one strlen_copy intrinsic."""
+    if len(records) != 2:
+        return None
+    first_family = _single_record_family(records[0])
+    second_family = _single_record_family(records[1])
+    if (
+        first_family == "strlen_class"
+        and second_family in {"memcpy_class", "memmove_class"}
+        and records[1].width == 1
+    ):
+        return StringIntrinsicArtifact(
+            records=(
+                StringIntrinsicRecord(
+                    index=0,
+                    family="strlen_copy_class",
+                    record_indexes=(records[0].index, records[1].index),
+                    width=1,
+                    direction_mode=records[1].direction_mode,
+                    repeat_kind=records[1].repeat_kind,
+                ),
+            )
+        )
+    scan_tail = _scan_tail_family(records)
+    if scan_tail is not None:
+        return StringIntrinsicArtifact(records=(scan_tail,))
+    return None
+
+
+def _lowered_intrinsic_records_8616(
+    records: tuple[StringInstructionRecord, ...],
+) -> tuple[list[StringIntrinsicRecord], list[StringIntrinsicRefusal]]:
+    """Lower each proven record family or refuse it explicitly."""
+    lowered_records: list[StringIntrinsicRecord] = []
+    refusals: list[StringIntrinsicRefusal] = []
+    for rec in records:
+        family = _single_record_family(rec)
+        if family is None:
+            refusals.append(
+                StringIntrinsicRefusal(
+                    "unsupported_string_family",
+                    f"no proven generic lowering for {rec.repeat_kind} {rec.mnemonic}",
+                    (rec.index,),
+                )
+            )
+            continue
+        lowered_records.append(
+            StringIntrinsicRecord(
+                index=len(lowered_records),
+                family=family,
+                record_indexes=(rec.index,),
+                width=rec.width,
+                direction_mode=rec.direction_mode,
+                repeat_kind=rec.repeat_kind,
+            )
+        )
+    return lowered_records, refusals
+
+
 def build_x86_16_string_intrinsic_artifact(artifact: StringInstructionArtifact) -> StringIntrinsicArtifact:
     """Lower proven string-instruction evidence into generic intrinsic classes."""
-
-    def _impl() -> StringIntrinsicArtifact:
-        mixed_movs = _mixed_movs_family(artifact.records)
-        if artifact.refusals and mixed_movs is None:
-            return StringIntrinsicArtifact(
-                refusals=tuple(StringIntrinsicRefusal(item.kind, item.detail) for item in artifact.refusals)
-            )
-        if not artifact.records:
-            return StringIntrinsicArtifact(
-                refusals=(StringIntrinsicRefusal("no_string_artifact", "no string instruction artifact available"),)
-            )
-
-        records = artifact.records
-        if len(records) == 2:
-            first_family = _single_record_family(records[0])
-            second_family = _single_record_family(records[1])
-            if (
-                first_family == "strlen_class"
-                and second_family in {"memcpy_class", "memmove_class"}
-                and records[1].width == 1
-            ):
-                return StringIntrinsicArtifact(
-                    records=(
-                        StringIntrinsicRecord(
-                            index=0,
-                            family="strlen_copy_class",
-                            record_indexes=(records[0].index, records[1].index),
-                            width=1,
-                            direction_mode=records[1].direction_mode,
-                            repeat_kind=records[1].repeat_kind,
-                        ),
-                    )
-                )
-            scan_tail = _scan_tail_family(records)
-            if scan_tail is not None:
-                return StringIntrinsicArtifact(records=(scan_tail,))
-
-        if mixed_movs is not None:
-            residual_refusals = tuple(
-                StringIntrinsicRefusal(item.kind, item.detail)
-                for item in artifact.refusals
-                if item.kind != "mixed_direction_signal"
-            )
-            return StringIntrinsicArtifact(records=(mixed_movs,), refusals=residual_refusals)
-
-        lowered_records: list[StringIntrinsicRecord] = []
-        refusals: list[StringIntrinsicRefusal] = []
-        for rec in records:
-            family = _single_record_family(rec)
-            if family is None:
-                refusals.append(
-                    StringIntrinsicRefusal(
-                        "unsupported_string_family",
-                        f"no proven generic lowering for {rec.repeat_kind} {rec.mnemonic}",
-                        (rec.index,),
-                    )
-                )
-                continue
-            lowered_records.append(
-                StringIntrinsicRecord(
-                    index=len(lowered_records),
-                    family=family,
-                    record_indexes=(rec.index,),
-                    width=rec.width,
-                    direction_mode=rec.direction_mode,
-                    repeat_kind=rec.repeat_kind,
-                )
-            )
-        if not lowered_records and not refusals:
-            refusals.append(
-                StringIntrinsicRefusal("no_lowering_signal", "string artifact produced no generic lowering")
-            )
+    mixed_movs = _mixed_movs_family(artifact.records)
+    if artifact.refusals and mixed_movs is None:
         return StringIntrinsicArtifact(
-            records=tuple(lowered_records),
-            refusals=tuple(refusals),
-            coverage=artifact.coverage,
+            refusals=tuple(StringIntrinsicRefusal(item.kind, item.detail) for item in artifact.refusals)
+        )
+    if not artifact.records:
+        return StringIntrinsicArtifact(
+            refusals=(StringIntrinsicRefusal("no_string_artifact", "no string instruction artifact available"),)
         )
 
-    return _impl()
+    records = artifact.records
+    pair = _strlen_copy_pair_8616(records)
+    if pair is not None:
+        return pair
+
+    if mixed_movs is not None:
+        residual_refusals = tuple(
+            StringIntrinsicRefusal(item.kind, item.detail)
+            for item in artifact.refusals
+            if item.kind != "mixed_direction_signal"
+        )
+        return StringIntrinsicArtifact(records=(mixed_movs,), refusals=residual_refusals)
+
+    lowered_records, refusals = _lowered_intrinsic_records_8616(records)
+    if not lowered_records and not refusals:
+        refusals.append(
+            StringIntrinsicRefusal("no_lowering_signal", "string artifact produced no generic lowering")
+        )
+    return StringIntrinsicArtifact(
+        records=tuple(lowered_records),
+        refusals=tuple(refusals),
+        coverage=artifact.coverage,
+    )
 
 
 def _render_header() -> str:
@@ -273,135 +286,163 @@ def _render_header() -> str:
     )
 
 
+@dataclass
+class _IntrinsicRender8616:
+    """Shared per-record rendering state for intrinsic diagnostic C."""
+
+    lines: list[str]
+    declared_length: bool = False
+    declared_compare: bool = False
+
+    def _width_args(self, width: int) -> str:
+        """Return call arguments for one width-taking intrinsic."""
+        return str(width)
+
+    def _state_args(self) -> str:
+        """Return call arguments for the state-taking overlap intrinsic."""
+        return ""
+
+    def _declare_length(self) -> None:
+        if not self.declared_length:
+            self.lines.append("    unsigned short __x86_16_length;")
+            self.declared_length = True
+
+    def _declare_compare(self) -> None:
+        if not self.declared_compare:
+            self.lines.append("    int __x86_16_compare;")
+            self.declared_compare = True
+
+    def _emit_movs(self, rec: StringIntrinsicRecord) -> None:
+        self.lines.append(f"    /* {rec.family}, width={rec.width}, direction={rec.direction_mode} */")
+        self.lines.append(f"    __x86_16_movs({self._width_args(rec.width)});")
+
+    def _emit_overlap(self) -> None:
+        self.lines.append("    /* memmove_overlap_class: mixed forward/backward movs evidence */")
+        self.lines.append(f"    __x86_16_movs_overlap_select({self._state_args()});")
+
+    def _emit_stos(self, rec: StringIntrinsicRecord) -> None:
+        self.lines.append(f"    /* memset_class, width={rec.width}, direction={rec.direction_mode} */")
+        self.lines.append(f"    __x86_16_stos({self._width_args(rec.width)});")
+
+    def _emit_strlen(self, rec: StringIntrinsicRecord) -> None:
+        self._declare_length()
+        self.lines.append("    /* strlen_class */")
+        self.lines.append(f"    __x86_16_length = __x86_16_scas_zterm_len({self._width_args(rec.width)});")
+
+    def _emit_cmps(self, rec: StringIntrinsicRecord) -> None:
+        self._declare_compare()
+        self.lines.append(f"    /* memcmp_class, width={rec.width} */")
+        self.lines.append(f"    __x86_16_compare = __x86_16_cmps({self._width_args(rec.width)});")
+
+    def _emit_scan_tail(self, rec: StringIntrinsicRecord) -> None:
+        self._declare_length()
+        self.lines.append("    /* scan_tail_class */")
+        self.lines.append(f"    __x86_16_length = __x86_16_scan_tail({self._width_args(rec.width)});")
+
+    def _emit_strlen_copy(self, rec: StringIntrinsicRecord) -> None:
+        """Render the merged strlen-copy arm; absent in the compact surface."""
+
+    def record(self, rec: StringIntrinsicRecord) -> None:
+        """Emit the render lines for one intrinsic record family."""
+        if rec.family in {"memcpy_class", "memmove_class", "movs_class"}:
+            self._emit_movs(rec)
+            return
+        if rec.family == "memmove_overlap_class":
+            self._emit_overlap()
+            return
+        if rec.family == "memset_class":
+            self._emit_stos(rec)
+            return
+        if rec.family == "strlen_class":
+            self._emit_strlen(rec)
+            return
+        if rec.family == "memcmp_class":
+            self._emit_cmps(rec)
+            return
+        if rec.family == "scan_tail_class":
+            self._emit_scan_tail(rec)
+            return
+        if rec.family == "strlen_copy_class":
+            self._emit_strlen_copy(rec)
+            return
+
+
+_COMPACT_PROTOTYPES_8616: dict[str, str] = {
+    "memcpy_class": "void __x86_16_movs(unsigned short width);",
+    "memmove_class": "void __x86_16_movs(unsigned short width);",
+    "movs_class": "void __x86_16_movs(unsigned short width);",
+    "memmove_overlap_class": "void __x86_16_movs_overlap_select(void);",
+    "memset_class": "void __x86_16_stos(unsigned short width);",
+    "strlen_class": "unsigned short __x86_16_scas_zterm_len(unsigned short width);",
+    "memcmp_class": "int __x86_16_cmps(unsigned short width);",
+    "scan_tail_class": "unsigned short __x86_16_scan_tail(unsigned short width);",
+}
+
+
+@dataclass
+class _CompactIntrinsicRender8616(_IntrinsicRender8616):
+    """Compact renderer collecting unique prototypes per record family."""
+
+    prototype_lines: list[str] = field(default_factory=list)
+    declared_prototypes: set[str] = field(default_factory=set)
+
+    def record(self, rec: StringIntrinsicRecord) -> None:
+        prototype = _COMPACT_PROTOTYPES_8616[rec.family]
+        if prototype not in self.declared_prototypes:
+            self.prototype_lines.append(prototype)
+            self.declared_prototypes.add(prototype)
+        super().record(rec)
+
+
 def _render_compact_intrinsic_c(name: str, artifact: StringIntrinsicArtifact) -> str | None:
-    def _impl() -> str | None:
-        prototype_map = {
-            "memcpy_class": "void __x86_16_movs(unsigned short width);",
-            "memmove_class": "void __x86_16_movs(unsigned short width);",
-            "movs_class": "void __x86_16_movs(unsigned short width);",
-            "memmove_overlap_class": "void __x86_16_movs_overlap_select(void);",
-            "memset_class": "void __x86_16_stos(unsigned short width);",
-            "strlen_class": "unsigned short __x86_16_scas_zterm_len(unsigned short width);",
-            "memcmp_class": "int __x86_16_cmps(unsigned short width);",
-            "scan_tail_class": "unsigned short __x86_16_scan_tail(unsigned short width);",
-        }
-        if not artifact.records:
-            return None
-        families = {rec.family for rec in artifact.records}
-        if "strlen_copy_class" in families:
-            return None
-        if any(family not in prototype_map for family in families):
-            return None
+    if not artifact.records:
+        return None
+    families = {rec.family for rec in artifact.records}
+    if "strlen_copy_class" in families:
+        return None
+    if any(family not in _COMPACT_PROTOTYPES_8616 for family in families):
+        return None
 
-        prototype_lines: list[str] = []
-        declared_prototypes: set[str] = set()
-        lines = [f"void {name}(void)\n{{"]
-        declared_length = False
-        declared_compare = False
-        for rec in artifact.records:
-            prototype = prototype_map[rec.family]
-            if prototype not in declared_prototypes:
-                prototype_lines.append(prototype)
-                declared_prototypes.add(prototype)
-            if rec.family in {"memcpy_class", "memmove_class", "movs_class"}:
-                lines.append(f"    /* {rec.family}, width={rec.width}, direction={rec.direction_mode} */")
-                lines.append(f"    __x86_16_movs({rec.width});")
-                continue
-            if rec.family == "memmove_overlap_class":
-                lines.append("    /* memmove_overlap_class: mixed forward/backward movs evidence */")
-                lines.append("    __x86_16_movs_overlap_select();")
-                continue
-            if rec.family == "memset_class":
-                lines.append(f"    /* memset_class, width={rec.width}, direction={rec.direction_mode} */")
-                lines.append(f"    __x86_16_stos({rec.width});")
-                continue
-            if rec.family == "strlen_class":
-                if not declared_length:
-                    lines.append("    unsigned short __x86_16_length;")
-                    declared_length = True
-                lines.append("    /* strlen_class */")
-                lines.append(f"    __x86_16_length = __x86_16_scas_zterm_len({rec.width});")
-                continue
-            if rec.family == "memcmp_class":
-                if not declared_compare:
-                    lines.append("    int __x86_16_compare;")
-                    declared_compare = True
-                lines.append(f"    /* memcmp_class, width={rec.width} */")
-                lines.append(f"    __x86_16_compare = __x86_16_cmps({rec.width});")
-                continue
-            if rec.family == "scan_tail_class":
-                if not declared_length:
-                    lines.append("    unsigned short __x86_16_length;")
-                    declared_length = True
-                lines.append("    /* scan_tail_class */")
-                lines.append(f"    __x86_16_length = __x86_16_scan_tail({rec.width});")
-                continue
-        lines.append("}")
-        return "\n".join([*prototype_lines, "", *lines]) + "\n"
+    render = _CompactIntrinsicRender8616(lines=[f"void {name}(void)\n{{"])
+    for rec in artifact.records:
+        render.record(rec)
+    render.lines.append("}")
+    return "\n".join([*render.prototype_lines, "", *render.lines]) + "\n"
 
-    return _impl()
+
+@dataclass
+class _FullIntrinsicRender8616(_IntrinsicRender8616):
+    """State-struct renderer including the merged strlen-copy arm."""
+
+    def _width_args(self, width: int) -> str:
+        return f"&__x86_16_state, {width}"
+
+    def _state_args(self) -> str:
+        return "&__x86_16_state"
+
+    def _emit_strlen_copy(self, rec: StringIntrinsicRecord) -> None:
+        self._declare_length()
+        self.lines.append("    /* strlen_copy_class */")
+        self.lines.append("    __x86_16_length = __x86_16_scas_zterm_len(&__x86_16_state, 1);")
+        self.lines.append("    __x86_16_state.cx = (unsigned short)(__x86_16_length + 1);")
+        self.lines.append("    __x86_16_movs(&__x86_16_state, 1);")
 
 
 def render_x86_16_string_intrinsic_c(name: str, artifact: StringIntrinsicArtifact) -> str | None:
     """Render diagnostic C for proven string intrinsic classes."""
+    if not artifact.records:
+        return None
+    compact = _render_compact_intrinsic_c(name, artifact)
+    if compact is not None:
+        return compact
 
-    def _impl() -> str | None:
-        if not artifact.records:
-            return None
-        compact = _render_compact_intrinsic_c(name, artifact)
-        if compact is not None:
-            return compact
-
-        lines = [_render_header(), f"void {name}(void)\n{{", "    __x86_16_string_state __x86_16_state;"]
-        declared_length = False
-        declared_compare = False
-        for rec in artifact.records:
-            if rec.family in {"memcpy_class", "memmove_class", "movs_class"}:
-                lines.append(f"    /* {rec.family}, width={rec.width}, direction={rec.direction_mode} */")
-                lines.append(f"    __x86_16_movs(&__x86_16_state, {rec.width});")
-                continue
-            if rec.family == "memmove_overlap_class":
-                lines.append("    /* memmove_overlap_class: mixed forward/backward movs evidence */")
-                lines.append("    __x86_16_movs_overlap_select(&__x86_16_state);")
-                continue
-            if rec.family == "memset_class":
-                lines.append(f"    /* memset_class, width={rec.width}, direction={rec.direction_mode} */")
-                lines.append(f"    __x86_16_stos(&__x86_16_state, {rec.width});")
-                continue
-            if rec.family == "strlen_class":
-                if not declared_length:
-                    lines.append("    unsigned short __x86_16_length;")
-                    declared_length = True
-                lines.append("    /* strlen_class */")
-                lines.append(f"    __x86_16_length = __x86_16_scas_zterm_len(&__x86_16_state, {rec.width});")
-                continue
-            if rec.family == "memcmp_class":
-                if not declared_compare:
-                    lines.append("    int __x86_16_compare;")
-                    declared_compare = True
-                lines.append(f"    /* memcmp_class, width={rec.width} */")
-                lines.append(f"    __x86_16_compare = __x86_16_cmps(&__x86_16_state, {rec.width});")
-                continue
-            if rec.family == "strlen_copy_class":
-                if not declared_length:
-                    lines.append("    unsigned short __x86_16_length;")
-                    declared_length = True
-                lines.append("    /* strlen_copy_class */")
-                lines.append("    __x86_16_length = __x86_16_scas_zterm_len(&__x86_16_state, 1);")
-                lines.append("    __x86_16_state.cx = (unsigned short)(__x86_16_length + 1);")
-                lines.append("    __x86_16_movs(&__x86_16_state, 1);")
-                continue
-            if rec.family == "scan_tail_class":
-                if not declared_length:
-                    lines.append("    unsigned short __x86_16_length;")
-                    declared_length = True
-                lines.append("    /* scan_tail_class */")
-                lines.append(f"    __x86_16_length = __x86_16_scan_tail(&__x86_16_state, {rec.width});")
-                continue
-        lines.append("}")
-        return "\n".join(lines) + "\n"
-
-    return _impl()
+    render = _FullIntrinsicRender8616(
+        lines=[_render_header(), f"void {name}(void)\n{{", "    __x86_16_string_state __x86_16_state;"]
+    )
+    for rec in artifact.records:
+        render.record(rec)
+    render.lines.append("}")
+    return "\n".join(render.lines) + "\n"
 
 
 def apply_x86_16_string_instruction_lowering(project: _ProjectLike, codegen: object) -> bool:

@@ -12,7 +12,7 @@ Do not perform structuring, rewrite, postprocess, or CLI/reporting work here.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Protocol, cast
 
 from ..alias.indexed_address_access_classification import (
@@ -89,6 +89,54 @@ def _keys_by_site_8616(
     }
 
 
+def _classify_unmatched_key_8616(
+    side: IndexedAddressCollectorSide8616,
+    key: IndexedAddressCollectorKey8616,
+    counterparts: tuple[IndexedAddressCollectorKey8616, ...],
+    alias_failures_by_addr: Mapping[int, list[IndexedAddressAliasFailureKind8616]],
+    ir_failures_by_addr: Mapping[int, list[IndexedAddressFailureKind8616]],
+) -> IndexedAddressCollectorMismatch8616:
+    """Classify one unmatched key against counterparts and typed refusals."""
+    if counterparts:
+        return IndexedAddressCollectorMismatch8616(
+            side,
+            IndexedAddressMismatchKind8616.IDENTITY_CONFLICT,
+            key,
+            counterparts,
+        )
+    if side is IndexedAddressCollectorSide8616.ALIAS:
+        return IndexedAddressCollectorMismatch8616(
+            side,
+            IndexedAddressMismatchKind8616.ALIAS_ONLY_NO_LEGACY_CANDIDATE,
+            key,
+        )
+    alias_failures = tuple(
+        sorted(alias_failures_by_addr.get(key.instr_addr, ()), key=lambda item: item.value)
+    )
+    ir_failures = tuple(
+        sorted(ir_failures_by_addr.get(key.instr_addr, ()), key=lambda item: item.value)
+    )
+    if alias_failures:
+        return IndexedAddressCollectorMismatch8616(
+            side,
+            IndexedAddressMismatchKind8616.LEGACY_ONLY_ALIAS_REFUSED,
+            key,
+            alias_failures=alias_failures,
+        )
+    if ir_failures:
+        return IndexedAddressCollectorMismatch8616(
+            side,
+            IndexedAddressMismatchKind8616.LEGACY_ONLY_IR_REFUSED,
+            key,
+            ir_failures=ir_failures,
+        )
+    return IndexedAddressCollectorMismatch8616(
+        side,
+        IndexedAddressMismatchKind8616.LEGACY_ONLY_NO_IR_CANDIDATE,
+        key,
+    )
+
+
 def classify_indexed_address_mismatches_8616(
     alias_evidence: IndexedAddressAliasEvidence8616,
     parity: IndexedAddressCollectorParity8616,
@@ -123,48 +171,15 @@ def classify_indexed_address_mismatches_8616(
         (IndexedAddressCollectorSide8616.LEGACY, parity.legacy_only, alias_keys_by_site),
     ):
         for key in unmatched:
-            counterparts = counterparts_by_site.get((key.kind, key.instr_addr), ())
-            if counterparts:
-                mismatch = IndexedAddressCollectorMismatch8616(
+            mismatches.append(
+                _classify_unmatched_key_8616(
                     side,
-                    IndexedAddressMismatchKind8616.IDENTITY_CONFLICT,
                     key,
-                    counterparts,
+                    counterparts_by_site.get((key.kind, key.instr_addr), ()),
+                    alias_failures_by_addr,
+                    ir_failures_by_addr,
                 )
-            elif side is IndexedAddressCollectorSide8616.ALIAS:
-                mismatch = IndexedAddressCollectorMismatch8616(
-                    side,
-                    IndexedAddressMismatchKind8616.ALIAS_ONLY_NO_LEGACY_CANDIDATE,
-                    key,
-                )
-            else:
-                alias_failures = tuple(
-                    sorted(alias_failures_by_addr.get(key.instr_addr, ()), key=lambda item: item.value)
-                )
-                ir_failures = tuple(
-                    sorted(ir_failures_by_addr.get(key.instr_addr, ()), key=lambda item: item.value)
-                )
-                if alias_failures:
-                    mismatch = IndexedAddressCollectorMismatch8616(
-                        side,
-                        IndexedAddressMismatchKind8616.LEGACY_ONLY_ALIAS_REFUSED,
-                        key,
-                        alias_failures=alias_failures,
-                    )
-                elif ir_failures:
-                    mismatch = IndexedAddressCollectorMismatch8616(
-                        side,
-                        IndexedAddressMismatchKind8616.LEGACY_ONLY_IR_REFUSED,
-                        key,
-                        ir_failures=ir_failures,
-                    )
-                else:
-                    mismatch = IndexedAddressCollectorMismatch8616(
-                        side,
-                        IndexedAddressMismatchKind8616.LEGACY_ONLY_NO_IR_CANDIDATE,
-                        key,
-                    )
-            mismatches.append(mismatch)
+            )
     result = tuple(sorted(mismatches, key=_mismatch_order_8616))
     if not all(mismatch.complete for mismatch in result):
         raise PipelineHardError(

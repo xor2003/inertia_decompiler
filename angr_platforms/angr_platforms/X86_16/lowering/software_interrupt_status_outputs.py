@@ -13,7 +13,7 @@ source, assembly, or rendered C text.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -369,6 +369,7 @@ def materialize_software_interrupt_status_outputs_8616(codegen: object) -> bool:
         surface._inertia_software_interrupt_status_output_stats_8616 = stats
         return False
     flags_offset = int(flags_info[0])
+    flags_size = int(flags_info[1])
     raw = normalized = classified = materialized = failures = 0
     changed = False
     containers = tuple(
@@ -378,96 +379,15 @@ def materialize_software_interrupt_status_outputs_8616(codegen: object) -> bool:
     )
     for container in containers:
         statements = list(container.statements or ())
-        pending: tuple[int, int] | None = None
-        insertions: dict[int, structured_c.CAssignment] = {}
-        carrier_rewrites: list[tuple[object, structured_c.CExpression, int]] = []
+        scan = _StatusOutputScan8616(codegen, flags_offset, flags_size)
         for index, statement in enumerate(statements):
-            calls = _calls_in_statement_8616(statement)
-            interrupt_calls = tuple(call for call in calls if _is_dos_int21_call_8616(call))
-            if interrupt_calls:
-                if len(interrupt_calls) != 1:
-                    pending = None
-                    continue
-                callsite_addr = _interrupt_callsite_address_8616(
-                    statement,
-                    interrupt_calls[0],
-                )
-                pending = (index, callsite_addr) if isinstance(callsite_addr, int) else None
-                continue
-            carriers = _flags_carriers_8616(statement, flags_offset)
-            if carriers and pending is not None:
-                raw += 1
-                call_index, callsite_addr = pending
-                read_addr = _instruction_address_8616(statement)
-                if len(carriers) != 1 or (
-                    isinstance(read_addr, int)
-                    and callsite_addr != interrupt_core_addr_8616(0x21)
-                    and read_addr <= callsite_addr
-                ):
-                    failures += 1
-                    pending = None
-                    continue
-                normalized += 1
-                classified += 1
-                carrier = _canonical_flags_carrier_8616(
-                    carriers[0],
-                    flags_offset,
-                    int(flags_info[1]),
-                    codegen,
-                )
-                carrier_rewrites.append(
-                    (
-                        _transparent_statement_leaf_8616(statement),
-                        carrier,
-                        callsite_addr,
-                    )
-                )
-                if call_index + 1 < len(statements):
-                    existing_calls = _calls_in_statement_8616(statements[call_index + 1])
-                    if any(_is_status_accessor_call_8616(call) for call in existing_calls):
-                        materialized += 1
-                        pending = None
-                        continue
-                insertions[call_index] = _status_assignment_8616(
-                    carrier,
-                    callsite_addr,
-                    codegen,
-                )
-                materialized += 1
-                pending = None
-                continue
-            if pending is not None and (
-                _writes_flags_8616(statement, flags_offset)
-                or any(not _is_status_accessor_call_8616(call) for call in calls)
-            ):
-                pending = None
-        if insertions:
-            rewritten: list[structured_c.CStatement] = []
-            for index, statement in enumerate(statements):
-                rewritten.append(statement)
-                insertion = insertions.get(index)
-                if insertion is not None:
-                    rewritten.append(insertion)
-            container.statements = rewritten
-            changed = True
-        for statement, carrier, callsite_addr in carrier_rewrites:
-            changed = (
-                _replace_stale_flags_projection_8616(
-                    statement,
-                    carrier,
-                    flags_offset,
-                    callsite_addr,
-                )
-                or changed
-            )
-            changed = (
-                _replace_dirty_flags_carriers_8616(
-                    statement,
-                    carrier,
-                    flags_offset,
-                )
-                or changed
-            )
+            scan.scan_statement(index, statement, statements)
+        changed = scan.apply(container, statements) or changed
+        raw += scan.raw
+        normalized += scan.normalized
+        classified += scan.classified
+        materialized += scan.materialized
+        failures += scan.failures
     stats = SoftwareInterruptStatusOutputStats8616(
         raw,
         normalized,
@@ -482,3 +402,141 @@ def materialize_software_interrupt_status_outputs_8616(codegen: object) -> bool:
             layer="lowering",
         )
     return changed
+
+
+@dataclass(slots=True)
+class _StatusOutputScan8616:
+    """Mutable per-container DOS-interrupt FLAGS consumer scan state."""
+
+    codegen: object
+    flags_offset: int
+    flags_size: int
+    pending: tuple[int, int] | None = None
+    insertions: dict[int, structured_c.CAssignment] = field(default_factory=dict)
+    carrier_rewrites: list[tuple[object, structured_c.CExpression, int]] = field(
+        default_factory=list
+    )
+    raw: int = 0
+    normalized: int = 0
+    classified: int = 0
+    materialized: int = 0
+    failures: int = 0
+
+    def scan_statement(
+        self,
+        index: int,
+        statement: object,
+        statements: list[structured_c.CStatement],
+    ) -> None:
+        """Advance the pending-interrupt state machine over one statement."""
+        calls = _calls_in_statement_8616(statement)
+        interrupt_calls = tuple(call for call in calls if _is_dos_int21_call_8616(call))
+        if interrupt_calls:
+            self._track_interrupt(index, statement, interrupt_calls)
+            return
+        carriers = _flags_carriers_8616(statement, self.flags_offset)
+        if carriers and self.pending is not None:
+            self._consume_carriers(statement, statements, carriers)
+            return
+        if self.pending is not None and (
+            _writes_flags_8616(statement, self.flags_offset)
+            or any(not _is_status_accessor_call_8616(call) for call in calls)
+        ):
+            self.pending = None
+
+    def _track_interrupt(
+        self,
+        index: int,
+        statement: object,
+        interrupt_calls: tuple[structured_c.CFunctionCall, ...],
+    ) -> None:
+        """Latch a single exact DOS interrupt callsite as pending."""
+        if len(interrupt_calls) != 1:
+            self.pending = None
+            return
+        callsite_addr = _interrupt_callsite_address_8616(statement, interrupt_calls[0])
+        self.pending = (index, callsite_addr) if isinstance(callsite_addr, int) else None
+
+    def _consume_carriers(
+        self,
+        statement: object,
+        statements: list[structured_c.CStatement],
+        carriers: tuple[structured_c.CExpression, ...],
+    ) -> None:
+        """Record insertion and carrier rewrites for the pending FLAGS read."""
+        self.raw += 1
+        assert self.pending is not None
+        call_index, callsite_addr = self.pending
+        read_addr = _instruction_address_8616(statement)
+        if len(carriers) != 1 or (
+            isinstance(read_addr, int)
+            and callsite_addr != interrupt_core_addr_8616(0x21)
+            and read_addr <= callsite_addr
+        ):
+            self.failures += 1
+            self.pending = None
+            return
+        self.normalized += 1
+        self.classified += 1
+        carrier = _canonical_flags_carrier_8616(
+            carriers[0],
+            self.flags_offset,
+            self.flags_size,
+            self.codegen,
+        )
+        self.carrier_rewrites.append(
+            (
+                _transparent_statement_leaf_8616(statement),
+                carrier,
+                callsite_addr,
+            )
+        )
+        if call_index + 1 < len(statements):
+            existing_calls = _calls_in_statement_8616(statements[call_index + 1])
+            if any(_is_status_accessor_call_8616(call) for call in existing_calls):
+                self.materialized += 1
+                self.pending = None
+                return
+        self.insertions[call_index] = _status_assignment_8616(
+            carrier,
+            callsite_addr,
+            self.codegen,
+        )
+        self.materialized += 1
+        self.pending = None
+
+    def apply(
+        self,
+        container: structured_c.CStatements,
+        statements: list[structured_c.CStatement],
+    ) -> bool:
+        """Apply recorded insertions and carrier rewrites to the container."""
+        changed = False
+        if self.insertions:
+            rewritten: list[structured_c.CStatement] = []
+            for index, statement in enumerate(statements):
+                rewritten.append(statement)
+                insertion = self.insertions.get(index)
+                if insertion is not None:
+                    rewritten.append(insertion)
+            container.statements = rewritten
+            changed = True
+        for statement, carrier, callsite_addr in self.carrier_rewrites:
+            changed = (
+                _replace_stale_flags_projection_8616(
+                    statement,
+                    carrier,
+                    self.flags_offset,
+                    callsite_addr,
+                )
+                or changed
+            )
+            changed = (
+                _replace_dirty_flags_carriers_8616(
+                    statement,
+                    carrier,
+                    self.flags_offset,
+                )
+                or changed
+            )
+        return changed

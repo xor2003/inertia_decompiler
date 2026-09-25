@@ -471,75 +471,94 @@ def machine_bp_offset_for_stack_variable_8616(
     if projection is not None:
         return projection.bp_offset
     if isinstance(variable.offset, int) and isinstance(variable.size, int):
-        projection = registry.for_equivalent_entry_sp_variable(variable)
-        if projection is not None:
-            return projection.bp_offset
-        named_projection = registry.for_named_entry_sp_variable(variable)
-        raw_projection = registry.for_bp_range(variable.offset, variable.size)
-        if (
-            named_projection is not None
-            and (
-                raw_projection is None
-                or raw_projection is named_projection
-                or raw_projection.display_name != variable.name
-            )
-        ):
-            return named_projection.bp_offset
-        projection = registry.for_entry_sp_range(variable.offset, variable.size)
-        if (
-            projection is not None
-            and registry.for_bp_range(variable.offset, variable.size) is None
-            and (
-                alias_excludes_stack_range_8616(
-                    codegen,
-                    variable.offset,
-                    variable.size,
-                )
-                or typed_frame_excludes_stack_range_8616(
-                    codegen,
-                    variable.offset,
-                    variable.size,
-                )
-            )
-        ):
-            return projection.bp_offset
-        if projection is not None:
-            return (
-                variable.offset
-                if raw_projection is None or raw_projection is projection
-                else None
-            )
-        projection = registry.containing_entry_sp_range(variable.offset, variable.size)
-        if projection is not None:
-            return projection.bp_offset + variable.offset - projection.entry_sp_offset
-        boundary = cast(_CodegenBoundary8616, codegen)
-        try:
-            source_alias = boundary._inertia_stack_memory_ssa_alias_artifact
-        except AttributeError:
-            source_alias = None
-        try:
-            frame = boundary._inertia_vex_ir_frame
-        except AttributeError:
-            frame = None
-        if isinstance(source_alias, StackMemorySSAAliasArtifact8616):
-            coordinate = project_stack_offset_to_machine_bp_8616(
-                source_alias,
-                frame,
-                variable.offset,
-                variable.size,
-            )
-            if coordinate.materialized and isinstance(coordinate.bp_offset, int):
-                return coordinate.bp_offset
-            if coordinate.status is StackCoordinateProjectionStatus8616.AMBIGUOUS:
-                return None
-        if variable.offset < 0:
-            c_function_offset = projected_c_function_machine_bp_offset_8616(
-                codegen,
-                variable,
-            )
-            if isinstance(c_function_offset, int):
-                return c_function_offset
+        decided, value = _entry_sp_offset_8616(codegen, registry, variable)
+        if decided:
+            return value
+        decided, value = _fallback_offset_8616(codegen, variable)
+        if decided:
+            return value
     return variable.offset if isinstance(variable.offset, int) else None
+
+
+def _entry_sp_offset_8616(
+    codegen: object,
+    registry: StackVariableCoordinateRegistry8616,
+    variable: SimStackVariable,
+) -> tuple[bool, int | None]:
+    """Resolve an entry-SP projection for one int-offset variable."""
+    offset = cast(int, variable.offset)
+    size = cast(int, variable.size)
+    projection = registry.for_equivalent_entry_sp_variable(variable)
+    if projection is not None:
+        return True, projection.bp_offset
+    named_projection = registry.for_named_entry_sp_variable(variable)
+    raw_projection = registry.for_bp_range(offset, size)
+    if (
+        named_projection is not None
+        and (
+            raw_projection is None
+            or raw_projection is named_projection
+            or raw_projection.display_name != variable.name
+        )
+    ):
+        return True, named_projection.bp_offset
+    projection = registry.for_entry_sp_range(offset, size)
+    if (
+        projection is not None
+        and registry.for_bp_range(offset, size) is None
+        and (
+            alias_excludes_stack_range_8616(codegen, offset, size)
+            or typed_frame_excludes_stack_range_8616(codegen, offset, size)
+        )
+    ):
+        return True, projection.bp_offset
+    if projection is not None:
+        return True, (
+            offset
+            if raw_projection is None or raw_projection is projection
+            else None
+        )
+    projection = registry.containing_entry_sp_range(offset, size)
+    if projection is not None:
+        return True, projection.bp_offset + offset - projection.entry_sp_offset
+    return False, None
+
+
+def _fallback_offset_8616(
+    codegen: object,
+    variable: SimStackVariable,
+) -> tuple[bool, int | None]:
+    """Resolve a machine-BP offset from alias artifacts or C-frame evidence."""
+    offset = cast(int, variable.offset)
+    size = cast(int, variable.size)
+    boundary = cast(_CodegenBoundary8616, codegen)
+    try:
+        source_alias = boundary._inertia_stack_memory_ssa_alias_artifact
+    except AttributeError:
+        source_alias = None
+    try:
+        frame = boundary._inertia_vex_ir_frame
+    except AttributeError:
+        frame = None
+    if isinstance(source_alias, StackMemorySSAAliasArtifact8616):
+        coordinate = project_stack_offset_to_machine_bp_8616(
+            source_alias,
+            frame,
+            offset,
+            size,
+        )
+        if coordinate.materialized and isinstance(coordinate.bp_offset, int):
+            return True, coordinate.bp_offset
+        if coordinate.status is StackCoordinateProjectionStatus8616.AMBIGUOUS:
+            return True, None
+    if offset < 0:
+        c_function_offset = projected_c_function_machine_bp_offset_8616(
+            codegen,
+            variable,
+        )
+        if isinstance(c_function_offset, int):
+            return True, c_function_offset
+    return False, None
 
 
 def stack_cvar_for_machine_bp_range_8616(

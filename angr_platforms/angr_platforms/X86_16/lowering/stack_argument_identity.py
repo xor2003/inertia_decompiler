@@ -11,7 +11,7 @@ prototype and alias facts already materialized by earlier pipeline owners.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -164,17 +164,26 @@ def _clone_argument_reference_8616(
     return clone
 
 
-def unify_positive_bp_argument_identity_8616(
-    codegen: object,
-) -> bool:
-    """Join body references to exact canonical positive-BP argument storage."""
-    typed_codegen = cast(_ArgumentIdentityCodegen8616, codegen)
+@dataclass(frozen=True, slots=True)
+class _ArgumentBoundary8616:
+    """Normalized cfunc boundary pieces consumed by the identity pass."""
+
+    cfunc: _ArgumentIdentityCFunction8616
+    argument_list: tuple[object, ...]
+    variables_in_use: object
+    unified_local_vars: object
+
+
+def _argument_boundary_8616(
+    typed_codegen: _ArgumentIdentityCodegen8616,
+) -> _ArgumentBoundary8616 | None:
+    """Return the normalized boundary pieces, or None when unavailable."""
     try:
         cfunc = typed_codegen.cfunc
     except AttributeError:
-        return False
+        return None
     if cfunc is None:
-        return False
+        return None
     # angr and focused codegen adapters may omit optional C-function indexes.
     # Normalize that dynamic boundary before applying owned identity contracts.
     try:
@@ -191,13 +200,26 @@ def unify_positive_bp_argument_identity_8616(
         unified_local_vars = None
     try:
         if typed_codegen._inertia_return_selector_materialized_8616:
-            return False
+            return None
     except AttributeError:
         pass
+    return _ArgumentBoundary8616(
+        cfunc,
+        argument_list,
+        variables_in_use,
+        unified_local_vars,
+    )
 
-    changed = bool(prune_unreferenced_pre_argument_declarations_8616(typed_codegen))
 
-    arguments_by_identity: dict[object, list[structured_c.CVariable]] = {}
+def _canonical_arguments_8616(
+    typed_codegen: _ArgumentIdentityCodegen8616,
+    argument_list: tuple[object, ...],
+) -> tuple[
+    dict[_StackSlotIdentity, structured_c.CVariable],
+    dict[int, structured_c.CVariable],
+]:
+    """Collect canonical argument references by identity and BP offset."""
+    arguments_by_identity: dict[_StackSlotIdentity, list[structured_c.CVariable]] = {}
     for candidate in argument_list:
         if not isinstance(candidate, structured_c.CVariable):
             continue
@@ -224,6 +246,118 @@ def unify_positive_bp_argument_identity_8616(
         for offset, arguments in arguments_by_offset.items()
         if len(arguments) == 1
     }
+    return canonical_by_identity, canonical_by_offset
+
+
+@dataclass(slots=True)
+class _ArgumentUnification8616:
+    """Mutable transform state for one argument-identity rewrite pass."""
+
+    codegen: _ArgumentIdentityCodegen8616
+    canonical_by_identity: Mapping[_StackSlotIdentity, structured_c.CVariable]
+    canonical_by_offset: Mapping[int, structured_c.CVariable]
+    changed: bool = False
+    raw_count: int = 0
+    normalized_count: int = 0
+    classified_count: int = 0
+    materialized_count: int = 0
+
+    def transform(self, node: object) -> object:
+        """Rewrite one node to its canonical argument reference."""
+        variable = _positive_stack_variable_8616(self.codegen, node)
+        indexed_offset = _indexed_stack_base_argument_offset_8616(node)
+        if variable is None and indexed_offset is None:
+            return node
+        self.raw_count += 1
+        if variable is not None:
+            identity = machine_bp_stack_identity_8616(self.codegen, variable)
+            if identity is None:
+                return node
+            argument = self.canonical_by_identity.get(identity)
+        else:
+            argument = self.canonical_by_offset.get(cast(int, indexed_offset))
+        self.normalized_count += 1
+        if argument is None:
+            return node
+        self.classified_count += 1
+        self.materialized_count += 1
+        if variable is not None and variable is argument.variable:
+            return node
+        self.changed = True
+        return _clone_argument_reference_8616(argument)
+
+
+def _merge_variables_in_use_8616(
+    typed_codegen: _ArgumentIdentityCodegen8616,
+    variables_in_use: dict[object, object],
+    canonical_by_identity: Mapping[_StackSlotIdentity, structured_c.CVariable],
+    canonical_variables: frozenset[object],
+) -> bool:
+    """Retarget or drop declaration-map entries bound to canonical arguments."""
+    changed = False
+    for variable, cvar in tuple(variables_in_use.items()):
+        if not isinstance(variable, SimStackVariable):
+            continue
+        identity = _machine_bp_stack_binding_identity_8616(
+            typed_codegen,
+            variable,
+            cvar,
+        )
+        argument = (
+            canonical_by_identity.get(identity) if identity is not None else None
+        )
+        if argument is None:
+            continue
+        if variable in canonical_variables:
+            if cvar is not argument:
+                variables_in_use[variable] = argument
+                changed = True
+            continue
+        del variables_in_use[variable]
+        changed = True
+    return changed
+
+
+def _merge_unified_local_vars_8616(
+    typed_codegen: _ArgumentIdentityCodegen8616,
+    unified_local_vars: dict[object, object],
+    canonical_by_identity: Mapping[_StackSlotIdentity, structured_c.CVariable],
+    canonical_variables: frozenset[object],
+    statements: object,
+) -> bool:
+    """Drop unified declaration entries proven argument-owned."""
+    argument_variable_ids = frozenset(id(variable) for variable in canonical_variables)
+    body_variable_ids = body_declaration_owner_ids_8616(statements, argument_variable_ids)
+    changed = False
+    for variable in tuple(unified_local_vars):
+        if not isinstance(variable, SimStackVariable):
+            continue
+        identity = machine_bp_stack_identity_8616(typed_codegen, variable)
+        # Widening can replace declaration members while leaving a byte key.
+        header_owned_members = id(variable) not in body_variable_ids and declaration_members_are_argument_owned_8616(
+            unified_local_vars[variable], argument_variable_ids,
+        )
+        if identity in canonical_by_identity or header_owned_members:
+            del unified_local_vars[variable]
+            changed = True
+    return changed
+
+
+def unify_positive_bp_argument_identity_8616(
+    codegen: object,
+) -> bool:
+    """Join body references to exact canonical positive-BP argument storage."""
+    typed_codegen = cast(_ArgumentIdentityCodegen8616, codegen)
+    boundary = _argument_boundary_8616(typed_codegen)
+    if boundary is None:
+        return False
+
+    changed = bool(prune_unreferenced_pre_argument_declarations_8616(typed_codegen))
+
+    canonical_by_identity, canonical_by_offset = _canonical_arguments_8616(
+        typed_codegen,
+        boundary.argument_list,
+    )
     if not canonical_by_identity:
         typed_codegen._inertia_arg_stack_identity_stats_8616 = (
             StackArgumentIdentityStats8616()
@@ -232,90 +366,55 @@ def unify_positive_bp_argument_identity_8616(
             _mark_stack_identity_change_8616(typed_codegen)
         return changed
 
-    raw_count = 0
-    normalized_count = 0
-    classified_count = 0
-    materialized_count = 0
-    def transform(node: object) -> object:
-        nonlocal raw_count, normalized_count, classified_count
-        nonlocal materialized_count, changed
-        variable = _positive_stack_variable_8616(typed_codegen, node)
-        indexed_offset = _indexed_stack_base_argument_offset_8616(node)
-        if variable is None and indexed_offset is None:
-            return node
-        raw_count += 1
-        if variable is not None:
-            identity = machine_bp_stack_identity_8616(typed_codegen, variable)
-            if identity is None:
-                return node
-            argument = canonical_by_identity.get(identity)
-        else:
-            argument = canonical_by_offset.get(cast(int, indexed_offset))
-        normalized_count += 1
-        if argument is None:
-            return node
-        classified_count += 1
-        materialized_count += 1
-        if variable is not None and variable is argument.variable:
-            return node
-        changed = True
-        return _clone_argument_reference_8616(argument)
+    unification = _ArgumentUnification8616(
+        typed_codegen,
+        canonical_by_identity,
+        canonical_by_offset,
+    )
+    if _replace_c_children_8616(boundary.cfunc.statements, unification.transform):
+        unification.changed = True
 
-    if _replace_c_children_8616(cfunc.statements, transform):
-        changed = True
-
-    canonical_variables = {
+    canonical_variables = frozenset(
         argument.variable for argument in canonical_by_identity.values()
-    }
-    if isinstance(variables_in_use, dict):
-        for variable, cvar in tuple(variables_in_use.items()):
-            if not isinstance(variable, SimStackVariable):
-                continue
-            identity = _machine_bp_stack_binding_identity_8616(
+    )
+    if isinstance(boundary.variables_in_use, dict):
+        changed = (
+            _merge_variables_in_use_8616(
                 typed_codegen,
-                variable,
-                cvar,
+                boundary.variables_in_use,
+                canonical_by_identity,
+                canonical_variables,
             )
-            argument = canonical_by_identity.get(identity)
-            if argument is None:
-                continue
-            if variable in canonical_variables:
-                if cvar is not argument:
-                    variables_in_use[variable] = argument
-                    changed = True
-                continue
-            del variables_in_use[variable]
-            changed = True
+            or changed
+        )
 
-    if isinstance(unified_local_vars, dict):
-        argument_variable_ids = frozenset(id(variable) for variable in canonical_variables)
-        body_variable_ids = body_declaration_owner_ids_8616(cfunc.statements, argument_variable_ids)
-        for variable in tuple(unified_local_vars):
-            if not isinstance(variable, SimStackVariable):
-                continue
-            identity = machine_bp_stack_identity_8616(typed_codegen, variable)
-            # Widening can replace declaration members while leaving a byte key.
-            header_owned_members = id(variable) not in body_variable_ids and declaration_members_are_argument_owned_8616(
-                unified_local_vars[variable], argument_variable_ids,
+    if isinstance(boundary.unified_local_vars, dict):
+        changed = (
+            _merge_unified_local_vars_8616(
+                typed_codegen,
+                boundary.unified_local_vars,
+                canonical_by_identity,
+                canonical_variables,
+                boundary.cfunc.statements,
             )
-            if identity in canonical_by_identity or header_owned_members:
-                del unified_local_vars[variable]
-                changed = True
+            or changed
+        )
 
-    failure_count = max(classified_count - materialized_count, 0)
+    failure_count = max(unification.classified_count - unification.materialized_count, 0)
     typed_codegen._inertia_arg_stack_identity_stats_8616 = (
         StackArgumentIdentityStats8616(
-            raw_fact_count=raw_count,
-            normalized_fact_count=normalized_count,
-            classified_fact_count=classified_count,
-            materialized_count=materialized_count,
+            raw_fact_count=unification.raw_count,
+            normalized_fact_count=unification.normalized_count,
+            classified_fact_count=unification.classified_count,
+            materialized_count=unification.materialized_count,
             failure_count=failure_count,
         )
     )
-    if classified_count > 0 and materialized_count == 0:
+    if unification.classified_count > 0 and unification.materialized_count == 0:
         raise RuntimeError(
             "argument stack identities were classified but not materialized"
         )
+    changed = changed or unification.changed
     if changed:
         _mark_stack_identity_change_8616(typed_codegen)
     return changed

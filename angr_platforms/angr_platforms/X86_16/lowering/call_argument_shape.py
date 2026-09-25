@@ -102,6 +102,30 @@ def _valid_widths_8616(widths: tuple[int, ...]) -> bool:
     return all(isinstance(width, int) and not isinstance(width, bool) and width > 0 for width in widths)
 
 
+def _identical_physical_summary_8616(
+    fresh_summary: CallsiteSummary8616,
+    previous_summary: CallsiteSummary8616,
+) -> bool:
+    """Return whether the rebuild reproduced the exact physical summary."""
+    if (
+        fresh_summary.callsite_addr != previous_summary.callsite_addr
+        or fresh_summary.target_addr != previous_summary.target_addr
+        or fresh_summary.return_addr != previous_summary.return_addr
+        or fresh_summary.kind != previous_summary.kind
+        or fresh_summary.arg_count != previous_summary.arg_count
+    ):
+        return False
+    return (
+        fresh_summary.arg_widths == previous_summary.arg_widths
+        and fresh_summary.stack_cleanup == previous_summary.stack_cleanup
+        and fresh_summary.push_arg_sources == previous_summary.push_arg_sources
+        and fresh_summary.push_arg_instruction_addrs
+        == previous_summary.push_arg_instruction_addrs
+        and fresh_summary.stack_cleanup_instruction_addr
+        == previous_summary.stack_cleanup_instruction_addr
+    )
+
+
 def carry_forward_logical_call_argument_shape_8616(
     fresh_summary: CallsiteSummary8616,
     previous_summary: CallsiteSummary8616,
@@ -110,20 +134,7 @@ def carry_forward_logical_call_argument_shape_8616(
     logical_widths = previous_summary.logical_arg_widths
     if fresh_summary.logical_arg_widths or not _valid_widths_8616(logical_widths):
         return fresh_summary
-    if (
-        fresh_summary.callsite_addr != previous_summary.callsite_addr
-        or fresh_summary.target_addr != previous_summary.target_addr
-        or fresh_summary.return_addr != previous_summary.return_addr
-        or fresh_summary.kind != previous_summary.kind
-        or fresh_summary.arg_count != previous_summary.arg_count
-        or fresh_summary.arg_widths != previous_summary.arg_widths
-        or fresh_summary.stack_cleanup != previous_summary.stack_cleanup
-        or fresh_summary.push_arg_sources != previous_summary.push_arg_sources
-        or fresh_summary.push_arg_instruction_addrs
-        != previous_summary.push_arg_instruction_addrs
-        or fresh_summary.stack_cleanup_instruction_addr
-        != previous_summary.stack_cleanup_instruction_addr
-    ):
+    if not _identical_physical_summary_8616(fresh_summary, previous_summary):
         return fresh_summary
 
     physical_widths = fresh_summary.arg_widths
@@ -296,19 +307,10 @@ def exact_call_return_pair_shape_evidence_8616(
     )
 
 
-def exact_caller_stack_object_shape_evidence_8616(
-    summary: CallsiteSummary8616,
+def _ordered_non_overlapping_objects_8616(
     stack_objects: tuple[CallerStackObject8616, ...],
-) -> LogicalArgumentShapeEvidence8616 | None:
-    """Group physical PUSH slices that exactly cover one caller stack object."""
-    physical_widths = summary.arg_widths
-    sources = summary.push_arg_sources
-    if (
-        not _valid_widths_8616(physical_widths)
-        or len(sources) != len(physical_widths)
-        or not sources
-    ):
-        return None
+) -> tuple[CallerStackObject8616, ...] | None:
+    """Return offset-sorted stack objects when none overlap and all are valid."""
     ordered_objects = tuple(sorted(stack_objects, key=lambda item: item.offset))
     if any(
         item.offset < 4
@@ -320,7 +322,15 @@ def exact_caller_stack_object_shape_evidence_8616(
         for index, item in enumerate(ordered_objects)
     ):
         return None
+    return ordered_objects
 
+
+def _object_owned_slices_8616(
+    sources: tuple[object, ...],
+    physical_widths: tuple[int, ...],
+    ordered_objects: tuple[CallerStackObject8616, ...],
+) -> list[CallerStackObject8616 | None]:
+    """Resolve the unique containing stack object for each BP-sourced slice."""
     owned_slices: list[CallerStackObject8616 | None] = []
     for source, width in zip(sources, physical_widths, strict=False):
         owner: CallerStackObject8616 | None = None
@@ -333,7 +343,15 @@ def exact_caller_stack_object_shape_evidence_8616(
             if len(candidates) == 1:
                 owner = candidates[0]
         owned_slices.append(owner)
+    return owned_slices
 
+
+def _grouped_push_widths_8616(
+    physical_widths: tuple[int, ...],
+    sources: tuple[object, ...],
+    owned_slices: list[CallerStackObject8616 | None],
+) -> tuple[list[int], bool] | None:
+    """Merge contiguous slices that exactly cover one stack object."""
     push_order_widths: list[int] = []
     grouped = False
     index = 0
@@ -364,6 +382,30 @@ def exact_caller_stack_object_shape_evidence_8616(
         else:
             push_order_widths.extend(physical_widths[index:end])
         index = end
+    return push_order_widths, grouped
+
+
+def exact_caller_stack_object_shape_evidence_8616(
+    summary: CallsiteSummary8616,
+    stack_objects: tuple[CallerStackObject8616, ...],
+) -> LogicalArgumentShapeEvidence8616 | None:
+    """Group physical PUSH slices that exactly cover one caller stack object."""
+    physical_widths = summary.arg_widths
+    sources = summary.push_arg_sources
+    if (
+        not _valid_widths_8616(physical_widths)
+        or len(sources) != len(physical_widths)
+        or not sources
+    ):
+        return None
+    ordered_objects = _ordered_non_overlapping_objects_8616(stack_objects)
+    if ordered_objects is None:
+        return None
+    owned_slices = _object_owned_slices_8616(sources, physical_widths, ordered_objects)
+    grouped_result = _grouped_push_widths_8616(physical_widths, sources, owned_slices)
+    if grouped_result is None:
+        return None
+    push_order_widths, grouped = grouped_result
     if not grouped or sum(push_order_widths) != sum(physical_widths):
         return None
     return LogicalArgumentShapeEvidence8616(

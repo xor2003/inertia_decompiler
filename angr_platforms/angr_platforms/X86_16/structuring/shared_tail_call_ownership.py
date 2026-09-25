@@ -14,7 +14,7 @@ rewrite cleanup, postprocess, or CLI/reporting work here.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Protocol, cast
 
@@ -167,25 +167,180 @@ def _owned_callsite_addr_8616(
     return summary_addr
 
 
-def materialize_shared_tail_call_ownership_8616(
-    project: object,
-    codegen: object,
-) -> SharedTailCallOwnershipResult8616:
-    """Remove only CFG-proven returned-call clones of one retained shared tail."""
-    boundary = cast(_CodegenSurface8616, codegen)
-    empty = SharedTailCallOwnershipResult8616(
-        SharedTailCallOwnershipStatus8616.NO_CANDIDATE,
-        SharedTailCallOwnershipStats8616(),
+@dataclass(frozen=True, slots=True)
+class _CallsiteOccurrenceShapes8616:
+    """One callsite's occurrences bucketed by kind with derived shape flags."""
+
+    conditions: tuple[SharedTailCallOccurrence8616, ...]
+    returned: tuple[SharedTailCallOccurrence8616, ...]
+    return_carriers: tuple[SharedTailCallOccurrence8616, ...]
+    standalone: tuple[SharedTailCallOccurrence8616, ...]
+    returned_clone_shape: bool
+    nested_standalone_shape: bool
+    condition_carrier_shape: bool
+
+
+def _occurrence_shapes_8616(
+    occurrences: list[SharedTailCallOccurrence8616],
+) -> _CallsiteOccurrenceShapes8616:
+    """Bucket one callsite's occurrences by kind and derive shape flags."""
+    conditions = tuple(
+        item for item in occurrences if item.kind is SharedTailCallOccurrenceKind8616.CONDITION
     )
+    returned = tuple(
+        item for item in occurrences if item.kind is SharedTailCallOccurrenceKind8616.RETURNED
+    )
+    return_carriers = tuple(
+        item
+        for item in occurrences
+        if item.kind is SharedTailCallOccurrenceKind8616.RETURN_CARRIER
+    )
+    standalone = tuple(
+        item for item in occurrences if item.kind is SharedTailCallOccurrenceKind8616.STANDALONE
+    )
+    return _CallsiteOccurrenceShapes8616(
+        conditions,
+        returned,
+        return_carriers,
+        standalone,
+        returned_clone_shape=bool(returned and standalone),
+        nested_standalone_shape=not returned and len(standalone) > 1,
+        condition_carrier_shape=(
+            len(conditions) == 1
+            and len(return_carriers) == 1
+            and not returned
+            and not standalone
+        ),
+    )
+
+
+def _ownership_proof_8616(
+    project: object,
+    summary: CallsiteSummary8616,
+    shapes: _CallsiteOccurrenceShapes8616,
+) -> tuple[
+    SharedTailCallOccurrence8616 | None,
+    tuple[SharedTailCallOccurrence8616, ...],
+    bool,
+]:
+    """Prove retained-call ownership and select clone occurrences."""
+    retained: SharedTailCallOccurrence8616 | None
+    clones: tuple[SharedTailCallOccurrence8616, ...]
+    if shapes.condition_carrier_shape:
+        retained = shapes.conditions[0]
+        clones = shapes.return_carriers
+        ownership_proven = (
+            summary.return_used is True
+            and summary.return_use_kind is CallsiteReturnUseKind8616.CONDITION
+            and _return_carrier_matches_8616(project, shapes.return_carriers[0], summary)
+            and standalone_follows_nested_clone_8616(retained, shapes.return_carriers[0])
+            and _same_call_arguments_8616(retained.call, shapes.return_carriers[0].call)
+        )
+    elif shapes.returned_clone_shape and len(shapes.standalone) == 1:
+        retained = shapes.standalone[0]
+        clones = shapes.returned
+        ownership_proven = all(
+            standalone_follows_nested_clone_8616(item, retained) for item in clones
+        )
+    elif shapes.nested_standalone_shape and summary.return_used is False:
+        retained_candidates = tuple(
+            candidate
+            for candidate in shapes.standalone
+            if all(
+                other is candidate
+                or (
+                    standalone_follows_nested_clone_8616(other, candidate)
+                    and _same_c_expression_8616(candidate.call, other.call)
+                )
+                for other in shapes.standalone
+            )
+        )
+        retained = retained_candidates[0] if len(retained_candidates) == 1 else None
+        clones = tuple(item for item in shapes.standalone if item is not retained)
+        ownership_proven = retained is not None and bool(clones)
+    else:
+        retained = None
+        clones = ()
+        ownership_proven = False
+    return retained, clones, ownership_proven
+
+
+@dataclass(slots=True)
+class _OwnershipScan8616:
+    """Mutable per-callsite shared-tail ownership scan state."""
+
+    project: object
+    topology: SharedTailCfgTopology8616 | None
+    inventory: Mapping[int, CallsiteSummary8616]
+    raw_count: int = 0
+    normalized_count: int = 0
+    classified_count: int = 0
+    materialized_count: int = 0
+    failure_count: int = 0
+    refusals: list[str] = field(default_factory=list)
+    removals: list[SharedTailCallOccurrence8616] = field(default_factory=list)
+    retained_call_ids: set[int] = field(default_factory=set)
+
+    def process(
+        self,
+        callsite_addr: int,
+        occurrences: list[SharedTailCallOccurrence8616],
+    ) -> None:
+        """Classify one callsite's occurrences into retained call and clones."""
+        shapes = _occurrence_shapes_8616(occurrences)
+        if (
+            not shapes.returned_clone_shape
+            and not shapes.nested_standalone_shape
+            and not shapes.condition_carrier_shape
+        ):
+            return
+        self.raw_count += 1
+        summary = self.inventory.get(callsite_addr)
+        if summary is None or self.topology is None:
+            self.failure_count += 1
+            self.refusals.append(f"callsite={callsite_addr:#x}:incomplete-census")
+            return
+        self.normalized_count += 1
+        if not shared_callsite_tail_is_proven_8616(summary, self.topology):
+            self.failure_count += 1
+            self.refusals.append(f"callsite={callsite_addr:#x}:not-proven-shared-cfg-tail")
+            return
+        retained, clones, ownership_proven = _ownership_proof_8616(
+            self.project,
+            summary,
+            shapes,
+        )
+        if not ownership_proven or retained is None:
+            self.failure_count += 1
+            self.refusals.append(f"callsite={callsite_addr:#x}:ast-ownership-conflict")
+            return
+        self.classified_count += len(clones)
+        self.retained_call_ids.add(id(retained.call))
+        self.removals.extend(clones)
+
+
+def _proven_surface_8616(
+    codegen: object,
+) -> (
+    tuple[
+        _CodegenSurface8616,
+        structured_c.CStatements,
+        dict[int, CallsiteSummary8616],
+        dict[int, CallsiteSummary8616],
+    ]
+    | None
+):
+    """Return the proven codegen surface pieces, or None when absent."""
+    boundary = cast(_CodegenSurface8616, codegen)
     try:
         cfunc = boundary.cfunc
         root = cfunc.statements
         summary_map = boundary._inertia_callsite_summaries
         inventory = boundary._inertia_callsite_summary_inventory_8616
     except AttributeError:
-        return empty
+        return None
     if not isinstance(root, structured_c.CStatements):
-        return empty
+        return None
     if not isinstance(summary_map, dict) or not isinstance(inventory, dict):
         raise TypeError("shared-tail call ownership requires typed callsite mappings")
     if any(
@@ -195,104 +350,16 @@ def materialize_shared_tail_call_ownership_8616(
         for callsite_addr, summary in inventory.items()
     ):
         raise TypeError("shared-tail callsite inventory contains an invalid owned contract")
-    topology: SharedTailCfgTopology8616 | None = recover_shared_tail_cfg_topology_8616(
-        project,
-        cfunc.addr,
-    )
-    occurrences_by_callsite: dict[int, list[SharedTailCallOccurrence8616]] = {}
-    for occurrence in collect_shared_tail_call_occurrences_8616(root):
-        callsite_addr = _owned_callsite_addr_8616(occurrence.call, summary_map)
-        if isinstance(callsite_addr, int):
-            occurrences_by_callsite.setdefault(callsite_addr, []).append(occurrence)
+    return boundary, root, summary_map, inventory
 
-    raw_count = normalized_count = classified_count = materialized_count = failure_count = 0
-    refusals: list[str] = []
-    removals: list[SharedTailCallOccurrence8616] = []
-    retained_call_ids: set[int] = set()
-    for callsite_addr, occurrences in sorted(occurrences_by_callsite.items()):
-        conditions = tuple(
-            item for item in occurrences if item.kind is SharedTailCallOccurrenceKind8616.CONDITION
-        )
-        returned = tuple(
-            item for item in occurrences if item.kind is SharedTailCallOccurrenceKind8616.RETURNED
-        )
-        return_carriers = tuple(
-            item
-            for item in occurrences
-            if item.kind is SharedTailCallOccurrenceKind8616.RETURN_CARRIER
-        )
-        standalone = tuple(
-            item for item in occurrences if item.kind is SharedTailCallOccurrenceKind8616.STANDALONE
-        )
-        returned_clone_shape = bool(returned and standalone)
-        nested_standalone_shape = not returned and len(standalone) > 1
-        condition_carrier_shape = (
-            len(conditions) == 1
-            and len(return_carriers) == 1
-            and not returned
-            and not standalone
-        )
-        if not returned_clone_shape and not nested_standalone_shape and not condition_carrier_shape:
-            continue
-        raw_count += 1
-        summary = inventory.get(callsite_addr)
-        if summary is None or topology is None:
-            failure_count += 1
-            refusals.append(f"callsite={callsite_addr:#x}:incomplete-census")
-            continue
-        normalized_count += 1
-        if not shared_callsite_tail_is_proven_8616(summary, topology):
-            failure_count += 1
-            refusals.append(f"callsite={callsite_addr:#x}:not-proven-shared-cfg-tail")
-            continue
-        retained: SharedTailCallOccurrence8616 | None
-        clones: tuple[SharedTailCallOccurrence8616, ...]
-        if condition_carrier_shape:
-            retained = conditions[0]
-            clones = return_carriers
-            ownership_proven = (
-                summary.return_used is True
-                and summary.return_use_kind is CallsiteReturnUseKind8616.CONDITION
-                and _return_carrier_matches_8616(project, return_carriers[0], summary)
-                and standalone_follows_nested_clone_8616(retained, return_carriers[0])
-                and _same_call_arguments_8616(retained.call, return_carriers[0].call)
-            )
-        elif returned_clone_shape and len(standalone) == 1:
-            retained = standalone[0]
-            clones = returned
-            ownership_proven = all(
-                standalone_follows_nested_clone_8616(item, retained) for item in clones
-            )
-        elif nested_standalone_shape and summary.return_used is False:
-            retained_candidates = tuple(
-                candidate
-                for candidate in standalone
-                if all(
-                    other is candidate
-                    or (
-                        standalone_follows_nested_clone_8616(other, candidate)
-                        and _same_c_expression_8616(candidate.call, other.call)
-                    )
-                    for other in standalone
-                )
-            )
-            retained = retained_candidates[0] if len(retained_candidates) == 1 else None
-            clones = tuple(item for item in standalone if item is not retained)
-            ownership_proven = retained is not None and bool(clones)
-        else:
-            retained = None
-            clones = ()
-            ownership_proven = False
-        if not ownership_proven or retained is None:
-            failure_count += 1
-            refusals.append(f"callsite={callsite_addr:#x}:ast-ownership-conflict")
-            continue
-        classified_count += len(clones)
-        retained_call_ids.add(id(retained.call))
-        removals.extend(clones)
 
+def _materialize_removals_8616(
+    scan: _OwnershipScan8616,
+    summary_map: dict[int, CallsiteSummary8616],
+) -> None:
+    """Delete proven clone occurrences from their owning containers."""
     for occurrence in sorted(
-        removals,
+        scan.removals,
         key=lambda item: (id(item.parent), item.statement_index),
         reverse=True,
     ):
@@ -304,26 +371,56 @@ def materialize_shared_tail_call_ownership_8616(
         ):
             raise PipelineHardError("classified shared-tail call clone lost its AST owner")
         del statements[occurrence.statement_index]
-        if id(occurrence.call) not in retained_call_ids:
+        if id(occurrence.call) not in scan.retained_call_ids:
             summary_map.pop(id(occurrence.call), None)
-        materialized_count += 1
+        scan.materialized_count += 1
+
+
+def materialize_shared_tail_call_ownership_8616(
+    project: object,
+    codegen: object,
+) -> SharedTailCallOwnershipResult8616:
+    """Remove only CFG-proven returned-call clones of one retained shared tail."""
+    empty = SharedTailCallOwnershipResult8616(
+        SharedTailCallOwnershipStatus8616.NO_CANDIDATE,
+        SharedTailCallOwnershipStats8616(),
+    )
+    surface = _proven_surface_8616(codegen)
+    if surface is None:
+        return empty
+    boundary, root, summary_map, inventory = surface
+    topology: SharedTailCfgTopology8616 | None = recover_shared_tail_cfg_topology_8616(
+        project,
+        boundary.cfunc.addr,
+    )
+    occurrences_by_callsite: dict[int, list[SharedTailCallOccurrence8616]] = {}
+    for occurrence in collect_shared_tail_call_occurrences_8616(root):
+        callsite_addr = _owned_callsite_addr_8616(occurrence.call, summary_map)
+        if isinstance(callsite_addr, int):
+            occurrences_by_callsite.setdefault(callsite_addr, []).append(occurrence)
+
+    scan = _OwnershipScan8616(project, topology, inventory)
+    for callsite_addr, occurrences in sorted(occurrences_by_callsite.items()):
+        scan.process(callsite_addr, occurrences)
+
+    _materialize_removals_8616(scan, summary_map)
 
     stats = SharedTailCallOwnershipStats8616(
-        raw_count,
-        normalized_count,
-        classified_count,
-        materialized_count,
-        failure_count,
+        scan.raw_count,
+        scan.normalized_count,
+        scan.classified_count,
+        scan.materialized_count,
+        scan.failure_count,
     )
     if stats.classified_fact_count > 0 and stats.materialized_count == 0:
         raise PipelineHardError("classified shared-tail call ownership was not materialized")
     status = (
         SharedTailCallOwnershipStatus8616.MATERIALIZED
-        if materialized_count
+        if scan.materialized_count
         else SharedTailCallOwnershipStatus8616.UNKNOWN_REFUSE
-        if failure_count
+        if scan.failure_count
         else SharedTailCallOwnershipStatus8616.NO_CANDIDATE
     )
-    result = SharedTailCallOwnershipResult8616(status, stats, tuple(refusals))
+    result = SharedTailCallOwnershipResult8616(status, stats, tuple(scan.refusals))
     boundary._inertia_shared_tail_call_ownership_result_8616 = result
     return result

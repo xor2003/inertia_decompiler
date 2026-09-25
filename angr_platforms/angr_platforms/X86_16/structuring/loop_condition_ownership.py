@@ -128,17 +128,26 @@ def _condition_chain_exit_8616(
         tags = boundary.tags
     except AttributeError:
         return None
-    target = tags.get("inertia_structuring_shared_body_target_8616")
-    if (
-        tags.get("inertia_structuring_shared_body_condition_chain_materialized_8616") is not True
-        or tags.get("ins_addr") != key[0]
-        or tags.get("vex_block_addr") != key[1]
-        or not isinstance(target, int)
-        or target not in successors
-        or _reaches_loop_header_8616(successors, target, key[1])
-    ):
+    if not _shared_body_chain_reusable_8616(tags, key, successors):
         return None
     return condition
+
+
+def _shared_body_chain_reusable_8616(
+    tags: dict[str, object],
+    key: tuple[int, int],
+    successors: Mapping[int, tuple[int, ...]],
+) -> bool:
+    """Return whether tags prove the exact materialized chain exit target."""
+    target = tags.get("inertia_structuring_shared_body_target_8616")
+    return (
+        tags.get("inertia_structuring_shared_body_condition_chain_materialized_8616") is True
+        and tags.get("ins_addr") == key[0]
+        and tags.get("vex_block_addr") == key[1]
+        and isinstance(target, int)
+        and target in successors
+        and not _reaches_loop_header_8616(successors, target, key[1])
+    )
 
 
 def _condition_tag_pairs_8616(condition_owner: object) -> frozenset[tuple[int, int]]:

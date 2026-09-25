@@ -106,34 +106,78 @@ def resolve_same_block_data_register_dependencies_8616(
     if depth > 8 or expr is None:
         return expr
     if isinstance(expr, ailment.Expr.Register):
-        view = _register_view_8616(expr)
-        if view is None or view in active_views or register_name(expr) not in _DATA_REGISTERS_8616:
-            return expr
-        reaching = _reaching_register_source_8616(
+        return _resolve_register_leaf_8616(
             expr,
             statements,
             before_index=before_index,
-            resolve_temporaries=resolve_temporaries,
-        )
-        if reaching is None:
-            return expr
-        source, source_index = reaching
-        return resolve_same_block_data_register_dependencies_8616(
-            source,
-            statements,
-            before_index=source_index,
             register_name=register_name,
             resolve_temporaries=resolve_temporaries,
             copy_expression=copy_expression,
-            active_views=active_views | {view},
-            depth=depth + 1,
+            active_views=active_views,
+            depth=depth,
         )
     if isinstance(expr, ailment.Expr.Load):
         return expr
+    return _resolve_composite_children_8616(
+        expr,
+        statements,
+        before_index=before_index,
+        register_name=register_name,
+        resolve_temporaries=resolve_temporaries,
+        copy_expression=copy_expression,
+        active_views=active_views,
+        depth=depth,
+    )
 
-    result = copy_expression(expr)
-    if not isinstance(result, Expression):
+
+def _resolve_register_leaf_8616(
+    expr: ailment.Expr.Register,
+    statements: Sequence[object],
+    *,
+    before_index: int,
+    register_name: RegisterNameResolver8616,
+    resolve_temporaries: TemporaryResolver8616,
+    copy_expression: ExpressionCopier8616,
+    active_views: frozenset[tuple[int, int]],
+    depth: int,
+) -> object:
+    """Substitute one proven reaching source for a data-register leaf."""
+    view = _register_view_8616(expr)
+    if view is None or view in active_views or register_name(expr) not in _DATA_REGISTERS_8616:
         return expr
+    reaching = _reaching_register_source_8616(
+        expr,
+        statements,
+        before_index=before_index,
+        resolve_temporaries=resolve_temporaries,
+    )
+    if reaching is None:
+        return expr
+    source, source_index = reaching
+    return resolve_same_block_data_register_dependencies_8616(
+        source,
+        statements,
+        before_index=source_index,
+        register_name=register_name,
+        resolve_temporaries=resolve_temporaries,
+        copy_expression=copy_expression,
+        active_views=active_views | {view},
+        depth=depth + 1,
+    )
+
+
+def _resolve_composite_children_8616(
+    expr: object,
+    statements: Sequence[object],
+    *,
+    before_index: int,
+    register_name: RegisterNameResolver8616,
+    resolve_temporaries: TemporaryResolver8616,
+    copy_expression: ExpressionCopier8616,
+    active_views: frozenset[tuple[int, int]],
+    depth: int,
+) -> object:
+    """Copy one composite expression and resolve each child operand."""
 
     def resolve(child: Expression) -> Expression:
         resolved = resolve_same_block_data_register_dependencies_8616(
@@ -148,6 +192,9 @@ def resolve_same_block_data_register_dependencies_8616(
         )
         return resolved if isinstance(resolved, Expression) else child
 
+    result = copy_expression(expr)
+    if not isinstance(result, Expression):
+        return expr
     if isinstance(result, ailment.Expr.BinaryOp):
         result.operands = [resolve(operand) for operand in result.operands]
     elif isinstance(result, ailment.Expr.UnaryOp):

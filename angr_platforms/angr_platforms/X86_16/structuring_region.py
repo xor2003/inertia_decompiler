@@ -242,82 +242,89 @@ class RegionGraph:
         """Return all successors of a region."""
         return list(region.successors)
 
+    def _merge_region_metadata_8616(self, src: Region, dst: Region) -> None:
+        """Merge statement provenance and free metadata from src into dst."""
+        src_statement_addrs = _metadata_int_tuple_8616(src.metadata.get("region_statement_ins_addrs", ()))
+        dst_statement_addrs = _metadata_int_tuple_8616(dst.metadata.get("region_statement_ins_addrs", ()))
+        src_statement_keys = _metadata_tuple_8616(src.metadata.get("region_statement_provenance_keys", ()))
+        dst_statement_keys = _metadata_tuple_8616(dst.metadata.get("region_statement_provenance_keys", ()))
+        if src_statement_addrs or dst_statement_addrs:
+            dst.metadata["region_statement_ins_addrs"] = tuple(
+                dict.fromkeys(
+                    [
+                        *dst_statement_addrs,
+                        *src_statement_addrs,
+                    ]
+                )
+            )
+            dst.metadata["region_statement_span_source"] = "merged_region_statement_ins_addrs"
+        if src_statement_keys or dst_statement_keys:
+            dst.metadata["region_statement_provenance_keys"] = tuple(
+                dict.fromkeys([*dst_statement_keys, *src_statement_keys])
+            )
+            dst.metadata["region_statement_span_source"] = "merged_region_statement_provenance"
+        for key, value in src.metadata.items():
+            if key not in dst.metadata:
+                dst.metadata[key] = value
+
+    def _transfer_merge_edges_8616(self, src: Region, dst: Region, transfer_edges: str) -> None:
+        """Transfer selected src edges onto dst during a region merge."""
+        if transfer_edges in ("both", "pred"):
+            for pred in list(src.predecessors):
+                pred.remove_successor(src)
+                if pred != dst:
+                    pred.add_successor(dst)
+
+        if transfer_edges in ("both", "succ"):
+            for succ in list(src.successors):
+                src.remove_successor(succ)
+                if succ != dst:
+                    dst.add_successor(succ)
+
+    def _merge_regions_impl_8616(self, src: Region, dst: Region, transfer_edges: str) -> None:
+        """Apply the merge after the public method records the contract.
+
+        Args:
+            src: Source region to merge (will be removed)
+            dst: Destination region (will absorb src's statements)
+            transfer_edges: How to handle edges:
+                - "both": transfer all src's edges to dst
+                - "pred": transfer only incoming edges
+                - "succ": transfer only outgoing edges
+                - "none": don't transfer edges
+        """
+        if src == dst:
+            return
+
+        # Merge statements
+        dst.statements.extend(src.statements)
+
+        # Preserve structured region types (Loop, IncSwitch, Condition) over Linear
+        # If either region has a more specific type, use that
+        if src.region_type != RegionType.Linear:
+            dst.region_type = src.region_type
+        # Also merge metadata from src to dst
+        self._merge_region_metadata_8616(src, dst)
+
+        # Transfer edges
+        self._transfer_merge_edges_8616(src, dst, transfer_edges)
+
+        # Remove self-referencing edges from dst (can happen when merging loop bodies)
+        if dst in dst.predecessors:
+            dst.predecessors.discard(dst)
+        if dst in dst.successors:
+            dst.successors.discard(dst)
+        if dst in self._adjacency.get(dst, set()):
+            self._adjacency[dst].discard(dst)
+
+        # Remove src from graph
+        if src in self.nodes:
+            self.nodes.discard(src)
+            del self._adjacency[src]
+
     def merge_regions(self, src: Region, dst: Region, transfer_edges: str = "both") -> None:
         """Merge src into dst, combining statements and selected graph edges."""
-
-        def _impl() -> None:
-            """Apply the merge after the public method records the contract.
-
-            Args:
-                src: Source region to merge (will be removed)
-                dst: Destination region (will absorb src's statements)
-                transfer_edges: How to handle edges:
-                    - "both": transfer all src's edges to dst
-                    - "pred": transfer only incoming edges
-                    - "succ": transfer only outgoing edges
-                    - "none": don't transfer edges
-            """
-            if src == dst:
-                return
-
-            # Merge statements
-            dst.statements.extend(src.statements)
-
-            # Preserve structured region types (Loop, IncSwitch, Condition) over Linear
-            # If either region has a more specific type, use that
-            if src.region_type != RegionType.Linear:
-                dst.region_type = src.region_type
-            # Also merge metadata from src to dst
-            src_statement_addrs = _metadata_int_tuple_8616(src.metadata.get("region_statement_ins_addrs", ()))
-            dst_statement_addrs = _metadata_int_tuple_8616(dst.metadata.get("region_statement_ins_addrs", ()))
-            src_statement_keys = _metadata_tuple_8616(src.metadata.get("region_statement_provenance_keys", ()))
-            dst_statement_keys = _metadata_tuple_8616(dst.metadata.get("region_statement_provenance_keys", ()))
-            if src_statement_addrs or dst_statement_addrs:
-                dst.metadata["region_statement_ins_addrs"] = tuple(
-                    dict.fromkeys(
-                        [
-                            *dst_statement_addrs,
-                            *src_statement_addrs,
-                        ]
-                    )
-                )
-                dst.metadata["region_statement_span_source"] = "merged_region_statement_ins_addrs"
-            if src_statement_keys or dst_statement_keys:
-                dst.metadata["region_statement_provenance_keys"] = tuple(
-                    dict.fromkeys([*dst_statement_keys, *src_statement_keys])
-                )
-                dst.metadata["region_statement_span_source"] = "merged_region_statement_provenance"
-            for key, value in src.metadata.items():
-                if key not in dst.metadata:
-                    dst.metadata[key] = value
-
-            # Transfer edges
-            if transfer_edges in ("both", "pred"):
-                for pred in list(src.predecessors):
-                    pred.remove_successor(src)
-                    if pred != dst:
-                        pred.add_successor(dst)
-
-            if transfer_edges in ("both", "succ"):
-                for succ in list(src.successors):
-                    src.remove_successor(succ)
-                    if succ != dst:
-                        dst.add_successor(succ)
-
-            # Remove self-referencing edges from dst (can happen when merging loop bodies)
-            if dst in dst.predecessors:
-                dst.predecessors.discard(dst)
-            if dst in dst.successors:
-                dst.successors.discard(dst)
-            if dst in self._adjacency.get(dst, set()):
-                self._adjacency[dst].discard(dst)
-
-            # Remove src from graph
-            if src in self.nodes:
-                self.nodes.discard(src)
-                del self._adjacency[src]
-
-        return _impl()
+        return self._merge_regions_impl_8616(src, dst, transfer_edges)
 
     def iter_postorder(self) -> list[Region]:
         """Return regions in post-order (children before parents).
@@ -501,75 +508,97 @@ class RegionGraphBuilder:
         return edges
 
 
+def _immediate_dominators_8616(
+    dominators: dict[Region, set[Region]],
+    all_regions: list[Region],
+) -> tuple[dict[Region, Region | None], dict[Region, set[Region]]]:
+    """Derive immediate dominators and strict-dominance from dominator sets."""
+    immediate_dominator: dict[Region, Region | None] = {}
+    strictly_dominates_map: dict[Region, set[Region]] = {r: set() for r in all_regions}
+
+    for region in all_regions:
+        doms = dominators[region] - {region}
+        immediate_dominator[region] = None if not doms else max(doms, key=lambda d: len(dominators[d]))
+    for region, doms in dominators.items():
+        for dom in doms:
+            if dom != region:
+                strictly_dominates_map[dom].add(region)
+    return immediate_dominator, strictly_dominates_map
+
+
+def _immediate_post_dominators_8616(
+    post_dominators: dict[Region, set[Region]],
+    all_regions: list[Region],
+) -> tuple[dict[Region, Region | None], dict[Region, set[Region]]]:
+    """Derive immediate post-dominators and strict post-dominance."""
+    immediate_post_dominator: dict[Region, Region | None] = {}
+    strictly_post_dominates_map: dict[Region, set[Region]] = {r: set() for r in all_regions}
+
+    for region in all_regions:
+        pdoms = post_dominators[region] - {region}
+        if not pdoms:
+            immediate_post_dominator[region] = None
+        else:
+            # Immediate post-dominator is the one that post-dominates the fewest nodes
+            # (closest in the post-dominator tree)
+            ipdom = min(pdoms, key=lambda pd: len(post_dominators[pd]))
+            immediate_post_dominator[region] = ipdom
+
+    for region, pdoms in post_dominators.items():
+        for pdom in pdoms:
+            if pdom != region:
+                strictly_post_dominates_map[pdom].add(region)
+    return immediate_post_dominator, strictly_post_dominates_map
+
+
+def _compute_dominators_impl_8616(graph: RegionGraph) -> DominatorInfo:
+    """Run the iterative dominator and post-dominator fixpoint algorithms.
+
+    Implements the iterative fixpoint algorithm:
+    - dom(entry) = {entry}
+    - dom(n) = {n} ∪ (∩ dom(predecessors of n))
+
+    Args:
+        graph: Region graph to analyze
+
+    Returns:
+        DominatorInfo object with cached relationships
+    """  # noqa: RUF002
+    if graph.entry is None:
+        return DominatorInfo()
+
+    all_regions = graph.iter_nodes()
+    dominators = _compute_fixpoint_dominators(graph, all_regions)
+
+    # Compute immediate dominators and strictly_dominates relationships
+    immediate_dominator, strictly_dominates_map = _immediate_dominators_8616(
+        dominators, all_regions
+    )
+
+    # Compute post-dominators (dominators in reverse graph)
+    # Identify exit nodes (regions with no successors)
+    exit_nodes = [r for r in all_regions if not graph.successors(r)]
+
+    post_dominators = _compute_fixpoint_post_dominators(graph, all_regions, exit_nodes)
+
+    # Compute immediate post-dominators
+    immediate_post_dominator, strictly_post_dominates_map = (
+        _immediate_post_dominators_8616(post_dominators, all_regions)
+    )
+
+    return DominatorInfo(
+        dominators=dominators,
+        immediate_dominator=immediate_dominator,
+        strictly_dominates_map=strictly_dominates_map,
+        post_dominators=post_dominators,
+        immediate_post_dominator=immediate_post_dominator,
+        strictly_post_dominates_map=strictly_post_dominates_map,
+    )
+
+
 def compute_dominators(graph: RegionGraph) -> DominatorInfo:
     """Compute dominator relationships for all regions."""
-
-    def _impl() -> DominatorInfo:
-        """Run the iterative dominator and post-dominator fixpoint algorithms.
-
-        Implements the iterative fixpoint algorithm:
-        - dom(entry) = {entry}
-        - dom(n) = {n} ∪ (∩ dom(predecessors of n))
-
-        Args:
-            graph: Region graph to analyze
-
-        Returns:
-            DominatorInfo object with cached relationships
-        """  # noqa: RUF002
-        if graph.entry is None:
-            return DominatorInfo()
-
-        all_regions = graph.iter_nodes()
-        dominators = _compute_fixpoint_dominators(graph, all_regions)
-
-        # Compute immediate dominators and strictly_dominates relationships
-        immediate_dominator: dict[Region, Region | None] = {}
-        strictly_dominates_map: dict[Region, set[Region]] = {r: set() for r in all_regions}
-
-        for region in all_regions:
-            doms = dominators[region] - {region}
-            immediate_dominator[region] = None if not doms else max(doms, key=lambda d: len(dominators[d]))
-        for region, doms in dominators.items():
-            for dom in doms:
-                if dom != region:
-                    strictly_dominates_map[dom].add(region)
-
-        # Compute post-dominators (dominators in reverse graph)
-        # Identify exit nodes (regions with no successors)
-        exit_nodes = [r for r in all_regions if not graph.successors(r)]
-
-        post_dominators = _compute_fixpoint_post_dominators(graph, all_regions, exit_nodes)
-
-        # Compute immediate post-dominators
-        immediate_post_dominator: dict[Region, Region | None] = {}
-        strictly_post_dominates_map: dict[Region, set[Region]] = {r: set() for r in all_regions}
-
-        for region in all_regions:
-            pdoms = post_dominators[region] - {region}
-            if not pdoms:
-                immediate_post_dominator[region] = None
-            else:
-                # Immediate post-dominator is the one that post-dominates the fewest nodes
-                # (closest in the post-dominator tree)
-                ipdom = min(pdoms, key=lambda pd: len(post_dominators[pd]))
-                immediate_post_dominator[region] = ipdom
-
-        for region, pdoms in post_dominators.items():
-            for pdom in pdoms:
-                if pdom != region:
-                    strictly_post_dominates_map[pdom].add(region)
-
-        return DominatorInfo(
-            dominators=dominators,
-            immediate_dominator=immediate_dominator,
-            strictly_dominates_map=strictly_dominates_map,
-            post_dominators=post_dominators,
-            immediate_post_dominator=immediate_post_dominator,
-            strictly_post_dominates_map=strictly_post_dominates_map,
-        )
-
-    return _impl()
+    return _compute_dominators_impl_8616(graph)
 
 
 def _compute_fixpoint_dominators(graph: RegionGraph, all_regions: list[Region]) -> dict[Region, set[Region]]:

@@ -40,17 +40,27 @@ def _refused_snapshot_8616(
     )
 
 
-def build_ssa_cfg_snapshot_8616(artifact: SSAFunctionArtifact) -> SSACFGSnapshot8616:
-    """Validate and freeze the SSA predecessor relation and its exact inverse."""
+def _validated_block_addrs_8616(
+    artifact: SSAFunctionArtifact,
+) -> tuple[int, ...] | SSACFGSnapshot8616:
+    """Return sorted unique block addresses or a typed refusal snapshot."""
     observed_blocks = tuple(block.addr for block in artifact.blocks)
     block_addrs = tuple(sorted(set(observed_blocks)))
     if not block_addrs:
         return _refused_snapshot_8616(artifact.function_addr, SSACFGFailureKind8616.EMPTY_CFG)
     if len(block_addrs) != len(observed_blocks):
         return _refused_snapshot_8616(artifact.function_addr, SSACFGFailureKind8616.DUPLICATE_BLOCK, block_addrs)
-    block_set = set(block_addrs)
-    if artifact.function_addr not in block_set:
+    if artifact.function_addr not in set(block_addrs):
         return _refused_snapshot_8616(artifact.function_addr, SSACFGFailureKind8616.ENTRY_BLOCK_MISSING)
+    return block_addrs
+
+
+def _normalized_predecessors_8616(
+    artifact: SSAFunctionArtifact,
+    block_addrs: tuple[int, ...],
+) -> tuple[tuple[int, tuple[int, ...]], ...] | SSACFGSnapshot8616:
+    """Return sorted per-node predecessors or a typed refusal snapshot."""
+    block_set = set(block_addrs)
     map_keys = set(artifact.predecessor_map)
     missing = tuple(sorted(block_set - map_keys))
     if missing:
@@ -88,21 +98,51 @@ def build_ssa_cfg_snapshot_8616(artifact: SSAFunctionArtifact) -> SSACFGSnapshot
             artifact.function_addr, SSACFGFailureKind8616.ENTRY_HAS_PREDECESSOR,
             entry_predecessors, normalized=True
         )
+    return predecessors
+
+
+def _successor_sets_8616(
+    block_addrs: tuple[int, ...],
+    predecessors: tuple[tuple[int, tuple[int, ...]], ...],
+) -> dict[int, set[int]]:
+    """Invert the predecessor relation into per-node successor sets."""
     successor_sets = {node: set[int]() for node in block_addrs}
     for target, sources in predecessors:
         for source in sources:
             successor_sets[source].add(target)
-    successors = tuple((node, tuple(sorted(successor_sets[node]))) for node in block_addrs)
-    edges = tuple(sorted((source, target) for source, targets in successors for target in targets))
-    reachable = {artifact.function_addr}
-    pending = [artifact.function_addr]
+    return successor_sets
+
+
+def _reachable_blocks_8616(
+    function_addr: int,
+    successor_sets: dict[int, set[int]],
+) -> set[int]:
+    """Return every block reachable from the function entry."""
+    reachable = {function_addr}
+    pending = [function_addr]
     while pending:
         node = pending.pop()
         for successor in successor_sets[node]:
             if successor not in reachable:
                 reachable.add(successor)
                 pending.append(successor)
-    unreachable = tuple(sorted(block_set - reachable))
+    return reachable
+
+
+def build_ssa_cfg_snapshot_8616(artifact: SSAFunctionArtifact) -> SSACFGSnapshot8616:
+    """Validate and freeze the SSA predecessor relation and its exact inverse."""
+    block_addrs = _validated_block_addrs_8616(artifact)
+    if isinstance(block_addrs, SSACFGSnapshot8616):
+        return block_addrs
+    predecessors = _normalized_predecessors_8616(artifact, block_addrs)
+    if isinstance(predecessors, SSACFGSnapshot8616):
+        return predecessors
+    successor_sets = _successor_sets_8616(block_addrs, predecessors)
+    successors = tuple((node, tuple(sorted(successor_sets[node]))) for node in block_addrs)
+    edges = tuple(sorted((source, target) for source, targets in successors for target in targets))
+    unreachable = tuple(
+        sorted(set(block_addrs) - _reachable_blocks_8616(artifact.function_addr, successor_sets))
+    )
     if unreachable:
         return _refused_snapshot_8616(
             artifact.function_addr, SSACFGFailureKind8616.UNREACHABLE_BLOCK,
@@ -162,13 +202,13 @@ def _refused_loop_8616(
     )
 
 
-def classify_ssa_natural_loop_8616(
+def _loop_input_refusal_8616(
     snapshot: SSACFGSnapshot8616,
     dominators: SSADominators8616,
     header: int,
     latch: int,
-) -> SSANaturalLoop8616:
-    """Prove one single-entry, single-latch, single-exit-target natural loop."""
+) -> SSANaturalLoop8616 | None:
+    """Return a refusal when loop inputs are not proven or consistent."""
     if not snapshot.complete or not dominators.complete:
         return _refused_loop_8616(header, latch, SSACFGFailureKind8616.SNAPSHOT_UNPROVEN)
     if (
@@ -185,6 +225,15 @@ def classify_ssa_natural_loop_8616(
         return _refused_loop_8616(header, latch, SSACFGFailureKind8616.LATCH_BACKEDGE_MISSING, normalized=True)
     if dominators.dominates(header, latch) is not True:
         return _refused_loop_8616(header, latch, SSACFGFailureKind8616.HEADER_DOMINANCE_UNPROVEN, normalized=True)
+    return None
+
+
+def _forward_region_8616(
+    snapshot: SSACFGSnapshot8616,
+    header: int,
+    latch: int,
+) -> set[int] | SSANaturalLoop8616:
+    """Return nodes reachable forward from the header without re-entering it."""
     forward: set[int] = set()
     pending = [header]
     while pending:
@@ -196,6 +245,16 @@ def classify_ssa_natural_loop_8616(
         if successors is None:
             return _refused_loop_8616(header, latch, SSACFGFailureKind8616.SNAPSHOT_UNPROVEN)
         pending.extend(reversed(tuple(target for target in successors if target != header)))
+    return forward
+
+
+def _loop_body_8616(
+    snapshot: SSACFGSnapshot8616,
+    dominators: SSADominators8616,
+    header: int,
+    latch: int,
+) -> set[int] | SSANaturalLoop8616:
+    """Close the latch predecessors over header-dominated nodes."""
     body = {header, latch}
     pending = [latch]
     while pending:
@@ -210,6 +269,17 @@ def classify_ssa_natural_loop_8616(
                 body.add(predecessor)
                 if predecessor != header:
                     pending.append(predecessor)
+    return body
+
+
+def _unique_loop_boundary_8616(
+    snapshot: SSACFGSnapshot8616,
+    header: int,
+    latch: int,
+    forward: set[int],
+    body: set[int],
+) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]] | SSANaturalLoop8616:
+    """Prove a unique latch, unique entry target, and single exit target."""
     header_predecessors = snapshot.predecessors(header)
     if header_predecessors is None:
         return _refused_loop_8616(header, latch, SSACFGFailureKind8616.SNAPSHOT_UNPROVEN)
@@ -229,6 +299,29 @@ def classify_ssa_natural_loop_8616(
         return _refused_loop_8616(
             header, latch, SSACFGFailureKind8616.NON_UNIQUE_EXIT_TARGET, normalized=True
         )
+    return entry_edges, exit_edges
+
+
+def classify_ssa_natural_loop_8616(
+    snapshot: SSACFGSnapshot8616,
+    dominators: SSADominators8616,
+    header: int,
+    latch: int,
+) -> SSANaturalLoop8616:
+    """Prove one single-entry, single-latch, single-exit-target natural loop."""
+    refusal = _loop_input_refusal_8616(snapshot, dominators, header, latch)
+    if refusal is not None:
+        return refusal
+    forward = _forward_region_8616(snapshot, header, latch)
+    if isinstance(forward, SSANaturalLoop8616):
+        return forward
+    body = _loop_body_8616(snapshot, dominators, header, latch)
+    if isinstance(body, SSANaturalLoop8616):
+        return body
+    boundary = _unique_loop_boundary_8616(snapshot, header, latch, forward, body)
+    if isinstance(boundary, SSANaturalLoop8616):
+        return boundary
+    entry_edges, exit_edges = boundary
     return SSANaturalLoop8616(
         header, latch, tuple(sorted(body)), entry_edges, ((latch, header),), exit_edges,
         _stats_8616(proven=True, normalized=True)

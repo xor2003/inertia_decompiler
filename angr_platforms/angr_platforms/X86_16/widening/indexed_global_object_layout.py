@@ -29,12 +29,13 @@ from .global_object_layout import (
 )
 
 
-def recover_global_object_layout_evidence_8616(
+def _program_inputs_8616(
     program: IndexedAliasProgramEvidence8616,
-) -> GlobalObjectLayoutEvidence8616:
-    """Join exact global-indexed Alias views and whole-value copy relations."""
-    if not program.closed:
-        raise ValueError("global-object Widening requires closed Alias program evidence")
+) -> tuple[
+    tuple[tuple[int, IndexedAliasAccessFact8616 | IndexedAliasAccessRefusal8616], ...],
+    tuple[tuple[int, IndexedAliasCopyFact8616 | IndexedAliasCopyRefusal8616], ...],
+]:
+    """Flatten every function's access and copy inputs with owning addrs."""
     access_input_list: list[
         tuple[int, IndexedAliasAccessFact8616 | IndexedAliasAccessRefusal8616]
     ] = []
@@ -56,14 +57,14 @@ def recover_global_object_layout_evidence_8616(
             (function.function_addr, refusal)
             for refusal in function.copies.refusals
         )
-    access_inputs = tuple(access_input_list)
-    copy_inputs = tuple(copy_input_list)
-    global_accesses = tuple(
-        (function_addr, fact)
-        for function_addr, fact in access_inputs
-        if isinstance(fact, IndexedAliasAccessFact8616)
-        and fact.role is IndexedAliasAccessRole8616.GLOBAL_INDEXED
-    )
+    return tuple(access_input_list), tuple(copy_input_list)
+
+
+def _candidate_bases_8616(
+    program: IndexedAliasProgramEvidence8616,
+    global_accesses: tuple[tuple[int, IndexedAliasAccessFact8616], ...],
+) -> set[int]:
+    """Return DS base offsets proven by paired byte views of a word access."""
     word_bases = {
         fact.source.storage.base_offset
         for _function_addr, fact in global_accesses
@@ -82,7 +83,7 @@ def recover_global_object_layout_evidence_8616(
             storage.index_shift,
         )
         byte_groups.setdefault(key, set()).add(storage.base_offset)
-    candidate_bases = (
+    return (
         {
             base
             for bases in byte_groups.values()
@@ -92,7 +93,14 @@ def recover_global_object_layout_evidence_8616(
         if not program.refusals
         else set()
     )
-    accepted_copies = tuple(
+
+
+def _accepted_copies_8616(
+    copy_inputs: tuple[tuple[int, IndexedAliasCopyFact8616 | IndexedAliasCopyRefusal8616], ...],
+    candidate_bases: set[int],
+) -> tuple[tuple[int, IndexedAliasCopyFact8616], ...]:
+    """Return copies whose DS word endpoints both sit inside candidate bases."""
+    return tuple(
         (function_addr, fact)
         for function_addr, fact in copy_inputs
         if isinstance(fact, IndexedAliasCopyFact8616)
@@ -103,6 +111,13 @@ def recover_global_object_layout_evidence_8616(
         and fact.source.storage.base_offset in candidate_bases
         and fact.destination.storage.base_offset in candidate_bases
     )
+
+
+def _copy_families_8616(
+    candidate_bases: set[int],
+    accepted_copies: tuple[tuple[int, IndexedAliasCopyFact8616], ...],
+) -> dict[int, set[int]]:
+    """Union candidate bases connected by proven whole-value copies."""
     copy_pairs = {
         tuple(
             sorted(
@@ -119,6 +134,81 @@ def recover_global_object_layout_evidence_8616(
         merged = families[source_base] | families[destination_base]
         for member in merged:
             families[member] = merged
+    return families
+
+
+def _access_refusals_8616(
+    access_inputs: tuple[tuple[int, IndexedAliasAccessFact8616 | IndexedAliasAccessRefusal8616], ...],
+    consumed_accesses: tuple[tuple[int, IndexedAliasAccessFact8616], ...],
+    incomplete: bool,
+) -> list[GlobalObjectLayoutRefusal8616]:
+    """Classify every unconsumed access input as a typed refusal."""
+    refusals: list[GlobalObjectLayoutRefusal8616] = []
+    for function_addr, source in access_inputs:
+        if (function_addr, source) in consumed_accesses:
+            continue
+        if incomplete:
+            failure = GlobalObjectLayoutFailureKind8616.PROGRAM_CENSUS_INCOMPLETE
+        elif isinstance(source, IndexedAliasAccessRefusal8616):
+            failure = GlobalObjectLayoutFailureKind8616.UPSTREAM_ACCESS_REFUSAL
+        elif source.role is not IndexedAliasAccessRole8616.GLOBAL_INDEXED:
+            failure = GlobalObjectLayoutFailureKind8616.NON_GLOBAL_ACCESS
+        else:
+            failure = GlobalObjectLayoutFailureKind8616.LAYOUT_NOT_PROVEN
+        refusals.append(
+            GlobalObjectLayoutRefusal8616(
+                function_addr,
+                failure,
+                "Alias access does not participate in one proven object layout",
+                source,
+            )
+        )
+    return refusals
+
+
+def _copy_refusals_8616(
+    copy_inputs: tuple[tuple[int, IndexedAliasCopyFact8616 | IndexedAliasCopyRefusal8616], ...],
+    accepted_copies: tuple[tuple[int, IndexedAliasCopyFact8616], ...],
+    incomplete: bool,
+) -> list[GlobalObjectLayoutRefusal8616]:
+    """Classify every unaccepted copy input as a typed refusal."""
+    refusals: list[GlobalObjectLayoutRefusal8616] = []
+    for function_addr, copy_source in copy_inputs:
+        if (function_addr, copy_source) in accepted_copies:
+            continue
+        if incomplete:
+            failure = GlobalObjectLayoutFailureKind8616.PROGRAM_CENSUS_INCOMPLETE
+        elif isinstance(copy_source, IndexedAliasCopyRefusal8616):
+            failure = GlobalObjectLayoutFailureKind8616.UPSTREAM_COPY_REFUSAL
+        else:
+            failure = GlobalObjectLayoutFailureKind8616.COPY_ENDPOINT_NOT_LAYOUT
+        refusals.append(
+            GlobalObjectLayoutRefusal8616(
+                function_addr,
+                failure,
+                "Alias copy does not join two proven object layouts",
+                copy_source,
+            )
+        )
+    return refusals
+
+
+def recover_global_object_layout_evidence_8616(
+    program: IndexedAliasProgramEvidence8616,
+) -> GlobalObjectLayoutEvidence8616:
+    """Join exact global-indexed Alias views and whole-value copy relations."""
+    if not program.closed:
+        raise ValueError("global-object Widening requires closed Alias program evidence")
+    access_inputs, copy_inputs = _program_inputs_8616(program)
+    global_accesses = tuple(
+        (function_addr, fact)
+        for function_addr, fact in access_inputs
+        if isinstance(fact, IndexedAliasAccessFact8616)
+        and fact.role is IndexedAliasAccessRole8616.GLOBAL_INDEXED
+    )
+    candidate_bases = _candidate_bases_8616(program, global_accesses)
+    accepted_copies = _accepted_copies_8616(copy_inputs, candidate_bases)
+    families = _copy_families_8616(candidate_bases, accepted_copies)
     layouts = tuple(
         GlobalObjectLayout8616(
             address=IRAddress(
@@ -160,42 +250,8 @@ def recover_global_object_layout_evidence_8616(
         )
         for refusal in program.refusals
     ]
-    for function_addr, source in access_inputs:
-        if (function_addr, source) in consumed_accesses:
-            continue
-        if incomplete:
-            failure = GlobalObjectLayoutFailureKind8616.PROGRAM_CENSUS_INCOMPLETE
-        elif isinstance(source, IndexedAliasAccessRefusal8616):
-            failure = GlobalObjectLayoutFailureKind8616.UPSTREAM_ACCESS_REFUSAL
-        elif source.role is not IndexedAliasAccessRole8616.GLOBAL_INDEXED:
-            failure = GlobalObjectLayoutFailureKind8616.NON_GLOBAL_ACCESS
-        else:
-            failure = GlobalObjectLayoutFailureKind8616.LAYOUT_NOT_PROVEN
-        refusals.append(
-            GlobalObjectLayoutRefusal8616(
-                function_addr,
-                failure,
-                "Alias access does not participate in one proven object layout",
-                source,
-            )
-        )
-    for function_addr, copy_source in copy_inputs:
-        if (function_addr, copy_source) in accepted_copies:
-            continue
-        if incomplete:
-            failure = GlobalObjectLayoutFailureKind8616.PROGRAM_CENSUS_INCOMPLETE
-        elif isinstance(copy_source, IndexedAliasCopyRefusal8616):
-            failure = GlobalObjectLayoutFailureKind8616.UPSTREAM_COPY_REFUSAL
-        else:
-            failure = GlobalObjectLayoutFailureKind8616.COPY_ENDPOINT_NOT_LAYOUT
-        refusals.append(
-            GlobalObjectLayoutRefusal8616(
-                function_addr,
-                failure,
-                "Alias copy does not join two proven object layouts",
-                copy_source,
-            )
-        )
+    refusals.extend(_access_refusals_8616(access_inputs, consumed_accesses, incomplete))
+    refusals.extend(_copy_refusals_8616(copy_inputs, accepted_copies, incomplete))
     materialized_count = len(consumed_accesses) + len(accepted_copies)
     result = GlobalObjectLayoutEvidence8616(
         layouts=layouts,

@@ -17,6 +17,16 @@ from .logical_memory_value_trace import trace_logical_word_load_8616
 from .scalar_definitions import ScalarDefinitionIndex8616
 
 
+def _stable_stack_word_source_8616(source: IRValue) -> bool:
+    """Return whether the source is one stable SS word."""
+    return (
+        source.space is MemSpace.SS
+        and source.status is AddressStatus.STABLE
+        and len(source.base) == 1
+        and source.size == 2
+    )
+
+
 def project_logical_stack_word_value_8616(
     instruction: IRInstr,
     definitions: ScalarDefinitionIndex8616,
@@ -36,15 +46,9 @@ def project_logical_stack_word_value_8616(
         before_index=before_index,
     )
     source = trace.source
-    if (
-        not trace.complete
-        or source is None
-        or source.space is not MemSpace.SS
-        or source.status is not AddressStatus.STABLE
-        or len(source.base) != 1
-        or source.size != 2
-        or instruction.addr is None
-    ):
+    if not trace.complete or source is None:
+        return None
+    if not _stable_stack_word_source_8616(source) or instruction.addr is None:
         return None
     base = source.base[0].lower()
     if base not in {"bp", "sp"}:

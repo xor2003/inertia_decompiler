@@ -98,22 +98,30 @@ class SSAMemoryAccess8616:
     address: IRAddress
     slices: tuple[SSAMemoryAccessSlice8616, ...]
 
+    def _slice_matches_8616(
+        self,
+        item: SSAMemoryAccessSlice8616,
+        expected_offset: int,
+    ) -> bool:
+        """Return whether one versioned slice continues the access exactly."""
+        cell = item.address
+        return (
+            item.source_byte_offset == expected_offset - self.address.offset
+            and cell.space is self.address.space
+            and cell.base == self.address.base
+            and cell.offset == expected_offset
+            and cell.size > 0
+            and cell.version is not None
+        )
+
     @property
     def complete(self) -> bool:
         """Return whether ordered versioned slices exactly cover the access."""
         expected_offset = self.address.offset
         for item in self.slices:
-            cell = item.address
-            if (
-                item.source_byte_offset != expected_offset - self.address.offset
-                or cell.space is not self.address.space
-                or cell.base != self.address.base
-                or cell.offset != expected_offset
-                or cell.size <= 0
-                or cell.version is None
-            ):
+            if not self._slice_matches_8616(item, expected_offset):
                 return False
-            expected_offset += cell.size
+            expected_offset += item.address.size
         return bool(self.slices and expected_offset == self.address.offset + self.address.size)
 
     def to_dict(self) -> dict[str, object]:

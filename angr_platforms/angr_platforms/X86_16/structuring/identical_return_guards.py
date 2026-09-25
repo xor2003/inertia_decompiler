@@ -152,6 +152,92 @@ def _single_return_8616(node: object) -> CReturn | None:
     return current if isinstance(current, CReturn) else None
 
 
+@dataclass(slots=True)
+class _GuardCandidate8616:
+    """One resolved identical-return guard shape awaiting collapse."""
+
+    alternate_node: object
+    alternate_return: CReturn
+    consumed_count: int
+    shape: IdenticalReturnGuardShape8616
+
+
+def _guard_candidate_8616(
+    statements: list[object],
+    index: int,
+    guard: CIfElse,
+) -> _GuardCandidate8616 | None:
+    """Resolve the else/fallthrough alternate return shape or skip."""
+    else_node = guard.else_node
+    alternate_return = _single_return_8616(else_node)
+    if alternate_return is not None and else_node is not None:
+        return _GuardCandidate8616(
+            else_node, alternate_return, 1, IdenticalReturnGuardShape8616.ELSE_RETURN
+        )
+    if index + 1 >= len(statements):
+        return None
+    alternate_node = statements[index + 1]
+    alternate_return = _single_return_8616(alternate_node)
+    if alternate_return is None or else_node is not None:
+        return None
+    return _GuardCandidate8616(
+        alternate_node,
+        alternate_return,
+        2,
+        IdenticalReturnGuardShape8616.FALLTHROUGH_RETURN,
+    )
+
+
+def _collapse_one_guard_8616(
+    statements: list[object],
+    index: int,
+    guard: CIfElse,
+    candidate: _GuardCandidate8616,
+    refusals: list[IdenticalReturnGuardRefusal8616],
+) -> tuple[int, int, int, int]:
+    """Validate one guard and splice it, returning index and count deltas."""
+    arms = tuple(guard.condition_and_nodes or ())
+    if len(arms) != 1:
+        refusals.append(
+            IdenticalReturnGuardRefusal8616(
+                index,
+                IdenticalReturnGuardRefusalReason8616.MULTIPLE_CONDITION_ARMS,
+            )
+        )
+        return index + 1, 0, 0, 0
+    condition, body = arms[0]
+    branch_return = _single_return_8616(body)
+    if branch_return is None:
+        refusals.append(
+            IdenticalReturnGuardRefusal8616(
+                index,
+                IdenticalReturnGuardRefusalReason8616.BRANCH_IS_NOT_ONE_RETURN,
+            )
+        )
+        return index + 1, 0, 0, 0
+    if not _condition_is_proven_pure_8616(condition):
+        refusals.append(
+            IdenticalReturnGuardRefusal8616(
+                index,
+                IdenticalReturnGuardRefusalReason8616.CONDITION_PURITY_UNPROVEN,
+            )
+        )
+        return index + 1, 1, 0, 0
+    if not _same_c_expression_8616(
+        branch_return.retval,
+        candidate.alternate_return.retval,
+    ):
+        refusals.append(
+            IdenticalReturnGuardRefusal8616(
+                index,
+                IdenticalReturnGuardRefusalReason8616.RETURN_EXPRESSION_MISMATCH,
+            )
+        )
+        return index + 1, 1, 0, 0
+    statements[index : index + candidate.consumed_count] = [candidate.alternate_node]
+    return max(0, index - 1), 1, 1, 1
+
+
 def collapse_pure_identical_return_guards_8616(
     root: object,
 ) -> IdenticalReturnGuardCollapseResult8616:
@@ -173,73 +259,23 @@ def collapse_pure_identical_return_guards_8616(
             if not isinstance(guard, CIfElse):
                 index += 1
                 continue
-            else_node = guard.else_node
-            alternate_return = _single_return_8616(else_node)
-            if alternate_return is not None and else_node is not None:
-                alternate_node = else_node
-                consumed_count = 1
-                shape = IdenticalReturnGuardShape8616.ELSE_RETURN
-            else:
-                if index + 1 >= len(statements):
-                    index += 1
-                    continue
-                alternate_node = statements[index + 1]
-                alternate_return = _single_return_8616(alternate_node)
-                if alternate_return is None or else_node is not None:
-                    index += 1
-                    continue
-                consumed_count = 2
-                shape = IdenticalReturnGuardShape8616.FALLTHROUGH_RETURN
+            candidate = _guard_candidate_8616(statements, index, guard)
+            if candidate is None:
+                index += 1
+                continue
             raw_count += 1
-            arms = tuple(guard.condition_and_nodes or ())
-            if len(arms) != 1:
-                refusals.append(
-                    IdenticalReturnGuardRefusal8616(
-                        index,
-                        IdenticalReturnGuardRefusalReason8616.MULTIPLE_CONDITION_ARMS,
-                    )
+            next_index, normalized, classified, materialized = _collapse_one_guard_8616(
+                statements, index, guard, candidate, refusals
+            )
+            normalized_count += normalized
+            classified_count += classified
+            materialized_count += materialized
+            if materialized:
+                materializations.append(
+                    IdenticalReturnGuardMaterialization8616(index, candidate.shape)
                 )
-                index += 1
-                continue
-            condition, body = arms[0]
-            branch_return = _single_return_8616(body)
-            if branch_return is None:
-                refusals.append(
-                    IdenticalReturnGuardRefusal8616(
-                        index,
-                        IdenticalReturnGuardRefusalReason8616.BRANCH_IS_NOT_ONE_RETURN,
-                    )
-                )
-                index += 1
-                continue
-            normalized_count += 1
-            if not _condition_is_proven_pure_8616(condition):
-                refusals.append(
-                    IdenticalReturnGuardRefusal8616(
-                        index,
-                        IdenticalReturnGuardRefusalReason8616.CONDITION_PURITY_UNPROVEN,
-                    )
-                )
-                index += 1
-                continue
-            if not _same_c_expression_8616(
-                branch_return.retval,
-                alternate_return.retval,
-            ):
-                refusals.append(
-                    IdenticalReturnGuardRefusal8616(
-                        index,
-                        IdenticalReturnGuardRefusalReason8616.RETURN_EXPRESSION_MISMATCH,
-                    )
-                )
-                index += 1
-                continue
-            classified_count += 1
-            materialized_count += 1
-            materializations.append(IdenticalReturnGuardMaterialization8616(index, shape))
-            statements[index : index + consumed_count] = [alternate_node]
-            container.statements = statements
-            index = max(0, index - 1)
+                container.statements = statements
+            index = next_index
 
     stats = IdenticalReturnGuardCollapseStats8616(
         raw_fact_count=raw_count,

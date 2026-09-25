@@ -7,6 +7,7 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -35,6 +36,80 @@ class _CodegenLike(Protocol):
     cfunc: _CFunctionLike | None
 
 
+@dataclass(slots=True)
+class _CodGlobalLoadFold8616:
+    """Mutable fold state for coalescing scaled word-global loads."""
+
+    codegen: _CodegenLike
+    synthetic_globals: object
+    storage_object_artifact: object
+    project: object
+    global_load_addr: Callable[[object, object], int | None]
+    match_scaled_high_byte: Callable[[object, object], int | None]
+    synthetic_word_global_variable: Callable[
+        [_CodegenLike, object, int, dict[int, structured_c.CVariable]], structured_c.CVariable | None
+    ]
+    created: dict[int, structured_c.CVariable] = field(default_factory=dict)
+
+    def transform(self, node: object) -> object:
+        """Replace one adjacent low+high byte global-load pair with a word global."""
+        if not isinstance(node, structured_c.CBinaryOp) or node.op not in {"Or", "Add"}:
+            return node
+
+        for low_expr, high_expr in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
+            low_addr = self.global_load_addr(low_expr, self.project)
+            if low_addr is None:
+                continue
+
+            if self.storage_object_artifact is not None:
+                record = storage_object_record_for_key(self.storage_object_artifact, ("mem", low_addr))
+                if record is not None and record.object_kind == "member":
+                    continue
+
+            cvar = self.synthetic_word_global_variable(
+                self.codegen, self.synthetic_globals, low_addr, self.created
+            )
+            if cvar is None:
+                continue
+
+            high_addr = self.match_scaled_high_byte(high_expr, self.project)
+            if high_addr != low_addr + 1:
+                continue
+
+            return cvar
+
+        return node
+
+
+def _storage_object_artifact_for(
+    project: object,
+    codegen: _CodegenLike,
+    cfunc: _CFunctionLike,
+    *,
+    collect_access_traits: Callable[[object, _CodegenLike], object],
+    build_access_trait_evidence_profiles: Callable[[dict[str, dict[BaseKey, object]]], EvidenceProfiles],
+    build_stable_access_object_hints: Callable[[dict[str, dict[BaseKey, object]]], StableHints],
+) -> object:
+    """Return the storage-object artifact for this function's access traits."""
+    # dynamic angr boundary: access traits are attached to Project by earlier passes.
+    traits_cache = getattr(project, "_inertia_access_traits", None)
+    if not isinstance(traits_cache, dict) or cfunc.addr not in traits_cache:
+        collect_access_traits(project, codegen)
+        # dynamic angr boundary: collect_access_traits refreshes the Project cache.
+        traits_cache = getattr(project, "_inertia_access_traits", None)
+
+    if not isinstance(traits_cache, dict):
+        return None
+    traits = traits_cache.get(cfunc.addr)
+    if not isinstance(traits, dict):
+        return None
+    return build_storage_object_artifact(
+        traits,
+        build_access_trait_evidence_profiles=build_access_trait_evidence_profiles,
+        build_stable_access_object_hints=build_stable_access_object_hints,
+    )
+
+
 def _coalesce_cod_word_global_loads(
     project: object,
     codegen: _CodegenLike,
@@ -54,60 +129,32 @@ def _coalesce_cod_word_global_loads(
     if not synthetic_globals or cfunc is None:
         return False
 
-    # dynamic angr boundary: access traits are attached to Project by earlier passes.
-    traits_cache = getattr(project, "_inertia_access_traits", None)
-    if not isinstance(traits_cache, dict) or cfunc.addr not in traits_cache:
-        collect_access_traits(project, codegen)
-        # dynamic angr boundary: collect_access_traits refreshes the Project cache.
-        traits_cache = getattr(project, "_inertia_access_traits", None)
+    storage_object_artifact = _storage_object_artifact_for(
+        project,
+        codegen,
+        cfunc,
+        collect_access_traits=collect_access_traits,
+        build_access_trait_evidence_profiles=build_access_trait_evidence_profiles,
+        build_stable_access_object_hints=build_stable_access_object_hints,
+    )
 
-    storage_object_artifact = None
-    if isinstance(traits_cache, dict):
-        traits = traits_cache.get(cfunc.addr)
-        if isinstance(traits, dict):
-            storage_object_artifact = build_storage_object_artifact(
-                traits,
-                build_access_trait_evidence_profiles=build_access_trait_evidence_profiles,
-                build_stable_access_object_hints=build_stable_access_object_hints,
-            )
-
-    created: dict[int, structured_c.CVariable] = {}
-
-    def transform(node: object) -> object:
-        if not isinstance(node, structured_c.CBinaryOp) or node.op not in {"Or", "Add"}:
-            return node
-
-        for low_expr, high_expr in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
-            low_addr = global_load_addr(low_expr, project)
-            if low_addr is None:
-                continue
-
-            if storage_object_artifact is not None:
-                record = storage_object_record_for_key(storage_object_artifact, ("mem", low_addr))
-                if record is not None and record.object_kind == "member":
-                    continue
-
-            cvar = synthetic_word_global_variable(codegen, synthetic_globals, low_addr, created)
-            if cvar is None:
-                continue
-
-            high_addr = match_scaled_high_byte(high_expr, project)
-            if high_addr != low_addr + 1:
-                continue
-
-            return cvar
-
-        return node
-
+    folder = _CodGlobalLoadFold8616(
+        codegen,
+        synthetic_globals,
+        storage_object_artifact,
+        project,
+        global_load_addr,
+        match_scaled_high_byte,
+        synthetic_word_global_variable,
+    )
     root = cfunc.statements
-    new_root = transform(root)
+    new_root = folder.transform(root)
+    changed = False
     if new_root is not root:
         cfunc.statements = new_root
         root = new_root
         changed = True
-    else:
-        changed = False
 
-    if replace_c_children(root, transform):
+    if replace_c_children(root, folder.transform):
         changed = True
     return changed

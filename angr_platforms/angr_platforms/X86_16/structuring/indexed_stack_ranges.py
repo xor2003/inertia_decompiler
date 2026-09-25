@@ -260,42 +260,64 @@ def _scalar_storage_8616(node: object) -> _ScalarStorage8616 | None:
         None,
     )
     if isinstance(variable, SimStackVariable):
-        width = _type_width_bytes_8616(node.type)
-        if width is None:
-            width = variable.size if isinstance(variable.size, int) else None
-        if not isinstance(variable.offset, int) or not isinstance(width, int) or width <= 0:
-            return None
-        return _ScalarStorage8616(
-            kind=_ScalarStorageKind8616.STACK,
-            offset=variable.offset,
-            width=width,
-            region=None,
-            space=MemSpace.SS,
-        )
+        return _stack_variable_storage_8616(node, variable)
     if isinstance(variable, SimMemoryVariable):
-        if not isinstance(variable.addr, int) or not isinstance(variable.size, int) or variable.size <= 0:
-            return None
-        return _ScalarStorage8616(
-            kind=_ScalarStorageKind8616.MEMORY,
-            offset=variable.addr,
-            width=variable.size,
-            region=None,
-            space=MemSpace.DS,
-        )
+        return _memory_variable_storage_8616(variable)
     if isinstance(variable, SimRegisterVariable):
-        if not isinstance(variable.reg, int) or not isinstance(variable.size, int) or variable.size <= 0:
-            return None
-        ident = ""
-        if isinstance(variable.ident, (int, str)):
-            ident = f"{type(variable.ident).__name__}:{variable.ident}"
-        return _ScalarStorage8616(
-            kind=_ScalarStorageKind8616.REGISTER,
-            offset=variable.reg,
-            width=variable.size,
-            region=variable.region if isinstance(variable.region, int) else None,
-            ident=ident,
-        )
+        return _register_variable_storage_8616(variable)
     return None
+
+
+def _stack_variable_storage_8616(
+    node: CVariable,
+    variable: SimStackVariable,
+) -> _ScalarStorage8616 | None:
+    """Return stack storage identity for one proven stack variable."""
+    width = _type_width_bytes_8616(node.type)
+    if width is None:
+        width = variable.size if isinstance(variable.size, int) else None
+    if not isinstance(variable.offset, int) or not isinstance(width, int) or width <= 0:
+        return None
+    return _ScalarStorage8616(
+        kind=_ScalarStorageKind8616.STACK,
+        offset=variable.offset,
+        width=width,
+        region=None,
+        space=MemSpace.SS,
+    )
+
+
+def _memory_variable_storage_8616(
+    variable: SimMemoryVariable,
+) -> _ScalarStorage8616 | None:
+    """Return DS storage identity for one proven global variable."""
+    if not isinstance(variable.addr, int) or not isinstance(variable.size, int) or variable.size <= 0:
+        return None
+    return _ScalarStorage8616(
+        kind=_ScalarStorageKind8616.MEMORY,
+        offset=variable.addr,
+        width=variable.size,
+        region=None,
+        space=MemSpace.DS,
+    )
+
+
+def _register_variable_storage_8616(
+    variable: SimRegisterVariable,
+) -> _ScalarStorage8616 | None:
+    """Return register storage identity for one proven register variable."""
+    if not isinstance(variable.reg, int) or not isinstance(variable.size, int) or variable.size <= 0:
+        return None
+    ident = ""
+    if isinstance(variable.ident, (int, str)):
+        ident = f"{type(variable.ident).__name__}:{variable.ident}"
+    return _ScalarStorage8616(
+        kind=_ScalarStorageKind8616.REGISTER,
+        offset=variable.reg,
+        width=variable.size,
+        region=variable.region if isinstance(variable.region, int) else None,
+        ident=ident,
+    )
 
 
 def _machine_bp_stack_offset_8616(
@@ -348,6 +370,18 @@ def _structured_call_target_addr_8616(call: CFunctionCall) -> int | None:
     return addr if isinstance(addr, int) else None
 
 
+def _array_variable_shape_8616(variable: object, length: object) -> bool:
+    """Check the backing stack variable and declared length are proven ints."""
+    return (
+        isinstance(variable, SimStackVariable)
+        and isinstance(variable.offset, int)
+        and isinstance(variable.size, int)
+        and variable.size > 0
+        and isinstance(length, int)
+        and length > 0
+    )
+
+
 def _stack_array_storage_8616(
     codegen: object | None,
     node: object,
@@ -362,15 +396,11 @@ def _stack_array_storage_8616(
     variable = node.unified_variable
     if not isinstance(variable, SimStackVariable):
         variable = node.variable
-    if (
-        not isinstance(variable, SimStackVariable)
-        or not isinstance(variable.offset, int)
-        or not isinstance(variable.size, int)
-        or variable.size <= 0
-        or not isinstance(node.type.length, int)
-        or node.type.length <= 0
-    ):
+    if not _array_variable_shape_8616(variable, node.type.length):
         return None
+    assert isinstance(variable, SimStackVariable)
+    assert isinstance(variable.offset, int) and isinstance(variable.size, int)
+    assert isinstance(node.type.length, int)
     element_width = _type_width_bytes_8616(node.type.elem_type)
     if element_width is None:
         if variable.size % node.type.length:
@@ -477,6 +507,35 @@ def _break_only_8616(node: object) -> bool:
     return _break_only_8616(node.statements[0])
 
 
+def _negated_break_condition_8616(condition: CUnaryOp) -> _AscendingLoop8616 | None:
+    """Unwrap one negated break condition into its ascending descriptor."""
+    operand = _strip_casts_8616(condition.operand)
+    if isinstance(operand, CUnaryOp) and operand.op == "Not":
+        return _ascending_condition_8616(operand.operand)
+    if (
+        isinstance(operand, CITE)
+        and _constant_value_8616(operand.iftrue) == 0
+        and _constant_value_8616(operand.iffalse) == 1
+    ):
+        return _ascending_condition_8616(operand.cond)
+    return _ascending_condition_8616(operand)
+
+
+def _ordered_break_condition_8616(condition: CBinaryOp) -> _AscendingLoop8616 | None:
+    """Return the ordered induction/bound descriptor for one comparison."""
+    if condition.op == "CmpGE":
+        induction = _scalar_storage_8616(condition.lhs)
+        bound = _scalar_storage_8616(condition.rhs)
+    elif condition.op == "CmpLE":
+        induction = _scalar_storage_8616(condition.rhs)
+        bound = _scalar_storage_8616(condition.lhs)
+    else:
+        return None
+    if induction is None or bound is None or induction == bound:
+        return None
+    return _AscendingLoop8616(induction=induction, bound=bound)
+
+
 def _break_guard_descriptor_8616(node: object) -> _AscendingLoop8616 | None:
     """Return the continued-loop predicate encoded by one exact break guard."""
     if isinstance(node, CIfBreak):
@@ -491,29 +550,10 @@ def _break_guard_descriptor_8616(node: object) -> _AscendingLoop8616 | None:
         return None
     condition = _strip_casts_8616(condition)
     if isinstance(condition, CUnaryOp) and condition.op == "Not":
-        operand = _strip_casts_8616(condition.operand)
-        if isinstance(operand, CUnaryOp) and operand.op == "Not":
-            return _ascending_condition_8616(operand.operand)
-        if (
-            isinstance(operand, CITE)
-            and _constant_value_8616(operand.iftrue) == 0
-            and _constant_value_8616(operand.iffalse) == 1
-        ):
-            return _ascending_condition_8616(operand.cond)
-        return _ascending_condition_8616(operand)
+        return _negated_break_condition_8616(condition)
     if not isinstance(condition, CBinaryOp):
         return None
-    if condition.op == "CmpGE":
-        induction = _scalar_storage_8616(condition.lhs)
-        bound = _scalar_storage_8616(condition.rhs)
-    elif condition.op == "CmpLE":
-        induction = _scalar_storage_8616(condition.rhs)
-        bound = _scalar_storage_8616(condition.lhs)
-    else:
-        return None
-    if induction is None or bound is None or induction == bound:
-        return None
-    return _AscendingLoop8616(induction=induction, bound=bound)
+    return _ordered_break_condition_8616(condition)
 
 
 def _unconditional_while_8616(loop: CWhileLoop) -> bool:
@@ -522,6 +562,163 @@ def _unconditional_while_8616(loop: CWhileLoop) -> bool:
         return True
     condition = _strip_casts_8616(loop.condition)
     return isinstance(condition, CConstant) and condition.value in {True}
+
+
+def _canonical_while_debug_8616(enabled: bool, reason: str, **values: object) -> None:
+    """Emit opt-in canonical-while refusal details."""
+    if enabled:
+        logging.getLogger(__name__).warning(
+            "indexed-stack-range event=while-shape-%s values=%r",
+            reason,
+            values,
+        )
+
+
+def _expression_shape_8616(node: object, depth: int = 0) -> object:
+    """Return a bounded typed expression shape for opt-in diagnostics."""
+    if depth >= 5:
+        return type(node).__name__
+    node = _strip_casts_8616(node)
+    if isinstance(node, CVariable):
+        return ("variable", node.name, _scalar_storage_8616(node))
+    if isinstance(node, CConstant):
+        return ("constant", node.value)
+    if isinstance(node, CUnaryOp):
+        return ("unary", node.op, _expression_shape_8616(node.operand, depth + 1))
+    if isinstance(node, CBinaryOp):
+        return (
+            "binary",
+            node.op,
+            _expression_shape_8616(node.lhs, depth + 1),
+            _expression_shape_8616(node.rhs, depth + 1),
+        )
+    if isinstance(node, CITE):
+        return (
+            "ite",
+            _expression_shape_8616(node.cond, depth + 1),
+            _expression_shape_8616(node.iftrue, depth + 1),
+            _expression_shape_8616(node.iffalse, depth + 1),
+        )
+    if isinstance(node, CFunctionCall):
+        return (
+            "call",
+            node.callee_func,
+            node.callee_target,
+            tuple(_expression_shape_8616(argument, depth + 1) for argument in node.args),
+        )
+    return type(node).__name__
+
+
+def _conditional_while_descriptor_8616(
+    loop: CWhileLoop,
+    statements: tuple[object, ...],
+    state: _RangeProofState8616,
+    debug: bool,
+) -> tuple[_AscendingLoop8616, int] | None:
+    """Match a conditional while header to its tail induction update."""
+    descriptor = _ascending_condition_8616(loop.condition)
+    if descriptor is None or state.constants.get(descriptor.induction) != 0:
+        _canonical_while_debug_8616(debug, "conditional", condition=_expression_shape_8616(loop.condition), descriptor=descriptor)
+        return None
+    scalar_assignments = tuple(
+        (assignment, target_rhs)
+        for assignment in _direct_scalar_assignments_8616(loop.body)
+        for target_rhs in (_assignment_to_scalar_8616(assignment),)
+        if target_rhs is not None
+    )
+    induction_writes = tuple(
+        assignment
+        for assignment, target_rhs in scalar_assignments
+        if target_rhs[0] == descriptor.induction
+    )
+    bound_writes = tuple(
+        assignment
+        for assignment, target_rhs in scalar_assignments
+        if target_rhs[0] == descriptor.bound
+    )
+    induction_write = (
+        cast(_AssignmentExpression8616, induction_writes[0])
+        if len(induction_writes) == 1
+        else None
+    )
+    if (
+        induction_write is None
+        or bool(bound_writes)
+        or not statements
+        or induction_write is not statements[-1]
+        or _binary_storage_constant_8616(
+            induction_write.rhs,
+            "Add",
+            1,
+        )
+        != descriptor.induction
+    ):
+        _canonical_while_debug_8616(
+            debug,
+            "conditional-writes",
+            descriptor=descriptor,
+            induction_writes=induction_writes,
+            bound_writes=bound_writes,
+            tail=type(statements[-1]).__name__ if statements else None,
+        )
+        return None
+    return descriptor, -1
+
+
+def _guard_candidate_8616(
+    statements: tuple[object, ...],
+    guard_index: int,
+    descriptor: _AscendingLoop8616,
+    debug: bool,
+) -> tuple[_AscendingLoop8616, int] | None:
+    """Prove one guard candidate has ordered induction writes only."""
+    writes_before_guard = tuple(
+        assignment
+        for prior in statements[:guard_index]
+        for assignment in _direct_scalar_assignments_8616(prior)
+        for target_rhs in (_assignment_to_scalar_8616(assignment),)
+        if target_rhs is not None
+        and target_rhs[0] in {descriptor.induction, descriptor.bound}
+    )
+    if writes_before_guard:
+        _canonical_while_debug_8616(
+            debug,
+            "writes-before-guard",
+            descriptor=descriptor,
+            writes=writes_before_guard,
+        )
+        return None
+    induction_writes = tuple(
+        assignment
+        for following in statements[guard_index + 1 :]
+        for assignment in _direct_scalar_assignments_8616(following)
+        for target_rhs in (_assignment_to_scalar_8616(assignment),)
+        if target_rhs is not None and target_rhs[0] == descriptor.induction
+    )
+    if (
+        len(induction_writes) != 1
+        or _binary_storage_constant_8616(
+            induction_writes[0].rhs,
+            "Add",
+            1,
+        )
+        != descriptor.induction
+    ):
+        _canonical_while_debug_8616(
+            debug,
+            "induction-writes",
+            descriptor=descriptor,
+            write_count=len(induction_writes),
+            writes=tuple(
+                (
+                    type(assignment.rhs).__name__,
+                    assignment.rhs.op if isinstance(assignment.rhs, CBinaryOp) else None,
+                )
+                for assignment in induction_writes
+            ),
+        )
+        return None
+    return descriptor, guard_index
 
 
 def _canonical_while_8616(
@@ -533,95 +730,11 @@ def _canonical_while_8616(
 
     def _debug(reason: str, **values: object) -> None:
         """Emit opt-in canonical-while refusal details."""
-        if debug:
-            logging.getLogger(__name__).warning(
-                "indexed-stack-range event=while-shape-%s values=%r",
-                reason,
-                values,
-            )
-
-    def _shape(node: object, depth: int = 0) -> object:
-        """Return a bounded typed expression shape for opt-in diagnostics."""
-        if depth >= 5:
-            return type(node).__name__
-        node = _strip_casts_8616(node)
-        if isinstance(node, CVariable):
-            return ("variable", node.name, _scalar_storage_8616(node))
-        if isinstance(node, CConstant):
-            return ("constant", node.value)
-        if isinstance(node, CUnaryOp):
-            return ("unary", node.op, _shape(node.operand, depth + 1))
-        if isinstance(node, CBinaryOp):
-            return (
-                "binary",
-                node.op,
-                _shape(node.lhs, depth + 1),
-                _shape(node.rhs, depth + 1),
-            )
-        if isinstance(node, CITE):
-            return (
-                "ite",
-                _shape(node.cond, depth + 1),
-                _shape(node.iftrue, depth + 1),
-                _shape(node.iffalse, depth + 1),
-            )
-        if isinstance(node, CFunctionCall):
-            return (
-                "call",
-                node.callee_func,
-                node.callee_target,
-                tuple(_shape(argument, depth + 1) for argument in node.args),
-            )
-        return type(node).__name__
+        _canonical_while_debug_8616(debug, reason, **values)
 
     statements = _transparent_body_statements_8616(loop.body)
     if not _unconditional_while_8616(loop):
-        descriptor = _ascending_condition_8616(loop.condition)
-        if descriptor is None or state.constants.get(descriptor.induction) != 0:
-            _debug("conditional", condition=_shape(loop.condition), descriptor=descriptor)
-            return None
-        scalar_assignments = tuple(
-            (assignment, target_rhs)
-            for assignment in _direct_scalar_assignments_8616(loop.body)
-            for target_rhs in (_assignment_to_scalar_8616(assignment),)
-            if target_rhs is not None
-        )
-        induction_writes = tuple(
-            assignment
-            for assignment, target_rhs in scalar_assignments
-            if target_rhs[0] == descriptor.induction
-        )
-        bound_writes = tuple(
-            assignment
-            for assignment, target_rhs in scalar_assignments
-            if target_rhs[0] == descriptor.bound
-        )
-        induction_write = (
-            cast(_AssignmentExpression8616, induction_writes[0])
-            if len(induction_writes) == 1
-            else None
-        )
-        if (
-            induction_write is None
-            or bool(bound_writes)
-            or not statements
-            or induction_write is not statements[-1]
-            or _binary_storage_constant_8616(
-                induction_write.rhs,
-                "Add",
-                1,
-            )
-            != descriptor.induction
-        ):
-            _debug(
-                "conditional-writes",
-                descriptor=descriptor,
-                induction_writes=induction_writes,
-                bound_writes=bound_writes,
-                tail=type(statements[-1]).__name__ if statements else None,
-            )
-            return None
-        return descriptor, -1
+        return _conditional_while_descriptor_8616(loop, statements, state, debug)
     candidates: list[tuple[_AscendingLoop8616, int]] = []
     for guard_index, statement in enumerate(statements):
         descriptor = _break_guard_descriptor_8616(statement)
@@ -634,7 +747,7 @@ def _canonical_while_8616(
                     (
                         type(condition).__name__,
                         condition.op if isinstance(condition, (CBinaryOp, CUnaryOp)) else None,
-                        _shape(condition),
+                        _expression_shape_8616(condition),
                         type(branch).__name__,
                         _break_only_8616(branch),
                     )
@@ -647,51 +760,14 @@ def _canonical_while_8616(
             or state.constants.get(descriptor.induction) != 0
         ):
             continue
-        writes_before_guard = tuple(
-            assignment
-            for prior in statements[:guard_index]
-            for assignment in _direct_scalar_assignments_8616(prior)
-            for target_rhs in (_assignment_to_scalar_8616(assignment),)
-            if target_rhs is not None
-            and target_rhs[0] in {descriptor.induction, descriptor.bound}
+        candidate = _guard_candidate_8616(
+            statements,
+            guard_index,
+            descriptor,
+            debug,
         )
-        if writes_before_guard:
-            _debug(
-                "writes-before-guard",
-                descriptor=descriptor,
-                writes=writes_before_guard,
-            )
-            continue
-        induction_writes = tuple(
-            assignment
-            for following in statements[guard_index + 1 :]
-            for assignment in _direct_scalar_assignments_8616(following)
-            for target_rhs in (_assignment_to_scalar_8616(assignment),)
-            if target_rhs is not None and target_rhs[0] == descriptor.induction
-        )
-        if (
-            len(induction_writes) != 1
-            or _binary_storage_constant_8616(
-                induction_writes[0].rhs,
-                "Add",
-                1,
-            )
-            != descriptor.induction
-        ):
-            _debug(
-                "induction-writes",
-                descriptor=descriptor,
-                write_count=len(induction_writes),
-                writes=tuple(
-                    (
-                        type(assignment.rhs).__name__,
-                        assignment.rhs.op if isinstance(assignment.rhs, CBinaryOp) else None,
-                    )
-                    for assignment in induction_writes
-                ),
-            )
-            continue
-        candidates.append((descriptor, guard_index))
+        if candidate is not None:
+            candidates.append(candidate)
     candidate_descriptors = {descriptor for descriptor, _index in candidates}
     if len(candidate_descriptors) != 1:
         _debug(
@@ -912,25 +988,13 @@ def _intersect_states_8616(
     )
 
 
-def collect_indexed_stack_read_proofs_8616(
-    root: object,
-    *,
-    direct_stack_move_facts: tuple[DirectStackMoveFact8616, ...] = (),
-    codegen: object | None = None,
-) -> IndexedStackReadProofReport8616:
-    """Prove exact dynamic reads selected from initialized stack-array prefixes.
-
-    The proof recognizes zero-based unit-stride prefix initialization, carries
-    synchronized ``bound - 1`` countdown variables through a second loop, and
-    consumes lowering-proven nonnegative signed-remainder facts. Every
-    unmatched dynamic stack-array read remains unproved.
-    """
-    report = _MutableProofReport8616()
-    facts = tuple(
-        fact
-        for fact in direct_stack_move_facts
-        if isinstance(fact, DirectStackMoveFact8616)
-    )
+def _contract_inventories_8616(
+    facts: tuple[DirectStackMoveFact8616, ...],
+) -> tuple[
+    dict[int, RuntimeCallReturnContract8616],
+    dict[int, RuntimeCallReturnContract8616],
+]:
+    """Index unambiguous call-return contracts by callsite and callee."""
     callsite_contracts: dict[int, RuntimeCallReturnContract8616] = {}
     target_contracts: dict[int, RuntimeCallReturnContract8616] = {}
     ambiguous_callsites: set[int] = set()
@@ -959,11 +1023,23 @@ def collect_indexed_stack_read_proofs_8616(
                 ambiguous.add(key)
             else:
                 inventory[key] = contract
-    debug = os.environ.get("INERTIA_DEBUG_INDEXED_STACK_RANGES") == "1"
+    return callsite_contracts, target_contracts
 
-    def _debug(event: str, **values: object) -> None:
+
+@dataclass
+class _IndexedReadProofScan8616:
+    """Prove dynamic indexed stack reads across one structured CFG."""
+
+    codegen: object | None
+    facts: tuple[DirectStackMoveFact8616, ...]
+    callsite_contracts: dict[int, RuntimeCallReturnContract8616]
+    target_contracts: dict[int, RuntimeCallReturnContract8616]
+    report: _MutableProofReport8616 = field(default_factory=_MutableProofReport8616)
+    debug: bool = False
+
+    def _debug(self, event: str, **values: object) -> None:
         """Emit opt-in typed proof diagnostics."""
-        if debug:
+        if self.debug:
             logging.getLogger(__name__).warning(
                 "indexed-stack-range event=%s values=%r",
                 event,
@@ -971,6 +1047,7 @@ def collect_indexed_stack_read_proofs_8616(
             )
 
     def _invalidate_scalar(
+        self,
         state: _RangeProofState8616,
         scalar: _ScalarStorage8616,
     ) -> None:
@@ -993,6 +1070,7 @@ def collect_indexed_stack_read_proofs_8616(
         state.constants.pop(scalar, None)
 
     def _invalidate_unknown_call(
+        self,
         expr: object,
         state: _RangeProofState8616,
         call_contracts: Mapping[int, RuntimeCallReturnContract8616] | None = None,
@@ -1022,10 +1100,10 @@ def collect_indexed_stack_read_proofs_8616(
             callee_addr = _structured_call_target_addr_8616(call)
             contract = contracts.get(id(call))
             if contract is None and isinstance(callsite_addr, int):
-                contract = callsite_contracts.get(callsite_addr)
+                contract = self.callsite_contracts.get(callsite_addr)
             if contract is None and isinstance(callee_addr, int):
-                contract = target_contracts.get(callee_addr)
-            _debug(
+                contract = self.target_contracts.get(callee_addr)
+            self._debug(
                 "call-effect",
                 call_node_id=id(call),
                 contract=contract,
@@ -1052,9 +1130,9 @@ def collect_indexed_stack_read_proofs_8616(
                     and contract.preserves_address(address)
                 ):
                     continue
-                _invalidate_scalar(state, bound)
+                self._invalidate_scalar(state, bound)
 
-    def _prove_reads(expr: object, state: _RangeProofState8616) -> None:
+    def _prove_reads(self, expr: object, state: _RangeProofState8616) -> None:
         """Record proofs for dynamic indexed stack-array reads in one value."""
         if expr is None:
             return
@@ -1063,17 +1141,17 @@ def collect_indexed_stack_read_proofs_8616(
                 continue
             if _constant_value_8616(node.index) is not None:
                 continue
-            array = _stack_array_storage_8616(codegen, node.variable)
+            array = _stack_array_storage_8616(self.codegen, node.variable)
             if array is None:
                 continue
-            report.raw_fact_count += 1
+            self.report.raw_fact_count += 1
             index = _scalar_storage_8616(node.index)
             if index is None:
                 continue
-            report.normalized_fact_count += 1
+            self.report.normalized_fact_count += 1
             prefix_bound = state.prefixes.get(array)
             range_bound = state.ranges.get(index)
-            _debug(
+            self._debug(
                 "read",
                 array=array,
                 index=index,
@@ -1082,10 +1160,10 @@ def collect_indexed_stack_read_proofs_8616(
             )
             if prefix_bound is None or range_bound is None:
                 continue
-            report.classified_fact_count += 1
+            self.report.classified_fact_count += 1
             if prefix_bound != range_bound:
                 continue
-            report.proofs.append(
+            self.report.proofs.append(
                 IndexedStackReadProof8616(
                     read_node_id=id(node),
                     array_offset=array.offset,
@@ -1096,24 +1174,16 @@ def collect_indexed_stack_read_proofs_8616(
                 )
             )
 
-    def _remainder_range_fact(
-        assignment: CAssignment,
+    def _remainder_candidates_8616(
+        self,
         lhs: _ScalarStorage8616,
-        state: _RangeProofState8616,
-    ) -> _RemainderCallEvidence8616 | None:
-        """Bind one structured modulo assignment to lowering and range evidence."""
-        rhs = _strip_casts_8616(assignment.rhs)
-        if not isinstance(rhs, CBinaryOp) or rhs.op != "Mod":
-            return None
-        lhs_bp_offset = _machine_bp_stack_offset_8616(codegen, assignment.lhs)
-        statement_ins_addr = (
-            assignment.tags.get("ins_addr")
-            if isinstance(assignment.tags, dict)
-            else None
-        )
-        candidates = tuple(
+        lhs_bp_offset: int | None,
+        statement_ins_addr: object,
+    ) -> tuple[DirectStackMoveFact8616, ...]:
+        """Select the uniquely matching signed-remainder lowering fact."""
+        return tuple(
             fact
-            for fact in facts
+            for fact in self.facts
             if fact.source_kind
             is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER
             and fact.dst_offset == lhs_bp_offset
@@ -1130,19 +1200,20 @@ def collect_indexed_stack_read_proofs_8616(
                 }
             )
         )
-        if len(candidates) != 1:
-            _debug(
-                "remainder-candidates",
-                lhs=lhs,
-                statement_ins_addr=statement_ins_addr,
-                candidates=candidates,
-            )
-            return None
-        fact = candidates[0]
+
+    def _remainder_divisor_bound_8616(
+        self,
+        rhs: CBinaryOp,
+        fact: DirectStackMoveFact8616,
+        lhs: _ScalarStorage8616,
+        state: _RangeProofState8616,
+        statement_ins_addr: object,
+    ) -> _ScalarStorage8616 | None:
+        """Prove the modulo divisor binds to the fact's source offset."""
         divisor = _binary_storage_constant_8616(rhs.rhs, "Add", 1)
         divisor_expression = _strip_casts_8616(rhs.rhs)
         divisor_bp_offset = (
-            _machine_bp_stack_offset_8616(codegen, divisor_expression.lhs)
+            _machine_bp_stack_offset_8616(self.codegen, divisor_expression.lhs)
             if isinstance(divisor_expression, CBinaryOp)
             else None
         )
@@ -1152,7 +1223,7 @@ def collect_indexed_stack_read_proofs_8616(
             or divisor_bp_offset != fact.source_offset
             or not isinstance(fact.source_call_ins_addr, int)
         ):
-            _debug(
+            self._debug(
                 "remainder-divisor",
                 lhs=lhs,
                 divisor=divisor,
@@ -1160,9 +1231,50 @@ def collect_indexed_stack_read_proofs_8616(
                 ranges=state.ranges,
             )
             return None
+        return divisor
+
+    def _remainder_range_fact(
+        self,
+        assignment: CAssignment,
+        lhs: _ScalarStorage8616,
+        state: _RangeProofState8616,
+    ) -> _RemainderCallEvidence8616 | None:
+        """Bind one structured modulo assignment to lowering and range evidence."""
+        rhs = _strip_casts_8616(assignment.rhs)
+        if not isinstance(rhs, CBinaryOp) or rhs.op != "Mod":
+            return None
+        lhs_bp_offset = _machine_bp_stack_offset_8616(self.codegen, assignment.lhs)
+        statement_ins_addr = (
+            assignment.tags.get("ins_addr")
+            if isinstance(assignment.tags, dict)
+            else None
+        )
+        candidates = self._remainder_candidates_8616(
+            lhs,
+            lhs_bp_offset,
+            statement_ins_addr,
+        )
+        if len(candidates) != 1:
+            self._debug(
+                "remainder-candidates",
+                lhs=lhs,
+                statement_ins_addr=statement_ins_addr,
+                candidates=candidates,
+            )
+            return None
+        fact = candidates[0]
+        divisor = self._remainder_divisor_bound_8616(
+            rhs,
+            fact,
+            lhs,
+            state,
+            statement_ins_addr,
+        )
+        if divisor is None:
+            return None
         call = _strip_casts_8616(rhs.lhs)
         if not isinstance(call, CFunctionCall):
-            _debug(
+            self._debug(
                 "remainder-numerator",
                 lhs=lhs,
                 statement_ins_addr=statement_ins_addr,
@@ -1176,7 +1288,7 @@ def collect_indexed_stack_read_proofs_8616(
             else None
         )
         callee_addr = _structured_call_target_addr_8616(call)
-        _debug(
+        self._debug(
             "remainder-call-identity",
             call_node_id=id(call),
             callsite_addr=callsite_addr,
@@ -1198,7 +1310,220 @@ def collect_indexed_stack_read_proofs_8616(
             call_contract=contract,
         )
 
+    def _walk_assignment(
+        self,
+        node: CAssignment,
+        state: _RangeProofState8616,
+    ) -> _RangeProofState8616:
+        """Fold one scalar assignment's proof effects into the state."""
+        self._prove_reads(node.rhs, state)
+        assignment = _assignment_to_scalar_8616(node)
+        call_contracts: dict[int, RuntimeCallReturnContract8616] = {}
+        derived_range = None
+        if assignment is not None:
+            derived = self._remainder_range_fact(node, assignment[0], state)
+            if derived is not None:
+                derived_range = derived.range_bound
+                call_contracts[derived.call_node_id] = derived.call_contract
+        self._invalidate_unknown_call(
+            node.rhs,
+            state,
+            call_contracts,
+        )
+        if assignment is None:
+            return state
+        lhs, rhs = assignment
+        assigned_constant = _constant_value_8616(rhs)
+        self._invalidate_scalar(state, lhs)
+        predecessor = _binary_storage_constant_8616(rhs, "Sub", 1)
+        if predecessor is not None:
+            state.predecessors[lhs] = predecessor
+        copied_storage = _scalar_storage_8616(rhs)
+        copied_range = (
+            state.ranges.get(copied_storage)
+            if copied_storage is not None
+            else None
+        )
+        if derived_range is not None:
+            state.ranges[lhs] = derived_range
+        elif copied_range is not None:
+            state.ranges[lhs] = copied_range
+        if assigned_constant is not None:
+            state.constants[lhs] = assigned_constant
+        return state
+
+    def _for_loop_debug_body_8616(self, node: CForLoop) -> object:
+        """Return the bounded per-statement debug census for one for-loop."""
+        if not isinstance(node.body, CStatements):
+            return ()
+        return tuple(
+            (
+                type(statement).__name__,
+                type(statement.lhs).__name__
+                if isinstance(statement, CAssignment)
+                else None,
+                _stack_array_storage_8616(self.codegen, statement.lhs.variable)
+                if isinstance(statement, CAssignment)
+                and isinstance(statement.lhs, CIndexedVariable)
+                else None,
+                _scalar_storage_8616(statement.lhs.index)
+                if isinstance(statement, CAssignment)
+                and isinstance(statement.lhs, CIndexedVariable)
+                else None,
+                (
+                    _assignment_to_scalar_8616(statement),
+                    type(statement.rhs).__name__,
+                    statement.rhs.op
+                    if isinstance(statement.rhs, CBinaryOp)
+                    else None,
+                )
+                if isinstance(statement, CAssignment)
+                else None,
+            )
+            for statement in node.body.statements
+        )
+
+    def _loop_outgoing_8616(
+        self,
+        node: object,
+        iterated: _RangeProofState8616,
+        entering: _RangeProofState8616,
+    ) -> _RangeProofState8616:
+        """Intersect loop-entry and post-iteration states, then drop writes."""
+        outgoing = _intersect_states_8616(
+            (entering, iterated),
+            entering,
+        )
+        written_scalars = {
+            assignment[0]
+            for candidate in _direct_scalar_assignments_8616(node)
+            for assignment in (_assignment_to_scalar_8616(candidate),)
+            if assignment is not None
+        }
+        for scalar in written_scalars:
+            self._invalidate_scalar(outgoing, scalar)
+        return outgoing
+
+    def _walk_for(
+        self,
+        node: CForLoop,
+        state: _RangeProofState8616,
+    ) -> _RangeProofState8616:
+        """Prove prefix bounds and countdown carriers across one for-loop."""
+        initialized = self._walk(node.initializer, state)
+        descriptor = _ascending_loop_8616(node)
+        self._debug(
+            "loop",
+            descriptor=descriptor,
+            prefixes=initialized.prefixes,
+            predecessors=initialized.predecessors,
+            body_statements=self._for_loop_debug_body_8616(node),
+        )
+        if descriptor is None:
+            self._walk(node.body, initialized)
+            return initialized
+        body_state = initialized.copy()
+        body_state.ranges[descriptor.induction] = descriptor.bound
+        carriers = _direct_decrement_carriers_8616(
+            node.body,
+            initialized,
+            descriptor,
+        )
+        self._debug("loop-carriers", descriptor=descriptor, carriers=carriers)
+        for carrier in carriers:
+            body_state.ranges[carrier] = descriptor.bound
+        iterated = self._walk(node.iterator, self._walk(node.body, body_state))
+        outgoing = self._loop_outgoing_8616(node, iterated, initialized)
+        prefix_array = _prefix_array_8616(self.codegen, node, descriptor)
+        self._debug(
+            "loop-prefix",
+            descriptor=descriptor,
+            prefix_array=prefix_array,
+        )
+        if prefix_array is not None:
+            outgoing.prefixes[prefix_array] = descriptor.bound
+        return outgoing
+
+    def _walk_while(
+        self,
+        node: CWhileLoop,
+        state: _RangeProofState8616,
+    ) -> _RangeProofState8616:
+        """Prove countdown carriers across one canonical while-loop."""
+        while_descriptor = _canonical_while_8616(node, state)
+        self._debug(
+            "while-loop",
+            descriptor=while_descriptor,
+            prefixes=state.prefixes,
+            predecessors=state.predecessors,
+            constants=state.constants,
+        )
+        if while_descriptor is None:
+            self._walk(node.body, state)
+            return state
+        descriptor, guard_index = while_descriptor
+        body_state = state.copy()
+        body_state.ranges[descriptor.induction] = descriptor.bound
+        carriers = _direct_decrement_carriers_8616(
+            node.body,
+            state,
+            descriptor,
+        )
+        self._debug("while-loop-carriers", descriptor=descriptor, carriers=carriers)
+        for carrier in carriers:
+            body_state.ranges[carrier] = descriptor.bound
+        iterated = self._walk(node.body, body_state)
+        outgoing = self._loop_outgoing_8616(node, iterated, state)
+        prefix_array = _while_prefix_array_8616(
+            self.codegen,
+            node,
+            descriptor,
+            guard_index,
+        )
+        self._debug(
+            "while-loop-prefix",
+            descriptor=descriptor,
+            prefix_array=prefix_array,
+        )
+        if prefix_array is not None:
+            outgoing.prefixes[prefix_array] = descriptor.bound
+        return outgoing
+
+    def _walk_ifelse(
+        self,
+        node: CIfElse,
+        state: _RangeProofState8616,
+    ) -> _RangeProofState8616:
+        """Intersect the branch states of one if/else node."""
+        branches = tuple(
+            self._walk(branch, state)
+            for _condition, branch in node.condition_and_nodes
+        )
+        if node.else_node is None:
+            branches += (state.copy(),)
+        else:
+            branches += (self._walk(node.else_node, state),)
+        return _intersect_states_8616(branches, state)
+
+    def _walk_switch(
+        self,
+        node: CSwitchCase,
+        state: _RangeProofState8616,
+    ) -> _RangeProofState8616:
+        """Intersect the case states of one switch node."""
+        self._prove_reads(node.switch, state)
+        branches = tuple(
+            self._walk(body, state)
+            for body in node.cases.values()
+        ) if isinstance(node.cases, dict) else ()
+        if node.default is None:
+            branches += (state.copy(),)
+        else:
+            branches += (self._walk(node.default, state),)
+        return _intersect_states_8616(branches, state)
+
     def _walk(
+        self,
         node: object,
         incoming: _RangeProofState8616,
     ) -> _RangeProofState8616:
@@ -1208,196 +1533,54 @@ def collect_indexed_stack_read_proofs_8616(
             return state
         if isinstance(node, CStatements):
             for statement in node.statements:
-                state = _walk(statement, state)
+                state = self._walk(statement, state)
             return state
         if isinstance(node, CAssignment):
-            _prove_reads(node.rhs, state)
-            assignment = _assignment_to_scalar_8616(node)
-            call_contracts: dict[int, RuntimeCallReturnContract8616] = {}
-            derived_range = None
-            if assignment is not None:
-                derived = _remainder_range_fact(node, assignment[0], state)
-                if derived is not None:
-                    derived_range = derived.range_bound
-                    call_contracts[derived.call_node_id] = derived.call_contract
-            _invalidate_unknown_call(
-                node.rhs,
-                state,
-                call_contracts,
-            )
-            if assignment is None:
-                return state
-            lhs, rhs = assignment
-            assigned_constant = _constant_value_8616(rhs)
-            _invalidate_scalar(state, lhs)
-            predecessor = _binary_storage_constant_8616(rhs, "Sub", 1)
-            if predecessor is not None:
-                state.predecessors[lhs] = predecessor
-            copied_storage = _scalar_storage_8616(rhs)
-            copied_range = (
-                state.ranges.get(copied_storage)
-                if copied_storage is not None
-                else None
-            )
-            if derived_range is not None:
-                state.ranges[lhs] = derived_range
-            elif copied_range is not None:
-                state.ranges[lhs] = copied_range
-            if assigned_constant is not None:
-                state.constants[lhs] = assigned_constant
-            return state
+            return self._walk_assignment(node, state)
         if isinstance(node, CExpressionStatement):
-            _prove_reads(node.expr, state)
-            _invalidate_unknown_call(node.expr, state)
+            self._prove_reads(node.expr, state)
+            self._invalidate_unknown_call(node.expr, state)
             return state
         if isinstance(node, CIfElse):
-            branches = tuple(
-                _walk(branch, state)
-                for _condition, branch in node.condition_and_nodes
-            )
-            if node.else_node is None:
-                branches += (state.copy(),)
-            else:
-                branches += (_walk(node.else_node, state),)
-            return _intersect_states_8616(branches, state)
+            return self._walk_ifelse(node, state)
         if isinstance(node, CForLoop):
-            initialized = _walk(node.initializer, state)
-            descriptor = _ascending_loop_8616(node)
-            _debug(
-                "loop",
-                descriptor=descriptor,
-                prefixes=initialized.prefixes,
-                predecessors=initialized.predecessors,
-                body_statements=tuple(
-                    (
-                        type(statement).__name__,
-                        type(statement.lhs).__name__
-                        if isinstance(statement, CAssignment)
-                        else None,
-                        _stack_array_storage_8616(codegen, statement.lhs.variable)
-                        if isinstance(statement, CAssignment)
-                        and isinstance(statement.lhs, CIndexedVariable)
-                        else None,
-                        _scalar_storage_8616(statement.lhs.index)
-                        if isinstance(statement, CAssignment)
-                        and isinstance(statement.lhs, CIndexedVariable)
-                        else None,
-                        (
-                            _assignment_to_scalar_8616(statement),
-                            type(statement.rhs).__name__,
-                            statement.rhs.op
-                            if isinstance(statement.rhs, CBinaryOp)
-                            else None,
-                        )
-                        if isinstance(statement, CAssignment)
-                        else None,
-                    )
-                    for statement in node.body.statements
-                )
-                if isinstance(node.body, CStatements)
-                else (),
-            )
-            if descriptor is None:
-                _walk(node.body, initialized)
-                return initialized
-            body_state = initialized.copy()
-            body_state.ranges[descriptor.induction] = descriptor.bound
-            carriers = _direct_decrement_carriers_8616(
-                node.body,
-                initialized,
-                descriptor,
-            )
-            _debug("loop-carriers", descriptor=descriptor, carriers=carriers)
-            for carrier in carriers:
-                body_state.ranges[carrier] = descriptor.bound
-            iterated = _walk(node.iterator, _walk(node.body, body_state))
-            outgoing = _intersect_states_8616(
-                (initialized, iterated),
-                initialized,
-            )
-            written_scalars = {
-                assignment[0]
-                for candidate in _direct_scalar_assignments_8616(node)
-                for assignment in (_assignment_to_scalar_8616(candidate),)
-                if assignment is not None
-            }
-            for scalar in written_scalars:
-                _invalidate_scalar(outgoing, scalar)
-            prefix_array = _prefix_array_8616(codegen, node, descriptor)
-            _debug(
-                "loop-prefix",
-                descriptor=descriptor,
-                prefix_array=prefix_array,
-            )
-            if prefix_array is not None:
-                outgoing.prefixes[prefix_array] = descriptor.bound
-            return outgoing
+            return self._walk_for(node, state)
         if isinstance(node, CWhileLoop):
-            while_descriptor = _canonical_while_8616(node, state)
-            _debug(
-                "while-loop",
-                descriptor=while_descriptor,
-                prefixes=state.prefixes,
-                predecessors=state.predecessors,
-                constants=state.constants,
-            )
-            if while_descriptor is None:
-                _walk(node.body, state)
-                return state
-            descriptor, guard_index = while_descriptor
-            body_state = state.copy()
-            body_state.ranges[descriptor.induction] = descriptor.bound
-            carriers = _direct_decrement_carriers_8616(
-                node.body,
-                state,
-                descriptor,
-            )
-            _debug("while-loop-carriers", descriptor=descriptor, carriers=carriers)
-            for carrier in carriers:
-                body_state.ranges[carrier] = descriptor.bound
-            iterated = _walk(node.body, body_state)
-            outgoing = _intersect_states_8616(
-                (state, iterated),
-                state,
-            )
-            written_scalars = {
-                assignment[0]
-                for candidate in _direct_scalar_assignments_8616(node)
-                for assignment in (_assignment_to_scalar_8616(candidate),)
-                if assignment is not None
-            }
-            for scalar in written_scalars:
-                _invalidate_scalar(outgoing, scalar)
-            prefix_array = _while_prefix_array_8616(
-                codegen,
-                node,
-                descriptor,
-                guard_index,
-            )
-            _debug(
-                "while-loop-prefix",
-                descriptor=descriptor,
-                prefix_array=prefix_array,
-            )
-            if prefix_array is not None:
-                outgoing.prefixes[prefix_array] = descriptor.bound
-            return outgoing
+            return self._walk_while(node, state)
         if isinstance(node, CSwitchCase):
-            _prove_reads(node.switch, state)
-            branches = tuple(
-                _walk(body, state)
-                for body in node.cases.values()
-            ) if isinstance(node.cases, dict) else ()
-            if node.default is None:
-                branches += (state.copy(),)
-            else:
-                branches += (_walk(node.default, state),)
-            return _intersect_states_8616(branches, state)
-        _prove_reads(node, state)
-        _invalidate_unknown_call(node, state)
+            return self._walk_switch(node, state)
+        self._prove_reads(node, state)
+        self._invalidate_unknown_call(node, state)
         return state
 
-    _walk(
+
+def collect_indexed_stack_read_proofs_8616(
+    root: object,
+    *,
+    direct_stack_move_facts: tuple[DirectStackMoveFact8616, ...] = (),
+    codegen: object | None = None,
+) -> IndexedStackReadProofReport8616:
+    """Prove exact dynamic reads selected from initialized stack-array prefixes.
+
+    The proof recognizes zero-based unit-stride prefix initialization, carries
+    synchronized ``bound - 1`` countdown variables through a second loop, and
+    consumes lowering-proven nonnegative signed-remainder facts. Every
+    unmatched dynamic stack-array read remains unproved.
+    """
+    facts = tuple(
+        fact
+        for fact in direct_stack_move_facts
+        if isinstance(fact, DirectStackMoveFact8616)
+    )
+    callsite_contracts, target_contracts = _contract_inventories_8616(facts)
+    scan = _IndexedReadProofScan8616(
+        codegen=codegen,
+        facts=facts,
+        callsite_contracts=callsite_contracts,
+        target_contracts=target_contracts,
+        debug=os.environ.get("INERTIA_DEBUG_INDEXED_STACK_RANGES") == "1",
+    )
+    scan._walk(
         root,
         _RangeProofState8616(
             prefixes={},
@@ -1406,4 +1589,4 @@ def collect_indexed_stack_read_proofs_8616(
             constants={},
         ),
     )
-    return report.freeze()
+    return scan.report.freeze()

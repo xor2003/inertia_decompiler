@@ -140,6 +140,34 @@ def prove_pointer_store_source_preservation_8616(
     )
 
 
+def _root_consumption_verdict_8616(
+    root: object,
+    setup: CAssignment,
+    stores: tuple[CAssignment, ...],
+    view: PhysicalRegisterView8616,
+    expected: int,
+) -> PointerStoreConsumptionFailure8616 | bool:
+    """Classify one C root: skip, consume, or refuse with a typed failure."""
+    if _c_ast_cycle_path_8616(root):
+        return PointerStoreConsumptionFailure8616.CYCLIC_AST
+    occurrences = tuple(_iter_c_node_occurrences_8616(root))
+    if any(
+        isinstance(node, CDirtyExpression) and physical_register_view_8616(node) is None
+        for node in occurrences
+    ):
+        return PointerStoreConsumptionFailure8616.OPAQUE_EFFECT
+    count = _register_occurrences(occurrences, view)
+    if not count:
+        return False
+    if sum(node is setup for node in occurrences) != 1 or any(
+        sum(node is store for node in occurrences) != 1 for store in stores
+    ):
+        return PointerStoreConsumptionFailure8616.INCOMPLETE_PLACEMENT
+    if count != expected:
+        return PointerStoreConsumptionFailure8616.UNCONSUMED_REGISTER
+    return True
+
+
 def prove_pointer_store_consumption_8616(
     roots: tuple[object, ...],
     setup: CAssignment,
@@ -162,24 +190,10 @@ def prove_pointer_store_consumption_8616(
         return _refuse(PointerStoreConsumptionFailure8616.INCOMPLETE_PLACEMENT)
     found = False
     for root in {id(root): root for root in roots}.values():
-        if _c_ast_cycle_path_8616(root):
-            return _refuse(PointerStoreConsumptionFailure8616.CYCLIC_AST)
-        occurrences = tuple(_iter_c_node_occurrences_8616(root))
-        if any(
-            isinstance(node, CDirtyExpression) and physical_register_view_8616(node) is None
-            for node in occurrences
-        ):
-            return _refuse(PointerStoreConsumptionFailure8616.OPAQUE_EFFECT)
-        count = _register_occurrences(occurrences, view)
-        if not count:
-            continue
-        if sum(node is setup for node in occurrences) != 1 or any(
-            sum(node is store for node in occurrences) != 1 for store in stores
-        ):
-            return _refuse(PointerStoreConsumptionFailure8616.INCOMPLETE_PLACEMENT)
-        if count != expected:
-            return _refuse(PointerStoreConsumptionFailure8616.UNCONSUMED_REGISTER)
-        found = True
+        verdict = _root_consumption_verdict_8616(root, setup, stores, view, expected)
+        if isinstance(verdict, PointerStoreConsumptionFailure8616):
+            return _refuse(verdict)
+        found = found or verdict
     if not found:
         return _refuse(PointerStoreConsumptionFailure8616.INCOMPLETE_PLACEMENT)
     return PointerStoreConsumptionEvidence8616(

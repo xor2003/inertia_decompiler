@@ -17,7 +17,7 @@ breakable scope all prove that ``break`` has the same destination as ``goto``.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import cast
 
@@ -236,18 +236,109 @@ def _replace_gotos_8616(
     return node, replaced
 
 
+@dataclass(slots=True)
+class _TailBreakScan8616:
+    """Mutable counters and decision log for one tail-break scan."""
+
+    root: object
+    raw_count: int = 0
+    normalized_count: int = 0
+    classified_count: int = 0
+    materialized_count: int = 0
+    failure_count: int = 0
+    replaced_count: int = 0
+    removed_count: int = 0
+    materializations: list[SwitchLoopTailBreakMaterialization8616] = field(
+        default_factory=list
+    )
+    decisions: list[SwitchLoopTailBreakDecision8616] = field(default_factory=list)
+
+    def _refuse(self, decision: SwitchLoopTailBreakDecision8616) -> None:
+        """Record one refused candidate with its typed decision."""
+        self.decisions.append(decision)
+        self.failure_count += 1
+
+    def process(self, candidate: _SwitchLoopTailCandidate8616) -> None:
+        """Validate and materialize one switch-loop tail candidate."""
+        self.raw_count += 1
+        statements = tuple(cast(Iterable[CStatement], candidate.loop_body.statements or ()))
+        if candidate.label_index != len(statements) - 1:
+            self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_EXECUTABLE_SUFFIX)
+            return
+        target = _label_target_8616(candidate.label)
+        if target is None:
+            self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_UNPROVEN_LABEL_TARGET)
+            return
+        matching_labels = tuple(
+            node
+            for node in _iter_c_nodes_deep_8616(self.root)
+            if isinstance(node, CLabel) and _label_target_8616(node) == target
+        )
+        if len(matching_labels) != 1 or matching_labels[0] is not candidate.label:
+            self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_AMBIGUOUS_LABEL)
+            return
+        self.normalized_count += 1
+        safe_gotos, unsafe_gotos = _switch_target_gotos_8616(candidate.switch, target)
+        if unsafe_gotos:
+            self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_NESTED_BREAKABLE)
+            return
+        if not safe_gotos:
+            self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_NO_TARGET_GOTO)
+            return
+        all_target_gotos = tuple(
+            node
+            for node in _iter_c_nodes_deep_8616(self.root)
+            if isinstance(node, CGoto) and node.target == target
+        )
+        if any(goto.target_idx is not None for goto in all_target_gotos):
+            self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_AMBIGUOUS_GOTO_TARGET)
+            return
+        safe_ids = {id(goto) for goto in safe_gotos}
+        if {id(goto) for goto in all_target_gotos} != safe_ids:
+            self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_EXTERNAL_TARGET_REFERENCE)
+            return
+        if any(goto.codegen is None for goto in safe_gotos):
+            self._refuse(SwitchLoopTailBreakDecision8616.REFUSED_MISSING_CODEGEN)
+            return
+        self.classified_count += 1
+        self._materialize(candidate, statements, target, safe_gotos)
+
+    def _materialize(
+        self,
+        candidate: _SwitchLoopTailCandidate8616,
+        statements: tuple[CStatement, ...],
+        target: int,
+        safe_gotos: tuple[CGoto, ...],
+    ) -> None:
+        """Replace proven gotos with breaks and drop the tail label."""
+        replacements = {
+            id(goto): CBreak(codegen=goto.codegen, tags=dict(goto.tags))
+            for goto in safe_gotos
+        }
+        replaced_here = 0
+        for _case_value, body in tuple(candidate.switch.cases or ()):
+            _updated, count = _replace_gotos_8616(body, replacements)
+            replaced_here += count
+        if isinstance(candidate.switch.default, CStatement):
+            _updated, count = _replace_gotos_8616(candidate.switch.default, replacements)
+            replaced_here += count
+        if replaced_here != len(replacements):
+            raise SwitchLoopTailBreakInvariantError8616(
+                "classified switch-loop tail gotos did not materialize completely"
+            )
+        candidate.loop_body.statements = list(statements[:-1])
+        self.replaced_count += replaced_here
+        self.removed_count += 1
+        self.materialized_count += 1
+        self.materializations.append(
+            SwitchLoopTailBreakMaterialization8616(target, replaced_here)
+        )
+        self.decisions.append(SwitchLoopTailBreakDecision8616.MATERIALIZED)
+
+
 def materialize_switch_loop_tail_breaks_8616(root: object) -> SwitchLoopTailBreakResult8616:
     """Collapse only complete, topology-proven switch exits at loop tails."""
-    raw_count = 0
-    normalized_count = 0
-    classified_count = 0
-    materialized_count = 0
-    failure_count = 0
-    replaced_count = 0
-    removed_count = 0
-    materializations: list[SwitchLoopTailBreakMaterialization8616] = []
-    decisions: list[SwitchLoopTailBreakDecision8616] = []
-
+    scan = _TailBreakScan8616(root)
     loops = tuple(
         node
         for node in _iter_c_nodes_deep_8616(root)
@@ -255,94 +346,22 @@ def materialize_switch_loop_tail_breaks_8616(root: object) -> SwitchLoopTailBrea
     )
     for loop in loops:
         for candidate in _loop_tail_candidates_8616(loop):
-            raw_count += 1
-            statements = tuple(cast(Iterable[CStatement], candidate.loop_body.statements or ()))
-            if candidate.label_index != len(statements) - 1:
-                decisions.append(SwitchLoopTailBreakDecision8616.REFUSED_EXECUTABLE_SUFFIX)
-                failure_count += 1
-                continue
-            target = _label_target_8616(candidate.label)
-            if target is None:
-                decisions.append(SwitchLoopTailBreakDecision8616.REFUSED_UNPROVEN_LABEL_TARGET)
-                failure_count += 1
-                continue
-            matching_labels = tuple(
-                node
-                for node in _iter_c_nodes_deep_8616(root)
-                if isinstance(node, CLabel) and _label_target_8616(node) == target
-            )
-            if len(matching_labels) != 1 or matching_labels[0] is not candidate.label:
-                decisions.append(SwitchLoopTailBreakDecision8616.REFUSED_AMBIGUOUS_LABEL)
-                failure_count += 1
-                continue
-            normalized_count += 1
-            safe_gotos, unsafe_gotos = _switch_target_gotos_8616(candidate.switch, target)
-            if unsafe_gotos:
-                decisions.append(SwitchLoopTailBreakDecision8616.REFUSED_NESTED_BREAKABLE)
-                failure_count += 1
-                continue
-            if not safe_gotos:
-                decisions.append(SwitchLoopTailBreakDecision8616.REFUSED_NO_TARGET_GOTO)
-                failure_count += 1
-                continue
-            all_target_gotos = tuple(
-                node
-                for node in _iter_c_nodes_deep_8616(root)
-                if isinstance(node, CGoto) and node.target == target
-            )
-            if any(goto.target_idx is not None for goto in all_target_gotos):
-                decisions.append(SwitchLoopTailBreakDecision8616.REFUSED_AMBIGUOUS_GOTO_TARGET)
-                failure_count += 1
-                continue
-            safe_ids = {id(goto) for goto in safe_gotos}
-            if {id(goto) for goto in all_target_gotos} != safe_ids:
-                decisions.append(SwitchLoopTailBreakDecision8616.REFUSED_EXTERNAL_TARGET_REFERENCE)
-                failure_count += 1
-                continue
-            if any(goto.codegen is None for goto in safe_gotos):
-                decisions.append(SwitchLoopTailBreakDecision8616.REFUSED_MISSING_CODEGEN)
-                failure_count += 1
-                continue
+            scan.process(candidate)
 
-            classified_count += 1
-            replacements = {
-                id(goto): CBreak(codegen=goto.codegen, tags=dict(goto.tags))
-                for goto in safe_gotos
-            }
-            replaced_here = 0
-            for _case_value, body in tuple(candidate.switch.cases or ()):
-                _updated, count = _replace_gotos_8616(body, replacements)
-                replaced_here += count
-            if isinstance(candidate.switch.default, CStatement):
-                _updated, count = _replace_gotos_8616(candidate.switch.default, replacements)
-                replaced_here += count
-            if replaced_here != len(replacements):
-                raise SwitchLoopTailBreakInvariantError8616(
-                    "classified switch-loop tail gotos did not materialize completely"
-                )
-            candidate.loop_body.statements = list(statements[:-1])
-            replaced_count += replaced_here
-            removed_count += 1
-            materialized_count += 1
-            materializations.append(
-                SwitchLoopTailBreakMaterialization8616(target, replaced_here)
-            )
-            decisions.append(SwitchLoopTailBreakDecision8616.MATERIALIZED)
-
-    if classified_count != materialized_count:
+    if scan.classified_count != scan.materialized_count:
         raise SwitchLoopTailBreakInvariantError8616(
             "classified switch-loop tail evidence did not close"
         )
     return SwitchLoopTailBreakResult8616(
-        replaced_goto_count=replaced_count,
-        removed_label_count=removed_count,
-        materializations=tuple(materializations),
-        decisions=tuple(decisions),
+        replaced_goto_count=scan.replaced_count,
+        removed_label_count=scan.removed_count,
+        materializations=tuple(scan.materializations),
+        decisions=tuple(scan.decisions),
         stats=SwitchLoopTailBreakStats8616(
-            raw_fact_count=raw_count,
-            normalized_fact_count=normalized_count,
-            classified_fact_count=classified_count,
-            materialized_count=materialized_count,
-            failure_count=failure_count,
+            raw_fact_count=scan.raw_count,
+            normalized_fact_count=scan.normalized_count,
+            classified_fact_count=scan.classified_count,
+            materialized_count=scan.materialized_count,
+            failure_count=scan.failure_count,
         ),
     )

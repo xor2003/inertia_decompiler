@@ -180,6 +180,67 @@ def _source_cvar_8616(
     return None
 
 
+def _apply_copy_fact_8616(
+    codegen: object,
+    node: object,
+    fact_index: dict[tuple[int, int, int], tuple[LogicalWordMemoryCopy8616, ...]],
+    refusals: list[LogicalWordMemoryCopyLoweringRefusal8616],
+) -> int | None:
+    """Apply one matched copy fact to one global assignment RHS.
+
+    Returns ``None`` when the node is not a matching global assignment,
+    ``0`` when a match refused, and ``1`` when the RHS was replaced.
+    """
+    if not isinstance(node, structured_c.CAssignment):
+        return None
+    identity = _direct_global_identity_8616(node)
+    if identity is None:
+        return None
+    destination_offset, destination_size = identity
+    instruction_addrs = instruction_addrs_from_node_8616(node)
+    matches = tuple(
+        fact
+        for instruction_addr in instruction_addrs
+        for fact in fact_index.get(
+            (instruction_addr, destination_offset, destination_size),
+            (),
+        )
+    )
+    if not matches:
+        return None
+    if len(matches) != 1:
+        refusals.append(
+            LogicalWordMemoryCopyLoweringRefusal8616(
+                None,
+                LogicalWordMemoryCopyLoweringFailure8616.FACT_AMBIGUOUS,
+                f"matching fact count={len(matches)}",
+            )
+        )
+        return 0
+    fact = matches[0]
+    source_cvar = _source_cvar_8616(codegen, node, fact)
+    if source_cvar is False:
+        refusals.append(
+            LogicalWordMemoryCopyLoweringRefusal8616(
+                fact,
+                LogicalWordMemoryCopyLoweringFailure8616.SOURCE_VARIABLE_AMBIGUOUS,
+                "multiple C variables represent the exact source stack range",
+            )
+        )
+        return 0
+    if source_cvar is None:
+        refusals.append(
+            LogicalWordMemoryCopyLoweringRefusal8616(
+                fact,
+                LogicalWordMemoryCopyLoweringFailure8616.SOURCE_VARIABLE_MISSING,
+                "no C variable represents the exact source stack range",
+            )
+        )
+        return 0
+    node.rhs = source_cvar
+    return 1
+
+
 def materialize_logical_word_memory_copies_8616(
     codegen: object,
     *,
@@ -226,55 +287,11 @@ def materialize_logical_word_memory_copies_8616(
             else _iter_c_nodes_deep_8616(root)
         )
         for node in nodes:
-            if not isinstance(node, structured_c.CAssignment):
-                continue
-            identity = _direct_global_identity_8616(node)
-            if identity is None:
-                continue
-            destination_offset, destination_size = identity
-            instruction_addrs = instruction_addrs_from_node_8616(node)
-            matches = tuple(
-                fact
-                for instruction_addr in instruction_addrs
-                for fact in fact_index.get(
-                    (instruction_addr, destination_offset, destination_size),
-                    (),
-                )
+            delta = _apply_copy_fact_8616(
+                codegen, node, fact_index, refusals
             )
-            if not matches:
-                continue
-            raw_fact_count += 1
-            if len(matches) != 1:
-                refusals.append(
-                    LogicalWordMemoryCopyLoweringRefusal8616(
-                        None,
-                        LogicalWordMemoryCopyLoweringFailure8616.FACT_AMBIGUOUS,
-                        f"matching fact count={len(matches)}",
-                    )
-                )
-                continue
-            fact = matches[0]
-            source_cvar = _source_cvar_8616(codegen, node, fact)
-            if source_cvar is False:
-                refusals.append(
-                    LogicalWordMemoryCopyLoweringRefusal8616(
-                        fact,
-                        LogicalWordMemoryCopyLoweringFailure8616.SOURCE_VARIABLE_AMBIGUOUS,
-                        "multiple C variables represent the exact source stack range",
-                    )
-                )
-                continue
-            if source_cvar is None:
-                refusals.append(
-                    LogicalWordMemoryCopyLoweringRefusal8616(
-                        fact,
-                        LogicalWordMemoryCopyLoweringFailure8616.SOURCE_VARIABLE_MISSING,
-                        "no C variable represents the exact source stack range",
-                    )
-                )
-                continue
-            node.rhs = source_cvar
-            materialized_count += 1
+            raw_fact_count += 1 if delta is not None else 0
+            materialized_count += delta or 0
     if query_session is not None:
         query_session.record_mutation(materialized_count > 0)
     stats = LogicalWordMemoryCopyLoweringStats8616(

@@ -16,7 +16,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
+
+if TYPE_CHECKING:
+    from .calling_convention_seed_cache import CallingConventionSeedRevision8616
 
 import claripy
 from angr import SimProcedure
@@ -188,9 +191,7 @@ def _apply_far_return_calling_convention_8616(project: object, function: object)
     if not proven_far_return_frame_at_8616(project, function_addr):
         return False
     current = typed_function.calling_convention
-    if current is not None and not isinstance(
-        current, (SimCC8616MSCsmall, SimCC8616MSCmedium, SimCC8616MSClarge)
-    ):
+    if current is not None and not isinstance(current, (SimCC8616MSCsmall, SimCC8616MSCmedium, SimCC8616MSClarge)):
         return False
     # Clinic re-runs CompleteCallingConventions for any function whose
     # prototype source is below ``CCA_DECOMPILER`` and resets the convention
@@ -228,16 +229,10 @@ def seed_wide_stack_prototype_from_binary_address_8616(
     )
     from .lowering.callee_pointer_evidence import apply_callee_pointer_argument_evidence_at_address_8616
 
-    canonical_address = (
-        canonicalize_x86_16_padding_call_target_8616(project, address)
-        or address
-    )
+    canonical_address = canonicalize_x86_16_padding_call_target_8616(project, address) or address
     source_proven = _function_has_proven_prototype_8616(source_function)
     typed_source = cast(_PrototypeFunctionBoundary8616, source_function)
-    bounded_refinement_allowed = (
-        not source_proven
-        or isinstance(typed_source.prototype, SimTypeFunction)
-    )
+    bounded_refinement_allowed = not source_proven or isinstance(typed_source.prototype, SimTypeFunction)
     binary_wide_seeded = (
         apply_x86_16_wide_stack_prototype_evidence_at_address(
             project,
@@ -264,11 +259,7 @@ def seed_wide_stack_prototype_from_binary_address_8616(
             None,
         )
         lookup = _dynamic_analysis_getattr_8616(functions, "function", None)
-        canonical_function = (
-            cast(Any, lookup)(addr=canonical_address, create=True)
-            if callable(lookup)
-            else None
-        )
+        canonical_function = cast(Any, lookup)(addr=canonical_address, create=True) if callable(lookup) else None
         if canonical_function is not None:
             if binary_wide_seeded and typed_source.prototype is not None:
                 typed_canonical = cast(
@@ -278,11 +269,14 @@ def seed_wide_stack_prototype_from_binary_address_8616(
                 typed_canonical.prototype = typed_source.prototype
                 typed_canonical.calling_convention = typed_source.calling_convention
                 typed_canonical.is_prototype_guessed = typed_source.is_prototype_guessed
-            pointer_seeded = apply_callee_pointer_argument_evidence_at_address_8616(
-                project,
-                canonical_function,
-                canonical_address,
-            ) or pointer_seeded
+            pointer_seeded = (
+                apply_callee_pointer_argument_evidence_at_address_8616(
+                    project,
+                    canonical_function,
+                    canonical_address,
+                )
+                or pointer_seeded
+            )
     if not abi_seeded and not pointer_seeded:
         return False
     if target_project is not None:
@@ -294,9 +288,7 @@ def seed_wide_stack_prototype_from_binary_address_8616(
             source_addr=canonical_address,
             target_addr=target_address,
         )
-    if typed_source.prototype is None or (
-        typed_source.is_prototype_guessed and not pointer_seeded
-    ):
+    if typed_source.prototype is None or (typed_source.is_prototype_guessed and not pointer_seeded):
         return False
     typed_target = cast(_PrototypeFunctionBoundary8616, target_function)
     typed_target.prototype = typed_source.prototype
@@ -308,11 +300,7 @@ def seed_wide_stack_prototype_from_binary_address_8616(
 def _analysis_function_block_addrs_8616(function: object) -> tuple[int, ...]:
     """Read sorted block addresses from angr's dynamic Function boundary."""
     return tuple(
-        sorted(
-            addr
-            for addr in _dynamic_analysis_tuple_attr_8616(function, "block_addrs_set")
-            if isinstance(addr, int)
-        )
+        sorted(addr for addr in _dynamic_analysis_tuple_attr_8616(function, "block_addrs_set") if isinstance(addr, int))
     )
 
 
@@ -363,12 +351,8 @@ def _analysis_function_call_return_8616(function: object, callsite_addr: int) ->
         matches = tuple(
             instruction
             for instruction in instructions
-            if _dynamic_analysis_getattr_8616(instruction, "address", None)
-            == callsite_addr
-            and str(
-                _dynamic_analysis_getattr_8616(instruction, "mnemonic", "") or ""
-            ).lower()
-            in {"call", "lcall"}
+            if _dynamic_analysis_getattr_8616(instruction, "address", None) == callsite_addr
+            and str(_dynamic_analysis_getattr_8616(instruction, "mnemonic", "") or "").lower() in {"call", "lcall"}
         )
         if len(matches) != 1:
             return return_addr
@@ -799,49 +783,42 @@ def interrupt_service_addr(call: InterruptCall) -> int:
     return int(INTERRUPT_SERVICE_BASE_ADDR) + _interrupt_service_key(call)
 
 
+_VECTOR_SERVICE_NAMES_8616: dict[int, tuple[str, str]] = {
+    0x10: ("bios_int10_video", "_bios_int10_video"),
+    0x11: ("bios_equiplist", "_bios_equiplist"),
+    0x12: ("bios_memsize", "_bios_memsize"),
+    0x13: ("bios_int13_disk", "_bios_disk"),
+    0x14: ("bios_int14_serial", "_bios_serialcom"),
+    0x15: ("bios_int15_system", "_bios_int15_system"),
+    0x16: ("bios_keybrd", "_bios_keybrd"),
+    0x17: ("bios_int17_printer", "_bios_printer"),
+    0x1A: ("bios_timeofday", "_bios_timeofday"),
+}
+
+
+def _spec_service_name_8616(spec: InterruptServiceSpec, api_style: str) -> str:
+    """Pick the pseudo/dos/modern name for a service spec."""
+    if api_style == "pseudo":
+        return spec.pseudo_name
+    if api_style in {"dos", "msc", "compiler"}:
+        return spec.dos_name
+    return spec.modern_name
+
+
 def interrupt_service_name(call: InterruptCall, api_style: str = "pseudo") -> str:
     """Return the service helper name for the selected API style."""
+    spec = _interrupt_service_spec_for_call(call)
+    if spec is not None:
+        return _spec_service_name_8616(spec, api_style)
 
-    def _impl() -> str:
-        spec = _interrupt_service_spec_for_call(call)
-        if spec is not None:
-            if api_style == "pseudo":
-                return spec.pseudo_name
-            if api_style in {"dos", "msc", "compiler"}:
-                return spec.dos_name
-            return spec.modern_name
+    if call.vector == 0x21:
+        spec = INT21_SERVICE_SPECS.get(call.ah or -1)
+        return _spec_service_name_8616(spec, api_style) if spec is not None else "dos_int21"
 
-        if call.vector == 0x21:
-            spec = INT21_SERVICE_SPECS.get(call.ah or -1)
-            if spec is not None:
-                if api_style == "pseudo":
-                    return spec.pseudo_name
-                if api_style in {"dos", "msc", "compiler"}:
-                    return spec.dos_name
-                return spec.modern_name
-            return "dos_int21"
-
-        if call.vector == 0x10:
-            return "bios_int10_video" if api_style == "pseudo" else "_bios_int10_video"
-        if call.vector == 0x11:
-            return "bios_equiplist" if api_style == "pseudo" else "_bios_equiplist"
-        if call.vector == 0x12:
-            return "bios_memsize" if api_style == "pseudo" else "_bios_memsize"
-        if call.vector == 0x13:
-            return "bios_int13_disk" if api_style == "pseudo" else "_bios_disk"
-        if call.vector == 0x14:
-            return "bios_int14_serial" if api_style == "pseudo" else "_bios_serialcom"
-        if call.vector == 0x15:
-            return "bios_int15_system" if api_style == "pseudo" else "_bios_int15_system"
-        if call.vector == 0x16:
-            return "bios_keybrd" if api_style == "pseudo" else "_bios_keybrd"
-        if call.vector == 0x17:
-            return "bios_int17_printer" if api_style == "pseudo" else "_bios_printer"
-        if call.vector == 0x1A:
-            return "bios_timeofday" if api_style == "pseudo" else "_bios_timeofday"
-        return get_interrupt_handler_class(call.vector).INT_NAME
-
-    return _impl()
+    names = _VECTOR_SERVICE_NAMES_8616.get(call.vector)
+    if names is not None:
+        return names[0] if api_style == "pseudo" else names[1]
+    return cast(str, get_interrupt_handler_class(call.vector).INT_NAME)
 
 
 def dos_service_name(call: InterruptCall) -> str:
@@ -947,11 +924,7 @@ def _remove_proven_no_return_fallthrough_8616(
         None,
     )
     target = next(
-        (
-            node
-            for node in nodes
-            if _dynamic_analysis_getattr_8616(node, "addr", None) == return_addr
-        ),
+        (node for node in nodes if _dynamic_analysis_getattr_8616(node, "addr", None) == return_addr),
         None,
     )
     if source is None or target is None or not graph.has_edge(source, target):
@@ -1107,46 +1080,50 @@ def describe_x86_16_known_helper_signatures() -> dict[str, object]:
     }
 
 
+def _track_com_ah_8616(text: str, ah: int | None) -> int | None:
+    """Track the current AH value through mov ah/ax immediates."""
+    if text.startswith("mov ah, "):
+        return int(text.split(", ", 1)[1], 0)
+    if text.startswith("mov ax, "):
+        ax = int(text.split(", ", 1)[1], 0)
+        return (ax >> 8) & 0xFF
+    return ah
+
+
+def _com_terminator_insn_8616(insn: object, ah: int | None) -> bool:
+    """Return whether a disassembled insn terminates the .COM code region."""
+    mnemonic = cast(Any, insn).mnemonic
+    if mnemonic == "int":
+        op = cast(Any, insn).op_str.lower()
+        return op in {"0x20", "0x27"} or (op == "0x21" and ah == 0x4C)
+    return mnemonic in {"ret", "retf", "iret", "jmp"}
+
+
 def infer_com_region(path: Path, *, base_addr: int, window: int, arch: object) -> tuple[int, int]:
     """Infer a bounded `.COM` code region by scanning until a likely terminator.
 
     This keeps tiny DOS stubs from decompiling their trailing strings as code.
     """
 
-    def _impl() -> tuple[int, int]:
-        data = path.read_bytes()
-        end_limit = min(len(data), window)
-        current = 0
-        ah = None
+    data = path.read_bytes()
+    end_limit = min(len(data), window)
+    current = 0
+    ah = None
 
-        while current < end_limit:
-            chunk = data[current : current + 16]
-            insn = next(cast(Any, arch).capstone.disasm(chunk, base_addr + current, 1), None)
-            if insn is None:
-                break
+    while current < end_limit:
+        chunk = data[current : current + 16]
+        insn = next(cast(Any, arch).capstone.disasm(chunk, base_addr + current, 1), None)
+        if insn is None:
+            break
 
-            text = f"{insn.mnemonic} {insn.op_str}".strip().lower()
-            if text.startswith("mov ah, "):
-                ah = int(text.split(", ", 1)[1], 0)
-            elif text.startswith("mov ax, "):
-                ax = int(text.split(", ", 1)[1], 0)
-                ah = (ax >> 8) & 0xFF
+        text = f"{insn.mnemonic} {insn.op_str}".strip().lower()
+        ah = _track_com_ah_8616(text, ah)
 
-            current += insn.size
+        current += insn.size
+        if _com_terminator_insn_8616(insn, ah):
+            break
 
-            if insn.mnemonic == "int":
-                if insn.op_str.lower() == "0x20":
-                    break
-                if insn.op_str.lower() == "0x21" and ah == 0x4C:
-                    break
-                if insn.op_str.lower() == "0x27":
-                    break
-            if insn.mnemonic in {"ret", "retf", "iret", "jmp"}:
-                break
-
-        return base_addr, base_addr + max(current, 1)
-
-    return _impl()
+    return base_addr, base_addr + max(current, 1)
 
 
 def _decode_com_ascii_string(binary_path: Path | None, dx: int | None, *, terminator: int) -> str | None:
@@ -1215,7 +1192,9 @@ def _format_mem_operand(ins: object, operand: object) -> str:
         pieces.append(base_name)
     if index:
         index_name = cast(Any, ins).reg_name(index).lower()
-        pieces.append(f"+{index_name} * {scale}" if pieces and scale != 1 else f"+{index_name}" if pieces else index_name)
+        pieces.append(
+            f"+{index_name} * {scale}" if pieces and scale != 1 else f"+{index_name}" if pieces else index_name
+        )
     if disp:
         disp_text = hex(abs(disp)) if abs(disp) > 9 else str(abs(disp))
         if pieces:
@@ -1228,7 +1207,9 @@ def _format_mem_operand(ins: object, operand: object) -> str:
     segment_name = (
         cast(Any, ins).reg_name(segment).lower()
         if segment
-        else "ss" if base_name in {"bp", "sp", "ebp", "esp"} else "ds"
+        else "ss"
+        if base_name in {"bp", "sp", "ebp", "esp"}
+        else "ds"
     )
     width = _dynamic_analysis_getattr_8616(operand, "size", 0)
     macro = {1: "SEG_U8", 2: "SEG_U16", 4: "SEG_U32"}.get(width)
@@ -1250,6 +1231,9 @@ def _operand_expr(ins: object, operand: object) -> tuple[int | None, str | None]
     return None, None
 
 
+type CsOperandAny8616 = Any
+
+
 @dataclass(frozen=True, slots=True)
 class _InterruptSymbolicStackWord8616:
     """One exactly decoded PUSH value retained for interrupt-input recovery."""
@@ -1268,166 +1252,334 @@ class _InterruptDirectCallStackEffect8616:
     return_frame_kind: TerminalReturnFrameKind8616 | None
 
 
-def collect_interrupt_calls(
-    function: object,
-    binary_path: Path | str | None = None,
-    *,
-    vectors: set[int] | None = None,
-) -> list[InterruptCall]:
-    """Collect recoverable interrupt calls from a dynamic angr Function boundary."""
+_GP_WORD_REGS_8616 = frozenset({"ax", "bx", "cx", "dx"})
+_GP_HALF_REGS_8616 = frozenset({"ah", "al", "bh", "bl", "ch", "cl", "dh", "dl"})
+_TRACKED_REGS_8616 = (
+    "ah",
+    "al",
+    "ax",
+    "bh",
+    "bl",
+    "bx",
+    "ch",
+    "cl",
+    "cx",
+    "dh",
+    "dl",
+    "dx",
+    "si",
+    "di",
+    "ds",
+    "es",
+    "ss",
+    "cs",
+)
+_PUSHED_REG_EXPRS_8616 = {
+    "ax": "inertia_eax & 0xffff",
+    "bx": "inertia_ebx & 0xffff",
+    "cx": "inertia_ecx & 0xffff",
+    "dx": "inertia_edx & 0xffff",
+    "si": "inertia_esi & 0xffff",
+    "di": "inertia_edi & 0xffff",
+    "ds": "inertia_ds",
+    "es": "inertia_es",
+    "ss": "inertia_ss",
+    "cs": "inertia_cs",
+}
 
-    def _impl() -> list[InterruptCall]:
-        nonlocal binary_path
-        binary_path = _coerce_path(binary_path)
-        project = _dynamic_analysis_getattr_8616(function, "project", None)
-        if project is None:
-            return []
 
-        calls: list[InterruptCall] = []
-        debug_interrupt_stack = bool(os.environ.get("INERTIA_DEBUG_INTERRUPT_STACK"))
-        regs: dict[str, tuple[int | None, str | None]] = {
-            "ah": (None, None),
-            "al": (None, None),
-            "ax": (None, None),
-            "bh": (None, None),
-            "bl": (None, None),
-            "bx": (None, None),
-            "ch": (None, None),
-            "cl": (None, None),
-            "cx": (None, None),
-            "dh": (None, None),
-            "dl": (None, None),
-            "dx": (None, None),
-            "si": (None, None),
-            "di": (None, None),
-            "ds": (None, None),
-            "es": (None, None),
-            "ss": (None, None),
-            "cs": (None, None),
-        }
+@dataclass
+class _InterruptCallScan8616:
+    """Linear symbolic-stack scan collecting recoverable interrupt calls."""
 
-        def set_reg(reg_name: str, value: int | None, expr: str | None) -> None:
-            regs[reg_name] = (value, expr)
+    project: object
+    binary_path: Path | None
+    vectors: set[int] | None
+    debug: bool
+    calls: list[InterruptCall]
+    symbolic_stack: list[_InterruptSymbolicStackWord8616]
+    expected_next_block: int | None
+    regs: dict[str, tuple[int | None, str | None]]
 
-            if reg_name in {"ax", "bx", "cx", "dx"}:
-                if value is not None:
-                    high = (value >> 8) & 0xFF
-                    low = value & 0xFF
-                    regs[f"{reg_name[0]}h"] = (high, _format_imm(high))
-                    regs[f"{reg_name[0]}l"] = (low, _format_imm(low))
-                else:
-                    regs[f"{reg_name[0]}h"] = (None, None)
-                    regs[f"{reg_name[0]}l"] = (None, None)
-            elif reg_name in {"ah", "al"}:
-                high_byte, _ = regs["ah"]
-                low_byte, _ = regs["al"]
-                if high_byte is not None and low_byte is not None:
-                    regs["ax"] = (((high_byte & 0xFF) << 8) | (low_byte & 0xFF), None)
-                else:
-                    regs["ax"] = (None, None)
-            elif reg_name in {"bh", "bl"}:
-                high_byte, _ = regs["bh"]
-                low_byte, _ = regs["bl"]
-                if high_byte is not None and low_byte is not None:
-                    regs["bx"] = (((high_byte & 0xFF) << 8) | (low_byte & 0xFF), None)
-                else:
-                    regs["bx"] = (None, None)
-            elif reg_name in {"ch", "cl"}:
-                high_byte, _ = regs["ch"]
-                low_byte, _ = regs["cl"]
-                if high_byte is not None and low_byte is not None:
-                    regs["cx"] = (((high_byte & 0xFF) << 8) | (low_byte & 0xFF), None)
-                else:
-                    regs["cx"] = (None, None)
-            elif reg_name in {"dh", "dl"}:
-                high_byte, _ = regs["dh"]
-                low_byte, _ = regs["dl"]
-                if high_byte is not None and low_byte is not None:
-                    regs["dx"] = (((high_byte & 0xFF) << 8) | (low_byte & 0xFF), None)
-                else:
-                    regs["dx"] = (None, None)
+    @classmethod
+    def create(cls, project: object, binary_path: Path | None, vectors: set[int] | None) -> _InterruptCallScan8616:
+        """Build a scan state with cleared registers and an empty stack."""
+        return cls(
+            project=project,
+            binary_path=binary_path,
+            vectors=vectors,
+            debug=bool(os.environ.get("INERTIA_DEBUG_INTERRUPT_STACK")),
+            calls=[],
+            symbolic_stack=[],
+            expected_next_block=None,
+            regs=dict.fromkeys(_TRACKED_REGS_8616, (None, None)),
+        )
 
-        def pushed_value(ins: object, operand: object) -> _InterruptSymbolicStackWord8616 | None:
-            """Capture one exact register/immediate PUSH source before later calls."""
-            ins_addr = _dynamic_analysis_int_attr_8616(ins, "address")
-            ins_size = _dynamic_analysis_int_attr_8616(ins, "size")
-            fallthrough_addr = (
-                ins_addr + ins_size
-                if ins_addr is not None and ins_size is not None and ins_size > 0
-                else None
+    def _dbg(self, text: str) -> None:
+        if self.debug:
+            print(text, file=sys.stderr)
+
+    def set_reg(self, reg_name: str, value: int | None, expr: str | None) -> None:
+        """Set a tracked register, keeping GP word/half pairs coherent."""
+        self.regs[reg_name] = (value, expr)
+        if reg_name in _GP_WORD_REGS_8616:
+            if value is not None:
+                high = (value >> 8) & 0xFF
+                low = value & 0xFF
+                self.regs[f"{reg_name[0]}h"] = (high, _format_imm(high))
+                self.regs[f"{reg_name[0]}l"] = (low, _format_imm(low))
+            else:
+                self.regs[f"{reg_name[0]}h"] = (None, None)
+                self.regs[f"{reg_name[0]}l"] = (None, None)
+        elif reg_name in _GP_HALF_REGS_8616:
+            word = f"{reg_name[0]}x"
+            high_byte, _ = self.regs[f"{reg_name[0]}h"]
+            low_byte, _ = self.regs[f"{reg_name[0]}l"]
+            if high_byte is not None and low_byte is not None:
+                self.regs[word] = (((high_byte & 0xFF) << 8) | (low_byte & 0xFF), None)
+            else:
+                self.regs[word] = (None, None)
+
+    def pushed_value(self, ins: object, operand: object) -> _InterruptSymbolicStackWord8616 | None:
+        """Capture one exact register/immediate PUSH source before later calls."""
+        ins_addr = _dynamic_analysis_int_attr_8616(ins, "address")
+        ins_size = _dynamic_analysis_int_attr_8616(ins, "size")
+        fallthrough_addr = (
+            ins_addr + ins_size if ins_addr is not None and ins_size is not None and ins_size > 0 else None
+        )
+        operand_type = _dynamic_analysis_getattr_8616(operand, "type", None)
+        if operand_type == 1:
+            reg_name = cast(Any, ins).reg_name(cast(Any, operand).reg).lower()
+            if reg_name not in self.regs:
+                return None
+            value, expr = self.regs[reg_name]
+            if value is None and expr is None:
+                expr = _PUSHED_REG_EXPRS_8616.get(reg_name)
+            return _InterruptSymbolicStackWord8616(value, expr, reg_name, fallthrough_addr)
+        if operand_type == 2:
+            value, expr = _operand_expr(ins, operand)
+            return _InterruptSymbolicStackWord8616(value, expr, None, fallthrough_addr)
+        return None
+
+    def direct_call_stack_effect(
+        self,
+        ins: CsInsn,
+        operands: object,
+    ) -> _InterruptDirectCallStackEffect8616:
+        """Prove one direct callee's cleanup and consistent return-frame shape."""
+        unknown = _InterruptDirectCallStackEffect8616(False, None)
+        if not isinstance(operands, (list, tuple)) or len(operands) != 1:
+            return unknown
+        target = operands[0]
+        if _dynamic_analysis_getattr_8616(target, "type", None) != 2:
+            return unknown
+        target_addr = _dynamic_analysis_getattr_8616(target, "imm", None)
+        if not isinstance(target_addr, int):
+            return unknown
+        if ins.mnemonic == "call":
+            ins_addr = _dynamic_analysis_getattr_8616(ins, "address", None)
+            if isinstance(ins_addr, int):
+                target_addr = (ins_addr & ~0xFFFF) | (target_addr & 0xFFFF)
+        candidates = [(self.project, target_addr)]
+        original_project = _dynamic_analysis_getattr_8616(self.project, "_inertia_original_project", None)
+        original_delta = _dynamic_analysis_getattr_8616(self.project, "_inertia_original_linear_delta", None)
+        if original_project is not None and isinstance(original_delta, int):
+            candidates.append((original_project, target_addr + original_delta))
+        proofs = tuple(
+            (
+                candidate_addr,
+                terminal_stack_cleanup_at_address_8616(candidate_project, candidate_addr),
             )
-            operand_type = _dynamic_analysis_getattr_8616(operand, "type", None)
-            if operand_type == 1:
-                reg_name = cast(Any, ins).reg_name(cast(Any, operand).reg).lower()
-                if reg_name not in regs:
-                    return None
-                value, expr = regs[reg_name]
-                if value is None and expr is None:
-                    expr = {
-                        "ax": "inertia_eax & 0xffff",
-                        "bx": "inertia_ebx & 0xffff",
-                        "cx": "inertia_ecx & 0xffff",
-                        "dx": "inertia_edx & 0xffff",
-                        "si": "inertia_esi & 0xffff",
-                        "di": "inertia_edi & 0xffff",
-                        "ds": "inertia_ds",
-                        "es": "inertia_es",
-                        "ss": "inertia_ss",
-                        "cs": "inertia_cs",
-                    }.get(reg_name)
-                return _InterruptSymbolicStackWord8616(value, expr, reg_name, fallthrough_addr)
-            if operand_type == 2:
-                value, expr = _operand_expr(ins, operand)
-                return _InterruptSymbolicStackWord8616(value, expr, None, fallthrough_addr)
+            for candidate_project, candidate_addr in candidates
+        )
+        if self.debug:
+            print(
+                f"[interrupt-stack] target={target_addr:#x} delta={original_delta!r} proofs={proofs!r}",
+                file=sys.stderr,
+            )
+        qualifying = tuple(
+            evidence for _candidate_addr, evidence in proofs if evidence.complete and evidence.consistent_cleanup == 0
+        )
+        if not qualifying:
+            return unknown
+        frame_kinds = frozenset(evidence.consistent_return_frame_kind for evidence in qualifying)
+        if len(frame_kinds) != 1:
+            return unknown
+        return _InterruptDirectCallStackEffect8616(True, next(iter(frame_kinds)))
+
+    def _step_push(self, ins: CsInsn, operand: object) -> None:
+        captured = self.pushed_value(ins, operand)
+        if captured is None:
+            self.symbolic_stack.clear()
+        else:
+            self.symbolic_stack.append(captured)
+        self._dbg(f"[interrupt-stack] push={ins.op_str!r} captured={captured!r} depth={len(self.symbolic_stack)}")
+
+    def _step_pop(self, ins: CsInsn, operand: CsOperandAny8616) -> None:
+        if operand.type != 1 or not self.symbolic_stack:
+            self.symbolic_stack.clear()
+            return
+        reg_name = ins.reg_name(operand.reg).lower()
+        if reg_name not in self.regs:
+            self.symbolic_stack.clear()
+            return
+        restored = self.symbolic_stack.pop()
+        self.set_reg(reg_name, restored.value, restored.expr)
+        self._dbg(
+            f"[interrupt-stack] pop={reg_name} "
+            f"value={(restored.value, restored.expr)!r} depth={len(self.symbolic_stack)}"
+        )
+
+    def _step_call(self, ins: CsInsn, operands: object) -> None:
+        effect = self.direct_call_stack_effect(ins, operands)
+        call_addr = _dynamic_analysis_int_attr_8616(ins, "address")
+        consumes_explicit_return_segment = (
+            effect.preserves_stack
+            and effect.return_frame_kind is TerminalReturnFrameKind8616.FAR
+            and ins.mnemonic == "call"
+            and bool(self.symbolic_stack)
+            and self.symbolic_stack[-1].source_register == "cs"
+            and self.symbolic_stack[-1].fallthrough_addr == call_addr
+        )
+        if consumes_explicit_return_segment:
+            self.symbolic_stack.pop()
+        self._dbg(
+            f"[interrupt-stack] call={ins.op_str!r} preserves={effect.preserves_stack} "
+            f"frame={effect.return_frame_kind!r} "
+            f"consumed_cs={consumes_explicit_return_segment} depth={len(self.symbolic_stack)}"
+        )
+        if not effect.preserves_stack or (
+            effect.return_frame_kind is TerminalReturnFrameKind8616.FAR
+            and ins.mnemonic == "call"
+            and not consumes_explicit_return_segment
+        ):
+            self.symbolic_stack.clear()
+
+    def _step_mov(self, ins: CsInsn, operands: CsOperandAny8616) -> None:
+        dst, src = operands
+        if dst.type != 1:
+            return
+        reg_name = ins.reg_name(dst.reg).lower()
+        if reg_name in {"sp", "esp"}:
+            self.symbolic_stack.clear()
+        if reg_name in self.regs:
+            value, expr = _operand_expr(ins, src)
+            self.set_reg(reg_name, value, expr)
+
+    def _step_xor(self, ins: CsInsn, operands: CsOperandAny8616) -> None:
+        dst_name = ins.reg_name(operands[0].reg).lower()
+        src_name = ins.reg_name(operands[1].reg).lower()
+        if dst_name == src_name and dst_name in self.regs:
+            self.set_reg(dst_name, 0, "0")
+        if dst_name in {"sp", "esp"}:
+            self.symbolic_stack.clear()
+
+    def _step_other_reg_write(self, ins: CsInsn, operands: CsOperandAny8616) -> None:
+        destination_name = ins.reg_name(operands[0].reg).lower()
+        if destination_name in {"sp", "esp"}:
+            self.symbolic_stack.clear()
+
+    def _int_vector(self, ins: CsInsn) -> int | None:
+        if ins.mnemonic == "int3":
+            return 3
+        try:
+            return int(ins.op_str.lower().strip(), 0) & 0xFF
+        except ValueError:
             return None
 
-        def direct_call_stack_effect(
-            ins: CsInsn,
-            operands: object,
-        ) -> _InterruptDirectCallStackEffect8616:
-            """Prove one direct callee's cleanup and consistent return-frame shape."""
-            unknown = _InterruptDirectCallStackEffect8616(False, None)
-            if not isinstance(operands, (list, tuple)) or len(operands) != 1:
-                return unknown
-            target = operands[0]
-            if _dynamic_analysis_getattr_8616(target, "type", None) != 2:
-                return unknown
-            target_addr = _dynamic_analysis_getattr_8616(target, "imm", None)
-            if not isinstance(target_addr, int):
-                return unknown
-            if ins.mnemonic == "call":
-                ins_addr = _dynamic_analysis_getattr_8616(ins, "address", None)
-                if isinstance(ins_addr, int):
-                    target_addr = (ins_addr & ~0xFFFF) | (target_addr & 0xFFFF)
-            candidates = [(project, target_addr)]
-            original_project = _dynamic_analysis_getattr_8616(project, "_inertia_original_project", None)
-            original_delta = _dynamic_analysis_getattr_8616(project, "_inertia_original_linear_delta", None)
-            if original_project is not None and isinstance(original_delta, int):
-                candidates.append((original_project, target_addr + original_delta))
-            proofs = tuple(
-                (
-                    candidate_addr,
-                    terminal_stack_cleanup_at_address_8616(candidate_project, candidate_addr),
-                )
-                for candidate_project, candidate_addr in candidates
-            )
-            if debug_interrupt_stack:
-                print(
-                    f"[interrupt-stack] target={target_addr:#x} delta={original_delta!r} proofs={proofs!r}",
-                    file=sys.stderr,
-                )
-            qualifying = tuple(
-                evidence
-                for _candidate_addr, evidence in proofs
-                if evidence.complete and evidence.consistent_cleanup == 0
-            )
-            if not qualifying:
-                return unknown
-            frame_kinds = frozenset(evidence.consistent_return_frame_kind for evidence in qualifying)
-            if len(frame_kinds) != 1:
-                return unknown
-            return _InterruptDirectCallStackEffect8616(True, next(iter(frame_kinds)))
+    def _interrupt_call(self, ins: CsInsn, vector: int, path_literal: str | None) -> InterruptCall:
+        """Build the recovered call record from the tracked register table."""
+        r = self.regs
+        return InterruptCall(
+            insn_addr=ins.address,
+            vector=vector,
+            ah=r["ah"][0],
+            al=r["al"][0],
+            ax=r["ax"][0],
+            bh=r["bh"][0],
+            bl=r["bl"][0],
+            bx=r["bx"][0],
+            ch=r["ch"][0],
+            cl=r["cl"][0],
+            cx=r["cx"][0],
+            dh=r["dh"][0],
+            dl=r["dl"][0],
+            dx=r["dx"][0],
+            si=r["si"][0],
+            di=r["di"][0],
+            ds=r["ds"][0],
+            es=r["es"][0],
+            ss=r["ss"][0],
+            cs=r["cs"][0],
+            ah_expr=r["ah"][1],
+            al_expr=r["al"][1],
+            ax_expr=r["ax"][1],
+            bh_expr=r["bh"][1],
+            bl_expr=r["bl"][1],
+            bx_expr=r["bx"][1],
+            ch_expr=r["ch"][1],
+            cl_expr=r["cl"][1],
+            cx_expr=r["cx"][1],
+            dh_expr=r["dh"][1],
+            dl_expr=r["dl"][1],
+            dx_expr=r["dx"][1],
+            si_expr=r["si"][1],
+            di_expr=r["di"][1],
+            ds_expr=r["ds"][1],
+            es_expr=r["es"][1],
+            ss_expr=r["ss"][1],
+            cs_expr=r["cs"][1],
+            string_literal=path_literal,
+        )
 
+    def _step_int(self, ins: CsInsn) -> None:
+        vector = self._int_vector(ins)
+        if vector is None:
+            return
+        if self.vectors is not None and vector not in self.vectors:
+            return
+
+        ah, _ah_expr = self.regs["ah"]
+        dx, dx_expr = self.regs["dx"]
+        if self.debug and (self.symbolic_stack or dx_expr is not None):
+            print(
+                f"[interrupt-stack] int={ins.address:#x} ah={ah!r} dx={(dx, dx_expr)!r} depth={len(self.symbolic_stack)}",
+                file=sys.stderr,
+            )
+        path_literal = None
+        if vector == 0x21 and ah in {0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x41}:
+            path_literal = decode_com_c_string(self.binary_path, dx)
+        elif vector == 0x21 and ah == 0x09:
+            path_literal = decode_com_dollar_string(self.binary_path, dx)
+        self.calls.append(self._interrupt_call(ins, vector, path_literal))
+        if vector == 0x21:
+            self.set_reg("dx", None, None)
+
+    def _step_insn(self, ins: CsInsn) -> None:
+        ins_size = _dynamic_analysis_getattr_8616(ins, "size", None)
+        self.expected_next_block = (
+            ins.address + ins_size if isinstance(ins.address, int) and isinstance(ins_size, int) else None
+        )
+        operands = _dynamic_analysis_getattr_8616(ins, "operands", ())
+        if ins.mnemonic == "push" and len(operands) == 1:
+            self._step_push(ins, operands[0])
+        elif ins.mnemonic == "pop" and len(operands) == 1:
+            self._step_pop(ins, operands[0])
+        elif ins.mnemonic in {"call", "lcall"}:
+            self._step_call(ins, operands)
+        elif ins.mnemonic == "mov" and len(operands) == 2:
+            self._step_mov(ins, operands)
+        elif ins.mnemonic == "xor" and len(operands) == 2 and operands[0].type == 1 and operands[1].type == 1:
+            self._step_xor(ins, operands)
+        elif operands and _dynamic_analysis_getattr_8616(operands[0], "type", None) == 1:
+            self._step_other_reg_write(ins, operands)
+        elif ins.mnemonic in {"int", "int3"}:
+            self._step_int(ins)
+        if ins.mnemonic.startswith("j") or ins.mnemonic.startswith("loop") or ins.mnemonic.startswith("ret"):
+            self.expected_next_block = None
+
+    def scan(self, function: object) -> list[InterruptCall]:
+        """Walk the function's blocks in order and collect interrupt calls."""
         block_sizes: dict[int, int] = {}
         graph = _dynamic_analysis_getattr_8616(function, "transition_graph", None)
         if graph is not None:
@@ -1444,197 +1596,37 @@ def collect_interrupt_calls(
             ),
             *block_sizes,
         }
-        symbolic_stack: list[_InterruptSymbolicStackWord8616] = []
-        expected_next_block: int | None = None
         for block_addr in sorted(block_addrs):
-            if debug_interrupt_stack:
-                print(
-                    f"[interrupt-stack] block={block_addr:#x} expected={expected_next_block!r} depth={len(symbolic_stack)}",
-                    file=sys.stderr,
-                )
-            if expected_next_block != block_addr:
-                symbolic_stack.clear()
-            expected_next_block = None
+            self._dbg(
+                f"[interrupt-stack] block={block_addr:#x} expected={self.expected_next_block!r} depth={len(self.symbolic_stack)}"
+            )
+            if self.expected_next_block != block_addr:
+                self.symbolic_stack.clear()
+            self.expected_next_block = None
             block_size = block_sizes.get(block_addr)
             if block_size is None:
-                block = project.factory.block(block_addr, opt_level=0)
+                block = cast(Any, self.project).factory.block(block_addr, opt_level=0)
             else:
-                block = project.factory.block(block_addr, size=block_size, opt_level=0)
+                block = cast(Any, self.project).factory.block(block_addr, size=block_size, opt_level=0)
             block_bytes = bytes(_dynamic_analysis_getattr_8616(block, "bytes", b""))
-            capstone_engine = cast(Any, project).arch.capstone
+            capstone_engine = cast(Any, self.project).arch.capstone
             for ins in capstone_engine.disasm(block_bytes, block_addr):
-                ins_size = _dynamic_analysis_getattr_8616(ins, "size", None)
-                expected_next_block = (
-                    ins.address + ins_size
-                    if isinstance(ins.address, int) and isinstance(ins_size, int)
-                    else None
-                )
-                operands = _dynamic_analysis_getattr_8616(ins, "operands", ())
-                if ins.mnemonic == "push" and len(operands) == 1:
-                    captured = pushed_value(ins, operands[0])
-                    if captured is None:
-                        symbolic_stack.clear()
-                    else:
-                        symbolic_stack.append(captured)
-                    if debug_interrupt_stack:
-                        print(
-                            f"[interrupt-stack] push={ins.op_str!r} captured={captured!r} depth={len(symbolic_stack)}",
-                            file=sys.stderr,
-                        )
-                elif ins.mnemonic == "pop" and len(operands) == 1:
-                    destination = operands[0]
-                    if destination.type != 1 or not symbolic_stack:
-                        symbolic_stack.clear()
-                        continue
-                    reg_name = ins.reg_name(destination.reg).lower()
-                    if reg_name not in regs:
-                        symbolic_stack.clear()
-                        continue
-                    restored = symbolic_stack.pop()
-                    set_reg(reg_name, restored.value, restored.expr)
-                    if debug_interrupt_stack:
-                        print(
-                            f"[interrupt-stack] pop={reg_name} "
-                            f"value={(restored.value, restored.expr)!r} depth={len(symbolic_stack)}",
-                            file=sys.stderr,
-                        )
-                elif ins.mnemonic in {"call", "lcall"}:
-                    effect = direct_call_stack_effect(ins, operands)
-                    call_addr = _dynamic_analysis_int_attr_8616(ins, "address")
-                    consumes_explicit_return_segment = (
-                        effect.preserves_stack
-                        and effect.return_frame_kind is TerminalReturnFrameKind8616.FAR
-                        and ins.mnemonic == "call"
-                        and bool(symbolic_stack)
-                        and symbolic_stack[-1].source_register == "cs"
-                        and symbolic_stack[-1].fallthrough_addr == call_addr
-                    )
-                    if consumes_explicit_return_segment:
-                        symbolic_stack.pop()
-                    if debug_interrupt_stack:
-                        print(
-                            f"[interrupt-stack] call={ins.op_str!r} preserves={effect.preserves_stack} "
-                            f"frame={effect.return_frame_kind!r} "
-                            f"consumed_cs={consumes_explicit_return_segment} depth={len(symbolic_stack)}",
-                            file=sys.stderr,
-                        )
-                    if not effect.preserves_stack or (
-                        effect.return_frame_kind is TerminalReturnFrameKind8616.FAR
-                        and ins.mnemonic == "call"
-                        and not consumes_explicit_return_segment
-                    ):
-                        symbolic_stack.clear()
-                elif ins.mnemonic == "mov" and len(operands) == 2:
-                    dst, src = operands
-                    if dst.type == 1:
-                        reg_name = ins.reg_name(dst.reg).lower()
-                        if reg_name in {"sp", "esp"}:
-                            symbolic_stack.clear()
-                        if reg_name in regs:
-                            value, expr = _operand_expr(ins, src)
-                            set_reg(reg_name, value, expr)
-                elif ins.mnemonic == "xor" and len(operands) == 2 and operands[0].type == 1 and operands[1].type == 1:
-                    dst_name = ins.reg_name(operands[0].reg).lower()
-                    src_name = ins.reg_name(operands[1].reg).lower()
-                    if dst_name == src_name and dst_name in regs:
-                        set_reg(dst_name, 0, "0")
-                    if dst_name in {"sp", "esp"}:
-                        symbolic_stack.clear()
-                elif operands and _dynamic_analysis_getattr_8616(operands[0], "type", None) == 1:
-                    destination_name = ins.reg_name(operands[0].reg).lower()
-                    if destination_name in {"sp", "esp"}:
-                        symbolic_stack.clear()
-                elif ins.mnemonic in {"int", "int3"}:
-                    if ins.mnemonic == "int3":
-                        vector = 3
-                    else:
-                        vector_text = ins.op_str.lower().strip()
-                        try:
-                            vector = int(vector_text, 0) & 0xFF
-                        except ValueError:
-                            continue
-                    if vectors is not None and vector not in vectors:
-                        continue
+                self._step_insn(ins)
+        return self.calls
 
-                    ah, ah_expr = regs["ah"]
-                    al, al_expr = regs["al"]
-                    ax, ax_expr = regs["ax"]
-                    bh, bh_expr = regs["bh"]
-                    bl, bl_expr = regs["bl"]
-                    bx, bx_expr = regs["bx"]
-                    ch, ch_expr = regs["ch"]
-                    cl, cl_expr = regs["cl"]
-                    cx, cx_expr = regs["cx"]
-                    dh, dh_expr = regs["dh"]
-                    dl, dl_expr = regs["dl"]
-                    dx, dx_expr = regs["dx"]
-                    si, si_expr = regs["si"]
-                    di, di_expr = regs["di"]
-                    ds, ds_expr = regs["ds"]
-                    es, es_expr = regs["es"]
-                    ss, ss_expr = regs["ss"]
-                    cs, cs_expr = regs["cs"]
-                    if debug_interrupt_stack and (symbolic_stack or dx_expr is not None):
-                        print(
-                            f"[interrupt-stack] int={ins.address:#x} ah={ah!r} dx={(dx, dx_expr)!r} depth={len(symbolic_stack)}",
-                            file=sys.stderr,
-                        )
-                    path_literal = None
-                    if vector == 0x21 and ah in {0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x41}:
-                        path_literal = decode_com_c_string(binary_path, dx)
-                    elif vector == 0x21 and ah == 0x09:
-                        path_literal = decode_com_dollar_string(binary_path, dx)
-                    calls.append(
-                        InterruptCall(
-                            insn_addr=ins.address,
-                            vector=vector,
-                            ah=ah,
-                            al=al,
-                            ax=ax,
-                            bh=bh,
-                            bl=bl,
-                            bx=bx,
-                            ch=ch,
-                            cl=cl,
-                            cx=cx,
-                            dh=dh,
-                            dl=dl,
-                            dx=dx,
-                            si=si,
-                            di=di,
-                            ds=ds,
-                            es=es,
-                            ss=ss,
-                            cs=cs,
-                            ah_expr=ah_expr,
-                            al_expr=al_expr,
-                            ax_expr=ax_expr,
-                            bh_expr=bh_expr,
-                            bl_expr=bl_expr,
-                            bx_expr=bx_expr,
-                            ch_expr=ch_expr,
-                            cl_expr=cl_expr,
-                            cx_expr=cx_expr,
-                            dh_expr=dh_expr,
-                            dl_expr=dl_expr,
-                            dx_expr=dx_expr,
-                            si_expr=si_expr,
-                            di_expr=di_expr,
-                            ds_expr=ds_expr,
-                            es_expr=es_expr,
-                            ss_expr=ss_expr,
-                            cs_expr=cs_expr,
-                            string_literal=path_literal,
-                        )
-                    )
-                    if vector == 0x21:
-                        set_reg("dx", None, None)
-                if ins.mnemonic.startswith("j") or ins.mnemonic.startswith("loop") or ins.mnemonic.startswith("ret"):
-                    expected_next_block = None
 
-        return calls
-
-    return _impl()
+def collect_interrupt_calls(
+    function: object,
+    binary_path: Path | str | None = None,
+    *,
+    vectors: set[int] | None = None,
+) -> list[InterruptCall]:
+    """Collect recoverable interrupt calls from a dynamic angr Function boundary."""
+    project = _dynamic_analysis_getattr_8616(function, "project", None)
+    if project is None:
+        return []
+    scan = _InterruptCallScan8616.create(project, _coerce_path(binary_path), vectors)
+    return scan.scan(function)
 
 
 def collect_dos_int21_calls(function: object, binary_path: Path | str | None = None) -> list[DOSInt21Call]:
@@ -1744,7 +1736,9 @@ def _interrupt_service_decl(spec: InterruptServiceSpec, api_style: str) -> str:
 
 
 def _render_string_dollar_call_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
-    helper_name = "_dos_print_dollar_string" if api_style == "dos" else name if api_style == "pseudo" else "print_dos_string"
+    helper_name = (
+        "_dos_print_dollar_string" if api_style == "dos" else name if api_style == "pseudo" else "print_dos_string"
+    )
     if call.string_literal is not None:
         return f'{helper_name}("{call.string_literal}")'
     argument = _dos_path_arg(call, far_ptr=api_style == "dos")
@@ -1770,50 +1764,86 @@ def _render_getvect_call_8616(call: DOSInt21Call, api_style: str, name: str) -> 
     return f"getvect({vector})"
 
 
-def _render_dos_int21_by_kind_8616(call: DOSInt21Call, api_style: str, name: str, render_kind: str) -> str:
-    def _impl() -> str:
-        if render_kind == "string_dollar":
-            return _render_string_dollar_call_8616(call, api_style, name)
-        if render_kind == "drive":
-            return f"{name}({_dos_drive_arg(call) or '0'})"
-        if render_kind == "path":
-            return f"{name}({_dos_path_arg(call, far_ptr=api_style == 'dos') or 'NULL'})"
-        if render_kind == "path_mode":
-            path = _dos_path_arg(call, far_ptr=api_style == "dos") or "NULL"
-            mode = _dos_arg(call.al, call.al_expr) or "0"
-            return f"{name}({path}, {mode})"
-        if render_kind == "path_attrs":
-            path = _dos_path_arg(call, far_ptr=api_style == "dos") or "NULL"
-            attrs = _dos_arg(call.cx, call.cx_expr) or "0"
-            return f"{name}({path}, {attrs})"
-        if render_kind == "handle":
-            return f"{name}({_dos_arg(call.bx, call.bx_expr) or '0'})"
-        if render_kind == "handle_buffer_count":
-            handle = _dos_arg(call.bx, call.bx_expr) or "0"
-            buffer = _dos_buffer_arg(call, far_ptr=api_style == "dos", const=call.ah == 0x40) or "NULL"
-            count = _dos_arg(call.cx, call.cx_expr) or "0"
-            return f"{name}({handle}, {buffer}, {count})"
-        if render_kind == "handle_seek":
-            handle = _dos_arg(call.bx, call.bx_expr) or "0"
-            offset = _dos_seek_offset_arg(call)
-            origin = _dos_arg(call.al, call.al_expr) or "0"
-            return f"{name}({handle}, {offset}, {origin})"
-        if render_kind == "drive_buffer":
-            drive = _dos_drive_arg(call) or "0"
-            buffer = _dos_si_buffer_arg(call, far_ptr=api_style == "dos", const=False) or "NULL"
-            return f"{name}({drive}, {buffer})"
-        if render_kind == "setvect":
-            return _render_setvect_call_8616(call, api_style, name)
-        if render_kind == "getvect":
-            return _render_getvect_call_8616(call, api_style, name)
-        if render_kind == "exit":
-            exit_code = call.ax & 0xFF if call.ax is not None else 0
-            return f"{name}({exit_code})"
-        if render_kind in {"zero_arg", "wrapper", "setblock", "get_version"}:
-            return f"{name}()"
-        return f"{name}()"
+def _rk_drive_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+    """Render a drive-number int21 service call."""
+    return f"{name}({_dos_drive_arg(call) or '0'})"
 
-    return _impl()
+
+def _rk_path_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+    """Render a single-path int21 service call."""
+    return f"{name}({_dos_path_arg(call, far_ptr=api_style == 'dos') or 'NULL'})"
+
+
+def _rk_path_reg_8616(call: DOSInt21Call, api_style: str, name: str, value: int | None, expr: str | None) -> str:
+    """Render a ``(path, reg-arg)`` int21 service call."""
+    path = _dos_path_arg(call, far_ptr=api_style == "dos") or "NULL"
+    arg = _dos_arg(value, expr) or "0"
+    return f"{name}({path}, {arg})"
+
+
+def _rk_path_mode_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+    return _rk_path_reg_8616(call, api_style, name, call.al, call.al_expr)
+
+
+def _rk_path_attrs_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+    return _rk_path_reg_8616(call, api_style, name, call.cx, call.cx_expr)
+
+
+def _rk_handle_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+    """Render a single-handle int21 service call."""
+    return f"{name}({_dos_arg(call.bx, call.bx_expr) or '0'})"
+
+
+def _rk_handle_buffer_count_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+    """Render a ``(handle, buffer, count)`` read/write int21 call."""
+    handle = _dos_arg(call.bx, call.bx_expr) or "0"
+    buffer = _dos_buffer_arg(call, far_ptr=api_style == "dos", const=call.ah == 0x40) or "NULL"
+    count = _dos_arg(call.cx, call.cx_expr) or "0"
+    return f"{name}({handle}, {buffer}, {count})"
+
+
+def _rk_handle_seek_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+    """Render a ``(handle, offset, origin)`` seek int21 call."""
+    handle = _dos_arg(call.bx, call.bx_expr) or "0"
+    offset = _dos_seek_offset_arg(call)
+    origin = _dos_arg(call.al, call.al_expr) or "0"
+    return f"{name}({handle}, {offset}, {origin})"
+
+
+def _rk_drive_buffer_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+    """Render a ``(drive, buffer)`` int21 service call."""
+    drive = _dos_drive_arg(call) or "0"
+    buffer = _dos_si_buffer_arg(call, far_ptr=api_style == "dos", const=False) or "NULL"
+    return f"{name}({drive}, {buffer})"
+
+
+def _rk_exit_8616(call: DOSInt21Call, api_style: str, name: str) -> str:
+    """Render a process-exit int21 call with the low-byte exit code."""
+    exit_code = call.ax & 0xFF if call.ax is not None else 0
+    return f"{name}({exit_code})"
+
+
+_DOS_RENDER_HANDLERS_8616: dict[str, Callable[[DOSInt21Call, str, str], str]] = {
+    "string_dollar": _render_string_dollar_call_8616,
+    "drive": _rk_drive_8616,
+    "path": _rk_path_8616,
+    "path_mode": _rk_path_mode_8616,
+    "path_attrs": _rk_path_attrs_8616,
+    "handle": _rk_handle_8616,
+    "handle_buffer_count": _rk_handle_buffer_count_8616,
+    "handle_seek": _rk_handle_seek_8616,
+    "drive_buffer": _rk_drive_buffer_8616,
+    "setvect": _render_setvect_call_8616,
+    "getvect": _render_getvect_call_8616,
+    "exit": _rk_exit_8616,
+}
+
+
+def _render_dos_int21_by_kind_8616(call: DOSInt21Call, api_style: str, name: str, render_kind: str) -> str:
+    handler = _DOS_RENDER_HANDLERS_8616.get(render_kind)
+    if handler is not None:
+        return handler(call, api_style, name)
+    return f"{name}()"
 
 
 def render_dos_int21_call(call: DOSInt21Call, api_style: str) -> str:
@@ -1831,38 +1861,35 @@ def render_dos_int21_call(call: DOSInt21Call, api_style: str) -> str:
     return _render_dos_int21_by_kind_8616(call, api_style, name, spec.render_kind)
 
 
+def _render_int10_wrapper_8616(call: InterruptCall, api_style: str) -> str:
+    """Render the int10 wrapper form: AH selector or int86/int86x fallback."""
+    if call.ah is not None:
+        selector = _format_imm(call.ah)
+        return f"{interrupt_service_name(call, api_style)}({selector})"
+    extended = any(value is not None for value in (call.ds, call.es, call.ss, call.cs))
+    if extended:
+        return "int86x(0x10, &inregs, &outregs, &sregs)"
+    return "int86(0x10, &inregs, &outregs)"
+
+
 def _render_simple_interrupt_call(call: InterruptCall, api_style: str) -> str:
-    def _impl() -> str:
-        nonlocal api_style
-        api_style = normalize_api_style(api_style)
-        spec = interrupt_service_spec(call)
-        if spec is None:
-            return render_dos_int21_call(call, api_style)
-        if api_style == "raw":
-            return f"int{call.vector:02x}()"
+    api_style = normalize_api_style(api_style)
+    spec = interrupt_service_spec(call)
+    if spec is None:
+        return render_dos_int21_call(call, api_style)
+    if api_style == "raw":
+        return f"int{call.vector:02x}()"
 
-        if call.vector == 0x10 and spec.render_kind == "wrapper":
-            if call.ah is not None:
-                selector = _format_imm(call.ah)
-                return f"{interrupt_service_name(call, api_style)}({selector})"
-            extended = any(value is not None for value in (call.ds, call.es, call.ss, call.cs))
-            if extended:
-                return "int86x(0x10, &inregs, &outregs, &sregs)"
-            return "int86(0x10, &inregs, &outregs)"
+    if call.vector == 0x10 and spec.render_kind == "wrapper":
+        return _render_int10_wrapper_8616(call, api_style)
 
-        name = interrupt_service_name(call, api_style)
-        if call.vector == 0x16:
-            dos_selector = _dos_arg(call.ah, call.ah_expr)
-            if dos_selector is not None:
-                return f"{name}({dos_selector})"
-            return f"{name}()"
-        if call.vector == 0x10 and api_style in {"dos", "msc", "compiler"}:
-            return f"{name}(0x10)"
-        if call.vector == 0x13 and api_style == "pseudo":
-            return f"{name}()"
-        return f"{name}()"
-
-    return _impl()
+    name = interrupt_service_name(call, api_style)
+    if call.vector == 0x16:
+        dos_selector = _dos_arg(call.ah, call.ah_expr)
+        return f"{name}({dos_selector})" if dos_selector is not None else f"{name}()"
+    if call.vector == 0x10 and api_style in {"dos", "msc", "compiler"}:
+        return f"{name}(0x10)"
+    return f"{name}()"
 
 
 def render_interrupt_call(call: InterruptCall, api_style: str) -> str:
@@ -1942,7 +1969,9 @@ def _absolute_mem_disp(operand: object) -> int | None:
 
 
 def _initial_cs_linear_base(project: object) -> int | None:
-    main_object = _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(project, "loader", None), "main_object", None)
+    main_object = _dynamic_analysis_getattr_8616(
+        _dynamic_analysis_getattr_8616(project, "loader", None), "main_object", None
+    )
     initial_regs = _dynamic_analysis_getattr_8616(main_object, "initial_register_values", None)
     if not isinstance(initial_regs, Mapping):
         return None
@@ -1965,13 +1994,17 @@ def _canonical_code_linear_addr(project: object, addr: int | None) -> int | None
     original_project = _dynamic_analysis_getattr_8616(project, "_inertia_original_project", None)
     original_delta = _dynamic_analysis_getattr_8616(project, "_inertia_original_linear_delta", None)
     if original_project is not None and isinstance(original_delta, int):
-        original_main = _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(original_project, "loader", None), "main_object", None)
+        original_main = _dynamic_analysis_getattr_8616(
+            _dynamic_analysis_getattr_8616(original_project, "loader", None), "main_object", None
+        )
         original_base = _dynamic_analysis_getattr_8616(original_main, "linked_base", None)
         if isinstance(original_base, int) and addr < original_base:
             return addr + original_delta
         return addr
 
-    main_object = _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(project, "loader", None), "main_object", None)
+    main_object = _dynamic_analysis_getattr_8616(
+        _dynamic_analysis_getattr_8616(project, "loader", None), "main_object", None
+    )
     linked_base = _dynamic_analysis_getattr_8616(main_object, "linked_base", None)
     max_addr = _dynamic_analysis_getattr_8616(main_object, "max_addr", None)
     if isinstance(linked_base, int) and isinstance(max_addr, int) and addr < linked_base:
@@ -2031,7 +2064,9 @@ def canonicalize_x86_16_padding_call_target_8616(
 def _neighbor_image_bounds(project: object) -> tuple[int | None, int | None]:
     candidate_projects = [_dynamic_analysis_getattr_8616(project, "_inertia_original_project", None), project]
     for candidate_project in candidate_projects:
-        main_object = _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(candidate_project, "loader", None), "main_object", None)
+        main_object = _dynamic_analysis_getattr_8616(
+            _dynamic_analysis_getattr_8616(candidate_project, "loader", None), "main_object", None
+        )
         linked_base = _dynamic_analysis_getattr_8616(main_object, "linked_base", None)
         max_addr = _dynamic_analysis_getattr_8616(main_object, "max_addr", None)
         if isinstance(linked_base, int) and isinstance(max_addr, int):
@@ -2065,7 +2100,11 @@ def _resolve_direct_call_target_from_insn(project: object, insn: object) -> int 
     )
     mnemonic = str(_dynamic_analysis_getattr_8616(insn, "mnemonic", "") or "").lower()
 
-    if mnemonic == "lcall" and len(operands) == 2 and all(_dynamic_analysis_getattr_8616(op, "type", None) == 2 for op in operands):
+    if (
+        mnemonic == "lcall"
+        and len(operands) == 2
+        and all(_dynamic_analysis_getattr_8616(op, "type", None) == 2 for op in operands)
+    ):
         seg = operands[0].imm & 0xFFFF
         off = operands[1].imm & 0xFFFF
         return canonicalize_x86_16_padding_call_target_8616(
@@ -2247,6 +2286,51 @@ def _tail_jump_target_is_function_entry_8616(project: object, target_addr: int) 
     return False
 
 
+def _fallback_instruction_groups_8616(project: object, function: object) -> tuple[tuple[object, ...], ...]:
+    """Collect per-block capstone insn tuples when the inventory is incomplete."""
+    fallback_groups: list[tuple[object, ...]] = []
+    for block_addr in _analysis_function_block_addrs_8616(function):
+        try:
+            block = _analysis_project_block_8616(project, block_addr)
+        except Exception:
+            continue
+        instructions = _dynamic_analysis_tuple_attr_8616(
+            _dynamic_analysis_getattr_8616(block, "capstone", None),
+            "insns",
+        )
+        if instructions:
+            fallback_groups.append(instructions)
+    return tuple(fallback_groups)
+
+
+def _patch_one_callsite_8616(
+    project: object, function: object, insn: object, call_sites: dict[int, tuple[int, int | None]]
+) -> bool:
+    """Patch one direct call insn into `_call_sites`; return whether it changed."""
+    mnemonic = str(_dynamic_analysis_getattr_8616(insn, "mnemonic", "") or "").lower()
+    if mnemonic not in {"call", "lcall"}:
+        return False
+    callsite_addr = _dynamic_analysis_getattr_8616(insn, "address", None)
+    if not isinstance(callsite_addr, int):
+        return False
+    target_addr = _resolve_direct_call_target_from_insn(project, insn)
+    if target_addr is None:
+        target_addr = resolve_stored_near_call_target_from_function(function, callsite_addr)
+    if target_addr is None:
+        return False
+    size = _dynamic_analysis_getattr_8616(insn, "size", None)
+    if not isinstance(size, int) or size <= 0:
+        size = _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(insn, "insn", None), "size", None)
+    return_addr = None
+    if isinstance(size, int) and size > 0:
+        return_addr = callsite_addr + size
+    recovered = (target_addr, return_addr)
+    if call_sites.get(callsite_addr) == recovered:
+        return False
+    call_sites[callsite_addr] = recovered
+    return True
+
+
 def patch_direct_call_sites(function: object) -> bool:
     """Recover direct near/far callsites from block ends when CFG left `_call_sites` empty.
 
@@ -2257,64 +2341,28 @@ def patch_direct_call_sites(function: object) -> bool:
     passes give up on call reasoning.
     """
 
-    def _impl() -> bool:
-        project = _x86_16_project_for_function_8616(function)
-        if project is None:
-            return False
+    project = _x86_16_project_for_function_8616(function)
+    if project is None:
+        return False
 
-        call_sites = _dynamic_analysis_getattr_8616(function, "_call_sites", None)
-        if not isinstance(call_sites, dict):
-            return False
-        sanitization = sanitize_direct_call_sites_8616(function)
-        changed = sanitization.pruned_count > 0
-        instruction_inventory = collect_function_instruction_inventory_8616(
-            project,
-            function_entry=_analysis_function_addr_8616(function),
-        )
-        instruction_groups: tuple[tuple[object, ...], ...]
-        if instruction_inventory.complete:
-            instruction_groups = (instruction_inventory.instructions,)
-        else:
-            fallback_groups: list[tuple[object, ...]] = []
-            for block_addr in _analysis_function_block_addrs_8616(function):
-                try:
-                    block = _analysis_project_block_8616(project, block_addr)
-                except Exception:
-                    continue
-                instructions = _dynamic_analysis_tuple_attr_8616(
-                    _dynamic_analysis_getattr_8616(block, "capstone", None),
-                    "insns",
-                )
-                if instructions:
-                    fallback_groups.append(instructions)
-            instruction_groups = tuple(fallback_groups)
-        for insns in instruction_groups:
-            for insn in insns:
-                mnemonic = str(_dynamic_analysis_getattr_8616(insn, "mnemonic", "") or "").lower()
-                if mnemonic not in {"call", "lcall"}:
-                    continue
-                callsite_addr = _dynamic_analysis_getattr_8616(insn, "address", None)
-                if not isinstance(callsite_addr, int):
-                    continue
-                target_addr = _resolve_direct_call_target_from_insn(project, insn)
-                if target_addr is None:
-                    target_addr = resolve_stored_near_call_target_from_function(function, callsite_addr)
-                if target_addr is None:
-                    continue
-                size = _dynamic_analysis_getattr_8616(insn, "size", None)
-                if not isinstance(size, int) or size <= 0:
-                    size = _dynamic_analysis_getattr_8616(_dynamic_analysis_getattr_8616(insn, "insn", None), "size", None)
-                return_addr = None
-                if isinstance(size, int) and size > 0:
-                    return_addr = callsite_addr + size
-                current = call_sites.get(callsite_addr)
-                recovered = (target_addr, return_addr)
-                if current != recovered:
-                    call_sites[callsite_addr] = recovered
-                    changed = True
-        return changed
-
-    return _impl()
+    call_sites = _dynamic_analysis_getattr_8616(function, "_call_sites", None)
+    if not isinstance(call_sites, dict):
+        return False
+    sanitization = sanitize_direct_call_sites_8616(function)
+    changed = sanitization.pruned_count > 0
+    instruction_inventory = collect_function_instruction_inventory_8616(
+        project,
+        function_entry=_analysis_function_addr_8616(function),
+    )
+    instruction_groups: tuple[tuple[object, ...], ...]
+    if instruction_inventory.complete:
+        instruction_groups = (instruction_inventory.instructions,)
+    else:
+        instruction_groups = _fallback_instruction_groups_8616(project, function)
+    for insns in instruction_groups:
+        for insn in insns:
+            changed = _patch_one_callsite_8616(project, function, insn, call_sites) or changed
+    return changed
 
 
 def resolve_stored_near_call_target_from_function(function: object, callsite_addr: int) -> int | None:
@@ -2329,56 +2377,7 @@ def resolve_stored_near_call_target_from_function(function: object, callsite_add
     which appear in MSC startup code for real-mode DOS.
     """
 
-    def _impl() -> int | None:
-        project = _x86_16_project_for_function_8616(function)
-        if project is None:
-            return None
-
-        block = _analysis_project_block_8616(project, callsite_addr)
-        insns = _dynamic_analysis_getattr_8616(block.capstone, "insns", ())
-        if not insns:
-            return None
-        last = insns[-1]
-        capstone_insn = _dynamic_analysis_getattr_8616(last, "insn", None)
-        operands: tuple[Any, ...] = tuple(
-            _dynamic_analysis_getattr_8616(capstone_insn, "operands", ()) if capstone_insn is not None else ()
-        )
-        if last.mnemonic != "call" or len(operands) != 1 or operands[0].type != 3:
-            return None
-
-        slot_disp = _absolute_mem_disp(operands[0])
-        if slot_disp is None:
-            return None
-
-        cs_base = _initial_cs_linear_base(project)
-        if cs_base is None:
-            return None
-
-        prior_insns: list[object] = []
-        for addr in _analysis_function_block_addrs_8616(function):
-            if addr >= callsite_addr:
-                continue
-            prior_block = _analysis_project_block_8616(project, addr)
-            prior_insns.extend(_dynamic_analysis_getattr_8616(prior_block.capstone, "insns", ()))
-
-        for ins in reversed(prior_insns):
-            ins_any = cast(Any, ins)
-            if ins_any.address >= callsite_addr:
-                continue
-            opers: tuple[Any, ...] = tuple(_dynamic_analysis_getattr_8616(ins_any.insn, "operands", ()) or ())
-            if ins_any.mnemonic != "mov" or len(opers) != 2:
-                continue
-            dst, src = opers
-            if dst.type != 3 or src.type != 2:
-                continue
-            dst_disp = _absolute_mem_disp(dst)
-            if dst_disp != slot_disp:
-                continue
-            return _canonical_code_linear_addr(project, cs_base + (src.imm & 0xFFFF))
-
-        return None
-
-    return _impl()
+    return _resolve_stored_near_target_8616(function, callsite_addr, "call")
 
 
 def resolve_stored_near_jump_target_from_function(function: object, jump_addr: int) -> int | None:
@@ -2388,56 +2387,65 @@ def resolve_stored_near_jump_target_from_function(function: object, jump_addr: i
     thunks that end in ``jmp word ptr [slot]``.
     """
 
-    def _impl() -> int | None:
-        project = _x86_16_project_for_function_8616(function)
-        if project is None:
-            return None
+    return _resolve_stored_near_target_8616(function, jump_addr, "jmp")
 
-        block = _analysis_project_block_8616(project, jump_addr)
-        insns = _dynamic_analysis_getattr_8616(block.capstone, "insns", ())
-        if not insns:
-            return None
-        last = insns[-1]
-        capstone_insn = _dynamic_analysis_getattr_8616(last, "insn", None)
-        operands: tuple[Any, ...] = tuple(
-            _dynamic_analysis_getattr_8616(capstone_insn, "operands", ()) if capstone_insn is not None else ()
-        )
-        if last.mnemonic != "jmp" or len(operands) != 1 or operands[0].type != 3:
-            return None
 
-        slot_disp = _absolute_mem_disp(operands[0])
-        if slot_disp is None:
-            return None
-
-        cs_base = _initial_cs_linear_base(project)
-        if cs_base is None:
-            return None
-
-        prior_insns: list[object] = []
-        for addr in _analysis_function_block_addrs_8616(function):
-            if addr >= jump_addr:
-                continue
-            prior_block = _analysis_project_block_8616(project, addr)
-            prior_insns.extend(_dynamic_analysis_getattr_8616(prior_block.capstone, "insns", ()))
-
-        for ins in reversed(prior_insns):
-            ins_any = cast(Any, ins)
-            if ins_any.address >= jump_addr:
-                continue
-            opers: tuple[Any, ...] = tuple(_dynamic_analysis_getattr_8616(ins_any.insn, "operands", ()) or ())
-            if ins_any.mnemonic != "mov" or len(opers) != 2:
-                continue
-            dst, src = opers
-            if dst.type != 3 or src.type != 2:
-                continue
-            dst_disp = _absolute_mem_disp(dst)
-            if dst_disp != slot_disp:
-                continue
-            return _canonical_code_linear_addr(project, cs_base + (src.imm & 0xFFFF))
-
+def _last_insn_mem_slot_8616(block: Any, mnemonic: str) -> int | None:  # noqa: ANN401
+    """Return the absolute mem disp of a single-operand last insn, or None."""
+    insns = _dynamic_analysis_getattr_8616(block.capstone, "insns", ())
+    if not insns:
         return None
+    last = insns[-1]
+    capstone_insn = _dynamic_analysis_getattr_8616(last, "insn", None)
+    operands: tuple[Any, ...] = tuple(
+        _dynamic_analysis_getattr_8616(capstone_insn, "operands", ()) if capstone_insn is not None else ()
+    )
+    if last.mnemonic != mnemonic or len(operands) != 1 or operands[0].type != 3:
+        return None
+    return _absolute_mem_disp(operands[0])
 
-    return _impl()
+
+def _prior_slot_store_target_8616(
+    project: object, function: object, site_addr: int, slot_disp: int, cs_base: int
+) -> int | None:
+    """Scan insns before ``site_addr`` for ``mov word ptr [slot], imm``."""
+    prior_insns: list[object] = []
+    for addr in _analysis_function_block_addrs_8616(function):
+        if addr >= site_addr:
+            continue
+        prior_block = _analysis_project_block_8616(project, addr)
+        prior_insns.extend(_dynamic_analysis_getattr_8616(prior_block.capstone, "insns", ()))
+
+    for ins in reversed(prior_insns):
+        ins_any = cast(Any, ins)
+        if ins_any.address >= site_addr:
+            continue
+        opers: tuple[Any, ...] = tuple(_dynamic_analysis_getattr_8616(ins_any.insn, "operands", ()) or ())
+        if ins_any.mnemonic != "mov" or len(opers) != 2:
+            continue
+        dst, src = opers
+        if dst.type != 3 or src.type != 2:
+            continue
+        dst_disp = _absolute_mem_disp(dst)
+        if dst_disp != slot_disp:
+            continue
+        return _canonical_code_linear_addr(project, cs_base + (src.imm & 0xFFFF))
+    return None
+
+
+def _resolve_stored_near_target_8616(function: object, site_addr: int, mnemonic: str) -> int | None:
+    """Shared slot-based near target recovery for call/jmp sites."""
+    project = _x86_16_project_for_function_8616(function)
+    if project is None:
+        return None
+    block = _analysis_project_block_8616(project, site_addr)
+    slot_disp = _last_insn_mem_slot_8616(block, mnemonic)
+    if slot_disp is None:
+        return None
+    cs_base = _initial_cs_linear_base(project)
+    if cs_base is None:
+        return None
+    return _prior_slot_store_target_8616(project, function, site_addr, slot_disp, cs_base)
 
 
 def collect_direct_far_call_targets(function: object) -> list[FarCallTarget]:
@@ -2475,6 +2483,104 @@ def collect_direct_far_call_targets(function: object) -> list[FarCallTarget]:
     return recovered
 
 
+def _neighbor_callsite_seed_8616(
+    project: object,
+    function: object,
+    callsite_addr: int,
+    linked_base: int | None,
+    image_end: int | None,
+) -> CallTargetSeed | None:
+    """Resolve one callsite's target kind and image-bounded seed."""
+    kind = CallTargetKind8616.CFG_RESOLVED_CALL
+    target_addr = _analysis_function_call_target_8616(function, callsite_addr)
+    if (
+        target_addr is not None
+        and linked_base is not None
+        and image_end is not None
+        and not (linked_base <= target_addr < image_end)
+    ):
+        target_addr = None
+
+    direct_target = resolve_direct_call_target_from_block(project, callsite_addr)
+    direct_kind = _direct_call_target_kind_8616(project, callsite_addr)
+    if direct_target is not None:
+        target_addr = direct_target
+        if direct_kind is not None:
+            kind = direct_kind
+    if direct_target is None and target_addr is None:
+        stored_target = resolve_stored_near_call_target_from_function(function, callsite_addr)
+        if stored_target is not None:
+            target_addr = stored_target
+            kind = CallTargetKind8616.STORED_NEAR_CALL
+    if target_addr is None:
+        return None
+    if linked_base is not None and image_end is not None and not (linked_base <= target_addr < image_end):
+        return None
+    return CallTargetSeed(
+        callsite_addr=callsite_addr,
+        target_addr=target_addr,
+        return_addr=_analysis_function_call_return_8616(function, callsite_addr),
+        kind=kind,
+    )
+
+
+def _neighbor_tail_seed_8616(
+    project: object,
+    function: object,
+    block_addr: int,
+    block_addr_set: set[int],
+    linked_base: int | None,
+    image_end: int | None,
+) -> CallTargetSeed | None:
+    """Resolve one block-end tail jump into a target seed."""
+    jump_target = resolve_direct_jump_target_from_block(project, block_addr)
+    tail_kind: CallTargetKind8616 | None = _direct_tail_jump_kind_8616(project, block_addr)
+    if jump_target is None:
+        jump_target = resolve_stored_near_jump_target_from_function(function, block_addr)
+        if jump_target is not None:
+            tail_kind = CallTargetKind8616.STORED_NEAR_TAIL_JUMP
+    if jump_target is None or tail_kind is None:
+        return None
+    function_addr = _analysis_function_addr_8616(function)
+    if jump_target in block_addr_set or jump_target == function_addr:
+        return None
+    if not _tail_jump_target_is_function_entry_8616(project, jump_target):
+        return None
+    if linked_base is not None and image_end is not None and not (linked_base <= jump_target < image_end):
+        return None
+    return CallTargetSeed(
+        callsite_addr=block_addr,
+        target_addr=jump_target,
+        return_addr=None,
+        kind=tail_kind,
+    )
+
+
+def _collect_neighbor_seeds_8616(project: object, function: object) -> list[CallTargetSeed]:
+    """Merge decoded callsite and tail-jump evidence into deduped seeds."""
+    patch_direct_call_sites(function)
+    linked_base, image_end = _neighbor_image_bounds(project)
+
+    recovered: dict[tuple[int, int], CallTargetSeed] = {}
+    for callsite_addr in _analysis_function_call_sites_8616(function):
+        seed = _neighbor_callsite_seed_8616(project, function, callsite_addr, linked_base, image_end)
+        if seed is not None and (seed.callsite_addr, seed.target_addr) not in recovered:
+            recovered[(seed.callsite_addr, seed.target_addr)] = seed
+
+    block_addrs = sorted(_dynamic_analysis_getattr_8616(function, "block_addrs_set", ()))
+    block_addr_set = set(block_addrs)
+    for block_addr in block_addrs:
+        seed = _neighbor_tail_seed_8616(project, function, block_addr, block_addr_set, linked_base, image_end)
+        if seed is None:
+            continue
+        key = (block_addr, seed.target_addr)
+        existing = recovered.get(key)
+        if existing is not None and existing.kind is not CallTargetKind8616.CFG_RESOLVED_CALL:
+            continue
+        recovered[key] = seed
+    return list(recovered.values())
+
+
 def collect_neighbor_call_targets(function: object) -> list[CallTargetSeed]:
     """Recover direct x86-16 call neighbors from a function's traced call sites.
 
@@ -2490,76 +2596,7 @@ def collect_neighbor_call_targets(function: object) -> list[CallTargetSeed]:
         project = _x86_16_project_for_function_8616(function)
         if project is None:
             return []
-
-        patch_direct_call_sites(function)
-
-        linked_base, image_end = _neighbor_image_bounds(project)
-
-        recovered: dict[tuple[int, int], CallTargetSeed] = {}
-        for callsite_addr in _analysis_function_call_sites_8616(function):
-            target_addr = None
-            kind = CallTargetKind8616.CFG_RESOLVED_CALL
-            target_addr = _analysis_function_call_target_8616(function, callsite_addr)
-            if target_addr is not None and linked_base is not None and image_end is not None and not (
-                linked_base <= target_addr < image_end
-            ):
-                target_addr = None
-
-            direct_target = resolve_direct_call_target_from_block(project, callsite_addr)
-            direct_kind = _direct_call_target_kind_8616(project, callsite_addr)
-            if direct_target is not None:
-                target_addr = direct_target
-                if direct_kind is not None:
-                    kind = direct_kind
-            if direct_target is None and target_addr is None:
-                stored_target = resolve_stored_near_call_target_from_function(function, callsite_addr)
-                if stored_target is not None:
-                    target_addr = stored_target
-                    kind = CallTargetKind8616.STORED_NEAR_CALL
-            if target_addr is None:
-                continue
-            if linked_base is not None and image_end is not None and not (linked_base <= target_addr < image_end):
-                continue
-            key = (callsite_addr, target_addr)
-            if key in recovered:
-                continue
-            recovered[key] = CallTargetSeed(
-                callsite_addr=callsite_addr,
-                target_addr=target_addr,
-                return_addr=_analysis_function_call_return_8616(function, callsite_addr),
-                kind=kind,
-            )
-
-        block_addrs = sorted(_dynamic_analysis_getattr_8616(function, "block_addrs_set", ()))
-        block_addr_set = set(block_addrs)
-        for block_addr in block_addrs:
-            jump_target = resolve_direct_jump_target_from_block(project, block_addr)
-            tail_kind: CallTargetKind8616 | None = _direct_tail_jump_kind_8616(project, block_addr)
-            if jump_target is None:
-                jump_target = resolve_stored_near_jump_target_from_function(function, block_addr)
-                if jump_target is not None:
-                    tail_kind = CallTargetKind8616.STORED_NEAR_TAIL_JUMP
-            if jump_target is None or tail_kind is None:
-                continue
-            function_addr = _analysis_function_addr_8616(function)
-            if jump_target in block_addr_set or jump_target == function_addr:
-                continue
-            if not _tail_jump_target_is_function_entry_8616(project, jump_target):
-                continue
-            if linked_base is not None and image_end is not None and not (linked_base <= jump_target < image_end):
-                continue
-            key = (block_addr, jump_target)
-            existing = recovered.get(key)
-            if existing is not None and existing.kind is not CallTargetKind8616.CFG_RESOLVED_CALL:
-                continue
-            recovered[key] = CallTargetSeed(
-                callsite_addr=block_addr,
-                target_addr=jump_target,
-                return_addr=None,
-                kind=tail_kind,
-            )
-
-        return list(recovered.values())
+        return _collect_neighbor_seeds_8616(project, function)
 
     def _build_cached_evidence(
         _project: object | None,
@@ -2577,7 +2614,7 @@ def collect_neighbor_call_targets(function: object) -> list[CallTargetSeed]:
         return _impl()
     try:
         function_content = bytes(cast(Any, project).loader.memory.load(function_addr, function_size))
-    except (AttributeError, KeyError, TypeError, ValueError):
+    except AttributeError, KeyError, TypeError, ValueError:
         return _impl()
     return list(
         collect_function_binary_evidence_8616(
@@ -2621,15 +2658,247 @@ def patch_dos_int21_call_sites(function: object, binary_path: Path | str | None 
     return patch_interrupt_service_call_sites(function, binary_path, vectors={0x21})
 
 
+@dataclass
+class _SeedCounts8616:
+    """Metrics census accumulated while seeding calling conventions."""
+
+    track: bool
+    start: float = 0.0
+    success_count: int = 0
+    error_count: int = 0
+    stack_probe_count: int = 0
+    stack_byte_count: int = 0
+    wide_stack_count: int = 0
+    terminal_call_return_count: int = 0
+    terminal_call_return_raw: int = 0
+    terminal_call_return_normalized: int = 0
+    terminal_call_return_classified: int = 0
+    terminal_call_return_materialized: int = 0
+    terminal_call_return_failures: int = 0
+    terminal_register_return_raw: int = 0
+    terminal_register_return_normalized: int = 0
+    terminal_register_return_classified: int = 0
+    terminal_register_return_materialized: int = 0
+    terminal_register_return_failures: int = 0
+
+    def begin(self) -> None:
+        if self.track:
+            self.start = time.perf_counter()
+
+    def add_terminal_register_stats(self, stats: object) -> None:
+        """Accumulate one function's terminal-register evidence counters."""
+        self.terminal_register_return_raw += cast(Any, stats).raw_fact_count
+        self.terminal_register_return_normalized += cast(Any, stats).normalized_fact_count
+        self.terminal_register_return_classified += cast(Any, stats).classified_fact_count
+        self.terminal_register_return_materialized += cast(Any, stats).materialized_count
+        self.terminal_register_return_failures += cast(Any, stats).failure_count
+
+    def add_terminal_call_evidence(self, evidence: object) -> None:
+        """Accumulate one function's terminal-call evidence counters."""
+        self.terminal_call_return_raw += cast(Any, evidence).raw_fact_count
+        self.terminal_call_return_normalized += cast(Any, evidence).normalized_fact_count
+        self.terminal_call_return_classified += cast(Any, evidence).classified_fact_count
+        self.terminal_call_return_materialized += cast(Any, evidence).materialized_count
+        self.terminal_call_return_failures += cast(Any, evidence).failure_count
+
+    def finish(self, total_functions: int, candidate_count: int) -> None:
+        """Emit the seed metric line when tracking is enabled."""
+        if not self.track:
+            return
+        elapsed_ms = int((time.perf_counter() - self.start) * 1000)
+        print(
+            f"[metric] seed_calling_conventions cfg_functions={total_functions} "
+            f"candidates={candidate_count} initialized={self.success_count} errors={self.error_count} "
+            f"stack_probes={self.stack_probe_count} stack_byte={self.stack_byte_count} "
+            f"wide_stack={self.wide_stack_count} terminal_call_return={self.terminal_call_return_count} "
+            f"terminal_call_return_raw={self.terminal_call_return_raw} "
+            f"terminal_call_return_normalized={self.terminal_call_return_normalized} "
+            f"terminal_call_return_classified={self.terminal_call_return_classified} "
+            f"terminal_call_return_materialized={self.terminal_call_return_materialized} "
+            f"terminal_call_return_failures={self.terminal_call_return_failures} "
+            f"terminal_register_return_raw={self.terminal_register_return_raw} "
+            f"terminal_register_return_normalized={self.terminal_register_return_normalized} "
+            f"terminal_register_return_classified={self.terminal_register_return_classified} "
+            f"terminal_register_return_materialized={self.terminal_register_return_materialized} "
+            f"terminal_register_return_failures={self.terminal_register_return_failures} "
+            f"elapsed_ms={elapsed_ms}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
+def _publish_seeded_cfg_8616(cfg: object, seeded_ids: set[int], seeded_revisions: dict[int, Any]) -> None:
+    """Cache the seed state on the dynamic CFG object, retrying once on failure."""
+    try:
+        cast(Any, cfg)._inertia_seeded_calling_conventions = seeded_ids
+        cast(Any, cfg)._inertia_seeded_calling_convention_revisions_8616 = seeded_revisions
+    except Exception:
+        logging.getLogger(__name__).debug("failed to cache calling convention seed state on CFG")
+        cast(Any, cfg)._inertia_seeded_calling_conventions = seeded_ids
+        cast(Any, cfg)._inertia_seeded_calling_convention_revisions_8616 = seeded_revisions
+
+
+def _seed_one_function_8616(
+    function: object,
+    project: object | None,
+    apply_stack_byte: Callable[[object, object], bool] | None,
+    apply_wide: Callable[[object, object], bool] | None,
+    counts: _SeedCounts8616,
+) -> None:
+    """Apply prototype/CC evidence for one function; may raise."""
+    if not _function_has_proven_prototype_8616(function):
+        cast(Any, function)._init_prototype_and_calling_convention()
+    if project is not None and apply_stack_byte is not None and apply_stack_byte(project, function):
+        counts.stack_byte_count += 1
+    if project is not None and apply_wide is not None and apply_wide(project, function):
+        counts.wide_stack_count += 1
+    if project is not None:
+        from .lowering.terminal_register_return_types import (
+            apply_terminal_register_return_type_evidence_8616,
+        )
+
+        counts.add_terminal_register_stats(apply_terminal_register_return_type_evidence_8616(project, function).stats)
+        _apply_far_return_calling_convention_8616(project, function)
+    counts.success_count += 1
+    if _is_stack_probe_helper_name_8616(_dynamic_analysis_getattr_8616(function, "name", None)):
+        counts.stack_probe_count += 1
+
+
+def _is_stack_probe_helper_name_8616(name: object) -> bool:
+    """Match the CRT stack-probe helper names that always return."""
+    if not isinstance(name, str):
+        return False
+    normalized = name.strip().lower().lstrip("_")
+    return normalized in {"anchkstk", "analloca_probe"}
+
+
+def _function_identity_8616(function: object) -> int:
+    """Return a stable identity for a function across CFG boundaries."""
+    function_addr = _analysis_function_addr_8616(function)
+    if isinstance(function_addr, int):
+        return function_addr
+    return id(function)
+
+
+def _seeded_cfg_function_ids_8616(cfg_obj: object) -> set[int]:
+    """Read the cached seeded-function id set from a dynamic CFG object."""
+    cached = _dynamic_analysis_getattr_8616(cfg_obj, "_inertia_seeded_calling_conventions", None)
+    if isinstance(cached, set):
+        return cast(set[int], cached)
+    return set()
+
+
+def _function_seed_revision_8616(
+    project: object | None,
+    seeded_revisions: dict[int, CallingConventionSeedRevision8616],
+    function: object,
+    inspected_targets: tuple[int, ...] | None = None,
+) -> CallingConventionSeedRevision8616:
+    """Refresh the exact dependencies recorded by terminal-call typing."""
+    from .calling_convention_seed_cache import calling_convention_seed_revision_8616
+
+    if inspected_targets is None:
+        previous = seeded_revisions.get(_function_identity_8616(function))
+        inspected_targets = tuple(item.target_addr for item in previous.callees) if previous is not None else ()
+    return calling_convention_seed_revision_8616(project, function, inspected_targets)
+
+
+def _seeded_cfg_revisions_8616(cfg_obj: object) -> dict[int, CallingConventionSeedRevision8616]:
+    """Read revision-aware cache state across the dynamic CFG boundary."""
+    from .calling_convention_seed_cache import CallingConventionSeedRevision8616
+
+    cached = _dynamic_analysis_getattr_8616(
+        cfg_obj,
+        "_inertia_seeded_calling_convention_revisions_8616",
+        None,
+    )
+    return (
+        {
+            key: value
+            for key, value in cached.items()
+            if isinstance(key, int) and isinstance(value, CallingConventionSeedRevision8616)
+        }
+        if isinstance(cached, Mapping)
+        else {}
+    )
+
+
+def _seed_candidates_8616(
+    project: object | None,
+    cfg_functions: Mapping[object, object],
+    seeded_ids: set[int],
+    seeded_revisions: dict[int, CallingConventionSeedRevision8616],
+) -> tuple[object, ...]:
+    """Select functions missing a seed or holding a stale revision."""
+    return tuple(
+        function
+        for function in cfg_functions.values()
+        if (
+            _function_identity_8616(function) not in seeded_ids
+            or seeded_revisions.get(_function_identity_8616(function))
+            != _function_seed_revision_8616(project, seeded_revisions, function)
+        )
+    )
+
+
+def _seed_candidate_8616(
+    project: object | None,
+    function: object,
+    apply_stack_byte: Callable[[object, object], bool] | None,
+    apply_wide: Callable[[object, object], bool] | None,
+    counts: _SeedCounts8616,
+) -> bool:
+    """Apply per-function seed evidence; False when the attempt raised."""
+    try:
+        _seed_one_function_8616(function, project, apply_stack_byte, apply_wide, counts)
+    except Exception as ex:
+        logging.getLogger(__name__).debug("prototype init skipped: %s", ex)
+        counts.error_count += 1
+        return False
+    return True
+
+
+def _finalize_seeded_function_8616(
+    cfg: object,
+    project: object | None,
+    function: object,
+    seeded_ids: set[int],
+    seeded_revisions: dict[int, Any],
+) -> None:
+    """Mark stack probes returning, refresh seed cache, and publish to CFG."""
+    if _is_stack_probe_helper_name_8616(_dynamic_analysis_getattr_8616(function, "name", None)):
+        with contextlib.suppress(Exception):
+            cast(Any, function).returning = True
+    function_id = _function_identity_8616(function)
+    seeded_ids.add(function_id)
+    seeded_revisions[function_id] = _function_seed_revision_8616(project, seeded_revisions, function)
+    _publish_seeded_cfg_8616(cfg, seeded_ids, seeded_revisions)
+
+
+def _seed_terminal_call_return_8616(
+    project: object,
+    function: object,
+    counts: _SeedCounts8616,
+    seeded_ids: set[int],
+    seeded_revisions: dict[int, Any],
+) -> None:
+    """Apply terminal-call return typing and reseed one function."""
+    from .lowering.terminal_call_return_types import apply_terminal_call_return_type_evidence_8616
+
+    function_id = _function_identity_8616(function)
+    result = apply_terminal_call_return_type_evidence_8616(project, function)
+    counts.add_terminal_call_evidence(result.evidence)
+    if result.changed:
+        counts.terminal_call_return_count += 1
+    _apply_far_return_calling_convention_8616(project, function)
+    seeded_ids.add(function_id)
+    seeded_revisions[function_id] = _function_seed_revision_8616(
+        project, seeded_revisions, function, result.evidence.inspected_target_addrs
+    )
+
+
 def seed_calling_conventions(cfg: object) -> None:
     """Initialize and refine x86-16 calling conventions for CFG functions."""
-    from .calling_convention_seed_cache import (
-        CallingConventionSeedRevision8616,
-        calling_convention_seed_revision_8616,
-    )
-    from .lowering.terminal_call_return_types import apply_terminal_call_return_type_evidence_8616
-    from .lowering.terminal_register_return_types import apply_terminal_register_return_type_evidence_8616
-
     apply_x86_16_stack_byte_prototype_evidence: Callable[[object, object], bool] | None
     apply_x86_16_wide_stack_prototype_evidence: Callable[[object, object], bool] | None
     try:
@@ -2642,172 +2911,38 @@ def seed_calling_conventions(cfg: object) -> None:
         apply_x86_16_stack_byte_prototype_evidence = None
         apply_x86_16_wide_stack_prototype_evidence = None
 
-    def _function_identity_8616(function: object) -> int:
-        function_addr = _analysis_function_addr_8616(function)
-        if isinstance(function_addr, int):
-            return function_addr
-        return id(function)
-
-    def _seeded_calling_conventions_function_ids(cfg_obj: object) -> set[int]:
-        cached = _dynamic_analysis_getattr_8616(cfg_obj, "_inertia_seeded_calling_conventions", None)
-        if isinstance(cached, set):
-            return cast(set[int], cached)
-        return set()
-
-    def _function_seed_revision_8616(
-        function: object,
-        inspected_targets: tuple[int, ...] | None = None,
-    ) -> CallingConventionSeedRevision8616:
-        """Refresh the exact dependencies recorded by terminal-call typing."""
-        if inspected_targets is None:
-            previous = seeded_revisions.get(_function_identity_8616(function))
-            inspected_targets = tuple(item.target_addr for item in previous.callees) if previous is not None else ()
-        return calling_convention_seed_revision_8616(project, function, inspected_targets)
-
-    def _seeded_calling_convention_revisions_8616(
-        cfg_obj: object,
-    ) -> dict[int, CallingConventionSeedRevision8616]:
-        """Read revision-aware cache state across the dynamic CFG boundary."""
-        cached = _dynamic_analysis_getattr_8616(
-            cfg_obj,
-            "_inertia_seeded_calling_convention_revisions_8616",
-            None,
-        )
-        return {
-            key: value for key, value in cached.items()
-            if isinstance(key, int) and isinstance(value, CallingConventionSeedRevision8616)
-        } if isinstance(cached, Mapping) else {}
-
-    def _is_stack_probe_helper_name(name: str | None) -> bool:
-        if not isinstance(name, str):
-            return False
-        normalized = name.strip().lower().lstrip("_")
-        return normalized in {"anchkstk", "analloca_probe"}
-
     cfg_functions = _dynamic_analysis_getattr_8616(cfg, "functions", {})
     if not isinstance(cfg_functions, Mapping):
         cfg_functions = {}
-    project = _dynamic_analysis_getattr_8616(cfg, "project", None) or _dynamic_analysis_getattr_8616(cfg, "_project", None)
-    total_functions = len(cfg_functions)
-    seeded_ids = _seeded_calling_conventions_function_ids(cfg)
-    seeded_revisions = _seeded_calling_convention_revisions_8616(cfg)
-    candidates = tuple(
-        function for function in cfg_functions.values()
-        if (
-            _function_identity_8616(function) not in seeded_ids
-            or seeded_revisions.get(_function_identity_8616(function))
-            != _function_seed_revision_8616(function)
-        )
+    project = _dynamic_analysis_getattr_8616(cfg, "project", None) or _dynamic_analysis_getattr_8616(
+        cfg, "_project", None
     )
+    total_functions = len(cfg_functions)
+    seeded_ids = _seeded_cfg_function_ids_8616(cfg)
+    seeded_revisions = _seeded_cfg_revisions_8616(cfg)
+    candidates = _seed_candidates_8616(project, cfg_functions, seeded_ids, seeded_revisions)
     candidate_count = len(candidates)
     if candidate_count == 0:
         return
 
-    track = True
-    success_count = 0
-    error_count = 0
-    stack_probe_count = 0
-    stack_byte_count = 0
-    wide_stack_count = 0
-    terminal_call_return_count = 0
-    terminal_call_return_raw = 0
-    terminal_call_return_normalized = 0
-    terminal_call_return_classified = 0
-    terminal_call_return_materialized = 0
-    terminal_call_return_failures = 0
-    terminal_register_return_raw = 0
-    terminal_register_return_normalized = 0
-    terminal_register_return_classified = 0
-    terminal_register_return_materialized = 0
-    terminal_register_return_failures = 0
-    if track:
-        start = time.perf_counter()
+    counts = _SeedCounts8616(track=True)
+    counts.begin()
     for function in candidates:
-        function_id = _function_identity_8616(function)
-        try:
-            if not _function_has_proven_prototype_8616(function):
-                function._init_prototype_and_calling_convention()
-            if project is not None and apply_x86_16_stack_byte_prototype_evidence is not None:  # noqa: SIM102
-                if apply_x86_16_stack_byte_prototype_evidence(project, function):
-                    stack_byte_count += 1
-            if project is not None and apply_x86_16_wide_stack_prototype_evidence is not None:  # noqa: SIM102
-                if apply_x86_16_wide_stack_prototype_evidence(project, function):
-                    wide_stack_count += 1
-            if project is not None:
-                terminal_register_result = apply_terminal_register_return_type_evidence_8616(project, function)
-                terminal_register_return_raw += terminal_register_result.stats.raw_fact_count
-                terminal_register_return_normalized += terminal_register_result.stats.normalized_fact_count
-                terminal_register_return_classified += terminal_register_result.stats.classified_fact_count
-                terminal_register_return_materialized += terminal_register_result.stats.materialized_count
-                terminal_register_return_failures += terminal_register_result.stats.failure_count
-            # Apply the far-frame convention last so evidence passes that seed a
-            # near CC do not clobber the proven ``BP+6`` argument base.
-            if project is not None:
-                _apply_far_return_calling_convention_8616(project, function)
-            success_count += 1
-            if _is_stack_probe_helper_name(_dynamic_analysis_getattr_8616(function, "name", None)):
-                stack_probe_count += 1
-        except Exception as ex:
-            logging.getLogger(__name__).debug("prototype init skipped: %s", ex)
-            error_count += 1
-            continue
-
-        if _is_stack_probe_helper_name(_dynamic_analysis_getattr_8616(function, "name", None)):
-            with contextlib.suppress(Exception):
-                function.returning = True
-        seeded_ids.add(function_id)
-        seeded_revisions[function_id] = _function_seed_revision_8616(function)
-        try:
-            cast(Any, cfg)._inertia_seeded_calling_conventions = seeded_ids
-            cast(Any, cfg)._inertia_seeded_calling_convention_revisions_8616 = seeded_revisions
-        except Exception:
-            logging.getLogger(__name__).debug("failed to cache calling convention seed state on CFG")
-            cast(Any, cfg)._inertia_seeded_calling_conventions = seeded_ids
-            cast(Any, cfg)._inertia_seeded_calling_convention_revisions_8616 = seeded_revisions
+        if _seed_candidate_8616(
+            project,
+            function,
+            apply_x86_16_stack_byte_prototype_evidence,
+            apply_x86_16_wide_stack_prototype_evidence,
+            counts,
+        ):
+            _finalize_seeded_function_8616(cfg, project, function, seeded_ids, seeded_revisions)
 
     if project is not None:
         for function in candidates:
-            function_id = _function_identity_8616(function)
-            result = apply_terminal_call_return_type_evidence_8616(project, function)
-            terminal_call_return_raw += result.evidence.raw_fact_count
-            terminal_call_return_normalized += result.evidence.normalized_fact_count
-            terminal_call_return_classified += result.evidence.classified_fact_count
-            terminal_call_return_materialized += result.evidence.materialized_count
-            terminal_call_return_failures += result.evidence.failure_count
-            if result.changed:
-                terminal_call_return_count += 1
-            _apply_far_return_calling_convention_8616(project, function)
-            seeded_ids.add(function_id)
-            seeded_revisions[function_id] = _function_seed_revision_8616(function, result.evidence.inspected_target_addrs)
-        try:
-            cast(Any, cfg)._inertia_seeded_calling_conventions = seeded_ids
-            cast(Any, cfg)._inertia_seeded_calling_convention_revisions_8616 = seeded_revisions
-        except Exception:
-            logging.getLogger(__name__).debug("failed to cache calling convention seed state on CFG")
-            cast(Any, cfg)._inertia_seeded_calling_conventions = seeded_ids
-            cast(Any, cfg)._inertia_seeded_calling_convention_revisions_8616 = seeded_revisions
+            _seed_terminal_call_return_8616(project, function, counts, seeded_ids, seeded_revisions)
+        _publish_seeded_cfg_8616(cfg, seeded_ids, seeded_revisions)
 
-    if track:
-        elapsed_ms = int((time.perf_counter() - start) * 1000)
-        print(
-            f"[metric] seed_calling_conventions cfg_functions={total_functions} "
-            f"candidates={candidate_count} initialized={success_count} errors={error_count} "
-            f"stack_probes={stack_probe_count} stack_byte={stack_byte_count} "
-            f"wide_stack={wide_stack_count} terminal_call_return={terminal_call_return_count} "
-            f"terminal_call_return_raw={terminal_call_return_raw} "
-            f"terminal_call_return_normalized={terminal_call_return_normalized} "
-            f"terminal_call_return_classified={terminal_call_return_classified} "
-            f"terminal_call_return_materialized={terminal_call_return_materialized} "
-            f"terminal_call_return_failures={terminal_call_return_failures} "
-            f"terminal_register_return_raw={terminal_register_return_raw} "
-            f"terminal_register_return_normalized={terminal_register_return_normalized} "
-            f"terminal_register_return_classified={terminal_register_return_classified} "
-            f"terminal_register_return_materialized={terminal_register_return_materialized} "
-            f"terminal_register_return_failures={terminal_register_return_failures} "
-            f"elapsed_ms={elapsed_ms}",
-            file=sys.stderr,
-            flush=True,
-        )
+    counts.finish(total_functions, candidate_count)
 
 
 def extend_cfg_for_far_calls(
@@ -2947,6 +3082,39 @@ def rank_entry_addresses_8616(
     return scored
 
 
+def _unique_neighbor_targets_8616(
+    neighbor_targets: list[CallTargetSeed], function_addr: int, max_targets: int
+) -> list[CallTargetSeed]:
+    """Pick nearest unique callee seeds, excluding the function itself."""
+    unique_targets: list[CallTargetSeed] = []
+    seen_targets: set[int] = {function_addr}
+    for target in sorted(
+        neighbor_targets,
+        key=lambda item: (abs(item.target_addr - function_addr), item.callsite_addr, item.target_addr),
+    ):
+        if target.target_addr in seen_targets:
+            continue
+        seen_targets.add(target.target_addr)
+        unique_targets.append(target)
+        if len(unique_targets) >= max_targets:
+            break
+    return unique_targets
+
+
+def _seed_recovered_cfg_8616(cfg: object, function_addr: int, unique_targets: list[CallTargetSeed]) -> None:
+    """Patch far sites and seed conventions on the recovered CFG."""
+    if function_addr in cast(Any, cfg).functions:
+        recovered_function = cast(Any, cfg).functions[function_addr]
+        recovered_far_targets = collect_direct_far_call_targets(recovered_function)
+        if recovered_far_targets:
+            patch_far_call_sites(recovered_function, recovered_far_targets)
+    for target in unique_targets:
+        callee = cast(Any, cfg).kb.functions.function(addr=target.target_addr, create=True)
+        if callee is not None:
+            callee._init_prototype_and_calling_convention()
+    seed_calling_conventions(cfg)
+
+
 def extend_cfg_for_neighbor_calls(
     project: object,
     function: object,
@@ -2962,56 +3130,32 @@ def extend_cfg_for_neighbor_calls(
     broader scan of unrelated code bytes.
     """
 
-    def _impl() -> object | None:
-        neighbor_targets = collect_neighbor_call_targets(function)
-        if not neighbor_targets:
-            return None
+    neighbor_targets = collect_neighbor_call_targets(function)
+    if not neighbor_targets:
+        return None
 
-        far_targets = collect_direct_far_call_targets(function)
-        if far_targets:
-            patch_far_call_sites(function, far_targets)
+    far_targets = collect_direct_far_call_targets(function)
+    if far_targets:
+        patch_far_call_sites(function, far_targets)
 
-        unique_targets: list[CallTargetSeed] = []
-        function_addr = _analysis_function_addr_8616(function)
-        if function_addr is None:
-            return None
-        seen_targets: set[int] = {function_addr}
-        for target in sorted(
-            neighbor_targets,
-            key=lambda item: (abs(item.target_addr - function_addr), item.callsite_addr, item.target_addr),
-        ):
-            if target.target_addr in seen_targets:
-                continue
-            seen_targets.add(target.target_addr)
-            unique_targets.append(target)
-            if len(unique_targets) >= max_targets:
-                break
-        if not unique_targets:
-            return None
+    function_addr = _analysis_function_addr_8616(function)
+    if function_addr is None:
+        return None
+    unique_targets = _unique_neighbor_targets_8616(neighbor_targets, function_addr, max_targets)
+    if not unique_targets:
+        return None
 
-        function_starts = [function_addr, *(target.target_addr for target in unique_targets)]
-        regions = [(function_addr, function_addr + entry_window)]
-        regions.extend((target.target_addr, target.target_addr + callee_window) for target in unique_targets)
+    function_starts = [function_addr, *(target.target_addr for target in unique_targets)]
+    regions = [(function_addr, function_addr + entry_window)]
+    regions.extend((target.target_addr, target.target_addr + callee_window) for target in unique_targets)
 
-        cfg = cast(Any, project).analyses.CFGFast(
-            start_at_entry=False,
-            function_starts=sorted(set(function_starts)),
-            regions=regions,
-            normalize=True,
-            force_complete_scan=False,
-        )
-        seed_calling_conventions(cfg)
-
-        if function_addr in cfg.functions:
-            recovered_function = cfg.functions[function_addr]
-            recovered_far_targets = collect_direct_far_call_targets(recovered_function)
-            if recovered_far_targets:
-                patch_far_call_sites(recovered_function, recovered_far_targets)
-        for target in unique_targets:
-            callee = cfg.kb.functions.function(addr=target.target_addr, create=True)
-            if callee is not None:
-                callee._init_prototype_and_calling_convention()
-        seed_calling_conventions(cfg)
-        return cast(object, cfg)
-
-    return _impl()
+    cfg = cast(Any, project).analyses.CFGFast(
+        start_at_entry=False,
+        function_starts=sorted(set(function_starts)),
+        regions=regions,
+        normalize=True,
+        force_complete_scan=False,
+    )
+    seed_calling_conventions(cfg)
+    _seed_recovered_cfg_8616(cfg, function_addr, unique_targets)
+    return cast(object, cfg)

@@ -165,20 +165,19 @@ def _materialize_predicate_8616(
     return CBinaryOp(op, lhs, rhs, codegen=codegen)
 
 
-def materialize_wide_stack_return_predicate_8616(
-    codegen: object,
-    conditions: tuple[ConditionIR, ...],
-    successors: dict[int, tuple[int, ...]],
-    prove_pair: WideStackPairProver8616,
-    recover_return: WideReturnRecoverer8616,
-    same_return: WideReturnComparator8616,
-    materialize_condition: WideConditionMaterializer8616,
-    *,
-    effects_are_safe: bool,
-) -> WideStackReturnPredicateResult8616:
-    """Atomically replace one complete pure comparison/return CFG."""
-    raw_count = len(conditions)
-    boundary = cast(_CodegenSurface8616, codegen)
+@dataclass(frozen=True, slots=True)
+class _ExitReturnCensus8616:
+    """Proven unique exit returns plus the cached exit classifier."""
+
+    selected_return: CExpression
+    alternate_return: CExpression
+    classify_exit: Callable[[int], bool | None]
+
+
+def _previous_materialized_result_8616(
+    boundary: _CodegenSurface8616,
+) -> WideStackReturnPredicateResult8616 | None:
+    """Return the recorded result when the pass already owns the C root."""
     try:
         previous = boundary._inertia_wide_stack_return_predicate_result_8616
     except AttributeError:
@@ -192,12 +191,17 @@ def materialize_wide_stack_return_predicate_8616(
         and root_tags.get("inertia_structuring_wide_stack_return_predicate_8616") is True
     ):
         return previous
-    if not effects_are_safe:
-        result = _refused_8616(
-            WideStackReturnPredicateStatus8616.EFFECTS_UNPROVEN,
-            raw_count,
-        )
-        return _record_result_8616(boundary, result)
+    return None
+
+
+def _exit_return_census_8616(
+    conditions: tuple[ConditionIR, ...],
+    recover_return: WideReturnRecoverer8616,
+    same_return: WideReturnComparator8616,
+    raw_count: int,
+    boundary: _CodegenSurface8616,
+) -> _ExitReturnCensus8616 | WideStackReturnPredicateResult8616:
+    """Classify exits into exactly two proven return classes or refuse."""
     return_cache: dict[int, CExpression | None] = {}
 
     def returned(target: int) -> CExpression | None:
@@ -232,11 +236,48 @@ def materialize_wide_stack_return_predicate_8616(
         expression = returned(target)
         return same_return(expression, selected_return) if expression is not None else None
 
+    return _ExitReturnCensus8616(selected_return, alternate_return, classify_exit)
+
+
+def materialize_wide_stack_return_predicate_8616(
+    codegen: object,
+    conditions: tuple[ConditionIR, ...],
+    successors: dict[int, tuple[int, ...]],
+    prove_pair: WideStackPairProver8616,
+    recover_return: WideReturnRecoverer8616,
+    same_return: WideReturnComparator8616,
+    materialize_condition: WideConditionMaterializer8616,
+    *,
+    effects_are_safe: bool,
+) -> WideStackReturnPredicateResult8616:
+    """Atomically replace one complete pure comparison/return CFG."""
+    raw_count = len(conditions)
+    boundary = cast(_CodegenSurface8616, codegen)
+    previous = _previous_materialized_result_8616(boundary)
+    if previous is not None:
+        return previous
+    if not effects_are_safe:
+        result = _refused_8616(
+            WideStackReturnPredicateStatus8616.EFFECTS_UNPROVEN,
+            raw_count,
+        )
+        return _record_result_8616(boundary, result)
+    census = _exit_return_census_8616(
+        conditions,
+        recover_return,
+        same_return,
+        raw_count,
+        boundary,
+    )
+    if isinstance(census, WideStackReturnPredicateResult8616):
+        return census
+    selected_return = census.selected_return
+    alternate_return = census.alternate_return
     graph = recover_wide_stack_predicate_graph_8616(
         conditions,
         successors,
         prove_pair,
-        classify_exit,
+        census.classify_exit,
     )
     if graph.status is not WidePredicateGraphStatus8616.RECOVERED or graph.expression is None:
         status = (

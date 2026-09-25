@@ -15,7 +15,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import TypeGuard
 
-from angr.analyses.decompiler.structured_codegen.c import CConstant, CExpression
+from angr.analyses.decompiler.structured_codegen.c import CConstant, CExpression, CReturn
 from angr.errors import SimEngineError
 from angr.sim_type import SimTypeInt, SimTypeShort
 
@@ -84,6 +84,62 @@ def _same_word_return_value_8616(lhs: CExpression, rhs: CExpression) -> bool:
     return _same_c_expression_8616(lhs, rhs)
 
 
+def _recovered_signed_word_returns_8616(
+    cfg_addresses: Iterable[int],
+    recover_return: Callable[[int], CExpression | None],
+) -> list[CExpression]:
+    """Collect unique signed-word return expressions proven by the CFG."""
+    recovered: list[CExpression] = []
+    for address in sorted(set(cfg_addresses)):
+        try:
+            expression = recover_return(address)
+        except (KeyError, SimEngineError):
+            continue
+        if not _is_signed_word_expression_8616(expression):
+            continue
+        if not any(_same_word_return_value_8616(expression, prior) for prior in recovered):
+            recovered.append(expression)
+    return recovered
+
+
+def _selected_scalar_return_leaves_8616(
+    current: tuple[CExpression, ...],
+    recovered: list[CExpression],
+    raw_count: int,
+) -> list[CExpression] | ScalarReturnLeafResult8616:
+    """Match each current leaf to exactly one recovered expression."""
+    selected: list[CExpression] = []
+    for expression in current:
+        matches = tuple(
+            candidate
+            for candidate in recovered
+            if _same_word_return_value_8616(expression, candidate)
+        )
+        if len(matches) != 1:
+            return ScalarReturnLeafResult8616(
+                False,
+                (),
+                ScalarReturnLeafStats8616(raw_count, raw_count, failure_count=1),
+            )
+        selected.append(matches[0])
+    return selected
+
+
+def _apply_scalar_return_leaves_8616(
+    body_returns: tuple[CReturn | None, ...],
+    selected: list[CExpression],
+) -> bool:
+    """Rewrite each non-signed-word leaf to its proven expression."""
+    changed = False
+    for statement, expression in zip(body_returns, selected, strict=True):
+        if statement is None:
+            raise AssertionError("complete scalar return proof lost its return statement")
+        if not _is_signed_word_expression_8616(statement.retval):
+            statement.retval = expression
+            changed = True
+    return changed
+
+
 def materialize_complete_scalar_return_leaves_8616(
     bodies: Sequence[object],
     cfg_addresses: Iterable[int],
@@ -104,39 +160,11 @@ def materialize_complete_scalar_return_leaves_8616(
             ScalarReturnLeafStats8616(raw_count, len(current), failure_count=1),
         )
 
-    recovered: list[CExpression] = []
-    for address in sorted(set(cfg_addresses)):
-        try:
-            expression = recover_return(address)
-        except (KeyError, SimEngineError):
-            continue
-        if not _is_signed_word_expression_8616(expression):
-            continue
-        if not any(_same_word_return_value_8616(expression, prior) for prior in recovered):
-            recovered.append(expression)
-
-    selected: list[CExpression] = []
-    for expression in current:
-        matches = tuple(
-            candidate
-            for candidate in recovered
-            if _same_word_return_value_8616(expression, candidate)
-        )
-        if len(matches) != 1:
-            return ScalarReturnLeafResult8616(
-                False,
-                (),
-                ScalarReturnLeafStats8616(raw_count, raw_count, failure_count=1),
-            )
-        selected.append(matches[0])
-
-    changed = False
-    for statement, expression in zip(body_returns, selected, strict=True):
-        if statement is None:
-            raise AssertionError("complete scalar return proof lost its return statement")
-        if not _is_signed_word_expression_8616(statement.retval):
-            statement.retval = expression
-            changed = True
+    recovered = _recovered_signed_word_returns_8616(cfg_addresses, recover_return)
+    selected = _selected_scalar_return_leaves_8616(current, recovered, raw_count)
+    if isinstance(selected, ScalarReturnLeafResult8616):
+        return selected
+    changed = _apply_scalar_return_leaves_8616(body_returns, selected)
     count = len(selected)
     return ScalarReturnLeafResult8616(
         changed,

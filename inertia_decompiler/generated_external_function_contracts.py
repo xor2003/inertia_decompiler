@@ -45,6 +45,11 @@ def _type_contract(node: c_ast.Node, *, parameter: bool = False) -> _TypeContrac
         if parameter:
             return "pointer", (), nested
         return "array", nested
+    return _named_type_contract(node)
+
+
+def _named_type_contract(node: c_ast.Node) -> _TypeContract | None:
+    """Return the contract tag for named struct/union/enum types."""
     if isinstance(node, c_ast.Struct):
         return "struct", node.name
     if isinstance(node, c_ast.Union):

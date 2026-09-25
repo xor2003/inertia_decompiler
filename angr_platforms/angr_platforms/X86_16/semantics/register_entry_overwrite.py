@@ -127,6 +127,96 @@ def prove_register_entry_overwrite_8616(
     )
 
 
+def _producer_lea_shape_8616(
+    producer: CsInsn,
+    request: ConsumedStackAddressSetup8616,
+) -> bool:
+    """Return whether the producer is the exact expected LEA BP form."""
+    operands = producer.operands
+    return bool(
+        producer.address == request.producer_address and producer.mnemonic == "lea"
+        and len(operands) == 2 and operands[0].type == X86_OP_REG
+        and operands[0].size == 2 and producer.reg_name(operands[0].reg) == request.register
+        and operands[1].type == X86_OP_MEM and operands[1].mem.index == 0
+        and producer.reg_name(operands[1].mem.base) == "bp"
+        and operands[1].mem.disp == request.bp_offset
+    )
+
+
+def _terminal_call_shape_8616(
+    instruction: CsInsn,
+    request: ConsumedStackAddressSetup8616,
+    consumed: bool,
+    is_last: bool,
+) -> bool:
+    """Return whether the call site is the exact consumed terminal call."""
+    operands = instruction.operands
+    return bool(
+        consumed and is_last and instruction.mnemonic == "call"
+        and len(operands) == 1 and operands[0].type == X86_OP_IMM
+        and operands[0].imm == request.target_address
+    )
+
+
+def _consumed_push_shape_8616(
+    instruction: CsInsn,
+    request: ConsumedStackAddressSetup8616,
+    effects: tuple[int, int],
+    consumed: bool,
+) -> bool:
+    """Return whether one PUSH is the exact sole consumed producer use."""
+    operands = instruction.operands
+    return bool(
+        not consumed and instruction.mnemonic == "push" and len(operands) == 1
+        and operands[0].type == X86_OP_REG and operands[0].size == 2
+        and instruction.reg_name(operands[0].reg) == request.register
+        and effects == (0xFFFF, 0)
+    )
+
+
+@dataclass(slots=True)
+class _CallerSetupScan8616:
+    """Sequential caller scan state for the consumed-PUSH proof."""
+
+    request: ConsumedStackAddressSetup8616
+    caller: Sequence[CsInsn]
+    next_address: int
+    consumed: bool = False
+
+    def step(
+        self,
+        instruction: CsInsn,
+    ) -> tuple[RegisterEntryOverwriteReason8616 | None, bool]:
+        """Advance one instruction; returns ``(reason, done)``."""
+        if instruction.address != self.next_address or instruction.size <= 0:
+            return RegisterEntryOverwriteReason8616.NONCONTIGUOUS, True
+        if instruction.address == self.request.call_address:
+            if not _terminal_call_shape_8616(
+                instruction, self.request, self.consumed,
+                instruction is self.caller[-1],
+            ):
+                return RegisterEntryOverwriteReason8616.INVALID_CALL, True
+            return None, True
+        if instruction.mnemonic not in _FALLTHROUGH_MNEMONICS:
+            return RegisterEntryOverwriteReason8616.UNSUPPORTED_INSTRUCTION, True
+        effects = decoded_register_bit_effects_8616(instruction, self.request.register)
+        frame_effects = decoded_register_bit_effects_8616(instruction, "bp")
+        if effects is None or frame_effects is None:
+            return RegisterEntryOverwriteReason8616.MISSING_EFFECTS, True
+        if frame_effects[1]:
+            return RegisterEntryOverwriteReason8616.FRAME_CHANGED, True
+        if instruction.address == self.request.push_address:
+            if not _consumed_push_shape_8616(
+                instruction, self.request, effects, self.consumed,
+            ):
+                return RegisterEntryOverwriteReason8616.INVALID_PUSH, True
+            self.consumed = True
+        elif effects != (0, 0):
+            return RegisterEntryOverwriteReason8616.CALLER_USE, True
+        self.next_address += instruction.size
+        return None, False
+
+
 def _caller_setup_refusal_8616(
     caller: Sequence[CsInsn], request: ConsumedStackAddressSetup8616,
 ) -> RegisterEntryOverwriteReason8616 | None:
@@ -134,50 +224,17 @@ def _caller_setup_refusal_8616(
     if not caller or request.register not in {"ax", "bx", "cx", "dx", "si", "di"}:
         return RegisterEntryOverwriteReason8616.INVALID_PRODUCER
     producer = caller[0]
-    operands = producer.operands
-    if (
-        producer.address != request.producer_address or producer.mnemonic != "lea"
-        or len(operands) != 2 or operands[0].type != X86_OP_REG
-        or operands[0].size != 2 or producer.reg_name(operands[0].reg) != request.register
-        or operands[1].type != X86_OP_MEM or operands[1].mem.index != 0
-        or producer.reg_name(operands[1].mem.base) != "bp"
-        or operands[1].mem.disp != request.bp_offset
-    ):
+    if not _producer_lea_shape_8616(producer, request):
         return RegisterEntryOverwriteReason8616.INVALID_PRODUCER
-    next_address = producer.address + producer.size
-    consumed = False
+    scan = _CallerSetupScan8616(
+        request=request,
+        caller=caller,
+        next_address=producer.address + producer.size,
+    )
     for instruction in caller[1:]:
-        if instruction.address != next_address or instruction.size <= 0:
-            return RegisterEntryOverwriteReason8616.NONCONTIGUOUS
-        operands = instruction.operands
-        if instruction.address == request.call_address:
-            if (
-                not consumed or instruction is not caller[-1] or instruction.mnemonic != "call"
-                or len(operands) != 1 or operands[0].type != X86_OP_IMM
-                or operands[0].imm != request.target_address
-            ):
-                return RegisterEntryOverwriteReason8616.INVALID_CALL
-            return None
-        if instruction.mnemonic not in _FALLTHROUGH_MNEMONICS:
-            return RegisterEntryOverwriteReason8616.UNSUPPORTED_INSTRUCTION
-        effects = decoded_register_bit_effects_8616(instruction, request.register)
-        frame_effects = decoded_register_bit_effects_8616(instruction, "bp")
-        if effects is None or frame_effects is None:
-            return RegisterEntryOverwriteReason8616.MISSING_EFFECTS
-        if frame_effects[1]:
-            return RegisterEntryOverwriteReason8616.FRAME_CHANGED
-        if instruction.address == request.push_address:
-            if (
-                consumed or instruction.mnemonic != "push" or len(operands) != 1
-                or operands[0].type != X86_OP_REG or operands[0].size != 2
-                or instruction.reg_name(operands[0].reg) != request.register
-                or effects != (0xFFFF, 0)
-            ):
-                return RegisterEntryOverwriteReason8616.INVALID_PUSH
-            consumed = True
-        elif effects != (0, 0):
-            return RegisterEntryOverwriteReason8616.CALLER_USE
-        next_address += instruction.size
+        reason, done = scan.step(instruction)
+        if done:
+            return reason
     return RegisterEntryOverwriteReason8616.INCOMPLETE_PREFIX
 
 

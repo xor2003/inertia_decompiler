@@ -152,24 +152,12 @@ def _is_redundant_aggregate_forward_decl(node: c_ast.Node) -> bool:
     )
 
 
-def assemble_generated_translation_unit(
-    payloads: Sequence[str],
-    *,
-    compiler: str = "gcc",
-) -> GeneratedTranslationUnit:
-    """Build one declaration table and preserve every parsed function-body AST."""
-    parsed_payloads = tuple(_parse_payload(payload, compiler=compiler) for payload in payloads)
-    definitions = tuple(
-        node
-        for payload_nodes in parsed_payloads
-        for node in payload_nodes
-        if isinstance(node, c_ast.FuncDef)
-    )
-    definition_names = {definition.decl.name for definition in definitions}
-    if len(definition_names) != len(definitions):
-        raise ValueError("generated C contains duplicate function definitions")
-
-    generator = c_generator.CGenerator()
+def _collect_declaration_sets(
+    parsed_payloads: tuple[tuple[c_ast.Node, ...], ...],
+    definition_names: set[str],
+    generator: c_generator.CGenerator,
+) -> tuple[list[_NamedDeclarationSet], set[tuple[DeclarationContractKind, str]]]:
+    """Group top-level declarations by contract kind and name, preserving order."""
     declaration_order: list[_NamedDeclarationSet] = []
     declarations_by_key: dict[tuple[DeclarationContractKind, str], _NamedDeclarationSet] = {}
     runtime_keys: set[tuple[DeclarationContractKind, str]] = set()
@@ -196,7 +184,14 @@ def assemble_generated_translation_unit(
             if rendered not in declaration_set.variants:
                 declaration_set.nodes.append(node)
                 declaration_set.variants.append(rendered)
+    return declaration_order, runtime_keys
 
+
+def _canonicalize_declaration_sets(
+    declaration_order: list[_NamedDeclarationSet],
+    generator: c_generator.CGenerator,
+) -> None:
+    """Collapse redundant aggregates and join compatible external declarations."""
     for declaration_set in declaration_order:
         if declaration_set.kind is DeclarationContractKind.TYPE:
             type_definitions = tuple(
@@ -218,6 +213,28 @@ def assemble_generated_translation_unit(
             continue
         declaration_set.nodes = [canonical]
         declaration_set.variants = [generator.visit(canonical)]
+
+
+def assemble_generated_translation_unit(
+    payloads: Sequence[str],
+    *,
+    compiler: str = "gcc",
+) -> GeneratedTranslationUnit:
+    """Build one declaration table and preserve every parsed function-body AST."""
+    parsed_payloads = tuple(_parse_payload(payload, compiler=compiler) for payload in payloads)
+    definitions = tuple(
+        node
+        for payload_nodes in parsed_payloads
+        for node in payload_nodes
+        if isinstance(node, c_ast.FuncDef)
+    )
+    definition_names = {definition.decl.name for definition in definitions}
+    if len(definition_names) != len(definitions):
+        raise ValueError("generated C contains duplicate function definitions")
+
+    generator = c_generator.CGenerator()
+    declaration_order, runtime_keys = _collect_declaration_sets(parsed_payloads, definition_names, generator)
+    _canonicalize_declaration_sets(declaration_order, generator)
 
     conflicts = tuple(
         DeclarationContractConflict(item.kind, item.name, tuple(item.variants))

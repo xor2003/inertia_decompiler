@@ -105,6 +105,63 @@ def _instruction_addresses_8616(block: object) -> frozenset[int]:
     )
 
 
+@dataclass(slots=True)
+class _TaggedReturnScan8616:
+    """Mutable per-return-node materialization scan state."""
+
+    project: object
+    codegen: object
+    terminal_blocks: tuple[int, ...] | frozenset[int]
+    decoded_addresses: dict[int, frozenset[int]]
+    expressions_equivalent: Callable[[object, object], bool]
+    normalized: int = 0
+    classified: int = 0
+    materialized: int = 0
+    failures: int = 0
+    replacements: int = 0
+
+    def process(self, return_node: CReturn) -> None:
+        """Materialize one tagged return node's proven value."""
+        expression = return_node.retval
+        if not isinstance(expression, CExpression):
+            return
+        tags = expression.tags
+        if not isinstance(tags, dict):
+            return
+        block_addr = tags.get("vex_block_addr")
+        instruction_addr = tags.get("ins_addr")
+        if not isinstance(block_addr, int) and not isinstance(instruction_addr, int):
+            return
+        self.normalized += 1
+        candidates = {
+            candidate
+            for candidate in self.terminal_blocks
+            if candidate == block_addr
+            or (
+                isinstance(instruction_addr, int)
+                and instruction_addr in self.decoded_addresses.get(candidate, frozenset())
+            )
+        }
+        if len(candidates) != 1:
+            self.failures += 1
+            return
+        candidate = candidates.pop()
+        proven = recover_branch_target_return_expression_8616(
+            self.project,
+            self.codegen,
+            candidate,
+        )
+        if not isinstance(proven, CExpression):
+            self.failures += 1
+            return
+        self.classified += 1
+        self.materialized += 1
+        if self.expressions_equivalent(expression, proven):
+            return
+        return_node.retval = proven
+        self.replacements += 1
+
+
 def materialize_tagged_terminal_return_values_8616(
     project: object,
     codegen: object,
@@ -144,58 +201,23 @@ def materialize_tagged_terminal_return_values_8616(
     return_nodes = tuple(
         node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CReturn)
     )
-    normalized = 0
-    classified = 0
-    materialized = 0
-    failures = 0
-    replacements = 0
+    scan = _TaggedReturnScan8616(
+        project,
+        codegen,
+        terminal_blocks,
+        decoded_addresses,
+        expressions_equivalent,
+    )
     for return_node in return_nodes:
-        expression = return_node.retval
-        if not isinstance(expression, CExpression):
-            continue
-        tags = expression.tags
-        if not isinstance(tags, dict):
-            continue
-        block_addr = tags.get("vex_block_addr")
-        instruction_addr = tags.get("ins_addr")
-        if not isinstance(block_addr, int) and not isinstance(instruction_addr, int):
-            continue
-        normalized += 1
-        candidates = {
-            candidate
-            for candidate in terminal_blocks
-            if candidate == block_addr
-            or (
-                isinstance(instruction_addr, int)
-                and instruction_addr in decoded_addresses.get(candidate, frozenset())
-            )
-        }
-        if len(candidates) != 1:
-            failures += 1
-            continue
-        candidate = candidates.pop()
-        proven = recover_branch_target_return_expression_8616(
-            project,
-            codegen,
-            candidate,
-        )
-        if not isinstance(proven, CExpression):
-            failures += 1
-            continue
-        classified += 1
-        materialized += 1
-        if expressions_equivalent(expression, proven):
-            continue
-        return_node.retval = proven
-        replacements += 1
+        scan.process(return_node)
 
     result = TaggedTerminalReturnValueResult8616(
         raw_fact_count=len(return_nodes),
-        normalized_fact_count=normalized,
-        classified_fact_count=classified,
-        materialized_count=materialized,
-        failure_count=failures,
-        replacement_count=replacements,
+        normalized_fact_count=scan.normalized,
+        classified_fact_count=scan.classified,
+        materialized_count=scan.materialized,
+        failure_count=scan.failures,
+        replacement_count=scan.replacements,
     )
     typed_codegen._inertia_tagged_terminal_return_value_result_8616 = result
     if result.classified_fact_count > 0 and result.materialized_count == 0:

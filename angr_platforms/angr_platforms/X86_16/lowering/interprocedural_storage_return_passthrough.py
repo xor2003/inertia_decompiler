@@ -18,7 +18,7 @@ from ..caller_return_use_contracts import (
     CallerReturnUseFact8616,
     CallsiteReturnUseKind8616,
 )
-from ..ir import IRValue, MemSpace
+from ..ir import IRInstr, IRValue, MemSpace
 from ..ir.function_ssa_registry import (
     FunctionSSAArtifactFailure8616,
 )
@@ -107,34 +107,12 @@ def _refused_result_8616(
     )
 
 
-def materialize_return_passthrough_trial_8616(
-    project: object,
-    callee_addr: int,
+def _semantic_passthrough_gate_8616(
+    caller_project: object | None,
+    caller_function: object,
     fact: CallerReturnUseFact8616,
-    accepted_target_addrs: tuple[int, ...],
-    caller_context: CallerSSAContext8616 | None = None,
-) -> ReturnPassThroughTrialResult8616:
-    """Join one proven recursive return path to its exact typed SSA CALL."""
-    if (
-        fact.kind is not CallsiteReturnUseKind8616.FUNCTION_RETURN
-        or not fact.excluded_recursive_passthrough
-    ):
-        return _refused_result_8616(
-            ReturnPassThroughTrialFailure8616.RETURN_FACT_NOT_PASSTHROUGH,
-        )
-    caller_project = project if caller_context is None else caller_context.evidence_project
-    caller_function = None if caller_context is None else caller_context.caller_function
-    if caller_function is None and caller_project is not None:
-        try:
-            caller_function = cast(_ProjectSurface8616, caller_project).kb.functions.function(
-                addr=fact.caller_addr, create=False
-            )
-        except (AttributeError, KeyError, TypeError, ValueError):
-            caller_function = None
-    if caller_function is None:
-        return _refused_result_8616(
-            ReturnPassThroughTrialFailure8616.CALLER_FUNCTION_UNAVAILABLE,
-        )
+) -> TerminalReturnPassThroughEvidence8616 | ReturnPassThroughTrialResult8616:
+    """Collect the unique semantic passthrough fact or a typed refusal."""
     semantic_evidence = collect_terminal_return_passthrough_evidence_8616(
         caller_project,
         caller_function,
@@ -161,7 +139,16 @@ def materialize_return_passthrough_trial_8616(
             semantic_evidence=semantic_evidence,
             normalized=True,
         )
+    return semantic_evidence
 
+
+def _callsite_call_gate_8616(
+    caller_project: object | None,
+    caller_function: object,
+    fact: CallerReturnUseFact8616,
+    semantic_evidence: TerminalReturnPassThroughEvidence8616,
+) -> tuple[int, int, IRInstr] | ReturnPassThroughTrialResult8616:
+    """Return the single typed CALL at the callsite or a typed refusal."""
     ssa = semantic_function_ssa_artifact_at_address_8616(
         caller_project, fact.caller_addr, function=caller_function
     )
@@ -199,6 +186,49 @@ def materialize_return_passthrough_trial_8616(
             semantic_evidence=semantic_evidence,
             normalized=True,
         )
+    return block_addr, instr_index, instruction
+
+
+def materialize_return_passthrough_trial_8616(
+    project: object,
+    callee_addr: int,
+    fact: CallerReturnUseFact8616,
+    accepted_target_addrs: tuple[int, ...],
+    caller_context: CallerSSAContext8616 | None = None,
+) -> ReturnPassThroughTrialResult8616:
+    """Join one proven recursive return path to its exact typed SSA CALL."""
+    if (
+        fact.kind is not CallsiteReturnUseKind8616.FUNCTION_RETURN
+        or not fact.excluded_recursive_passthrough
+    ):
+        return _refused_result_8616(
+            ReturnPassThroughTrialFailure8616.RETURN_FACT_NOT_PASSTHROUGH,
+        )
+    caller_project = project if caller_context is None else caller_context.evidence_project
+    caller_function = None if caller_context is None else caller_context.caller_function
+    if caller_function is None and caller_project is not None:
+        try:
+            caller_function = cast(_ProjectSurface8616, caller_project).kb.functions.function(
+                addr=fact.caller_addr, create=False
+            )
+        except (AttributeError, KeyError, TypeError, ValueError):
+            caller_function = None
+    if caller_function is None:
+        return _refused_result_8616(
+            ReturnPassThroughTrialFailure8616.CALLER_FUNCTION_UNAVAILABLE,
+        )
+    gate = _semantic_passthrough_gate_8616(caller_project, caller_function, fact)
+    if isinstance(gate, ReturnPassThroughTrialResult8616):
+        return gate
+    semantic_evidence = gate
+    semantic_fact = semantic_evidence.facts[0]
+
+    call_gate = _callsite_call_gate_8616(
+        caller_project, caller_function, fact, semantic_evidence
+    )
+    if isinstance(call_gate, ReturnPassThroughTrialResult8616):
+        return call_gate
+    block_addr, instr_index, instruction = call_gate
     target = instruction.args[0]
     if target.space is not MemSpace.CONST or not isinstance(target.const, int):
         return _refused_result_8616(

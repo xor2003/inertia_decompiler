@@ -14,16 +14,25 @@ from .core import AddressStatus, IRAddress, IRInstr, IRValue, MemSpace, SegmentO
 from .scalar_affine_contracts import ScalarAffineEntryRegister8616, ScalarAffineTerm8616
 
 
+def _proven_bp_load_address_8616(address: IRAddress, width: int) -> bool:
+    """Return whether the address is one proven stable BP-relative word."""
+    return (
+        address.space is MemSpace.SS
+        and address.base == ("bp",)
+        and address.size == width
+        and address.status is AddressStatus.STABLE
+        and address.segment_origin is SegmentOrigin.PROVEN
+    )
+
+
 def stack_affine_source_8616(instruction: IRInstr, width: int) -> IRAddress | None:
     """Return one exact direct BP-relative scalar LOAD source."""
     address = instruction.args[0] if instruction.args else None
-    if (
-        instruction.op != "LOAD" or instruction.size != width
-        or not isinstance(address, IRAddress)
-        or address.space is not MemSpace.SS or address.base != ("bp",)
-        or address.size != width or address.status is not AddressStatus.STABLE
-        or address.segment_origin is not SegmentOrigin.PROVEN
-    ):
+    if instruction.op != "LOAD" or instruction.size != width:
+        return None
+    if not isinstance(address, IRAddress):
+        return None
+    if not _proven_bp_load_address_8616(address, width):
         return None
     return address
 

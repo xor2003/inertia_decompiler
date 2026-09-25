@@ -104,6 +104,66 @@ def _lift_block_and_collect_facts(project: object, block_addr: int) -> list[obje
     return []
 
 
+def _function_block_addrs_8616(project: object, function_addr: int) -> list[int]:
+    """Return the sorted block addresses proven to belong to one function."""
+    kb = _dynamic_boundary_attr_8616(project, "kb") if project is not None else None
+    if kb is None:
+        return []
+    functions = _dynamic_boundary_attr_8616(kb, "functions")
+    function_for_addr = _dynamic_boundary_attr_8616(functions, "function")
+    func = function_for_addr(addr=function_addr, create=False) if callable(function_for_addr) else None
+    if func is None:
+        return []
+    return _sorted_int_iterable_attr_8616(func, "block_addrs_set")
+
+
+def _relift_function_blocks_8616(project: object, block_addrs: list[int]) -> None:
+    """Re-lift each owned block so the collection context records accesses."""
+    factory = _dynamic_boundary_attr_8616(project, "factory")
+    lift_block = _dynamic_boundary_attr_8616(factory, "block")
+    if not callable(lift_block):
+        return
+    for block_addr in block_addrs:
+        try:
+            lift_block(block_addr, opt_level=0)
+        except Exception as ex:
+            logging.getLogger(__name__).debug(
+                "semantic evidence re-lift failed block_addr=%#x: %s",
+                block_addr,
+                ex,
+            )
+
+
+def _collected_facts_8616(
+    project: object,
+    codegen: object,
+    func_addr: int,
+    allow_legacy: bool,
+) -> tuple[list[object], list[object], list[object]]:
+    """Collect normalized facts; only the debug flag permits legacy fallback."""
+    try:
+        return collect_normalized_semantic_alias_facts_from_project_8616(
+            project, func_addr
+        )
+    except Exception as e:
+        typing.cast(typing.Any, codegen)._inertia_semantic_fact_transfer_error = repr(e)
+        if not allow_legacy:
+            raise
+        facts = collect_semantic_alias_facts_from_project_8616(project, func_addr)
+        typing.cast(typing.Any, codegen)._inertia_semantic_fact_transfer_fallback_used = True
+        return facts, [], []
+
+
+def _init_consumption_counters_8616(codegen: object) -> None:
+    """Initialize consumption counters (filled later by materialization passes)."""
+    if not _has_dynamic_codegen_attr_8616(codegen, "_inertia_semantic_stack_materialized_count"):
+        typing.cast(typing.Any, codegen)._inertia_semantic_stack_materialized_count = 0
+    if not _has_dynamic_codegen_attr_8616(codegen, "_inertia_semantic_condition_fact_count"):
+        typing.cast(typing.Any, codegen)._inertia_semantic_condition_fact_count = 0
+    if not _has_dynamic_codegen_attr_8616(codegen, "_inertia_semantic_condition_materialized_count"):
+        typing.cast(typing.Any, codegen)._inertia_semantic_condition_materialized_count = 0
+
+
 def collect_normalized_semantic_alias_facts_from_project_8616(
     project: object, function_addr: int
 ) -> tuple[list[object], list[object], list[object]]:
@@ -137,30 +197,12 @@ def collect_normalized_semantic_alias_facts_from_project_8616(
             normalize_semantic_accesses_8616,
         )
 
-        kb = _dynamic_boundary_attr_8616(project, "kb") if project is not None else None
-        block_addrs: list[int] = []
-        if kb is not None:
-            functions = _dynamic_boundary_attr_8616(kb, "functions")
-            function_for_addr = _dynamic_boundary_attr_8616(functions, "function")
-            func = function_for_addr(addr=function_addr, create=False) if callable(function_for_addr) else None
-            if func is not None:
-                block_addrs = _sorted_int_iterable_attr_8616(func, "block_addrs_set")
+        block_addrs = _function_block_addrs_8616(project, function_addr)
 
         # Re-lift only blocks proven to belong to this function. The context owns
         # every resulting access, so equal addresses in other projects cannot leak.
         with collect_accesses_for_function(function_addr) as collection:
-            factory = _dynamic_boundary_attr_8616(project, "factory")
-            lift_block = _dynamic_boundary_attr_8616(factory, "block")
-            if callable(lift_block):
-                for block_addr in block_addrs:
-                    try:
-                        lift_block(block_addr, opt_level=0)
-                    except Exception as ex:
-                        logging.getLogger(__name__).debug(
-                            "semantic evidence re-lift failed block_addr=%#x: %s",
-                            block_addr,
-                            ex,
-                        )
+            _relift_function_blocks_8616(project, block_addrs)
             raw_accesses = list(collection.accesses)
 
         raw_access_tuples = [
@@ -301,19 +343,9 @@ def transfer_semantic_alias_facts_to_codegen_8616(project: object, codegen: obje
         # Silent fallback is FORBIDDEN — it makes regressions invisible.
         allow_legacy = bool(_dynamic_boundary_attr_8616(project, "_inertia_allow_legacy_fact_fallback", False))
 
-        try:
-            facts, failures, raw_accesses = collect_normalized_semantic_alias_facts_from_project_8616(
-                project, func_addr
-            )
-        except Exception as e:
-            typing.cast(typing.Any, codegen)._inertia_semantic_fact_transfer_error = repr(e)
-            if allow_legacy:
-                facts = collect_semantic_alias_facts_from_project_8616(project, func_addr)
-                failures = []
-                raw_accesses = []
-                typing.cast(typing.Any, codegen)._inertia_semantic_fact_transfer_fallback_used = True
-            else:
-                raise
+        facts, failures, raw_accesses = _collected_facts_8616(
+            project, codegen, func_addr, allow_legacy,
+        )
 
         raw_count = len(raw_accesses)
 
@@ -339,13 +371,7 @@ def transfer_semantic_alias_facts_to_codegen_8616(project: object, codegen: obje
         typing.cast(typing.Any, codegen)._inertia_semantic_stack_fact_count = stack_count
         typing.cast(typing.Any, codegen)._inertia_semantic_failure_count = len(failures)
 
-        # Initialize consumption counters (filled later by materialization passes)
-        if not _has_dynamic_codegen_attr_8616(codegen, "_inertia_semantic_stack_materialized_count"):
-            typing.cast(typing.Any, codegen)._inertia_semantic_stack_materialized_count = 0
-        if not _has_dynamic_codegen_attr_8616(codegen, "_inertia_semantic_condition_fact_count"):
-            typing.cast(typing.Any, codegen)._inertia_semantic_condition_fact_count = 0
-        if not _has_dynamic_codegen_attr_8616(codegen, "_inertia_semantic_condition_materialized_count"):
-            typing.cast(typing.Any, codegen)._inertia_semantic_condition_materialized_count = 0
+        _init_consumption_counters_8616(codegen)
 
         # ── Initialize STACK lane contract ──
         typing.cast(typing.Any, codegen)._inertia_stack_lane = SemanticLaneState(

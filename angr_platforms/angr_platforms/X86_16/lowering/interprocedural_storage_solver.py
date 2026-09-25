@@ -13,7 +13,7 @@ Forbidden: signature guessing or partial publication.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..pipeline.errors import PipelineHardError
 from .interprocedural_storage_contracts import (
@@ -61,51 +61,65 @@ class _SCCOutputState8616:
         )
 
 
-def _deterministic_sccs_8616(
+def _caller_callee_graph_8616(
     trials_by_addr: dict[int, FunctionStorageTrials8616],
-) -> tuple[tuple[int, ...], ...]:
-    """Return deterministic Tarjan SCCs for internal caller-to-callee edges."""
+) -> dict[int, set[int]]:
+    """Build internal caller-to-callee edges for tracked functions only."""
     graph: dict[int, set[int]] = {address: set() for address in trials_by_addr}
     for callee_addr, trials in trials_by_addr.items():
         for callsite in trials.callsites:
             if callsite.caller_addr in graph:
                 graph[callsite.caller_addr].add(callee_addr)
-    index = 0
-    indices: dict[int, int] = {}
-    lowlinks: dict[int, int] = {}
-    stack: list[int] = []
-    on_stack: set[int] = set()
-    components: list[tuple[int, ...]] = []
+    return graph
 
-    def visit(node: int) -> None:
+
+@dataclass(slots=True)
+class _TarjanState8616:
+    """Mutable Tarjan traversal state over the deterministic call graph."""
+
+    graph: dict[int, set[int]]
+    index: int = 0
+    indices: dict[int, int] = field(default_factory=dict)
+    lowlinks: dict[int, int] = field(default_factory=dict)
+    stack: list[int] = field(default_factory=list)
+    on_stack: set[int] = field(default_factory=set)
+    components: list[tuple[int, ...]] = field(default_factory=list)
+
+    def visit(self, node: int) -> None:
         """Visit one node and emit its component after all descendants."""
-        nonlocal index
-        indices[node] = index
-        lowlinks[node] = index
-        index += 1
-        stack.append(node)
-        on_stack.add(node)
-        for target in sorted(graph[node]):
-            if target not in indices:
-                visit(target)
-                lowlinks[node] = min(lowlinks[node], lowlinks[target])
-            elif target in on_stack:
-                lowlinks[node] = min(lowlinks[node], indices[target])
-        if lowlinks[node] != indices[node]:
+        self.indices[node] = self.index
+        self.lowlinks[node] = self.index
+        self.index += 1
+        self.stack.append(node)
+        self.on_stack.add(node)
+        for target in sorted(self.graph[node]):
+            if target not in self.indices:
+                self.visit(target)
+                self.lowlinks[node] = min(self.lowlinks[node], self.lowlinks[target])
+            elif target in self.on_stack:
+                self.lowlinks[node] = min(self.lowlinks[node], self.indices[target])
+        if self.lowlinks[node] != self.indices[node]:
             return
         component: list[int] = []
         while True:
-            member = stack.pop()
-            on_stack.remove(member)
+            member = self.stack.pop()
+            self.on_stack.remove(member)
             component.append(member)
             if member == node:
                 break
-        components.append(tuple(sorted(component)))
+        self.components.append(tuple(sorted(component)))
 
+
+def _deterministic_sccs_8616(
+    trials_by_addr: dict[int, FunctionStorageTrials8616],
+) -> tuple[tuple[int, ...], ...]:
+    """Return deterministic Tarjan SCCs for internal caller-to-callee edges."""
+    graph = _caller_callee_graph_8616(trials_by_addr)
+    state = _TarjanState8616(graph)
     for node in sorted(graph):
-        if node not in indices:
-            visit(node)
-    return tuple(sorted(components, key=lambda item: item[0]))
+        if node not in state.indices:
+            state.visit(node)
+    return tuple(sorted(state.components, key=lambda item: item[0]))
 
 
 def _direct_output_seed_8616(

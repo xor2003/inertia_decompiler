@@ -221,6 +221,44 @@ def _matching_logical_reads_8616(
     return tuple(matches)
 
 
+def _proven_shift_definition_8616(
+    definitions: ScalarDefinitionIndex8616,
+    shifted_value: IRValue,
+    *,
+    block_addr: int,
+    before_index: int,
+    low_path: tuple[IndexedAddressDefinitionSite8616, ...],
+) -> tuple[ScalarDefinition8616, IndexedAddressDefinitionSite8616] | LogicalMemoryValueTrace8616:
+    """Return the unique proven definition behind the shifted half."""
+    shift_candidates = reaching_scalar_definitions_8616(
+        definitions,
+        shifted_value,
+        block_addr=block_addr,
+        before_index=before_index,
+    )
+    if not shift_candidates:
+        return LogicalMemoryValueTrace8616(
+            None,
+            low_path,
+            IndexedAddressFailureKind8616.INDEX_DEFINITION_MISSING,
+        )
+    if len(shift_candidates) != 1:
+        return LogicalMemoryValueTrace8616(
+            None,
+            low_path,
+            IndexedAddressFailureKind8616.INDEX_DEFINITION_CONFLICT,
+        )
+    shift_definition = shift_candidates[0]
+    shift_site = _definition_site_8616(shift_definition)
+    if shift_site is None:
+        return LogicalMemoryValueTrace8616(
+            None,
+            low_path,
+            IndexedAddressFailureKind8616.INDEX_SOURCE_UNPROVEN,
+        )
+    return shift_definition, shift_site
+
+
 def trace_logical_word_load_8616(
     instruction: IRInstr,
     definitions: ScalarDefinitionIndex8616,
@@ -253,34 +291,18 @@ def trace_logical_word_load_8616(
     if low_trace.failure is not None or low_trace.definition is None:
         return LogicalMemoryValueTrace8616(None, low_trace.path, low_trace.failure)
 
-    shift_candidates = reaching_scalar_definitions_8616(
+    resolved = _proven_shift_definition_8616(
         definitions,
         shifted_value,
         block_addr=block_addr,
         before_index=before_index,
+        low_path=low_trace.path,
     )
-    if not shift_candidates:
-        return LogicalMemoryValueTrace8616(
-            None,
-            low_trace.path,
-            IndexedAddressFailureKind8616.INDEX_DEFINITION_MISSING,
-        )
-    if len(shift_candidates) != 1:
-        return LogicalMemoryValueTrace8616(
-            None,
-            low_trace.path,
-            IndexedAddressFailureKind8616.INDEX_DEFINITION_CONFLICT,
-        )
-    shift_definition = shift_candidates[0]
-    shift_site = _definition_site_8616(shift_definition)
-    shift_instruction = shift_definition.instruction
-    if shift_site is None:
-        return LogicalMemoryValueTrace8616(
-            None,
-            low_trace.path,
-            IndexedAddressFailureKind8616.INDEX_SOURCE_UNPROVEN,
-        )
+    if isinstance(resolved, LogicalMemoryValueTrace8616):
+        return resolved
+    shift_definition, shift_site = resolved
     path_through_shift = (*low_trace.path, shift_site)
+    shift_instruction = shift_definition.instruction
     if shift_instruction.op != "Iop_Shl16" or len(shift_instruction.args) != 2:
         return LogicalMemoryValueTrace8616(
             None,

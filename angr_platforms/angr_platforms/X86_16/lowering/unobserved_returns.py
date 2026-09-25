@@ -106,41 +106,63 @@ def _pure_return_expr_state_8616(expr: object, *, depth: int = 0) -> tuple[bool,
         return True, True
     if depth > 8:
         return False, False
-    if isinstance(expr, CConstant):
-        return True, False
+    leaf = _leaf_expr_state_8616(expr)
+    if leaf is not None:
+        return leaf
     if isinstance(expr, CTypeCast):
         return _pure_return_expr_state_8616(expr.expr, depth=depth + 1)
     if isinstance(expr, CUnaryOp):
         return _pure_return_expr_state_8616(expr.operand, depth=depth + 1)
     if isinstance(expr, CIndexedVariable):
-        variable_state = _pure_return_expr_state_8616(expr.variable, depth=depth + 1)
-        index_state = _pure_return_expr_state_8616(expr.index, depth=depth + 1)
-        return (
-            variable_state[0] and index_state[0],
-            variable_state[1] or index_state[1],
-        )
+        return _combined_expr_state_8616((expr.variable, expr.index), depth=depth)
     if isinstance(expr, CBinaryOp):
-        states = tuple(
-            _pure_return_expr_state_8616(item, depth=depth + 1)
-            for item in (expr.lhs, expr.rhs)
-        )
-        return all(pure for pure, _unresolved in states), any(
-            unresolved for _pure, unresolved in states
-        )
+        return _combined_expr_state_8616((expr.lhs, expr.rhs), depth=depth)
+    return False, False
+
+
+def _leaf_expr_state_8616(expr: object) -> tuple[bool, bool] | None:
+    """Return the leaf-carrier state, or None for composite expressions."""
+    if isinstance(expr, CConstant):
+        return True, False
     if isinstance(expr, CFakeVariable):
         return True, True
     if isinstance(expr, CDirtyExpression):
-        unresolved = isinstance(
-            expr.dirty,
-            (ailment.Expr.VirtualVariable, ailment.Expr.Register, ailment.Expr.Tmp),
-        )
-        return unresolved, unresolved
+        return _dirty_expr_state_8616(expr)
     if isinstance(expr, CVariable):
-        variable = expr.variable
-        if isinstance(variable, SimRegisterVariable):
-            return True, expr.unified_variable is None
-        if isinstance(variable, SimStackVariable):
-            return True, not isinstance(variable.name, str)
+        return _variable_expr_state_8616(expr)
+    return None
+
+
+def _combined_expr_state_8616(
+    items: tuple[object, ...],
+    *,
+    depth: int,
+) -> tuple[bool, bool]:
+    """Combine child states: pure only when all pure, unresolved when any."""
+    states = tuple(
+        _pure_return_expr_state_8616(item, depth=depth + 1) for item in items
+    )
+    return all(pure for pure, _unresolved in states), any(
+        unresolved for _pure, unresolved in states
+    )
+
+
+def _dirty_expr_state_8616(expr: CDirtyExpression) -> tuple[bool, bool]:
+    """Report an unresolved dirty carrier exactly once."""
+    unresolved = isinstance(
+        expr.dirty,
+        (ailment.Expr.VirtualVariable, ailment.Expr.Register, ailment.Expr.Tmp),
+    )
+    return unresolved, unresolved
+
+
+def _variable_expr_state_8616(expr: CVariable) -> tuple[bool, bool]:
+    """Report register and stack carriers as pure; name the unresolved forms."""
+    variable = expr.variable
+    if isinstance(variable, SimRegisterVariable):
+        return True, expr.unified_variable is None
+    if isinstance(variable, SimStackVariable):
+        return True, not isinstance(variable.name, str)
     return False, False
 
 

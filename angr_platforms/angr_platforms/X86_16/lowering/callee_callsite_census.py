@@ -128,6 +128,68 @@ def _caller_function_ranges_8616(project: object) -> tuple[tuple[int, int], ...]
     )
 
 
+def _function_callsite_facts_8616(
+    evidence_project: object,
+    evidence_target: int,
+    function: object,
+    facts: dict[tuple[int, int], CalleeCallsiteFact8616],
+    raw_callsites: set[tuple[int, int]],
+) -> None:
+    """Record every direct callsite from one caller function."""
+    try:
+        targets = collect_neighbor_call_targets(function)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return
+    for target in targets:
+        if target.target_addr != evidence_target:
+            continue
+        callsite_key = (id(evidence_project), target.callsite_addr)
+        raw_callsites.add(callsite_key)
+        if callsite_key in facts and facts[callsite_key].summary is not None:
+            continue
+        summary = summarize_x86_16_callsite(function, target.callsite_addr)
+        if summary is not None and summary.stack_probe_helper:
+            summary = None
+        facts[callsite_key] = CalleeCallsiteFact8616(
+            evidence_project=evidence_project,
+            caller_function=function,
+            evidence_target_addr=evidence_target,
+            caller_addr=_function_addr_8616(function),
+            callsite_addr=target.callsite_addr,
+            summary=summary,
+        )
+
+
+def _collect_project_facts_8616(
+    evidence_project: object,
+    evidence_target: int,
+    function_ranges: tuple[tuple[int, int], ...],
+    facts: dict[tuple[int, int], CalleeCallsiteFact8616],
+    raw_callsites: set[tuple[int, int]],
+) -> None:
+    """Collect callsite facts from one evidence project surface."""
+    try:
+        functions = tuple(cast(_ProjectSurface8616, evidence_project).kb.functions.values())
+    except (AttributeError, TypeError):
+        return
+    for function in functions:
+        _function_callsite_facts_8616(
+            evidence_project,
+            evidence_target,
+            function,
+            facts,
+            raw_callsites,
+        )
+    for fact in collect_range_callsite_facts_for_target_8616(
+        evidence_project,
+        evidence_target,
+        function_ranges,
+    ):
+        callsite_key = (id(evidence_project), fact.callsite_addr)
+        raw_callsites.add(callsite_key)
+        facts[callsite_key] = fact
+
+
 def collect_callee_callsite_census_8616(
     project: object,
     target_addr: int,
@@ -147,41 +209,13 @@ def collect_callee_callsite_census_8616(
         if project_key in visited_projects:
             continue
         visited_projects.add(project_key)
-        try:
-            functions = tuple(cast(_ProjectSurface8616, evidence_project).kb.functions.values())
-        except (AttributeError, TypeError):
-            continue
-        for function in functions:
-            try:
-                targets = collect_neighbor_call_targets(function)
-            except (AttributeError, KeyError, TypeError, ValueError):
-                continue
-            for target in targets:
-                if target.target_addr != evidence_target:
-                    continue
-                callsite_key = (id(evidence_project), target.callsite_addr)
-                raw_callsites.add(callsite_key)
-                if callsite_key in facts and facts[callsite_key].summary is not None:
-                    continue
-                summary = summarize_x86_16_callsite(function, target.callsite_addr)
-                if summary is not None and summary.stack_probe_helper:
-                    summary = None
-                facts[callsite_key] = CalleeCallsiteFact8616(
-                    evidence_project=evidence_project,
-                    caller_function=function,
-                    evidence_target_addr=evidence_target,
-                    caller_addr=_function_addr_8616(function),
-                    callsite_addr=target.callsite_addr,
-                    summary=summary,
-                )
-        for fact in collect_range_callsite_facts_for_target_8616(
+        _collect_project_facts_8616(
             evidence_project,
             evidence_target,
             function_ranges,
-        ):
-            callsite_key = (id(evidence_project), fact.callsite_addr)
-            raw_callsites.add(callsite_key)
-            facts[callsite_key] = fact
+            facts,
+            raw_callsites,
+        )
     ordered = tuple(facts[key] for key in sorted(raw_callsites, key=lambda item: (item[1], item[0])))
     normalized_count = sum(fact.summary is not None for fact in ordered)
     census = CalleeCallsiteCensus8616(

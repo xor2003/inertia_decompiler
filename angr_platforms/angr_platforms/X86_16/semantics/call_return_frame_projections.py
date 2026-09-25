@@ -9,7 +9,7 @@ Do not perform alias-state ownership, widening, lowering/materialization, struct
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, TypeGuard, cast
 
@@ -146,6 +146,94 @@ def _inventory_8616(
     return tuple(owners), {tmp: tuple(indices) for tmp, indices in definitions.items()}, imark_counts
 
 
+def _refuse_dependency_8616(
+    reason: _Reason8616,
+    indices: Iterable[int] = (),
+) -> None:
+    """Raise one typed dependency refusal with its implicated indices."""
+    raise _DependencyRefusal8616(reason, indices)
+
+
+@dataclass(slots=True)
+class _DependencyWalk8616:
+    """Recursive producer walk over one store statement's data expression."""
+
+    statements: tuple[DynamicValue, ...]
+    owners: tuple[int | None, ...]
+    definitions: dict[int, tuple[int, ...]]
+    callsite_addr: int
+    producers: set[int] = field(default_factory=set)
+    visiting: list[int] = field(default_factory=list)
+
+    def visit(self, expression_value: object, consumer_index: int) -> None:
+        """Walk one expression, recording every proven producer."""
+        expression = cast(DynamicValue, expression_value)
+        try:
+            tag = expression.tag
+        except AttributeError:
+            _refuse_dependency_8616(
+                _Reason8616.INCOMPLETE_DEPENDENCY, self.visiting
+            )
+        if tag == "Iex_RdTmp":
+            self._visit_rdtmp_8616(expression, consumer_index)
+            return
+        try:
+            children = tuple(expression.child_expressions)
+        except (AttributeError, TypeError):
+            _refuse_dependency_8616(
+                _Reason8616.INCOMPLETE_DEPENDENCY, self.visiting
+            )
+        for child in children:
+            self.visit(child, consumer_index)
+
+    def _visit_rdtmp_8616(
+        self,
+        expression: DynamicValue,
+        consumer_index: int,
+    ) -> None:
+        """Resolve one temporary read to its unique same-callsite producer."""
+        try:
+            temporary = expression.tmp
+        except AttributeError:
+            temporary = None
+        if not _is_int_8616(temporary):
+            _refuse_dependency_8616(
+                _Reason8616.INCOMPLETE_DEPENDENCY, self.visiting
+            )
+        indices = self.definitions.get(temporary, ())
+        if not indices:
+            _refuse_dependency_8616(
+                _Reason8616.INCOMPLETE_DEPENDENCY, self.visiting
+            )
+        if len(indices) != 1:
+            _refuse_dependency_8616(_Reason8616.AMBIGUOUS_DEFINITION, indices)
+        producer_index = indices[0]
+        if self.owners[producer_index] != self.callsite_addr:
+            _refuse_dependency_8616(
+                _Reason8616.CROSS_CALLSITE_DEPENDENCY, indices
+            )
+        if producer_index in self.visiting:
+            start = self.visiting.index(producer_index)
+            _refuse_dependency_8616(
+                _Reason8616.CYCLIC_DEPENDENCY,
+                (*self.visiting[start:], producer_index),
+            )
+        try:
+            producer_data = self.statements[producer_index].data
+        except (AttributeError, IndexError):
+            _refuse_dependency_8616(
+                _Reason8616.INCOMPLETE_DEPENDENCY, indices
+            )
+        self.producers.add(producer_index)
+        self.visiting.append(producer_index)
+        self.visit(producer_data, producer_index)
+        self.visiting.pop()
+        if producer_index >= consumer_index:
+            _refuse_dependency_8616(
+                _Reason8616.INCOMPLETE_DEPENDENCY, indices
+            )
+
+
 def _dependencies_8616(
     statements: tuple[DynamicValue, ...],
     owners: tuple[int | None, ...],
@@ -154,67 +242,14 @@ def _dependencies_8616(
     callsite_addr: int,
     store_index: int,
 ) -> _DependencyResult8616:
-    producers: set[int] = set()
-    visiting: list[int] = []
-
-    def refuse(
-        reason: _Reason8616,
-        indices: Iterable[int] = (),
-    ) -> None:
-        raise _DependencyRefusal8616(reason, indices)
-
-    def visit(expression_value: object, consumer_index: int) -> None:
-        expression = cast(DynamicValue, expression_value)
-        try:
-            tag = expression.tag
-        except AttributeError:
-            refuse(_Reason8616.INCOMPLETE_DEPENDENCY, visiting)
-        if tag == "Iex_RdTmp":
-            try:
-                temporary = expression.tmp
-            except AttributeError:
-                temporary = None
-            if not _is_int_8616(temporary):
-                refuse(_Reason8616.INCOMPLETE_DEPENDENCY, visiting)
-            indices = definitions.get(temporary, ())
-            if not indices:
-                refuse(_Reason8616.INCOMPLETE_DEPENDENCY, visiting)
-            if len(indices) != 1:
-                refuse(_Reason8616.AMBIGUOUS_DEFINITION, indices)
-            producer_index = indices[0]
-            if owners[producer_index] != callsite_addr:
-                refuse(_Reason8616.CROSS_CALLSITE_DEPENDENCY, indices)
-            if producer_index in visiting:
-                start = visiting.index(producer_index)
-                refuse(
-                    _Reason8616.CYCLIC_DEPENDENCY,
-                    (*visiting[start:], producer_index),
-                )
-            try:
-                producer_data = statements[producer_index].data
-            except (AttributeError, IndexError):
-                refuse(_Reason8616.INCOMPLETE_DEPENDENCY, indices)
-            producers.add(producer_index)
-            visiting.append(producer_index)
-            visit(producer_data, producer_index)
-            visiting.pop()
-            if producer_index >= consumer_index:
-                refuse(_Reason8616.INCOMPLETE_DEPENDENCY, indices)
-            return
-        try:
-            children = tuple(expression.child_expressions)
-        except (AttributeError, TypeError):
-            refuse(_Reason8616.INCOMPLETE_DEPENDENCY, visiting)
-        for child in children:
-            visit(child, consumer_index)
-
+    walk = _DependencyWalk8616(statements, owners, definitions, callsite_addr)
     try:
-        visit(statements[store_index].data, store_index)
+        walk.visit(statements[store_index].data, store_index)
     except (AttributeError, IndexError):
         return _DependencyResult8616((), _Reason8616.INCOMPLETE_DEPENDENCY, (store_index,))
     except _DependencyRefusal8616 as refusal:
         return _DependencyResult8616((), refusal.reason, refusal.indices)
-    return _DependencyResult8616(tuple(sorted(producers)), None, ())
+    return _DependencyResult8616(tuple(sorted(walk.producers)), None, ())
 
 
 def _read_temporaries_8616(expression_value: object) -> frozenset[int] | None:
@@ -243,6 +278,45 @@ def _read_temporaries_8616(expression_value: object) -> frozenset[int] | None:
     return frozenset(reads)
 
 
+def _store_reads_8616(statement: DynamicValue) -> frozenset[int] | None:
+    """Return combined data and address temporaries read by one store."""
+    data_reads = _read_temporaries_8616(statement.data)
+    # Dynamic pyvex statement boundary: mocked and versioned store
+    # nodes do not all expose an address child uniformly.
+    try:
+        address = statement.addr
+    except AttributeError:
+        address = None
+    address_reads = (
+        frozenset()
+        if address is None
+        else _read_temporaries_8616(address)
+    )
+    return (
+        data_reads | address_reads
+        if data_reads is not None and address_reads is not None
+        else None
+    )
+
+
+def _statement_reads_8616(statement: DynamicValue) -> frozenset[int] | None:
+    """Return the temporaries one statement reads, decoding its tag."""
+    reads = _read_temporaries_8616(statement)
+    if reads is not None:
+        return reads
+    try:
+        tag = statement.tag
+    except AttributeError:
+        return None
+    if tag == "Ist_IMark":
+        return frozenset()
+    if tag == "Ist_WrTmp":
+        return _read_temporaries_8616(statement.data)
+    if tag == "Ist_Store":
+        return _store_reads_8616(statement)
+    return None
+
+
 def _producer_consumers_8616(
     vex: DynamicValue,
     statements: tuple[DynamicValue, ...],
@@ -250,34 +324,7 @@ def _producer_consumers_8616(
     """Index every VEX temporary consumer, including the IRSB next expression."""
     consumers: dict[int, set[int]] = {}
     for index, statement in enumerate(statements):
-        reads = _read_temporaries_8616(statement)
-        if reads is None:
-            try:
-                tag = statement.tag
-            except AttributeError:
-                return None
-            if tag == "Ist_IMark":
-                reads = frozenset()
-            elif tag == "Ist_WrTmp":
-                reads = _read_temporaries_8616(statement.data)
-            elif tag == "Ist_Store":
-                data_reads = _read_temporaries_8616(statement.data)
-                # Dynamic pyvex statement boundary: mocked and versioned store
-                # nodes do not all expose an address child uniformly.
-                try:
-                    address = statement.addr
-                except AttributeError:
-                    address = None
-                address_reads = (
-                    frozenset()
-                    if address is None
-                    else _read_temporaries_8616(address)
-                )
-                reads = (
-                    data_reads | address_reads
-                    if data_reads is not None and address_reads is not None
-                    else None
-                )
+        reads = _statement_reads_8616(statement)
         if reads is None:
             return None
         for temporary in reads:
@@ -327,6 +374,48 @@ def _finalize_8616(
     return result
 
 
+def _store_reason_8616(
+    statements: tuple[DynamicValue, ...],
+    owners: tuple[int | None, ...],
+    imark_counts: dict[int, int],
+    callsite_addr: int,
+    store_index: int,
+) -> _Reason8616 | None:
+    """Return the typed refusal for one store index, or None when exact."""
+    if imark_counts.get(callsite_addr, 0) != 1:
+        return _Reason8616.IMARK_NOT_EXACT
+    if not 0 <= store_index < len(statements):
+        return _Reason8616.STORE_NOT_EXACT
+    try:
+        exact_store = statements[store_index].tag == "Ist_Store" and owners[store_index] == callsite_addr
+    except AttributeError:
+        exact_store = False
+    return None if exact_store else _Reason8616.STORE_NOT_EXACT
+
+
+def _non_frame_producers_8616(
+    statements: tuple[DynamicValue, ...],
+    producer_indices: set[int],
+    consumers: dict[int, frozenset[int]] | None,
+    allowed_consumer_indices: set[int],
+) -> set[int]:
+    """Return producers whose temporary escapes the allowed consumer set."""
+    non_frame_producers: set[int] = set()
+    for producer_index in producer_indices:
+        try:
+            temporary = statements[producer_index].tmp
+        except (AttributeError, IndexError):
+            non_frame_producers.add(producer_index)
+            continue
+        if (
+            consumers is None
+            or not _is_int_8616(temporary)
+            or not consumers.get(temporary, frozenset()).issubset(allowed_consumer_indices)
+        ):
+            non_frame_producers.add(producer_index)
+    return non_frame_producers
+
+
 def collect_call_return_frame_store_projections_8616(
     vex: object,
     *,
@@ -346,18 +435,9 @@ def collect_call_return_frame_store_projections_8616(
     refusals: list[CallReturnFrameProjectionRefusal8616] = []
     for store_index in store_indices:
         store_key = CallReturnFrameEffectKey8616(callsite_addr, vex_block_addr, store_index)
-        reason: _Reason8616 | None = None
-        if imark_counts.get(callsite_addr, 0) != 1:
-            reason = _Reason8616.IMARK_NOT_EXACT
-        elif not 0 <= store_index < len(statements):
-            reason = _Reason8616.STORE_NOT_EXACT
-        else:
-            try:
-                exact_store = statements[store_index].tag == "Ist_Store" and owners[store_index] == callsite_addr
-            except AttributeError:
-                exact_store = False
-            if not exact_store:
-                reason = _Reason8616.STORE_NOT_EXACT
+        reason = _store_reason_8616(
+            statements, owners, imark_counts, callsite_addr, store_index,
+        )
         if reason is not None:
             refusals.append(CallReturnFrameProjectionRefusal8616(store_key, reason, ()))
             continue
@@ -384,19 +464,9 @@ def collect_call_return_frame_store_projections_8616(
     }
     allowed_consumer_indices = producer_indices | set(dependencies)
     consumers = _producer_consumers_8616(cast(DynamicValue, vex), statements)
-    non_frame_producers: set[int] = set()
-    for producer_index in producer_indices:
-        try:
-            temporary = statements[producer_index].tmp
-        except (AttributeError, IndexError):
-            non_frame_producers.add(producer_index)
-            continue
-        if (
-            consumers is None
-            or not _is_int_8616(temporary)
-            or not consumers.get(temporary, frozenset()).issubset(allowed_consumer_indices)
-        ):
-            non_frame_producers.add(producer_index)
+    non_frame_producers = _non_frame_producers_8616(
+        statements, producer_indices, consumers, allowed_consumer_indices,
+    )
 
     producer_facts: list[CallReturnFrameProjectionFact8616] = []
     normalized_count = 0

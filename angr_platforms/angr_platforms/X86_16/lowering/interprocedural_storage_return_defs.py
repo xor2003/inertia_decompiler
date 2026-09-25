@@ -181,18 +181,13 @@ def resolve_call_output_definitions_8616(
     )
 
 
-def resolve_storage_call_output_definitions_8616(
+def _validated_call_gate_8616(
     artifact: SSAFunctionArtifact,
     caller_addr: int,
     callsite_addr: int,
-    callee_addr: int,
-    accepted_target_addrs: tuple[int, ...],
-    output_storages: tuple[StorageIdentity8616, ...],
-    *,
-    project: object | None = None,
-) -> CallOutputDefinitionResult8616:
-    """Bind exact register or addressed storage outputs to one typed CALL."""
-    raw_count = len(output_storages)
+    raw_count: int,
+) -> tuple[int, int, IRInstr] | CallOutputDefinitionResult8616:
+    """Return the single proven CALL site or a typed refusal result."""
     if artifact.function_addr != caller_addr:
         return _refused_result_8616(
             CallOutputDefinitionVerdict8616.CONFLICT,
@@ -225,26 +220,57 @@ def resolve_storage_call_output_definitions_8616(
             CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
             raw_count,
         )
-    target = instruction.args[0]
-    if target.space is not MemSpace.CONST or not isinstance(target.const, int):
-        return _refused_result_8616(
-            CallOutputDefinitionVerdict8616.UNKNOWN_REFUSE,
-            CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
-            raw_count,
-        )
+    return block_addr, instr_index, instruction
+
+
+def _call_target_match_8616(
+    target_const: int,
+    accepted_target_addrs: tuple[int, ...],
+    project: object | None,
+) -> bool:
+    """Return whether the constant callee matches accepted target evidence."""
     targets = frozenset(
         address
         for address in accepted_target_addrs
         if isinstance(address, int) and not isinstance(address, bool)
     )
-    target_matches = target.const in targets or (
+    if not targets:
+        return False
+    return target_const in targets or (
         project is not None
         and any(
-            x86_16_call_targets_equivalent_8616(project, target.const, accepted)
+            x86_16_call_targets_equivalent_8616(project, target_const, accepted)
             for accepted in targets
         )
     )
-    if not targets or not target_matches:
+
+
+def resolve_storage_call_output_definitions_8616(
+    artifact: SSAFunctionArtifact,
+    caller_addr: int,
+    callsite_addr: int,
+    callee_addr: int,
+    accepted_target_addrs: tuple[int, ...],
+    output_storages: tuple[StorageIdentity8616, ...],
+    *,
+    project: object | None = None,
+) -> CallOutputDefinitionResult8616:
+    """Bind exact register or addressed storage outputs to one typed CALL."""
+    raw_count = len(output_storages)
+    gate = _validated_call_gate_8616(artifact, caller_addr, callsite_addr, raw_count)
+    if isinstance(gate, CallOutputDefinitionResult8616):
+        return gate
+    block_addr, instr_index, instruction = gate
+    target = instruction.args[0]
+    if not isinstance(target, IRValue) or target.space is not MemSpace.CONST or not isinstance(
+        target.const, int
+    ):
+        return _refused_result_8616(
+            CallOutputDefinitionVerdict8616.UNKNOWN_REFUSE,
+            CallOutputDefinitionFailure8616.CALL_TARGET_UNKNOWN,
+            raw_count,
+        )
+    if not _call_target_match_8616(target.const, accepted_target_addrs, project):
         return _refused_result_8616(
             CallOutputDefinitionVerdict8616.CONFLICT,
             CallOutputDefinitionFailure8616.CALL_TARGET_CONFLICT,

@@ -31,18 +31,21 @@ from .terminal_pointer_output_contracts import (
 )
 
 
+def _stable_proven_address_8616(address: IRAddress) -> bool:
+    """Return whether one address is a stable proven DS/ES store target."""
+    return (
+        address.space in {MemSpace.DS, MemSpace.ES}
+        and address.status is AddressStatus.STABLE
+        and address.segment_origin is SegmentOrigin.PROVEN
+        and address.size > 0
+    )
+
+
 def _pointer_address_8616(
     address: IRAddress,
 ) -> tuple[PointerOutputKey8616, IRValue] | None:
     """Return one exact stable DS/ES address with one versioned register base."""
-    if (
-        address.space not in {MemSpace.DS, MemSpace.ES}
-        or address.status is not AddressStatus.STABLE
-        or address.segment_origin is not SegmentOrigin.PROVEN
-        or address.size <= 0
-        or len(address.base) != 1
-        or len(address.base_values) != 1
-    ):
+    if not _stable_proven_address_8616(address) or len(address.base) != 1 or len(address.base_values) != 1:
         return None
     base_value = address.base_values[0]
     if (
@@ -257,6 +260,64 @@ def _store_may_alias_candidates_8616(
     return False
 
 
+def _grouped_pointer_sites_8616(
+    artifact: SSAFunctionArtifact,
+    reachable: set[int],
+) -> tuple[
+    dict[PointerOutputKey8616, tuple[IRAddress, IRValue, list[TerminalPointerStoreSite8616]]],
+    list[tuple[int, int, IRInstr]],
+    set[tuple[int, int]],
+]:
+    """Group proven pointer-store sites and census every reachable STORE."""
+    grouped: dict[
+        PointerOutputKey8616,
+        tuple[IRAddress, IRValue, list[TerminalPointerStoreSite8616]],
+    ] = {}
+    all_stores: list[tuple[int, int, IRInstr]] = []
+    pointer_sites: set[tuple[int, int]] = set()
+    for block in artifact.blocks:
+        if block.addr not in reachable:
+            continue
+        for instr_index, instruction in enumerate(block.instrs):
+            if instruction.op != "STORE":
+                continue
+            all_stores.append((block.addr, instr_index, instruction))
+            pointer = _pointer_store_8616(block.addr, instr_index, instruction)
+            if pointer is None:
+                continue
+            pointer_sites.add((block.addr, instr_index))
+            key, address, base_value, site = pointer
+            grouped.setdefault(key, (address, base_value, []))[2].append(site)
+    return grouped, all_stores, pointer_sites
+
+
+def _pointer_output_facts_8616(
+    grouped: dict[PointerOutputKey8616, tuple[IRAddress, IRValue, list[TerminalPointerStoreSite8616]]],
+    keys: tuple[PointerOutputKey8616, ...],
+    must_write: frozenset[PointerOutputKey8616],
+    terminals: tuple[int, ...],
+    definite_terminals: dict[PointerOutputKey8616, tuple[int, ...]],
+) -> tuple[TerminalPointerOutputFact8616, ...]:
+    """Materialize one dispositioned pointer-output fact per proven key."""
+    return tuple(
+        TerminalPointerOutputFact8616(
+            address=grouped[key][0],
+            base_value=grouped[key][1],
+            disposition=(
+                TerminalPointerOutputDisposition8616.MUST_WRITE
+                if key in must_write
+                else TerminalPointerOutputDisposition8616.CONDITIONAL
+            ),
+            store_sites=tuple(
+                sorted(grouped[key][2], key=lambda site: (site.block_addr, site.instr_index))
+            ),
+            terminal_block_addrs=terminals,
+            definitely_written_terminal_block_addrs=definite_terminals[key],
+        )
+        for key in keys
+    )
+
+
 def collect_terminal_pointer_output_evidence_8616(
     project: object,
     artifact: SSAFunctionArtifact,
@@ -278,25 +339,7 @@ def collect_terminal_pointer_output_evidence_8616(
             raise RuntimeError("incomplete pointer-output CFG refusal")
         return _refused_8616(artifact, failure, len(all_candidates))
 
-    grouped: dict[
-        PointerOutputKey8616,
-        tuple[IRAddress, IRValue, list[TerminalPointerStoreSite8616]],
-    ] = {}
-    all_stores: list[tuple[int, int, IRInstr]] = []
-    pointer_sites: set[tuple[int, int]] = set()
-    for block in artifact.blocks:
-        if block.addr not in reachable:
-            continue
-        for instr_index, instruction in enumerate(block.instrs):
-            if instruction.op != "STORE":
-                continue
-            all_stores.append((block.addr, instr_index, instruction))
-            pointer = _pointer_store_8616(block.addr, instr_index, instruction)
-            if pointer is None:
-                continue
-            pointer_sites.add((block.addr, instr_index))
-            key, address, base_value, site = pointer
-            grouped.setdefault(key, (address, base_value, []))[2].append(site)
+    grouped, all_stores, pointer_sites = _grouped_pointer_sites_8616(artifact, reachable)
     if not grouped:
         return TerminalPointerOutputEvidence8616(
             artifact.function_addr, (), None, TerminalPointerOutputStats8616()
@@ -319,23 +362,7 @@ def collect_terminal_pointer_output_evidence_8616(
         return _refused_8616(
             artifact, TerminalPointerOutputFailure8616.TERMINAL_NOT_RETURN, len(keys), len(keys)
         )
-    facts = tuple(
-        TerminalPointerOutputFact8616(
-            address=grouped[key][0],
-            base_value=grouped[key][1],
-            disposition=(
-                TerminalPointerOutputDisposition8616.MUST_WRITE
-                if key in must_write
-                else TerminalPointerOutputDisposition8616.CONDITIONAL
-            ),
-            store_sites=tuple(
-                sorted(grouped[key][2], key=lambda site: (site.block_addr, site.instr_index))
-            ),
-            terminal_block_addrs=terminals,
-            definitely_written_terminal_block_addrs=definite_terminals[key],
-        )
-        for key in keys
-    )
+    facts = _pointer_output_facts_8616(grouped, keys, must_write, terminals, definite_terminals)
     count = len(facts)
     return TerminalPointerOutputEvidence8616(
         artifact.function_addr,

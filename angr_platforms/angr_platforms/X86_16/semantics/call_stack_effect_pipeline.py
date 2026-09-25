@@ -234,18 +234,19 @@ def build_semantic_function_ssa_8616(
     return effects, outputs, build_x86_16_function_ssa(outputs.function)
 
 
-def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> bool:
-    """Replace raw function SSA with the Semantics-enriched production artifact."""
-    boundary = cast(_CodegenBoundary8616, codegen)
+def _proven_source_ir_8616(
+    boundary: _CodegenBoundary8616,
+) -> tuple[_CFunctionBoundary8616, IRFunctionArtifact, IRFunctionArtifact] | None:
+    """Return the proven cfunc/raw/source IR triple, or None."""
     try:
         cfunc = boundary.cfunc
         raw_ir = boundary._inertia_vex_ir_artifact
     except AttributeError:
-        return False
+        return None
     if cfunc is None or not isinstance(cfunc.addr, int):
-        return False
+        return None
     if not isinstance(raw_ir, IRFunctionArtifact) or raw_ir.function_addr != cfunc.addr:
-        return False
+        return None
     try:
         source_ir = boundary._inertia_raw_vex_ir_artifact_8616
     except AttributeError:
@@ -254,14 +255,16 @@ def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> bo
         except AttributeError:
             source_ir = raw_ir
     if not isinstance(source_ir, IRFunctionArtifact) or source_ir.function_addr != cfunc.addr:
-        return False
-    project_boundary = cast(_ProjectBoundary8616, project)
-    try:
-        function = project_boundary.kb.functions.function(addr=cfunc.addr, create=False)
-    except (AttributeError, KeyError, TypeError):
-        return False
-    if function is None:
-        return False
+        return None
+    return cfunc, raw_ir, source_ir
+
+
+def _reusable_projection_8616(
+    boundary: _CodegenBoundary8616,
+    source_ir: IRFunctionArtifact,
+    raw_ir: IRFunctionArtifact,
+) -> bool:
+    """Return whether the cached Semantics projection still matches codegen."""
     try:
         existing_projection = boundary._inertia_call_semantic_projection_8616
         existing_stage = boundary._inertia_vex_ir_function_ssa_stage_8616
@@ -279,36 +282,52 @@ def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> bo
                 "cached call Semantics projection has incomplete evidence accounting",
                 layer="semantics",
             )
-        return False
-    effects, outputs, function_ssa = build_semantic_function_ssa_8616(
+        return True
+    return False
+
+
+def _published_function_ssa_8616(
+    project: object,
+    function_ssa: SSAFunctionArtifact,
+    outputs: CallOutputArtifact8616,
+    function_addr: int,
+) -> SSAFunctionArtifact:
+    """Publish the SSA artifact to the project registry when unrefused."""
+    if outputs.function.refusals:
+        return function_ssa
+    publication = publish_function_ssa_artifact_8616(
         project,
-        function,
-        ir_artifact=source_ir,
+        function_ssa,
+        FunctionSSAArtifactStage8616.SEMANTIC,
     )
-    if not outputs.function.refusals:
-        publication = publish_function_ssa_artifact_8616(
-            project,
-            function_ssa,
-            FunctionSSAArtifactStage8616.SEMANTIC,
+    if (
+        publication.verdict is not FunctionSSAArtifactVerdict8616.PROVEN
+        or publication.artifact is None
+    ):
+        raise PipelineHardError(
+            "Semantics function SSA conflicts with the project registry",
+            layer="semantics",
+            details={
+                "function_addr": function_addr,
+                "failure": None
+                if publication.failure is None
+                else publication.failure.value,
+                "stage": None
+                if publication.stage is None
+                else publication.stage.value,
+            },
         )
-        if (
-            publication.verdict is not FunctionSSAArtifactVerdict8616.PROVEN
-            or publication.artifact is None
-        ):
-            raise PipelineHardError(
-                "Semantics function SSA conflicts with the project registry",
-                layer="semantics",
-                details={
-                    "function_addr": cfunc.addr,
-                    "failure": None
-                    if publication.failure is None
-                    else publication.failure.value,
-                    "stage": None
-                    if publication.stage is None
-                    else publication.stage.value,
-                },
-            )
-        function_ssa = publication.artifact
+    return publication.artifact
+
+
+def _publish_semantic_artifacts_8616(
+    boundary: _CodegenBoundary8616,
+    source_ir: IRFunctionArtifact,
+    effects: CallStackEffectArtifact8616,
+    outputs: CallOutputArtifact8616,
+    function_ssa: SSAFunctionArtifact,
+) -> None:
+    """Publish all Semantics artifacts onto the codegen boundary."""
     boundary._inertia_vex_ir_artifact = outputs.function
     boundary._inertia_vex_ir_summary = outputs.function.summary
     boundary._inertia_vex_ir_function_ssa = function_ssa
@@ -323,6 +342,15 @@ def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> bo
         outputs,
         function_ssa,
     )
+
+
+def _record_function_info_8616(
+    function: object,
+    outputs: CallOutputArtifact8616,
+    effects: CallStackEffectArtifact8616,
+    function_ssa: SSAFunctionArtifact,
+) -> None:
+    """Mirror Semantics artifacts into the function's info dict."""
     typed_function = cast(_FunctionBoundary8616, function)
     try:
         info: dict[str, object] | None = typed_function.info
@@ -337,6 +365,32 @@ def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> bo
         )
         info["x86_16_call_stack_effects"] = effects.to_dict()
         info["x86_16_call_outputs"] = outputs.to_dict()
+
+
+def apply_x86_16_call_stack_effects_8616(project: object, codegen: object) -> bool:
+    """Replace raw function SSA with the Semantics-enriched production artifact."""
+    boundary = cast(_CodegenBoundary8616, codegen)
+    proven = _proven_source_ir_8616(boundary)
+    if proven is None:
+        return False
+    cfunc, raw_ir, source_ir = proven
+    project_boundary = cast(_ProjectBoundary8616, project)
+    try:
+        function = project_boundary.kb.functions.function(addr=cfunc.addr, create=False)
+    except (AttributeError, KeyError, TypeError):
+        return False
+    if function is None:
+        return False
+    if _reusable_projection_8616(boundary, source_ir, raw_ir):
+        return False
+    effects, outputs, function_ssa = build_semantic_function_ssa_8616(
+        project,
+        function,
+        ir_artifact=source_ir,
+    )
+    function_ssa = _published_function_ssa_8616(project, function_ssa, outputs, cfunc.addr)
+    _publish_semantic_artifacts_8616(boundary, source_ir, effects, outputs, function_ssa)
+    _record_function_info_8616(function, outputs, effects, function_ssa)
     return False
 
 

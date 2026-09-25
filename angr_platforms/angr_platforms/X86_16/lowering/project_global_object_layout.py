@@ -88,6 +88,70 @@ class FunctionRangeView8616:
     size: int
 
 
+def _program_selections_8616(
+    evidence_project: object,
+    ranges: tuple[object, ...],
+) -> list[IndexedAliasFunctionSelection8616]:
+    """Resolve validated function-range bounds into alias selections."""
+    selections: list[IndexedAliasFunctionSelection8616] = []
+    for bounds in ranges:
+        if (
+            not isinstance(bounds, tuple)
+            or len(bounds) != 2
+            or not isinstance(bounds[0], int)
+            or not isinstance(bounds[1], int)
+            or bounds[1] <= bounds[0]
+        ):
+            raise TypeError(
+                "project function ranges contain an invalid (start, end) pair"
+            )
+        try:
+            function = cast(
+                _EvidenceProject8616,
+                evidence_project,
+            ).kb.functions.function(
+                addr=bounds[0],
+                create=False,
+            )
+        except (AttributeError, KeyError, TypeError):
+            function = None
+        selections.append(
+            IndexedAliasFunctionSelection8616(bounds[0], function)
+        )
+    return selections
+
+
+def _indexed_alias_program_8616(
+    surface: _ProjectGlobalObjectLayoutSurface8616,
+    evidence_project: object,
+    project: object,
+    ranges: tuple[object, ...],
+) -> IndexedAliasProgramEvidence8616:
+    """Return cached or freshly built indexed-alias program evidence."""
+    try:
+        program = surface._inertia_indexed_alias_program_evidence_8616
+    except AttributeError:
+        program = None
+    if (
+        not isinstance(program, IndexedAliasProgramEvidence8616)
+        and evidence_project is not project
+    ):
+        try:
+            program = cast(
+                _ProjectGlobalObjectLayoutSurface8616,
+                evidence_project,
+            )._inertia_indexed_alias_program_evidence_8616
+        except AttributeError:
+            program = None
+    if not isinstance(program, IndexedAliasProgramEvidence8616):
+        program = build_indexed_alias_program_evidence_8616(
+            evidence_project,
+            _program_selections_8616(evidence_project, ranges),
+        )
+        surface._inertia_indexed_alias_program_evidence_8616 = program
+    return program
+
+
 def collect_project_global_object_layout_evidence_8616(
     project: object,
 ) -> GlobalObjectLayoutEvidence8616:
@@ -112,52 +176,7 @@ def collect_project_global_object_layout_evidence_8616(
     except AttributeError:
         evidence_project = project
 
-    try:
-        program = surface._inertia_indexed_alias_program_evidence_8616
-    except AttributeError:
-        program = None
-    if (
-        not isinstance(program, IndexedAliasProgramEvidence8616)
-        and evidence_project is not project
-    ):
-        try:
-            program = cast(
-                _ProjectGlobalObjectLayoutSurface8616,
-                evidence_project,
-            )._inertia_indexed_alias_program_evidence_8616
-        except AttributeError:
-            program = None
-    if not isinstance(program, IndexedAliasProgramEvidence8616):
-        selections: list[IndexedAliasFunctionSelection8616] = []
-        for bounds in ranges:
-            if (
-                not isinstance(bounds, tuple)
-                or len(bounds) != 2
-                or not isinstance(bounds[0], int)
-                or not isinstance(bounds[1], int)
-                or bounds[1] <= bounds[0]
-            ):
-                raise TypeError(
-                    "project function ranges contain an invalid (start, end) pair"
-                )
-            try:
-                function = cast(
-                    _EvidenceProject8616,
-                    evidence_project,
-                ).kb.functions.function(
-                    addr=bounds[0],
-                    create=False,
-                )
-            except (AttributeError, KeyError, TypeError):
-                function = None
-            selections.append(
-                IndexedAliasFunctionSelection8616(bounds[0], function)
-            )
-        program = build_indexed_alias_program_evidence_8616(
-            evidence_project,
-            selections,
-        )
-        surface._inertia_indexed_alias_program_evidence_8616 = program
+    program = _indexed_alias_program_8616(surface, evidence_project, project, ranges)
     result = recover_global_object_layout_evidence_8616(program)
     surface._inertia_project_global_object_layout_evidence_8616 = result
     return result

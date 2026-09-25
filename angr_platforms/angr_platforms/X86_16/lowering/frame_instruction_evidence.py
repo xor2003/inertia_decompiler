@@ -78,6 +78,74 @@ def _instruction_end_8616(value: object) -> int | None:
     return address + size if isinstance(address, int) and isinstance(size, int) and size > 0 else None
 
 
+def _entry_setup_end_8616(
+    instructions_by_addr: Mapping[int, object],
+    function_addr: int,
+) -> int | None:
+    """Prove the mandatory ``push bp; mov bp, sp`` entry; return setup end."""
+    push = _instruction_8616(instructions_by_addr.get(function_addr))
+    try:
+        push_id = push.id
+    except AttributeError:
+        return None
+    push_end = _instruction_end_8616(push)
+    if (
+        push_id != X86_INS_PUSH
+        or _instruction_registers_8616(push) != (X86_REG_BP,)
+        or push_end is None
+    ):
+        return None
+    frame_setup = _instruction_8616(instructions_by_addr.get(push_end))
+    try:
+        setup_id = frame_setup.id
+    except AttributeError:
+        return None
+    if setup_id != X86_INS_MOV or _instruction_registers_8616(frame_setup) != (
+        X86_REG_BP,
+        X86_REG_SP,
+    ):
+        return None
+    return push_end
+
+
+def _teardown_sequence_8616(
+    instructions_by_addr: Mapping[int, object],
+    raw_instruction: object,
+) -> tuple[int, int] | None:
+    """Return ``(pop_addr, ret_addr)`` for a contiguous teardown or None."""
+    instruction = _instruction_8616(raw_instruction)
+    try:
+        instruction_id = instruction.id
+    except AttributeError:
+        return None
+    if instruction_id != X86_INS_MOV or _instruction_registers_8616(instruction) != (
+        X86_REG_SP,
+        X86_REG_BP,
+    ):
+        return None
+    pop_addr = _instruction_end_8616(instruction)
+    if pop_addr is None:
+        return None
+    pop = _instruction_8616(instructions_by_addr.get(pop_addr))
+    try:
+        pop_id = pop.id
+    except AttributeError:
+        return None
+    if pop_id != X86_INS_POP or _instruction_registers_8616(pop) != (X86_REG_BP,):
+        return None
+    ret_addr = _instruction_end_8616(pop)
+    if ret_addr is None:
+        return None
+    ret = _instruction_8616(instructions_by_addr.get(ret_addr))
+    try:
+        ret_id = ret.id
+    except AttributeError:
+        return None
+    if ret_id != X86_INS_RET:
+        return None
+    return pop_addr, ret_addr
+
+
 def canonical_frame_instruction_addresses_8616(
     instructions_by_addr: Mapping[int, object],
     function_addr: int,
@@ -89,60 +157,17 @@ def canonical_frame_instruction_addresses_8616(
     prove that structured C contains a matching push or setup carrier before
     pruning.
     """
-    push = _instruction_8616(instructions_by_addr.get(function_addr))
-    try:
-        push_id = push.id
-    except AttributeError:
-        return frozenset()
-    push_end = _instruction_end_8616(push)
-    if (
-        push_id != X86_INS_PUSH
-        or _instruction_registers_8616(push) != (X86_REG_BP,)
-        or push_end is None
-    ):
-        return frozenset()
-    frame_setup = _instruction_8616(instructions_by_addr.get(push_end))
-    try:
-        setup_id = frame_setup.id
-    except AttributeError:
-        return frozenset()
-    if setup_id != X86_INS_MOV or _instruction_registers_8616(frame_setup) != (
-        X86_REG_BP,
-        X86_REG_SP,
-    ):
+    push_end = _entry_setup_end_8616(instructions_by_addr, function_addr)
+    if push_end is None:
         return frozenset()
 
     addresses = {function_addr, push_end}
     for address, raw_instruction in instructions_by_addr.items():
-        instruction = _instruction_8616(raw_instruction)
-        try:
-            instruction_id = instruction.id
-        except AttributeError:
-            continue
-        if instruction_id != X86_INS_MOV or _instruction_registers_8616(instruction) != (
-            X86_REG_SP,
-            X86_REG_BP,
-        ):
-            continue
-        pop_addr = _instruction_end_8616(instruction)
-        if pop_addr is None:
-            continue
-        pop = _instruction_8616(instructions_by_addr.get(pop_addr))
-        try:
-            pop_id = pop.id
-        except AttributeError:
-            continue
-        if pop_id != X86_INS_POP or _instruction_registers_8616(pop) != (X86_REG_BP,):
-            continue
-        ret_addr = _instruction_end_8616(pop)
-        if ret_addr is None:
-            continue
-        ret = _instruction_8616(instructions_by_addr.get(ret_addr))
-        try:
-            ret_id = ret.id
-        except AttributeError:
-            continue
-        if ret_id == X86_INS_RET:
+        teardown = _teardown_sequence_8616(
+            instructions_by_addr, _instruction_8616(raw_instruction)
+        )
+        if teardown is not None:
+            pop_addr, ret_addr = teardown
             addresses.update((address, pop_addr, ret_addr))
     return frozenset(addresses)
 

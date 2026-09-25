@@ -123,6 +123,131 @@ def _refusal_8616(
     )
 
 
+def _call_summary_gate_8616(
+    block: IRBlock,
+    instr_index: int,
+    instruction: IRInstr,
+    summaries: Mapping[int, CallsiteSummary8616],
+    address_counts: Counter[int],
+) -> CallsiteSummary8616 | CallOutputFact8616:
+    """Return the proven callsite summary or its early refusal fact."""
+    summary = summaries.get(instruction.addr) if instruction.addr is not None else None
+    if instruction.addr is None:
+        return _refusal_8616(
+            block.addr,
+            instr_index,
+            None,
+            summary,
+            CallOutputFailure8616.CALL_ADDRESS_MISSING,
+        )
+    if address_counts[instruction.addr] != 1:
+        return _refusal_8616(
+            block.addr,
+            instr_index,
+            instruction.addr,
+            summary,
+            CallOutputFailure8616.DUPLICATE_CALL_ADDRESS,
+        )
+    if summary is None:
+        return _refusal_8616(
+            block.addr,
+            instr_index,
+            instruction.addr,
+            None,
+            CallOutputFailure8616.SUMMARY_MISSING,
+        )
+    if summary.target_addr is None:
+        return _refusal_8616(
+            block.addr,
+            instr_index,
+            instruction.addr,
+            summary,
+            CallOutputFailure8616.TARGET_UNRESOLVED,
+        )
+    if callsite_machine_frame_kind_8616(summary) is None:
+        return _refusal_8616(
+            block.addr,
+            instr_index,
+            instruction.addr,
+            summary,
+            CallOutputFailure8616.FRAME_KIND_UNKNOWN,
+        )
+    if summary.return_used is None:
+        return _refusal_8616(
+            block.addr,
+            instr_index,
+            instruction.addr,
+            summary,
+            CallOutputFailure8616.RETURN_USE_UNKNOWN,
+        )
+    return summary
+
+
+def _call_shape_gate_8616(
+    block: IRBlock,
+    instr_index: int,
+    instruction: IRInstr,
+    summary: CallsiteSummary8616,
+    blocks: Mapping[int, IRBlock],
+    predecessors: Mapping[int, set[int]],
+) -> CallOutputShape8616 | CallOutputFact8616:
+    """Return the proven output shape, a no-output fact, or a refusal fact."""
+    if summary.return_used is False:
+        return CallOutputFact8616(
+            block.addr,
+            instr_index,
+            instruction.addr,
+            summary.target_addr,
+            summary.return_addr,
+            None,
+            (),
+            CallOutputVerdict8616.PROVEN,
+            None,
+        )
+    shape = _shape_8616(summary)
+    if shape is None:
+        return _refusal_8616(
+            block.addr,
+            instr_index,
+            instruction.addr,
+            summary,
+            CallOutputFailure8616.RETURN_SHAPE_UNKNOWN,
+        )
+    if instr_index != len(block.instrs) - 1:
+        return _refusal_8616(
+            block.addr,
+            instr_index,
+            instruction.addr,
+            summary,
+            CallOutputFailure8616.CALL_NOT_TERMINAL,
+        )
+    if summary.return_addr is None or summary.return_addr not in blocks:
+        return _refusal_8616(
+            block.addr,
+            instr_index,
+            instruction.addr,
+            summary,
+            CallOutputFailure8616.RETURN_BLOCK_MISSING,
+        )
+    if block.successor_addrs != (summary.return_addr,):
+        return _refusal_8616(
+            block.addr,
+            instr_index,
+            instruction.addr,
+            summary,
+            CallOutputFailure8616.RETURN_EDGE_MISMATCH,
+        )
+    if predecessors[summary.return_addr] != {block.addr}:
+        return _refusal_8616(
+            block.addr,
+            instr_index,
+            instruction.addr,
+            summary,
+            CallOutputFailure8616.RETURN_BLOCK_HAS_OTHER_PREDECESSOR,
+        )
+    return shape
+
+
 def materialize_call_outputs_8616(
     artifact: IRFunctionArtifact,
     summaries: Mapping[int, CallsiteSummary8616],
@@ -146,144 +271,32 @@ def materialize_call_outputs_8616(
     injections: dict[int, tuple[IRInstr, ...]] = {}
     facts: list[CallOutputFact8616] = []
     for block, instr_index, instruction in calls:
-        summary = summaries.get(instruction.addr) if instruction.addr is not None else None
-        if instruction.addr is None:
-            facts.append(
-                _refusal_8616(
-                    block.addr,
-                    instr_index,
-                    None,
-                    summary,
-                    CallOutputFailure8616.CALL_ADDRESS_MISSING,
-                )
-            )
+        gated_summary = _call_summary_gate_8616(
+            block,
+            instr_index,
+            instruction,
+            summaries,
+            address_counts,
+        )
+        if isinstance(gated_summary, CallOutputFact8616):
+            facts.append(gated_summary)
             continue
-        if address_counts[instruction.addr] != 1:
-            facts.append(
-                _refusal_8616(
-                    block.addr,
-                    instr_index,
-                    instruction.addr,
-                    summary,
-                    CallOutputFailure8616.DUPLICATE_CALL_ADDRESS,
-                )
-            )
+        summary = gated_summary
+        assert instruction.addr is not None
+        gated_shape = _call_shape_gate_8616(
+            block,
+            instr_index,
+            instruction,
+            summary,
+            blocks,
+            predecessors,
+        )
+        if isinstance(gated_shape, CallOutputFact8616):
+            facts.append(gated_shape)
             continue
-        if summary is None:
-            facts.append(
-                _refusal_8616(
-                    block.addr,
-                    instr_index,
-                    instruction.addr,
-                    None,
-                    CallOutputFailure8616.SUMMARY_MISSING,
-                )
-            )
-            continue
-        if summary.target_addr is None:
-            facts.append(
-                _refusal_8616(
-                    block.addr,
-                    instr_index,
-                    instruction.addr,
-                    summary,
-                    CallOutputFailure8616.TARGET_UNRESOLVED,
-                )
-            )
-            continue
-        if callsite_machine_frame_kind_8616(summary) is None:
-            facts.append(
-                _refusal_8616(
-                    block.addr,
-                    instr_index,
-                    instruction.addr,
-                    summary,
-                    CallOutputFailure8616.FRAME_KIND_UNKNOWN,
-                )
-            )
-            continue
-        if summary.return_used is None:
-            facts.append(
-                _refusal_8616(
-                    block.addr,
-                    instr_index,
-                    instruction.addr,
-                    summary,
-                    CallOutputFailure8616.RETURN_USE_UNKNOWN,
-                )
-            )
-            continue
-        if summary.return_used is False:
-            facts.append(
-                CallOutputFact8616(
-                    block.addr,
-                    instr_index,
-                    instruction.addr,
-                    summary.target_addr,
-                    summary.return_addr,
-                    None,
-                    (),
-                    CallOutputVerdict8616.PROVEN,
-                    None,
-                )
-            )
-            continue
-        shape = _shape_8616(summary)
-        if shape is None:
-            facts.append(
-                _refusal_8616(
-                    block.addr,
-                    instr_index,
-                    instruction.addr,
-                    summary,
-                    CallOutputFailure8616.RETURN_SHAPE_UNKNOWN,
-                )
-            )
-            continue
-        if instr_index != len(block.instrs) - 1:
-            facts.append(
-                _refusal_8616(
-                    block.addr,
-                    instr_index,
-                    instruction.addr,
-                    summary,
-                    CallOutputFailure8616.CALL_NOT_TERMINAL,
-                )
-            )
-            continue
-        if summary.return_addr is None or summary.return_addr not in blocks:
-            facts.append(
-                _refusal_8616(
-                    block.addr,
-                    instr_index,
-                    instruction.addr,
-                    summary,
-                    CallOutputFailure8616.RETURN_BLOCK_MISSING,
-                )
-            )
-            continue
-        if block.successor_addrs != (summary.return_addr,):
-            facts.append(
-                _refusal_8616(
-                    block.addr,
-                    instr_index,
-                    instruction.addr,
-                    summary,
-                    CallOutputFailure8616.RETURN_EDGE_MISMATCH,
-                )
-            )
-            continue
-        if predecessors[summary.return_addr] != {block.addr}:
-            facts.append(
-                _refusal_8616(
-                    block.addr,
-                    instr_index,
-                    instruction.addr,
-                    summary,
-                    CallOutputFailure8616.RETURN_BLOCK_HAS_OTHER_PREDECESSOR,
-                )
-            )
-            continue
+        shape = gated_shape
+        assert summary.return_addr is not None
+        assert summary.target_addr is not None
         outputs = _output_values_8616(shape, instruction.addr, summary.target_addr)
         injections[summary.return_addr] = tuple(
             IRInstr(

@@ -216,6 +216,143 @@ def _retire_declaration_only_frame_locals_8616(
                 mapping.pop(variable, None)
 
 
+@dataclass(frozen=True, slots=True)
+class _CallReturnFrameIndex8616:
+    """By-key effect/projection groupings plus refused producer keys."""
+
+    effects_by_key: dict[CallReturnFrameEffectKey8616, list[CallReturnFrameEffectRole8616]]
+    projections_by_key: dict[
+        CallReturnFrameEffectKey8616,
+        list[CallReturnFrameProjectionFact8616],
+    ]
+    refused_keys: set[CallReturnFrameEffectKey8616]
+
+
+def _prune_inputs_8616(
+    project: object,
+    surface: _CodegenSurface8616,
+    function: object | None,
+) -> tuple[object, dict[int, CallsiteSummary8616], object, dict[int, int]] | None:
+    """Return validated (root, summaries, function, return_addrs) or None."""
+    try:
+        root = surface.cfunc.statements
+        summaries = surface._inertia_callsite_summaries
+    except AttributeError:
+        return None
+    if not isinstance(summaries, dict) or any(
+        not isinstance(key, int) or not isinstance(summary, CallsiteSummary8616)
+        for key, summary in summaries.items()
+    ):
+        raise TypeError("callsite summary carrier contains an invalid owned contract")
+    active_function = function or _function_for_codegen_8616(project, surface.cfunc)
+    return_addrs = _return_addresses_by_callsite_8616(summaries)
+    if active_function is None or not return_addrs:
+        return None
+    return root, summaries, active_function, return_addrs
+
+
+def _effect_index_8616(
+    collection: CallReturnFrameEffectCollection8616,
+) -> _CallReturnFrameIndex8616:
+    """Group effects and projections by key plus refused producer keys."""
+    effects_by_key: dict[CallReturnFrameEffectKey8616, list[CallReturnFrameEffectRole8616]] = {}
+    for effect in collection.effects:
+        effects_by_key.setdefault(effect.key, []).append(effect.role)
+    projections_by_key: dict[
+        CallReturnFrameEffectKey8616,
+        list[CallReturnFrameProjectionFact8616],
+    ] = {}
+    for projection in collection.projection_collection.projections:
+        projections_by_key.setdefault(projection.projection_key, []).append(projection)
+    refused_keys = {
+        producer_key
+        for refusal in collection.projection_collection.refusals
+        for producer_key in refusal.producer_keys
+    }
+    return _CallReturnFrameIndex8616(effects_by_key, projections_by_key, refused_keys)
+
+
+def _relation_exact_8616(
+    key: CallReturnFrameEffectKey8616,
+    projection: CallReturnFrameProjectionFact8616,
+    effects_by_key: dict[CallReturnFrameEffectKey8616, list[CallReturnFrameEffectRole8616]],
+) -> bool:
+    """Return whether the projection joins the argument to one stack store."""
+    store_roles = tuple(effects_by_key.get(projection.store_key, ()))
+    if (
+        projection.projection_key != key
+        or projection.store_key.callsite_addr != key.callsite_addr
+        or len(store_roles) != 1
+        or store_roles[0] is not CallReturnFrameEffectRole8616.STACK_STORE
+    ):
+        return False
+    return (
+        (
+            projection.role is CallReturnFrameProjectionRole8616.STORE_STATEMENT
+            and projection.projection_key == projection.store_key
+        )
+        or (
+            projection.role is CallReturnFrameProjectionRole8616.VALUE_PRODUCER
+            and projection.projection_key != projection.store_key
+        )
+    )
+
+
+@dataclass(slots=True)
+class _CallReturnFramePruneScan8616:
+    """Per-node prune state: grouped evidence plus the owning stats."""
+
+    stats: CallReturnFrameArgumentPruneStats8616
+    index: _CallReturnFrameIndex8616
+    return_addrs: dict[int, int]
+    callsite_addr: object
+    summary: CallsiteSummary8616 | None
+
+    def keep_argument(self, argument: StructuredAstValue) -> bool:
+        """Return whether one argument survives the exact-store join."""
+        key = _expression_effect_key_8616(argument)
+        if key is None:
+            return True
+        projections = tuple(self.index.projections_by_key.get(key, ()))
+        if (
+            not projections
+            and key not in self.index.refused_keys
+            and key.callsite_addr not in self.return_addrs
+        ):
+            return True
+        self.stats.raw_fact_count += 1
+        if key in self.index.refused_keys or len(projections) != 1:
+            self.stats.failure_count += 1
+            return True
+        projection = projections[0]
+        if not _relation_exact_8616(key, projection, self.index.effects_by_key):
+            self.stats.failure_count += 1
+            return True
+        self.stats.normalized_fact_count += 1
+        if not self._callsite_consistent_8616(key, projection):
+            self.stats.failure_count += 1
+            return True
+        self.stats.classified_fact_count += 1
+        self.stats.materialized_count += 1
+        return False
+
+    def _callsite_consistent_8616(
+        self,
+        key: CallReturnFrameEffectKey8616,
+        projection: CallReturnFrameProjectionFact8616,
+    ) -> bool:
+        """Return whether the node callsite and summary agree exactly."""
+        return (
+            self.summary is not None
+            and isinstance(self.callsite_addr, int)
+            and key.callsite_addr == self.callsite_addr
+            and projection.store_key.callsite_addr == self.callsite_addr
+            and self.summary.callsite_addr == self.callsite_addr
+            and isinstance(self.summary.return_addr, int)
+            and self.return_addrs.get(self.callsite_addr) == self.summary.return_addr
+        )
+
+
 def prune_exact_call_return_frame_arguments_8616(
     project: object,
     codegen: object,
@@ -225,100 +362,32 @@ def prune_exact_call_return_frame_arguments_8616(
     """Remove C arguments joined to exact Semantics-owned CALL-frame stores."""
     surface = cast(_CodegenSurface8616, codegen)
     stats = CallReturnFrameArgumentPruneStats8616()
-    try:
-        root = surface.cfunc.statements
-        summaries = surface._inertia_callsite_summaries
-    except AttributeError:
+    inputs = _prune_inputs_8616(project, surface, function)
+    if inputs is None:
         return _empty_result_8616(surface, stats)
-    if not isinstance(summaries, dict) or any(
-        not isinstance(key, int) or not isinstance(summary, CallsiteSummary8616)
-        for key, summary in summaries.items()
-    ):
-        raise TypeError("callsite summary carrier contains an invalid owned contract")
-    active_function = function or _function_for_codegen_8616(project, surface.cfunc)
-    return_addrs = _return_addresses_by_callsite_8616(summaries)
-    if active_function is None or not return_addrs:
-        return _empty_result_8616(surface, stats)
+    root, summaries, active_function, return_addrs = inputs
     collection = collect_call_return_frame_effects_8616(
         project,
         active_function,
         return_addrs,
     )
     surface._inertia_call_return_frame_effect_collection_8616 = collection
-    projection_collection = collection.projection_collection
-    if not projection_collection.closed:
+    if not collection.projection_collection.closed:
         raise PipelineHardError("CALL-frame argument lowering received open projection evidence")
-    effects_by_key: dict[CallReturnFrameEffectKey8616, list[CallReturnFrameEffectRole8616]] = {}
-    for effect in collection.effects:
-        effects_by_key.setdefault(effect.key, []).append(effect.role)
-    projections_by_key: dict[
-        CallReturnFrameEffectKey8616,
-        list[CallReturnFrameProjectionFact8616],
-    ] = {}
-    for projection in projection_collection.projections:
-        projections_by_key.setdefault(projection.projection_key, []).append(projection)
-    refused_keys = {
-        producer_key
-        for refusal in projection_collection.refusals
-        for producer_key in refusal.producer_keys
-    }
+    index = _effect_index_8616(collection)
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, structured_c.CFunctionCall) or not node.args:
             continue
-        callsite_addr = structured_callsite_addr_8616(node)
-        summary = summaries.get(id(node))
-        retained: list[StructuredAstValue] = []
-        for argument in tuple(node.args):
-            key = _expression_effect_key_8616(argument)
-            if key is None:
-                retained.append(argument)
-                continue
-            projections = tuple(projections_by_key.get(key, ()))
-            if not projections and key not in refused_keys and key.callsite_addr not in return_addrs:
-                retained.append(argument)
-                continue
-            stats.raw_fact_count += 1
-            if key in refused_keys or len(projections) != 1:
-                stats.failure_count += 1
-                retained.append(argument)
-                continue
-            projection = projections[0]
-            store_roles = tuple(effects_by_key.get(projection.store_key, ()))
-            relation_is_exact = (
-                projection.projection_key == key
-                and projection.store_key.callsite_addr == key.callsite_addr
-                and len(store_roles) == 1
-                and store_roles[0] is CallReturnFrameEffectRole8616.STACK_STORE
-                and (
-                    (
-                        projection.role is CallReturnFrameProjectionRole8616.STORE_STATEMENT
-                        and projection.projection_key == projection.store_key
-                    )
-                    or (
-                        projection.role is CallReturnFrameProjectionRole8616.VALUE_PRODUCER
-                        and projection.projection_key != projection.store_key
-                    )
-                )
-            )
-            if not relation_is_exact:
-                stats.failure_count += 1
-                retained.append(argument)
-                continue
-            stats.normalized_fact_count += 1
-            if (
-                summary is None
-                or not isinstance(callsite_addr, int)
-                or key.callsite_addr != callsite_addr
-                or projection.store_key.callsite_addr != callsite_addr
-                or summary.callsite_addr != callsite_addr
-                or not isinstance(summary.return_addr, int)
-                or return_addrs.get(callsite_addr) != summary.return_addr
-            ):
-                stats.failure_count += 1
-                retained.append(argument)
-                continue
-            stats.classified_fact_count += 1
-            stats.materialized_count += 1
+        scan = _CallReturnFramePruneScan8616(
+            stats=stats,
+            index=index,
+            return_addrs=return_addrs,
+            callsite_addr=structured_callsite_addr_8616(node),
+            summary=summaries.get(id(node)),
+        )
+        retained = [
+            argument for argument in tuple(node.args) if scan.keep_argument(argument)
+        ]
         if len(retained) != len(node.args):
             node.args = retained
     if stats.classified_fact_count > 0 and stats.materialized_count == 0:

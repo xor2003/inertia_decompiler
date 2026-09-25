@@ -15,7 +15,7 @@ call itself may become redundant after fixed-frame recovery.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import (
@@ -233,54 +233,65 @@ def _masked_subregister_call_result_8616(
     if not isinstance(rhs, CBinaryOp) or rhs.op != "Or":
         return None
     for preserved, projected in ((rhs.lhs, rhs.rhs), (rhs.rhs, rhs.lhs)):
-        if not isinstance(preserved, CBinaryOp) or preserved.op != "And":
-            continue
-        if not isinstance(projected, CBinaryOp) or projected.op != "And":
-            continue
-        preserved_parts = (
-            (preserved.lhs, preserved.rhs)
-            if isinstance(preserved.rhs, CConstant)
-            else (preserved.rhs, preserved.lhs)
-        )
-        projected_parts = (
-            (projected.lhs, projected.rhs)
-            if isinstance(projected.rhs, CConstant)
-            else (projected.rhs, projected.lhs)
-        )
-        preserved_value, preserved_mask = preserved_parts
-        projected_value, projected_mask = projected_parts
-        if not isinstance(preserved_mask, CConstant) or not isinstance(projected_mask, CConstant):
-            continue
-        projection = _projected_call_result_8616(projected_value)
-        if projection is None or projection.residual is not None:
-            continue
-        destination_view = physical_register_view_8616(assignment.lhs)
-        preserved_view = physical_register_view_8616(preserved_value)
-        runtime_destination_view = runtime_gp_expression_view_8616(assignment.lhs)
-        runtime_preserved_view = runtime_gp_expression_view_8616(preserved_value)
-        if not (
-            (destination_view is not None and preserved_view == destination_view)
-            or (
-                runtime_destination_view is not None
-                and runtime_preserved_view == runtime_destination_view
-            )
-        ):
-            continue
-        if destination_view is not None:
-            destination_width = destination_view.width
-        elif runtime_destination_view is not None:
-            destination_width = runtime_destination_view.width
-        else:
-            continue
-        full_mask = (1 << (destination_width * 8)) - 1
-        preserved_bits = int(preserved_mask.value) & full_mask
-        projected_bits = int(projected_mask.value) & full_mask
-        if preserved_bits & projected_bits:
-            continue
-        if preserved_bits | projected_bits != full_mask:
-            continue
-        return projection
+        projection = _masked_orientation_8616(assignment, preserved, projected)
+        if projection is not None:
+            return projection
     return None
+
+
+def _masked_orientation_8616(
+    assignment: CAssignment,
+    preserved: object,
+    projected: object,
+) -> _ProjectedCallResult8616 | None:
+    """Prove one preserved/projected operand orientation of an Or-mask."""
+    if not isinstance(preserved, CBinaryOp) or preserved.op != "And":
+        return None
+    if not isinstance(projected, CBinaryOp) or projected.op != "And":
+        return None
+    preserved_parts = (
+        (preserved.lhs, preserved.rhs)
+        if isinstance(preserved.rhs, CConstant)
+        else (preserved.rhs, preserved.lhs)
+    )
+    projected_parts = (
+        (projected.lhs, projected.rhs)
+        if isinstance(projected.rhs, CConstant)
+        else (projected.rhs, projected.lhs)
+    )
+    preserved_value, preserved_mask = preserved_parts
+    projected_value, projected_mask = projected_parts
+    if not isinstance(preserved_mask, CConstant) or not isinstance(projected_mask, CConstant):
+        return None
+    projection = _projected_call_result_8616(projected_value)
+    if projection is None or projection.residual is not None:
+        return None
+    destination_view = physical_register_view_8616(assignment.lhs)
+    preserved_view = physical_register_view_8616(preserved_value)
+    runtime_destination_view = runtime_gp_expression_view_8616(assignment.lhs)
+    runtime_preserved_view = runtime_gp_expression_view_8616(preserved_value)
+    if not (
+        (destination_view is not None and preserved_view == destination_view)
+        or (
+            runtime_destination_view is not None
+            and runtime_preserved_view == runtime_destination_view
+        )
+    ):
+        return None
+    if destination_view is not None:
+        destination_width = destination_view.width
+    elif runtime_destination_view is not None:
+        destination_width = runtime_destination_view.width
+    else:
+        return None
+    full_mask = (1 << (destination_width * 8)) - 1
+    preserved_bits = int(preserved_mask.value) & full_mask
+    projected_bits = int(projected_mask.value) & full_mask
+    if preserved_bits & projected_bits:
+        return None
+    if preserved_bits | projected_bits != full_mask:
+        return None
+    return projection
 
 
 def _is_proven_unobserved_projected_result_8616(summary: CallsiteSummary8616) -> bool:
@@ -357,6 +368,106 @@ def _has_typed_void_interrupt_target_8616(
     )
 
 
+@dataclass(slots=True)
+class _UnobservedLowerScan8616:
+    """Mutable per-statement scan state for unobserved call-result lowering."""
+
+    boundary: _UnobservedResultCodegen8616
+    summaries: dict[int, CallsiteSummary8616]
+    c_result_contracts: dict[int, CallsiteCResultContract8616]
+    seen_assignments: set[int] = field(default_factory=set)
+    raw_fact_count: int = 0
+    normalized_fact_count: int = 0
+    classified_fact_count: int = 0
+    materialized_count: int = 0
+
+    def process_container(self, container: CStatements) -> None:
+        """Rewrite proven assignments inside one statement container."""
+        statements: list[object] = list(container.statements or ())
+        changed = False
+        for index, statement in enumerate(statements):
+            replacement = self._replacement_8616(statement)
+            if replacement is None:
+                continue
+            statements[index : index + 1] = replacement
+            self.materialized_count += 1
+            changed = True
+        if changed:
+            cast(Any, container).statements = statements
+
+    def _replacement_8616(self, statement: object) -> list[object] | None:
+        """Return the proven replacement statement(s) or None."""
+        if not isinstance(statement, CAssignment):
+            return None
+        direct_call = (
+            statement.rhs
+            if isinstance(statement.rhs, CFunctionCall)
+            and not is_structured_insert_intrinsic_8616(statement.rhs)
+            else None
+        )
+        projection = (
+            None
+            if direct_call is not None
+            else _projected_call_result_8616(statement.rhs)
+        )
+        if direct_call is None and projection is None:
+            projection = _masked_subregister_call_result_8616(statement)
+        projected_call = projection.call if projection is not None else None
+        call = direct_call or projected_call
+        if call is None:
+            return None
+        assignment_id = id(statement)
+        if assignment_id in self.seen_assignments:
+            return None
+        self.seen_assignments.add(assignment_id)
+        self.raw_fact_count += 1
+        summary = self.summaries.get(id(call))
+        c_result_contract = _c_result_contract_for_call_8616(
+            self.boundary,
+            call,
+            self.c_result_contracts,
+        )
+        typed_void_projection = projected_call is not None and (
+            _is_typed_void_call_8616(call)
+            or _has_proven_void_interrupt_result_8616(self.boundary, call)
+            or _has_typed_void_interrupt_target_8616(self.boundary, call)
+            or (
+                c_result_contract is not None
+                and c_result_contract.kind is CallsiteCResultKind8616.VOID
+            )
+        )
+        if summary is None and not typed_void_projection:
+            return None
+        self.normalized_fact_count += 1
+        direct_is_proven = summary is not None and direct_call is not None and _is_proven_unobserved_ax_result_8616(
+            statement,
+            summary,
+        )
+        projected_is_proven = (
+            projected_call is not None
+            and (
+                typed_void_projection
+                or (
+                    summary is not None
+                    and _is_proven_unobserved_projected_result_8616(summary)
+                )
+            )
+        )
+        if not direct_is_proven and not projected_is_proven:
+            return None
+        self.classified_fact_count += 1
+        call_statement = CExpressionStatement(call, codegen=statement.codegen)
+        if projection is not None and projection.residual is not None:
+            residual_assignment = CAssignment(
+                statement.lhs,
+                projection.residual,
+                tags=statement.tags,
+                codegen=statement.codegen,
+            )
+            return [call_statement, residual_assignment]
+        return [call_statement]
+
+
 def lower_unobserved_call_result_assignments_8616(codegen: object) -> bool:
     """Replace only typed-clobbered AX call assignments with standalone calls."""
     boundary = cast(_UnobservedResultCodegen8616, codegen)
@@ -367,98 +478,22 @@ def lower_unobserved_call_result_assignments_8616(codegen: object) -> bool:
     except AttributeError:
         return False
 
-    raw_fact_count = 0
-    normalized_fact_count = 0
-    classified_fact_count = 0
-    materialized_count = 0
-    seen_assignments: set[int] = set()
+    scan = _UnobservedLowerScan8616(
+        boundary=boundary,
+        summaries=summaries,
+        c_result_contracts=c_result_contracts,
+    )
     for container in tuple(
         node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CStatements)
     ):
-        statements: list[object] = list(container.statements or ())
-        changed = False
-        for index, statement in enumerate(statements):
-            if not isinstance(statement, CAssignment):
-                continue
-            direct_call = (
-                statement.rhs
-                if isinstance(statement.rhs, CFunctionCall)
-                and not is_structured_insert_intrinsic_8616(statement.rhs)
-                else None
-            )
-            projection = (
-                None
-                if direct_call is not None
-                else _projected_call_result_8616(statement.rhs)
-            )
-            if direct_call is None and projection is None:
-                projection = _masked_subregister_call_result_8616(statement)
-            projected_call = projection.call if projection is not None else None
-            call = direct_call or projected_call
-            if call is None:
-                continue
-            assignment_id = id(statement)
-            if assignment_id in seen_assignments:
-                continue
-            seen_assignments.add(assignment_id)
-            raw_fact_count += 1
-            summary = summaries.get(id(call))
-            c_result_contract = _c_result_contract_for_call_8616(
-                boundary,
-                call,
-                c_result_contracts,
-            )
-            typed_void_projection = projected_call is not None and (
-                _is_typed_void_call_8616(call)
-                or _has_proven_void_interrupt_result_8616(boundary, call)
-                or _has_typed_void_interrupt_target_8616(boundary, call)
-                or (
-                    c_result_contract is not None
-                    and c_result_contract.kind is CallsiteCResultKind8616.VOID
-                )
-            )
-            if summary is None and not typed_void_projection:
-                continue
-            normalized_fact_count += 1
-            direct_is_proven = summary is not None and direct_call is not None and _is_proven_unobserved_ax_result_8616(
-                statement,
-                summary,
-            )
-            projected_is_proven = (
-                projected_call is not None
-                and (
-                    typed_void_projection
-                    or (
-                        summary is not None
-                        and _is_proven_unobserved_projected_result_8616(summary)
-                    )
-                )
-            )
-            if not direct_is_proven and not projected_is_proven:
-                continue
-            classified_fact_count += 1
-            call_statement = CExpressionStatement(call, codegen=statement.codegen)
-            if projection is not None and projection.residual is not None:
-                residual_assignment = CAssignment(
-                    statement.lhs,
-                    projection.residual,
-                    tags=statement.tags,
-                    codegen=statement.codegen,
-                )
-                statements[index : index + 1] = [call_statement, residual_assignment]
-            else:
-                statements[index] = call_statement
-            materialized_count += 1
-            changed = True
-        if changed:
-            cast(Any, container).statements = statements
+        scan.process_container(container)
 
     stats = UnobservedCallResultLoweringStats8616(
-        raw_fact_count=raw_fact_count,
-        normalized_fact_count=normalized_fact_count,
-        classified_fact_count=classified_fact_count,
-        materialized_count=materialized_count,
-        failure_count=classified_fact_count - materialized_count,
+        raw_fact_count=scan.raw_fact_count,
+        normalized_fact_count=scan.normalized_fact_count,
+        classified_fact_count=scan.classified_fact_count,
+        materialized_count=scan.materialized_count,
+        failure_count=scan.classified_fact_count - scan.materialized_count,
     )
     if not stats.closed:
         raise PipelineHardError("unobserved call-result lowering evidence accounting is not closed")

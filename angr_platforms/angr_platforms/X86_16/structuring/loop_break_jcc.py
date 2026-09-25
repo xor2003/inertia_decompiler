@@ -48,7 +48,7 @@ from ..ir.condition_ir import (
 from ..pipeline.errors import PipelineHardError
 from .condition_materialization import materialize_condition_ir_expression_8616
 from .condition_storage_identity import same_condition_storage_identity_8616
-from .loop_break_topology import collect_loop_break_topology_8616
+from .loop_break_topology import LoopBreakTopology8616, collect_loop_break_topology_8616
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -846,114 +846,160 @@ def _split_materialized_loop_header_condition_chains_8616(
     changed = False
     debug_jcc = bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE"))
     for loop_node in _loop_nodes_with_body_8616(root, query_session):
-        loop_body = cast(CStatements, loop_node.body)
-        statements = _dynamic_sequence_8616(loop_body.statements)
-        if not statements:
-            continue
-        first_guard = _break_guard_condition_8616(statements[0])
-        first_key = _condition_tags_8616(first_guard)
-        if first_guard is None or first_key is None:
-            continue
-        first_fact = facts_by_jcc.get(first_key[0])
-        decoded_condition = decoded_conditions_by_jcc.get(first_key[0])
-        if first_fact is None or decoded_condition is None:
-            continue
-        condition_matches = _condition_matches_decoded_8616(
-            project,
-            loop_node.condition,
-            decoded_condition,
-            callbacks,
-        ) or _logical_and_prefix_matches_8616(
-            project,
-            loop_node.condition,
-            decoded_condition,
-            callbacks,
-        )
-        header_jccs = _condition_jcc_addrs_8616(loop_node.condition)
-        if debug_jcc:
-            logging.getLogger(__name__).warning(
-                "[unconsumed-loop-break-jcc] split candidate first=%#x "
-                "condition_matches=%s header_jccs=%r branch_jccs=%r body_types=%r",
-                first_fact.jcc_addr,
-                condition_matches,
-                tuple(sorted(header_jccs)),
-                tuple(sorted(facts_by_jcc)),
-                tuple(type(statement).__name__ for statement in statements[:5]),
-            )
-        if not condition_matches:
-            continue
-        suffix_jccs = (header_jccs & facts_by_jcc.keys()) - {
-            first_fact.jcc_addr
-        }
-        body_effect_addrs = header_jccs - facts_by_jcc.keys() - {
-            first_fact.jcc_addr
-        }
-        if not _root_contains_ins_addr_8616(
-            loop_body,
-            first_fact.body_target,
-            query_session,
-        ):
-            continue
-        if _root_contains_ins_addr_8616(
-            loop_body,
-            first_fact.false_target,
-            query_session,
-        ):
-            continue
-        if any(
-            not _root_contains_ins_addr_8616(
-                loop_body,
-                effect_addr,
-                query_session,
-            )
-            for effect_addr in body_effect_addrs
-        ):
-            continue
-        suffix_guards = tuple(
-            _body_break_guard_for_fact_8616(
-                loop_body,
-                facts_by_jcc[jcc_addr],
-                project=project,
-                callbacks=callbacks,
-            )
-            for jcc_addr in sorted(suffix_jccs)
-            if jcc_addr in facts_by_jcc
-        )
-        if len(suffix_guards) != len(suffix_jccs) or any(
-            guard is None for guard in suffix_guards
-        ):
-            continue
-        retained_condition = callbacks.clone_c_value(decoded_condition)
-        if not isinstance(retained_condition, CExpression):
-            continue
-        removed_fingerprint = callbacks.expr_fingerprint(first_guard, project)
-        retained_fingerprint = callbacks.expr_fingerprint(
-            retained_condition,
-            project,
-        )
-        fact = LoopHeaderDuplicateGuardRemovalFact8616(
-            jcc_addr=first_fact.jcc_addr,
-            block_addr=first_fact.block_addr,
-            removed_guard_fingerprint=removed_fingerprint,
-            retained_loop_fingerprint=retained_fingerprint,
-        )
-        rebuilt = list(statements)
-        del rebuilt[0]
-        loop_body.statements = rebuilt
-        loop_node.condition = retained_condition
-        query_session.record_mutation()
-        _record_loop_header_duplicate_guard_removal_fact_8616(codegen, fact)
-        callbacks.record_condition_evidence(
+        changed = _split_loop_header_chain_8616(
             project,
             codegen,
-            first_guard,
-            retained_condition,
-        )
-        stats.materialized_count += 1
-        stats.removed_loop_header_duplicate_guard += 1
-        stats.split_loop_header_condition_chain += 1
-        changed = True
+            loop_node,
+            decoded_conditions_by_jcc,
+            facts_by_jcc,
+            callbacks,
+            stats,
+            query_session,
+            debug_jcc,
+        ) or changed
     return changed
+
+
+def _split_loop_header_chain_8616(
+    project: object,
+    codegen: object,
+    loop_node: CForLoop | CWhileLoop | CDoWhileLoop,
+    decoded_conditions_by_jcc: Mapping[int, CExpression],
+    facts_by_jcc: dict[int, LoopBranchGuardFact8616],
+    callbacks: UnconsumedLoopBreakJccCallbacks8616,
+    stats: UnconsumedLoopBreakJccStats8616,
+    query_session: _LoopBreakAstQuerySession8616,
+    debug_jcc: bool,
+) -> bool:
+    """Split one collapsed loop header when every suffix JCC is materialized."""
+    loop_body = cast(CStatements, loop_node.body)
+    statements = _dynamic_sequence_8616(loop_body.statements)
+    if not statements:
+        return False
+    first_guard = _break_guard_condition_8616(statements[0])
+    first_key = _condition_tags_8616(first_guard)
+    if first_guard is None or first_key is None:
+        return False
+    first_fact = facts_by_jcc.get(first_key[0])
+    decoded_condition = decoded_conditions_by_jcc.get(first_key[0])
+    if first_fact is None or decoded_condition is None:
+        return False
+    condition_matches = _condition_matches_decoded_8616(
+        project,
+        loop_node.condition,
+        decoded_condition,
+        callbacks,
+    ) or _logical_and_prefix_matches_8616(
+        project,
+        loop_node.condition,
+        decoded_condition,
+        callbacks,
+    )
+    header_jccs = _condition_jcc_addrs_8616(loop_node.condition)
+    if debug_jcc:
+        logging.getLogger(__name__).warning(
+            "[unconsumed-loop-break-jcc] split candidate first=%#x "
+            "condition_matches=%s header_jccs=%r branch_jccs=%r body_types=%r",
+            first_fact.jcc_addr,
+            condition_matches,
+            tuple(sorted(header_jccs)),
+            tuple(sorted(facts_by_jcc)),
+            tuple(type(statement).__name__ for statement in statements[:5]),
+        )
+    if not condition_matches:
+        return False
+    if not _suffix_chain_proven_8616(
+        project,
+        loop_body,
+        first_fact,
+        header_jccs,
+        facts_by_jcc,
+        callbacks,
+        query_session,
+    ):
+        return False
+    retained_condition = callbacks.clone_c_value(decoded_condition)
+    if not isinstance(retained_condition, CExpression):
+        return False
+    removed_fingerprint = callbacks.expr_fingerprint(first_guard, project)
+    retained_fingerprint = callbacks.expr_fingerprint(
+        retained_condition,
+        project,
+    )
+    fact = LoopHeaderDuplicateGuardRemovalFact8616(
+        jcc_addr=first_fact.jcc_addr,
+        block_addr=first_fact.block_addr,
+        removed_guard_fingerprint=removed_fingerprint,
+        retained_loop_fingerprint=retained_fingerprint,
+    )
+    rebuilt = list(statements)
+    del rebuilt[0]
+    loop_body.statements = rebuilt
+    loop_node.condition = retained_condition
+    query_session.record_mutation()
+    _record_loop_header_duplicate_guard_removal_fact_8616(codegen, fact)
+    callbacks.record_condition_evidence(
+        project,
+        codegen,
+        first_guard,
+        retained_condition,
+    )
+    stats.materialized_count += 1
+    stats.removed_loop_header_duplicate_guard += 1
+    stats.split_loop_header_condition_chain += 1
+    return True
+
+
+def _suffix_chain_proven_8616(
+    project: object,
+    loop_body: CStatements,
+    first_fact: LoopBranchGuardFact8616,
+    header_jccs: frozenset[int],
+    facts_by_jcc: dict[int, LoopBranchGuardFact8616],
+    callbacks: UnconsumedLoopBreakJccCallbacks8616,
+    query_session: _LoopBreakAstQuerySession8616,
+) -> bool:
+    """Return whether every collapsed suffix JCC has a proven body guard."""
+    suffix_jccs = (header_jccs & facts_by_jcc.keys()) - {
+        first_fact.jcc_addr
+    }
+    body_effect_addrs = header_jccs - facts_by_jcc.keys() - {
+        first_fact.jcc_addr
+    }
+    if not _root_contains_ins_addr_8616(
+        loop_body,
+        first_fact.body_target,
+        query_session,
+    ):
+        return False
+    if _root_contains_ins_addr_8616(
+        loop_body,
+        first_fact.false_target,
+        query_session,
+    ):
+        return False
+    if any(
+        not _root_contains_ins_addr_8616(
+            loop_body,
+            effect_addr,
+            query_session,
+        )
+        for effect_addr in body_effect_addrs
+    ):
+        return False
+    suffix_guards = tuple(
+        _body_break_guard_for_fact_8616(
+            loop_body,
+            facts_by_jcc[jcc_addr],
+            project=project,
+            callbacks=callbacks,
+        )
+        for jcc_addr in sorted(suffix_jccs)
+        if jcc_addr in facts_by_jcc
+    )
+    return len(suffix_guards) == len(suffix_jccs) and all(
+        guard is not None for guard in suffix_guards
+    )
 
 
 def _unconsumed_loop_break_jcc_stats_8616(codegen: object) -> UnconsumedLoopBreakJccStats8616:
@@ -1048,6 +1094,632 @@ def _record_loop_branch_guard_fact_8616(
     )
 
 
+@dataclass(slots=True)
+class _LoopBreakJccScan8616:
+    """Mutable per-function scan state for unconsumed loop-break JCCs."""
+
+    project: object
+    codegen: object
+    callbacks: UnconsumedLoopBreakJccCallbacks8616
+    stats: UnconsumedLoopBreakJccStats8616
+    root: object
+    query_session: _LoopBreakAstQuerySession8616
+    topology: LoopBreakTopology8616 | None
+    existing_condition_keys: frozenset[tuple[int, int]]
+    existing_loop_header_jcc_addrs: frozenset[int]
+    typed_loop_condition_jcc_addrs: frozenset[int]
+    existing_break_nodes_by_key: dict[tuple[int, int], tuple[object, ...]]
+    typed_conditions_by_key: dict[tuple[int, int], tuple[ConditionIR, ...]]
+    decoded_conditions_by_jcc: dict[int, CExpression] = field(default_factory=dict)
+    changed: bool = False
+    log: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
+    debug_jcc: bool = field(default_factory=lambda: bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE")))
+
+    def scan_jcc(self, block_addr: int, jcc: object) -> None:
+        """Materialize one JCC's loop-break guard when the proof closes."""
+        jcc_addr = _dynamic_int_8616(_dynamic_attr_8616(jcc, "address", -1))
+        mnemonic = str(_dynamic_attr_8616(jcc, "mnemonic", "")).lower()
+        if jcc_addr < 0 or mnemonic in {"jmp", "ljmp"} or not mnemonic.startswith("j"):
+            return
+        self.stats.raw_fact_count += 1
+        key = (jcc_addr, int(block_addr))
+        existing_break_nodes = tuple(
+            node
+            for existing_key, nodes in self.existing_break_nodes_by_key.items()
+            if existing_key[0] == jcc_addr
+            for node in nodes
+        )
+        if jcc_addr in self.typed_loop_condition_jcc_addrs and not existing_break_nodes:
+            self.stats.refused_existing_condition += 1
+            return
+        has_existing_condition_without_break = (
+            any(existing_key[0] == jcc_addr for existing_key in self.existing_condition_keys)
+            and not existing_break_nodes
+        )
+        targets = self._targets_8616(block_addr, jcc_addr, jcc, key)
+        if targets is None:
+            return
+        body_target, fallthrough_target, false_target, exit_target = targets
+        self.stats.normalized_fact_count += 1
+
+        tags: dict[str, int] = {
+            "ins_addr": jcc_addr,
+            "vex_block_addr": int(block_addr),
+            "inertia_jcc_materialized_8616": True,
+        }
+        decoded = self._decode_8616(
+            key, jcc_addr, int(block_addr), mnemonic,
+            int(body_target), int(fallthrough_target), int(false_target), exit_target, tags,
+        )
+        if decoded is None:
+            return
+        guard_cond, decoded_cond, typed_condition = decoded
+        self._materialize_8616(
+            key,
+            jcc_addr,
+            int(block_addr),
+            int(body_target),
+            int(fallthrough_target),
+            int(false_target),
+            exit_target,
+            guard_cond,
+            decoded_cond,
+            typed_condition,
+            existing_break_nodes,
+            has_existing_condition_without_break,
+        )
+
+    def _materialize_8616(
+        self,
+        key: tuple[int, int],
+        jcc_addr: int,
+        block_addr: int,
+        body_target: int,
+        fallthrough_target: int,
+        false_target: int,
+        exit_target: int | None,
+        guard_cond: CExpression,
+        decoded_cond: CExpression,
+        typed_condition: ConditionIR | None,
+        existing_break_nodes: tuple[object, ...],
+        has_existing_condition_without_break: bool,
+    ) -> None:
+        """Fingerprint, consume-check, and anchor one decoded JCC guard."""
+        fingerprints = self._fingerprints_8616(guard_cond, decoded_cond)
+        if fingerprints is None:
+            return
+        decoded_condition_fingerprint, guard_condition_fingerprint = fingerprints
+        if _existing_nonbreak_branch_consumes_jcc_8616(
+            self.root,
+            project=self.project,
+            body_target=body_target,
+            false_target=false_target,
+            decoded_condition_fingerprint=decoded_condition_fingerprint,
+            callbacks=self.callbacks,
+            query_session=self.query_session,
+        ):
+            self.stats.refused_existing_condition += 1
+            return
+        resolved = self._consuming_break_nodes_8616(
+            body_target,
+            false_target,
+            exit_target,
+            decoded_condition_fingerprint,
+            guard_cond,
+            guard_condition_fingerprint,
+            existing_break_nodes,
+        )
+        if resolved is None:
+            return
+        existing_break_nodes, cleared_existing_flag = resolved
+        if cleared_existing_flag:
+            has_existing_condition_without_break = False
+        if (
+            has_existing_condition_without_break
+            and jcc_addr not in self.existing_loop_header_jcc_addrs
+        ):
+            self.stats.refused_existing_condition += 1
+            return
+        if existing_break_nodes or has_existing_condition_without_break:
+            self.stats.classified_fact_count += 1
+        branch_fact = LoopBranchGuardFact8616(
+            jcc_addr=jcc_addr,
+            block_addr=block_addr,
+            body_target=body_target,
+            fallthrough_target=fallthrough_target,
+            false_target=false_target,
+            decoded_condition_fingerprint=decoded_condition_fingerprint,
+            guard_condition_fingerprint=guard_condition_fingerprint,
+            condition_ir=typed_condition,
+        )
+        if has_existing_condition_without_break:
+            _record_loop_branch_guard_fact_8616(self.codegen, branch_fact)
+            self.stats.refused_existing_condition += 1
+            return
+
+        materialized_for_key = self._anchor_8616(
+            key,
+            block_addr,
+            body_target,
+            fallthrough_target,
+            false_target,
+            exit_target,
+            guard_cond,
+            decoded_cond,
+            decoded_condition_fingerprint,
+            guard_condition_fingerprint,
+            branch_fact,
+            existing_break_nodes,
+        )
+        if not materialized_for_key:
+            if self.debug_jcc:
+                self.log.warning(
+                    "[unconsumed-loop-break-jcc] refuse loop anchor key=%r body_target=%#x "
+                    "false_target=%#x exit_target=%r",
+                    key,
+                    body_target,
+                    false_target,
+                    exit_target,
+                )
+            self.stats.refused_no_loop_anchor += 1
+
+    def _targets_8616(
+        self,
+        block_addr: int,
+        jcc_addr: int,
+        jcc: object,
+        key: tuple[int, int],
+    ) -> tuple[int, int, int, int | None] | None:
+        """Resolve body/fallthrough/false targets or count the refusal."""
+        body_target = self.callbacks.branch_target_imm(jcc)
+        fallthrough_target = _instruction_fallthrough_target_8616(jcc)
+        false_target = self.callbacks.next_unconditional_target_after_jcc(
+            self.project, int(block_addr), jcc_addr,
+        )
+        if body_target is None or fallthrough_target is None or false_target is None:
+            if self.debug_jcc:
+                self.log.warning(
+                    "[unconsumed-loop-break-jcc] refuse targets key=%r body_target=%r "
+                    "fallthrough_target=%r false_target=%r",
+                    key,
+                    body_target,
+                    fallthrough_target,
+                    false_target,
+                )
+            self.stats.refused_no_fallthrough_jump += 1
+            return None
+        exit_target = self.callbacks.resolve_one_hop_jmp_target(self.project, int(false_target))
+        return body_target, fallthrough_target, false_target, exit_target
+
+    def _decode_8616(
+        self,
+        key: tuple[int, int],
+        jcc_addr: int,
+        block_addr: int,
+        mnemonic: str,
+        body_target: int,
+        fallthrough_target: int,
+        false_target: int,
+        exit_target: int | None,
+        tags: dict[str, int],
+    ) -> tuple[CExpression, CExpression, ConditionIR | None] | None:
+        """Decode one JCC to guard/decoded conditions or count the refusal."""
+        typed_candidates = _typed_conditions_for_branch_8616(
+            self.typed_conditions_by_key,
+            jcc_addr=jcc_addr,
+            block_addr=block_addr,
+            body_target=body_target,
+            fallthrough_target=fallthrough_target,
+        )
+        if self.debug_jcc:
+            self.log.warning(
+                "[unconsumed-loop-break-jcc] candidate key=%r mnemonic=%s body_target=%#x "
+                "fallthrough_target=%#x false_target=%#x exit_target=%r typed_candidates=%d",
+                key,
+                mnemonic,
+                body_target,
+                fallthrough_target,
+                false_target,
+                exit_target,
+                len(typed_candidates),
+            )
+        if len(typed_candidates) > 1:
+            self.stats.refused_decode += 1
+            return None
+        typed_condition: ConditionIR | None = None
+        if typed_candidates:
+            typed_condition = typed_candidates[0]
+            if not _typed_condition_matches_jcc_targets_8616(
+                typed_condition,
+                body_target=body_target,
+                fallthrough_target=fallthrough_target,
+            ):
+                if self.debug_jcc:
+                    self.log.warning(
+                        "[unconsumed-loop-break-jcc] refuse typed targets key=%r "
+                        "typed_taken=%r typed_fallthrough=%r",
+                        key,
+                        typed_condition.taken_target,
+                        typed_condition.fallthrough_target,
+                    )
+                self.stats.refused_decode += 1
+                return None
+            decoded_cond = materialize_condition_ir_expression_8616(
+                self.project,
+                self.codegen,
+                typed_condition,
+            )
+            guard_cond = (
+                _invert_materialized_condition_8616(
+                    decoded_cond,
+                    self.codegen,
+                    self.callbacks,
+                    tags,
+                )
+                if decoded_cond is not None
+                else None
+            )
+            if decoded_cond is not None:
+                decoded_cond.tags = dict(tags)
+        else:
+            decoded = self.callbacks.translate_cmp_jcc_guard(
+                self.project, self.codegen, block_addr, jcc_addr,
+            )
+            if decoded is None:
+                self.stats.refused_decode += 1
+                return None
+            guard_cond = self.callbacks.inverted_condition_expr(
+                self.project, self.codegen, decoded, tags,
+            )
+            decoded_cond = self.callbacks.decoded_condition_expr(
+                self.project, self.codegen, decoded, tags,
+            )
+        if not isinstance(guard_cond, CExpression) or not isinstance(
+            decoded_cond,
+            CExpression,
+        ):
+            if self.debug_jcc:
+                self.log.warning(
+                    "[unconsumed-loop-break-jcc] refuse decode key=%r guard=%r decoded=%r",
+                    key,
+                    guard_cond,
+                    decoded_cond,
+                )
+            self.stats.refused_decode += 1
+            return None
+        self.decoded_conditions_by_jcc[jcc_addr] = decoded_cond
+        return guard_cond, decoded_cond, typed_condition
+
+    def _fingerprints_8616(
+        self,
+        guard_cond: CExpression,
+        decoded_cond: CExpression,
+    ) -> tuple[str, str] | None:
+        """Return canonicalized condition fingerprints or count the refusal."""
+        decoded_condition_fingerprint = (
+            canonicalize_condition_storage_fingerprint_8616(
+                self.callbacks.expr_fingerprint(
+                    decoded_cond,
+                    self.project,
+                )
+            )
+        )
+        guard_condition_fingerprint = (
+            canonicalize_condition_storage_fingerprint_8616(
+                self.callbacks.expr_fingerprint(
+                    guard_cond,
+                    self.project,
+                )
+            )
+        )
+        if (
+            not decoded_condition_fingerprint
+            or not guard_condition_fingerprint
+        ):
+            self.stats.refused_decode += 1
+            return None
+        return decoded_condition_fingerprint, guard_condition_fingerprint
+
+    def _consuming_break_nodes_8616(
+        self,
+        body_target: int,
+        false_target: int,
+        exit_target: int | None,
+        decoded_condition_fingerprint: str,
+        guard_cond: CExpression,
+        guard_condition_fingerprint: str,
+        existing_break_nodes: tuple[object, ...],
+    ) -> tuple[tuple[object, ...], bool] | None:
+        """Resolve loop-header break nodes or count the existing-condition refusal."""
+        consuming_loop_headers = (
+            _loop_headers_consuming_jcc_8616(
+                self.root,
+                project=self.project,
+                body_target=body_target,
+                false_target=false_target,
+                exit_target=exit_target,
+                decoded_condition_fingerprint=decoded_condition_fingerprint,
+                callbacks=self.callbacks,
+                query_session=self.query_session,
+            )
+            if not existing_break_nodes
+            else ()
+        )
+        if not consuming_loop_headers:
+            return existing_break_nodes, False
+        resolved_nodes = tuple(
+            dict.fromkeys(
+                guard
+                for loop_node in consuming_loop_headers
+                for guard in _semantic_break_guards_in_loop_8616(
+                    cast(CStatements, loop_node.body),
+                    project=self.project,
+                    guard_condition=guard_cond,
+                    guard_condition_fingerprint=guard_condition_fingerprint,
+                    callbacks=self.callbacks,
+                )
+            )
+        )
+        if not resolved_nodes:
+            self.stats.refused_existing_condition += 1
+            return None
+        return resolved_nodes, True
+
+    def _anchor_8616(
+        self,
+        key: tuple[int, int],
+        block_addr: int,
+        body_target: int,
+        fallthrough_target: int,
+        false_target: int,
+        exit_target: int | None,
+        guard_cond: CExpression,
+        decoded_cond: CExpression,
+        decoded_condition_fingerprint: str,
+        guard_condition_fingerprint: str,
+        branch_fact: LoopBranchGuardFact8616,
+        existing_break_nodes: tuple[object, ...],
+    ) -> bool:
+        """Materialize or refuse the guard inside one matching loop anchor."""
+        for loop_node in reversed(_loop_nodes_with_body_8616(self.root, self.query_session)):
+            loop_body = _dynamic_attr_8616(loop_node, "body", None)
+            if not isinstance(loop_body, CStatements):
+                continue
+            if not _root_contains_ins_addr_8616(
+                loop_body,
+                body_target,
+                self.query_session,
+            ):
+                continue
+            if _root_contains_ins_addr_8616(
+                loop_body,
+                false_target,
+                self.query_session,
+            ):
+                continue
+            if isinstance(exit_target, int) and _root_contains_ins_addr_8616(
+                loop_body,
+                int(exit_target),
+                self.query_session,
+            ):
+                continue
+            if not existing_break_nodes:
+                if self._anchor_without_breaks_8616(
+                    loop_body,
+                    block_addr,
+                    body_target,
+                    fallthrough_target,
+                    false_target,
+                    key,
+                    guard_cond,
+                    guard_condition_fingerprint,
+                    decoded_cond,
+                    branch_fact,
+                ):
+                    return True
+                continue
+            if self._resolve_existing_breaks_8616(
+                loop_node,
+                loop_body,
+                key,
+                existing_break_nodes,
+                decoded_cond,
+                guard_cond,
+                decoded_condition_fingerprint,
+                guard_condition_fingerprint,
+                branch_fact,
+                body_target,
+                false_target,
+            ):
+                return True
+        return False
+
+    def _anchor_without_breaks_8616(
+        self,
+        loop_body: CStatements,
+        block_addr: int,
+        body_target: int,
+        fallthrough_target: int,
+        false_target: int,
+        key: tuple[int, int],
+        guard_cond: CExpression,
+        guard_condition_fingerprint: str,
+        decoded_cond: CExpression,
+        branch_fact: LoopBranchGuardFact8616,
+    ) -> bool:
+        """Census duplicate guards, then attempt the topology-proven insert."""
+        semantic_break_guards = _semantic_break_guards_in_loop_8616(
+            loop_body,
+            project=self.project,
+            guard_condition=guard_cond,
+            guard_condition_fingerprint=guard_condition_fingerprint,
+            callbacks=self.callbacks,
+        )
+        if len(semantic_break_guards) == 1:
+            _record_loop_branch_guard_fact_8616(self.codegen, branch_fact)
+            self.stats.refused_duplicate_guard += 1
+            return True
+        if len(semantic_break_guards) > 1:
+            self.stats.refused_duplicate_guard += 1
+            return True
+        return self._insert_guard_8616(
+            loop_body,
+            block_addr,
+            body_target,
+            fallthrough_target,
+            false_target,
+            key,
+            guard_cond,
+            decoded_cond,
+            branch_fact,
+        )
+
+    def _resolve_existing_breaks_8616(
+        self,
+        loop_node: CForLoop | CWhileLoop | CDoWhileLoop,
+        loop_body: CStatements,
+        key: tuple[int, int],
+        existing_break_nodes: tuple[object, ...],
+        decoded_cond: CExpression,
+        guard_cond: CExpression,
+        decoded_condition_fingerprint: str,
+        guard_condition_fingerprint: str,
+        branch_fact: LoopBranchGuardFact8616,
+        body_target: int,
+        false_target: int,
+    ) -> bool:
+        """Remove a duplicate header guard or rebind one body break."""
+        removal = _remove_loop_header_duplicate_break_guard_8616(
+            self.project,
+            loop_node,
+            loop_body,
+            existing_break_nodes,
+            key=key,
+            decoded_condition=decoded_cond,
+            guard_condition=guard_cond,
+            callbacks=self.callbacks,
+        )
+        if removal is not None:
+            _record_loop_branch_guard_fact_8616(self.codegen, branch_fact)
+            _record_loop_header_duplicate_guard_removal_fact_8616(
+                self.codegen,
+                removal.fact,
+            )
+            self.callbacks.record_condition_evidence(
+                self.project,
+                self.codegen,
+                removal.removed_condition,
+                loop_node.condition,
+            )
+            self.stats.materialized_count += 1
+            self.stats.removed_loop_header_duplicate_guard += 1
+            self.changed = True
+            self.query_session.record_mutation()
+            self.existing_break_nodes_by_key = {
+                **self.existing_break_nodes_by_key,
+                key: (),
+            }
+            return True
+        if self.debug_jcc:
+            self.log.warning(
+                "[unconsumed-loop-break-jcc] existing break candidates key=%r count=%d body_target=%#x false_target=%#x",
+                key,
+                len(existing_break_nodes),
+                body_target,
+                false_target,
+            )
+        for break_node in existing_break_nodes:
+            if not _root_contains_node_8616(
+                loop_body,
+                break_node,
+                self.query_session,
+            ):
+                if self.debug_jcc:
+                    self.log.warning("[unconsumed-loop-break-jcc] existing break not in loop body key=%r", key)
+                continue
+            current_condition = _break_guard_condition_8616(break_node)
+            current_fp = self.callbacks.expr_fingerprint(current_condition, self.project)
+            if (
+                current_fp == guard_condition_fingerprint
+                or self.callbacks.same_c_expression(
+                    current_condition,
+                    guard_cond,
+                )
+                or same_condition_storage_identity_8616(
+                    current_condition,
+                    guard_cond,
+                    same_expression=self.callbacks.same_c_expression,
+                )
+            ):
+                _record_loop_branch_guard_fact_8616(
+                    self.codegen,
+                    branch_fact,
+                )
+                self.stats.refused_duplicate_guard += 1
+                return True
+            if (
+                current_fp != decoded_condition_fingerprint
+                and not self.callbacks.same_c_expression(
+                    current_condition,
+                    decoded_cond,
+                )
+            ):
+                continue
+            previous_condition = current_condition
+            replacement_condition = self.callbacks.clone_c_value(guard_cond)
+            if not _set_break_guard_condition_8616(break_node, replacement_condition):
+                continue
+            _record_loop_branch_guard_fact_8616(
+                self.codegen,
+                branch_fact,
+            )
+            self.callbacks.record_condition_evidence(self.project, self.codegen, previous_condition, replacement_condition)
+            self.stats.materialized_count += 1
+            self.changed = True
+            self.query_session.record_mutation()
+            return True
+        return False
+
+    def _insert_guard_8616(
+        self,
+        loop_body: CStatements,
+        block_addr: int,
+        body_target: int,
+        fallthrough_target: int,
+        false_target: int,
+        key: tuple[int, int],
+        guard_cond: CExpression,
+        decoded_cond: CExpression,
+        branch_fact: LoopBranchGuardFact8616,
+    ) -> bool:
+        """Insert a new break guard after CFG-exit and placement proof."""
+        if self.topology is None or not self.topology.proves_exit(
+            block_addr, body_target, fallthrough_target, false_target,
+        ):
+            return False
+        body_statements = _dynamic_sequence_8616(_dynamic_attr_8616(loop_body, "statements", ()))
+        insert_idx = _first_statement_index_containing_ins_addr_8616(
+            body_statements,
+            body_target,
+            self.query_session,
+        )
+        if insert_idx is None:
+            return False
+        # New guards are classified only after CFG exit and placement proof.
+        self.stats.classified_fact_count += 1
+        guard = CIfBreak(self.callbacks.clone_c_value(guard_cond), codegen=self.codegen, cstyle_ifs=True)
+        rebuilt = list(body_statements)
+        rebuilt.insert(insert_idx, guard)
+        loop_body.statements = rebuilt
+        _record_loop_branch_guard_fact_8616(self.codegen, branch_fact)
+        self.callbacks.record_condition_evidence(self.project, self.codegen, decoded_cond, guard.condition)
+        self.stats.materialized_count += 1
+        self.changed = True
+        self.query_session.record_mutation()
+        self.existing_break_nodes_by_key = {**self.existing_break_nodes_by_key, key: (guard,)}
+        return True
+
+
 def materialize_unconsumed_loop_break_jcc_8616(
     project: object,
     codegen: object,
@@ -1060,415 +1732,36 @@ def materialize_unconsumed_loop_break_jcc_8616(
         return False
     stats = _unconsumed_loop_break_jcc_stats_8616(codegen)
     initial_surface = _collect_loop_break_initial_surface_8616(root)
-    existing_condition_keys = initial_surface.condition_keys
-    existing_loop_header_jcc_addrs = initial_surface.loop_header_jcc_addrs
-    typed_loop_condition_jcc_addrs = initial_surface.typed_loop_condition_jcc_addrs
-    existing_break_nodes_by_key = dict(initial_surface.break_nodes_by_key)
-    typed_conditions_by_key = _typed_conditions_by_key_8616(codegen)
-    decoded_conditions_by_jcc: dict[int, CExpression] = {}
     query_session = _LoopBreakAstQuerySession8616()
-    topology = collect_loop_break_topology_8616(project, codegen)
-    changed = False
-    log = logging.getLogger(__name__)
-    debug_jcc = bool(os.environ.get("INERTIA_DEBUG_JCC_REWRITE"))
+    scan = _LoopBreakJccScan8616(
+        project=project,
+        codegen=codegen,
+        callbacks=callbacks,
+        stats=stats,
+        root=root,
+        query_session=query_session,
+        topology=collect_loop_break_topology_8616(project, codegen),
+        existing_condition_keys=initial_surface.condition_keys,
+        existing_loop_header_jcc_addrs=initial_surface.loop_header_jcc_addrs,
+        typed_loop_condition_jcc_addrs=initial_surface.typed_loop_condition_jcc_addrs,
+        existing_break_nodes_by_key=dict(initial_surface.break_nodes_by_key),
+        typed_conditions_by_key=_typed_conditions_by_key_8616(codegen),
+    )
 
     for block_addr, jcc in callbacks.linear_jcc_block_starts(project, codegen):
-        jcc_addr = _dynamic_int_8616(_dynamic_attr_8616(jcc, "address", -1))
-        mnemonic = str(_dynamic_attr_8616(jcc, "mnemonic", "")).lower()
-        if jcc_addr < 0 or mnemonic in {"jmp", "ljmp"} or not mnemonic.startswith("j"):
-            continue
-        stats.raw_fact_count += 1
-        key = (jcc_addr, int(block_addr))
-        existing_break_nodes = tuple(
-            node
-            for existing_key, nodes in existing_break_nodes_by_key.items()
-            if existing_key[0] == jcc_addr
-            for node in nodes
-        )
-        if jcc_addr in typed_loop_condition_jcc_addrs and not existing_break_nodes:
-            stats.refused_existing_condition += 1
-            continue
-        has_existing_condition_without_break = (
-            any(existing_key[0] == jcc_addr for existing_key in existing_condition_keys)
-            and not existing_break_nodes
-        )
-
-        body_target = callbacks.branch_target_imm(jcc)
-        fallthrough_target = _instruction_fallthrough_target_8616(jcc)
-        false_target = callbacks.next_unconditional_target_after_jcc(project, int(block_addr), jcc_addr)
-        if body_target is None or fallthrough_target is None or false_target is None:
-            if debug_jcc:
-                log.warning(
-                    "[unconsumed-loop-break-jcc] refuse targets key=%r body_target=%r "
-                    "fallthrough_target=%r false_target=%r",
-                    key,
-                    body_target,
-                    fallthrough_target,
-                    false_target,
-                )
-            stats.refused_no_fallthrough_jump += 1
-            continue
-        stats.normalized_fact_count += 1
-        exit_target = callbacks.resolve_one_hop_jmp_target(project, int(false_target))
-
-        tags = {
-            "ins_addr": jcc_addr,
-            "vex_block_addr": int(block_addr),
-            "inertia_jcc_materialized_8616": True,
-        }
-        typed_candidates = _typed_conditions_for_branch_8616(
-            typed_conditions_by_key,
-            jcc_addr=jcc_addr,
-            block_addr=int(block_addr),
-            body_target=int(body_target),
-            fallthrough_target=int(fallthrough_target),
-        )
-        if debug_jcc:
-            log.warning(
-                "[unconsumed-loop-break-jcc] candidate key=%r mnemonic=%s body_target=%#x "
-                "fallthrough_target=%#x false_target=%#x exit_target=%r typed_candidates=%d",
-                key,
-                mnemonic,
-                int(body_target),
-                int(fallthrough_target),
-                int(false_target),
-                exit_target,
-                len(typed_candidates),
-            )
-        if len(typed_candidates) > 1:
-            stats.refused_decode += 1
-            continue
-        typed_condition: ConditionIR | None = None
-        if typed_candidates:
-            typed_condition = typed_candidates[0]
-            if not _typed_condition_matches_jcc_targets_8616(
-                typed_condition,
-                body_target=int(body_target),
-                fallthrough_target=int(fallthrough_target),
-            ):
-                if debug_jcc:
-                    log.warning(
-                        "[unconsumed-loop-break-jcc] refuse typed targets key=%r "
-                        "typed_taken=%r typed_fallthrough=%r",
-                        key,
-                        typed_condition.taken_target,
-                        typed_condition.fallthrough_target,
-                    )
-                stats.refused_decode += 1
-                continue
-            decoded_cond = materialize_condition_ir_expression_8616(
-                project,
-                codegen,
-                typed_condition,
-            )
-            guard_cond = (
-                _invert_materialized_condition_8616(
-                    decoded_cond,
-                    codegen,
-                    callbacks,
-                    tags,
-                )
-                if decoded_cond is not None
-                else None
-            )
-            if decoded_cond is not None:
-                decoded_cond.tags = dict(tags)
-        else:
-            decoded = callbacks.translate_cmp_jcc_guard(project, codegen, int(block_addr), jcc_addr)
-            if decoded is None:
-                stats.refused_decode += 1
-                continue
-            guard_cond = callbacks.inverted_condition_expr(project, codegen, decoded, tags)
-            decoded_cond = callbacks.decoded_condition_expr(project, codegen, decoded, tags)
-        if not isinstance(guard_cond, CExpression) or not isinstance(
-            decoded_cond,
-            CExpression,
-        ):
-            if debug_jcc:
-                log.warning(
-                    "[unconsumed-loop-break-jcc] refuse decode key=%r guard=%r decoded=%r",
-                    key,
-                    guard_cond,
-                    decoded_cond,
-                )
-            stats.refused_decode += 1
-            continue
-        decoded_conditions_by_jcc[jcc_addr] = decoded_cond
-        decoded_condition_fingerprint = (
-            canonicalize_condition_storage_fingerprint_8616(
-                callbacks.expr_fingerprint(
-                    decoded_cond,
-                    project,
-                )
-            )
-        )
-        guard_condition_fingerprint = (
-            canonicalize_condition_storage_fingerprint_8616(
-                callbacks.expr_fingerprint(
-                    guard_cond,
-                    project,
-                )
-            )
-        )
-        if (
-            not decoded_condition_fingerprint
-            or not guard_condition_fingerprint
-        ):
-            stats.refused_decode += 1
-            continue
-        if _existing_nonbreak_branch_consumes_jcc_8616(
-            root,
-            project=project,
-            body_target=int(body_target),
-            false_target=int(false_target),
-            decoded_condition_fingerprint=decoded_condition_fingerprint,
-            callbacks=callbacks,
-            query_session=query_session,
-        ):
-            stats.refused_existing_condition += 1
-            continue
-        consuming_loop_headers = (
-            _loop_headers_consuming_jcc_8616(
-                root,
-                project=project,
-                body_target=int(body_target),
-                false_target=int(false_target),
-                exit_target=exit_target,
-                decoded_condition_fingerprint=decoded_condition_fingerprint,
-                callbacks=callbacks,
-                query_session=query_session,
-            )
-            if not existing_break_nodes
-            else ()
-        )
-        if consuming_loop_headers:
-            existing_break_nodes = tuple(
-                dict.fromkeys(
-                    guard
-                    for loop_node in consuming_loop_headers
-                    for guard in _semantic_break_guards_in_loop_8616(
-                        cast(CStatements, loop_node.body),
-                        project=project,
-                        guard_condition=guard_cond,
-                        guard_condition_fingerprint=guard_condition_fingerprint,
-                        callbacks=callbacks,
-                    )
-                )
-            )
-            if not existing_break_nodes:
-                stats.refused_existing_condition += 1
-                continue
-            has_existing_condition_without_break = False
-        if (
-            has_existing_condition_without_break
-            and jcc_addr not in existing_loop_header_jcc_addrs
-        ):
-            stats.refused_existing_condition += 1
-            continue
-        if existing_break_nodes or has_existing_condition_without_break:
-            stats.classified_fact_count += 1
-        branch_fact = LoopBranchGuardFact8616(
-            jcc_addr=jcc_addr,
-            block_addr=int(block_addr),
-            body_target=int(body_target),
-            fallthrough_target=int(fallthrough_target),
-            false_target=int(false_target),
-            decoded_condition_fingerprint=decoded_condition_fingerprint,
-            guard_condition_fingerprint=guard_condition_fingerprint,
-            condition_ir=typed_condition,
-        )
-        if has_existing_condition_without_break:
-            _record_loop_branch_guard_fact_8616(codegen, branch_fact)
-            stats.refused_existing_condition += 1
-            continue
-
-        materialized_for_key = False
-        for loop_node in reversed(_loop_nodes_with_body_8616(root, query_session)):
-            loop_body = _dynamic_attr_8616(loop_node, "body", None)
-            if not isinstance(loop_body, CStatements):
-                continue
-            if not _root_contains_ins_addr_8616(
-                loop_body,
-                int(body_target),
-                query_session,
-            ):
-                continue
-            if _root_contains_ins_addr_8616(
-                loop_body,
-                int(false_target),
-                query_session,
-            ):
-                continue
-            if isinstance(exit_target, int) and _root_contains_ins_addr_8616(
-                loop_body,
-                int(exit_target),
-                query_session,
-            ):
-                continue
-            if not existing_break_nodes:
-                semantic_break_guards = _semantic_break_guards_in_loop_8616(
-                    loop_body,
-                    project=project,
-                    guard_condition=guard_cond,
-                    guard_condition_fingerprint=guard_condition_fingerprint,
-                    callbacks=callbacks,
-                )
-                if len(semantic_break_guards) == 1:
-                    _record_loop_branch_guard_fact_8616(codegen, branch_fact)
-                    stats.refused_duplicate_guard += 1
-                    materialized_for_key = True
-                    break
-                if len(semantic_break_guards) > 1:
-                    stats.refused_duplicate_guard += 1
-                    materialized_for_key = True
-                    break
-            if existing_break_nodes:
-                removal = _remove_loop_header_duplicate_break_guard_8616(
-                    project,
-                    loop_node,
-                    loop_body,
-                    existing_break_nodes,
-                    key=key,
-                    decoded_condition=decoded_cond,
-                    guard_condition=guard_cond,
-                    callbacks=callbacks,
-                )
-                if removal is not None:
-                    _record_loop_branch_guard_fact_8616(codegen, branch_fact)
-                    _record_loop_header_duplicate_guard_removal_fact_8616(
-                        codegen,
-                        removal.fact,
-                    )
-                    callbacks.record_condition_evidence(
-                        project,
-                        codegen,
-                        removal.removed_condition,
-                        loop_node.condition,
-                    )
-                    stats.materialized_count += 1
-                    stats.removed_loop_header_duplicate_guard += 1
-                    changed = True
-                    query_session.record_mutation()
-                    materialized_for_key = True
-                    existing_break_nodes_by_key = {
-                        **existing_break_nodes_by_key,
-                        key: (),
-                    }
-                    break
-                if os.environ.get("INERTIA_DEBUG_JCC_REWRITE"):
-                    log.warning(
-                        "[unconsumed-loop-break-jcc] existing break candidates key=%r count=%d body_target=%#x false_target=%#x",
-                        key,
-                        len(existing_break_nodes),
-                        int(body_target),
-                        int(false_target),
-                    )
-                for break_node in existing_break_nodes:
-                    if not _root_contains_node_8616(
-                        loop_body,
-                        break_node,
-                        query_session,
-                    ):
-                        if os.environ.get("INERTIA_DEBUG_JCC_REWRITE"):
-                            log.warning("[unconsumed-loop-break-jcc] existing break not in loop body key=%r", key)
-                        continue
-                    current_condition = _break_guard_condition_8616(break_node)
-                    current_fp = callbacks.expr_fingerprint(current_condition, project)
-                    if (
-                        current_fp == guard_condition_fingerprint
-                        or callbacks.same_c_expression(
-                            current_condition,
-                            guard_cond,
-                        )
-                        or same_condition_storage_identity_8616(
-                            current_condition,
-                            guard_cond,
-                            same_expression=callbacks.same_c_expression,
-                        )
-                    ):
-                        _record_loop_branch_guard_fact_8616(
-                            codegen,
-                            branch_fact,
-                        )
-                        stats.refused_duplicate_guard += 1
-                        materialized_for_key = True
-                        break
-                    if (
-                        current_fp != decoded_condition_fingerprint
-                        and not callbacks.same_c_expression(
-                            current_condition,
-                            decoded_cond,
-                        )
-                    ):
-                        continue
-                    previous_condition = current_condition
-                    replacement_condition = callbacks.clone_c_value(guard_cond)
-                    if not _set_break_guard_condition_8616(break_node, replacement_condition):
-                        continue
-                    _record_loop_branch_guard_fact_8616(
-                        codegen,
-                        branch_fact,
-                    )
-                    callbacks.record_condition_evidence(project, codegen, previous_condition, replacement_condition)
-                    stats.materialized_count += 1
-                    changed = True
-                    query_session.record_mutation()
-                    materialized_for_key = True
-                    break
-                if materialized_for_key:
-                    break
-                continue
-
-            if topology is None or not topology.proves_exit(
-                int(block_addr), int(body_target), int(fallthrough_target), int(false_target),
-            ):
-                continue
-            body_statements = _dynamic_sequence_8616(_dynamic_attr_8616(loop_body, "statements", ()))
-            insert_idx = _first_statement_index_containing_ins_addr_8616(
-                body_statements,
-                int(body_target),
-                query_session,
-            )
-            if insert_idx is None:
-                continue
-            # New guards are classified only after CFG exit and placement proof.
-            stats.classified_fact_count += 1
-            guard = CIfBreak(callbacks.clone_c_value(guard_cond), codegen=codegen, cstyle_ifs=True)
-            rebuilt = list(body_statements)
-            rebuilt.insert(insert_idx, guard)
-            loop_body.statements = rebuilt
-            _record_loop_branch_guard_fact_8616(codegen, branch_fact)
-            callbacks.record_condition_evidence(project, codegen, decoded_cond, guard.condition)
-            stats.materialized_count += 1
-            changed = True
-            query_session.record_mutation()
-            materialized_for_key = True
-            existing_break_nodes_by_key = {**existing_break_nodes_by_key, key: (guard,)}
-            break
-
-        if not materialized_for_key:
-            if debug_jcc:
-                log.warning(
-                    "[unconsumed-loop-break-jcc] refuse loop anchor key=%r body_target=%#x "
-                    "false_target=%#x exit_target=%r",
-                    key,
-                    int(body_target),
-                    int(false_target),
-                    exit_target,
-                )
-            stats.refused_no_loop_anchor += 1
+        scan.scan_jcc(block_addr, jcc)
 
     changed = (
         _split_materialized_loop_header_condition_chains_8616(
             project,
             root,
             codegen,
-            decoded_conditions_by_jcc,
+            scan.decoded_conditions_by_jcc,
             callbacks,
             stats,
             query_session,
         )
-        or changed
+        or scan.changed
     )
     query_session.record_stats(stats)
     if stats.raw_fact_count and stats.materialized_count == 0:

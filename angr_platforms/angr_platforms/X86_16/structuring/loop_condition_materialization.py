@@ -196,6 +196,78 @@ def _structured_body_block_addrs_8616(body: object) -> frozenset[int]:
     return frozenset(addresses)
 
 
+def _function_region_8616(codegen: object) -> int | None:
+    """Return the current function's region for shared register identities."""
+    try:
+        cfunc = cast(_CodegenBoundary8616, codegen).cfunc
+    except AttributeError:
+        return None
+    return cfunc.addr if cfunc is not None else None
+
+
+def _shared_loop_register_8616(
+    reg: int,
+    size: int,
+    name: str,
+    region: int | None,
+) -> SimRegisterVariable:
+    """Construct the shared typed register identity for one loop carrier."""
+    return SimRegisterVariable(
+        reg,
+        size,
+        ident=f"inertia-register-{name}",
+        region=region if isinstance(region, int) else None,
+        name=name,
+    )
+
+
+def _self_update_match_8616(
+    node: object,
+    register_name: str,
+) -> tuple[CAssignment, CBinaryOp, int] | None:
+    """Return the self-update triple when one node exactly matches."""
+    if not isinstance(node, CAssignment) or not isinstance(node.lhs, CVariable):
+        return None
+    variable = node.lhs.variable
+    rhs = node.rhs
+    if (
+        not isinstance(variable, SimRegisterVariable)
+        or variable.name != register_name
+        or not isinstance(rhs, CBinaryOp)
+    ):
+        return None
+    dirty_operand = rhs.lhs
+    try:
+        dirty_varid = dirty_operand.dirty.varid if isinstance(dirty_operand, CDirtyExpression) else None
+    except AttributeError:
+        dirty_varid = None
+    if (
+        rhs.op not in {"Add", "Sub"}
+        or not isinstance(dirty_varid, int)
+        or not isinstance(rhs.rhs, CConstant)
+        or not isinstance(rhs.rhs.value, int)
+    ):
+        return None
+    return node, rhs, dirty_varid
+
+
+def _replaced_register_carrier_8616(
+    node: object,
+    dirty_varid: int,
+    source: CVariable,
+) -> object:
+    """Replace only the unique virtual identity proven by the self-update."""
+    if not isinstance(node, CDirtyExpression):
+        return node
+    try:
+        node_varid = node.dirty.varid
+    except AttributeError:
+        return node
+    if node_varid != dirty_varid:
+        return node
+    return _clone_c_ast_tree_8616(source)
+
+
 def _materialize_plain_loop_counter_update_8616(
     body: object,
     condition: ConditionIR,
@@ -210,45 +282,23 @@ def _materialize_plain_loop_counter_update_8616(
     ):
         return 0
 
-    matches: list[tuple[CAssignment, CBinaryOp, int]] = []
-    for node in _iter_c_nodes_deep_8616(body):
-        if not isinstance(node, CAssignment) or not isinstance(node.lhs, CVariable):
-            continue
-        variable = node.lhs.variable
-        rhs = node.rhs
-        dirty_operand = rhs.lhs if isinstance(rhs, CBinaryOp) else None
-        try:
-            dirty_varid = dirty_operand.dirty.varid if isinstance(dirty_operand, CDirtyExpression) else None
-        except AttributeError:
-            dirty_varid = None
-        if (
-            not isinstance(variable, SimRegisterVariable)
-            or variable.name != operand.name.lower()
-            or not isinstance(rhs, CBinaryOp)
-            or rhs.op not in {"Add", "Sub"}
-            or not isinstance(dirty_varid, int)
-            or not isinstance(rhs.rhs, CConstant)
-            or not isinstance(rhs.rhs.value, int)
-        ):
-            continue
-        matches.append((node, rhs, dirty_varid))
+    matches = [
+        match
+        for node in _iter_c_nodes_deep_8616(body)
+        if (match := _self_update_match_8616(node, operand.name.lower())) is not None
+    ]
     if len(matches) != 1:
         return 0
 
     assignment, _rhs, dirty_varid = matches[0]
     variable = cast(SimRegisterVariable, assignment.lhs.variable)
-    try:
-        cfunc = cast(_CodegenBoundary8616, codegen).cfunc
-    except AttributeError:
-        cfunc = None
-    function_region = cfunc.addr if cfunc is not None else None
-    region = variable.region if isinstance(variable.region, int) else function_region
-    shared = SimRegisterVariable(
-        variable.reg,
-        variable.size,
-        ident=f"inertia-register-{operand.name.lower()}",
-        region=region if isinstance(region, int) else None,
-        name=operand.name.lower(),
+    region = (
+        variable.region
+        if isinstance(variable.region, int)
+        else _function_region_8616(codegen)
+    )
+    shared = _shared_loop_register_8616(
+        variable.reg, variable.size, operand.name.lower(), region,
     )
     assignment.lhs.variable = shared
     assignment.lhs.unified_variable = shared
@@ -257,16 +307,10 @@ def _materialize_plain_loop_counter_update_8616(
     def _replace_proven_register_carrier(node: object) -> object:
         """Replace only the unique virtual identity proven by the self-update."""
         nonlocal replacement_count
-        if not isinstance(node, CDirtyExpression):
-            return node
-        try:
-            node_varid = node.dirty.varid
-        except AttributeError:
-            return node
-        if node_varid != dirty_varid:
-            return node
-        replacement_count += 1
-        return _clone_c_ast_tree_8616(assignment.lhs)
+        replaced = _replaced_register_carrier_8616(node, dirty_varid, assignment.lhs)
+        if replaced is not node:
+            replacement_count += 1
+        return replaced
 
     _replace_c_children_8616(body, _replace_proven_register_carrier)
     return int(replacement_count > 0)
@@ -336,6 +380,71 @@ def _bind_register_identity_to_loop_carrier_8616(
     return replacements
 
 
+def _latest_loop_initializer_8616(
+    root: object,
+    loop_body: object,
+    update: ConditionRegisterUpdateIR,
+    target_offset: int,
+    target_size: int,
+) -> CAssignment | None:
+    """Return the unique latest pre-update initializer for the target register."""
+    body_ids = {id(node) for node in _iter_c_nodes_deep_8616(loop_body)}
+    initializers: list[tuple[int, CAssignment]] = []
+    for node in _iter_c_nodes_deep_8616(root):
+        if id(node) in body_ids or not isinstance(node, CAssignment):
+            continue
+        if not isinstance(node.lhs, CVariable) or not isinstance(node.lhs.variable, SimRegisterVariable):
+            continue
+        tags = _expression_tags_8616(node)
+        ins_addr = tags.get("ins_addr")
+        variable = node.lhs.variable
+        if (
+            isinstance(ins_addr, int)
+            and ins_addr < update.instruction_addr
+            and variable.reg == target_offset
+            and variable.size == target_size
+        ):
+            initializers.append((ins_addr, node))
+    if not initializers:
+        return None
+    latest_addr = max(address for address, _assignment in initializers)
+    latest = tuple(
+        assignment for address, assignment in initializers if address == latest_addr
+    )
+    return latest[0] if len(latest) == 1 else None
+
+
+def _zero_xor_initializer_8616(initializer: CAssignment, codegen: object) -> None:
+    """Normalize a proven ``x ^ x`` initializer to a literal zero."""
+    if (
+        isinstance(initializer.rhs, CBinaryOp)
+        and initializer.rhs.op == "Xor"
+        and _same_c_expression_8616(initializer.rhs.lhs, initializer.rhs.rhs)
+    ):
+        initializer.rhs = CConstant(
+            0,
+            initializer.rhs.type or SimTypeShort(False),
+            codegen=codegen,
+        )
+
+
+def _marked_update_target_8616(
+    loop: _LoopBoundary8616,
+    update: ConditionRegisterUpdateIR,
+    marker: str,
+) -> CVariable | None:
+    """Return an already-materialized update target inside the loop body."""
+    if not isinstance(loop.body, CStatements):
+        return None
+    for statement in loop.body.statements or ():
+        if not isinstance(statement, CAssignment):
+            continue
+        tags = _expression_tags_8616(statement)
+        if tags.get(marker) == update.instruction_addr:
+            return cast(CVariable, statement.lhs)
+    return None
+
+
 def _materialize_bound_loop_register_update_8616(
     root: object,
     loop: _LoopBoundary8616,
@@ -359,42 +468,16 @@ def _materialize_bound_loop_register_update_8616(
         return _RegisterUpdateMaterialization8616()
     target_offset = int(target_offset)
     target_size = int(target_size)
-    body_ids = {id(node) for node in _iter_c_nodes_deep_8616(loop.body)}
-    initializers: list[tuple[int, CAssignment]] = []
-    for node in _iter_c_nodes_deep_8616(root):
-        if id(node) in body_ids or not isinstance(node, CAssignment):
-            continue
-        if not isinstance(node.lhs, CVariable) or not isinstance(node.lhs.variable, SimRegisterVariable):
-            continue
-        tags = _expression_tags_8616(node)
-        ins_addr = tags.get("ins_addr")
-        variable = node.lhs.variable
-        if (
-            isinstance(ins_addr, int)
-            and ins_addr < update.instruction_addr
-            and variable.reg == target_offset
-            and variable.size == target_size
-        ):
-            initializers.append((ins_addr, node))
-    if not initializers:
-        return _RegisterUpdateMaterialization8616()
-    latest_addr = max(address for address, _assignment in initializers)
-    latest = tuple(
-        assignment for address, assignment in initializers if address == latest_addr
+    initializer = _latest_loop_initializer_8616(
+        root, loop.body, update, target_offset, target_size,
     )
-    if len(latest) != 1:
+    if initializer is None:
         return _RegisterUpdateMaterialization8616()
-    initializer = latest[0]
     initializer_variable = cast(SimRegisterVariable, initializer.lhs.variable)
-    try:
-        cfunc = cast(_CodegenBoundary8616, codegen).cfunc
-    except AttributeError:
-        cfunc = None
-    function_region = cfunc.addr if cfunc is not None else None
     region = (
         initializer_variable.region
         if isinstance(initializer_variable.region, int)
-        else function_region
+        else _function_region_8616(codegen)
     )
     rhs = lower_ir_value_to_c_expr_8616(
         update.rhs, project, codegen, resolve_register_name=True,
@@ -402,37 +485,21 @@ def _materialize_bound_loop_register_update_8616(
     op = {"add": "Add", "and": "And", "or": "Or", "sub": "Sub", "xor": "Xor"}.get(update.op)
     if not isinstance(rhs, CExpression) or op is None:
         return _RegisterUpdateMaterialization8616()
-    shared = SimRegisterVariable(
-        target_offset,
-        target_size,
-        ident=f"inertia-register-{update.target_register}",
-        region=region if isinstance(region, int) else None,
-        name=update.target_register,
+    shared = _shared_loop_register_8616(
+        target_offset, target_size, update.target_register, region,
     )
     initializer.lhs.variable = shared
     initializer.lhs.unified_variable = shared
     target = cast(CVariable, _clone_c_ast_tree_8616(initializer.lhs))
     _bind_register_identity_to_loop_carrier_8616(root, initializer_variable, target)
-    if (
-        isinstance(initializer.rhs, CBinaryOp)
-        and initializer.rhs.op == "Xor"
-        and _same_c_expression_8616(initializer.rhs.lhs, initializer.rhs.rhs)
-    ):
-        initializer.rhs = CConstant(
-            0,
-            initializer.rhs.type or SimTypeShort(False),
-            codegen=codegen,
-        )
+    _zero_xor_initializer_8616(initializer, codegen)
     marker = "inertia_typed_loop_register_update_8616"
-    for statement in loop.body.statements or ():
-        if not isinstance(statement, CAssignment):
-            continue
-        tags = _expression_tags_8616(statement)
-        if tags.get(marker) == update.instruction_addr:
-            return _RegisterUpdateMaterialization8616(
-                target=cast(CVariable, statement.lhs),
-                update=update,
-            )
+    marked_target = _marked_update_target_8616(loop, update, marker)
+    if marked_target is not None:
+        return _RegisterUpdateMaterialization8616(
+            target=marked_target,
+            update=update,
+        )
     update_assignment = CAssignment(
         cast(CVariable, _clone_c_ast_tree_8616(target)),
         CBinaryOp(
@@ -711,6 +778,260 @@ def _mark_condition_binding_8616(expression: CExpression, key: tuple[int, int]) 
     boundary.tags = tags
 
 
+def _conditions_by_key_8616(
+    typed_conditions: tuple[ConditionIR, ...],
+) -> dict[tuple[int, int], list[ConditionIR]]:
+    """Group typed conditions by their exact proven condition key."""
+    conditions_by_key: dict[tuple[int, int], list[ConditionIR]] = {}
+    for condition in typed_conditions:
+        key = _condition_key_8616(condition)
+        if key is not None:
+            conditions_by_key.setdefault(key, []).append(condition)
+    return conditions_by_key
+
+
+@dataclass(slots=True)
+class _LoopConditionTally8616:
+    """Accumulated stats for the loop-condition materialization pass."""
+
+    raw: int = 0
+    normalized: int = 0
+    classified: int = 0
+    materialized: int = 0
+    changed: int = 0
+    taken: int = 0
+    fallthrough: int = 0
+    counter_updates: int = 0
+    composite_owned: int = 0
+
+
+@dataclass(slots=True)
+class _LoopKeySelection8616:
+    """Key-narrowing state for one structured loop boundary."""
+
+    loop_body: object
+    successors: Mapping[int, tuple[int, ...]]
+    conditions_by_key: Mapping[tuple[int, int], list[ConditionIR]]
+    leading_break_guard: CIfBreak | CIfElse | None
+    current_keys: frozenset[tuple[int, int]]
+    body_keys: frozenset[tuple[int, int]]
+    body_block_addrs: frozenset[int]
+    matching_keys: frozenset[tuple[int, int]]
+    pretest_keys: frozenset[tuple[int, int]] = frozenset()
+    owned_pretest_keys: frozenset[tuple[int, int]] = frozenset()
+
+    def _owns_pretest_guard_8616(self, key: tuple[int, int]) -> bool:
+        """Return whether the leading break guard uniquely owns one key."""
+        return (
+            len(self.conditions_by_key[key]) == 1
+            and classify_composite_loop_exit_ownership_8616(
+                self.loop_body,
+                key,
+                self.successors,
+                leading_break_guard=self.leading_break_guard,
+            ).owned_pretest_guard
+            is self.leading_break_guard
+        )
+
+    def _has_continuation_edge_8616(self, key: tuple[int, int]) -> bool:
+        """Return whether one key's unique condition proves a loop edge."""
+        return (
+            len(self.conditions_by_key[key]) == 1
+            and _continuation_edge_8616(
+                self.conditions_by_key[key][0],
+                self.successors,
+                body_block_addrs=self.body_block_addrs,
+            )
+            is not None
+        )
+
+    def narrow(self) -> None:
+        """Narrow matching keys through pretest-guard and current-key ownership."""
+        if len(self.matching_keys) > 1 and self.leading_break_guard is not None:
+            self.pretest_keys = _tag_pairs_8616(
+                self.leading_break_guard
+            ).intersection(self.matching_keys)
+            self.owned_pretest_keys = frozenset(
+                key for key in self.pretest_keys if self._owns_pretest_guard_8616(key)
+            )
+            if len(self.owned_pretest_keys) == 1:
+                self.matching_keys = self.owned_pretest_keys
+        if (
+            len(self.matching_keys) > 1
+            and not self.pretest_keys
+            and len(self.current_keys) == 1
+        ):
+            self.matching_keys = self.current_keys
+
+    def resolve_continuation(self) -> None:
+        """Narrow matching keys to conditions proving a continuation edge."""
+        if len(self.matching_keys) > 1:
+            self.matching_keys = frozenset(
+                key
+                for key in self.matching_keys
+                if self._has_continuation_edge_8616(key)
+            )
+
+
+def _materialize_loop_guard_8616(
+    root: object,
+    loop: _LoopBoundary8616,
+    current: CExpression,
+    key: tuple[int, int],
+    condition: ConditionIR,
+    selection: _LoopKeySelection8616,
+    tally: _LoopConditionTally8616,
+    lower_condition: Callable[[ConditionIR], CExpression | None],
+    codegen: object,
+) -> None:
+    """Materialize one uniquely proven continuation condition into a loop guard."""
+    composite_ownership = classify_composite_loop_exit_ownership_8616(
+        loop.body,
+        key,
+        selection.successors,
+        leading_break_guard=selection.leading_break_guard,
+    )
+    if (
+        composite_ownership.status is CompositeLoopExitOwnershipStatus8616.UNIQUE
+        and composite_ownership.owned_pretest_guard is None
+    ):
+        tally.classified += 1
+        tally.materialized += 1
+        tally.composite_owned += 1
+        return
+    if composite_ownership.status is CompositeLoopExitOwnershipStatus8616.AMBIGUOUS or (
+        not selection.current_keys
+        and composite_ownership.status is not CompositeLoopExitOwnershipStatus8616.UNIQUE
+        and not _loop_header_carries_condition_register_8616(current, condition)
+    ):
+        return
+    edge = _continuation_edge_8616(
+        condition,
+        selection.successors,
+        body_block_addrs=selection.body_block_addrs,
+    )
+    if edge is None:
+        return
+    _mark_condition_binding_8616(current, key)
+    tally.classified += 1
+    if edge is LoopContinuationEdge8616.TAKEN:
+        tally.taken += 1
+    else:
+        tally.fallthrough += 1
+    tally.counter_updates += _materialize_plain_loop_counter_update_8616(
+        loop.body, condition, codegen,
+    )
+    _bind_existing_loop_condition_register_8616(current, loop.body, condition)
+    update_materialization = _materialize_bound_loop_register_update_8616(
+        root,
+        loop,
+        condition,
+        codegen,
+    )
+    tally.counter_updates += int(update_materialization.changed)
+    lowering_condition = (
+        _condition_after_materialized_register_update_8616(
+            condition,
+            update_materialization.update,
+        )
+        if update_materialization.update is not None
+        else condition
+    )
+    replacement = lower_condition(lowering_condition)
+    if replacement is None:
+        return
+    if update_materialization.target is not None:
+        _bind_materialized_update_target_8616(
+            replacement,
+            update_materialization.target,
+        )
+    if edge is LoopContinuationEdge8616.FALLTHROUGH:
+        replacement = _invert_condition_8616(replacement, codegen)
+    pretest_consumed = composite_ownership.owned_pretest_guard is not None
+    if composite_ownership.owned_pretest_guard is not None and not _consume_owned_pretest_guard_8616(
+        loop,
+        composite_ownership.owned_pretest_guard,
+        codegen,
+    ):
+        return
+    tally.composite_owned += int(pretest_consumed)
+    if _is_owned_materialization_8616(current, key, edge) and _same_c_expression_8616(current, replacement):
+        tally.materialized += 1
+        tally.changed += int(pretest_consumed)
+        return
+    _mark_materialization_8616(replacement, key, edge)
+    loop.condition = replacement
+    tally.materialized += 1
+    tally.changed += 1
+
+
+def _process_loop_node_8616(
+    node: object,
+    root: object,
+    codegen: object,
+    conditions_by_key: Mapping[tuple[int, int], list[ConditionIR]],
+    successors: Mapping[int, tuple[int, ...]],
+    lower_condition: Callable[[ConditionIR], CExpression | None],
+    tally: _LoopConditionTally8616,
+) -> None:
+    """Materialize the proven continuation condition for one structured loop."""
+    if not isinstance(node, (CForLoop, CWhileLoop, CDoWhileLoop)):
+        return
+    loop = cast(_LoopBoundary8616, node)
+    current = loop.condition
+    if not isinstance(current, CExpression):
+        return
+    leading_break_guard = (
+        pretest_condition_surface_8616(node).leading_break_guard
+        if isinstance(node, (CForLoop, CWhileLoop))
+        else None
+    )
+    current_keys = loop_condition_keys_8616(current, _tag_pairs_8616(current), conditions_by_key, successors)
+    body_keys = _tag_pairs_8616(loop.body).intersection(conditions_by_key)
+    matching_keys = current_keys | body_keys
+    if not matching_keys:
+        return
+    tally.raw += 1
+    selection = _LoopKeySelection8616(
+        loop_body=loop.body,
+        successors=successors,
+        conditions_by_key=conditions_by_key,
+        leading_break_guard=leading_break_guard,
+        current_keys=current_keys,
+        body_keys=body_keys,
+        body_block_addrs=_structured_body_block_addrs_8616(loop.body),
+        matching_keys=matching_keys,
+    )
+    selection.narrow()
+    _debug_loop_selection_8616(
+        body_keys=body_keys,
+        current_keys=current_keys,
+        leading_guard_type=(type(leading_break_guard).__name__ if leading_break_guard is not None else None),
+        matching_keys=selection.matching_keys,
+        owned_pretest_keys=selection.owned_pretest_keys,
+        pretest_keys=selection.pretest_keys,
+    )
+    selection.resolve_continuation()
+    if len(selection.matching_keys) != 1:
+        return
+    key = next(iter(selection.matching_keys))
+    candidates = conditions_by_key[key]
+    if len(candidates) != 1:
+        return
+    tally.normalized += 1
+    _materialize_loop_guard_8616(
+        root,
+        loop,
+        current,
+        key,
+        candidates[0],
+        selection,
+        tally,
+        lower_condition,
+        codegen,
+    )
+
+
 def materialize_typed_loop_continuation_conditions_8616(
     root: object,
     codegen: object,
@@ -719,165 +1040,28 @@ def materialize_typed_loop_continuation_conditions_8616(
     lower_condition: Callable[[ConditionIR], CExpression | None],
 ) -> LoopConditionMaterializationStats8616:
     """Replace loop guards only when exact typed and CFG evidence agree."""
-    conditions_by_key: dict[tuple[int, int], list[ConditionIR]] = {}
-    for condition in typed_conditions:
-        key = _condition_key_8616(condition)
-        if key is not None:
-            conditions_by_key.setdefault(key, []).append(condition)
-
-    raw_count = 0
-    normalized_count = 0
-    classified_count = 0
-    materialized_count = 0
-    changed_count = 0
-    taken_count = 0
-    fallthrough_count = 0
-    counter_update_count = 0
-    composite_loop_exit_owned_count = 0
+    conditions_by_key = _conditions_by_key_8616(typed_conditions)
+    tally = _LoopConditionTally8616()
     for node in _iter_c_nodes_deep_8616(root):
-        if not isinstance(node, (CForLoop, CWhileLoop, CDoWhileLoop)):
-            continue
-        loop = cast(_LoopBoundary8616, node)
-        current = loop.condition
-        if not isinstance(current, CExpression):
-            continue
-        leading_break_guard = (
-            pretest_condition_surface_8616(node).leading_break_guard
-            if isinstance(node, (CForLoop, CWhileLoop))
-            else None
-        )
-        current_keys = loop_condition_keys_8616(current, _tag_pairs_8616(current), conditions_by_key, successors)
-        body_keys = _tag_pairs_8616(loop.body).intersection(conditions_by_key)
-        matching_keys = current_keys | body_keys
-        if not matching_keys:
-            continue
-        raw_count += 1
-        body_block_addrs = _structured_body_block_addrs_8616(loop.body)
-        pretest_keys: frozenset[tuple[int, int]] = frozenset()
-        owned_pretest_keys: frozenset[tuple[int, int]] = frozenset()
-        if len(matching_keys) > 1 and leading_break_guard is not None:
-            pretest_keys = _tag_pairs_8616(leading_break_guard).intersection(matching_keys)
-            owned_pretest_keys = frozenset(
-                key
-                for key in pretest_keys
-                if len(conditions_by_key[key]) == 1
-                and classify_composite_loop_exit_ownership_8616(
-                    loop.body,
-                    key,
-                    successors,
-                    leading_break_guard=leading_break_guard,
-                ).owned_pretest_guard
-                is leading_break_guard
-            )
-            if len(owned_pretest_keys) == 1:
-                matching_keys = owned_pretest_keys
-        if len(matching_keys) > 1 and not pretest_keys and len(current_keys) == 1:
-            matching_keys = current_keys
-        _debug_loop_selection_8616(
-            body_keys=body_keys,
-            current_keys=current_keys,
-            leading_guard_type=(type(leading_break_guard).__name__ if leading_break_guard is not None else None),
-            matching_keys=matching_keys,
-            owned_pretest_keys=owned_pretest_keys,
-            pretest_keys=pretest_keys,
-        )
-        if len(matching_keys) > 1:
-            matching_keys = frozenset(
-                key
-                for key in matching_keys
-                if len(conditions_by_key[key]) == 1
-                and _continuation_edge_8616(
-                    conditions_by_key[key][0],
-                    successors,
-                    body_block_addrs=body_block_addrs,
-                )
-                is not None
-            )
-        if len(matching_keys) != 1:
-            continue
-        key = next(iter(matching_keys))
-        candidates = conditions_by_key[key]
-        if len(candidates) != 1:
-            continue
-        normalized_count += 1
-        composite_ownership = classify_composite_loop_exit_ownership_8616(
-            loop.body,
-            key,
-            successors,
-            leading_break_guard=leading_break_guard,
-        )
-        if (
-            composite_ownership.status is CompositeLoopExitOwnershipStatus8616.UNIQUE
-            and composite_ownership.owned_pretest_guard is None
-        ):
-            classified_count += 1
-            materialized_count += 1
-            composite_loop_exit_owned_count += 1
-            continue
-        if composite_ownership.status is CompositeLoopExitOwnershipStatus8616.AMBIGUOUS or (
-            not current_keys
-            and composite_ownership.status is not CompositeLoopExitOwnershipStatus8616.UNIQUE
-            and not _loop_header_carries_condition_register_8616(current, candidates[0])
-        ):
-            continue
-        condition = candidates[0]
-        edge = _continuation_edge_8616(
-            condition,
-            successors,
-            body_block_addrs=body_block_addrs,
-        )
-        if edge is None:
-            continue
-        _mark_condition_binding_8616(current, key)
-        classified_count += 1
-        if edge is LoopContinuationEdge8616.TAKEN:
-            taken_count += 1
-        else:
-            fallthrough_count += 1
-        counter_update_count += _materialize_plain_loop_counter_update_8616(loop.body, condition, codegen)
-        _bind_existing_loop_condition_register_8616(current, loop.body, condition)
-        update_materialization = _materialize_bound_loop_register_update_8616(
+        _process_loop_node_8616(
+            node,
             root,
-            loop,
-            condition,
             codegen,
+            conditions_by_key,
+            successors,
+            lower_condition,
+            tally,
         )
-        counter_update_count += int(update_materialization.changed)
-        lowering_condition = (
-            _condition_after_materialized_register_update_8616(
-                condition,
-                update_materialization.update,
-            )
-            if update_materialization.update is not None
-            else condition
-        )
-        replacement = lower_condition(lowering_condition)
-        if replacement is None:
-            continue
-        if update_materialization.target is not None:
-            _bind_materialized_update_target_8616(
-                replacement,
-                update_materialization.target,
-            )
-        if edge is LoopContinuationEdge8616.FALLTHROUGH:
-            replacement = _invert_condition_8616(replacement, codegen)
-        pretest_consumed = composite_ownership.owned_pretest_guard is not None
-        if composite_ownership.owned_pretest_guard is not None and not _consume_owned_pretest_guard_8616(
-            loop,
-            composite_ownership.owned_pretest_guard,
-            codegen,
-        ):
-            continue
-        composite_loop_exit_owned_count += int(pretest_consumed)
-        if _is_owned_materialization_8616(current, key, edge) and _same_c_expression_8616(current, replacement):
-            materialized_count += 1
-            changed_count += int(pretest_consumed)
-            continue
-        _mark_materialization_8616(replacement, key, edge)
-        loop.condition = replacement
-        materialized_count += 1
-        changed_count += 1
 
+    raw_count = tally.raw
+    normalized_count = tally.normalized
+    classified_count = tally.classified
+    materialized_count = tally.materialized
+    changed_count = tally.changed
+    taken_count = tally.taken
+    fallthrough_count = tally.fallthrough
+    counter_update_count = tally.counter_updates
+    composite_loop_exit_owned_count = tally.composite_owned
     failure_count = raw_count - normalized_count + normalized_count - classified_count
     failure_count += classified_count - materialized_count
     return LoopConditionMaterializationStats8616(
