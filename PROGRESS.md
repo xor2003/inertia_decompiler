@@ -490,3 +490,26 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   arm replacement, apply helpers) and `_SingleArm8616`/`_ArmReplacement8616`
   per-node state. All debug projections and refusal paths preserved.
 - Owning tests: 160 passed.
+
+## decompiler_postprocess_jcc.py: promoted findings 31 -> 0
+
+- `_rewrite_decoded_jcc_conditions_8616` (~421) -> `_JccRewriteRun8616`
+  pass dataclass: 65 nested closures converted to `self.`-state methods via
+  tokenize-based rename; `run` split into `_run_setup_8616`,
+  `_run_collect_signatures_8616`, `_run_rebind_and_sibling_polarity_8616`,
+  `_run_rewrite_node_conditions_8616` (+ `_rewrite_condition_pairs_8616`),
+  `_run_prune_and_publish_8616`.
+- Shared expression walkers hoisted: `_walk_c_expr_children_8616`,
+  `_m_statements_from_root_8616`/`_flatten_c_statements_8616`,
+  `_m_child_statement_roots_8616`, `_m_condition_exprs_from_stmt_8616`,
+  `_m_assignment_rhs_has_real_call_8616`, `_m_expr_is_return_register_8616`,
+  `_m_root_contains_ins_addr_8616` (+ `_root_children_8616`,
+  `_root_tags_match_ins_addr_8616`), arg-offset collectors.
+- `_CallReturnGuardScan8616` and `_CallReturnRebind8616` dataclasses replace
+  nonlocal-closure collectors.
+- `_decoded_condition_replacement` (38) split into pre-key gates, candidate
+  resolution, signature/raw-state/materialized-keep gates, unknown-polarity
+  inversion (`_DecodedGateResult8616`), and final replacement helpers.
+- All refusal counters, debug events, consumed-low prune semantics, and
+  call-return rebind behavior preserved.
+- Owning tests: 159 passed (incl. idempotent typed-condition ordering).
