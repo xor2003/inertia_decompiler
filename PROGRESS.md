@@ -513,3 +513,32 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - All refusal counters, debug events, consumed-low prune semantics, and
   call-return rebind behavior preserved.
 - Owning tests: 159 passed (incl. idempotent typed-condition ordering).
+
+## decompiler_postprocess_simplify.py: promoted findings 24 -> 0
+
+- `_simplify_structured_expressions_8616` (345) -> `_SimplifyExpressionRun8616`
+  pass dataclass: ~35 nested closures converted to methods (same tokenize
+  rename as JCC); `run` split into `_collect_cfunc_roots_8616`,
+  `_apply_root_transforms_8616`, `_refresh_root_children_8616`.
+- `transform` (39) split into `_fold_stat_counted_8616`,
+  `_fold_binary_transform_8616` (+ `_fold_concat_8616`,
+  `_fold_zero_operand_binary_8616`, `_fold_or_word_or_zero_8616`),
+  `_fold_not_transform_8616`, `_fold_tail_binary_8616` (+ `_fold_cmp_against_zero_8616`).
+- `_fold_pure_constant_binary_8616` -> `_PURE_BINARY_FOLDS_8616` operator table.
+- Counter bumps unified under `_bump_stat_8616` (dynamic codegen boundary).
+- `_expr_contains_stack_or_flags_register_8616` -> offsets collector +
+  recursive walker + shared `_seq_structured_children_8616` iterator
+  (also used by `_contains_unresolved_virtual_expr_8616`).
+- `_materialize_word_or_update_statements_8616` (107) -> methods on the same
+  run class: `_gate_arithmetic_update_pair_8616`, `_match_arithmetic_delta_8616`,
+  `_gate_duplicate_shift_update_8616`, `_match_duplicate_or_base_8616`,
+  `_log_*_refuse_8616` debug helpers, `_probe_word_or_pair_8616`,
+  `_try_duplicate_shift_8616`, `_try_arithmetic_pair_update_8616`,
+  `_try_word_or_update_8616`, `_rewrite_statement_list_8616` driver.
+  All INERTIA_DEBUG_WORD_OR_UPDATE refusal/match logs preserved verbatim.
+- `_eliminate_single_use_temporaries_8616` (51) -> `_SingleUseTemporaryRun8616`
+  accumulator + module-level `_is_virtual_register_temporary_8616`,
+  `_crosses_nested_execution_scope_8616`, `_safe_inline_expr_8616`,
+  `_count_var_uses_8616`/`_replace_var_use_8616` (+ seq/pairs/attrs helpers).
+  Frozen `SingleUseTemporaryEliminationStats8616` still published per run.
+- Owning tests: 90 passed.
