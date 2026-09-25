@@ -111,6 +111,7 @@ class TDInfoTypeKind(IntEnum):
     VL_UNION = 0x21
     ENUM = 0x22
     FUNCTION = 0x23
+    CLASS = 0x2E
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,26 @@ class TDInfoTypeDescriptor:
     attributes: int | None = None
     lower_bound: int | None = None
     upper_bound: int | None = None
+    member_ref: int | None = None
+
+
+@dataclass(frozen=True)
+class TDInfoMemberList:
+    """One decoded TD32 member-record list: an aggregate's field block.
+
+    ``record_index`` is the TD32 member-table record ordinal of the list's
+    first field record.  Borland type descriptors reference this ordinal
+    through their trailing ``member_ref`` field (verified against TDUMP).
+    """
+
+    record_index: int
+    payload_offset: int
+    size: int
+    owner_name: str
+    owner_type_index: int | None
+    bitfield: bool
+    member_names: tuple[str, ...]
+    method_names: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -251,6 +272,7 @@ class TDInfoEXEInfo:
     type_references: tuple[TDInfoTypeReference, ...] = ()
     type_members: tuple[TDInfoTypeMember, ...] = ()
     enum_members: tuple[TDInfoEnumMember, ...] = ()
+    member_lists: tuple[TDInfoMemberList, ...] = ()
     raw_table_spans: tuple[TDInfoRawTableSpan, ...] = ()
     code_labels: dict[int, str] = field(default_factory=dict)
     data_labels: dict[int, str] = field(default_factory=dict)
@@ -266,217 +288,249 @@ def parse_tdinfo_exe(path: Path, *, load_base_linear: int = 0) -> TDInfoEXEInfo 
     return parse_tdinfo_exe_bytes(path.read_bytes(), load_base_linear=load_base_linear)
 
 
+def _tdinfo_header_layout_8616(data: bytes) -> tuple | None:
+    """Decode the TDINFO header layout, or None when absent/truncated."""
+    if len(data) < 0x40 or data[:2] != b"MZ":
+        return None
+
+    used_bytes_in_last_page, file_size_in_pages = struct.unpack_from("<HH", data, 2)
+    if file_size_in_pages == 0:
+        return None
+    used_bytes = used_bytes_in_last_page or _PAGE_SIZE
+    debug_info_offset = file_size_in_pages * _PAGE_SIZE - (_PAGE_SIZE - used_bytes)
+    if debug_info_offset < 0 or debug_info_offset + 44 > len(data):
+        return None
+
+    magic_number = struct.unpack_from("<H", data, debug_info_offset)[0]
+    if magic_number != _TDINFO_MAGIC:
+        return None
+
+    (
+        _magic,
+        minor_version,
+        major_version,
+        names_pool_size_in_bytes,
+        names_count,
+        types_count,
+        members_count,
+        symbols_count,
+        globals_count,
+    ) = struct.unpack_from("<HBBIHHHHH", data, debug_info_offset)
+    extension_size = struct.unpack_from("<H", data, debug_info_offset + 42)[0]
+    symbol_records_offset = debug_info_offset + 44 + extension_size
+    if symbol_records_offset + symbols_count * 9 > len(data):
+        return None
+    names_pool_offset = len(data) - names_pool_size_in_bytes
+    if names_pool_offset < symbol_records_offset or names_pool_offset < 0:
+        return None
+    header = TDInfoHeader(
+        major_version=major_version,
+        minor_version=minor_version,
+        names_pool_size_in_bytes=names_pool_size_in_bytes,
+        names_count=names_count,
+        types_count=types_count,
+        members_count=members_count,
+        symbols_count=symbols_count,
+        globals_count=globals_count,
+        extension_size=extension_size,
+    )
+    return (
+        header,
+        debug_info_offset,
+        symbol_records_offset,
+        names_pool_offset,
+    )
+
+
+@dataclass
+class _TdinfoSymbolCollection8616:
+    """Mutable buckets for TDINFO symbol classification."""
+
+    symbols: list[TDInfoSymbolRecord] = field(default_factory=list)
+    symbols_by_class: dict[TDInfoSymbolClass, list[TDInfoSymbolRecord]] = field(
+        default_factory=lambda: {klass: [] for klass in TDInfoSymbolClass}
+    )
+    named_symbols: list[TDInfoNamedSymbol] = field(default_factory=list)
+    names_by_class: dict[TDInfoSymbolClass, list[str]] = field(
+        default_factory=lambda: {klass: [] for klass in TDInfoSymbolClass}
+    )
+    code_labels: dict[int, str] = field(default_factory=dict)
+    data_labels: dict[int, str] = field(default_factory=dict)
+    type_names: list[str] = field(default_factory=list)
+    stack_variables: list[TDInfoNamedSymbol] = field(default_factory=list)
+    register_symbols: list[TDInfoNamedSymbol] = field(default_factory=list)
+    constant_symbols: list[TDInfoNamedSymbol] = field(default_factory=list)
+    type_references: list[TDInfoTypeReference] = field(default_factory=list)
+
+    def add_symbol(self, symbol: TDInfoSymbolRecord, names: tuple[str, ...]) -> str | None:
+        """Classify one symbol record into the typed buckets."""
+        self.symbols.append(symbol)
+        self.symbols_by_class.setdefault(symbol.symbol_class, []).append(symbol)
+        name = _tdinfo_symbol_name(symbol, names)
+        if name is None:
+            return None
+        named_symbol = TDInfoNamedSymbol(name=name, record=symbol)
+        self.named_symbols.append(named_symbol)
+        self.names_by_class.setdefault(symbol.symbol_class, []).append(name)
+        if symbol.type_index:
+            self.type_references.append(
+                TDInfoTypeReference(name=name, type_index=symbol.type_index, symbol_class=symbol.symbol_class)
+            )
+        if symbol.symbol_class in {
+            TDInfoSymbolClass.TYPEDEF,
+            TDInfoSymbolClass.STRUCT_UNION_OR_ENUM,
+        } and _tdinfo_type_name_looks_user_defined(name):
+            self.type_names.append(name)
+        elif symbol.symbol_class in {TDInfoSymbolClass.AUTO, TDInfoSymbolClass.PASCAL_VAR}:
+            self.stack_variables.append(named_symbol)
+        elif symbol.symbol_class is TDInfoSymbolClass.REGISTER:
+            self.register_symbols.append(named_symbol)
+        elif symbol.symbol_class is TDInfoSymbolClass.CONSTANT:
+            self.constant_symbols.append(named_symbol)
+        return name
+
+
+def _collect_tdinfo_symbols_8616(
+    data: bytes,
+    *,
+    symbol_records_offset: int,
+    symbols_count: int,
+    names: tuple[str, ...],
+    load_base_linear: int,
+    collection: _TdinfoSymbolCollection8616,
+) -> None:
+    """Fold fixed 9-byte symbol records into the collection."""
+    for index in range(symbols_count):
+        entry_offset = symbol_records_offset + index * 9
+        name_index, type_index, offset, segment, bitfield = struct.unpack_from("<HHHHB", data, entry_offset)
+        symbol_class = TDInfoSymbolClass(bitfield & 0x7)
+        symbol = TDInfoSymbolRecord(
+            index=name_index,
+            type_index=type_index,
+            offset=offset,
+            segment=segment,
+            symbol_class=symbol_class,
+        )
+        name = collection.add_symbol(symbol, names)
+        if symbol.symbol_class is not TDInfoSymbolClass.STATIC:
+            continue
+        if name is None:
+            continue
+        linear = symbol.linear_addr(load_base_linear=load_base_linear)
+        if _tdinfo_name_looks_like_code(name):
+            collection.code_labels.setdefault(linear, name.lstrip("_"))
+        else:
+            collection.data_labels.setdefault(linear, name)
+
+
+def _tdinfo_version_strings_8616(major_version: int, minor_version: int) -> tuple[str, str, str, str]:
+    """Return (tds, tlink, commandline_hint, products) version strings."""
+    normalized_minor_version = 10 if major_version == 3 and minor_version == 0x10 else minor_version
+    tds_key = (major_version, normalized_minor_version)
+    if tds_key in _OLD_FORMAT_NO_TDS:
+        return "N/A (pre-2.0 format)", "1.0/1.1", "No TDS info in header", "Turbo C 1.0/1.5"
+    if tds_key in _TDS_VERSION_MAP:
+        return _TDS_VERSION_MAP[tds_key]
+    return f"{major_version}.{normalized_minor_version}", "unknown", "", ""
+
+
 def parse_tdinfo_exe_bytes(data: bytes, *, load_base_linear: int = 0) -> TDInfoEXEInfo | None:
     """Parse TDINFO debug metadata from executable bytes when present."""
+    layout = _tdinfo_header_layout_8616(data)
+    if layout is None:
+        return None
+    header, debug_info_offset, symbol_records_offset, names_pool_offset = layout
+    symbols_count = header.symbols_count
+    symbol_records_size = symbols_count * 9
+    payload_offset = symbol_records_offset + symbol_records_size
+    payload_blob = data[payload_offset:names_pool_offset]
+    raw_table_spans = _tdinfo_raw_table_spans(
+        debug_info_offset=debug_info_offset,
+        symbol_records_offset=symbol_records_offset,
+        symbol_records_size=symbol_records_size,
+        symbols_count=symbols_count,
+        names_pool_offset=names_pool_offset,
+        names_pool_size=header.names_pool_size_in_bytes,
+    )
 
-    def _impl() -> TDInfoEXEInfo | None:
-        if len(data) < 0x40 or data[:2] != b"MZ":
-            return None
+    names = _parse_tdinfo_name_pool(data[names_pool_offset:], expected_count=header.names_count)
+    name_pool_entries = _classify_tdinfo_name_pool(names)
+    public_symbols = tuple(entry.name for entry in name_pool_entries if entry.kind is TDInfoNameKind.PUBLIC_SYMBOL)
+    local_identifiers = tuple(entry.name for entry in name_pool_entries if entry.kind is TDInfoNameKind.IDENTIFIER)
 
-        used_bytes_in_last_page, file_size_in_pages = struct.unpack_from("<HH", data, 2)
-        if file_size_in_pages == 0:
-            return None
-        used_bytes = used_bytes_in_last_page or _PAGE_SIZE
-        debug_info_offset = file_size_in_pages * _PAGE_SIZE - (_PAGE_SIZE - used_bytes)
-        if debug_info_offset < 0 or debug_info_offset + 44 > len(data):
-            return None
+    collection = _TdinfoSymbolCollection8616()
+    _collect_tdinfo_symbols_8616(
+        data,
+        symbol_records_offset=symbol_records_offset,
+        symbols_count=symbols_count,
+        names=names,
+        load_base_linear=load_base_linear,
+        collection=collection,
+    )
 
-        magic_number = struct.unpack_from("<H", data, debug_info_offset)[0]
-        if magic_number != _TDINFO_MAGIC:
-            return None
+    extra_symbols, extra_symbol_bytes = _parse_tdinfo_extra_symbol_records(
+        payload_blob,
+        names,
+        types_count=header.types_count,
+    )
+    if extra_symbols:
+        for symbol in extra_symbols:
+            collection.add_symbol(symbol, names)
 
-        (
-            _magic,
-            minor_version,
-            major_version,
-            names_pool_size_in_bytes,
-            names_count,
-            types_count,
-            members_count,
-            symbols_count,
-            globals_count,
-        ) = struct.unpack_from("<HBBIHHHHH", data, debug_info_offset)
-        extension_size = struct.unpack_from("<H", data, debug_info_offset + 42)[0]
-        symbol_records_offset = debug_info_offset + 44 + extension_size
-        if symbol_records_offset + symbols_count * 9 > len(data):
-            return None
-        names_pool_offset = len(data) - names_pool_size_in_bytes
-        if names_pool_offset < symbol_records_offset or names_pool_offset < 0:
-            return None
-        symbol_records_size = symbols_count * 9
-        payload_offset = symbol_records_offset + symbol_records_size
-        payload_blob = data[payload_offset:names_pool_offset]
-        raw_table_spans = _tdinfo_raw_table_spans(
-            debug_info_offset=debug_info_offset,
-            symbol_records_offset=symbol_records_offset,
-            symbol_records_size=symbol_records_size,
-            symbols_count=symbols_count,
-            names_pool_offset=names_pool_offset,
-            names_pool_size=names_pool_size_in_bytes,
-        )
+    descriptor_payload = payload_blob[extra_symbol_bytes:]
+    type_descriptors = _parse_tdinfo_type_descriptors(
+        descriptor_payload,
+        names,
+        payload_base_offset=payload_offset + extra_symbol_bytes,
+        type_references=tuple(collection.type_references),
+    )
+    type_members, enum_members, member_lists = _parse_tdinfo_members(
+        descriptor_payload,
+        names,
+        payload_base_offset=payload_offset + extra_symbol_bytes,
+        type_descriptors=type_descriptors,
+        types_count=header.types_count,
+    )
 
-        header = TDInfoHeader(
-            major_version=major_version,
-            minor_version=minor_version,
-            names_pool_size_in_bytes=names_pool_size_in_bytes,
-            names_count=names_count,
-            types_count=types_count,
-            members_count=members_count,
-            symbols_count=symbols_count,
-            globals_count=globals_count,
-            extension_size=extension_size,
-        )
-        names = _parse_tdinfo_name_pool(data[names_pool_offset:], expected_count=names_count)
-        name_pool_entries = _classify_tdinfo_name_pool(names)
-        public_symbols = tuple(entry.name for entry in name_pool_entries if entry.kind is TDInfoNameKind.PUBLIC_SYMBOL)
-        local_identifiers = tuple(entry.name for entry in name_pool_entries if entry.kind is TDInfoNameKind.IDENTIFIER)
+    # Lookup TLink/TDS version identification
+    tds_version_str, tlink_version_str, commandline_hint, products = _tdinfo_version_strings_8616(
+        header.major_version, header.minor_version,
+    )
 
-        symbols: list[TDInfoSymbolRecord] = []
-        symbols_by_class: dict[TDInfoSymbolClass, list[TDInfoSymbolRecord]] = {klass: [] for klass in TDInfoSymbolClass}
-        code_labels: dict[int, str] = {}
-        data_labels: dict[int, str] = {}
-        type_names: list[str] = []
-        named_symbols: list[TDInfoNamedSymbol] = []
-        names_by_class: dict[TDInfoSymbolClass, list[str]] = {klass: [] for klass in TDInfoSymbolClass}
-        stack_variables: list[TDInfoNamedSymbol] = []
-        register_symbols: list[TDInfoNamedSymbol] = []
-        constant_symbols: list[TDInfoNamedSymbol] = []
-        type_references: list[TDInfoTypeReference] = []
-        for index in range(symbols_count):
-            entry_offset = symbol_records_offset + index * 9
-            name_index, type_index, offset, segment, bitfield = struct.unpack_from("<HHHHB", data, entry_offset)
-            symbol_class = TDInfoSymbolClass(bitfield & 0x7)
-            symbol = TDInfoSymbolRecord(
-                index=name_index,
-                type_index=type_index,
-                offset=offset,
-                segment=segment,
-                symbol_class=symbol_class,
-            )
-            symbols.append(symbol)
-            symbols_by_class.setdefault(symbol_class, []).append(symbol)
-            name = _tdinfo_symbol_name(symbol, names)
-            if name is not None:
-                named_symbol = TDInfoNamedSymbol(name=name, record=symbol)
-                named_symbols.append(named_symbol)
-                names_by_class.setdefault(symbol_class, []).append(name)
-                if symbol.type_index:
-                    type_references.append(
-                        TDInfoTypeReference(name=name, type_index=symbol.type_index, symbol_class=symbol_class)
-                    )
-                if symbol_class in {
-                    TDInfoSymbolClass.TYPEDEF,
-                    TDInfoSymbolClass.STRUCT_UNION_OR_ENUM,
-                } and _tdinfo_type_name_looks_user_defined(name):
-                    type_names.append(name)
-                elif symbol_class in {TDInfoSymbolClass.AUTO, TDInfoSymbolClass.PASCAL_VAR}:
-                    stack_variables.append(named_symbol)
-                elif symbol_class is TDInfoSymbolClass.REGISTER:
-                    register_symbols.append(named_symbol)
-                elif symbol_class is TDInfoSymbolClass.CONSTANT:
-                    constant_symbols.append(named_symbol)
-            if symbol.symbol_class is not TDInfoSymbolClass.STATIC:
-                continue
-            if name is None:
-                continue
-            linear = symbol.linear_addr(load_base_linear=load_base_linear)
-            if _tdinfo_name_looks_like_code(name):
-                code_labels.setdefault(linear, name.lstrip("_"))
-            else:
-                data_labels.setdefault(linear, name)
-
-        extra_symbols, extra_symbol_bytes = _parse_tdinfo_extra_symbol_records(payload_blob, names)
-        if extra_symbols:
-            for symbol in extra_symbols:
-                symbols.append(symbol)
-                symbols_by_class.setdefault(symbol.symbol_class, []).append(symbol)
-                name = _tdinfo_symbol_name(symbol, names)
-                if name is None:
-                    continue
-                named_symbol = TDInfoNamedSymbol(name=name, record=symbol)
-                named_symbols.append(named_symbol)
-                names_by_class.setdefault(symbol.symbol_class, []).append(name)
-                if symbol.type_index:
-                    type_references.append(
-                        TDInfoTypeReference(name=name, type_index=symbol.type_index, symbol_class=symbol.symbol_class)
-                    )
-                if symbol.symbol_class in {
-                    TDInfoSymbolClass.TYPEDEF,
-                    TDInfoSymbolClass.STRUCT_UNION_OR_ENUM,
-                } and _tdinfo_type_name_looks_user_defined(name):
-                    type_names.append(name)
-                elif symbol.symbol_class in {TDInfoSymbolClass.AUTO, TDInfoSymbolClass.PASCAL_VAR}:
-                    stack_variables.append(named_symbol)
-                elif symbol.symbol_class is TDInfoSymbolClass.REGISTER:
-                    register_symbols.append(named_symbol)
-                elif symbol.symbol_class is TDInfoSymbolClass.CONSTANT:
-                    constant_symbols.append(named_symbol)
-
-        descriptor_payload = payload_blob[extra_symbol_bytes:]
-        type_descriptors, descriptor_bytes = _parse_tdinfo_type_descriptors(
-            descriptor_payload,
-            names,
-            payload_base_offset=payload_offset + extra_symbol_bytes,
-            type_references=tuple(type_references),
-        )
-        type_members, enum_members = _parse_tdinfo_members(
-            descriptor_payload[descriptor_bytes:],
-            names,
-            payload_base_offset=payload_offset + extra_symbol_bytes + descriptor_bytes,
-            type_descriptors=type_descriptors,
-        )
-
-        # Lookup TLink/TDS version identification
-        normalized_minor_version = 10 if major_version == 3 and minor_version == 0x10 else minor_version
-        tds_key = (major_version, normalized_minor_version)
-        if tds_key in _OLD_FORMAT_NO_TDS:
-            tds_version_str = "N/A (pre-2.0 format)"
-            tlink_version_str = "1.0/1.1"
-            commandline_hint = "No TDS info in header"
-            products = "Turbo C 1.0/1.5"
-        elif tds_key in _TDS_VERSION_MAP:
-            tds_version_str, tlink_version_str, commandline_hint, products = _TDS_VERSION_MAP[tds_key]
-        else:
-            tds_version_str = f"{major_version}.{normalized_minor_version}"
-            tlink_version_str = "unknown"
-            commandline_hint = ""
-            products = ""
-
-        return TDInfoEXEInfo(
-            header=header,
-            debug_info_offset=debug_info_offset,
-            symbols=tuple(symbols),
-            names=names,
-            name_pool_entries=name_pool_entries,
-            source_files=tuple(entry.name for entry in name_pool_entries if entry.kind is TDInfoNameKind.SOURCE_FILE),
-            candidate_identifiers=tuple(
-                entry.name
-                for entry in name_pool_entries
-                if entry.kind in {TDInfoNameKind.IDENTIFIER, TDInfoNameKind.PUBLIC_SYMBOL}
-            ),
-            public_symbols=public_symbols,
-            local_identifiers=local_identifiers,
-            named_symbols=tuple(named_symbols),
-            names_by_class={klass: tuple(items) for klass, items in names_by_class.items() if items},
-            symbols_by_class={klass: tuple(items) for klass, items in symbols_by_class.items() if items},
-            stack_variables=tuple(stack_variables),
-            register_symbols=tuple(register_symbols),
-            constant_symbols=tuple(constant_symbols),
-            type_names=tuple(dict.fromkeys(type_names)),
-            type_descriptors=type_descriptors,
-            type_references=tuple(dict.fromkeys(type_references)),
-            type_members=type_members,
-            enum_members=enum_members,
-            raw_table_spans=raw_table_spans,
-            code_labels=code_labels,
-            data_labels=data_labels,
-            tds_version_str=tds_version_str,
-            tlink_version_str=tlink_version_str,
-            commandline_hint=commandline_hint,
-            products=products,
-        )
-
-    return _impl()
+    return TDInfoEXEInfo(
+        header=header,
+        debug_info_offset=debug_info_offset,
+        symbols=tuple(collection.symbols),
+        names=names,
+        name_pool_entries=name_pool_entries,
+        source_files=tuple(entry.name for entry in name_pool_entries if entry.kind is TDInfoNameKind.SOURCE_FILE),
+        candidate_identifiers=tuple(
+            entry.name
+            for entry in name_pool_entries
+            if entry.kind in {TDInfoNameKind.IDENTIFIER, TDInfoNameKind.PUBLIC_SYMBOL}
+        ),
+        public_symbols=public_symbols,
+        local_identifiers=local_identifiers,
+        named_symbols=tuple(collection.named_symbols),
+        names_by_class={klass: tuple(items) for klass, items in collection.names_by_class.items() if items},
+        symbols_by_class={klass: tuple(items) for klass, items in collection.symbols_by_class.items() if items},
+        stack_variables=tuple(collection.stack_variables),
+        register_symbols=tuple(collection.register_symbols),
+        constant_symbols=tuple(collection.constant_symbols),
+        type_names=tuple(dict.fromkeys(collection.type_names)),
+        type_descriptors=type_descriptors,
+        type_references=tuple(dict.fromkeys(collection.type_references)),
+        type_members=type_members,
+        enum_members=enum_members,
+        member_lists=member_lists,
+        raw_table_spans=raw_table_spans,
+        code_labels=collection.code_labels,
+        data_labels=collection.data_labels,
+        tds_version_str=tds_version_str,
+        tlink_version_str=tlink_version_str,
+        commandline_hint=commandline_hint,
+        products=products,
+    )
 
 
 def _tdinfo_raw_table_spans(
@@ -599,14 +653,12 @@ def _parse_tdinfo_type_descriptor_sequence(
     return tuple(descriptors)
 
 
-def _parse_tdinfo_type_descriptor(
+def _tdinfo_descriptor_head_8616(
     payload: bytes,
     names: tuple[str, ...],
-    *,
     offset: int,
-    payload_base_offset: int,
-    type_index: int,
-) -> TDInfoTypeDescriptor | None:
+) -> tuple[TDInfoTypeKind, bytes, str, int] | None:
+    """Return (kind, raw, name, size) for one descriptor record, or None."""
     if offset + _TDINFO_DESCRIPTOR_RECORD_SIZE > len(payload):
         return None
     try:
@@ -629,14 +681,14 @@ def _parse_tdinfo_type_descriptor(
     size = struct.unpack_from("<H", payload, offset + 3)[0]
     if size > 0x1000:
         return None
-    raw = payload[offset : offset + record_size]
-    attributes = raw[5]
-    base_type_index = None
-    target_type_index = None
-    return_type_index = None
-    call_kind = None
-    lower_bound = None
-    upper_bound = None
+    return kind, payload[offset : offset + record_size], name, size
+
+
+def _tdinfo_descriptor_links_8616(
+    kind: TDInfoTypeKind,
+    raw: bytes,
+) -> tuple[int | None, int | None, int | None, int | None, int | None, int | None]:
+    """Return (base, target, return, call_kind, lower, upper) links for one kind."""
     aux_type = struct.unpack_from("<H", raw, 6)[0]
     if kind in {
         TDInfoTypeKind.C_ARRAY,
@@ -644,21 +696,49 @@ def _parse_tdinfo_type_descriptor(
         TDInfoTypeKind.P_ARRAY,
         TDInfoTypeKind.ARRAY_DESCRIPTOR,
     }:
-        base_type_index = aux_type
-    elif kind in {
+        return aux_type, None, None, None, None, None
+    if kind in {
         TDInfoTypeKind.NEAR_POINTER,
         TDInfoTypeKind.FAR_POINTER,
         TDInfoTypeKind.NEAR386_POINTER,
         TDInfoTypeKind.FAR386_POINTER,
     }:
-        target_type_index = aux_type
-    elif kind is TDInfoTypeKind.FUNCTION:
-        return_type_index = aux_type
-        call_kind = raw[7]
-    elif kind is TDInfoTypeKind.ENUM:
-        base_type_index = aux_type
-        lower_bound = _tdinfo_i16(struct.unpack_from("<H", raw, 8)[0])
-        upper_bound = _tdinfo_i16(struct.unpack_from("<H", raw, 10)[0])
+        return None, aux_type, None, None, None, None
+    if kind is TDInfoTypeKind.FUNCTION:
+        return None, None, aux_type, raw[7], None, None
+    if kind is TDInfoTypeKind.ENUM:
+        return (
+            aux_type,
+            None,
+            None,
+            None,
+            _tdinfo_i16(struct.unpack_from("<H", raw, 8)[0]),
+            _tdinfo_i16(struct.unpack_from("<H", raw, 10)[0]),
+        )
+    return None, None, None, None, None, None
+
+
+def _parse_tdinfo_type_descriptor(
+    payload: bytes,
+    names: tuple[str, ...],
+    *,
+    offset: int,
+    payload_base_offset: int,
+    type_index: int,
+) -> TDInfoTypeDescriptor | None:
+    head = _tdinfo_descriptor_head_8616(payload, names, offset)
+    if head is None:
+        return None
+    kind, raw, name, size = head
+    attributes = raw[5]
+    (
+        base_type_index,
+        target_type_index,
+        return_type_index,
+        call_kind,
+        lower_bound,
+        upper_bound,
+    ) = _tdinfo_descriptor_links_8616(kind, raw)
     return TDInfoTypeDescriptor(
         type_index=type_index,
         kind=kind,
@@ -751,6 +831,55 @@ def _parse_tdinfo_extra_symbol_records(
     return tuple(symbols), offset
 
 
+def _emit_tdinfo_enum_members_8616(
+    sequence: object,
+    enum_seen: set[tuple[str, int]],
+    owner_type_index: int | None,
+) -> list[TDInfoEnumMember]:
+    """Materialize enum members for one sequence, deduplicated by enum_seen."""
+    emitted: list[TDInfoEnumMember] = []
+    for member in sequence:
+        enum_key = (member.name, member.type_index)
+        if enum_key in enum_seen:
+            continue
+        enum_seen.add(enum_key)
+        emitted.append(
+            TDInfoEnumMember(
+                name=member.name,
+                value=member.type_index,
+                attributes=member.attributes,
+                payload_offset=member.payload_offset,
+                owner_type_index=owner_type_index,
+            )
+        )
+    return emitted
+
+
+def _emit_tdinfo_struct_members_8616(
+    sequence: object,
+    seen: set[tuple[str, int, int]],
+    owner_type_index: int | None,
+) -> list[TDInfoTypeMember]:
+    """Materialize struct members for one sequence, deduplicated by seen."""
+    emitted: list[TDInfoTypeMember] = []
+    for member in sequence:
+        key = (member.name, member.offset, member.type_index)
+        if key in seen:
+            continue
+        seen.add(key)
+        emitted.append(
+            TDInfoTypeMember(
+                name=member.name,
+                offset=member.offset,
+                type_index=member.type_index,
+                attributes=member.attributes,
+                payload_offset=member.payload_offset,
+                owner_type_index=owner_type_index,
+            )
+        )
+    return emitted
+
+
 def _parse_tdinfo_members(
     payload: bytes,
     names: tuple[str, ...],
@@ -797,20 +926,7 @@ def _parse_tdinfo_members(
                 enum_owner_indexes[next_enum_owner] if next_enum_owner < len(enum_owner_indexes) else None
             )
             next_enum_owner += 1
-            for member in sequence:
-                enum_key = (member.name, member.type_index)
-                if enum_key in enum_seen:
-                    continue
-                enum_seen.add(enum_key)
-                enum_members.append(
-                    TDInfoEnumMember(
-                        name=member.name,
-                        value=member.type_index,
-                        attributes=member.attributes,
-                        payload_offset=member.payload_offset,
-                        owner_type_index=owner_type_index,
-                    )
-                )
+            enum_members.extend(_emit_tdinfo_enum_members_8616(sequence, enum_seen, owner_type_index))
         else:
             owner_type_index = (
                 struct_owner_indexes[next_struct_owner]
@@ -818,21 +934,7 @@ def _parse_tdinfo_members(
                 else None
             )
             next_struct_owner += 1
-            for member in sequence:
-                key = (member.name, member.offset, member.type_index)
-                if key in seen:
-                    continue
-                seen.add(key)
-                members.append(
-                    TDInfoTypeMember(
-                        name=member.name,
-                        offset=member.offset,
-                        type_index=member.type_index,
-                        attributes=member.attributes,
-                        payload_offset=member.payload_offset,
-                        owner_type_index=owner_type_index,
-                    )
-                )
+            members.extend(_emit_tdinfo_struct_members_8616(sequence, seen, owner_type_index))
     return tuple(members), tuple(enum_members)
 
 

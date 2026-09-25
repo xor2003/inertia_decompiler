@@ -135,6 +135,24 @@ def _snapshot_insertion_point_8616(
     if unique_anchors:
         return None
 
+    candidates = _snapshot_insertion_candidates_8616(containers, save_addr, restore_addr)
+    if not candidates:
+        return None
+    best_score = min(candidate[:3] for candidate in candidates)
+    owners = tuple(candidate for candidate in candidates if candidate[:3] == best_score)
+    unique = {(id(container), index) for _addr, _span, _size, container, index in owners}
+    if len(unique) != 1:
+        return None
+    _addr, _size, _span, container, index = owners[0]
+    return container, index
+
+
+def _snapshot_insertion_candidates_8616(
+    containers: tuple[structured_c.CStatements, ...],
+    save_addr: int,
+    restore_addr: int,
+) -> list[tuple[int, int, int, structured_c.CStatements, int]]:
+    """Score each container holding a statement after the proven save."""
     candidates: list[tuple[int, int, int, structured_c.CStatements, int]] = []
     for container in containers:
         container_addrs = tuple(
@@ -176,15 +194,7 @@ def _snapshot_insertion_point_8616(
                     insertion_index,
                 )
             )
-    if not candidates:
-        return None
-    best_score = min(candidate[:3] for candidate in candidates)
-    owners = tuple(candidate for candidate in candidates if candidate[:3] == best_score)
-    unique = {(id(container), index) for _addr, _span, _size, container, index in owners}
-    if len(unique) != 1:
-        return None
-    _addr, _size, _span, container, index = owners[0]
-    return container, index
+    return candidates
 
 
 def _snapshot_variable_8616(
@@ -239,6 +249,171 @@ def _snapshot_variable_8616(
     return cvar
 
 
+def _log_restore_refusal_8616(
+    fact: SegmentStackRestoreFact8616,
+    insertion: tuple[structured_c.CStatements, int] | None,
+    source: object,
+    containers: tuple[structured_c.CStatements, ...],
+) -> None:
+    """Log a refused snapshot placement when debug output is enabled."""
+    if not os.environ.get("INERTIA_DEBUG_GP_STACK_RESTORE"):
+        return
+    logging.getLogger(__name__).warning(
+        "[gp-stack-restore-refusal] save=%#x restore=%#x insertion=%s source=%s statement_addrs=%s",
+        fact.saved_instruction_addr,
+        fact.restore_instruction_addr,
+        insertion,
+        source,
+        tuple(
+            tuple(sorted(instruction_addrs_from_node_8616(statement)))
+            for container in containers
+            for statement in container.statements
+        ),
+    )
+
+
+def _log_no_replacement_refusal_8616(
+    fact: SegmentStackRestoreFact8616,
+    containers: tuple[structured_c.CStatements, ...],
+    replacement_count: int,
+) -> None:
+    """Log observed byte offsets when no proven POP replacement matched."""
+    if not os.environ.get("INERTIA_DEBUG_GP_STACK_RESTORE"):
+        return
+    byte_offsets = tuple(
+        (
+            sorted(instruction_addrs_from_node_8616(statement)),
+            tuple(
+                (node.variable.base, node.variable.offset, node.variable.size)
+                for node in _iter_c_nodes_deep_8616(statement)
+                if isinstance(node, structured_c.CVariable)
+                and isinstance(node.variable, SimStackVariable)
+            ),
+        )
+        for container in containers
+        for statement in tuple(container.statements)
+        if isinstance(statement, (structured_c.CAssignment, structured_c.CReturn))
+        and fact.restore_instruction_addr in instruction_addrs_from_node_8616(statement)
+    )
+    logging.getLogger(__name__).warning(
+        "[gp-stack-restore-refusal] restore=%#x replacement_count=%d "
+        "expected_offsets=%r observed_byte_offsets=%r",
+        fact.restore_instruction_addr,
+        replacement_count,
+        fact.stack_offsets,
+        byte_offsets,
+    )
+
+
+@dataclass(slots=True)
+class _GpRestoreReplacer8616:
+    """Replace the syntax projection only inside the proven POP owner."""
+
+    fact: SegmentStackRestoreFact8616
+    codegen: object
+    snapshot: structured_c.CVariable
+    replacement_count: int = 0
+
+    def replace_restore(self, node: object) -> object:
+        """Return the snapshot copy for matching nodes, else the node."""
+        # Dynamic angr C-AST boundary: tags are the durable typed identity
+        # carried through later structured-tree cloning and simplification.
+        node_tags = getattr(node, "tags", None)
+        restore_identity = (
+            self.fact.saved_instruction_addr,
+            self.fact.restore_instruction_addr,
+            self.fact.restore_register,
+        )
+        if (
+            isinstance(node, structured_c.CVariable)
+            and isinstance(node_tags, dict)
+            and node_tags.get("inertia_x86_16_gp_stack_restore") == restore_identity
+        ):
+            self.replacement_count += 1
+            return node
+        if not matches_gp_restore_stack_bytes_8616(self.codegen, node, self.fact):
+            return node
+        self.replacement_count += 1
+        replacement = copy.copy(self.snapshot)
+        replacement.tags = {
+            **(dict(node_tags) if isinstance(node_tags, dict) else {}),
+            "ins_addr": self.fact.restore_instruction_addr,
+            "inertia_x86_16_gp_stack_restore": restore_identity,
+        }
+        return replacement
+
+
+def _snapshot_save_assignment_8616(
+    fact: SegmentStackRestoreFact8616,
+    snapshot: structured_c.CVariable,
+    source: object,
+    *,
+    codegen: object,
+) -> structured_c.CAssignment:
+    """Build the tagged save assignment inserted at the insertion point."""
+    return structured_c.CAssignment(
+        copy.copy(snapshot),
+        source,
+        codegen=codegen,
+        tags={
+            "ins_addr": fact.saved_instruction_addr,
+            "inertia_x86_16_gp_stack_save": (
+                fact.saved_instruction_addr,
+                fact.restore_instruction_addr,
+                fact.restore_register,
+            ),
+        },
+    )
+
+
+def _anchor_save_following_statements_8616(
+    target: structured_c.CStatements,
+    index: int,
+    fact: SegmentStackRestoreFact8616,
+) -> None:
+    """Tag later statements whose addresses fall inside the save window."""
+    anchor_identity = (
+        fact.saved_instruction_addr,
+        fact.restore_instruction_addr,
+        fact.restore_register,
+    )
+    for statement in target.statements[index:]:
+        addresses = instruction_addrs_from_node_8616(statement)
+        if not any(
+            fact.saved_instruction_addr < address < fact.restore_instruction_addr
+            for address in addresses
+        ):
+            continue
+        statement_tags = getattr(statement, "tags", None)
+        statement.tags = {
+            **(dict(statement_tags) if isinstance(statement_tags, dict) else {}),
+            _GP_STACK_SAVE_ANCHOR_TAG_8616: anchor_identity,
+        }
+
+
+def _log_restore_placement_8616(
+    fact: SegmentStackRestoreFact8616,
+    target: structured_c.CStatements,
+    index: int,
+) -> None:
+    """Log the chosen insertion index when debug output is enabled."""
+    if not os.environ.get("INERTIA_DEBUG_GP_STACK_RESTORE"):
+        return
+    logging.getLogger(__name__).warning(
+        "[gp-stack-restore-placement] save=%#x restore=%#x index=%d statements=%r",
+        fact.saved_instruction_addr,
+        fact.restore_instruction_addr,
+        index,
+        tuple(
+            (
+                type(statement).__name__,
+                tuple(sorted(instruction_addrs_from_node_8616(statement))),
+            )
+            for statement in target.statements
+        ),
+    )
+
+
 def _materialize_fact_8616(
     fact: SegmentStackRestoreFact8616,
     containers: tuple[structured_c.CStatements, ...],
@@ -261,19 +436,7 @@ def _materialize_fact_8616(
     else:
         source = runtime_gp_state_expr_8616(fact.saved_register, codegen=codegen, function_addr=function_addr)
     if insertion is None or source is None:
-        if os.environ.get("INERTIA_DEBUG_GP_STACK_RESTORE"):
-            logging.getLogger(__name__).warning(
-                "[gp-stack-restore-refusal] save=%#x restore=%#x insertion=%s source=%s statement_addrs=%s",
-                fact.saved_instruction_addr,
-                fact.restore_instruction_addr,
-                insertion,
-                source,
-                tuple(
-                    tuple(sorted(instruction_addrs_from_node_8616(statement)))
-                    for container in containers
-                    for statement in container.statements
-                ),
-            )
+        _log_restore_refusal_8616(fact, insertion, source, containers)
         return False
     snapshot = _snapshot_variable_8616(
         fact,
@@ -282,36 +445,7 @@ def _materialize_fact_8616(
         project=project,
         function_addr=function_addr,
     )
-    replacement_count = 0
-
-    def replace_restore(node: object) -> object:
-        """Replace the syntax projection only inside the proven POP owner."""
-        nonlocal replacement_count
-        # Dynamic angr C-AST boundary: tags are the durable typed identity
-        # carried through later structured-tree cloning and simplification.
-        node_tags = getattr(node, "tags", None)
-        restore_identity = (
-            fact.saved_instruction_addr,
-            fact.restore_instruction_addr,
-            fact.restore_register,
-        )
-        if (
-            isinstance(node, structured_c.CVariable)
-            and isinstance(node_tags, dict)
-            and node_tags.get("inertia_x86_16_gp_stack_restore") == restore_identity
-        ):
-            replacement_count += 1
-            return node
-        if not matches_gp_restore_stack_bytes_8616(codegen, node, fact):
-            return node
-        replacement_count += 1
-        replacement = copy.copy(snapshot)
-        replacement.tags = {
-            **(dict(node_tags) if isinstance(node_tags, dict) else {}),
-            "ins_addr": fact.restore_instruction_addr,
-            "inertia_x86_16_gp_stack_restore": restore_identity,
-        }
-        return replacement
+    replacer = _GpRestoreReplacer8616(fact=fact, codegen=codegen, snapshot=snapshot)
 
     for container in containers:
         for statement in tuple(container.statements):
@@ -324,78 +458,14 @@ def _materialize_fact_8616(
                 continue
             if fact.restore_instruction_addr not in instruction_addrs_from_node_8616(statement):
                 continue
-            _replace_c_children_8616(statement, replace_restore)
-    if replacement_count < 1:
-        if os.environ.get("INERTIA_DEBUG_GP_STACK_RESTORE"):
-            byte_offsets = tuple(
-                (
-                    sorted(instruction_addrs_from_node_8616(statement)),
-                    tuple(
-                        (node.variable.base, node.variable.offset, node.variable.size)
-                        for node in _iter_c_nodes_deep_8616(statement)
-                        if isinstance(node, structured_c.CVariable)
-                        and isinstance(node.variable, SimStackVariable)
-                    ),
-                )
-                for container in containers
-                for statement in tuple(container.statements)
-                if isinstance(statement, (structured_c.CAssignment, structured_c.CReturn))
-                and fact.restore_instruction_addr in instruction_addrs_from_node_8616(statement)
-            )
-            logging.getLogger(__name__).warning(
-                "[gp-stack-restore-refusal] restore=%#x replacement_count=%d "
-                "expected_offsets=%r observed_byte_offsets=%r",
-                fact.restore_instruction_addr,
-                replacement_count,
-                fact.stack_offsets,
-                byte_offsets,
-            )
+            _replace_c_children_8616(statement, replacer.replace_restore)
+    if replacer.replacement_count < 1:
+        _log_no_replacement_refusal_8616(fact, containers, replacer.replacement_count)
         return False
     target, index = insertion
-    assignment = structured_c.CAssignment(
-        copy.copy(snapshot),
-        source,
-        codegen=codegen,
-        tags={
-            "ins_addr": fact.saved_instruction_addr,
-            "inertia_x86_16_gp_stack_save": (
-                fact.saved_instruction_addr,
-                fact.restore_instruction_addr,
-                fact.restore_register,
-            ),
-        },
-    )
-    anchor_identity = (
-        fact.saved_instruction_addr,
-        fact.restore_instruction_addr,
-        fact.restore_register,
-    )
-    for statement in target.statements[index:]:
-        addresses = instruction_addrs_from_node_8616(statement)
-        if not any(
-            fact.saved_instruction_addr < address < fact.restore_instruction_addr
-            for address in addresses
-        ):
-            continue
-        statement_tags = getattr(statement, "tags", None)
-        statement.tags = {
-            **(dict(statement_tags) if isinstance(statement_tags, dict) else {}),
-            _GP_STACK_SAVE_ANCHOR_TAG_8616: anchor_identity,
-        }
-    if os.environ.get("INERTIA_DEBUG_GP_STACK_RESTORE"):
-        logging.getLogger(__name__).warning(
-            "[gp-stack-restore-placement] save=%#x restore=%#x index=%d statements=%r",
-            fact.saved_instruction_addr,
-            fact.restore_instruction_addr,
-            index,
-            tuple(
-                (
-                    type(statement).__name__,
-                    tuple(sorted(instruction_addrs_from_node_8616(statement))),
-                )
-                for statement in target.statements
-            ),
-        )
+    assignment = _snapshot_save_assignment_8616(fact, snapshot, source, codegen=codegen)
+    _anchor_save_following_statements_8616(target, index, fact)
+    _log_restore_placement_8616(fact, target, index)
     target.statements.insert(index, assignment)
     # A refused restore must not replace declarations for existing stack locals.
     cfunc = cast(_CodegenBoundary8616, codegen).cfunc

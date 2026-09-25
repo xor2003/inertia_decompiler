@@ -527,10 +527,74 @@ def build_fixture(
     decompile_now: bool = True,
 ) -> dict[str, Any]:
     """Compile, run, decompile, and report one QuickC fixture."""
-
     fixture_start = time.monotonic()
     source_path = quickc_root / spec.source_rel
-    result: dict[str, Any] = {
+    result = _fixture_base_result(spec, source_path, kvikdos, quickc_root)
+    skip_reason = _fixture_skip_reason(spec, source_path, kvikdos, quickc_root)
+    if skip_reason is not None:
+        result.update({"status": "skipped", "skip_reason": skip_reason, "wall_seconds": 0.0})
+        return result
+
+    stem = _fixture_stem(spec)
+    out_dir = output_root / spec.name
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True)
+    source_copy = out_dir / f"{stem}.C"
+    shutil.copyfile(source_path, source_copy)
+
+    _record_fixture_stages(spec, stem, out_dir, kvikdos, quickc_root, result)
+    passed, missing_stdout = _fixture_stages_verdict(spec, result)
+
+    exe_path = out_dir / f"{stem}.EXE"
+    map_path = out_dir / f"{stem}.MAP"
+    obj_path = out_dir / f"{stem}.OBJ"
+    target_selection = _select_decompile_target(spec, map_path, obj_path=obj_path)
+    result["decompile_target_selection"] = target_selection.to_json()
+    if exe_path.is_file():
+        result["decompile"] = _fixture_decompile_section(
+            spec,
+            exe_path,
+            target_selection,
+            decompile=decompile,
+            decompile_timeout=decompile_timeout,
+            decompile_now=decompile_now,
+        )
+        result["compiler_match"] = _compiler_evidence_for_fixture(exe_path)
+        passed = passed and result["compiler_match"]["status"] in {"passed", "gap"}
+        if decompile_now:
+            passed = passed and result["decompile"]["status"] == "passed"
+    else:
+        result["decompile"], result["compiler_match"] = _missing_exe_sections(
+            spec,
+            target_selection,
+        )
+        passed = False
+    result["wall_seconds"] = round(time.monotonic() - fixture_start, 3)
+    result["pre_decompile_passed"] = passed
+    if not decompile_now and isinstance(result.get("decompile"), dict) and result["decompile"].get("status") == "pending":
+        result["status"] = "pending" if passed else "failed"
+    else:
+        result["status"] = "passed" if passed else "failed"
+    if missing_stdout:
+        result["missing_expected_stdout"] = missing_stdout
+    if exe_path.is_file():
+        result["exe"] = str(exe_path)
+    if obj_path.is_file():
+        result["obj"] = str(obj_path)
+    if map_path.is_file():
+        result["map"] = str(map_path)
+    return result
+
+
+def _fixture_base_result(
+    spec: QuickCFixtureSpec,
+    source_path: Path,
+    kvikdos: Path,
+    quickc_root: Path,
+) -> dict[str, Any]:
+    """Build the shared report skeleton for one fixture."""
+    return {
         "name": spec.name,
         "source": str(source_path),
         "origin": "borrow/UltraDecompiler/QuickC",
@@ -570,27 +634,35 @@ def build_fixture(
             spec.generated_c_contract.to_json() if spec.generated_c_contract is not None else None
         ),
     }
+
+
+def _fixture_skip_reason(
+    spec: QuickCFixtureSpec,
+    source_path: Path,
+    kvikdos: Path,
+    quickc_root: Path,
+) -> str | None:
+    """Return the skip reason for one fixture, or None when it can build."""
     if spec.exclude_reason:
-        result.update({"status": "skipped", "skip_reason": spec.exclude_reason, "wall_seconds": 0.0})
-        return result
+        return spec.exclude_reason
     if not source_path.is_file():
-        result.update({"status": "skipped", "skip_reason": f"missing source fixture: {source_path}", "wall_seconds": 0.0})
-        return result
+        return f"missing source fixture: {source_path}"
     if not kvikdos.is_file():
-        result.update({"status": "skipped", "skip_reason": f"missing kvikdos executable: {kvikdos}", "wall_seconds": 0.0})
-        return result
+        return f"missing kvikdos executable: {kvikdos}"
     if not (quickc_root / "QCL.EXE").is_file() or not (quickc_root / "LINK.EXE").is_file():
-        result.update({"status": "skipped", "skip_reason": f"missing QuickC tools under: {quickc_root}", "wall_seconds": 0.0})
-        return result
+        return f"missing QuickC tools under: {quickc_root}"
+    return None
 
-    stem = _fixture_stem(spec)
-    out_dir = output_root / spec.name
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
-    source_copy = out_dir / f"{stem}.C"
-    shutil.copyfile(source_path, source_copy)
 
+def _record_fixture_stages(
+    spec: QuickCFixtureSpec,
+    stem: str,
+    out_dir: Path,
+    kvikdos: Path,
+    quickc_root: Path,
+    result: dict[str, Any],
+) -> None:
+    """Compile, link, and run the fixture, appending stage results."""
     compile_cmd = (
         [*_kvikdos_base(kvikdos, out_dir, quickc_root), "--path-dos=e:\\", "--env=INCLUDE=e:\\INCLUDE", "--env=LIB=e:\\", "--prog=e:\\QCL.EXE", "e:\\QCL.EXE", *spec.compiler_flags, "/c", f"/Foc:\\{stem}.OBJ", f"c:\\{stem}.C"]
     )
@@ -621,6 +693,12 @@ def build_fixture(
             }
         )
 
+
+def _fixture_stages_verdict(
+    spec: QuickCFixtureSpec,
+    result: dict[str, Any],
+) -> tuple[bool, list[str]]:
+    """Return the pre-decompile pass verdict and missing stdout needles."""
     stage_codes = {stage["stage"]: stage["returncode"] for stage in result["stages"]}
     run_stage = result["stages"][-1]
     stdout = str(run_stage["stdout"])
@@ -631,70 +709,63 @@ def build_fixture(
         and stage_codes.get("run") == spec.expected_exit_code
         and not missing_stdout
     )
-    exe_path = out_dir / f"{stem}.EXE"
-    map_path = out_dir / f"{stem}.MAP"
-    obj_path = out_dir / f"{stem}.OBJ"
-    target_selection = _select_decompile_target(spec, map_path, obj_path=obj_path)
-    result["decompile_target_selection"] = target_selection.to_json()
-    if exe_path.is_file():
-        if decompile_now:
-            result["decompile"] = _decompile_fixture(
-                exe_path,
-                selection=target_selection,
-                decompile=decompile,
-                timeout=decompile_timeout,
-                generated_c_contract=spec.generated_c_contract,
-            )
-        else:
-            result["decompile"] = {
-                "status": "pending",
-                "target_selection": target_selection.to_json(),
-                "targets": list(target_selection.targets),
-                "generated_c_present": False,
-                "missing_targets": list(target_selection.targets),
-                "validation_status": "unavailable",
-                "validation_unavailable_reason": "batch decompile not run yet",
-                "wall_seconds": 0.0,
-            }
-        result["compiler_match"] = _compiler_evidence_for_fixture(exe_path)
-        passed = passed and result["compiler_match"]["status"] in {"passed", "gap"}
-        if decompile_now:
-            passed = passed and result["decompile"]["status"] == "passed"
-    else:
-        result["decompile"] = {
-            "status": "failed",
-            "reason": "executable was not produced",
-            "target_selection": target_selection.to_json(),
-            "targets": list(target_selection.targets),
-            "generated_c_present": False,
-            "missing_targets": list(target_selection.targets),
-            "validation_status": "unavailable",
-            "validation_unavailable_reason": "executable was not produced",
-        }
-        result["compiler_match"] = {
-            "status": "gap",
-            "family": "unknown",
-            "memory_model": spec.memory_model,
-            "flags": list(spec.compiler_flags),
-            "raw_features": {},
-            "evidence_gap": "executable was not produced",
-        }
-        passed = False
-    result["wall_seconds"] = round(time.monotonic() - fixture_start, 3)
-    result["pre_decompile_passed"] = passed
-    if not decompile_now and isinstance(result.get("decompile"), dict) and result["decompile"].get("status") == "pending":
-        result["status"] = "pending" if passed else "failed"
-    else:
-        result["status"] = "passed" if passed else "failed"
-    if missing_stdout:
-        result["missing_expected_stdout"] = missing_stdout
-    if exe_path.is_file():
-        result["exe"] = str(exe_path)
-    if obj_path.is_file():
-        result["obj"] = str(obj_path)
-    if map_path.is_file():
-        result["map"] = str(map_path)
-    return result
+    return passed, missing_stdout
+
+
+def _fixture_decompile_section(
+    spec: QuickCFixtureSpec,
+    exe_path: Path,
+    target_selection: DecompileTargetSelection,
+    *,
+    decompile: Path,
+    decompile_timeout: int,
+    decompile_now: bool,
+) -> dict[str, Any]:
+    """Return the decompile section for a produced executable."""
+    if decompile_now:
+        return _decompile_fixture(
+            exe_path,
+            selection=target_selection,
+            decompile=decompile,
+            timeout=decompile_timeout,
+            generated_c_contract=spec.generated_c_contract,
+        )
+    return {
+        "status": "pending",
+        "target_selection": target_selection.to_json(),
+        "targets": list(target_selection.targets),
+        "generated_c_present": False,
+        "missing_targets": list(target_selection.targets),
+        "validation_status": "unavailable",
+        "validation_unavailable_reason": "batch decompile not run yet",
+        "wall_seconds": 0.0,
+    }
+
+
+def _missing_exe_sections(
+    spec: QuickCFixtureSpec,
+    target_selection: DecompileTargetSelection,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return the decompile and compiler-match sections for a missing exe."""
+    decompile_section = {
+        "status": "failed",
+        "reason": "executable was not produced",
+        "target_selection": target_selection.to_json(),
+        "targets": list(target_selection.targets),
+        "generated_c_present": False,
+        "missing_targets": list(target_selection.targets),
+        "validation_status": "unavailable",
+        "validation_unavailable_reason": "executable was not produced",
+    }
+    compiler_match = {
+        "status": "gap",
+        "family": "unknown",
+        "memory_model": spec.memory_model,
+        "flags": list(spec.compiler_flags),
+        "raw_features": {},
+        "evidence_gap": "executable was not produced",
+    }
+    return decompile_section, compiler_match
 
 
 def _selection_from_json(selection: dict[str, Any]) -> DecompileTargetSelection:
@@ -776,27 +847,32 @@ def selected_fixtures(names: str | None) -> tuple[QuickCFixtureSpec, ...]:
     return tuple(registry[name] for name in sorted(wanted) if name in registry)
 
 
-def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
-    """Return structured pass/fail, validation, and evidence counts."""
-
-    selected_count = len(results)
-    passed_count = sum(1 for result in results if result.get("status") == "passed")
-    xfail_count = sum(1 for result in results if result.get("expected_status") == "xfail")
-    decompile_sections: list[dict[str, Any]] = []
-    compiler_sections: list[dict[str, Any]] = []
+def _collected_sections(
+    results: list[dict[str, Any]],
+    key: str,
+) -> list[dict[str, Any]]:
+    """Collect each result's `key` section when it is a dict."""
+    sections: list[dict[str, Any]] = []
     for result in results:
-        decompile_section = result.get("decompile")
-        if isinstance(decompile_section, dict):
-            decompile_sections.append(decompile_section)
-        compiler_section = result.get("compiler_match")
-        if isinstance(compiler_section, dict):
-            compiler_sections.append(compiler_section)
+        section = result.get(key)
+        if isinstance(section, dict):
+            sections.append(section)
+    return sections
+
+
+def _validation_counts(decompile_sections: list[dict[str, Any]]) -> dict[str, int]:
+    """Bucket each decompile section's validation status."""
     validation_counts = {"passed": 0, "unavailable": 0, "failed": 0}
     for section in decompile_sections:
         status = str(section.get("validation_status", "unavailable"))
         if status not in validation_counts:
             status = "unavailable"
         validation_counts[status] += 1
+    return validation_counts
+
+
+def _target_selection_modes(results: list[dict[str, Any]]) -> dict[str, int]:
+    """Count decompile target-selection modes across results."""
     target_modes: dict[str, int] = {}
     for result in results:
         selection = result.get("decompile_target_selection")
@@ -804,6 +880,11 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
             selection = result.get("decompile", {}).get("target_selection") if isinstance(result.get("decompile"), dict) else None
         mode = str(selection.get("mode", "missing")) if isinstance(selection, dict) else "missing"
         target_modes[mode] = target_modes.get(mode, 0) + 1
+    return target_modes
+
+
+def _timed_fixtures(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collect per-fixture wall-time rows sorted slowest first."""
     timed_fixtures: list[dict[str, Any]] = []
     for result in results:
         name = result.get("name")
@@ -823,6 +904,20 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
             }
         )
     timed_fixtures.sort(key=lambda item: float(item["wall_seconds"]), reverse=True)
+    return timed_fixtures
+
+
+def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return structured pass/fail, validation, and evidence counts."""
+
+    selected_count = len(results)
+    passed_count = sum(1 for result in results if result.get("status") == "passed")
+    xfail_count = sum(1 for result in results if result.get("expected_status") == "xfail")
+    decompile_sections = _collected_sections(results, "decompile")
+    compiler_sections = _collected_sections(results, "compiler_match")
+    validation_counts = _validation_counts(decompile_sections)
+    target_modes = _target_selection_modes(results)
+    timed_fixtures = _timed_fixtures(results)
     return {
         "selected_fixture_count": selected_count,
         "passed_fixture_count": passed_count,

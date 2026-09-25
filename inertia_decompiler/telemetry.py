@@ -267,20 +267,12 @@ def configure_telemetry_from_env(
         _STATE.top_n = max(1, int(top_n if top_n is not None else _env_int(TRACE_TOP_N_ENV, _STATE.top_n)))
         _STATE.min_ms = max(0.0, float(min_ms if min_ms is not None else _env_float(TRACE_MIN_MS_ENV, _STATE.min_ms)))
         resolved_full_jsonl = full_jsonl if full_jsonl is not None else _env_bool(TRACE_FULL_JSONL_ENV, False)
-        if otlp_export is not None:
-            os.environ[TRACE_OTLP_ENABLE_ENV] = "1" if bool(otlp_export) else "0"
-        if otlp_endpoint is not None:
-            if otlp_endpoint:
-                os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = otlp_endpoint
-            else:
-                os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
-        if service_name is not None:
-            if service_name:
-                os.environ[TRACE_SERVICE_NAME_ENV] = service_name
-            else:
-                os.environ.pop(TRACE_SERVICE_NAME_ENV, None)
-        if force_flush_ms is not None:
-            os.environ[TRACE_FORCE_FLUSH_MS_ENV] = str(max(1, int(force_flush_ms)))
+        _publish_env_overrides(
+            otlp_export=otlp_export,
+            otlp_endpoint=otlp_endpoint,
+            service_name=service_name,
+            force_flush_ms=force_flush_ms,
+        )
 
         raw_file_path = file_path if file_path is not None else os.environ.get(TRACE_FILE_ENV)
         _STATE.file_path = Path(raw_file_path) if raw_file_path else None
@@ -303,6 +295,30 @@ def configure_telemetry_from_env(
             _install_signal_handlers()
             _STATE.configured = True
     return True
+
+
+def _publish_env_overrides(
+    *,
+    otlp_export: bool | None,
+    otlp_endpoint: str | None,
+    service_name: str | None,
+    force_flush_ms: int | None,
+) -> None:
+    """Publish explicit configuration arguments into OTLP env variables."""
+    if otlp_export is not None:
+        os.environ[TRACE_OTLP_ENABLE_ENV] = "1" if bool(otlp_export) else "0"
+    if otlp_endpoint is not None:
+        if otlp_endpoint:
+            os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = otlp_endpoint
+        else:
+            os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
+    if service_name is not None:
+        if service_name:
+            os.environ[TRACE_SERVICE_NAME_ENV] = service_name
+        else:
+            os.environ.pop(TRACE_SERVICE_NAME_ENV, None)
+    if force_flush_ms is not None:
+        os.environ[TRACE_FORCE_FLUSH_MS_ENV] = str(max(1, int(force_flush_ms)))
 
 
 def _install_signal_handlers() -> None:
@@ -459,12 +475,7 @@ def _collect_auto_attr(attrs: dict[str, object], name: str, value: object) -> No
         attrs[name] = _format_auto_value(name, value)
         return
     if name in {"path", "file_path"}:
-        if isinstance(value, Path):
-            attrs.setdefault("binary", value.name)
-            attrs["path"] = value.name
-        elif isinstance(value, str) and value:
-            attrs.setdefault("binary", Path(value).name)
-            attrs["path"] = Path(value).name
+        _collect_path_attr(attrs, value)
         return
     if name in {"function", "function_obj", "decompile_function"}:
         _collect_function_attrs(attrs, value)
@@ -473,15 +484,30 @@ def _collect_auto_attr(attrs: dict[str, object], name: str, value: object) -> No
         _collect_project_attrs(attrs, value)
         return
     if name in {"item", "task"}:
-        # Dynamic third-party payload boundary: queued work items are not owned contracts.
-        item_function = getattr(value, "function", None)
-        if item_function is not None:
-            _collect_function_attrs(attrs, item_function)
-        # Dynamic third-party payload boundary: queued work items are not owned contracts.
-        item_index = getattr(value, "index", None)
-        if isinstance(item_index, int):
-            attrs.setdefault("index", item_index)
+        _collect_item_attrs(attrs, value)
         return
+
+
+def _collect_path_attr(attrs: dict[str, object], value: object) -> None:
+    """Record a path/file_path payload as binary name plus path."""
+    if isinstance(value, Path):
+        attrs.setdefault("binary", value.name)
+        attrs["path"] = value.name
+    elif isinstance(value, str) and value:
+        attrs.setdefault("binary", Path(value).name)
+        attrs["path"] = Path(value).name
+
+
+def _collect_item_attrs(attrs: dict[str, object], value: object) -> None:
+    """Record function/index attributes from a queued work item."""
+    # Dynamic third-party payload boundary: queued work items are not owned contracts.
+    item_function = getattr(value, "function", None)
+    if item_function is not None:
+        _collect_function_attrs(attrs, item_function)
+    # Dynamic third-party payload boundary: queued work items are not owned contracts.
+    item_index = getattr(value, "index", None)
+    if isinstance(item_index, int):
+        attrs.setdefault("index", item_index)
 
 
 def _collect_function_attrs(attrs: dict[str, object], function: object) -> None:
@@ -916,26 +942,38 @@ def emit_compact_summary() -> None:
         encoded = build_agent_slow_trace_text().rstrip("\n")
     else:
         encoded = json.dumps(summary, sort_keys=True, separators=(",", ":"))
-    if _STATE.stderr_summary:
-        if _STATE.output_format == TraceOutputFormat.SLOW:
-            stderr_encoded = build_agent_slow_trace_text().rstrip("\n")
-        else:
-            # Stderr is an agent-facing surface. Keep it compact text even
-            # when the file output is JSON/JSONL for external parsers.
-            stderr_encoded = build_agent_trace_text().rstrip("\n")
-        print(f"[otel-trace] {stderr_encoded}", file=sys.stderr)
-        sys.stderr.flush()
-    if _STATE.file_path is not None:
-        _STATE.file_path.parent.mkdir(parents=True, exist_ok=True)
-        if _STATE.output_format == TraceOutputFormat.JSONL:
-            _write_full_jsonl(_STATE.file_path)
-        elif _STATE.output_format == TraceOutputFormat.TEXT:
-            _STATE.file_path.write_text(build_agent_trace_text(), encoding="utf-8")
-        elif _STATE.output_format == TraceOutputFormat.SLOW:
-            _STATE.file_path.write_text(build_agent_slow_trace_text(), encoding="utf-8")
-        else:
-            _STATE.file_path.write_text(encoded + "\n", encoding="utf-8")
+    _emit_stderr_summary()
+    _write_compact_summary_file(encoded)
     _flush_and_shutdown_otel()
+
+
+def _emit_stderr_summary() -> None:
+    """Emit the compact text summary to the stderr agent surface."""
+    if not _STATE.stderr_summary:
+        return
+    if _STATE.output_format == TraceOutputFormat.SLOW:
+        stderr_encoded = build_agent_slow_trace_text().rstrip("\n")
+    else:
+        # Stderr is an agent-facing surface. Keep it compact text even
+        # when the file output is JSON/JSONL for external parsers.
+        stderr_encoded = build_agent_trace_text().rstrip("\n")
+    print(f"[otel-trace] {stderr_encoded}", file=sys.stderr)
+    sys.stderr.flush()
+
+
+def _write_compact_summary_file(encoded: str) -> None:
+    """Write the summary to the configured file in its output format."""
+    if _STATE.file_path is None:
+        return
+    _STATE.file_path.parent.mkdir(parents=True, exist_ok=True)
+    if _STATE.output_format == TraceOutputFormat.JSONL:
+        _write_full_jsonl(_STATE.file_path)
+    elif _STATE.output_format == TraceOutputFormat.TEXT:
+        _STATE.file_path.write_text(build_agent_trace_text(), encoding="utf-8")
+    elif _STATE.output_format == TraceOutputFormat.SLOW:
+        _STATE.file_path.write_text(build_agent_slow_trace_text(), encoding="utf-8")
+    else:
+        _STATE.file_path.write_text(encoded + "\n", encoding="utf-8")
 
 
 def _flush_and_shutdown_otel() -> None:

@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol, cast
 
@@ -495,11 +495,14 @@ def _covering_global_cvariables_8616(
     covering: list[CVariable] = []
     for variable in variables:
         for storage in _cvariable_storage_views_8616(variable):
-            if (
+            if not (
                 isinstance(storage, SimMemoryVariable)
                 and isinstance(storage.addr, int)
                 and isinstance(storage.size, int)
-                and storage.size > 0
+            ):
+                continue
+            if (
+                storage.size > 0
                 and storage.addr <= offset
                 and access_end <= storage.addr + storage.size
             ):
@@ -1059,7 +1062,6 @@ def _stack_aggregate_fact_is_valid_8616(
         and fact.byte_size % fact.element_width == 0
     )
 
-
 def validate_storage_identities_8616(
     codegen: object,
     root: object,
@@ -1083,51 +1085,115 @@ def validate_storage_identities_8616(
     )
     named_global_facts = named_global_aggregate_type_facts_8616(codegen)
     query_index = query_index or StructuredAstQueryIndex8616.build(root)
-    nodes = query_index.nodes
     root_variables = _root_cvariables_8616(root, query_index)
-    declaration_variables = _declaration_cvariables_8616(
-        codegen,
-        root_variables,
+    run = _StorageValidationRun8616(
+        codegen=codegen,
+        nodes=query_index.nodes,
+        root_variables=root_variables,
+        declaration_variables=_declaration_cvariables_8616(
+            codegen,
+            root_variables,
+        ),
+        named_global_facts=named_global_facts,
     )
-    issues: list[StorageValidationIssue8616] = []
-    classified_fact_count = 0
-    materialized_count = 0
+    run.global_facts_phase(global_facts)
+    run.stack_facts_phase(stack_facts)
+    run.field_facts_phase(field_facts)
+    run.copy_facts_phase(copy_facts)
 
-    conflicting_keys: set[tuple[object, ...]] = set()
-    facts_by_evidence: dict[
-        tuple[MemSpace, int, int, object], list[GlobalStorageIdentityFact8616]
-    ] = {}
-    for fact in global_facts:
-        facts_by_evidence.setdefault(
-            (fact.space, fact.offset, fact.evidence_addr, fact.kind), []
-        ).append(fact)
-    for evidence_key, evidence_facts in facts_by_evidence.items():
-        widths = tuple(sorted({fact.width for fact in evidence_facts}))
-        if len(widths) <= 1:
-            continue
-        conflicting_keys.add(evidence_key)
-        classified_fact_count += len(evidence_facts)
-        representative = min(evidence_facts, key=lambda fact: (fact.width, fact.name))
-        issues.append(
-            StorageIdentityIssue8616(
-                kind=StorageIdentityIssueKind8616.CONFLICTING_EVIDENCE_WIDTH,
-                space=representative.space,
-                offset=representative.offset,
-                expected_width=representative.width,
-                name=representative.name,
-                evidence_addrs=(representative.evidence_addr,),
-                actual_widths=widths,
-            )
+    report = StorageIdentityValidationReport8616(
+        raw_fact_count=(
+            len(raw_global_facts)
+            + len(raw_stack_facts)
+            + len(raw_field_facts)
+            + len(raw_copy_facts)
+        ),
+        normalized_fact_count=(
+            len(global_facts)
+            + len(stack_facts)
+            + len(field_facts)
+            + len(copy_facts)
+        ),
+        classified_fact_count=run.classified_fact_count,
+        materialized_count=run.materialized_count,
+        issues=tuple(sorted(run.issues, key=lambda issue: issue.token())),
+    )
+    if os.environ.get("INERTIA_DEBUG_VALIDATION_STORAGE") == "1":
+        log.warning(
+            "storage validation copy_facts=%r final_copies=%r "
+            "named_global_facts=%r issues=%r counters=%r",
+            copy_facts,
+            tuple(
+                (fact, _final_indexed_global_stack_copies_8616(codegen, run.nodes, fact))
+                for fact in copy_facts
+            ),
+            named_global_facts,
+            report.issue_tokens(),
+            report.to_dict(),
         )
+    return report
 
-    for fact in global_facts:
+
+@dataclass(slots=True)
+class _StorageValidationRun8616:
+    """Shared context and issue counters for storage-identity validation."""
+
+    codegen: object
+    nodes: object
+    root_variables: tuple[CVariable, ...]
+    declaration_variables: tuple[CVariable, ...]
+    named_global_facts: tuple[object, ...]
+    issues: list[StorageValidationIssue8616] = field(default_factory=list)
+    classified_fact_count: int = 0
+    materialized_count: int = 0
+
+    def global_facts_phase(
+        self,
+        global_facts: tuple[GlobalStorageIdentityFact8616, ...],
+    ) -> None:
+        """Compare normalized global facts against final DS globals."""
+        conflicting_keys: set[tuple[object, ...]] = set()
+        facts_by_evidence: dict[
+            tuple[MemSpace, int, int, object], list[GlobalStorageIdentityFact8616]
+        ] = {}
+        for fact in global_facts:
+            facts_by_evidence.setdefault(
+                (fact.space, fact.offset, fact.evidence_addr, fact.kind), []
+            ).append(fact)
+        for evidence_key, evidence_facts in facts_by_evidence.items():
+            widths = tuple(sorted({fact.width for fact in evidence_facts}))
+            if len(widths) <= 1:
+                continue
+            conflicting_keys.add(evidence_key)
+            self.classified_fact_count += len(evidence_facts)
+            representative = min(evidence_facts, key=lambda fact: (fact.width, fact.name))
+            self.issues.append(
+                StorageIdentityIssue8616(
+                    kind=StorageIdentityIssueKind8616.CONFLICTING_EVIDENCE_WIDTH,
+                    space=representative.space,
+                    offset=representative.offset,
+                    expected_width=representative.width,
+                    name=representative.name,
+                    evidence_addrs=(representative.evidence_addr,),
+                    actual_widths=widths,
+                )
+            )
+        for fact in global_facts:
+            self._global_fact(fact, conflicting_keys)
+
+    def _global_fact(
+        self,
+        fact: GlobalStorageIdentityFact8616,
+        conflicting_keys: set[tuple[object, ...]],
+    ) -> None:
+        """Classify one global storage fact against the final globals."""
         evidence_key = (fact.space, fact.offset, fact.evidence_addr, fact.kind)
         if evidence_key in conflicting_keys:
-            continue
-        classified_fact_count += 1
+            return
+        self.classified_fact_count += 1
         evidence_addrs = (fact.evidence_addr,)
         if fact.space is not MemSpace.DS:
-            issues.append(
+            self.issues.append(
                 StorageIdentityIssue8616(
                     kind=StorageIdentityIssueKind8616.UNREPRESENTED_SEGMENT,
                     space=fact.space,
@@ -1137,21 +1203,21 @@ def validate_storage_identities_8616(
                     evidence_addrs=evidence_addrs,
                 )
             )
-            continue
+            return
 
         covering_globals = _covering_global_cvariables_8616(
-            root_variables,
+            self.root_variables,
             fact.offset,
             fact.width,
         )
         actual_widths = _global_storage_candidate_widths_8616(
-            root_variables,
+            self.root_variables,
             fact.offset,
         )
         if covering_globals:
-            materialized_count += 1
+            self.materialized_count += 1
         elif actual_widths:
-            issues.append(
+            self.issues.append(
                 StorageIdentityIssue8616(
                     kind=StorageIdentityIssueKind8616.WIDTH_MISMATCH,
                     space=fact.space,
@@ -1163,7 +1229,7 @@ def validate_storage_identities_8616(
                 )
             )
         else:
-            issues.append(
+            self.issues.append(
                 StorageIdentityIssue8616(
                     kind=StorageIdentityIssueKind8616.MISSING_GLOBAL,
                     space=fact.space,
@@ -1184,14 +1250,14 @@ def validate_storage_identities_8616(
                     location
                     for shadow_name in shadow_names
                     for location in _shadow_locations_8616(
-                        declaration_variables,
+                        self.declaration_variables,
                         shadow_name,
                     )
                 }
             )
         )
         if shadow_locations:
-            issues.append(
+            self.issues.append(
                 StorageIdentityIssue8616(
                     kind=StorageIdentityIssueKind8616.LOCAL_SHADOW,
                     space=fact.space,
@@ -1203,46 +1269,58 @@ def validate_storage_identities_8616(
                 )
             )
 
-    conflicting_stack_bases: set[int] = set()
-    stack_facts_by_base: dict[int, list[StackAggregateObjectFact8616]] = {}
-    for stack_fact in stack_facts:
-        stack_facts_by_base.setdefault(stack_fact.base_offset, []).append(stack_fact)
-    for base_offset, base_facts in stack_facts_by_base.items():
-        shapes = {
-            (stack_fact.byte_size, stack_fact.element_width)
-            for stack_fact in base_facts
-        }
-        if len(shapes) <= 1:
-            continue
-        conflicting_stack_bases.add(base_offset)
-        classified_fact_count += len(base_facts)
-        stack_representative = min(
-            base_facts,
-            key=lambda fact: (
-                fact.byte_size,
-                fact.element_width,
-                fact.evidence_kind.value,
-                fact.indexed_offsets,
-            ),
-        )
-        issues.append(
-            StackAggregateObjectIssue8616(
-                kind=StackAggregateObjectIssueKind8616.CONFLICTING_EVIDENCE_SHAPE,
-                base_offset=stack_representative.base_offset,
-                expected_byte_size=stack_representative.byte_size,
-                expected_element_width=stack_representative.element_width,
-                evidence_kind=stack_representative.evidence_kind,
-                indexed_offsets=stack_representative.indexed_offsets,
-                evidence_shapes=tuple(sorted(shapes)),
+    def stack_facts_phase(
+        self,
+        stack_facts: tuple[StackAggregateObjectFact8616, ...],
+    ) -> None:
+        """Compare normalized stack-aggregate facts against final locals."""
+        conflicting_stack_bases: set[int] = set()
+        stack_facts_by_base: dict[int, list[StackAggregateObjectFact8616]] = {}
+        for stack_fact in stack_facts:
+            stack_facts_by_base.setdefault(stack_fact.base_offset, []).append(stack_fact)
+        for base_offset, base_facts in stack_facts_by_base.items():
+            shapes = {
+                (stack_fact.byte_size, stack_fact.element_width)
+                for stack_fact in base_facts
+            }
+            if len(shapes) <= 1:
+                continue
+            conflicting_stack_bases.add(base_offset)
+            self.classified_fact_count += len(base_facts)
+            stack_representative = min(
+                base_facts,
+                key=lambda fact: (
+                    fact.byte_size,
+                    fact.element_width,
+                    fact.evidence_kind.value,
+                    fact.indexed_offsets,
+                ),
             )
-        )
+            self.issues.append(
+                StackAggregateObjectIssue8616(
+                    kind=StackAggregateObjectIssueKind8616.CONFLICTING_EVIDENCE_SHAPE,
+                    base_offset=stack_representative.base_offset,
+                    expected_byte_size=stack_representative.byte_size,
+                    expected_element_width=stack_representative.element_width,
+                    evidence_kind=stack_representative.evidence_kind,
+                    indexed_offsets=stack_representative.indexed_offsets,
+                    evidence_shapes=tuple(sorted(shapes)),
+                )
+            )
+        for stack_fact in stack_facts:
+            self._stack_fact(stack_fact, conflicting_stack_bases)
 
-    for stack_fact in stack_facts:
+    def _stack_fact(
+        self,
+        stack_fact: StackAggregateObjectFact8616,
+        conflicting_stack_bases: set[int],
+    ) -> None:
+        """Classify one stack-aggregate fact against the final locals."""
         if stack_fact.base_offset in conflicting_stack_bases:
-            continue
-        classified_fact_count += 1
+            return
+        self.classified_fact_count += 1
         if not _stack_aggregate_fact_is_valid_8616(stack_fact):
-            issues.append(
+            self.issues.append(
                 StackAggregateObjectIssue8616(
                     kind=StackAggregateObjectIssueKind8616.INVALID_EVIDENCE_SHAPE,
                     base_offset=stack_fact.base_offset,
@@ -1252,10 +1330,10 @@ def validate_storage_identities_8616(
                     indexed_offsets=stack_fact.indexed_offsets,
                 )
             )
-            continue
+            return
         actual_shapes = _stack_aggregate_candidate_shapes_8616(
-            codegen,
-            root_variables,
+            self.codegen,
+            self.root_variables,
             stack_fact.base_offset,
         )
         matching_width_shapes = tuple(
@@ -1267,17 +1345,15 @@ def validate_storage_identities_8616(
             shape[2] == stack_fact.element_width
             for shape in matching_width_shapes
         ):
-            materialized_count += 1
-            continue
+            self.materialized_count += 1
+            return
         if not actual_shapes:
             issue_kind = StackAggregateObjectIssueKind8616.MISSING_OBJECT
         elif not matching_width_shapes:
             issue_kind = StackAggregateObjectIssueKind8616.WIDTH_MISMATCH
         else:
-            issue_kind = (
-                StackAggregateObjectIssueKind8616.ELEMENT_STRIDE_MISMATCH
-            )
-        issues.append(
+            issue_kind = StackAggregateObjectIssueKind8616.ELEMENT_STRIDE_MISMATCH
+        self.issues.append(
             StackAggregateObjectIssue8616(
                 kind=issue_kind,
                 base_offset=stack_fact.base_offset,
@@ -1289,59 +1365,71 @@ def validate_storage_identities_8616(
             )
         )
 
-    conflicting_field_identities: set[tuple[str, int, str, int]] = set()
-    field_facts_by_identity: dict[
-        tuple[str, int, str, int],
-        list[StackAggregateFieldProjectionFact8616],
-    ] = {}
-    for field_fact in field_facts:
-        identity = (
-            field_fact.source_base,
-            field_fact.source_offset,
-            field_fact.destination_base,
-            field_fact.destination_offset,
-        )
-        field_facts_by_identity.setdefault(identity, []).append(field_fact)
-    for identity, identity_facts in field_facts_by_identity.items():
-        field_variants = {
-            (
-                fact.field_offset,
-                fact.struct_type,
-                fact.cast_source_type,
-                fact.cast_destination_type,
+    def field_facts_phase(
+        self,
+        field_facts: tuple[StackAggregateFieldProjectionFact8616, ...],
+    ) -> None:
+        """Compare normalized field-projection facts against final locals."""
+        conflicting_field_identities: set[tuple[str, int, str, int]] = set()
+        field_facts_by_identity: dict[
+            tuple[str, int, str, int],
+            list[StackAggregateFieldProjectionFact8616],
+        ] = {}
+        for field_fact in field_facts:
+            identity = (
+                field_fact.source_base,
+                field_fact.source_offset,
+                field_fact.destination_base,
+                field_fact.destination_offset,
             )
-            for fact in identity_facts
-        }
-        if len(field_variants) <= 1:
-            continue
-        conflicting_field_identities.add(identity)
-        classified_fact_count += len(identity_facts)
-        field_representative = min(
-            identity_facts,
-            key=lambda fact: (
-                fact.field_offset,
-                _struct_name_8616(fact.struct_type),
-            ),
-        )
-        issues.append(
-            _stack_field_projection_issue_8616(
-                field_representative,
-                StackFieldProjectionIssueKind8616.CONFLICTING_EVIDENCE,
-                evidence_projections=tuple(
-                    sorted(
-                        {
-                            (
-                                fact.field_offset,
-                                _struct_name_8616(fact.struct_type),
-                            )
-                            for fact in identity_facts
-                        }
-                    )
+            field_facts_by_identity.setdefault(identity, []).append(field_fact)
+        for identity, identity_facts in field_facts_by_identity.items():
+            field_variants = {
+                (
+                    fact.field_offset,
+                    fact.struct_type,
+                    fact.cast_source_type,
+                    fact.cast_destination_type,
+                )
+                for fact in identity_facts
+            }
+            if len(field_variants) <= 1:
+                continue
+            conflicting_field_identities.add(identity)
+            self.classified_fact_count += len(identity_facts)
+            field_representative = min(
+                identity_facts,
+                key=lambda fact: (
+                    fact.field_offset,
+                    _struct_name_8616(fact.struct_type),
                 ),
             )
-        )
+            self.issues.append(
+                _stack_field_projection_issue_8616(
+                    field_representative,
+                    StackFieldProjectionIssueKind8616.CONFLICTING_EVIDENCE,
+                    evidence_projections=tuple(
+                        sorted(
+                            {
+                                (
+                                    fact.field_offset,
+                                    _struct_name_8616(fact.struct_type),
+                                )
+                                for fact in identity_facts
+                            }
+                        )
+                    ),
+                )
+            )
+        for field_fact in field_facts:
+            self._field_fact(field_fact, conflicting_field_identities)
 
-    for field_fact in field_facts:
+    def _field_fact(
+        self,
+        field_fact: StackAggregateFieldProjectionFact8616,
+        conflicting_field_identities: set[tuple[str, int, str, int]],
+    ) -> None:
+        """Classify one field-projection fact against final locals."""
         identity = (
             field_fact.source_base,
             field_fact.source_offset,
@@ -1349,25 +1437,25 @@ def validate_storage_identities_8616(
             field_fact.destination_offset,
         )
         if identity in conflicting_field_identities:
-            continue
-        classified_fact_count += 1
+            return
+        self.classified_fact_count += 1
         if not _stack_field_projection_fact_is_valid_8616(field_fact):
-            issues.append(
+            self.issues.append(
                 _stack_field_projection_issue_8616(
                     field_fact,
                     StackFieldProjectionIssueKind8616.INVALID_EVIDENCE,
                 )
             )
-            continue
-        actual = _final_stack_field_projections_8616(codegen, nodes, field_fact)
+            return
+        actual = _final_stack_field_projections_8616(self.codegen, self.nodes, field_fact)
         if not actual:
-            issues.append(
+            self.issues.append(
                 _stack_field_projection_issue_8616(
                     field_fact,
                     StackFieldProjectionIssueKind8616.MISSING_PROJECTION,
                 )
             )
-            continue
+            return
         source_matches = tuple(
             projection
             for projection in actual
@@ -1375,138 +1463,152 @@ def validate_storage_identities_8616(
             and projection.source_offset == field_fact.source_offset
         )
         if not source_matches:
-            issues.append(
+            self.issues.append(
                 _stack_field_projection_issue_8616(
                     field_fact,
                     StackFieldProjectionIssueKind8616.SOURCE_IDENTITY_MISMATCH,
                     actual=actual,
                 )
             )
-            continue
+            return
         field_matches = tuple(
             projection
             for projection in source_matches
             if projection.field_offset == field_fact.field_offset
         )
         if not field_matches:
-            issues.append(
+            self.issues.append(
                 _stack_field_projection_issue_8616(
                     field_fact,
                     StackFieldProjectionIssueKind8616.FIELD_OFFSET_MISMATCH,
                     actual=source_matches,
                 )
             )
-            continue
+            return
         if not any(
             projection.struct_type == field_fact.struct_type
             for projection in field_matches
         ):
-            issues.append(
+            self.issues.append(
                 _stack_field_projection_issue_8616(
                     field_fact,
                     StackFieldProjectionIssueKind8616.STRUCT_TYPE_MISMATCH,
                     actual=field_matches,
                 )
             )
-            continue
-        materialized_count += 1
+            return
+        self.materialized_count += 1
 
-    conflicting_copy_evidence: set[tuple[int, int]] = set()
-    copy_facts_by_evidence: dict[
-        tuple[int, int],
-        list[IndexedGlobalStackAggregateCopyFact8616],
-    ] = {}
-    for copy_fact in copy_facts:
-        copy_facts_by_evidence.setdefault(
-            (copy_fact.load_ins_addr, copy_fact.store_ins_addr),
-            [],
-        ).append(copy_fact)
-    for evidence_identity, copy_evidence_facts in copy_facts_by_evidence.items():
-        copy_variants = {
-            (
-                copy_evidence_fact.source_global_offset,
-                copy_evidence_fact.source_index_base,
-                copy_evidence_fact.source_index_offset,
-                copy_evidence_fact.source_index_adjustment,
-                copy_evidence_fact.destination_base,
-                copy_evidence_fact.destination_offset,
-                copy_evidence_fact.width,
-                copy_evidence_fact.struct_type,
-            )
-            for copy_evidence_fact in copy_evidence_facts
-        }
-        if len(copy_variants) <= 1:
-            continue
-        conflicting_copy_evidence.add(evidence_identity)
-        classified_fact_count += len(copy_evidence_facts)
-        copy_representative = min(
-            copy_evidence_facts,
-            key=lambda copy_evidence_fact: (
-                copy_evidence_fact.source_global_offset,
-                copy_evidence_fact.source_index_offset,
-                copy_evidence_fact.source_index_adjustment,
-                copy_evidence_fact.destination_offset,
-                copy_evidence_fact.width,
-                _struct_name_8616(copy_evidence_fact.struct_type),
-            ),
-        )
-        issues.append(
-            _indexed_global_stack_copy_issue_8616(
-                copy_representative,
-                IndexedGlobalStackAggregateCopyIssueKind8616.CONFLICTING_EVIDENCE,
-                evidence_variants=tuple(
-                    sorted(
-                        {
-                            (
-                                copy_evidence_fact.source_global_offset,
-                                copy_evidence_fact.source_index_offset,
-                                copy_evidence_fact.source_index_adjustment,
-                                copy_evidence_fact.destination_offset,
-                                _struct_name_8616(copy_evidence_fact.struct_type),
-                            )
-                            for copy_evidence_fact in copy_evidence_facts
-                        }
-                    )
+    def copy_facts_phase(
+        self,
+        copy_facts: tuple[IndexedGlobalStackAggregateCopyFact8616, ...],
+    ) -> None:
+        """Compare normalized whole-copy facts against final copies."""
+        conflicting_copy_evidence: set[tuple[int, int]] = set()
+        copy_facts_by_evidence: dict[
+            tuple[int, int],
+            list[IndexedGlobalStackAggregateCopyFact8616],
+        ] = {}
+        for copy_fact in copy_facts:
+            copy_facts_by_evidence.setdefault(
+                (copy_fact.load_ins_addr, copy_fact.store_ins_addr),
+                [],
+            ).append(copy_fact)
+        for evidence_identity, copy_evidence_facts in copy_facts_by_evidence.items():
+            copy_variants = {
+                (
+                    copy_evidence_fact.source_global_offset,
+                    copy_evidence_fact.source_index_base,
+                    copy_evidence_fact.source_index_offset,
+                    copy_evidence_fact.source_index_adjustment,
+                    copy_evidence_fact.destination_base,
+                    copy_evidence_fact.destination_offset,
+                    copy_evidence_fact.width,
+                    copy_evidence_fact.struct_type,
+                )
+                for copy_evidence_fact in copy_evidence_facts
+            }
+            if len(copy_variants) <= 1:
+                continue
+            conflicting_copy_evidence.add(evidence_identity)
+            self.classified_fact_count += len(copy_evidence_facts)
+            copy_representative = min(
+                copy_evidence_facts,
+                key=lambda copy_evidence_fact: (
+                    copy_evidence_fact.source_global_offset,
+                    copy_evidence_fact.source_index_offset,
+                    copy_evidence_fact.source_index_adjustment,
+                    copy_evidence_fact.destination_offset,
+                    copy_evidence_fact.width,
+                    _struct_name_8616(copy_evidence_fact.struct_type),
                 ),
             )
-        )
+            self.issues.append(
+                _indexed_global_stack_copy_issue_8616(
+                    copy_representative,
+                    IndexedGlobalStackAggregateCopyIssueKind8616.CONFLICTING_EVIDENCE,
+                    evidence_variants=tuple(
+                        sorted(
+                            {
+                                (
+                                    copy_evidence_fact.source_global_offset,
+                                    copy_evidence_fact.source_index_offset,
+                                    copy_evidence_fact.source_index_adjustment,
+                                    copy_evidence_fact.destination_offset,
+                                    _struct_name_8616(copy_evidence_fact.struct_type),
+                                )
+                                for copy_evidence_fact in copy_evidence_facts
+                            }
+                        )
+                    ),
+                )
+            )
+        for copy_fact in copy_facts:
+            self._copy_fact(copy_fact, conflicting_copy_evidence)
 
-    for copy_fact in copy_facts:
+    def _copy_fact(
+        self,
+        copy_fact: IndexedGlobalStackAggregateCopyFact8616,
+        conflicting_copy_evidence: set[tuple[int, int]],
+    ) -> None:
+        """Classify one indexed whole-copy fact against final copies."""
         evidence_identity = (copy_fact.load_ins_addr, copy_fact.store_ins_addr)
         if evidence_identity in conflicting_copy_evidence:
-            continue
-        classified_fact_count += 1
+            return
+        self.classified_fact_count += 1
         if not _indexed_global_stack_copy_fact_is_valid_8616(copy_fact):
-            issues.append(
+            self.issues.append(
                 _indexed_global_stack_copy_issue_8616(
                     copy_fact,
                     IndexedGlobalStackAggregateCopyIssueKind8616.INVALID_EVIDENCE,
                 )
             )
-            continue
-        copy_actual = _final_indexed_global_stack_copies_8616(codegen, nodes, copy_fact)
+            return
+        copy_actual = _final_indexed_global_stack_copies_8616(
+            self.codegen, self.nodes, copy_fact
+        )
         if not copy_actual:
-            issues.append(
+            self.issues.append(
                 _indexed_global_stack_copy_issue_8616(
                     copy_fact,
                     IndexedGlobalStackAggregateCopyIssueKind8616.MISSING_COPY,
                 )
             )
-            continue
+            return
         copy_source_matches = tuple(
             copy
             for copy in copy_actual
             if copy.source_global_offset == copy_fact.source_global_offset
         )
         if not copy_source_matches:
-            issues.append(
+            self.issues.append(
                 _indexed_global_stack_copy_issue_8616(
                     copy_fact,
                     IndexedGlobalStackAggregateCopyIssueKind8616.SOURCE_IDENTITY_MISMATCH,
                     actual=copy_actual,
                 )
             )
-            continue
+            return
         copy_index_matches = tuple(
             copy
             for copy in copy_source_matches
@@ -1516,14 +1618,14 @@ def validate_storage_identities_8616(
             == copy_fact.source_index_adjustment
         )
         if not copy_index_matches:
-            issues.append(
+            self.issues.append(
                 _indexed_global_stack_copy_issue_8616(
                     copy_fact,
                     IndexedGlobalStackAggregateCopyIssueKind8616.SOURCE_INDEX_MISMATCH,
                     actual=copy_source_matches,
                 )
             )
-            continue
+            return
         copy_width_matches = tuple(
             copy
             for copy in copy_index_matches
@@ -1531,68 +1633,36 @@ def validate_storage_identities_8616(
             and copy.destination_width == copy_fact.width
         )
         if not copy_width_matches:
-            issues.append(
+            self.issues.append(
                 _indexed_global_stack_copy_issue_8616(
                     copy_fact,
                     IndexedGlobalStackAggregateCopyIssueKind8616.WIDTH_MISMATCH,
                     actual=copy_index_matches,
                 )
             )
-            continue
+            return
         if not any(
             (
                 copy.source_struct_type == copy_fact.struct_type
                 or (
                     copy.source_struct_type is None
                     and _registered_named_global_copy_type_matches_8616(
-                        codegen,
+                        self.codegen,
                         copy_fact,
                         copy,
-                        named_global_facts,
+                        self.named_global_facts,
                     )
                 )
             )
             and copy.destination_struct_type == copy_fact.struct_type
             for copy in copy_width_matches
         ):
-            issues.append(
+            self.issues.append(
                 _indexed_global_stack_copy_issue_8616(
                     copy_fact,
                     IndexedGlobalStackAggregateCopyIssueKind8616.STRUCT_TYPE_MISMATCH,
                     actual=copy_width_matches,
                 )
             )
-            continue
-        materialized_count += 1
-
-    report = StorageIdentityValidationReport8616(
-        raw_fact_count=(
-            len(raw_global_facts)
-            + len(raw_stack_facts)
-            + len(raw_field_facts)
-            + len(raw_copy_facts)
-        ),
-        normalized_fact_count=(
-            len(global_facts)
-            + len(stack_facts)
-            + len(field_facts)
-            + len(copy_facts)
-        ),
-        classified_fact_count=classified_fact_count,
-        materialized_count=materialized_count,
-        issues=tuple(sorted(issues, key=lambda issue: issue.token())),
-    )
-    if os.environ.get("INERTIA_DEBUG_VALIDATION_STORAGE") == "1":
-        log.warning(
-            "storage validation copy_facts=%r final_copies=%r "
-            "named_global_facts=%r issues=%r counters=%r",
-            copy_facts,
-            tuple(
-                (fact, _final_indexed_global_stack_copies_8616(codegen, nodes, fact))
-                for fact in copy_facts
-            ),
-            named_global_facts,
-            report.issue_tokens(),
-            report.to_dict(),
-        )
-    return report
+            return
+        self.materialized_count += 1

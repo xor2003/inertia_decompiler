@@ -173,12 +173,7 @@ def _resolve_proxy_attr(name: str) -> object:
         globals()[name] = value
         return value
     if name in {"SimTypeChar", "SimTypePointer", "SimTypeShort", "_AccessTraitEvidenceProfile", "_AccessTraitStrideEvidence", "describe_alias_storage"}:
-        if name in {"SimTypeChar", "SimTypePointer", "SimTypeShort"}:
-            value = _load_angr_sim_types(name)
-        elif name in {"_AccessTraitEvidenceProfile", "_AccessTraitStrideEvidence"}:
-            value = _load_access_profile_attr(name)
-        else:
-            value = _load_alias_query_attr(name)
+        value = _load_typed_proxy_attr(name)
         globals()[name] = value
         return value
     if name in {"analyze_adjacent_storage_slices", "join_adjacent_register_slices", "can_join_adjacent_register_slices"}:
@@ -194,76 +189,102 @@ def _resolve_proxy_attr(name: str) -> object:
     raise AttributeError(name)
 
 
+def _load_typed_proxy_attr(name: str) -> object:
+    """Load one typed surface from its owning lazy module."""
+    if name in {"SimTypeChar", "SimTypePointer", "SimTypeShort"}:
+        return _load_angr_sim_types(name)
+    if name in {"_AccessTraitEvidenceProfile", "_AccessTraitStrideEvidence"}:
+        return _load_access_profile_attr(name)
+    return _load_alias_query_attr(name)
+
+
 structured_c: object
 _AccessTraitEvidenceProfile: type
 _AccessTraitStrideEvidence: type
 
 
+def _normalized_high_slice_expr(current_high_expr: object) -> object:
+    """Unwrap one Mul/Shl high-byte scale wrapper into its inner view."""
+    from angr.analyses.decompiler.structured_codegen.c import CBinaryOp
+
+    from .cli_c_ast_rewrites import _c_constant_value, _unwrap_c_casts
+
+    if isinstance(current_high_expr, CBinaryOp) and current_high_expr.op in {"Mul", "Shl"}:
+        for maybe_inner, maybe_scale in (
+            (current_high_expr.lhs, current_high_expr.rhs),
+            (current_high_expr.rhs, current_high_expr.lhs),
+        ):
+            scale = _c_constant_value(_unwrap_c_casts(maybe_scale))
+            if scale not in {8, 0x100}:
+                continue
+            return _unwrap_c_casts(maybe_inner)
+    return current_high_expr
+
+
+def _joinable_register_pair_proof(analysis: object) -> object | None:
+    """Return the widening proof when its register-pair versions agree."""
+    # Dynamic codegen boundary: widening proof shape comes from X86_16 analysis helpers.
+    proof = getattr(analysis, "proof", None)
+    if proof is None:
+        return None
+    # Dynamic codegen boundary: widening proof fields are analysis-owned evidence.
+    if getattr(proof, "register_pair", None) is None:
+        return None
+    # Dynamic codegen boundary: widening proof fields are analysis-owned evidence.
+    if getattr(proof, "left_version", None) is None or getattr(proof, "right_version", None) is None:
+        return None
+    # Dynamic codegen boundary: widening proof fields are analysis-owned evidence.
+    if getattr(proof, "left_version", None) != getattr(proof, "right_version", None):
+        return None
+    return proof
+
+
+def _match_adjacent_register_pair_impl(
+    low_expr: object,
+    high_expr: object,
+    codegen: object,
+) -> object | None:
+    """Join two proven adjacent byte slices into one widened expression."""
+    from angr.analyses.decompiler.structured_codegen.c import CVariable
+    from angr.sim_variable import SimRegisterVariable
+    from angr_platforms.X86_16.widening_model import analyze_adjacent_storage_slices
+
+    from .cli_c_ast_rewrites import _get_or_seed_inertia_alias_state
+
+    current_low_expr = low_expr
+    current_high_expr = _normalized_high_slice_expr(high_expr)
+    if not isinstance(current_low_expr, CVariable) or not isinstance(current_high_expr, CVariable):
+        return None
+    # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
+    low_var = getattr(current_low_expr, "variable", None)
+    # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
+    high_var = getattr(current_high_expr, "variable", None)
+    if not isinstance(low_var, SimRegisterVariable) or not isinstance(high_var, SimRegisterVariable):
+        return None
+    # Dynamic codegen boundary: SimRegisterVariable slice size comes from angr variable metadata.
+    if getattr(low_var, "size", None) != 1 or getattr(high_var, "size", None) != 1:
+        return None
+    alias_state = _get_or_seed_inertia_alias_state(codegen)
+    if alias_state is None:
+        return None
+    analysis = analyze_adjacent_storage_slices(current_low_expr, current_high_expr, alias_state=alias_state)
+    if not analysis.ok:
+        return None
+    proof = _joinable_register_pair_proof(analysis)
+    if proof is None:
+        return None
+    can_join_attr = _load_widening_attr("can_join_adjacent_register_slices")
+    if not can_join_attr(current_low_expr, current_high_expr, alias_state=alias_state, proof=proof):
+        return None
+    join_attr = _load_widening_attr("join_adjacent_register_slices")
+    return join_attr(
+        current_low_expr, current_high_expr, codegen, alias_state=alias_state, proof=proof
+    )
+
+
 def _match_adjacent_register_pair_var_expr(low_expr: object, high_expr: object, codegen: object) -> object | None:
     # Compatibility surface for legacy tests and callers importing from decompile/cli.
-    def _impl() -> object | None:
-        from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CVariable
-        from angr.sim_variable import SimRegisterVariable
-        from angr_platforms.X86_16.widening_model import analyze_adjacent_storage_slices
-
-        from .cli_c_ast_rewrites import (
-            _c_constant_value,
-            _get_or_seed_inertia_alias_state,
-            _unwrap_c_casts,
-        )
-
-        current_low_expr = low_expr
-        current_high_expr = high_expr
-        if isinstance(current_high_expr, CBinaryOp) and current_high_expr.op in {"Mul", "Shl"}:
-            for maybe_inner, maybe_scale in (
-                (current_high_expr.lhs, current_high_expr.rhs),
-                (current_high_expr.rhs, current_high_expr.lhs),
-            ):
-                scale = _c_constant_value(_unwrap_c_casts(maybe_scale))
-                if scale not in {8, 0x100}:
-                    continue
-                current_high_expr = _unwrap_c_casts(maybe_inner)
-                break
-        if not isinstance(current_low_expr, CVariable) or not isinstance(current_high_expr, CVariable):
-            return None
-        # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
-        low_var = getattr(current_low_expr, "variable", None)
-        # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
-        high_var = getattr(current_high_expr, "variable", None)
-        if not isinstance(low_var, SimRegisterVariable) or not isinstance(high_var, SimRegisterVariable):
-            return None
-        # Dynamic codegen boundary: SimRegisterVariable slice size comes from angr variable metadata.
-        if getattr(low_var, "size", None) != 1 or getattr(high_var, "size", None) != 1:
-            return None
-        alias_state = _get_or_seed_inertia_alias_state(codegen)
-        if alias_state is None:
-            return None
-        analysis = analyze_adjacent_storage_slices(current_low_expr, current_high_expr, alias_state=alias_state)
-        if not analysis.ok:
-            return None
-        # Dynamic codegen boundary: widening proof shape comes from X86_16 analysis helpers.
-        proof = getattr(analysis, "proof", None)
-        if proof is None:
-            return None
-        # Dynamic codegen boundary: widening proof fields are analysis-owned evidence.
-        if getattr(proof, "register_pair", None) is None:
-            return None
-        # Dynamic codegen boundary: widening proof fields are analysis-owned evidence.
-        if getattr(proof, "left_version", None) is None or getattr(proof, "right_version", None) is None:
-            return None
-        # Dynamic codegen boundary: widening proof fields are analysis-owned evidence.
-        if getattr(proof, "left_version", None) != getattr(proof, "right_version", None):
-            return None
-        can_join_attr = _load_widening_attr("can_join_adjacent_register_slices")
-        if not can_join_attr(current_low_expr, current_high_expr, alias_state=alias_state, proof=proof):
-            return None
-        join_attr = _load_widening_attr("join_adjacent_register_slices")
-        return join_attr(
-            current_low_expr, current_high_expr, codegen, alias_state=alias_state, proof=proof
-        )
-
-
-    return _impl()
+    return _match_adjacent_register_pair_impl(low_expr, high_expr, codegen)
 
 
 def _compat_module_getattr(name_or_self: object, name: object | None = None) -> object:

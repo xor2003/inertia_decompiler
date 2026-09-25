@@ -108,41 +108,42 @@ class AccessTraitEvidenceProfile:
 
     def best_rewrite_kind(self, base_key: tuple[object, ...] | None = None) -> str | None:
         """Return the safest rewrite category implied by this profile."""
-
-        def _impl() -> str | None:
-            if base_key is not None and base_key and base_key[0] == "stack" and self.stack_like:
-                return "stack"
-            structured_counts: dict[str, int] = {}
-            for evidence in self.induction_evidence + self.stride_evidence:
-                structured_counts[evidence.kind] = structured_counts.get(evidence.kind, 0) + max(int(evidence.count), 1)
-            if structured_counts:
-                dominant_kind = max(
-                    structured_counts.items(),
-                    key=lambda item: (
-                        item[1],
-                        {"induction_like": 3, "array_like": 2, "member_like": 1}.get(item[0], 0),
-                        item[0],
-                    ),
-                )[0]
-                if dominant_kind == "induction_like":
-                    return "induction"
-                if dominant_kind == "array_like":
-                    return "array"
-                if dominant_kind == "member_like":
-                    return "member"
-            if self.member_like and self.array_like:
-                return None
-            if self.array_like:
-                return "array"
-            if self.member_like:
-                return "member"
-            if self.induction_like:
-                return "induction"
-            if self.stack_like:
-                return "stack"
+        if base_key is not None and base_key and base_key[0] == "stack" and self.stack_like:
+            return "stack"
+        dominant_kind = self._dominant_structured_kind()
+        if dominant_kind == "induction_like":
+            return "induction"
+        if dominant_kind == "array_like":
+            return "array"
+        if dominant_kind == "member_like":
+            return "member"
+        if self.member_like and self.array_like:
             return None
+        if self.array_like:
+            return "array"
+        if self.member_like:
+            return "member"
+        if self.induction_like:
+            return "induction"
+        if self.stack_like:
+            return "stack"
+        return None
 
-        return _impl()
+    def _dominant_structured_kind(self) -> str | None:
+        """Return the dominant structured-evidence kind, or None."""
+        structured_counts: dict[str, int] = {}
+        for evidence in self.induction_evidence + self.stride_evidence:
+            structured_counts[evidence.kind] = structured_counts.get(evidence.kind, 0) + max(int(evidence.count), 1)
+        if not structured_counts:
+            return None
+        return max(
+            structured_counts.items(),
+            key=lambda item: (
+                item[1],
+                {"induction_like": 3, "array_like": 2, "member_like": 1}.get(item[0], 0),
+                item[0],
+            ),
+        )[0]
 
 
 def infer_induction_variable(profile: AccessTraitEvidenceProfile) -> AccessTraitInductionVar | None:
@@ -244,91 +245,116 @@ def access_trait_profile_for_key(
     return None
 
 
+def _raw_profile_entry_8616(
+    raw_profiles: dict[tuple[object, ...], dict[str, list[object]]],
+    group_key: tuple[object, ...],
+) -> dict[str, list[object]]:
+    """Return the mutable raw-profile bucket set for one base key."""
+    return raw_profiles.setdefault(
+        group_key,
+        {
+            "member_like": [],
+            "array_like": [],
+            "induction_like": [],
+            "stack_like": [],
+            "induction_evidence": [],
+            "stride_evidence": [],
+        },
+    )
+
+
+def _decoded_bucket_candidate_8616(
+    key: object,
+    count: object,
+    base_index: int,
+    offset_index: int,
+    size_index: int | None,
+) -> tuple[tuple[object, ...], int, int] | None:
+    """Decode one raw bucket key into (base_key, offset, size), or None."""
+    if not isinstance(key, tuple) or len(key) <= max(base_index, offset_index):
+        return None
+    base_key = key[base_index]
+    if not isinstance(base_key, tuple):
+        return None
+    offset = key[offset_index]
+    if not isinstance(offset, int):
+        return None
+    size = 1
+    if size_index is not None and len(key) > size_index:
+        raw_size = key[size_index]
+        if isinstance(raw_size, int):
+            size = raw_size
+    if size not in {1, 2}:
+        return None
+    if not isinstance(count, int):
+        return None
+    return base_key, offset, size
+
+
+def _add_access_trait_bucket_8616(
+    raw_profiles: dict[tuple[object, ...], dict[str, list[object]]],
+    traits: dict[str, dict[tuple[object, ...], object]],
+    bucket_name: str,
+    category: str,
+    base_index: int,
+    offset_index: int,
+    size_index: int | None = None,
+) -> None:
+    """Fold one keyed trait bucket into the per-base raw profile lists."""
+    bucket = traits.get(bucket_name, {})
+    if not isinstance(bucket, dict):
+        return
+    for key, count in bucket.items():
+        decoded = _decoded_bucket_candidate_8616(key, count, base_index, offset_index, size_index)
+        if decoded is None:
+            continue
+        base_key, offset, size = decoded
+        profile = _raw_profile_entry_8616(raw_profiles, base_key)
+        cast(list[NamingCandidate], profile[category]).append((offset, size, count))
+        if category in {"member_like", "stack_like"} and base_key[0] == "stack":
+            cast(list[NamingCandidate], profile["stack_like"]).append((offset, size, count))
+
+
+def _add_access_trait_structured_bucket_8616(
+    raw_profiles: dict[tuple[object, ...], dict[str, list[object]]],
+    traits: dict[str, dict[tuple[object, ...], object]],
+    bucket_name: str,
+    profile_bucket: str,
+    category: str | None = None,
+) -> None:
+    """Fold one structured-evidence trait bucket into the raw profile lists."""
+    bucket = traits.get(bucket_name, {})
+    if not isinstance(bucket, dict):
+        return
+    for evidence in bucket.values():
+        if not isinstance(evidence, AccessTraitStrideEvidence):
+            continue
+        group_key = evidence.index_key
+        if not isinstance(group_key, tuple):
+            continue
+        profile = _raw_profile_entry_8616(raw_profiles, group_key)
+        bucket_category = category or evidence.kind
+        cast(list[NamingCandidate], profile[bucket_category]).append(
+            (evidence.offset, evidence.width, evidence.count)
+        )
+        cast(list[AccessTraitStrideEvidence], profile[profile_bucket]).append(evidence)
+
+
 def build_access_trait_evidence_profiles(
     traits: dict[str, dict[tuple[object, ...], object]],
 ) -> dict[tuple[object, ...], AccessTraitEvidenceProfile]:
     """Group raw access trait buckets into typed evidence profiles."""
     raw_profiles: dict[tuple[object, ...], dict[str, list[object]]] = {}
 
-    def add_bucket(
-        bucket_name: str,
-        category: str,
-        base_index: int,
-        offset_index: int,
-        size_index: int | None = None,
-    ) -> None:
-        bucket = traits.get(bucket_name, {})
-        if not isinstance(bucket, dict):
-            return
-        for key, count in bucket.items():
-            if not isinstance(key, tuple) or len(key) <= max(base_index, offset_index):
-                continue
-            base_key = key[base_index]
-            if not isinstance(base_key, tuple):
-                continue
-            offset = key[offset_index]
-            if not isinstance(offset, int):
-                continue
-            size = 1
-            if size_index is not None and len(key) > size_index:
-                raw_size = key[size_index]
-                if isinstance(raw_size, int):
-                    size = raw_size
-            if size not in {1, 2}:
-                continue
-            if not isinstance(count, int):
-                continue
-            profile = raw_profiles.setdefault(
-                base_key,
-                {
-                    "member_like": [],
-                    "array_like": [],
-                    "induction_like": [],
-                    "stack_like": [],
-                    "induction_evidence": [],
-                    "stride_evidence": [],
-                },
-            )
-            cast(list[NamingCandidate], profile[category]).append((offset, size, count))
-            if category in {"member_like", "stack_like"} and base_key[0] == "stack":
-                cast(list[NamingCandidate], profile["stack_like"]).append((offset, size, count))
-
-    def add_structured_bucket(bucket_name: str, profile_bucket: str, category: str | None = None) -> None:
-        bucket = traits.get(bucket_name, {})
-        if not isinstance(bucket, dict):
-            return
-        for evidence in bucket.values():
-            if not isinstance(evidence, AccessTraitStrideEvidence):
-                continue
-            group_key = evidence.index_key
-            if not isinstance(group_key, tuple):
-                continue
-            profile = raw_profiles.setdefault(
-                group_key,
-                {
-                    "member_like": [],
-                    "array_like": [],
-                    "induction_like": [],
-                    "stack_like": [],
-                    "induction_evidence": [],
-                    "stride_evidence": [],
-                },
-            )
-            bucket_category = category or evidence.kind
-            cast(list[NamingCandidate], profile[bucket_category]).append(
-                (evidence.offset, evidence.width, evidence.count)
-            )
-            cast(list[AccessTraitStrideEvidence], profile[profile_bucket]).append(evidence)
-
-    add_bucket("member_evidence", "member_like", 0, 1, 2)
-    add_bucket("repeated_offset_widths", "member_like", 1, 2, 3)
-    add_bucket("repeated_offsets", "member_like", 1, 2, None)
-    add_bucket("base_const", "member_like", 1, 2, 3)
-    add_bucket("array_evidence", "array_like", 0, 3, 4)
-    add_bucket("base_stride_widths", "array_like", 1, 3, 4)
-    add_bucket("base_stride", "array_like", 1, 3, 4)
-    add_structured_bucket("induction_evidence", "induction_evidence", "induction_like")
-    add_structured_bucket("stride_evidence", "stride_evidence")
+    _add_access_trait_bucket_8616(raw_profiles, traits, "member_evidence", "member_like", 0, 1, 2)
+    _add_access_trait_bucket_8616(raw_profiles, traits, "repeated_offset_widths", "member_like", 1, 2, 3)
+    _add_access_trait_bucket_8616(raw_profiles, traits, "repeated_offsets", "member_like", 1, 2, None)
+    _add_access_trait_bucket_8616(raw_profiles, traits, "base_const", "member_like", 1, 2, 3)
+    _add_access_trait_bucket_8616(raw_profiles, traits, "array_evidence", "array_like", 0, 3, 4)
+    _add_access_trait_bucket_8616(raw_profiles, traits, "base_stride_widths", "array_like", 1, 3, 4)
+    _add_access_trait_bucket_8616(raw_profiles, traits, "base_stride", "array_like", 1, 3, 4)
+    _add_access_trait_structured_bucket_8616(raw_profiles, traits, "induction_evidence", "induction_evidence", "induction_like")
+    _add_access_trait_structured_bucket_8616(raw_profiles, traits, "stride_evidence", "stride_evidence")
 
     return {
         base_key: AccessTraitEvidenceProfile(

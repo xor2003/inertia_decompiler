@@ -49,16 +49,13 @@ class WorkerResourceContract:
         paths = payload.get("paths")
         shard_count = payload.get("shard_count")
         shard_index = payload.get("shard_index")
-        if (
-            not isinstance(paths, list)
-            or not paths
-            or not all(isinstance(path, str) for path in paths)
-            or not isinstance(shard_count, int)
-            or not isinstance(shard_index, int)
-            or shard_count < 1
-            or shard_index < 0
-            or shard_index >= shard_count
-        ):
+        if not isinstance(paths, list) or not paths:
+            return None
+        if not all(isinstance(path, str) for path in paths):
+            return None
+        if not isinstance(shard_count, int) or not isinstance(shard_index, int):
+            return None
+        if shard_count < 1 or shard_index < 0 or shard_index >= shard_count:
             return None
         return cls(tuple(paths), shard_count, shard_index)
 
@@ -122,31 +119,48 @@ class WorkerResourceHistory:
             return cls()
         accepted_payload = payload.get("accepted_worker_resources")
         if isinstance(accepted_payload, list):
-            raw_source_sha256 = payload.get("accepted_worker_resource_source_sha256")
-            accepted_source_sha256 = (
-                raw_source_sha256 if isinstance(raw_source_sha256, str) and raw_source_sha256 else None
-            )
-            accepted = tuple(
-                measurement
-                for record in accepted_payload
-                if (measurement := WorkerResourceMeasurement.from_payload(record)) is not None
-            )
-            lower_bound_payload = payload.get("observed_worker_resource_lower_bounds")
-            if isinstance(lower_bound_payload, list):
-                lower_bounds = tuple(
-                    measurement
-                    for record in lower_bound_payload
-                    if (measurement := WorkerResourceMeasurement.from_payload(record)) is not None
-                )
-            else:
-                lower_bounds = _typed_observed_measurements(payload)
-            return cls(
-                accepted=tuple(sorted(accepted, key=measurement_sort_key)),
-                observed_lower_bounds=_maximum_measurements(lower_bounds),
-                accepted_source_sha256=accepted_source_sha256,
-            )
+            return cls._from_accepted_payload(payload, accepted_payload)
         if payload.get("succeeded") is not True or payload.get("memory_exceeded") is True:
             return cls()
+        return cls._from_legacy_worker_peaks(payload)
+
+    @classmethod
+    def _from_accepted_payload(
+        cls,
+        payload: dict[object, object],
+        accepted_payload: list[object],
+    ) -> WorkerResourceHistory:
+        """Decode the typed accepted/lower-bound measurement lists."""
+        raw_source_sha256 = payload.get("accepted_worker_resource_source_sha256")
+        accepted_source_sha256 = (
+            raw_source_sha256 if isinstance(raw_source_sha256, str) and raw_source_sha256 else None
+        )
+        accepted = tuple(
+            measurement
+            for record in accepted_payload
+            if (measurement := WorkerResourceMeasurement.from_payload(record)) is not None
+        )
+        lower_bound_payload = payload.get("observed_worker_resource_lower_bounds")
+        if isinstance(lower_bound_payload, list):
+            lower_bounds = tuple(
+                measurement
+                for record in lower_bound_payload
+                if (measurement := WorkerResourceMeasurement.from_payload(record)) is not None
+            )
+        else:
+            lower_bounds = _typed_observed_measurements(payload)
+        return cls(
+            accepted=tuple(sorted(accepted, key=measurement_sort_key)),
+            observed_lower_bounds=_maximum_measurements(lower_bounds),
+            accepted_source_sha256=accepted_source_sha256,
+        )
+
+    @classmethod
+    def _from_legacy_worker_peaks(
+        cls,
+        payload: dict[object, object],
+    ) -> WorkerResourceHistory:
+        """Migrate a legacy worker-paths/peak-RSS payload into measurements."""
         worker_paths = payload.get("worker_paths")
         worker_peaks = payload.get("worker_peak_rss_kib")
         if not isinstance(worker_paths, dict) or not isinstance(worker_peaks, dict):
@@ -154,16 +168,20 @@ class WorkerResourceHistory:
         peaks_by_paths: dict[tuple[str, ...], list[int]] = {}
         for name, raw_paths in worker_paths.items():
             peak_rss_kib = worker_peaks.get(name)
-            if (
+            if not (
                 isinstance(name, str)
                 and isinstance(raw_paths, list)
                 and raw_paths
-                and all(isinstance(item, str) for item in raw_paths)
+            ):
+                continue
+            if not (
+                all(isinstance(item, str) for item in raw_paths)
                 and isinstance(peak_rss_kib, int)
                 and peak_rss_kib > 0
             ):
-                paths = tuple(raw_paths)
-                peaks_by_paths.setdefault(paths, []).append(peak_rss_kib)
+                continue
+            paths = tuple(raw_paths)
+            peaks_by_paths.setdefault(paths, []).append(peak_rss_kib)
         migrated: list[WorkerResourceMeasurement] = []
         for paths, peaks in peaks_by_paths.items():
             shard_count = len(peaks)

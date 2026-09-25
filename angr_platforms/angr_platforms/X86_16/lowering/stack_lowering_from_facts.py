@@ -392,6 +392,198 @@ def _register_stack_cvar_surface_8616(codegen: object, cvar: object, target_type
         unified_locals[variable] = {(cvar, _dynamic_boundary_attr_8616(cvar, "variable_type") or target_type)}
 
 
+def _record_stack_cvar_8616(
+    codegen: object,
+    cvar: object,
+    *,
+    binding_name: object,
+    offset: int,
+    bp_offset: int,
+    size: int,
+    publish_machine_bp: bool,
+) -> object:
+    """Record projection name and machine-BP coordinates for one CVariable."""
+    if isinstance(binding_name, str) and binding_name:
+        apply_stack_variable_projection_name_8616(
+            codegen,
+            cvar=cvar,
+            entry_sp_offset=offset,
+            size=size,
+            name=binding_name,
+        )
+    variable = _dynamic_boundary_attr_8616(cvar, "variable")
+    if isinstance(variable, SimStackVariable) and publish_machine_bp:
+        record_stack_variable_coordinate_projection_8616(
+            codegen,
+            variable=variable,
+            cvar=cvar,
+            bp_offset=bp_offset,
+            entry_sp_offset=offset,
+            size=size,
+            display_name=binding_name if isinstance(binding_name, str) else None,
+        )
+    return cvar
+
+
+def _materialize_existing_views_8616(
+    codegen: object,
+    variables_in_use: object,
+    *,
+    offset: int,
+    bp_offset: int,
+    size: int,
+    target_type: object,
+    binding_name: object,
+    publish_machine_bp: bool,
+) -> object | None:
+    """Promote and record matching regenerated views at this storage start."""
+    if not isinstance(variables_in_use, dict):
+        return None
+    matches = [
+        (var, cvar)
+        for var, cvar in variables_in_use.items()
+        if isinstance(var, SimStackVariable)
+        and _canonical_stack_offset_8616(var.offset) == offset
+        and (not isinstance(var.size, int) or var.size <= size)
+    ]
+    if not matches:
+        return None
+    canonical_var, canonical_cvar = min(
+        matches,
+        key=lambda item: (
+            item[0].size != size,
+            not isinstance(item[0].size, int) or item[0].size < size,
+            str(item[0].name or ""),
+        ),
+    )
+    for _variable, candidate_cvar in matches:
+        _promote_direct_stack_cvariable(codegen, candidate_cvar, size, target_type)
+        _apply_stack_binding_name_8616(candidate_cvar, binding_name)
+        _register_stack_cvar_surface_8616(codegen, candidate_cvar, target_type)
+    if not isinstance(canonical_var, SimStackVariable):
+        return None
+    recorded = _record_stack_cvar_8616(
+        codegen, canonical_cvar,
+        binding_name=binding_name, offset=offset, bp_offset=bp_offset,
+        size=size, publish_machine_bp=publish_machine_bp,
+    )
+    for variable, _candidate_cvar in matches:
+        if variable is canonical_var or not publish_machine_bp:
+            continue
+        record_stack_variable_coordinate_alias_8616(
+            codegen,
+            bp_offset=bp_offset,
+            size=size,
+            variable=variable,
+        )
+    return recorded
+
+
+def _materialize_new_stack_cvar_8616(
+    codegen: object,
+    cfunc: object,
+    variables_in_use: object,
+    *,
+    offset: int,
+    size: int,
+    target_type: object,
+    binding_name: object,
+) -> tuple[object, object]:
+    """Create and register a fresh SimStackVariable + CVariable pair."""
+    variable = SimStackVariable(
+        offset,
+        size,
+        base="bp",
+        name=binding_name or _stack_object_name(offset),
+        region=_dynamic_boundary_attr_8616(cfunc, "addr"),
+    )
+    cvar = structured_c.CVariable(variable, variable_type=target_type, codegen=codegen)
+    _apply_stack_binding_name_8616(cvar, binding_name)
+
+    if isinstance(variables_in_use, dict):
+        variables_in_use[variable] = cvar
+
+    unified_locals = _dynamic_boundary_attr_8616(cfunc, "unified_local_vars")
+    if isinstance(unified_locals, dict):
+        unified_locals[variable] = {(cvar, target_type)}
+
+    stack_local_candidates = _dynamic_boundary_attr_8616(codegen, "_inertia_stack_local_declaration_candidates")
+    if isinstance(stack_local_candidates, dict):
+        stack_local_candidates[id(variable)] = (variable, cvar)
+
+    sort_local_vars = _dynamic_boundary_attr_8616(cfunc, "sort_local_vars")
+    if callable(sort_local_vars):
+        with contextlib.suppress(Exception):
+            sort_local_vars()
+    return variable, cvar
+
+
+def _materialize_stack_cvar_8616(
+    codegen: object,
+    offset: object,
+    size: int,
+    *,
+    machine_bp_offset: int | None,
+    preferred_name: str | None,
+    publish_machine_bp: bool,
+) -> object | None:
+    """Materialize one stack CVariable at an entry-SP offset."""
+    cfunc = _dynamic_boundary_attr_8616(codegen, "cfunc")
+    if cfunc is None:
+        return None
+    offset = _canonical_stack_offset_8616(offset)
+    if not isinstance(offset, int):
+        return None
+    bp_offset = _canonical_stack_offset_8616(machine_bp_offset)
+    if machine_bp_offset is None:
+        bp_offset = offset
+    if not isinstance(bp_offset, int):
+        return None
+    binding_name = preferred_name
+    if bp_offset < 0 and generated_stack_variable_name_8616(binding_name):
+        binding_name = _stack_object_name(bp_offset, codegen=codegen)
+
+    target_type = _stack_type_for_size(size, codegen=codegen)
+    if offset >= 2:
+        arg_cvar = _arg_cvar_at_stack_offset_8616(codegen, offset)
+        if isinstance(arg_cvar, structured_c.CVariable):
+            _promote_direct_stack_cvariable(
+                codegen,
+                arg_cvar,
+                size,
+                target_type,
+                preserve_existing_type=True,
+            )
+            _apply_stack_binding_name_8616(arg_cvar, binding_name)
+            _register_stack_cvar_surface_8616(codegen, arg_cvar, target_type)
+            return _record_stack_cvar_8616(
+                codegen, arg_cvar,
+                binding_name=binding_name, offset=offset, bp_offset=bp_offset,
+                size=size, publish_machine_bp=publish_machine_bp,
+            )
+
+    # Reconcile every regenerated view at this exact storage start. angr may
+    # rebuild byte variables after an earlier Alias-proven word projection.
+    variables_in_use = _dynamic_boundary_attr_8616(cfunc, "variables_in_use")
+    existing = _materialize_existing_views_8616(
+        codegen, variables_in_use,
+        offset=offset, bp_offset=bp_offset, size=size, target_type=target_type,
+        binding_name=binding_name, publish_machine_bp=publish_machine_bp,
+    )
+    if existing is not None:
+        return existing
+
+    _variable, cvar = _materialize_new_stack_cvar_8616(
+        codegen, cfunc, variables_in_use,
+        offset=offset, size=size, target_type=target_type, binding_name=binding_name,
+    )
+    return _record_stack_cvar_8616(
+        codegen, cvar,
+        binding_name=binding_name, offset=offset, bp_offset=bp_offset,
+        size=size, publish_machine_bp=publish_machine_bp,
+    )
+
+
 def materialize_stack_cvar_at_offset_from_facts_8616(
     codegen: object,
     offset: int,
@@ -409,126 +601,149 @@ def materialize_stack_cvar_at_offset_from_facts_8616(
     without BP-frame proof must disable publication of that machine relation.
     """
 
-    def _impl() -> object | None:
-        nonlocal offset
-        cfunc = _dynamic_boundary_attr_8616(codegen, "cfunc")
-        if cfunc is None:
-            return None
-        offset = _canonical_stack_offset_8616(offset)
-        if not isinstance(offset, int):
-            return None
-        bp_offset = _canonical_stack_offset_8616(machine_bp_offset)
-        if machine_bp_offset is None:
-            bp_offset = offset
-        if not isinstance(bp_offset, int):
-            return None
-        binding_name = preferred_name
-        if bp_offset < 0 and generated_stack_variable_name_8616(binding_name):
-            binding_name = _stack_object_name(bp_offset, codegen=codegen)
+    return _materialize_stack_cvar_8616(
+        codegen,
+        offset,
+        size,
+        machine_bp_offset=machine_bp_offset,
+        preferred_name=preferred_name,
+        publish_machine_bp=publish_machine_bp,
+    )
 
-        def _record(cvar: object) -> object:
-            if isinstance(binding_name, str) and binding_name:
-                apply_stack_variable_projection_name_8616(
-                    codegen,
-                    cvar=cvar,
-                    entry_sp_offset=offset,
-                    size=size,
-                    name=binding_name,
-                )
-            variable = _dynamic_boundary_attr_8616(cvar, "variable")
-            if isinstance(variable, SimStackVariable) and publish_machine_bp:
-                record_stack_variable_coordinate_projection_8616(
-                    codegen,
-                    variable=variable,
-                    cvar=cvar,
-                    bp_offset=bp_offset,
-                    entry_sp_offset=offset,
-                    size=size,
-                    display_name=binding_name,
-                )
-            return cvar
 
-        target_type = _stack_type_for_size(size, codegen=codegen)
-        if offset >= 2:
-            arg_cvar = _arg_cvar_at_stack_offset_8616(codegen, offset)
-            if isinstance(arg_cvar, structured_c.CVariable):
-                _promote_direct_stack_cvariable(
-                    codegen,
-                    arg_cvar,
-                    size,
-                    target_type,
-                    preserve_existing_type=True,
-                )
-                _apply_stack_binding_name_8616(arg_cvar, binding_name)
-                _register_stack_cvar_surface_8616(codegen, arg_cvar, target_type)
-                return _record(cast(object, arg_cvar))
+def _stable_stack_fact_count_8616(alias_facts: list[object]) -> int:
+    """Count alias facts carrying a stable stack identity."""
+    return len(
+        [
+            fact
+            for fact in alias_facts
+            if isinstance(fact, AliasStorageFacts)
+            and isinstance(fact.identity, tuple)
+            and len(fact.identity) >= 2
+            and fact.identity[0] == "stack"
+        ]
+    )
 
-        # Reconcile every regenerated view at this exact storage start. angr may
-        # rebuild byte variables after an earlier Alias-proven word projection.
-        variables_in_use = _dynamic_boundary_attr_8616(cfunc, "variables_in_use")
-        if isinstance(variables_in_use, dict):
-            matches = [
-                (var, cvar)
-                for var, cvar in variables_in_use.items()
-                if isinstance(var, SimStackVariable)
-                and _canonical_stack_offset_8616(var.offset) == offset
-                and (not isinstance(var.size, int) or var.size <= size)
-            ]
-            if matches:
-                canonical_var, canonical_cvar = min(
-                    matches,
-                    key=lambda item: (
-                        item[0].size != size,
-                        not isinstance(item[0].size, int) or item[0].size < size,
-                        str(item[0].name or ""),
-                    ),
-                )
-                for _variable, candidate_cvar in matches:
-                    _promote_direct_stack_cvariable(codegen, candidate_cvar, size, target_type)
-                    _apply_stack_binding_name_8616(candidate_cvar, binding_name)
-                    _register_stack_cvar_surface_8616(codegen, candidate_cvar, target_type)
-                if isinstance(canonical_var, SimStackVariable):
-                    recorded = _record(cast(object, canonical_cvar))
-                    for variable, _candidate_cvar in matches:
-                        if variable is canonical_var or not publish_machine_bp:
-                            continue
-                        record_stack_variable_coordinate_alias_8616(
-                            codegen,
-                            bp_offset=bp_offset,
-                            size=size,
-                            variable=variable,
-                        )
-                    return recorded
 
-        variable = SimStackVariable(
-            offset,
-            size,
-            base="bp",
-            name=binding_name or _stack_object_name(offset),
-            region=_dynamic_boundary_attr_8616(cfunc, "addr"),
+def _stable_bp_fact_count_8616(alias_facts: list[object]) -> int:
+    """Count alias facts carrying a stable BP stack-slot identity."""
+    return len(
+        [
+            fact
+            for fact in alias_facts
+            if isinstance(fact, AliasStorageFacts)
+            and (slot := _stack_slot_identity_from_fact_8616(fact)) is not None
+            and slot.base == "bp"
+        ]
+    )
+
+
+def _stack_lowering_debug_stats_8616(
+    stable_stack_fact_count: int,
+    stable_bp_fact_count: int,
+    bindings: object,
+    typed_frame_slots: object,
+    unbound_typed_frame_slots: object,
+) -> dict[str, int]:
+    """Build the stack-lowering debug counter block."""
+    return {
+        "stable_stack_fact_count": stable_stack_fact_count,
+        "stable_bp_fact_count": stable_bp_fact_count,
+        "stack_binding_count": len(bindings),
+        "stack_slot_candidates": len(bindings),
+        "stack_slot_bindings": len(bindings),
+        "stack_slot_materialized": 0,
+        "stack_slot_failed": 0,
+        "typed_frame_raw_fact_count": len(typed_frame_slots),
+        "typed_frame_normalized_fact_count": len(typed_frame_slots),
+        "typed_frame_classified_fact_count": len(typed_frame_slots),
+        "typed_frame_bound_count": len(typed_frame_slots) - len(unbound_typed_frame_slots),
+        "typed_frame_failure_count": len(unbound_typed_frame_slots),
+    }
+
+
+def _materialization_offset_for_binding_8616(
+    codegen: object,
+    binding: object,
+    offset: int,
+    size: int,
+    entry_sp_offsets_by_bp_range: Mapping[tuple[int, int], int] | None,
+) -> int:
+    """Resolve the entry-SP materialization offset for one binding."""
+    if not isinstance(offset, int):
+        raise TypeError(f"invalid stack binding offset {binding.bp_offset!r}")
+    materialization_offset: int | None
+    if entry_sp_offsets_by_bp_range is None:
+        existing_projection = stack_variable_coordinate_registry_8616(
+            codegen
+        ).for_bp_range(offset, size)
+        materialization_offset = (
+            existing_projection.entry_sp_offset
+            if existing_projection is not None
+            else offset
         )
-        cvar = structured_c.CVariable(variable, variable_type=target_type, codegen=codegen)
-        _apply_stack_binding_name_8616(cvar, binding_name)
+    else:
+        materialization_offset = entry_sp_offsets_by_bp_range.get(
+            (offset, size)
+        )
+    if not isinstance(materialization_offset, int):
+        raise TypeError(
+            f"missing entry-SP projection for BP range {(offset, size)!r}"
+        )
+    return materialization_offset
 
-        if isinstance(variables_in_use, dict):
-            variables_in_use[variable] = cvar
 
-        unified_locals = _dynamic_boundary_attr_8616(cfunc, "unified_local_vars")
-        if isinstance(unified_locals, dict):
-            unified_locals[variable] = {(cvar, target_type)}
+def _materialize_stack_bindings_8616(
+    codegen: object,
+    bindings: object,
+    entry_sp_offsets_by_bp_range: Mapping[tuple[int, int], int] | None,
+) -> tuple[int, list[StackSlotFailure], list[tuple[int, str]]]:
+    """Materialize each alias-proven binding; failures are typed, not fatal."""
+    materialized_count = 0
+    failures_list: list[StackSlotFailure] = []
+    materialized: list[tuple[int, str]] = []
 
-        stack_local_candidates = _dynamic_boundary_attr_8616(codegen, "_inertia_stack_local_declaration_candidates")
-        if isinstance(stack_local_candidates, dict):
-            stack_local_candidates[id(variable)] = (variable, cvar)
-
-        sort_local_vars = _dynamic_boundary_attr_8616(cfunc, "sort_local_vars")
-        if callable(sort_local_vars):
-            with contextlib.suppress(Exception):
-                sort_local_vars()
-
-        return _record(cast(object, cvar))
-
-    return _impl()
+    for binding in bindings:
+        offset = _canonical_stack_offset_8616(binding.bp_offset)
+        size = binding.size if binding.size > 0 else 2
+        try:
+            materialization_offset = _materialization_offset_for_binding_8616(
+                codegen, binding, offset, size, entry_sp_offsets_by_bp_range,
+            )
+            cvar = materialize_stack_cvar_at_offset_from_facts_8616(
+                codegen,
+                materialization_offset,
+                size,
+                machine_bp_offset=offset,
+                preferred_name=binding.var_name,
+            )
+            materialized_name = _dynamic_boundary_attr_8616(
+                _dynamic_boundary_attr_8616(cvar, "variable"), "name"
+            ) or _dynamic_boundary_attr_8616(
+                cvar, "name"
+            )
+            materialized_count += 1
+            materialized.append(
+                (int(offset), str(materialized_name or _stack_object_name(int(offset), codegen=codegen)))
+            )
+        except Exception as exc:
+            fallback_offset = _canonical_stack_offset_8616(binding.bp_offset)
+            if not isinstance(fallback_offset, int):
+                fallback_offset = 0
+            failures_list.append(
+                StackSlotFailure(
+                    offset=fallback_offset,
+                    size=size,
+                    reason=str(exc),
+                )
+            )
+            log.debug(
+                "stage=stack_lowering_from_facts function=%#x offset=%r failed: %s",
+                _dynamic_boundary_attr_8616(_dynamic_boundary_attr_8616(codegen, "cfunc"), "addr", -1) or -1,
+                fallback_offset,
+                exc,
+            )
+    return materialized_count, failures_list, materialized
 
 
 def lower_stack_accesses_from_alias_facts_8616(
@@ -556,39 +771,15 @@ def lower_stack_accesses_from_alias_facts_8616(
         bindings = build_stack_variable_bindings_from_alias_facts_8616(alias_facts)
         typed_frame_slots = _typed_bp_frame_slots_8616(codegen, required_bp_ranges)
         unbound_typed_frame_slots = _unbound_typed_frame_slots_8616(bindings, typed_frame_slots)
-        stable_stack_fact_count = len(
-            [
-                fact
-                for fact in alias_facts
-                if isinstance(fact, AliasStorageFacts)
-                and isinstance(fact.identity, tuple)
-                and len(fact.identity) >= 2
-                and fact.identity[0] == "stack"
-            ]
+        stable_stack_fact_count = _stable_stack_fact_count_8616(alias_facts)
+        stable_bp_fact_count = _stable_bp_fact_count_8616(alias_facts)
+        debug_stats = _stack_lowering_debug_stats_8616(
+            stable_stack_fact_count,
+            stable_bp_fact_count,
+            bindings,
+            typed_frame_slots,
+            unbound_typed_frame_slots,
         )
-        stable_bp_fact_count = len(
-            [
-                fact
-                for fact in alias_facts
-                if isinstance(fact, AliasStorageFacts)
-                and (slot := _stack_slot_identity_from_fact_8616(fact)) is not None
-                and slot.base == "bp"
-            ]
-        )
-        debug_stats = {
-            "stable_stack_fact_count": stable_stack_fact_count,
-            "stable_bp_fact_count": stable_bp_fact_count,
-            "stack_binding_count": len(bindings),
-            "stack_slot_candidates": len(bindings),
-            "stack_slot_bindings": len(bindings),
-            "stack_slot_materialized": 0,
-            "stack_slot_failed": 0,
-            "typed_frame_raw_fact_count": len(typed_frame_slots),
-            "typed_frame_normalized_fact_count": len(typed_frame_slots),
-            "typed_frame_classified_fact_count": len(typed_frame_slots),
-            "typed_frame_bound_count": len(typed_frame_slots) - len(unbound_typed_frame_slots),
-            "typed_frame_failure_count": len(unbound_typed_frame_slots),
-        }
         typing.cast(typing.Any, codegen)._inertia_stack_lowering_debug = debug_stats
         typing.cast(typing.Any, codegen)._inertia_stack_variable_bindings = tuple(bindings)
         if unbound_typed_frame_slots:
@@ -623,68 +814,9 @@ def lower_stack_accesses_from_alias_facts_8616(
         typing.cast(typing.Any, codegen)._inertia_stack_lowering_source = "alias_facts"
         typing.cast(typing.Any, codegen)._inertia_semantic_stack_binding_count = len(bindings)
 
-        materialized_count = 0
-        failures_list: list[StackSlotFailure] = []
-        materialized: list[tuple[int, str]] = []
-
-        for binding in bindings:
-            offset = _canonical_stack_offset_8616(binding.bp_offset)
-            size = binding.size if binding.size > 0 else 2
-            try:
-                if not isinstance(offset, int):
-                    raise TypeError(f"invalid stack binding offset {binding.bp_offset!r}")
-                materialization_offset: int | None
-                if entry_sp_offsets_by_bp_range is None:
-                    existing_projection = stack_variable_coordinate_registry_8616(
-                        codegen
-                    ).for_bp_range(offset, size)
-                    materialization_offset = (
-                        existing_projection.entry_sp_offset
-                        if existing_projection is not None
-                        else offset
-                    )
-                else:
-                    materialization_offset = entry_sp_offsets_by_bp_range.get(
-                        (offset, size)
-                    )
-                if not isinstance(materialization_offset, int):
-                    raise TypeError(
-                        f"missing entry-SP projection for BP range {(offset, size)!r}"
-                    )
-
-                cvar = materialize_stack_cvar_at_offset_from_facts_8616(
-                    codegen,
-                    materialization_offset,
-                    size,
-                    machine_bp_offset=offset,
-                    preferred_name=binding.var_name,
-                )
-                materialized_name = _dynamic_boundary_attr_8616(
-                    _dynamic_boundary_attr_8616(cvar, "variable"), "name"
-                ) or _dynamic_boundary_attr_8616(
-                    cvar, "name"
-                )
-                materialized_count += 1
-                materialized.append(
-                    (int(offset), str(materialized_name or _stack_object_name(int(offset), codegen=codegen)))
-                )
-            except Exception as exc:
-                fallback_offset = _canonical_stack_offset_8616(binding.bp_offset)
-                if not isinstance(fallback_offset, int):
-                    fallback_offset = 0
-                failures_list.append(
-                    StackSlotFailure(
-                        offset=fallback_offset,
-                        size=size,
-                        reason=str(exc),
-                    )
-                )
-                log.debug(
-                    "stage=stack_lowering_from_facts function=%#x offset=%r failed: %s",
-                    _dynamic_boundary_attr_8616(_dynamic_boundary_attr_8616(codegen, "cfunc"), "addr", -1) or -1,
-                    fallback_offset,
-                    exc,
-                )
+        materialized_count, failures_list, materialized = _materialize_stack_bindings_8616(
+            codegen, bindings, entry_sp_offsets_by_bp_range,
+        )
 
         typing.cast(typing.Any, codegen)._inertia_semantic_stack_materialized_count = materialized_count
         debug_stats["stack_slot_materialized"] = materialized_count

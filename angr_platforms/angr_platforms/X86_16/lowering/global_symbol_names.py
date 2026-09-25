@@ -122,6 +122,20 @@ def _rename_memory_variable_8616(
     return True
 
 
+def _rename_variable_pair_8616(
+    variable: object,
+    unified: object,
+    names_by_storage: Mapping[tuple[int, int], str],
+) -> bool:
+    """Rename one variable and its unified view to the proven DS name."""
+    changed = _rename_memory_variable_8616(variable, names_by_storage)
+    if isinstance(unified, SimVariable) and _rename_memory_variable_8616(
+        unified, names_by_storage
+    ):
+        changed = True
+    return changed
+
+
 def synchronize_ds_global_symbol_names_8616(
     codegen: object,
     facts: Iterable[DSGlobalSymbolNameFact8616],
@@ -143,30 +157,87 @@ def synchronize_ds_global_symbol_names_8616(
     for node in _iter_c_nodes_deep_8616(cfunc.statements):
         if not isinstance(node, CVariable):
             continue
-        if _rename_memory_variable_8616(node.variable, names_by_storage):
-            changed = True
-        unified = node.unified_variable
-        if isinstance(unified, SimVariable) and _rename_memory_variable_8616(
-            unified, names_by_storage
-        ):
+        if _rename_variable_pair_8616(node.variable, node.unified_variable, names_by_storage):
             changed = True
 
-    variables_in_use = cfunc.variables_in_use
-    if isinstance(variables_in_use, Mapping):
-        for variable, cvariable in variables_in_use.items():
-            if _rename_memory_variable_8616(variable, names_by_storage):
-                changed = True
-            if isinstance(cvariable, CVariable):
-                if _rename_memory_variable_8616(
-                    cvariable.variable, names_by_storage
-                ):
-                    changed = True
-                unified = cvariable.unified_variable
-                if isinstance(unified, SimVariable) and _rename_memory_variable_8616(
-                    unified, names_by_storage
-                ):
-                    changed = True
+    if _rename_variables_in_use_8616(cfunc.variables_in_use, names_by_storage):
+        changed = True
     return changed
+
+
+def _rename_variables_in_use_8616(
+    variables_in_use: object,
+    names_by_storage: Mapping[tuple[int, int], str],
+) -> bool:
+    """Rename every in-use variable and C-view to the proven DS name."""
+    if not isinstance(variables_in_use, Mapping):
+        return False
+    changed = False
+    for variable, cvariable in variables_in_use.items():
+        if _rename_memory_variable_8616(variable, names_by_storage):
+            changed = True
+        if _rename_variable_view_8616(cvariable, names_by_storage):
+            changed = True
+    return changed
+
+
+def _rename_variable_view_8616(
+    cvariable: object,
+    names_by_storage: Mapping[tuple[int, int], str],
+) -> bool:
+    """Rename one C-variable view and its unified payload to the DS name."""
+    if not isinstance(cvariable, CVariable):
+        return False
+    return _rename_variable_pair_8616(
+        cvariable.variable, cvariable.unified_variable, names_by_storage
+    )
+
+
+def _drop_stale_unified_locals_8616(
+    unified_local_vars: object,
+    names_by_storage: Mapping[tuple[int, int], str],
+) -> tuple[int, int]:
+    """Drop unified-local entries whose storage key is a proven DS global."""
+    if not isinstance(unified_local_vars, Mapping):
+        return 0, 0
+    stale_local_variables = tuple(
+        variable
+        for variable in unified_local_vars
+        if _nonstack_memory_storage_key_8616(variable) in names_by_storage
+    )
+    materialized_count = 0
+    if isinstance(unified_local_vars, dict):
+        for variable in stale_local_variables:
+            del unified_local_vars[variable]
+            materialized_count += 1
+    return len(stale_local_variables), materialized_count
+
+
+def _drop_stale_variables_in_use_8616(
+    variables_in_use: object,
+    referenced_variable_ids: set[int],
+    names_by_storage: Mapping[tuple[int, int], str],
+) -> tuple[int, int]:
+    """Drop in-use carriers that only shadow a proven DS global view."""
+    if not isinstance(variables_in_use, Mapping):
+        return 0, 0
+    stale_carriers = tuple(
+        variable
+        for variable, cvariable in variables_in_use.items()
+        if id(variable) not in referenced_variable_ids
+        and _nonstack_memory_storage_key_8616(variable) is None
+        and isinstance(cvariable, CVariable)
+        and (
+            _nonstack_memory_storage_key_8616(cvariable.variable) in names_by_storage
+            or _nonstack_memory_storage_key_8616(cvariable.unified_variable) in names_by_storage
+        )
+    )
+    materialized_count = 0
+    if isinstance(variables_in_use, dict):
+        for variable in stale_carriers:
+            del variables_in_use[variable]
+            materialized_count += 1
+    return len(stale_carriers), materialized_count
 
 
 def reconcile_ds_global_local_declarations_8616(
@@ -201,8 +272,6 @@ def reconcile_ds_global_local_declarations_8616(
         for node in _iter_c_nodes_deep_8616(cfunc.statements)
         if isinstance(node, CVariable)
     }
-    classified_count = 0
-    materialized_count = 0
 
     try:
         unified_local_vars = cfunc.unified_local_vars
@@ -210,17 +279,9 @@ def reconcile_ds_global_local_declarations_8616(
         # Dynamic boundary: synthetic/older angr CFunction surfaces may not
         # cache unified local declarations.
         unified_local_vars = {}
-    if isinstance(unified_local_vars, Mapping):
-        stale_local_variables = tuple(
-            variable
-            for variable in unified_local_vars
-            if _nonstack_memory_storage_key_8616(variable) in names_by_storage
-        )
-        classified_count += len(stale_local_variables)
-        if isinstance(unified_local_vars, dict):
-            for variable in stale_local_variables:
-                del unified_local_vars[variable]
-                materialized_count += 1
+    classified_count, materialized_count = _drop_stale_unified_locals_8616(
+        unified_local_vars, names_by_storage
+    )
 
     try:
         variables_in_use = cfunc.variables_in_use
@@ -228,23 +289,11 @@ def reconcile_ds_global_local_declarations_8616(
         # Dynamic boundary: a declaration-only fixture may omit variable-use
         # indexing entirely.
         variables_in_use = {}
-    if isinstance(variables_in_use, Mapping):
-        stale_carriers = tuple(
-            variable
-            for variable, cvariable in variables_in_use.items()
-            if id(variable) not in referenced_variable_ids
-            and _nonstack_memory_storage_key_8616(variable) is None
-            and isinstance(cvariable, CVariable)
-            and (
-                _nonstack_memory_storage_key_8616(cvariable.variable) in names_by_storage
-                or _nonstack_memory_storage_key_8616(cvariable.unified_variable) in names_by_storage
-            )
-        )
-        classified_count += len(stale_carriers)
-        if isinstance(variables_in_use, dict):
-            for variable in stale_carriers:
-                del variables_in_use[variable]
-                materialized_count += 1
+    carrier_classified, carrier_removed = _drop_stale_variables_in_use_8616(
+        variables_in_use, referenced_variable_ids, names_by_storage
+    )
+    classified_count += carrier_classified
+    materialized_count += carrier_removed
 
     failure_count = classified_count - materialized_count
     carrier._inertia_ds_global_local_declaration_stats_8616 = (

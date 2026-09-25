@@ -7,6 +7,7 @@ Forbidden: owning decompiler semantics, source-backed recovery, or postprocess s
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
@@ -172,6 +173,263 @@ def _record_segmented_evidence(
 
     return _impl()
 
+def _new_traits_8616() -> Traits:
+    """Return the empty per-function access-trait buckets."""
+    return {
+        "base_const": {},
+        "base_stride": {},
+        "repeated_offsets": {},
+        "repeated_offset_widths": {},
+        "base_stride_widths": {},
+        "induction_evidence": {},
+        "stride_evidence": {},
+        "member_evidence": {},
+        "array_evidence": {},
+    }
+
+
+@dataclass(slots=True)
+class _AccessTraitCollector:
+    """Collect one function's access-trait evidence from structured C."""
+
+    project: _ProjectLike
+    codegen: InductionCodegenLike
+    cfunc: object
+    cache: object
+    iter_c_nodes_deep: NodeIterator
+    unwrap_c_casts: CastUnwrapper
+    c_constant_value: ConstantResolver
+    classify_segmented_dereference: Callable[
+        [object, _ProjectLike], _SegmentedDereferenceLike | None
+    ]
+    stack_slot_identity_for_variable: StackIdentityResolver
+    access_trait_variable_key: BaseKeyResolver
+    stride_evidence_type: type[AccessTraitStrideEvidence]
+    traits: Traits = field(default_factory=_new_traits_8616)
+
+    def record(self, bucket: str, key: BaseKey) -> None:
+        """Bump one bucket count, tolerating a cached non-int value."""
+        store = self.traits[bucket]
+        existing = store.get(key, 0)
+        store[key] = (existing if isinstance(existing, int) else 0) + 1
+
+    def record_stride_evidence(
+        self,
+        *,
+        kind: str,
+        seg_name: str,
+        base_key: tuple[object, ...] | None,
+        index_key: tuple[object, ...] | None,
+        stride: int,
+        offset: int,
+        access_size: int,
+    ) -> None:
+        """Accumulate typed stride evidence for one index carrier."""
+        if index_key is None:
+            return
+        evidence_key = (kind, seg_name, base_key, index_key, stride, offset, access_size)
+        bucket_name = "induction_evidence" if kind == "induction_like" else "stride_evidence"
+        existing = self.traits[bucket_name].get(evidence_key)
+        existing_count = existing.count if isinstance(existing, self.stride_evidence_type) else existing
+        if not isinstance(existing_count, int):
+            existing_count = None
+        count = 1 if existing_count is None else int(existing_count) + 1
+        self.traits[bucket_name][evidence_key] = self.stride_evidence_type(
+            segment=seg_name,
+            base_key=base_key,
+            index_key=index_key,
+            stride=stride,
+            offset=offset,
+            width=access_size,
+            count=count,
+            kind=kind,
+        )
+
+    def stable_base_key(self, variable: object) -> BaseKey | None:
+        """Map one angr variable onto a stable storage-identity key."""
+        if isinstance(variable, SimRegisterVariable):
+            return ("reg", variable.reg)
+        if isinstance(variable, SimStackVariable):
+            identity = self.stack_slot_identity_for_variable(variable)
+            if identity is None:
+                return None
+            return ("stack", identity.base, variable.offset, variable.region)
+        if isinstance(variable, SimMemoryVariable):
+            return ("mem", variable.addr)
+        return None
+
+    def expr_index_key(self, expr: object) -> BaseKey | None:
+        """Resolve one expression to a stack-carried index identity."""
+        expr = self.unwrap_c_casts(expr)
+        if isinstance(expr, structured_c.CVariable):
+            # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
+            return self.access_trait_variable_key(getattr(expr, "variable", None))
+        if isinstance(expr, structured_c.CUnaryOp) and expr.op == "Dereference":
+            # Dynamic codegen boundary: unary operands are supplied by angr structured C.
+            operand = self.unwrap_c_casts(getattr(expr, "operand", None))
+            if isinstance(operand, structured_c.CUnaryOp) and operand.op == "Reference":
+                # Dynamic codegen boundary: reference operands are supplied by angr structured C.
+                expr = self.unwrap_c_casts(getattr(operand, "operand", None))
+            else:
+                return None
+        if isinstance(expr, structured_c.CIndexedVariable):
+            return self._indexed_expr_key(expr)
+        return None
+
+    def _indexed_expr_key(self, expr: object) -> BaseKey | None:
+        """Resolve an indexed-variable base+offset identity."""
+        # Dynamic codegen boundary: indexed variable bases are supplied by angr structured C.
+        base_expr = self.unwrap_c_casts(getattr(expr, "variable", None))
+        if isinstance(base_expr, structured_c.CUnaryOp) and base_expr.op == "Reference":
+            # Dynamic codegen boundary: reference operands are supplied by angr structured C.
+            base_expr = self.unwrap_c_casts(getattr(base_expr, "operand", None))
+        # Dynamic codegen boundary: indexed variable indexes are supplied by angr structured C.
+        index = self.c_constant_value(self.unwrap_c_casts(getattr(expr, "index", None)))
+        if not isinstance(index, int) or not isinstance(base_expr, structured_c.CVariable):
+            return None
+        # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
+        base_var = getattr(base_expr, "variable", None)
+        if not isinstance(base_var, SimStackVariable):
+            return None
+        identity = self.stack_slot_identity_for_variable(base_var)
+        if identity is None:
+            return None
+        base_offset = base_var.offset
+        if not isinstance(base_offset, int):
+            return None
+        return ("stack", identity.base, base_offset + index, base_var.region)
+
+    def _product_stride_term(self, inner: object) -> tuple[BaseKey, int] | None:
+        """Extract (index_key, stride) from a Mul/Shl term, if proven."""
+        for maybe_index, maybe_stride in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
+            stride_value = self.c_constant_value(self.unwrap_c_casts(maybe_stride))
+            if inner.op == "Shl":
+                if not isinstance(stride_value, int):
+                    continue
+                stride = 1 << stride_value
+            else:
+                if stride_value is None:
+                    continue
+                stride = stride_value
+            index = self.unwrap_c_casts(maybe_index)
+            index_key = self.expr_index_key(index)
+            if index_key is not None:
+                return index_key, stride
+        return None
+
+    def summarize_address(self, addr_expr: object) -> AddressSummary:
+        """Decompose one address into base terms, offset, and stride terms."""
+        from_terms: list[object] = []
+        offset = 0
+        stride_terms: list[tuple[BaseKey, int]] = []
+
+        for term in self.flatten_c_add_terms(addr_expr):
+            inner = self.unwrap_c_casts(term)
+            const_value = self.c_constant_value(inner)
+            if const_value is not None:
+                offset += const_value
+                continue
+            if isinstance(inner, structured_c.CBinaryOp) and inner.op in {"Mul", "Shl"}:
+                stride_term = self._product_stride_term(inner)
+                if stride_term is not None:
+                    stride_terms.append(stride_term)
+                else:
+                    from_terms.append(inner)
+                continue
+
+            index_key = self.expr_index_key(inner)
+            if index_key is not None:
+                stride_terms.append((index_key, 1))
+                continue
+
+            if isinstance(inner, structured_c.CVariable):
+                from_terms.append(inner)
+                continue
+
+            from_terms.append(inner)
+
+        return from_terms, offset, stride_terms
+
+    def flatten_c_add_terms(self, expr: object) -> list[object]:
+        """Flatten a chain of Add nodes into its term list."""
+        if expr is None:
+            return []
+        expr = self.unwrap_c_casts(expr)
+        if isinstance(expr, structured_c.CBinaryOp) and expr.op == "Add":
+            return [
+                *self.flatten_c_add_terms(expr.lhs),
+                *self.flatten_c_add_terms(expr.rhs),
+            ]
+        return [expr]
+
+    def merge_cached_traits(self) -> None:
+        """Fold any existing project-cache traits into the fresh buckets."""
+        # Dynamic compatibility boundary: older callers may not have initialized the project cache yet.
+        if not isinstance(self.cache, dict):
+            return
+        existing = self.cache.get(self.cfunc.addr)
+        if isinstance(existing, dict):
+            for bucket, bucket_data in existing.items():
+                if bucket not in self.traits or not isinstance(bucket_data, dict):
+                    continue
+                self.traits[bucket].update(bucket_data)
+
+    def visit_node(self, node: structured_c.CUnaryOp) -> None:
+        """Record trait evidence for one dereference node."""
+        access_size = _node_access_size(self.project, node)
+
+        direct_index_key = self.expr_index_key(node)
+        if direct_index_key is not None and access_size >= 2:
+            self.record_stride_evidence(
+                kind="induction_like",
+                seg_name="expr",
+                base_key=None,
+                index_key=direct_index_key,
+                stride=1,
+                offset=0,
+                access_size=access_size,
+            )
+        _record_plain_base_evidence(
+            node=node,
+            access_size=access_size,
+            summarize_address=self.summarize_address,
+            stable_base_key=self.stable_base_key,
+            record=self.record,
+        )
+        _record_segmented_evidence(
+            project=self.project,
+            node=node,
+            access_size=access_size,
+            classify_segmented_dereference=self.classify_segmented_dereference,
+            summarize_address=self.summarize_address,
+            access_trait_variable_key=self.access_trait_variable_key,
+            record=self.record,
+            record_stride_evidence=self.record_stride_evidence,
+        )
+
+    def publish(self) -> bool:
+        """Write collected traits to the project cache and apply rewrites."""
+        _prune_sparse_trait_counts(self.traits)
+
+        cache = self.cache
+        if not isinstance(cache, dict):
+            cache = {}
+            # Dynamic compatibility boundary: project cache is attached to the third-party angr Project.
+            self.project._inertia_access_traits = cache
+        if any(isinstance(bucket, dict) and bucket for bucket in self.traits.values()):
+            cache[self.cfunc.addr] = self.traits
+        else:
+            cache.pop(self.cfunc.addr, None)
+        return rewrite_for_loop_conditions_from_access_traits(
+            cast(InductionProjectLike, self.project),
+            self.codegen,
+            build_access_trait_evidence_profiles=cast(
+                BuildAccessTraitEvidenceProfiles, build_access_trait_evidence_profiles
+            ),
+            infer_induction_variable=cast(InferInductionVariable, infer_induction_variable),
+            iter_c_nodes_deep=self.iter_c_nodes_deep,
+        )
+
 
 def _collect_access_traits(
     project: _ProjectLike,
@@ -185,221 +443,29 @@ def _collect_access_traits(
     access_trait_variable_key: BaseKeyResolver,
     AccessTraitStrideEvidence: type[AccessTraitStrideEvidence],
 ) -> bool:
-    def _impl() -> bool:
-        cfunc = codegen.cfunc
-        if cfunc is None:
-            return False
+    """Collect access-trait evidence for one function's structured C body."""
+    cfunc = codegen.cfunc
+    if cfunc is None:
+        return False
 
-        traits: Traits = {
-            "base_const": {},
-            "base_stride": {},
-            "repeated_offsets": {},
-            "repeated_offset_widths": {},
-            "base_stride_widths": {},
-            "induction_evidence": {},
-            "stride_evidence": {},
-            "member_evidence": {},
-            "array_evidence": {},
-        }
-
-        # Dynamic compatibility boundary: older callers may not have initialized the project cache yet.
-        cache = getattr(project, "_inertia_access_traits", None)
-        if isinstance(cache, dict):
-            existing = cache.get(cfunc.addr)
-            if isinstance(existing, dict):
-                for bucket, bucket_data in existing.items():
-                    if bucket not in traits or not isinstance(bucket_data, dict):
-                        continue
-                    traits[bucket].update(bucket_data)
-
-        def record(bucket: str, key: BaseKey) -> None:
-            store = traits[bucket]
-            existing = store.get(key, 0)
-            store[key] = (existing if isinstance(existing, int) else 0) + 1
-
-        def record_stride_evidence(
-            *,
-            kind: str,
-            seg_name: str,
-            base_key: tuple[object, ...] | None,
-            index_key: tuple[object, ...] | None,
-            stride: int,
-            offset: int,
-            access_size: int,
-        ) -> None:
-            if index_key is None:
-                return
-            evidence_key = (kind, seg_name, base_key, index_key, stride, offset, access_size)
-            bucket_name = "induction_evidence" if kind == "induction_like" else "stride_evidence"
-            existing = traits[bucket_name].get(evidence_key)
-            existing_count = existing.count if isinstance(existing, AccessTraitStrideEvidence) else existing
-            if not isinstance(existing_count, int):
-                existing_count = None
-            count = 1 if existing_count is None else int(existing_count) + 1
-            traits[bucket_name][evidence_key] = AccessTraitStrideEvidence(
-                segment=seg_name,
-                base_key=base_key,
-                index_key=index_key,
-                stride=stride,
-                offset=offset,
-                width=access_size,
-                count=count,
-                kind=kind,
-            )
-
-        def stable_base_key(variable: object) -> BaseKey | None:
-            if isinstance(variable, SimRegisterVariable):
-                return ("reg", variable.reg)
-            if isinstance(variable, SimStackVariable):
-                identity = stack_slot_identity_for_variable(variable)
-                if identity is None:
-                    return None
-                return ("stack", identity.base, variable.offset, variable.region)
-            if isinstance(variable, SimMemoryVariable):
-                return ("mem", variable.addr)
-            return None
-
-        def expr_index_key(expr: object) -> BaseKey | None:
-            expr = unwrap_c_casts(expr)
-            if isinstance(expr, structured_c.CVariable):
-                # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
-                return access_trait_variable_key(getattr(expr, "variable", None))
-            if isinstance(expr, structured_c.CUnaryOp) and expr.op == "Dereference":
-                # Dynamic codegen boundary: unary operands are supplied by angr structured C.
-                operand = unwrap_c_casts(getattr(expr, "operand", None))
-                if isinstance(operand, structured_c.CUnaryOp) and operand.op == "Reference":
-                    # Dynamic codegen boundary: reference operands are supplied by angr structured C.
-                    expr = unwrap_c_casts(getattr(operand, "operand", None))
-                else:
-                    return None
-            if isinstance(expr, structured_c.CIndexedVariable):
-                # Dynamic codegen boundary: indexed variable bases are supplied by angr structured C.
-                base_expr = unwrap_c_casts(getattr(expr, "variable", None))
-                if isinstance(base_expr, structured_c.CUnaryOp) and base_expr.op == "Reference":
-                    # Dynamic codegen boundary: reference operands are supplied by angr structured C.
-                    base_expr = unwrap_c_casts(getattr(base_expr, "operand", None))
-                # Dynamic codegen boundary: indexed variable indexes are supplied by angr structured C.
-                index = c_constant_value(unwrap_c_casts(getattr(expr, "index", None)))
-                if not isinstance(index, int) or not isinstance(base_expr, structured_c.CVariable):
-                    return None
-                # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
-                base_var = getattr(base_expr, "variable", None)
-                if not isinstance(base_var, SimStackVariable):
-                    return None
-                identity = stack_slot_identity_for_variable(base_var)
-                if identity is None:
-                    return None
-                base_offset = base_var.offset
-                if not isinstance(base_offset, int):
-                    return None
-                return ("stack", identity.base, base_offset + index, base_var.region)
-            return None
-
-        def summarize_address(addr_expr: object) -> AddressSummary:
-            from_terms: list[object] = []
-            offset = 0
-            stride_terms: list[tuple[BaseKey, int]] = []
-
-            for term in _flatten_c_add_terms(addr_expr):
-                inner = unwrap_c_casts(term)
-                const_value = c_constant_value(inner)
-                if const_value is not None:
-                    offset += const_value
-                    continue
-                if isinstance(inner, structured_c.CBinaryOp) and inner.op in {"Mul", "Shl"}:
-                    for maybe_index, maybe_stride in ((inner.lhs, inner.rhs), (inner.rhs, inner.lhs)):
-                        stride_value = c_constant_value(unwrap_c_casts(maybe_stride))
-                        if inner.op == "Shl":
-                            if not isinstance(stride_value, int):
-                                continue
-                            stride = 1 << stride_value
-                        else:
-                            if stride_value is None:
-                                continue
-                            stride = stride_value
-                        index = unwrap_c_casts(maybe_index)
-                        index_key = expr_index_key(index)
-                        if index_key is not None:
-                            stride_terms.append((index_key, stride))
-                            break
-                    else:
-                        from_terms.append(inner)
-                    continue
-
-                index_key = expr_index_key(inner)
-                if index_key is not None:
-                    stride_terms.append((index_key, 1))
-                    continue
-
-                if isinstance(inner, structured_c.CVariable):
-                    from_terms.append(inner)
-                    continue
-
-                from_terms.append(inner)
-
-            return from_terms, offset, stride_terms
-
-        def _flatten_c_add_terms(expr: object) -> list[object]:
-            if expr is None:
-                return []
-            expr = unwrap_c_casts(expr)
-            if isinstance(expr, structured_c.CBinaryOp) and expr.op == "Add":
-                return [*_flatten_c_add_terms(expr.lhs), *_flatten_c_add_terms(expr.rhs)]
-            return [expr]
-
-        for node in iter_c_nodes_deep(cfunc.statements):
-            if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
-                continue
-
-            access_size = _node_access_size(project, node)
-
-            direct_index_key = expr_index_key(node)
-            if direct_index_key is not None and access_size >= 2:
-                record_stride_evidence(
-                    kind="induction_like",
-                    seg_name="expr",
-                    base_key=None,
-                    index_key=direct_index_key,
-                    stride=1,
-                    offset=0,
-                    access_size=access_size,
-                )
-            _record_plain_base_evidence(
-                node=node,
-                access_size=access_size,
-                summarize_address=summarize_address,
-                stable_base_key=stable_base_key,
-                record=record,
-            )
-            _record_segmented_evidence(
-                project=project,
-                node=node,
-                access_size=access_size,
-                classify_segmented_dereference=classify_segmented_dereference,
-                summarize_address=summarize_address,
-                access_trait_variable_key=access_trait_variable_key,
-                record=record,
-                record_stride_evidence=record_stride_evidence,
-            )
-
-        _prune_sparse_trait_counts(traits)
-
-        if not isinstance(cache, dict):
-            cache = {}
-            # Dynamic compatibility boundary: project cache is attached to the third-party angr Project.
-            project._inertia_access_traits = cache
-        if any(isinstance(bucket, dict) and bucket for bucket in traits.values()):
-            cache[cfunc.addr] = traits
-        else:
-            cache.pop(cfunc.addr, None)
-        return rewrite_for_loop_conditions_from_access_traits(
-            cast(InductionProjectLike, project),
-            codegen,
-            build_access_trait_evidence_profiles=cast(
-                BuildAccessTraitEvidenceProfiles, build_access_trait_evidence_profiles
-            ),
-            infer_induction_variable=cast(InferInductionVariable, infer_induction_variable),
-            iter_c_nodes_deep=iter_c_nodes_deep,
-        )
-
-    return _impl()
+    # Dynamic compatibility boundary: older callers may not have initialized the project cache yet.
+    cache = getattr(project, "_inertia_access_traits", None)
+    collector = _AccessTraitCollector(
+        project=project,
+        codegen=codegen,
+        cfunc=cfunc,
+        cache=cache,
+        iter_c_nodes_deep=iter_c_nodes_deep,
+        unwrap_c_casts=unwrap_c_casts,
+        c_constant_value=c_constant_value,
+        classify_segmented_dereference=classify_segmented_dereference,
+        stack_slot_identity_for_variable=stack_slot_identity_for_variable,
+        access_trait_variable_key=access_trait_variable_key,
+        stride_evidence_type=AccessTraitStrideEvidence,
+    )
+    collector.merge_cached_traits()
+    for node in iter_c_nodes_deep(cfunc.statements):
+        if not isinstance(node, structured_c.CUnaryOp) or node.op != "Dereference":
+            continue
+        collector.visit_node(node)
+    return collector.publish()

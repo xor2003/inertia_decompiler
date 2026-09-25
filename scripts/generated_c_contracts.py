@@ -82,14 +82,13 @@ class CallGuardedAssignmentRequirement:
         guard_argument = raw.get("guard_argument")
         assignment_name = raw.get("assignment_name")
         assignment_value = raw.get("assignment_value")
-        if (
-            not isinstance(guard_call, str)
-            or not isinstance(guard_argument, int)
-            or isinstance(guard_argument, bool)
-            or not isinstance(assignment_name, str)
-            or not isinstance(assignment_value, int)
-            or isinstance(assignment_value, bool)
-        ):
+        if not isinstance(guard_call, str):
+            return None
+        if not isinstance(guard_argument, int) or isinstance(guard_argument, bool):
+            return None
+        if not isinstance(assignment_name, str):
+            return None
+        if not isinstance(assignment_value, int) or isinstance(assignment_value, bool):
             return None
         return cls(guard_call, guard_argument, assignment_name, assignment_value)
 
@@ -128,14 +127,13 @@ class BranchBodyEffectsRequirement:
         required_calls = raw.get("required_calls")
         assignment_name = raw.get("assignment_name")
         assignment_source_name = raw.get("assignment_source_name")
-        if (
-            not isinstance(function_name, str)
-            or not isinstance(required_calls, list)
-            or not required_calls
-            or not all(isinstance(item, str) for item in required_calls)
-            or not isinstance(assignment_name, str)
-            or not isinstance(assignment_source_name, str)
-        ):
+        if not isinstance(function_name, str):
+            return None
+        if not isinstance(required_calls, list) or not required_calls:
+            return None
+        if not all(isinstance(item, str) for item in required_calls):
+            return None
+        if not isinstance(assignment_name, str) or not isinstance(assignment_source_name, str):
             return None
         return cls(
             function_name=function_name,

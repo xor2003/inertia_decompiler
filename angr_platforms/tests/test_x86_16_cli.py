@@ -1937,80 +1937,82 @@ def test_install_angr_peephole_expr_bitwidth_guard_skips_mismatched_replacements
     assert walker.any_update is False
 
 
+class _BsgFakeBV:
+    def __init__(self, bits, *, concrete=False, concrete_value=0):
+        self._bits = bits
+        self.concrete = concrete
+        self.concrete_value = concrete_value
+
+    def size(self):
+        return self._bits
+
+    def zero_extend(self, nbits):
+        return _BsgFakeBV(self._bits + nbits, concrete=self.concrete, concrete_value=self.concrete_value)
+
+    def __getitem__(self, item):
+        hi, lo = item.start, item.stop
+        return _BsgFakeBV(hi - lo + 1, concrete=self.concrete, concrete_value=self.concrete_value)
+
+    def __sub__(self, other):
+        return _BsgFakeBV(max(self._bits, other._bits))
+
+class _BsgFakeRichR:
+    def __init__(self, data, typevar=None, type_constraints=None):
+        self.data = data
+        self.typevar = typevar
+        self.type_constraints = type_constraints
+
+class _BsgFakeTypeVariable:
+    pass
+
+class _BsgFakeTypevarsModule:
+    TypeVariable = _BsgFakeTypeVariable
+
+    @staticmethod
+    def new_dtv(*_args, **_kwargs):
+        return _BsgFakeTypeVariable()
+
+    @staticmethod
+    def SubN(_value):
+        return "subn"
+
+    @staticmethod
+    def Sub(_lhs, _rhs, _out):
+        return ("sub", _lhs, _rhs, _out)
+
+class _BsgFakeState:
+    def top(self, bits):
+        return ("top", bits)
+
+class _BsgFakeEngine:
+    def __init__(self):
+        self.state = _BsgFakeState()
+
+    def _expr_pair(self, _arg0, _arg1):
+        return _BsgFakeRichR(_BsgFakeBV(16), typevar=_BsgFakeTypeVariable()), _BsgFakeRichR(_BsgFakeBV(8))
+
+    def _handle_binop_Sub(self, expr):
+        raise AssertionError("original implementation should not run")
+
+class _BsgFakeExpr:
+    bits = 16
+    operands = ("lhs", "rhs")
+
+
 def test_install_angr_variable_recovery_binop_sub_size_guard_computes_in_wider_domain_then_narrows():
-    class FakeBV:
-        def __init__(self, bits, *, concrete=False, concrete_value=0):
-            self._bits = bits
-            self.concrete = concrete
-            self.concrete_value = concrete_value
-
-        def size(self):
-            return self._bits
-
-        def zero_extend(self, nbits):
-            return FakeBV(self._bits + nbits, concrete=self.concrete, concrete_value=self.concrete_value)
-
-        def __getitem__(self, item):
-            hi, lo = item.start, item.stop
-            return FakeBV(hi - lo + 1, concrete=self.concrete, concrete_value=self.concrete_value)
-
-        def __sub__(self, other):
-            return FakeBV(max(self._bits, other._bits))
-
-    class FakeRichR:
-        def __init__(self, data, typevar=None, type_constraints=None):
-            self.data = data
-            self.typevar = typevar
-            self.type_constraints = type_constraints
-
-    class FakeTypeVariable:
-        pass
-
-    class FakeTypevarsModule:
-        TypeVariable = FakeTypeVariable
-
-        @staticmethod
-        def new_dtv(*_args, **_kwargs):
-            return FakeTypeVariable()
-
-        @staticmethod
-        def SubN(_value):
-            return "subn"
-
-        @staticmethod
-        def Sub(_lhs, _rhs, _out):
-            return ("sub", _lhs, _rhs, _out)
-
-    class FakeState:
-        def top(self, bits):
-            return ("top", bits)
-
-    class FakeEngine:
-        def __init__(self):
-            self.state = FakeState()
-
-        def _expr_pair(self, _arg0, _arg1):
-            return FakeRichR(FakeBV(16), typevar=FakeTypeVariable()), FakeRichR(FakeBV(8))
-
-        def _handle_binop_Sub(self, expr):
-            raise AssertionError("original implementation should not run")
-
-    class FakeExpr:
-        bits = 16
-        operands = ("lhs", "rhs")
-
     original = runtime_support.install_angr_variable_recovery_binop_sub_size_guard(
-        FakeEngine,
-        richr_cls=FakeRichR,
-        typevars_module=FakeTypevarsModule,
+        _BsgFakeEngine,
+        richr_cls=_BsgFakeRichR,
+        typevars_module=_BsgFakeTypevarsModule,
     )
     try:
-        result = FakeEngine()._handle_binop_Sub(FakeExpr())
+        result = _BsgFakeEngine()._handle_binop_Sub(_BsgFakeExpr())
     finally:
-        FakeEngine._handle_binop_Sub = original
+        _BsgFakeEngine._handle_binop_Sub = original
 
-    assert isinstance(result.data, FakeBV)
+    assert isinstance(result.data, _BsgFakeBV)
     assert result.data.size() == 16
+
 
 
 def test_recover_direct_addr_function_prefers_candidate_recovery_for_x86_16(monkeypatch):
@@ -5235,6 +5237,35 @@ def test_try_decompile_non_optimized_slice_retries_with_fresh_project(monkeypatc
     assert outcome.rendered == "int sub_11593(void) { return 0; }"
 
 
+class _SliceFakeFunctionManager:
+    def __init__(self):
+        self.created: list[int] = []
+
+    def function(self, *, addr=None, create=False, **_kwargs):
+        if create:
+            self.created.append(addr)
+        return SimpleNamespace(addr=addr)
+
+class _SliceFakeFunction:
+    def __init__(self):
+        self.addr = 0x11593
+        self.name = "sub_11593"
+        self.normalized = False
+        self._callsite_checks = 0
+
+    def normalize(self):
+        self.normalized = True
+
+    def get_call_sites(self):
+        self._callsite_checks += 1
+        if self._callsite_checks == 1:
+            return []
+        return [0x1159F]
+
+    def get_call_target(self, _callsite):
+        return 0x1140D
+
+
 def test_try_decompile_non_optimized_slice_prepares_direct_callee_context_before_retry(monkeypatch, tmp_path):
     binary = tmp_path / "sample.exe"
     binary.write_bytes(b"\x90" * 0x40)
@@ -5255,41 +5286,13 @@ def test_try_decompile_non_optimized_slice_prepares_direct_callee_context_before
         ),
     )
 
-    class FakeFunctionManager:
-        def __init__(self):
-            self.created: list[int] = []
-
-        def function(self, *, addr=None, create=False, **_kwargs):
-            if create:
-                self.created.append(addr)
-            return SimpleNamespace(addr=addr)
-
-    class FakeFunction:
-        def __init__(self):
-            self.addr = 0x11593
-            self.name = "sub_11593"
-            self.normalized = False
-            self._callsite_checks = 0
-
-        def normalize(self):
-            self.normalized = True
-
-        def get_call_sites(self):
-            self._callsite_checks += 1
-            if self._callsite_checks == 1:
-                return []
-            return [0x1159F]
-
-        def get_call_target(self, _callsite):
-            return 0x1140D
-
     slice_project = SimpleNamespace(
         arch=SimpleNamespace(name="86_16"),
         loader=shared_project.loader,
-        kb=SimpleNamespace(functions=FakeFunctionManager()),
+        kb=SimpleNamespace(functions=_SliceFakeFunctionManager()),
     )
     cfg = SimpleNamespace()
-    func = FakeFunction()
+    func = _SliceFakeFunction()
     calls = {"decompile": 0}
 
     monkeypatch.setattr(decompile, "_lst_code_region", lambda *_args, **_kwargs: None)
@@ -12375,6 +12378,58 @@ def test_main_parallel_promotes_done_future_at_deadline(monkeypatch, tmp_path, c
     assert "Timed out after 2s." not in out
 
 
+
+class _LateCollectFakeFuture:
+    def __init__(self, result):
+        self._result = result
+        self._done = False
+
+    def result(self, timeout=None):
+        return self._result
+
+    def done(self):
+        return self._done
+
+    def cancelled(self):
+        return False
+
+
+class _LateCollectFakeExecutor:
+    def __init__(self, *args, **kwargs):
+        self.future = None
+
+    def submit(self, _fn, item, **_kwargs):
+        self.future = _LateCollectFakeFuture(
+            decompile.FunctionWorkResult(
+                index=item.index,
+                status="ok",
+                payload=f"int {item.function.name}(void) {{ return 0; }}",
+                debug_output="",
+                tail_validation=_fake_stable_tail_validation(),
+                function=item.function,
+                function_cfg=item.function_cfg,
+            )
+        )
+        _LATE_EXECUTOR_STATE["future"] = self.future
+        return self.future
+
+    def shutdown(self, wait=True, cancel_futures=True):
+        return None
+
+
+_LATE_EXECUTOR_STATE: dict[str, object] = {"future": None, "wait_count": 0}
+
+
+def _late_collect_fake_wait(pending, **_kwargs):
+    _LATE_EXECUTOR_STATE["wait_count"] += 1
+    if _LATE_EXECUTOR_STATE["wait_count"] == 1:
+        return set(), set(pending)
+    future = _LATE_EXECUTOR_STATE["future"]
+    if future is not None:
+        future._done = True
+    return {future} if future is not None else set(), set()
+
+
 def test_main_parallel_promotes_future_completed_during_late_collection(monkeypatch, tmp_path, capsys):
     binary = tmp_path / "sample.exe"
     binary.write_bytes(b"MZ")
@@ -12387,54 +12442,8 @@ def test_main_parallel_promotes_future_completed_during_late_collection(monkeypa
     )
     function = SimpleNamespace(addr=0x11423, name="_start", project=project)
 
-    class _FakeFuture:
-        def __init__(self, result):
-            self._result = result
-            self._done = False
-
-        def result(self, timeout=None):
-            return self._result
-
-        def done(self):
-            return self._done
-
-        def cancelled(self):
-            return False
-
-    class _FakeExecutor:
-        def __init__(self, *args, **kwargs):
-            self.future = None
-
-        def submit(self, _fn, item, **_kwargs):
-            self.future = _FakeFuture(
-                decompile.FunctionWorkResult(
-                    index=item.index,
-                    status="ok",
-                    payload=f"int {item.function.name}(void) {{ return 0; }}",
-                    debug_output="",
-                    tail_validation=_fake_stable_tail_validation(),
-                    function=item.function,
-                    function_cfg=item.function_cfg,
-                )
-            )
-            executor_state["future"] = self.future
-            return self.future
-
-        def shutdown(self, wait=True, cancel_futures=True):
-            return None
-
     monotonic_values = iter([0.0] + [5.0] * 16)
-    executor_state = {"future": None}
-    wait_calls = {"count": 0}
-
-    def _fake_wait(pending, **_kwargs):
-        wait_calls["count"] += 1
-        if wait_calls["count"] == 1:
-            return set(), set(pending)
-        future = executor_state["future"]
-        if future is not None:
-            future._done = True
-        return {future} if future is not None else set(), set()
+    _LATE_EXECUTOR_STATE.update({"future": None, "wait_count": 0})
 
     monkeypatch.setattr(decompile, "_build_project", lambda *_args, **_kwargs: project)
     monkeypatch.setattr(decompile, "_load_lst_metadata", lambda *_args, **_kwargs: None)
@@ -12450,8 +12459,8 @@ def test_main_parallel_promotes_future_completed_during_late_collection(monkeypa
     monkeypatch.setattr(decompile, "select_function_worker_policy_8616", lambda **_kwargs: SimpleNamespace(mode=decompile.FunctionWorkerMode8616.SHARED, workers=2))
     monkeypatch.setattr(decompile, "requires_isolated_function_decompilation", lambda **_kwargs: False)
     monkeypatch.setattr(decompile, "_run_with_timeout_in_daemon_thread", lambda fn, **_kwargs: fn())
-    monkeypatch.setattr(decompile, "DaemonThreadPoolExecutor", _FakeExecutor)
-    monkeypatch.setattr(decompile, "wait", _fake_wait)
+    monkeypatch.setattr(decompile, "DaemonThreadPoolExecutor", _LateCollectFakeExecutor)
+    monkeypatch.setattr(decompile, "wait", _late_collect_fake_wait)
     monkeypatch.setattr(decompile.time, "monotonic", lambda: next(monotonic_values))
 
     rc = decompile.main([str(binary), "--timeout", "2", "--max-functions", "1"])

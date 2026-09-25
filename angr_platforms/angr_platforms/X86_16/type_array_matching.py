@@ -546,96 +546,107 @@ def _has_induction_evidence_for_key_8616(codegen: object, index_key: tuple[objec
     return _impl()
 
 
+def _best_typed_induction_summary_8616(
+    summaries: object,
+    index_key: object,
+) -> object | None:
+    """Return the highest-scoring typed summary for one index key."""
+    best_summary = None
+    best_summary_score: tuple[int, int, int] | None = None
+    for summary in summaries:
+        if summary.index_key != index_key:
+            continue
+        summary_score: tuple[int, int, int] = (
+            int(summary.count),
+            abs(int(summary.stride)),
+            int(summary.width),
+        )
+        if best_summary_score is None or summary_score > best_summary_score:
+            best_summary = summary
+            best_summary_score = summary_score
+    return best_summary
+
+
+def _best_profile_induction_match_8616(
+    profiles: object,
+    index_key: object,
+    variable: object,
+) -> InductionVariable | None:
+    """Return the best access-trait induction match for one index key."""
+    direct_profile = profiles.get(index_key)
+    if direct_profile is not None:
+        direct_match = infer_induction_variable(direct_profile)
+        if direct_match is not None and direct_match.index_key == index_key:
+            return _access_trait_induction_var_8616(direct_match, variable)
+
+    best_match: InductionVariable | None = None
+    best_score: tuple[int, int, int, int] | None = None
+    for profile_key, profile in profiles.items():
+        candidate = infer_induction_variable(profile)
+        if candidate is None or candidate.index_key != index_key:
+            continue
+        candidate_score: tuple[int, int, int, int] = (
+            int(candidate.count),
+            abs(int(candidate.stride)),
+            int(candidate.width),
+            1 if profile_key == index_key else 0,
+        )
+        if best_score is None or candidate_score > best_score:
+            best_match = _access_trait_induction_var_8616(candidate, variable)
+            best_score = candidate_score
+    return best_match
+
+
 def _profile_induction_match_8616(codegen: object, loop_var: object) -> InductionVariable | None:
-    def _impl() -> InductionVariable | None:
-        """Match induction evidence through the dynamic third-party angr codegen/project boundary."""
-        # Dynamic angr boundary: CVariable-compatible loop nodes expose the wrapped SimVariable dynamically.
-        variable = getattr(loop_var, "variable", None)
-        index_key = _loop_index_key_8616(loop_var)
-        if variable is None or index_key is None:
-            return None
+    """Match induction evidence through the dynamic third-party angr codegen/project boundary."""
+    # Dynamic angr boundary: CVariable-compatible loop nodes expose the wrapped SimVariable dynamically.
+    variable = getattr(loop_var, "variable", None)
+    index_key = _loop_index_key_8616(loop_var)
+    if variable is None or index_key is None:
+        return None
 
-        summaries = _typed_induction_summaries_8616(codegen)
-        best_summary = None
-        best_summary_score: tuple[int, int, int] | None = None
-        for summary in summaries:
-            if summary.index_key != index_key:
-                continue
-            summary_score: tuple[int, int, int] = (
-                int(summary.count),
-                abs(int(summary.stride)),
-                int(summary.width),
-            )
-            if best_summary_score is None or summary_score > best_summary_score:
-                best_summary = summary
-                best_summary_score = summary_score
-        if best_summary is not None:
-            var_name = variable.name if isinstance(variable, SimRegisterVariable) else "reg_unknown"
-            return InductionVariable(
-                var_name=var_name or f"reg_{variable.reg}",
-                stride=int(best_summary.stride),
-                base_value=int(best_summary.offset),
-                loop_bound=int(best_summary.bound_candidate) if best_summary.bound_candidate is not None else None,
-                element_width=int(best_summary.width),
-            )
+    best_summary = _best_typed_induction_summary_8616(_typed_induction_summaries_8616(codegen), index_key)
+    if best_summary is not None:
+        var_name = variable.name if isinstance(variable, SimRegisterVariable) else "reg_unknown"
+        return InductionVariable(
+            var_name=var_name or f"reg_{variable.reg}",
+            stride=int(best_summary.stride),
+            base_value=int(best_summary.offset),
+            loop_bound=int(best_summary.bound_candidate) if best_summary.bound_candidate is not None else None,
+            element_width=int(best_summary.width),
+        )
 
-        # Dynamic codegen boundary: access-trait evidence is attached to third-party angr project/codegen objects.
-        project = getattr(codegen, "project", None)
-        cfunc = getattr(codegen, "cfunc", None)
-        func_addr = getattr(cfunc, "addr", None)
-        if not isinstance(func_addr, int):
-            return None
-
-        profiles = _cached_access_trait_profiles_8616(project, func_addr)
-        if profiles is None:
-            return None
-        direct_profile = profiles.get(index_key)
-        if direct_profile is not None:
-            direct_match = infer_induction_variable(direct_profile)
-            if direct_match is not None and direct_match.index_key == index_key:
-                return _access_trait_induction_var_8616(direct_match, variable)
-
-        best_match: InductionVariable | None = None
-        best_score: tuple[int, int, int, int] | None = None
-        for profile_key, profile in profiles.items():
-            candidate = infer_induction_variable(profile)
-            if candidate is None or candidate.index_key != index_key:
-                continue
-            candidate_score: tuple[int, int, int, int] = (
-                int(candidate.count),
-                abs(int(candidate.stride)),
-                int(candidate.width),
-                1 if profile_key == index_key else 0,
-            )
-            if best_score is None or candidate_score > best_score:
-                best_match = _access_trait_induction_var_8616(candidate, variable)
-                best_score = candidate_score
-        return best_match
-
-    return _impl()
-
-
-def _rewrite_induction_loops_8616(codegen: object) -> bool:
-    """Rewrite induction loop shape at the dynamic third-party angr codegen boundary."""
-    # Dynamic codegen boundary: this pass is called with third-party angr codegen instances.
+    # Dynamic codegen boundary: access-trait evidence is attached to third-party angr project/codegen objects.
+    project = getattr(codegen, "project", None)
     cfunc = getattr(codegen, "cfunc", None)
-    if cfunc is None:
-        return False
+    func_addr = getattr(cfunc, "addr", None)
+    if not isinstance(func_addr, int):
+        return None
 
-    changed = False
+    profiles = _cached_access_trait_profiles_8616(project, func_addr)
+    if profiles is None:
+        return None
+    return _best_profile_induction_match_8616(profiles, index_key, variable)
 
-    def transform(node: object) -> object:
-        nonlocal changed
-        if isinstance(node, CForLoop):
-            simplified = _unwrap_double_negation_8616(node.condition)
-            if simplified is not None:
-                index_key = _condition_index_key_8616(simplified)
-                if index_key is not None and _has_induction_evidence_for_key_8616(codegen, index_key):
-                    node.condition = simplified
-                    changed = True
-            return node
-        if not isinstance(node, CWhileLoop):
-            return node
+
+@dataclass
+class _InductionLoopRewrite8616:
+    """Mutable run state for induction-loop condition rewriting."""
+
+    codegen: object
+    changed: bool = False
+
+    @staticmethod
+    def _last_monotonic_update(statements: list[object]) -> object | None:
+        """Return the last monotonic update statement, or None."""
+        for stmt in reversed(statements[1:]):
+            update = _extract_monotonic_update_8616(stmt)
+            if update is not None:
+                return update
+        return None
+
+    def _rewrite_while_loop(self, node: CWhileLoop) -> object:
+        """Convert while(1)+guard+update into a bounded loop condition."""
         if not _literal_true_8616(node.condition):
             return node
         body = node.body
@@ -651,17 +662,13 @@ def _rewrite_induction_loops_8616(codegen: object) -> bool:
         if inverted is None:
             return node
 
-        update = None
-        for stmt in reversed(statements[1:]):
-            update = _extract_monotonic_update_8616(stmt)
-            if update is not None:
-                break
+        update = self._last_monotonic_update(statements)
         if update is None:
             return node
         loop_var, _delta = update
         if not _cond_uses_var_8616(guard, loop_var):
             return node
-        induction_info = _profile_induction_match_8616(codegen, loop_var)
+        induction_info = _profile_induction_match_8616(self.codegen, loop_var)
         if induction_info is None:
             return node
         if abs(int(_delta)) != int(induction_info.stride):
@@ -671,22 +678,46 @@ def _rewrite_induction_loops_8616(codegen: object) -> bool:
             inverted,
             guard.lhs,
             guard.rhs,
-            codegen=codegen,
+            codegen=self.codegen,
             tags=guard.tags,
         )
         body.statements = statements[1:]
-        changed = True
+        self.changed = True
         return node
 
+    def transform(self, node: object) -> object:
+        """Rewrite one node when induction evidence supports it."""
+        if isinstance(node, CForLoop):
+            simplified = _unwrap_double_negation_8616(node.condition)
+            if simplified is not None:
+                index_key = _condition_index_key_8616(simplified)
+                if index_key is not None and _has_induction_evidence_for_key_8616(self.codegen, index_key):
+                    node.condition = simplified
+                    self.changed = True
+            return node
+        if not isinstance(node, CWhileLoop):
+            return node
+        return self._rewrite_while_loop(node)
+
+
+def _rewrite_induction_loops_8616(codegen: object) -> bool:
+    """Rewrite induction loop shape at the dynamic third-party angr codegen boundary."""
+    # Dynamic codegen boundary: this pass is called with third-party angr codegen instances.
+    cfunc = getattr(codegen, "cfunc", None)
+    if cfunc is None:
+        return False
+
+    rewrite = _InductionLoopRewrite8616(codegen=codegen)
+
     root = cfunc.statements
-    new_root = transform(root)
+    new_root = rewrite.transform(root)
     if new_root is not root:
         root = _safe_assign_cfunc_statements_8616(codegen, new_root, root)
         if hasattr(cfunc, "body"):
             cfunc.body = cfunc.statements
-    if _replace_c_children_8616(cfunc.statements, transform):
-        changed = True
-    return changed
+    if _replace_c_children_8616(cfunc.statements, rewrite.transform):
+        rewrite.changed = True
+    return rewrite.changed
 
 
 def apply_x86_16_array_expression_matching(codegen: object) -> bool:

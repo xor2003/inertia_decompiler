@@ -29,6 +29,20 @@ from angr_platforms.X86_16.tail_validation import (
 )
 
 
+def _recorded_stub_8616(
+    calls: list[str],
+    *labels: str,
+    result: object = False,
+):
+    """Return a monkeypatch stub that records `labels` and returns `result`."""
+
+    def stub(*_args, **_kwargs):
+        calls.extend(labels)
+        return result
+
+    return stub
+
+
 def test_structuring_return_shape_materializes_void_return_ast_after_classification(monkeypatch):
     calls = []
     project = SimpleNamespace()
@@ -2069,8 +2083,7 @@ def test_structuring_validation_prime_refreshes_conditions_after_final_lowering_
     project = SimpleNamespace()
     codegen = SimpleNamespace(cfunc=SimpleNamespace(addr=0x4010))
 
-    def unchanged(*_args, **_kwargs):
-        return False
+    unchanged = _recorded_stub_8616(calls)
 
     for name in (
         "_apply_structuring_stable_stack_semantics_8616",
@@ -2103,45 +2116,29 @@ def test_structuring_validation_prime_refreshes_conditions_after_final_lowering_
         unchanged,
     )
 
-    def segment_replay(*_args, **_kwargs):
-        calls.append("segment")
-        return False
-
-    def consumed_push_replay(*_args, **_kwargs):
-        calls.append("consumed-push")
-        return False
-
-    def pointer_memory_replay(*_args, **_kwargs):
-        calls.append("pointer-memory")
-        return False
-
-    def loop_idiom_replay(*_args, **_kwargs):
-        calls.append("loop")
-        return False
-
-    def terminal_call_result_replay(*_args, **_kwargs):
-        calls.append("terminal-call")
-        return False
-
-    def condition_refresh(*_args, **_kwargs):
-        calls.append("condition-refresh")
-        return stage._condition_refresh.StructuringConditionRefreshResult8616.unclosed()
-
-    def widening_replay(*_args, **_kwargs):
-        calls.append("widening")
-        return False
-
-    def carrier_prune(*_args, **_kwargs):
-        calls.append("carrier-prune")
-        return False
-
-    def dead_flag_cleanup(*_args, **_kwargs):
-        calls.append("dead-flags")
-        return SimpleNamespace(changed=False)
-
-    def lowering_replay(*_args, **_kwargs):
-        calls.extend(("segment", "consumed-push", "carrier-prune"))
-        return False
+    segment_replay = _recorded_stub_8616(calls, "segment")
+    consumed_push_replay = _recorded_stub_8616(calls, "consumed-push")
+    pointer_memory_replay = _recorded_stub_8616(calls, "pointer-memory")
+    loop_idiom_replay = _recorded_stub_8616(calls, "loop")
+    terminal_call_result_replay = _recorded_stub_8616(calls, "terminal-call")
+    condition_refresh = _recorded_stub_8616(
+        calls,
+        "condition-refresh",
+        result=stage._condition_refresh.StructuringConditionRefreshResult8616.unclosed(),
+    )
+    widening_replay = _recorded_stub_8616(calls, "widening")
+    carrier_prune = _recorded_stub_8616(calls, "carrier-prune")
+    dead_flag_cleanup = _recorded_stub_8616(
+        calls,
+        "dead-flags",
+        result=SimpleNamespace(changed=False),
+    )
+    lowering_replay = _recorded_stub_8616(
+        calls,
+        "segment",
+        "consumed-push",
+        "carrier-prune",
+    )
 
     monkeypatch.setattr(
         stage._vex_ir,
@@ -2261,56 +2258,22 @@ def test_structuring_lowering_replay_orders_call_and_pointer_consumers_before_co
     project = SimpleNamespace()
     codegen = SimpleNamespace()
 
-    def callsite_prototypes(*_args, **_kwargs):
-        calls.append("callsite-prototypes")
-        return False
-
-    def callsite_arguments(*_args, **_kwargs):
-        calls.append("callsite-arguments")
-        return False
-
-    def call_return_selectors(*_args, **_kwargs):
-        calls.append("call-return-selectors")
-        return False
-
-    def pointer_arguments(*_args, **_kwargs):
-        calls.append("pointer-arguments")
-        return False
-
-    def stdlib_call_chains(*_args, **_kwargs):
-        calls.append("stdlib-call-chains")
-        return False
-
-    def stable_stack_replay(*_args, **_kwargs):
-        calls.append("stable-stack")
-        return False
-
-    def direct_stack_replay(*_args, **_kwargs):
-        calls.append("direct-stack")
-        return False
-
-    def segment_replay(*_args, **_kwargs):
-        calls.append("segment")
-        return True
-
-    def frame_prologue_replay(*_args, **_kwargs):
-        calls.append("frame-prologue")
-        return False
-
-    def consumed_push_replay(*_args, **_kwargs):
-        calls.append("consumed-push")
-        return False
-
-    def structured_intrinsics(*_args, **_kwargs):
-        calls.append("structured-intrinsics")
-        return False
-
-    def prune_structured_intrinsics(*_args, **_kwargs):
-        calls.append("prune-structured-intrinsics")
-        return False
-
-    def no_op_type_consumer(*_args, **_kwargs):
-        return False
+    callsite_prototypes = _recorded_stub_8616(calls, "callsite-prototypes")
+    callsite_arguments = _recorded_stub_8616(calls, "callsite-arguments")
+    call_return_selectors = _recorded_stub_8616(calls, "call-return-selectors")
+    pointer_arguments = _recorded_stub_8616(calls, "pointer-arguments")
+    stdlib_call_chains = _recorded_stub_8616(calls, "stdlib-call-chains")
+    stable_stack_replay = _recorded_stub_8616(calls, "stable-stack")
+    direct_stack_replay = _recorded_stub_8616(calls, "direct-stack")
+    segment_replay = _recorded_stub_8616(calls, "segment", result=True)
+    frame_prologue_replay = _recorded_stub_8616(calls, "frame-prologue")
+    consumed_push_replay = _recorded_stub_8616(calls, "consumed-push")
+    structured_intrinsics = _recorded_stub_8616(calls, "structured-intrinsics")
+    prune_structured_intrinsics = _recorded_stub_8616(
+        calls,
+        "prune-structured-intrinsics",
+    )
+    no_op_type_consumer = _recorded_stub_8616(calls)
 
     monkeypatch.setattr(
         stage,

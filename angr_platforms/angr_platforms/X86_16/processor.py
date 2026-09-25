@@ -332,51 +332,54 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
 
     def get_gpreg(self, n: reg8_t | reg16_t | reg32_t | VexValue) -> RegisterValue:
         """Return a general-purpose register in concrete or VEX lifting mode."""
-
-        def _impl() -> RegisterValue:
-            if isinstance(n, VexValue):
-                if self.lifter_instruction is not None:
-                    return n
-                raise ValueError("Cannot get gpreg from a non-constant VexValue without an active lifter instruction")
-            name = register_name_8616(n)
-            if isinstance(n, reg8_t):
-                if self.lifter_instruction is not None:
-                    if self.vex_offsets is None:
-                        raise ValueError("vex_offsets not initialized for lifting mode")
-                    base_name = register_name_8616(self._reg8_base(n))
-                    offset = self.vex_offsets[base_name] + int(self._reg8_is_high(n))
-                    return VexValue(self.lifter_instruction, self.lifter_instruction.rdreg(offset, Type.int_8))
-                base = self.get_gpreg(self._reg8_base(n))
-                if not isinstance(base, int):
-                    raise TypeError("Concrete register reads must return integers")
-                if self._reg8_is_high(n):
-                    return (base >> 8) & 0xFF
-                return base & 0xFF
+        if isinstance(n, VexValue):
             if self.lifter_instruction is not None:
-                if self.vex_offsets is None:
-                    raise ValueError("vex_offsets not initialized for lifting mode")
-                offset = self.vex_offsets.get(name, 0)
-                return VexValue(self.lifter_instruction, self.lifter_instruction.rdreg(offset, TYPES[type(n)]))
-            # concrete mode
-            if isinstance(n, reg32_t):
-                idx = n.value
-                if idx < reg32_t.GPREGS_COUNT.value:
-                    return self.gpregs[idx].reg32
-                elif idx == reg32_t.EIP.value:
-                    return self.eip
-                elif idx == reg32_t.EFLAGS.value:
-                    return self.flags
-            elif isinstance(n, reg16_t):
-                idx = n.value
-                if idx < reg32_t.GPREGS_COUNT.value:  # 8 for 16-bit views
-                    return self.gpregs[idx].reg16
-                elif idx == reg16_t.IP.value:
-                    return self.eip & 0xFFFF
-                elif idx == reg16_t.FLAGS.value:
-                    return self.flags & 0xFFFF
-            raise ValueError(f"Cannot get gpreg {n} without lifter_instruction in concrete mode")
+                return n
+            raise ValueError("Cannot get gpreg from a non-constant VexValue without an active lifter instruction")
+        name = register_name_8616(n)
+        if isinstance(n, reg8_t):
+            return self._get_reg8_gpreg(n)
+        if self.lifter_instruction is not None:
+            if self.vex_offsets is None:
+                raise ValueError("vex_offsets not initialized for lifting mode")
+            offset = self.vex_offsets.get(name, 0)
+            return VexValue(self.lifter_instruction, self.lifter_instruction.rdreg(offset, TYPES[type(n)]))
+        return self._get_gpreg_concrete(n)
 
-        return _impl()
+    def _get_reg8_gpreg(self, n: reg8_t) -> RegisterValue:
+        """Return an 8-bit register view in concrete or VEX lifting mode."""
+        if self.lifter_instruction is not None:
+            if self.vex_offsets is None:
+                raise ValueError("vex_offsets not initialized for lifting mode")
+            base_name = register_name_8616(self._reg8_base(n))
+            offset = self.vex_offsets[base_name] + int(self._reg8_is_high(n))
+            return VexValue(self.lifter_instruction, self.lifter_instruction.rdreg(offset, Type.int_8))
+        base = self.get_gpreg(self._reg8_base(n))
+        if not isinstance(base, int):
+            raise TypeError("Concrete register reads must return integers")
+        if self._reg8_is_high(n):
+            return (base >> 8) & 0xFF
+        return base & 0xFF
+
+    def _get_gpreg_concrete(self, n: reg16_t | reg32_t) -> RegisterValue:
+        """Return a 16/32-bit register in concrete mode."""
+        if isinstance(n, reg32_t):
+            idx = n.value
+            if idx < reg32_t.GPREGS_COUNT.value:
+                return self.gpregs[idx].reg32
+            elif idx == reg32_t.EIP.value:
+                return self.eip
+            elif idx == reg32_t.EFLAGS.value:
+                return self.flags
+        elif isinstance(n, reg16_t):
+            idx = n.value
+            if idx < reg32_t.GPREGS_COUNT.value:  # 8 for 16-bit views
+                return self.gpregs[idx].reg16
+            elif idx == reg16_t.IP.value:
+                return self.eip & 0xFFFF
+            elif idx == reg16_t.FLAGS.value:
+                return self.flags & 0xFFFF
+        raise ValueError(f"Cannot get gpreg {n} without lifter_instruction in concrete mode")
 
     def constant(self, n: int, type_: object = Type.int_8) -> RegisterValue:
         """Keep concrete values; encode lifted integers as width-bounded bits."""
@@ -478,71 +481,78 @@ class Processor(Eflags, CR):  # type: ignore[misc, unused-ignore] # dynamic fron
         if not isinstance(n, (reg8_t, reg16_t, reg32_t)):
             raise TypeError(f"Unsupported general-purpose register {n!r}")
 
-        def _impl() -> None:
-            nonlocal value
-            name = register_name_8616(n)
-            if isinstance(n, reg8_t):
-                base_reg = self._reg8_base(n)
-                if self.lifter_instruction is not None:
-                    if self.vex_offsets is None:
-                        raise ValueError("vex_offsets not initialized for lifting mode")
-                    base_name = register_name_8616(base_reg)
-                    offset = self.vex_offsets[base_name] + int(self._reg8_is_high(n))
-                    if isinstance(value, int):
-                        value = self.constant(value, Type.int_8)
-                    if isinstance(value, VexValue):
-                        value = cast(VexValue, value.cast_to(Type.int_8)).rdt
-                    self.lifter_instruction._append_stmt(Put(cast(Any, value), offset))
-                    return
+        name = register_name_8616(n)
+        if isinstance(n, reg8_t):
+            self._set_reg8_gpreg(n, value)
+            return
+        if self.lifter_instruction is not None:
+            self._set_gpreg_lifted(n, name, value)
+            return
+        self._set_gpreg_concrete(n, value)
 
-                if not isinstance(value, int):
-                    raise TypeError(f"Cannot set {n} from non-concrete value of type {type(value)} in concrete mode")
-                idx = base_reg.value
-                if self._reg8_is_high(n):
-                    self.gpregs[idx].reg8_h = value
-                else:
-                    self.gpregs[idx].reg8_l = value
-                return
-            if self.lifter_instruction is not None:
-                if self.vex_offsets is None:
-                    raise ValueError("vex_offsets not initialized for lifting mode")
-                offset = self.vex_offsets.get(name, 0)
-                is_flags_register = (
-                    (isinstance(n, reg16_t) and n is reg16_t.FLAGS)
-                    or (isinstance(n, reg32_t) and n is reg32_t.EFLAGS)
-                )
-                flags_value = value if is_flags_register else None
-                if isinstance(value, int):
-                    value = self.constant(value, TYPES[type(n)])
-                if isinstance(value, VexValue):
-                    value = value.rdt
-                self.lifter_instruction._append_stmt(Put(cast(Any, value), offset))
-                if flags_value is not None:
-                    self._sync_lifted_direction_step(flags_value)
-                return
-            # concrete mode
+    def _set_reg8_gpreg(self, n: reg8_t, value: object) -> None:
+        """Set an 8-bit register view in concrete or VEX lifting mode."""
+        base_reg = self._reg8_base(n)
+        if self.lifter_instruction is not None:
+            if self.vex_offsets is None:
+                raise ValueError("vex_offsets not initialized for lifting mode")
+            base_name = register_name_8616(base_reg)
+            offset = self.vex_offsets[base_name] + int(self._reg8_is_high(n))
             if isinstance(value, int):
-                if isinstance(n, reg32_t):
-                    idx = n.value
-                    if idx < reg32_t.GPREGS_COUNT.value:
-                        self.gpregs[idx].reg32 = value
-                    elif idx == reg32_t.EIP.value:
-                        self.eip = value
-                    elif idx == reg32_t.EFLAGS.value:
-                        self.flags = value
-                    return
-                elif isinstance(n, reg16_t):
-                    idx = n.value
-                    if idx < reg32_t.GPREGS_COUNT.value:
-                        self.gpregs[idx].reg16 = value
-                    elif idx == reg16_t.IP.value:
-                        self.eip = (self.eip & 0xFFFF0000) | (value & 0xFFFF)
-                    elif idx == reg16_t.FLAGS.value:
-                        self.flags = (self.flags & 0xFFFF0000) | (value & 0xFFFF)
-                    return
-            raise TypeError(f"Cannot set {n} from non-concrete value of type {type(value)} in concrete mode")
+                value = self.constant(value, Type.int_8)
+            if isinstance(value, VexValue):
+                value = cast(VexValue, value.cast_to(Type.int_8)).rdt
+            self.lifter_instruction._append_stmt(Put(cast(Any, value), offset))
+            return
 
-        return _impl()
+        if not isinstance(value, int):
+            raise TypeError(f"Cannot set {n} from non-concrete value of type {type(value)} in concrete mode")
+        idx = base_reg.value
+        if self._reg8_is_high(n):
+            self.gpregs[idx].reg8_h = value
+        else:
+            self.gpregs[idx].reg8_l = value
+
+    def _set_gpreg_lifted(self, n: reg16_t | reg32_t, name: str, value: object) -> None:
+        """Set a 16/32-bit register in VEX lifting mode."""
+        if self.vex_offsets is None:
+            raise ValueError("vex_offsets not initialized for lifting mode")
+        offset = self.vex_offsets.get(name, 0)
+        is_flags_register = (
+            (isinstance(n, reg16_t) and n is reg16_t.FLAGS)
+            or (isinstance(n, reg32_t) and n is reg32_t.EFLAGS)
+        )
+        flags_value = value if is_flags_register else None
+        if isinstance(value, int):
+            value = self.constant(value, TYPES[type(n)])
+        if isinstance(value, VexValue):
+            value = value.rdt
+        self.lifter_instruction._append_stmt(Put(cast(Any, value), offset))
+        if flags_value is not None:
+            self._sync_lifted_direction_step(flags_value)
+
+    def _set_gpreg_concrete(self, n: reg16_t | reg32_t, value: object) -> None:
+        """Set a 16/32-bit register in concrete mode."""
+        if isinstance(value, int):
+            if isinstance(n, reg32_t):
+                idx = n.value
+                if idx < reg32_t.GPREGS_COUNT.value:
+                    self.gpregs[idx].reg32 = value
+                elif idx == reg32_t.EIP.value:
+                    self.eip = value
+                elif idx == reg32_t.EFLAGS.value:
+                    self.flags = value
+                return
+            elif isinstance(n, reg16_t):
+                idx = n.value
+                if idx < reg32_t.GPREGS_COUNT.value:
+                    self.gpregs[idx].reg16 = value
+                elif idx == reg16_t.IP.value:
+                    self.eip = (self.eip & 0xFFFF0000) | (value & 0xFFFF)
+                elif idx == reg16_t.FLAGS.value:
+                    self.flags = (self.flags & 0xFFFF0000) | (value & 0xFFFF)
+                return
+        raise TypeError(f"Cannot set {n} from non-concrete value of type {type(value)} in concrete mode")
 
     def set_sgreg(self, n: sgreg_t, reg: object) -> None:
         """Set a segment register in concrete or VEX lifting mode."""

@@ -13,7 +13,7 @@ from __future__ import annotations
 import builtins
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from angr.ailment.expression import VirtualVariableCategory
@@ -269,20 +269,24 @@ def _ssa_segmented_word_mov_addrs_8616(codegen: _CodegenBoundary8616) -> frozens
     for block in resolution.artifact.blocks:
         for instruction in block.instrs:
             destination = instruction.dst
-            if (
-                instruction.op.upper() != "MOV"
-                or instruction.size != 2
-                or not isinstance(destination, IRValue)
-                or destination.space is not MemSpace.REG
-                or destination.size != 2
-                or len(instruction.args) != 1
-                or not isinstance(instruction.args[0], IRAddress)
-                or instruction.args[0].space not in {MemSpace.DS, MemSpace.ES, MemSpace.SS}
-            ):
+            if not _is_segmented_word_mov_8616(instruction, destination):
                 continue
             if isinstance(instruction.addr, int):
                 proven.add(instruction.addr)
     return frozenset(proven)
+
+
+def _is_segmented_word_mov_8616(instruction: object, destination: object) -> bool:
+    """Return whether an instruction is a proven segmented word MOV."""
+    if instruction.op.upper() != "MOV" or instruction.size != 2:
+        return False
+    if not isinstance(destination, IRValue):
+        return False
+    if destination.space is not MemSpace.REG or destination.size != 2:
+        return False
+    if len(instruction.args) != 1 or not isinstance(instruction.args[0], IRAddress):
+        return False
+    return instruction.args[0].space in {MemSpace.DS, MemSpace.ES, MemSpace.SS}
 
 
 _GP_WORD_REGISTER_NAMES_8616 = frozenset({"ax", "bp", "bx", "cx", "di", "dx", "si", "sp"})
@@ -379,6 +383,107 @@ def _pure_register_assignment_8616(statement: object) -> bool:
     return False
 
 
+@dataclass
+class _ByteLoadWidenStats8616:
+    """Evidence counters for statement-level byte-pair widening."""
+
+    changed: bool = False
+    raw: int = 0
+    normalized: int = 0
+    classified: int = 0
+    materialized: int = 0
+
+
+def _authorized_word_destination_8616(
+    statements: list[object],
+    index: int,
+    first_assignment: object,
+    first_call: object,
+    second_assignment: object,
+    second_call: object,
+    proven_mov_addrs: frozenset[int],
+) -> tuple[int | None, CAssignment | None, frozenset[int]]:
+    """Return the authorized destination assignment index/statement/addrs."""
+    load_addrs = (
+        _instruction_addrs_8616(first_assignment)
+        | _instruction_addrs_8616(first_call)
+    ) & (
+        _instruction_addrs_8616(second_assignment)
+        | _instruction_addrs_8616(second_call)
+    )
+    for candidate_index in range(index + 2, min(index + 7, len(statements))):
+        candidate = _word_register_assignment_8616(statements[candidate_index])
+        if candidate is not None:
+            candidate_authorized = (
+                load_addrs & _instruction_addrs_8616(candidate) & proven_mov_addrs
+            )
+            if len(candidate_authorized) == 1:
+                return candidate_index, candidate, candidate_authorized
+        if not _pure_register_assignment_8616(statements[candidate_index]):
+            break
+    return None, None, frozenset()
+
+
+def _try_merge_byte_pair_8616(
+    statements: list[object],
+    index: int,
+    rebuilt: list[object],
+    *,
+    proven_mov_addrs: frozenset[int],
+    codegen: _CodegenBoundary8616,
+    stats: _ByteLoadWidenStats8616,
+) -> int | None:
+    """Merge one authorized split-byte pair into a word load, or refuse."""
+    first = _temporary_byte_load_assignment_8616(statements[index])
+    second = _temporary_byte_load_assignment_8616(statements[index + 1])
+    if first is None or second is None:
+        return None
+    stats.raw += 1
+    first_assignment, first_call, first_segment, first_offset = first
+    second_assignment, second_call, second_segment, second_offset = second
+    if not _same_c_expression_8616(first_segment, second_segment):
+        return None
+    if _adjacent_offsets_8616(first_offset, second_offset):
+        low_call, low_segment, low_offset = first_call, first_segment, first_offset
+        high_call = second_call
+    elif _adjacent_offsets_8616(second_offset, first_offset):
+        low_call, low_segment, low_offset = second_call, second_segment, second_offset
+        high_call = first_call
+    else:
+        return None
+    stats.normalized += 1
+    destination_index, destination, authorized = _authorized_word_destination_8616(
+        statements, index,
+        first_assignment, first_call, second_assignment, second_call,
+        proven_mov_addrs,
+    )
+    if destination is None or destination_index is None:
+        return None
+    stats.classified += 1
+    identity = join_adjacent_segmented_load_identities_8616(
+        segmented_load_identity_8616(low_call),
+        segmented_load_identity_8616(high_call),
+    )
+    tags: dict[str, object] = {
+        "inertia_x86_16_runtime_segment_helper": "SEG_U16",
+        "inertia_source_instruction_addrs": tuple(sorted(authorized)),
+    }
+    if identity is not None:
+        tags = segmented_load_tags_8616(identity, existing=tags)
+    destination.rhs = CFunctionCall(
+        "SEG_U16",
+        None,
+        [low_segment, low_offset],
+        codegen=codegen,
+        tags=tags,
+    )
+    rebuilt.append(destination)
+    rebuilt.extend(statements[index + 2 : destination_index])
+    stats.materialized += 1
+    stats.changed = True
+    return destination_index + 1
+
+
 def _widen_statement_byte_loads_8616(
     root: object,
     *,
@@ -386,8 +491,7 @@ def _widen_statement_byte_loads_8616(
     proven_mov_addrs: frozenset[int],
 ) -> tuple[bool, int, int, int, int]:
     """Collapse typed-evidence-authorized split bytes into one word-register load."""
-    changed = False
-    raw = normalized = classified = materialized = 0
+    stats = _ByteLoadWidenStats8616()
     statement_groups = (
         node
         for node in (root, *_iter_c_nodes_deep_8616(root))
@@ -405,116 +509,44 @@ def _widen_statement_byte_loads_8616(
             if index + 2 >= len(statements):
                 rebuilt.extend(statements[index:])
                 break
-            first = _temporary_byte_load_assignment_8616(statements[index])
-            second = _temporary_byte_load_assignment_8616(statements[index + 1])
-            if first is None or second is None:
-                rebuilt.append(statements[index])
-                index += 1
-                continue
-            raw += 1
-            first_assignment, first_call, first_segment, first_offset = first
-            second_assignment, second_call, second_segment, second_offset = second
-            if not _same_c_expression_8616(first_segment, second_segment):
-                rebuilt.append(statements[index])
-                index += 1
-                continue
-            if _adjacent_offsets_8616(first_offset, second_offset):
-                low_call, low_segment, low_offset = first_call, first_segment, first_offset
-                high_call = second_call
-            elif _adjacent_offsets_8616(second_offset, first_offset):
-                low_call, low_segment, low_offset = second_call, second_segment, second_offset
-                high_call = first_call
-            else:
-                rebuilt.append(statements[index])
-                index += 1
-                continue
-            normalized += 1
-            load_addrs = (
-                _instruction_addrs_8616(first_assignment)
-                | _instruction_addrs_8616(first_call)
-            ) & (
-                _instruction_addrs_8616(second_assignment)
-                | _instruction_addrs_8616(second_call)
+            merged_index = _try_merge_byte_pair_8616(
+                statements, index, rebuilt,
+                proven_mov_addrs=proven_mov_addrs, codegen=codegen, stats=stats,
             )
-            destination_index: int | None = None
-            destination: CAssignment | None = None
-            authorized: frozenset[int] = frozenset()
-            for candidate_index in range(index + 2, min(index + 7, len(statements))):
-                candidate = _word_register_assignment_8616(statements[candidate_index])
-                if candidate is not None:
-                    candidate_authorized = (
-                        load_addrs & _instruction_addrs_8616(candidate) & proven_mov_addrs
-                    )
-                    if len(candidate_authorized) == 1:
-                        destination_index = candidate_index
-                        destination = candidate
-                        authorized = candidate_authorized
-                        break
-                if not _pure_register_assignment_8616(statements[candidate_index]):
-                    break
-            if destination is None or destination_index is None:
+            if merged_index is None:
                 rebuilt.append(statements[index])
                 index += 1
                 continue
-            classified += 1
-            identity = join_adjacent_segmented_load_identities_8616(
-                segmented_load_identity_8616(low_call),
-                segmented_load_identity_8616(high_call),
-            )
-            tags: dict[str, object] = {
-                "inertia_x86_16_runtime_segment_helper": "SEG_U16",
-                "inertia_source_instruction_addrs": tuple(sorted(authorized)),
-            }
-            if identity is not None:
-                tags = segmented_load_tags_8616(identity, existing=tags)
-            destination.rhs = CFunctionCall(
-                "SEG_U16",
-                None,
-                [low_segment, low_offset],
-                codegen=codegen,
-                tags=tags,
-            )
-            rebuilt.append(destination)
-            rebuilt.extend(statements[index + 2 : destination_index])
-            materialized += 1
-            changed = True
-            index = destination_index + 1
-        if changed and rebuilt != statements:
+            index = merged_index
+        if stats.changed and rebuilt != statements:
             group.statements = rebuilt
-    return changed, raw, normalized, classified, materialized
+    return stats.changed, stats.raw, stats.normalized, stats.classified, stats.materialized
 
 
-def apply_segmented_load_widening_8616(codegen: object) -> bool:
-    """Widen proven adjacent segmented byte loads in one structured C tree."""
-    typed_codegen = cast(_CodegenBoundary8616, codegen)
-    cfunc = typed_codegen.cfunc
-    raw = 0
-    normalized = 0
-    classified = 0
-    materialized = 0
-    proven_mov_addrs = _ssa_segmented_word_mov_addrs_8616(
-        typed_codegen
-    ) | _decoded_segmented_word_mov_addrs_8616(typed_codegen)
+@dataclass
+class _SegmentedLoadWidener8616:
+    """Apply typed-evidence widening to one structured C tree."""
 
-    def transform(node: object) -> object:
-        """Materialize one adjacent byte pair when all widening facts agree."""
-        nonlocal classified, materialized, normalized, raw
-        if not isinstance(node, CBinaryOp) or node.op not in {"Or", "Add"}:
-            return node
+    codegen: _CodegenBoundary8616
+    proven_mov_addrs: frozenset[int]
+    stats: _ByteLoadWidenStats8616 = field(default_factory=_ByteLoadWidenStats8616)
+
+    def _typed_pair(self, node: CBinaryOp) -> object | None:
+        """Return a typed-identity SEG_U16 call for one pair, or None."""
         for possible_low, possible_high in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
             low = _segmented_byte_load_8616(possible_low)
             high = _shifted_high_byte_8616(possible_high)
             if low is None or high is None:
                 continue
-            raw += 1
+            self.stats.raw += 1
             low_call, low_segment, low_offset = low
             high_call, high_segment, high_offset = high
             if not _same_c_expression_8616(low_segment, high_segment):
                 continue
-            normalized += 1
+            self.stats.normalized += 1
             if not _adjacent_offsets_8616(low_offset, high_offset):
                 continue
-            classified += 1
+            self.stats.classified += 1
             identity = join_adjacent_segmented_load_identities_8616(
                 segmented_load_identity_8616(low_call),
                 segmented_load_identity_8616(high_call),
@@ -522,48 +554,67 @@ def apply_segmented_load_widening_8616(codegen: object) -> bool:
             tags: dict[str, object] = {"inertia_x86_16_runtime_segment_helper": "SEG_U16"}
             if identity is not None:
                 tags = segmented_load_tags_8616(identity, existing=tags)
-            materialized += 1
+            self.stats.materialized += 1
             return CFunctionCall(
                 "SEG_U16",
                 None,
                 [low_segment, low_offset],
-                codegen=codegen,
+                codegen=self.codegen,
                 tags=tags,
             )
+        return None
+
+    def _authorized_pair(self, node: CBinaryOp) -> object | None:
+        """Return an instruction-authorized SEG_U16 call for one pair, or None."""
         for possible_low, possible_high in ((node.lhs, node.rhs), (node.rhs, node.lhs)):
             low = _overwide_segmented_byte_lane_8616(possible_low)
             high = _shifted_overwide_segmented_byte_lane_8616(possible_high)
             if low is None or high is None:
                 continue
-            raw += 1
+            self.stats.raw += 1
             low_call, low_segment, low_offset = low
             high_call, high_segment, high_offset = high
             if not _same_c_expression_8616(low_segment, high_segment):
                 continue
-            normalized += 1
+            self.stats.normalized += 1
             if not _adjacent_offsets_8616(low_offset, high_offset):
                 continue
             authorized = (
                 _instruction_addrs_8616(low_call)
                 & _instruction_addrs_8616(high_call)
-                & proven_mov_addrs
+                & self.proven_mov_addrs
             )
             if len(authorized) != 1:
                 continue
-            classified += 1
-            materialized += 1
+            self.stats.classified += 1
+            self.stats.materialized += 1
             return CFunctionCall(
                 "SEG_U16",
                 None,
                 [low_segment, low_offset],
-                codegen=codegen,
+                codegen=self.codegen,
                 tags={
                     "inertia_x86_16_runtime_segment_helper": "SEG_U16",
                     "inertia_source_instruction_addrs": tuple(sorted(authorized)),
                 },
             )
+        return None
+
+    def transform(self, node: object) -> object:
+        """Materialize one adjacent byte pair when all widening facts agree."""
+        if not isinstance(node, CBinaryOp) or node.op not in {"Or", "Add"}:
+            return node
+        typed = self._typed_pair(node)
+        if typed is not None:
+            return typed
+        authorized = self._authorized_pair(node)
+        if authorized is not None:
+            return authorized
         return node
 
+
+def _cfunc_rewrite_roots_8616(cfunc: object) -> list[tuple[list[str], object]]:
+    """Return the distinct (attributes, root) rewrite anchors on one cfunc."""
     roots: list[tuple[list[str], object]] = []
     seen_roots: dict[int, list[str]] = {}
     for attribute in ("body", "statements", "stmt"):
@@ -576,10 +627,22 @@ def apply_segmented_load_widening_8616(codegen: object) -> bool:
         attributes = [attribute]
         seen_roots[id(root)] = attributes
         roots.append((attributes, root))
+    return roots
+
+
+def apply_segmented_load_widening_8616(codegen: object) -> bool:
+    """Widen proven adjacent segmented byte loads in one structured C tree."""
+    typed_codegen = cast(_CodegenBoundary8616, codegen)
+    cfunc = typed_codegen.cfunc
+    proven_mov_addrs = _ssa_segmented_word_mov_addrs_8616(
+        typed_codegen
+    ) | _decoded_segmented_word_mov_addrs_8616(typed_codegen)
+
+    widener = _SegmentedLoadWidener8616(codegen=typed_codegen, proven_mov_addrs=proven_mov_addrs)
 
     changed = False
-    for attributes, root in roots:
-        replacement = transform(root)
+    for attributes, root in _cfunc_rewrite_roots_8616(cfunc):
+        replacement = widener.transform(root)
         if replacement is not root:
             if isinstance(root, CStatements) and not isinstance(replacement, CStatements):
                 replacement = CStatements([replacement], codegen=codegen)
@@ -588,7 +651,7 @@ def apply_segmented_load_widening_8616(codegen: object) -> bool:
             root = replacement
             changed = True
         for _ in range(3):
-            if not _replace_c_children_8616(root, transform):
+            if not _replace_c_children_8616(root, widener.transform):
                 break
             changed = True
 
@@ -600,10 +663,10 @@ def apply_segmented_load_widening_8616(codegen: object) -> bool:
         )
     )
     changed = statement_changed or changed
-    raw += statement_raw
-    normalized += statement_normalized
-    classified += statement_classified
-    materialized += statement_materialized
+    raw = widener.stats.raw + statement_raw
+    normalized = widener.stats.normalized + statement_normalized
+    classified = widener.stats.classified + statement_classified
+    materialized = widener.stats.materialized + statement_materialized
 
     typed_codegen._inertia_segmented_load_widening_report_8616 = SegmentedLoadWideningReport8616(
         raw_fact_count=raw,

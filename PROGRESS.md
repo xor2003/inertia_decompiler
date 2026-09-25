@@ -554,3 +554,26 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   Arm ordering and `continue` semantics preserved exactly.
 - Owning tests: 7 passed.
 - Disk: freed ~2.1G on /home (caches); /tmp overflow files removed.
+
+## gp_stack_restore / positive_bp_arguments / structured_intrinsics / validation_storage — clean
+
+- `gp_stack_restore.py`: `_snapshot_insertion_candidates_8616` + `_GpRestoreReplacer8616`
+  (replacer closure -> dataclass) + debug/anchor/assignment helpers.
+- `positive_bp_arguments.py`: `materialize_positive_bp_arguments_8616` (57) ->
+  `_PositiveBpRun8616`/`_DesiredInterface8616` run dataclasses + phased helpers
+  (prepare, collect, layout, body-plan, desired, source-types, publish, prune).
+- `structured_intrinsics.py`: `_decoded_insert_operands_8616`,
+  `_insert_identity_occurrence_counts_8616`, `_insert_statement_lists_8616`,
+  `_prune_statement_list_8616`.
+- `validation_storage.py`: `validate_storage_identities_8616` (42) ->
+  `_StorageValidationRun8616` with per-phase methods (global/stack/field/copy).
+- Owning tests: 422 + 77 + 54 passed. One tail_validation failure is
+  pre-existing (baseline red, unrelated kvikdos/env path).
+- cli_access_traits -> `_AccessTraitCollector` (traits buckets + stride evidence
+  + indexed-key + address summarizer). cli.py lazy-proxy splits.
+  cli_linear_aliases -> `_BytePairSeedVisitor`. telemetry -> env/summary splits.
+  pytest_resource_history -> payload-decode splits. import_ultra_quickc_fixtures
+  -> fixture-result/stage/decompile helpers. test files -> hoisted fakes +
+  `_recorded_stub_8616`.
+- One `test_x86_16_cli` failure: kvikdos non-UTF8 subprocess decode
+  (pre-existing environmental, in recompile_check path).

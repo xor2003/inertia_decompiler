@@ -15,6 +15,7 @@ import tempfile
 import time
 from collections import Counter
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
@@ -120,19 +121,16 @@ def _measured_worker_reservation(
     return int((peak_rss_kib * (100 + DEFAULT_WORKER_HEADROOM_PERCENT) + 99) // 100)
 
 
-def _load_inventory(
+def _inventory_records(
     path: Path,
-    history_path: Path | None,
 ) -> tuple[
-    tuple[str, ...],
-    dict[str, tuple[str, ...]],
+    list[str],
+    dict[str, set[str]],
     dict[str, float],
-    dict[str, float],
-    frozenset[str],
-    frozenset[str],
     dict[str, str],
+    set[str],
 ]:
-    """Load expected nodes, lane paths, and compact scheduling weights."""
+    """Scan one inventory payload into node, lane, and weight tables."""
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     records = payload.get("records") if isinstance(payload, dict) else None
@@ -160,61 +158,107 @@ def _load_inventory(
         weights[nodeid] = 30.0 if isinstance(subprocess_count, int) and subprocess_count > 0 else 1.0
     if len(expected) != len(set(expected)):
         raise ValueError("inventory contains duplicate node IDs")
+    return expected, lane_paths, weights, node_paths, resource_serial_paths
+
+
+def _historical_weights(
+    history: object, node_paths: dict[str, str]
+) -> dict[str, float]:
+    """Collect per-node historical scheduling durations from prior history."""
+
+    historical_weights: dict[str, float] = {}
+    scheduling_durations = history.get("scheduling_node_durations") if isinstance(history, dict) else None
+    if isinstance(scheduling_durations, dict):
+        for nodeid, seconds in scheduling_durations.items():
+            if isinstance(nodeid, str) and nodeid in node_paths and isinstance(seconds, (int, float)):
+                historical_weights[nodeid] = float(seconds)
+    else:
+        historical_weights.update(_legacy_historical_weights(history, node_paths))
+    return historical_weights
+
+
+def _legacy_historical_weights(
+    history: object, node_paths: dict[str, str]
+) -> dict[str, float]:
+    """Collect durations from the older records/node_durations schema."""
+
+    historical_weights: dict[str, float] = {}
+    history_records = history.get("records", []) if isinstance(history, dict) else []
+    if isinstance(history_records, list):
+        for record in history_records:
+            if not isinstance(record, dict):
+                continue
+            nodeid = record.get("nodeid")
+            seconds = record.get("call_seconds")
+            if isinstance(nodeid, str) and nodeid in node_paths and isinstance(seconds, (int, float)):
+                historical_weights[nodeid] = float(seconds)
+    node_durations = history.get("node_durations", {}) if isinstance(history, dict) else {}
+    if isinstance(node_durations, dict):
+        for nodeid, seconds in node_durations.items():
+            if isinstance(nodeid, str) and nodeid in node_paths and isinstance(seconds, (int, float)):
+                historical_weights[nodeid] = float(seconds)
+    return historical_weights
+
+
+def _historical_memory_serial_paths(
+    history: object, resource_serial_paths: set[str]
+) -> set[str]:
+    """Recover paths that previously needed exclusive memory scheduling."""
+
+    memory_serial_paths: set[str] = set()
+    worker_paths = history.get("worker_paths", {}) if isinstance(history, dict) else {}
+    wave_facts = history.get("wave_resource_facts", []) if isinstance(history, dict) else []
+    if isinstance(worker_paths, dict) and isinstance(wave_facts, list):
+        for wave in wave_facts:
+            if not isinstance(wave, dict) or wave.get("memory_exceeded") is not True:
+                continue
+            workers = wave.get("workers", ())
+            if not isinstance(workers, list):
+                continue
+            heavy_workers = [
+                worker
+                for worker in workers
+                if isinstance(worker, str) and worker.startswith("heavy-")
+            ]
+            if len(heavy_workers) != 1:
+                continue
+            paths = worker_paths.get(heavy_workers[0], ())
+            if isinstance(paths, list):
+                memory_serial_paths.update(path for path in paths if isinstance(path, str))
+    persisted_serial_paths = history.get("memory_serial_paths", ()) if isinstance(history, dict) else ()
+    if not persisted_serial_paths and isinstance(history, dict):
+        legacy_exclusive_paths = history.get("exclusive_paths", ())
+        if isinstance(legacy_exclusive_paths, list):
+            persisted_serial_paths = [
+                path for path in legacy_exclusive_paths if path not in resource_serial_paths
+            ]
+    if isinstance(persisted_serial_paths, list):
+        memory_serial_paths.update(path for path in persisted_serial_paths if isinstance(path, str))
+    return memory_serial_paths
+
+
+def _load_inventory(
+    path: Path,
+    history_path: Path | None,
+) -> tuple[
+    tuple[str, ...],
+    dict[str, tuple[str, ...]],
+    dict[str, float],
+    dict[str, float],
+    frozenset[str],
+    frozenset[str],
+    dict[str, str],
+]:
+    """Load expected nodes, lane paths, and compact scheduling weights."""
+
+    expected, lane_paths, weights, node_paths, resource_serial_paths = _inventory_records(path)
     memory_serial_paths: set[str] = set()
     historical_outcomes: dict[str, str] = {}
     if history_path is not None and history_path.exists():
         history = json.loads(history_path.read_text(encoding="utf-8"))
-        historical_weights: dict[str, float] = {}
-        scheduling_durations = history.get("scheduling_node_durations") if isinstance(history, dict) else None
-        if isinstance(scheduling_durations, dict):
-            for nodeid, seconds in scheduling_durations.items():
-                if isinstance(nodeid, str) and nodeid in node_paths and isinstance(seconds, (int, float)):
-                    historical_weights[nodeid] = float(seconds)
-        else:
-            history_records = history.get("records", []) if isinstance(history, dict) else []
-            if isinstance(history_records, list):
-                for record in history_records:
-                    if not isinstance(record, dict):
-                        continue
-                    nodeid = record.get("nodeid")
-                    seconds = record.get("call_seconds")
-                    if isinstance(nodeid, str) and nodeid in node_paths and isinstance(seconds, (int, float)):
-                        historical_weights[nodeid] = float(seconds)
-            node_durations = history.get("node_durations", {}) if isinstance(history, dict) else {}
-            if isinstance(node_durations, dict):
-                for nodeid, seconds in node_durations.items():
-                    if isinstance(nodeid, str) and nodeid in node_paths and isinstance(seconds, (int, float)):
-                        historical_weights[nodeid] = float(seconds)
-        for nodeid, seconds in historical_weights.items():
+        for nodeid, seconds in _historical_weights(history, node_paths).items():
             weights[nodeid] = max(seconds, 0.001)
-        worker_paths = history.get("worker_paths", {}) if isinstance(history, dict) else {}
-        wave_facts = history.get("wave_resource_facts", []) if isinstance(history, dict) else []
-        if isinstance(worker_paths, dict) and isinstance(wave_facts, list):
-            for wave in wave_facts:
-                if not isinstance(wave, dict) or wave.get("memory_exceeded") is not True:
-                    continue
-                workers = wave.get("workers", ())
-                if not isinstance(workers, list):
-                    continue
-                heavy_workers = [
-                    worker
-                    for worker in workers
-                    if isinstance(worker, str) and worker.startswith("heavy-")
-                ]
-                if len(heavy_workers) != 1:
-                    continue
-                paths = worker_paths.get(heavy_workers[0], ())
-                if isinstance(paths, list):
-                    memory_serial_paths.update(path for path in paths if isinstance(path, str))
-        persisted_serial_paths = history.get("memory_serial_paths", ()) if isinstance(history, dict) else ()
-        if not persisted_serial_paths and isinstance(history, dict):
-            legacy_exclusive_paths = history.get("exclusive_paths", ())
-            if isinstance(legacy_exclusive_paths, list):
-                persisted_serial_paths = [
-                    path for path in legacy_exclusive_paths if path not in resource_serial_paths
-                ]
-        if isinstance(persisted_serial_paths, list):
-            memory_serial_paths.update(path for path in persisted_serial_paths if isinstance(path, str))
+        memory_serial_paths = _historical_memory_serial_paths(history, resource_serial_paths)
         node_outcomes = history.get("accepted_node_outcomes") if isinstance(history, dict) else None
         if not isinstance(node_outcomes, dict):
             node_outcomes = history.get("node_outcomes", {}) if isinstance(history, dict) else {}
@@ -305,6 +349,122 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _build_schedules(
+    args: argparse.Namespace,
+    lane_paths: dict[str, tuple[str, ...]],
+    path_weights: dict[str, float],
+    light_slots: int,
+    heavy_waves: Sequence[tuple[WorkerSpec, ...]],
+    resource_history: WorkerResourceHistory,
+    exclusive_paths: frozenset[str],
+) -> list[tuple[tuple[ScheduledWorkerSpec, ...], int]]:
+    """Build ordered schedule waves from light, heavy, and exclusive workers."""
+
+    light_specs = [
+        WorkerSpec(name=f"light-{index}", paths=paths)
+        for index, paths in enumerate(partition_paths(lane_paths["light"], path_weights, light_slots))
+    ]
+    schedules: list[tuple[tuple[ScheduledWorkerSpec, ...], int]] = []
+    if light_specs:
+        schedules.append(
+            (tuple(ScheduledWorkerSpec(spec, 1) for spec in light_specs), args.workers)
+        )
+    conservative_specs: list[WorkerSpec] = []
+    measured_specs: list[WorkerSpec] = []
+    exclusive_schedules: list[tuple[ScheduledWorkerSpec, ...]] = []
+    for wave in heavy_waves:
+        if all(set(spec.paths) <= exclusive_paths for spec in wave):
+            exclusive_schedules.append(tuple(ScheduledWorkerSpec(spec, 1) for spec in wave))
+        elif all(resource_history.peak_for(spec) is not None for spec in wave):
+            measured_specs.extend(wave)
+        else:
+            conservative_specs.extend(wave)
+    if conservative_specs:
+        schedules.append(
+            (
+                tuple(ScheduledWorkerSpec(spec, 1) for spec in conservative_specs),
+                args.heavy_workers,
+            )
+        )
+    if measured_specs:
+        schedules.append(
+            (
+                tuple(
+                    ScheduledWorkerSpec(
+                        spec,
+                        _measured_worker_reservation(resource_history, spec),
+                    )
+                    for spec in measured_specs
+                ),
+                args.workers,
+            )
+        )
+    schedules.extend((schedule, 1) for schedule in exclusive_schedules)
+    return schedules
+
+
+@dataclass(slots=True)
+class _RunOutcome:
+    """Aggregated results from executing every schedule wave."""
+
+    peak_rss_kib: int = 0
+    memory_exceeded: bool = False
+    outputs: dict[str, str] = field(default_factory=dict)
+    reports: list[WorkerReport] = field(default_factory=list)
+    exit_codes: dict[str, int] = field(default_factory=dict)
+    worker_peak_rss_kib: dict[str, int] = field(default_factory=dict)
+    last_active_nodeids: dict[str, str] = field(default_factory=dict)
+    wave_resource_facts: list[dict[str, object]] = field(default_factory=list)
+
+
+def _run_schedules(
+    args: argparse.Namespace,
+    schedules: Sequence[tuple[tuple[ScheduledWorkerSpec, ...], int]],
+    run_root: Path,
+    weights_path: Path,
+) -> _RunOutcome:
+    """Execute each schedule wave in order, stopping early on memory pressure."""
+
+    run = _RunOutcome()
+    for schedule, schedule_worker_limit in schedules:
+        specs = tuple(item.spec for item in schedule)
+        wave_started = time.monotonic()
+        result = run_pytest_schedule(
+            schedule,
+            repo_root=REPO_ROOT,
+            run_root=run_root,
+            weights_path=weights_path,
+            durations=args.durations,
+            max_workers=schedule_worker_limit,
+            reservation_limit_kib=max(
+                1,
+                args.max_rss_mib * 1024 - DEFAULT_CONTROLLER_RESERVE_KIB,
+            ),
+            max_rss_kib=args.max_rss_mib * 1024,
+        )
+        run.peak_rss_kib = max(run.peak_rss_kib, result.peak_rss_kib)
+        run.memory_exceeded = run.memory_exceeded or result.memory_exceeded
+        run.outputs.update(result.outputs)
+        run.exit_codes.update(result.exit_codes)
+        run.worker_peak_rss_kib.update(result.worker_peak_rss_kib)
+        run.reports.extend(result.reports)
+        run.wave_resource_facts.append(
+            {
+                "workers": [spec.name for spec in specs],
+                "max_workers": schedule_worker_limit,
+                "peak_rss_kib": result.peak_rss_kib,
+                "worker_peak_rss_kib": dict(sorted(result.worker_peak_rss_kib.items())),
+                "memory_exceeded": result.memory_exceeded,
+                "elapsed_seconds": time.monotonic() - wave_started,
+            }
+        )
+        if result.memory_exceeded:
+            run.last_active_nodeids.update(result.active_nodeids)
+        if run.memory_exceeded:
+            break
+    return run
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run every inventoried node exactly once with bounded import ownership."""
 
@@ -332,16 +492,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.history_json,
     )
     exclusive_paths = resource_serial_paths | memory_serial_paths
-    peak_rss_kib = 0
-    memory_exceeded = False
-    worker_outputs: dict[str, str] = {}
-    worker_reports: list[WorkerReport] = []
-    worker_exit_codes: dict[str, int] = {}
-    worker_peak_rss_kib: dict[str, int] = {}
-    worker_paths: dict[str, list[str]] = {}
-    worker_specs: dict[str, WorkerSpec] = {}
-    last_active_nodeids: dict[str, str] = {}
-    wave_resource_facts: list[dict[str, object]] = []
     (REPO_ROOT / ".cache" / "pytest").mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="pytest-partition-", dir=REPO_ROOT / ".cache" / "pytest") as raw_run_root:
         run_root = Path(raw_run_root)
@@ -358,88 +508,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             history=resource_history,
             exclusive_paths=exclusive_paths,
         )
-        light_specs = [
-            WorkerSpec(name=f"light-{index}", paths=paths)
-            for index, paths in enumerate(partition_paths(lane_paths["light"], path_weights, light_slots))
-        ]
-        schedules: list[tuple[tuple[ScheduledWorkerSpec, ...], int]] = []
-        if light_specs:
-            schedules.append(
-                (tuple(ScheduledWorkerSpec(spec, 1) for spec in light_specs), args.workers)
-            )
-        conservative_specs: list[WorkerSpec] = []
-        measured_specs: list[WorkerSpec] = []
-        exclusive_schedules: list[tuple[ScheduledWorkerSpec, ...]] = []
-        for wave in heavy_waves:
-            if all(set(spec.paths) <= exclusive_paths for spec in wave):
-                exclusive_schedules.append(tuple(ScheduledWorkerSpec(spec, 1) for spec in wave))
-            elif all(resource_history.peak_for(spec) is not None for spec in wave):
-                measured_specs.extend(wave)
-            else:
-                conservative_specs.extend(wave)
-        if conservative_specs:
-            schedules.append(
-                (
-                    tuple(ScheduledWorkerSpec(spec, 1) for spec in conservative_specs),
-                    args.heavy_workers,
-                )
-            )
-        if measured_specs:
-            schedules.append(
-                (
-                    tuple(
-                        ScheduledWorkerSpec(
-                            spec,
-                            _measured_worker_reservation(resource_history, spec),
-                        )
-                        for spec in measured_specs
-                    ),
-                    args.workers,
-                )
-            )
-        schedules.extend((schedule, 1) for schedule in exclusive_schedules)
+        schedules = _build_schedules(
+            args,
+            lane_paths,
+            path_weights,
+            light_slots,
+            heavy_waves,
+            resource_history,
+            exclusive_paths,
+        )
         worker_specs = {
             item.spec.name: item.spec
             for schedule, _worker_limit in schedules
             for item in schedule
         }
         worker_paths = {name: list(spec.paths) for name, spec in worker_specs.items()}
-        for schedule, schedule_worker_limit in schedules:
-            specs = tuple(item.spec for item in schedule)
-            wave_started = time.monotonic()
-            result = run_pytest_schedule(
-                schedule,
-                repo_root=REPO_ROOT,
-                run_root=run_root,
-                weights_path=weights_path,
-                durations=args.durations,
-                max_workers=schedule_worker_limit,
-                reservation_limit_kib=max(
-                    1,
-                    args.max_rss_mib * 1024 - DEFAULT_CONTROLLER_RESERVE_KIB,
-                ),
-                max_rss_kib=args.max_rss_mib * 1024,
-            )
-            peak_rss_kib = max(peak_rss_kib, result.peak_rss_kib)
-            memory_exceeded = memory_exceeded or result.memory_exceeded
-            worker_outputs.update(result.outputs)
-            worker_exit_codes.update(result.exit_codes)
-            worker_peak_rss_kib.update(result.worker_peak_rss_kib)
-            worker_reports.extend(result.reports)
-            wave_resource_facts.append(
-                {
-                    "workers": [spec.name for spec in specs],
-                    "max_workers": schedule_worker_limit,
-                    "peak_rss_kib": result.peak_rss_kib,
-                    "worker_peak_rss_kib": dict(sorted(result.worker_peak_rss_kib.items())),
-                    "memory_exceeded": result.memory_exceeded,
-                    "elapsed_seconds": time.monotonic() - wave_started,
-                }
-            )
-            if result.memory_exceeded:
-                last_active_nodeids.update(result.active_nodeids)
-            if memory_exceeded:
-                break
+        run = _run_schedules(args, schedules, run_root, weights_path)
+        peak_rss_kib = run.peak_rss_kib
+        memory_exceeded = run.memory_exceeded
+        worker_outputs = run.outputs
+        worker_reports = run.reports
+        worker_exit_codes = run.exit_codes
+        worker_peak_rss_kib = run.worker_peak_rss_kib
+        last_active_nodeids = run.last_active_nodeids
+        wave_resource_facts = run.wave_resource_facts
     for name in sorted(worker_outputs):
         print(f"===== pytest shard {name} =====")
         print(worker_outputs[name], end="" if worker_outputs[name].endswith("\n") else "\n")

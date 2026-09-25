@@ -593,6 +593,23 @@ class FunctionStatus:
 
     def terminal_status(self) -> TerminalStatus:
         """Return the single terminal status for this function."""
+        refusal = self._terminal_refusal_status()
+        if refusal is not None:
+            return refusal
+        if self.error:
+            return TerminalStatus.ERROR
+        if self.timeout:
+            return TerminalStatus.TIMEOUT
+        if self.fallback:
+            return TerminalStatus.FALLBACK
+        if self.uncollected:
+            return TerminalStatus.UNCOLLECTED
+        if self.validation_passed:
+            return TerminalStatus.PASSED
+        return TerminalStatus.UNKNOWN
+
+    def _terminal_refusal_status(self) -> TerminalStatus | None:
+        """Return the refusal/validation-failure status, or None."""
         if self.source_quality_refused:
             return TerminalStatus.SOURCE_QUALITY_REFUSED
         if self.final_quality_refused:
@@ -608,17 +625,7 @@ class FunctionStatus:
             and self.failure_status not in {FailureStatus.TIMEOUT, FailureStatus.ERROR}
         ):
             return TerminalStatus.TAIL_VALIDATION_FAILED
-        if self.error:
-            return TerminalStatus.ERROR
-        if self.timeout:
-            return TerminalStatus.TIMEOUT
-        if self.fallback:
-            return TerminalStatus.FALLBACK
-        if self.uncollected:
-            return TerminalStatus.UNCOLLECTED
-        if self.validation_passed:
-            return TerminalStatus.PASSED
-        return TerminalStatus.UNKNOWN
+        return None
 
     def to_json(self) -> dict[str, Any]:
         """Serialize this function status."""
@@ -722,8 +729,8 @@ def _merge_duplicate_proc_records(records: list[FunctionStatus]) -> list[Functio
     return merged
 
 
-def _update_flags(record: FunctionStatus, line: str) -> None:
-    """Update one function verdict from a structured or fatal transcript line."""
+def _apply_recovered_flags(record: FunctionStatus, line: str) -> None:
+    """Reset verdict fields when a retry-recovered line appears."""
     lowered = line.lower()
     if _RETRY_RECOVERED_RE.search(line) is not None:
         record.validation_passed = True
@@ -745,6 +752,9 @@ def _update_flags(record: FunctionStatus, line: str) -> None:
         record.failure_status = FailureStatus.OK
         record.validation = ValidationStatus.PASSED
 
+
+def _apply_timeout_flags(record: FunctionStatus, line: str, lowered: str) -> None:
+    """Apply timeout markers, stage timeouts, and traceback tracking."""
     timeout_delay_match = _TIMEOUT_DELAY_RE.search(line)
     if timeout_delay_match is not None:
         record.timeout_seconds = float(timeout_delay_match.group("seconds"))
@@ -768,43 +778,54 @@ def _update_flags(record: FunctionStatus, line: str) -> None:
             record.error = True
             record.failure_status = FailureStatus.ERROR
 
+
+def _apply_failure_family_flags(record: FunctionStatus, line: str) -> None:
+    """Apply a structured failure-family line to the record."""
     failure_match = _FAILURE_FAMILY_RE.search(line)
-    if failure_match is not None:
-        failure_status = FailureStatus.from_token(failure_match.group("status"))
-        record.failure_status = failure_status
-        failure_stage = failure_match.group("stage")
-        if failure_stage != "not_set" or record.failure_stage is None:
-            record.failure_stage = failure_stage
-        record.validation = ValidationStatus.from_token(failure_match.group("validation"))
-        if failure_status is FailureStatus.TIMEOUT:
-            record.timeout = True
-        elif failure_status is FailureStatus.ERROR:
-            record.error = True
-        elif failure_status is FailureStatus.VALIDATION_FAILED:
-            record.validation_failed = True
-        if record.validation is ValidationStatus.FAILED:
-            record.validation_failed = True
+    if failure_match is None:
+        return
+    failure_status = FailureStatus.from_token(failure_match.group("status"))
+    record.failure_status = failure_status
+    failure_stage = failure_match.group("stage")
+    if failure_stage != "not_set" or record.failure_stage is None:
+        record.failure_stage = failure_stage
+    record.validation = ValidationStatus.from_token(failure_match.group("validation"))
+    if failure_status is FailureStatus.TIMEOUT:
+        record.timeout = True
+    elif failure_status is FailureStatus.ERROR:
+        record.error = True
+    elif failure_status is FailureStatus.VALIDATION_FAILED:
+        record.validation_failed = True
+    if record.validation is ValidationStatus.FAILED:
+        record.validation_failed = True
 
+
+def _apply_function_info_flags(record: FunctionStatus, line: str) -> None:
+    """Apply a structured function-info line to the record."""
     info_match = _FUNCTION_INFO_RE.search(line)
-    if info_match is not None:
-        attempt = AttemptStatus.from_token(info_match.group("attempt"))
-        record.attempt = attempt
-        record.validation = ValidationStatus.from_token(info_match.group("validation"))
-        if attempt is AttemptStatus.TIMED_OUT:
-            record.timeout = True
-        elif attempt is AttemptStatus.ERROR:
-            record.error = True
-        elif attempt is AttemptStatus.FALLBACK:
-            record.fallback = True
-        elif attempt is AttemptStatus.EMPTY:
-            record.uncollected = True
-        if record.validation is ValidationStatus.PASSED:
-            record.validation_passed = True
-        elif record.validation is ValidationStatus.FAILED:
-            record.validation_failed = True
-        elif record.validation is ValidationStatus.UNCOLLECTED:
-            record.uncollected = True
+    if info_match is None:
+        return
+    attempt = AttemptStatus.from_token(info_match.group("attempt"))
+    record.attempt = attempt
+    record.validation = ValidationStatus.from_token(info_match.group("validation"))
+    if attempt is AttemptStatus.TIMED_OUT:
+        record.timeout = True
+    elif attempt is AttemptStatus.ERROR:
+        record.error = True
+    elif attempt is AttemptStatus.FALLBACK:
+        record.fallback = True
+    elif attempt is AttemptStatus.EMPTY:
+        record.uncollected = True
+    if record.validation is ValidationStatus.PASSED:
+        record.validation_passed = True
+    elif record.validation is ValidationStatus.FAILED:
+        record.validation_failed = True
+    elif record.validation is ValidationStatus.UNCOLLECTED:
+        record.uncollected = True
 
+
+def _apply_marker_flags(record: FunctionStatus, lowered: str) -> None:
+    """Apply free-text verdict markers to the record."""
     if "validation=passed" in lowered or "validation passed" in lowered:
         record.validation_passed = True
     direct_failure_after_clean = "direct validation=failed" in lowered and record.validation_passed
@@ -819,6 +840,16 @@ def _update_flags(record: FunctionStatus, line: str) -> None:
         record.validation_failed = True
     if "uncollected" in lowered:
         record.uncollected = True
+
+
+def _update_flags(record: FunctionStatus, line: str) -> None:
+    """Update one function verdict from a structured or fatal transcript line."""
+    lowered = line.lower()
+    _apply_recovered_flags(record, line)
+    _apply_timeout_flags(record, line, lowered)
+    _apply_failure_family_flags(record, line)
+    _apply_function_info_flags(record, line)
+    _apply_marker_flags(record, lowered)
 
 
 def _parse_run_summary_line(run_summary: dict[str, Any], line: str) -> None:
@@ -1174,25 +1205,11 @@ def _conditional_break_matches(
     )
 
 
-def _evaluate_source_contract(
-    contract: FunctionCallContract,
-    emitted_c: str | None,
-    *,
-    call_name_aliases: Mapping[str, str] | None = None,
-) -> SourceContractResult:
-    """Compare one generated function against its source-call acceptance contract."""
-    if emitted_c is None:
-        return SourceContractResult(passed=False, parse_error="generated C block missing")
-    try:
-        observations, null_arguments, conditional_breaks = (
-            _parse_generated_contract_observations(
-                contract.name,
-                emitted_c,
-            )
-        )
-    except (ParseError, ValueError) as ex:
-        return SourceContractResult(passed=False, parse_error=str(ex))
-
+def _normalized_contract_observations_8616(
+    observations: list[CallObservation],
+    call_name_aliases: Mapping[str, str] | None,
+) -> dict[str, list[tuple[int, CallObservation]]]:
+    """Group observations by alias-normalized call name."""
     observations_by_name: dict[str, list[tuple[int, CallObservation]]] = {}
     for index, observation in enumerate(observations):
         normalized_name = (call_name_aliases or {}).get(observation.name, observation.name)
@@ -1206,7 +1223,15 @@ def _evaluate_source_contract(
         observations_by_name.setdefault(normalized_name, []).append(
             (index, normalized_observation)
         )
+    return observations_by_name
 
+
+def _check_call_requirements_8616(
+    contract: FunctionCallContract,
+    observations_by_name: dict[str, list[tuple[int, CallObservation]]],
+    null_arguments: object,
+) -> tuple[list[str], list[str], list[str], set[str]]:
+    """Return missing/count/argument mismatches plus the expected-name set."""
     missing_calls: list[str] = []
     count_mismatches: list[str] = []
     argument_mismatches: list[str] = []
@@ -1229,6 +1254,33 @@ def _evaluate_source_contract(
             argument_mismatches.append(
                 f"{requirement.name}[{occurrence}]: expected=({expected_text}) actual=({actual_text})"
             )
+    return missing_calls, count_mismatches, argument_mismatches, expected_names
+
+
+def _evaluate_source_contract(
+    contract: FunctionCallContract,
+    emitted_c: str | None,
+    *,
+    call_name_aliases: Mapping[str, str] | None = None,
+) -> SourceContractResult:
+    """Compare one generated function against its source-call acceptance contract."""
+    if emitted_c is None:
+        return SourceContractResult(passed=False, parse_error="generated C block missing")
+    try:
+        observations, null_arguments, conditional_breaks = (
+            _parse_generated_contract_observations(
+                contract.name,
+                emitted_c,
+            )
+        )
+    except (ParseError, ValueError) as ex:
+        return SourceContractResult(passed=False, parse_error=str(ex))
+
+    observations_by_name = _normalized_contract_observations_8616(observations, call_name_aliases)
+
+    missing_calls, count_mismatches, argument_mismatches, expected_names = _check_call_requirements_8616(
+        contract, observations_by_name, null_arguments,
+    )
 
     unexpected_calls = tuple(
         f"{name}: count={len(calls)}"
@@ -1316,58 +1368,60 @@ def _attach_canonical_generated_definitions(
         previous_end = end
 
 
-def parse_status_text(text: str, *, check_source_contracts: bool = False) -> dict[str, Any]:
-    """Parse a decompiler transcript into a deterministic scoreboard."""
-    records: list[FunctionStatus] = []
+@dataclass
+class _StatusParseRun8616:
+    """Mutable transcript-parse state for one status pass."""
+
+    records: list[FunctionStatus] = field(default_factory=list)
     current: FunctionStatus | None = None
     pending_function: tuple[str, str] | None = None
-    run_summary: dict[str, Any] = {}
+    run_summary: dict[str, Any] = field(default_factory=dict)
 
-    for line in text.splitlines():
+    def flush_current(self) -> None:
+        """Append the open record, if any."""
+        if self.current is not None:
+            self.records.append(self.current)
+            self.current = None
+
+    def handle_line(self, line: str) -> None:
+        """Fold one transcript line into records and the run summary."""
         recovery_start_match = _RECOVERY_START_RE.search(line)
         if recovery_start_match is not None:
-            if current is not None:
-                records.append(current)
-                current = None
-            pending_function = (recovery_start_match.group("addr").lower(), recovery_start_match.group("name").strip())
+            self.flush_current()
+            self.pending_function = (recovery_start_match.group("addr").lower(), recovery_start_match.group("name").strip())
         direct_header_match = _DIRECT_FUNCTION_HEADER_RE.search(line)
-        if direct_header_match is not None and current is not None:
+        if direct_header_match is not None and self.current is not None:
             direct_name = direct_header_match.group(2).strip()
-            if current.name == direct_name and (current.timeout or current.error or current.validation_failed):
-                current.lines.append(line)
-                _update_flags(current, line)
-                continue
+            if self.current.name == direct_name and (self.current.timeout or self.current.error or self.current.validation_failed):
+                self.current.lines.append(line)
+                _update_flags(self.current, line)
+                return
         function_header_match = _FUNCTION_HEADER_RE.search(line)
         match = function_header_match or direct_header_match
         if match is not None:
-            if current is not None and not (
-                function_header_match is not None and current.is_recovery_placeholder()
+            if self.current is not None and not (
+                function_header_match is not None and self.current.is_recovery_placeholder()
             ):
-                records.append(current)
-            current = FunctionStatus(addr=match.group(1).lower(), name=match.group(2).strip())
-            pending_function = None
-        elif current is not None and _RUN_SUMMARY_START_RE.search(line):
-            records.append(current)
-            current = None
-            _parse_run_summary_line(run_summary, line)
-            continue
-        elif current is None and pending_function is not None and _FAILURE_FAMILY_RE.search(line) is not None:
-            current = FunctionStatus(addr=pending_function[0], name=pending_function[1])
-            pending_function = None
-        elif current is None:
-            _parse_run_summary_line(run_summary, line)
-        if current is None:
-            continue
-        current.lines.append(line)
-        _update_flags(current, line)
+                self.records.append(self.current)
+            self.current = FunctionStatus(addr=match.group(1).lower(), name=match.group(2).strip())
+            self.pending_function = None
+        elif self.current is not None and _RUN_SUMMARY_START_RE.search(line):
+            self.flush_current()
+            _parse_run_summary_line(self.run_summary, line)
+            return
+        elif self.current is None and self.pending_function is not None and _FAILURE_FAMILY_RE.search(line) is not None:
+            self.current = FunctionStatus(addr=self.pending_function[0], name=self.pending_function[1])
+            self.pending_function = None
+        elif self.current is None:
+            _parse_run_summary_line(self.run_summary, line)
+        if self.current is None:
+            return
+        self.current.lines.append(line)
+        _update_flags(self.current, line)
 
-    if current is not None:
-        records.append(current)
 
-    records = _merge_duplicate_proc_records(records)
-    _attach_canonical_generated_definitions(records, text)
-    if check_source_contracts:
-        _apply_sortdemo_source_contracts(records)
+def _scoreboard_summary_8616(records: list[FunctionStatus]) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
+    """Return (status counts, failure-stage counts) for merged records."""
     summary: dict[str, int] = {"total": len(records)}
     failure_stages: dict[str, dict[str, int]] = {}
     for record in records:
@@ -1377,6 +1431,23 @@ def parse_status_text(text: str, *, check_source_contracts: bool = False) -> dic
         if stage:
             stages_for_status = failure_stages.setdefault(status, {})
             stages_for_status[stage] = stages_for_status.get(stage, 0) + 1
+    return summary, failure_stages
+
+
+def parse_status_text(text: str, *, check_source_contracts: bool = False) -> dict[str, Any]:
+    """Parse a decompiler transcript into a deterministic scoreboard."""
+    run = _StatusParseRun8616()
+    for line in text.splitlines():
+        run.handle_line(line)
+    run.flush_current()
+    records = run.records
+    run_summary = run.run_summary
+
+    records = _merge_duplicate_proc_records(records)
+    _attach_canonical_generated_definitions(records, text)
+    if check_source_contracts:
+        _apply_sortdemo_source_contracts(records)
+    summary, failure_stages = _scoreboard_summary_8616(records)
     functions = [record.to_json() for record in records]
     source_contract_records = [record for record in records if record.source_contract is not None]
     source_contract_summary = {

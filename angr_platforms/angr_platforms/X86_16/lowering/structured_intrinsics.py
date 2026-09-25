@@ -112,13 +112,10 @@ def _insert_value_width_bits_8616(value: object) -> int | None:
     return _expression_width_bits_8616(value)
 
 
-def lower_structured_insert_call_8616(
-    call: object,
-) -> structured_c.CExpression | None:
-    """Lower one x86 little-endian Insert intrinsic to exact bit operations."""
-    if not is_structured_insert_intrinsic_8616(call):
-        return None
-    assert isinstance(call, structured_c.CFunctionCall)
+def _decoded_insert_operands_8616(
+    call: structured_c.CFunctionCall,
+) -> tuple[object, int, object, int, int] | None:
+    """Validate Insert operands; return (base, shift, value, base_width, value_width)."""
     raw_args: object = call.args
     if not isinstance(raw_args, (list, tuple)):
         return None
@@ -142,6 +139,20 @@ def lower_structured_insert_call_8616(
     shift = offset.value * 8
     if shift < 0 or shift + value_width > base_width:
         return None
+    return base, shift, value, base_width, value_width
+
+
+def lower_structured_insert_call_8616(
+    call: object,
+) -> structured_c.CExpression | None:
+    """Lower one x86 little-endian Insert intrinsic to exact bit operations."""
+    if not is_structured_insert_intrinsic_8616(call):
+        return None
+    assert isinstance(call, structured_c.CFunctionCall)
+    decoded = _decoded_insert_operands_8616(call)
+    if decoded is None:
+        return None
+    base, shift, value, base_width, value_width = decoded
 
     base_type = base.type if isinstance(base, structured_c.CExpression) and isinstance(base.type, SimType) else None
     operation_type = base_type or SimTypeShort(False)
@@ -255,6 +266,58 @@ def _unused_insert_statement_8616(
     return expression
 
 
+def _insert_identity_occurrence_counts_8616(root: object) -> dict[int, int]:
+    """Count uses of each unified variable identity under the root."""
+    counts: dict[int, int] = {}
+    for node in _iter_c_node_occurrences_8616(root):
+        if isinstance(node, structured_c.CVariable):
+            identity = node.unified_variable or node.variable
+            identity_id = id(identity)
+            counts[identity_id] = counts.get(identity_id, 0) + 1
+    return counts
+
+
+def _insert_statement_lists_8616(root: object) -> list[structured_c.CStatements]:
+    """Collect each distinct statement-list node reachable under the root."""
+    statement_lists: list[structured_c.CStatements] = []
+    seen_statement_list_ids: set[int] = set()
+    for node in (root, *_iter_c_nodes_deep_8616(root)):
+        if not isinstance(node, structured_c.CStatements) or id(node) in seen_statement_list_ids:
+            continue
+        seen_statement_list_ids.add(id(node))
+        statement_lists.append(node)
+    return statement_lists
+
+
+def _prune_statement_list_8616(
+    statements_node: structured_c.CStatements,
+    identity_occurrence_counts: dict[int, int],
+) -> tuple[int, int, bool]:
+    """Drop unused Insert statements; return (raw, dropped, changed)."""
+    raw_count = 0
+    dropped_count = 0
+    old_statements = list(statements_node.statements or ())
+    new_statements: list[object] = []
+    for statement in old_statements:
+        if isinstance(statement, structured_c.CExpressionStatement):
+            expression = statement.expr
+        elif isinstance(statement, structured_c.CAssignment):
+            expression = statement.rhs
+        else:
+            expression = statement
+        if is_structured_insert_intrinsic_8616(expression):
+            raw_count += 1
+        intrinsic = _unused_insert_statement_8616(statement, identity_occurrence_counts)
+        if intrinsic is None:
+            new_statements.append(statement)
+            continue
+        dropped_count += 1
+    if len(new_statements) != len(old_statements):
+        statements_node.statements = new_statements
+        return raw_count, dropped_count, True
+    return raw_count, dropped_count, False
+
+
 def prune_unused_structured_insert_intrinsics_8616(codegen: object) -> bool:
     """Remove pure standalone Insert pseudo-calls whose values are unused."""
     typed_codegen = cast(_CodegenStructuredIntrinsics8616, codegen)
@@ -268,42 +331,17 @@ def prune_unused_structured_insert_intrinsics_8616(codegen: object) -> bool:
 
     raw_count = 0
     classified_count = 0
-    materialized_count = 0
     changed = False
-    identity_occurrence_counts: dict[int, int] = {}
-    for node in _iter_c_node_occurrences_8616(root):
-        if isinstance(node, structured_c.CVariable):
-            identity = node.unified_variable or node.variable
-            identity_id = id(identity)
-            identity_occurrence_counts[identity_id] = identity_occurrence_counts.get(identity_id, 0) + 1
-    statement_lists: list[structured_c.CStatements] = []
-    seen_statement_list_ids: set[int] = set()
-    for node in (root, *_iter_c_nodes_deep_8616(root)):
-        if not isinstance(node, structured_c.CStatements) or id(node) in seen_statement_list_ids:
-            continue
-        seen_statement_list_ids.add(id(node))
-        statement_lists.append(node)
-    for statements_node in statement_lists:
-        old_statements = list(statements_node.statements or ())
-        new_statements: list[object] = []
-        for statement in old_statements:
-            if isinstance(statement, structured_c.CExpressionStatement):
-                expression = statement.expr
-            elif isinstance(statement, structured_c.CAssignment):
-                expression = statement.rhs
-            else:
-                expression = statement
-            if is_structured_insert_intrinsic_8616(expression):
-                raw_count += 1
-            intrinsic = _unused_insert_statement_8616(statement, identity_occurrence_counts)
-            if intrinsic is None:
-                new_statements.append(statement)
-                continue
-            classified_count += 1
-            materialized_count += 1
-            changed = True
-        if len(new_statements) != len(old_statements):
-            statements_node.statements = new_statements
+    identity_occurrence_counts = _insert_identity_occurrence_counts_8616(root)
+    for statements_node in _insert_statement_lists_8616(root):
+        raw, dropped, list_changed = _prune_statement_list_8616(
+            statements_node,
+            identity_occurrence_counts,
+        )
+        raw_count += raw
+        classified_count += dropped
+        changed = changed or list_changed
+    materialized_count = classified_count
 
     typed_codegen._inertia_structured_intrinsic_lowering_stats_8616 = (
         StructuredIntrinsicLoweringStats8616(

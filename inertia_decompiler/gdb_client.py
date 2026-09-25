@@ -266,49 +266,52 @@ class GDBClient:
     # -- low-level packet I/O ----------------------------------------------
 
     async def _read_packet(self) -> str:
-        async def _impl() -> str:
-            """Read one RSP packet (handles $...#cc and acks)."""
-            assert self._reader is not None
-            while True:
-                ch = await self._reader.read(1)
-                if not ch:
+        """Read one RSP packet (handles $...#cc and acks)."""
+        assert self._reader is not None
+        while True:
+            ch = await self._reader.read(1)
+            if not ch:
+                raise GDBClientError("Connection closed")
+            if ch == b"$":
+                break
+            if ch == b"+":
+                continue  # ack – skip  # noqa: RUF003
+
+        data = await self._read_packet_payload()
+
+        # Read checksum
+        cc = (await self._reader.read(2)).decode("ascii", errors="replace")
+        expected = _checksum(data.decode("ascii", errors="replace"))
+
+        # Send ack
+        assert self._writer is not None
+        if cc == expected:
+            self._writer.write(b"+")
+        else:
+            self._writer.write(b"-")
+        await self._writer.drain()
+
+        return data.decode("ascii", errors="replace")
+
+    async def _read_packet_payload(self) -> bytearray:
+        """Read the payload bytes up to the checksum marker."""
+        assert self._reader is not None
+        data = bytearray()
+        while True:
+            b = await self._reader.read(1)
+            if not b:
+                raise GDBClientError("Connection closed")
+            if b == b"#":
+                break
+            if b == b"}":
+                # escaped byte – next byte is XOR 0x20  # noqa: RUF003
+                esc = await self._reader.read(1)
+                if not esc:
                     raise GDBClientError("Connection closed")
-                if ch == b"$":
-                    break
-                if ch == b"+":
-                    continue  # ack – skip  # noqa: RUF003
-
-            data = bytearray()
-            while True:
-                b = await self._reader.read(1)
-                if not b:
-                    raise GDBClientError("Connection closed")
-                if b == b"#":
-                    break
-                if b == b"}":
-                    # escaped byte – next byte is XOR 0x20  # noqa: RUF003
-                    esc = await self._reader.read(1)
-                    if not esc:
-                        raise GDBClientError("Connection closed")
-                    data.append(esc[0] ^ 0x20)
-                else:
-                    data.append(b[0])
-
-            # Read checksum
-            cc = (await self._reader.read(2)).decode("ascii", errors="replace")
-            expected = _checksum(data.decode("ascii", errors="replace"))
-
-            # Send ack
-            assert self._writer is not None
-            if cc == expected:
-                self._writer.write(b"+")
+                data.append(esc[0] ^ 0x20)
             else:
-                self._writer.write(b"-")
-            await self._writer.drain()
-
-            return data.decode("ascii", errors="replace")
-
-        return await _impl()
+                data.append(b[0])
+        return data
 
     async def _send_packet(self, data: str) -> str:
         """Send packet and return reply."""
@@ -321,78 +324,84 @@ class GDBClient:
     # -- stop reply parsing -----------------------------------------------
 
     def _parse_stop_reply(self, reply: str) -> StopInfo:
-        def _impl() -> StopInfo:
-            info = StopInfo()
-            if not reply:
-                return info
-
-            if reply.startswith("S"):
-                # Sxx  – signal  # noqa: RUF003
-                with contextlib.suppress(ValueError):
-                    info.signal = int(reply[1:3], 16)
-                mapping = {
-                    0x02: StopReason.SIGINT,
-                    0x04: StopReason.SIGILL,
-                    0x05: StopReason.SIGTRAP,
-                    0x08: StopReason.SIGFPE,
-                    0x0B: StopReason.SIGSEGV,
-                }
-                info.reason = mapping.get(info.signal, StopReason.UNKNOWN)
-                # Optional key:value pairs after signal
-                if ";" in reply:
-                    for kv in reply[3:].split(";"):
-                        if "=" in kv:
-                            k, v = kv.split("=", 1)
-                            info.frame[k] = v
-                        elif k == "thread":
-                            info.thread = v
-
-            elif reply.startswith("T"):
-                # Txx  – signal with extra info  # noqa: RUF003
-                with contextlib.suppress(ValueError):
-                    info.signal = int(reply[1:3], 16)
-                mapping = {
-                    0x02: StopReason.SIGINT,
-                    0x04: StopReason.SIGILL,
-                    0x05: StopReason.SIGTRAP,
-                    0x08: StopReason.SIGFPE,
-                    0x0B: StopReason.SIGSEGV,
-                }
-                info.reason = mapping.get(info.signal, StopReason.UNKNOWN)
-                for kv in reply[3:].split(";"):
-                    if "=" in kv:
-                        k, v = kv.split("=", 1)
-                        info.frame[k] = v
-                    elif kv.startswith("thread:"):
-                        info.thread = kv[7:]
-                    elif kv.startswith("watch:"):
-                        with contextlib.suppress(ValueError):
-                            info.watch_addr = int(kv[6:], 16)
-
-            elif reply.startswith("W"):
-                info.reason = StopReason.EXITED
-                with contextlib.suppress(ValueError):
-                    info.signal = int(reply[1:3], 16)
-            elif reply.startswith("X"):
-                info.reason = StopReason.SIGNALLED
-                with contextlib.suppress(ValueError):
-                    info.signal = int(reply[1:3], 16)
-            elif reply.startswith("O"):
-                # Console output
-                hex_out = reply[1:]
-                try:
-                    text = bytes.fromhex(hex_out).decode("utf-8", errors="replace")
-                    if self._on_output:
-                        self._on_output(text)
-                except ValueError:
-                    pass
-
-            self._stopped = True
-            if self._on_stop:
-                self._on_stop(info)
+        info = StopInfo()
+        if not reply:
             return info
+        self._apply_stop_reply(info, reply)
+        self._stopped = True
+        if self._on_stop:
+            self._on_stop(info)
+        return info
 
-        return _impl()
+    def _apply_stop_reply(self, info: StopInfo, reply: str) -> None:
+        """Decode one RSP stop reply letter into typed stop fields."""
+        if reply.startswith("S"):
+            # Sxx  – signal  # noqa: RUF003
+            self._apply_signal_reason(info, reply)
+            # Optional key:value pairs after signal
+            if ";" in reply:
+                self._apply_s_fields(info, reply)
+        elif reply.startswith("T"):
+            # Txx  – signal with extra info  # noqa: RUF003
+            self._apply_signal_reason(info, reply)
+            self._apply_t_fields(info, reply)
+        elif reply.startswith("W"):
+            info.reason = StopReason.EXITED
+            with contextlib.suppress(ValueError):
+                info.signal = int(reply[1:3], 16)
+        elif reply.startswith("X"):
+            info.reason = StopReason.SIGNALLED
+            with contextlib.suppress(ValueError):
+                info.signal = int(reply[1:3], 16)
+        elif reply.startswith("O"):
+            self._apply_console_output(reply)
+
+    @staticmethod
+    def _apply_s_fields(info: StopInfo, reply: str) -> None:
+        """Decode optional key:value pairs after an Sxx signal."""
+        for kv in reply[3:].split(";"):
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                info.frame[k] = v
+            elif k == "thread":
+                info.thread = v
+
+    @staticmethod
+    def _apply_t_fields(info: StopInfo, reply: str) -> None:
+        """Decode the key:value fields after a Txx signal."""
+        for kv in reply[3:].split(";"):
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                info.frame[k] = v
+            elif kv.startswith("thread:"):
+                info.thread = kv[7:]
+            elif kv.startswith("watch:"):
+                with contextlib.suppress(ValueError):
+                    info.watch_addr = int(kv[6:], 16)
+
+    @staticmethod
+    def _apply_signal_reason(info: StopInfo, reply: str) -> None:
+        """Decode the S/T signal byte into a typed stop reason."""
+        with contextlib.suppress(ValueError):
+            info.signal = int(reply[1:3], 16)
+        mapping = {
+            0x02: StopReason.SIGINT,
+            0x04: StopReason.SIGILL,
+            0x05: StopReason.SIGTRAP,
+            0x08: StopReason.SIGFPE,
+            0x0B: StopReason.SIGSEGV,
+        }
+        info.reason = mapping.get(info.signal, StopReason.UNKNOWN)
+
+    def _apply_console_output(self, reply: str) -> None:
+        """Forward an O console-output packet to the output hook."""
+        hex_out = reply[1:]
+        try:
+            text = bytes.fromhex(hex_out).decode("utf-8", errors="replace")
+            if self._on_output:
+                self._on_output(text)
+        except ValueError:
+            pass
 
     # -- execution control -------------------------------------------------
 
