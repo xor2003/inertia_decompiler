@@ -17,7 +17,8 @@ from __future__ import annotations
 import logging
 import os
 from collections import Counter
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -796,6 +797,78 @@ def _c_statement_container_shapes_8616(
     return shapes
 
 
+def _walk_c_statement_paths_8616(
+    current: object,
+    path: tuple[str, ...],
+    paths: dict[int, tuple[str, ...]],
+    seen: set[int],
+) -> None:
+    """Record the structured-C parent path for each reachable statement."""
+    if current is None:
+        return
+    if isinstance(current, structured_c.CStatements):
+        statements = _c_statements_items_8616(current)
+        for index, child in enumerate(statements):
+            _walk_c_statement_paths_8616(child, (*path, f"CStatements[{index}]"), paths, seen)
+        return
+    if not isinstance(current, structured_c.CStatement):
+        return
+    marker = id(current)
+    if marker in seen:
+        return
+    seen.add(marker)
+    paths[marker] = (*path, type(current).__name__)
+    if isinstance(current, structured_c.CIfElse):
+        for index, (_, branch) in enumerate(_c_ifelse_pairs_8616(current)):
+            _walk_c_statement_paths_8616(branch, (*paths[marker], f"if_branch[{index}]"), paths, seen)
+        _walk_c_statement_paths_8616(current.else_node, (*paths[marker], "else"), paths, seen)
+        return
+    for attr in ("body", "default"):
+        _walk_c_statement_paths_8616(getattr(current, attr, None), (*paths[marker], attr), paths, seen)
+    for index, (_, case_body) in enumerate(_c_switch_cases_8616(current)):
+        _walk_c_statement_paths_8616(case_body, (*paths[marker], f"case[{index}]"), paths, seen)
+
+
+@dataclass(slots=True)
+class _CStatementOwnership8616:
+    """Address/provenance ownership maps built during one statement walk."""
+
+    by_addr: dict[int, list[structured_c.CStatement]] = field(default_factory=dict)
+    by_key: dict[tuple[str, int, int], list[structured_c.CStatement]] = field(default_factory=dict)
+
+    def _record(self, owner: structured_c.CStatement, stmt: structured_c.CStatement) -> None:
+        for ins_addr in _c_statement_owned_ins_addrs_8616(stmt):
+            self.by_addr.setdefault(ins_addr, []).append(owner)
+        for key in _c_statement_owned_provenance_keys_8616(stmt):
+            self.by_key.setdefault(key, []).append(owner)
+
+    def visit(
+        self,
+        current: object,
+        positioned_owner: structured_c.CStatement | None,
+        statement_positions: dict[int, tuple[list[object], int]],
+    ) -> None:
+        """Attribute each statement to the nearest positioned owner."""
+        if isinstance(current, structured_c.CStatements):
+            for child in _c_statements_items_8616(current):
+                self.visit(child, positioned_owner, statement_positions)
+            return
+        if not isinstance(current, structured_c.CStatement):
+            return
+        owner = current if id(current) in statement_positions else positioned_owner
+        if owner is not None:
+            self._record(owner, current)
+        if isinstance(current, structured_c.CIfElse):
+            for _, branch in _c_ifelse_pairs_8616(current):
+                self.visit(branch, owner, statement_positions)
+            self.visit(current.else_node, owner, statement_positions)
+            return
+        for attr in ("body", "default"):
+            self.visit(getattr(current, attr, None), owner, statement_positions)
+        for _, case_body in _c_switch_cases_8616(current):
+            self.visit(case_body, owner, statement_positions)
+
+
 def _c_statement_parent_paths_8616(
     codegen: object,
 ) -> dict[int, tuple[str, ...]]:
@@ -803,33 +876,7 @@ def _c_statement_parent_paths_8616(
     root = getattr(cfunc, "statements", None) if cfunc is not None else None
     paths: dict[int, tuple[str, ...]] = {}
     seen: set[int] = set()
-
-    def _visit(current: object, path: tuple[str, ...]) -> None:
-        if current is None:
-            return
-        if isinstance(current, structured_c.CStatements):
-            statements = _c_statements_items_8616(current)
-            for index, child in enumerate(statements):
-                _visit(child, (*path, f"CStatements[{index}]"))
-            return
-        if not isinstance(current, structured_c.CStatement):
-            return
-        marker = id(current)
-        if marker in seen:
-            return
-        seen.add(marker)
-        paths[marker] = (*path, type(current).__name__)
-        if isinstance(current, structured_c.CIfElse):
-            for index, (_, branch) in enumerate(_c_ifelse_pairs_8616(current)):
-                _visit(branch, (*paths[marker], f"if_branch[{index}]"))
-            _visit(current.else_node, (*paths[marker], "else"))
-            return
-        for attr in ("body", "default"):
-            _visit(getattr(current, attr, None), (*paths[marker], attr))
-        for index, (_, case_body) in enumerate(_c_switch_cases_8616(current)):
-            _visit(case_body, (*paths[marker], f"case[{index}]"))
-
-    _visit(root, ("root",))
+    _walk_c_statement_paths_8616(root, ("root",), paths, seen)
     return paths
 
 
@@ -841,37 +888,11 @@ def _c_positioned_statement_ownership_8616(
     dict[tuple[str, int, int], tuple[structured_c.CStatement, ...]],
 ]:
     top_level_statements = _top_level_c_statements_8616(codegen)
-    statements_by_addr: dict[int, list[structured_c.CStatement]] = {}
-    statements_by_key: dict[tuple[str, int, int], list[structured_c.CStatement]] = {}
-
-    def _record(owner: structured_c.CStatement, stmt: structured_c.CStatement) -> None:
-        for ins_addr in _c_statement_owned_ins_addrs_8616(stmt):
-            statements_by_addr.setdefault(ins_addr, []).append(owner)
-        for key in _c_statement_owned_provenance_keys_8616(stmt):
-            statements_by_key.setdefault(key, []).append(owner)
-
-    def _visit(current: object, positioned_owner: structured_c.CStatement | None) -> None:
-        if isinstance(current, structured_c.CStatements):
-            for child in _c_statements_items_8616(current):
-                _visit(child, positioned_owner)
-            return
-        if not isinstance(current, structured_c.CStatement):
-            return
-        owner = current if id(current) in statement_positions else positioned_owner
-        if owner is not None:
-            _record(owner, current)
-        if isinstance(current, structured_c.CIfElse):
-            for _, branch in _c_ifelse_pairs_8616(current):
-                _visit(branch, owner)
-            _visit(current.else_node, owner)
-            return
-        for attr in ("body", "default"):
-            _visit(getattr(current, attr, None), owner)
-        for _, case_body in _c_switch_cases_8616(current):
-            _visit(case_body, owner)
-
+    ownership = _CStatementOwnership8616()
     for top_level_statement in top_level_statements:
-        _visit(top_level_statement, None)
+        ownership.visit(top_level_statement, None, statement_positions)
+    statements_by_addr = ownership.by_addr
+    statements_by_key = ownership.by_key
     return (
         {
             addr: _dedupe_c_statements_by_identity_8616(tuple(statements))
@@ -939,6 +960,20 @@ def _statement_scope_debug_summary_8616(
     return tuple(result)
 
 
+def _owner_node_position_8616(
+    statements_node_positions: dict[int, tuple[list[object], int]],
+    container: list[object],
+) -> tuple[list[object], int] | None:
+    """Find the CStatements node whose ``statements`` list is ``container``."""
+    for node_id, position in statements_node_positions.items():
+        candidate_parent, candidate_index = position
+        if 0 <= candidate_index < len(candidate_parent) and id(candidate_parent[candidate_index]) == node_id:
+            candidate_node = candidate_parent[candidate_index]
+            if isinstance(candidate_node, structured_c.CStatements) and candidate_node.statements is container:
+                return (candidate_parent, int(candidate_index))
+    return None
+
+
 def _statement_container_parent_span_8616(
     covered_statements: tuple[structured_c.CStatement, ...],
     statement_positions: dict[int, tuple[list[object], int]],
@@ -958,14 +993,7 @@ def _statement_container_parent_span_8616(
 
     parent_positions: list[tuple[list[object], int, list[object], int, int, int]] = []
     for container_id, container in container_by_id.items():
-        owner_node_position = None
-        for node_id, position in statements_node_positions.items():
-            candidate_parent, candidate_index = position
-            if 0 <= candidate_index < len(candidate_parent) and id(candidate_parent[candidate_index]) == node_id:
-                candidate_node = candidate_parent[candidate_index]
-                if isinstance(candidate_node, structured_c.CStatements) and candidate_node.statements is container:
-                    owner_node_position = (candidate_parent, int(candidate_index))
-                    break
+        owner_node_position = _owner_node_position_8616(statements_node_positions, container)
         if owner_node_position is None:
             return None
         indexes = covered_by_container[container_id]
@@ -1174,6 +1202,45 @@ def _top_level_c_statements_8616(codegen: object) -> tuple[structured_c.CStateme
     )
 
 
+def _switch_case_target_regions_8616(graph: RegionGraph) -> list[Region]:
+    """Collect switch case and default regions hidden outside graph nodes."""
+    regions: list[Region] = []
+    for switch_region in _typed_edge_switch_regions_8616(graph):
+        for case_region in _metadata_regions_8616(switch_region.metadata.get("switch_candidates")):
+            regions.append(case_region)  # noqa: PERF402
+        default_region = switch_region.metadata.get("switch_default_target")
+        if isinstance(default_region, Region):
+            regions.append(default_region)
+    return regions
+
+
+def _populate_linear_region_statements_8616(
+    region: Region,
+    statements_by_addr: dict[int, tuple[structured_c.CStatement, ...]],
+    statements_by_key: dict[tuple[str, int, int], tuple[structured_c.CStatement, ...]],
+) -> bool:
+    """Attach owned statements to one empty linear region; return success."""
+    if region.region_type != RegionType.Linear or region.block_addr is None:
+        return False
+    if _region_raw_statements_8616(region):
+        return False
+    region_keys = _metadata_provenance_keys_8616(region.metadata.get("region_statement_provenance_keys"))
+    region_addrs = _metadata_ints_8616(region.metadata.get("region_statement_ins_addrs"))
+    if not region_addrs:
+        region_addrs = (int(region.block_addr),)
+    statements = tuple(stmt for key in region_keys for stmt in statements_by_key.get(key, ()))
+    if not statements:
+        statements = tuple(
+            stmt
+            for addr in region_addrs
+            for stmt in statements_by_addr.get(int(addr), ())
+        )
+    if not statements:
+        return False
+    region.statements.extend(statements)
+    return True
+
+
 def _populate_region_statements_from_cfunc_8616(graph: RegionGraph, codegen: object) -> int:
     """Attach exact-address C statements to empty linear regions.
 
@@ -1187,34 +1254,13 @@ def _populate_region_statements_from_cfunc_8616(graph: RegionGraph, codegen: obj
         return 0
 
     regions: list[Region] = list(graph.nodes)
-    for switch_region in _typed_edge_switch_regions_8616(graph):
-        for case_region in _metadata_regions_8616(switch_region.metadata.get("switch_candidates")):
-            regions.append(case_region)  # noqa: PERF402
-        default_region = switch_region.metadata.get("switch_default_target")
-        if isinstance(default_region, Region):
-            regions.append(default_region)
+    regions.extend(_switch_case_target_regions_8616(graph))
 
     populated = 0
     for region in sorted(dict.fromkeys(regions), key=lambda item: int(item.region_id or 0)):
-        if region.region_type != RegionType.Linear or region.block_addr is None:
-            continue
-        if _region_raw_statements_8616(region):
-            continue
-        region_keys = _metadata_provenance_keys_8616(region.metadata.get("region_statement_provenance_keys"))
-        region_addrs = _metadata_ints_8616(region.metadata.get("region_statement_ins_addrs"))
-        if not region_addrs:
-            region_addrs = (int(region.block_addr),)
-        statements = tuple(stmt for key in region_keys for stmt in statements_by_key.get(key, ()))
-        if not statements:
-            statements = tuple(
-                stmt
-                for addr in region_addrs
-                for stmt in statements_by_addr.get(int(addr), ())
-            )
-        if not statements:
-            continue
-        region.statements.extend(statements)
-        populated += 1
+        populated += int(
+            _populate_linear_region_statements_8616(region, statements_by_addr, statements_by_key)
+        )
     return populated
 
 
@@ -1546,6 +1592,143 @@ def _retag_cloned_callsite_8616(
     )
 
 
+def _collect_condition_call_occurrences_8616(
+    block: structured_c.CStatements,
+    occurrences_by_call: dict[int, list[tuple[_ConditionRoot8616, structured_c.CFunctionCall]]],
+    seen_statement_lists: set[int],
+) -> None:
+    """Collect condition calls in deterministic structured execution order."""
+    statements = block.statements
+    if not isinstance(statements, list) or id(statements) in seen_statement_lists:
+        return
+    seen_statement_lists.add(id(statements))
+    for statement in statements:
+        if not isinstance(
+            statement,
+            (structured_c.CStatement, structured_c.CDirtyStatement),
+        ):
+            raise TypeError(
+                "angr CStatements contains a non-CStatement value: "
+                f"{type(statement).__module__}.{type(statement).__qualname__}"
+            )
+        for condition_root in _condition_roots_8616(statement):
+            for call in _expression_calls_8616(condition_root.expression):
+                occurrences_by_call.setdefault(id(call), []).append((condition_root, call))
+        for child, _control_path in _iter_child_statement_paths_8616(statement, ()):
+            _collect_condition_call_occurrences_8616(child, occurrences_by_call, seen_statement_lists)
+
+
+def _clone_occurrence_conditions_8616(
+    occurrences: list[tuple[_ConditionRoot8616, structured_c.CFunctionCall]],
+    existing_summary: CallsiteSummary8616,
+    candidates: tuple[CallsiteSummary8616, ...],
+) -> list[
+    tuple[
+        _ConditionRoot8616,
+        structured_c.CExpression,
+        structured_c.CFunctionCall,
+        CallsiteSummary8616,
+    ]
+]:
+    """Clone each extra occurrence's condition and retag its callsite."""
+    replacements: list[
+        tuple[
+            _ConditionRoot8616,
+            structured_c.CExpression,
+            structured_c.CFunctionCall,
+            CallsiteSummary8616,
+        ]
+    ] = []
+    for (condition_root, original), summary in zip(
+        occurrences[1:],
+        candidates[1:],
+        strict=True,
+    ):
+        clone_memo: dict[int, object] = {}
+        cloned_condition = _clone_c_ast_tree_8616(
+            condition_root.expression,
+            clone_memo,
+        )
+        clone = clone_memo.get(id(original))
+        if not isinstance(cloned_condition, structured_c.CExpression) or not isinstance(
+            clone,
+            structured_c.CFunctionCall,
+        ):
+            return []
+        _retag_cloned_callsite_8616(clone, existing_summary, summary)
+        replacements.append((condition_root, cloned_condition, clone, summary))
+    return replacements
+
+
+def _split_call_occurrences_8616(
+    call_id: int,
+    occurrences: list[tuple[_ConditionRoot8616, structured_c.CFunctionCall]],
+    summary_map: dict[int, CallsiteSummary8616],
+    inventory: Mapping[int, CallsiteSummary8616],
+    represented_elsewhere: set[int],
+    stats: DistinctConditionCallOccurrenceStats8616,
+    debug_groups: list[tuple[int, int, int | None, tuple[int, ...], str]],
+) -> bool:
+    """Split one call's occurrences; return True when materialized."""
+    if len(occurrences) < 2:
+        return False
+    stats.raw_fact_count += 1
+    existing_summary = summary_map.get(call_id)
+    if existing_summary is None or not isinstance(existing_summary.target_addr, int):
+        stats.failure_count += 1
+        debug_groups.append((call_id, len(occurrences), None, (), "missing-summary"))
+        return False
+    candidates = tuple(
+        summary
+        for callsite_addr, summary in sorted(inventory.items())
+        if summary.target_addr == existing_summary.target_addr
+        and callsite_addr not in represented_elsewhere
+    )
+
+    def _fail(reason: str) -> bool:
+        stats.failure_count += 1
+        debug_groups.append(
+            (
+                call_id,
+                len(occurrences),
+                existing_summary.callsite_addr,
+                tuple(summary.callsite_addr for summary in candidates),
+                reason,
+            )
+        )
+        return False
+
+    if existing_summary not in candidates:
+        return _fail("existing-summary-not-candidate")
+    stats.normalized_fact_count += 1
+    if len(candidates) != len(occurrences) or candidates[0] != existing_summary:
+        return _fail("ambiguous-candidates")
+    stats.classified_fact_count += 1
+    bind_structured_callsite_identity_8616(occurrences[0][1], existing_summary)
+
+    replacements = _clone_occurrence_conditions_8616(occurrences, existing_summary, candidates)
+    if len(replacements) != len(occurrences) - 1:
+        return _fail("clone-failed")
+    if not all(
+        _replace_condition_root_8616(condition_root, cloned_condition)
+        for condition_root, cloned_condition, _clone, _summary in replacements
+    ):
+        return _fail("replacement-failed")
+    for _condition_root, _cloned_condition, clone, summary in replacements:
+        summary_map[id(clone)] = summary
+    stats.materialized_count += 1
+    debug_groups.append(
+        (
+            call_id,
+            len(occurrences),
+            existing_summary.callsite_addr,
+            tuple(summary.callsite_addr for summary in candidates),
+            "materialized",
+        )
+    )
+    return True
+
+
 def split_distinct_condition_call_occurrences_8616(codegen: object) -> bool:
     """Give distinct proven binary condition calls independent C AST nodes.
 
@@ -1584,30 +1767,7 @@ def split_distinct_condition_call_occurrences_8616(codegen: object) -> bool:
         int,
         list[tuple[_ConditionRoot8616, structured_c.CFunctionCall]],
     ] = {}
-    seen_statement_lists: set[int] = set()
-
-    def _collect_block(block: structured_c.CStatements) -> None:
-        """Collect condition calls in deterministic structured execution order."""
-        statements = block.statements
-        if not isinstance(statements, list) or id(statements) in seen_statement_lists:
-            return
-        seen_statement_lists.add(id(statements))
-        for statement in statements:
-            if not isinstance(
-                statement,
-                (structured_c.CStatement, structured_c.CDirtyStatement),
-            ):
-                raise TypeError(
-                    "angr CStatements contains a non-CStatement value: "
-                    f"{type(statement).__module__}.{type(statement).__qualname__}"
-                )
-            for condition_root in _condition_roots_8616(statement):
-                for call in _expression_calls_8616(condition_root.expression):
-                    occurrences_by_call.setdefault(id(call), []).append((condition_root, call))
-            for child, _control_path in _iter_child_statement_paths_8616(statement, ()):
-                _collect_block(child)
-
-    _collect_block(root)
+    _collect_condition_call_occurrences_8616(root, occurrences_by_call, set())
     represented_elsewhere = {
         summary.callsite_addr
         for node_id, summary in summary_map.items()
@@ -1620,115 +1780,15 @@ def split_distinct_condition_call_occurrences_8616(codegen: object) -> bool:
     changed = False
     debug_groups: list[tuple[int, int, int | None, tuple[int, ...], str]] = []
     for call_id, occurrences in occurrences_by_call.items():
-        if len(occurrences) < 2:
-            continue
-        stats.raw_fact_count += 1
-        existing_summary = summary_map.get(call_id)
-        if existing_summary is None or not isinstance(existing_summary.target_addr, int):
-            stats.failure_count += 1
-            debug_groups.append((call_id, len(occurrences), None, (), "missing-summary"))
-            continue
-        candidates = tuple(
-            summary
-            for callsite_addr, summary in sorted(inventory.items())
-            if summary.target_addr == existing_summary.target_addr
-            and callsite_addr not in represented_elsewhere
-        )
-        if existing_summary not in candidates:
-            stats.failure_count += 1
-            debug_groups.append(
-                (
-                    call_id,
-                    len(occurrences),
-                    existing_summary.callsite_addr,
-                    tuple(summary.callsite_addr for summary in candidates),
-                    "existing-summary-not-candidate",
-                )
-            )
-            continue
-        stats.normalized_fact_count += 1
-        if len(candidates) != len(occurrences) or candidates[0] != existing_summary:
-            stats.failure_count += 1
-            debug_groups.append(
-                (
-                    call_id,
-                    len(occurrences),
-                    existing_summary.callsite_addr,
-                    tuple(summary.callsite_addr for summary in candidates),
-                    "ambiguous-candidates",
-                )
-            )
-            continue
-        stats.classified_fact_count += 1
-        bind_structured_callsite_identity_8616(occurrences[0][1], existing_summary)
-
-        replacements: list[
-            tuple[
-                _ConditionRoot8616,
-                structured_c.CExpression,
-                structured_c.CFunctionCall,
-                CallsiteSummary8616,
-            ]
-        ] = []
-        for (condition_root, original), summary in zip(
-            occurrences[1:],
-            candidates[1:],
-            strict=True,
-        ):
-            clone_memo: dict[int, object] = {}
-            cloned_condition = _clone_c_ast_tree_8616(
-                condition_root.expression,
-                clone_memo,
-            )
-            clone = clone_memo.get(id(original))
-            if not isinstance(cloned_condition, structured_c.CExpression) or not isinstance(
-                clone,
-                structured_c.CFunctionCall,
-            ):
-                replacements = []
-                break
-            _retag_cloned_callsite_8616(clone, existing_summary, summary)
-            replacements.append((condition_root, cloned_condition, clone, summary))
-        if len(replacements) != len(occurrences) - 1:
-            stats.failure_count += 1
-            debug_groups.append(
-                (
-                    call_id,
-                    len(occurrences),
-                    existing_summary.callsite_addr,
-                    tuple(summary.callsite_addr for summary in candidates),
-                    "clone-failed",
-                )
-            )
-            continue
-        if not all(
-            _replace_condition_root_8616(condition_root, cloned_condition)
-            for condition_root, cloned_condition, _clone, _summary in replacements
-        ):
-            stats.failure_count += 1
-            debug_groups.append(
-                (
-                    call_id,
-                    len(occurrences),
-                    existing_summary.callsite_addr,
-                    tuple(summary.callsite_addr for summary in candidates),
-                    "replacement-failed",
-                )
-            )
-            continue
-        for _condition_root, _cloned_condition, clone, summary in replacements:
-            summary_map[id(clone)] = summary
-        stats.materialized_count += 1
-        debug_groups.append(
-            (
-                call_id,
-                len(occurrences),
-                existing_summary.callsite_addr,
-                tuple(summary.callsite_addr for summary in candidates),
-                "materialized",
-            )
-        )
-        changed = True
+        changed = _split_call_occurrences_8616(
+            call_id,
+            occurrences,
+            summary_map,
+            inventory,
+            represented_elsewhere,
+            stats,
+            debug_groups,
+        ) or changed
 
     if stats.classified_fact_count > 0 and stats.materialized_count == 0:
         raise PipelineHardError(
@@ -1837,6 +1897,374 @@ def _same_callsite_statement_effect_8616(
     return False
 
 
+@dataclass(slots=True)
+class _SharedCallCoalesce8616:
+    """Scan state for shared-callsite occurrence coalescing."""
+
+    summary_map: dict[int, CallsiteSummary8616]
+    inventory: Mapping[int, CallsiteSummary8616]
+    stats: SharedCallOccurrenceStats8616
+    changed: bool = False
+    pending: list[tuple[structured_c.CStatements, tuple[tuple[int, str, int], ...]]] = field(
+        default_factory=list
+    )
+    seen_statement_lists: set[int] = field(default_factory=set)
+    debug_duplicates: list[tuple[str, int, bool, bool | None]] = field(default_factory=list)
+    seen_call_locations: dict[
+        tuple[tuple[tuple[int, str, int], ...], int],
+        tuple[
+            structured_c.CStatement,
+            structured_c.CFunctionCall,
+            CallsiteSummary8616 | None,
+        ],
+    ] = field(default_factory=dict)
+    seen_typed_callsites: dict[
+        tuple[tuple[tuple[int, str, int], ...], int],
+        tuple[structured_c.CStatement, structured_c.CFunctionCall, CallsiteSummary8616],
+    ] = field(default_factory=dict)
+
+    def _debug_shared_scan_8616(
+        self,
+        statement: structured_c.CStatement,
+        statements: list[structured_c.CStatement],
+        statement_index: int,
+        summary: CallsiteSummary8616 | None,
+        condition_carrier_call_id: int | None,
+    ) -> None:
+        """Emit opt-in diagnostics for one scanned statement."""
+        if not os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
+            return
+        logger.warning(
+            "[shared-call-scan] statement=%s carrier=%r summary=%r next=%s",
+            type(statement).__name__,
+            condition_carrier_call_id,
+            (
+                summary.callsite_addr,
+                summary.return_used,
+                summary.return_use_kind,
+            )
+            if summary is not None
+            else None,
+            type(statements[statement_index + 1]).__name__
+            if statement_index + 1 < len(statements)
+            else None,
+        )
+
+    def _debug_direct_call_8616(
+        self,
+        statement: structured_c.CStatement,
+        call: structured_c.CFunctionCall,
+        call_id: int,
+        summary: CallsiteSummary8616 | None,
+    ) -> None:
+        """Emit opt-in diagnostics for one direct call statement."""
+        if not os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
+            return
+        logger.warning(
+            "[shared-direct-call] statement=%s call=%#x tags=%r "
+            "callee_func=(%s,%r,%r) callee_target=(%s,%r) summary=%r",
+            type(statement).__name__,
+            call_id,
+            call.tags,
+            type(call.callee_func).__name__,
+            getattr(call.callee_func, "addr", None),
+            getattr(call.callee_func, "name", None),
+            type(call.callee_target).__name__,
+            getattr(call.callee_target, "value", call.callee_target),
+            (
+                summary.callsite_addr,
+                summary.target_addr,
+                summary.return_used,
+            )
+            if summary is not None
+            else None,
+        )
+
+    def _bind_condition_carrier_8616(
+        self,
+        statement: structured_c.CStatement,
+        statements: list[structured_c.CStatement],
+        statement_index: int,
+        condition_carrier_call: structured_c.CFunctionCall | None,
+        summary: CallsiteSummary8616 | None,
+    ) -> bool:
+        """Bind a CONDITION return-use carrier to the next statement's call."""
+        if not _condition_carrier_bind_candidate_8616(
+            condition_carrier_call, summary, statements, statement_index
+        ):
+            return False
+        assert summary is not None and condition_carrier_call is not None
+        condition_calls = _condition_calls_8616(statements[statement_index + 1])
+        if not condition_calls:
+            return False
+        self.stats.raw_fact_count += 1
+        matches = tuple(
+            condition_call
+            for condition_call in condition_calls
+            if _same_zero_argument_call_target_8616(condition_carrier_call, condition_call)
+        )
+        if len(matches) == 1:
+            self.stats.normalized_fact_count += 1
+            condition_call = matches[0]
+            condition_summary = self.summary_map.get(id(condition_call))
+            if condition_summary is None or condition_summary.callsite_addr == summary.callsite_addr:
+                self.summary_map[id(condition_call)] = summary
+                self.stats.classified_fact_count += 1
+                self.stats.materialized_count += 1
+                self.debug_duplicates.append(
+                    (type(statement).__name__, id(condition_carrier_call), True, True)
+                )
+                self.changed = True
+                return True
+        self.stats.failure_count += 1
+        return False
+
+    def _inherit_prior_callsite_8616(
+        self,
+        statement: structured_c.CStatement,
+        call: structured_c.CFunctionCall,
+        control_path: tuple[tuple[int, str, int], ...],
+    ) -> bool:
+        """Adopt a proven prior typed callsite; return True to drop the statement."""
+        prior_matches = tuple(
+            (previous_statement, previous_call, previous_summary)
+            for (previous_path, _callsite_addr), (
+                previous_statement,
+                previous_call,
+                previous_summary,
+            ) in self.seen_typed_callsites.items()
+            if previous_path == control_path
+            and _same_regenerated_call_surface_8616(previous_call, call)
+            and _same_callsite_statement_effect_8616(
+                previous_statement,
+                previous_call,
+                previous_summary,
+                statement,
+                call,
+                previous_summary,
+            )
+        )
+        if not prior_matches:
+            return False
+        self.stats.raw_fact_count += 1
+        normalized_matches = tuple(
+            match
+            for match in prior_matches
+            if isinstance(match[2].target_addr, int)
+            and _inventory_has_unique_target_callsite_8616(
+                self.inventory,
+                match[2].target_addr,
+            )
+        )
+        if len(normalized_matches) == 1:
+            self.stats.normalized_fact_count += 1
+            previous_summary = normalized_matches[0][2]
+            self.summary_map[id(call)] = previous_summary
+            self.stats.classified_fact_count += 1
+            self.stats.materialized_count += 1
+            self.changed = True
+            return True
+        self.stats.failure_count += 1
+        return False
+
+    def _coalesce_call_location_8616(
+        self,
+        statement: structured_c.CStatement,
+        call: structured_c.CFunctionCall,
+        call_id: int,
+        summary: CallsiteSummary8616 | None,
+        control_path: tuple[tuple[int, str, int], ...],
+    ) -> bool:
+        """Drop duplicate occurrences at one call location; False to continue."""
+        call_location = (control_path, call_id)
+        previous_occurrence = self.seen_call_locations.get(call_location)
+        if previous_occurrence is None:
+            self.seen_call_locations[call_location] = (statement, call, summary)
+            return False
+        previous_statement, previous_call, previous_summary_optional = previous_occurrence
+        self.stats.raw_fact_count += 1
+        self.stats.normalized_fact_count += 1
+        self.debug_duplicates.append(
+            (
+                type(statement).__name__,
+                call_id,
+                summary is not None,
+                summary.return_used if summary is not None else None,
+            )
+        )
+        if (
+            summary is not None
+            and summary.return_used is False
+            and isinstance(summary.callsite_addr, int)
+        ):
+            self.stats.classified_fact_count += 1
+            self.stats.materialized_count += 1
+            self.changed = True
+            return True
+        if _same_drop_surface_8616(
+            statement, previous_statement, call, previous_call, summary, previous_summary_optional
+        ):
+            self.stats.classified_fact_count += 1
+            self.stats.materialized_count += 1
+            self.changed = True
+            return True
+        self.stats.failure_count += 1
+        return True
+
+    def _coalesce_typed_callsite_8616(
+        self,
+        statement: structured_c.CStatement,
+        call: structured_c.CFunctionCall,
+        call_id: int,
+        summary: CallsiteSummary8616 | None,
+        control_path: tuple[tuple[int, str, int], ...],
+    ) -> bool:
+        """Coalesce regenerated occurrences of one typed callsite; True = keep."""
+        if summary is None or not isinstance(summary.callsite_addr, int):
+            return True
+        callsite_location = (control_path, summary.callsite_addr)
+        previous = self.seen_typed_callsites.get(callsite_location)
+        if previous is None:
+            self.seen_typed_callsites[callsite_location] = (statement, call, summary)
+            return True
+        previous_statement, previous_call, previous_summary = previous
+        self.stats.raw_fact_count += 1
+        self.stats.normalized_fact_count += 1
+        self.debug_duplicates.append(
+            (
+                type(statement).__name__,
+                call_id,
+                True,
+                summary.return_used,
+            )
+        )
+        if _same_callsite_statement_effect_8616(
+            previous_statement,
+            previous_call,
+            previous_summary,
+            statement,
+            call,
+            summary,
+        ):
+            self.stats.classified_fact_count += 1
+            self.stats.materialized_count += 1
+            self.changed = True
+            return False
+        self.stats.failure_count += 1
+        return True
+
+    def process_statement(
+        self,
+        statement: structured_c.CStatement,
+        statement_index: int,
+        statements: list[structured_c.CStatement],
+        control_path: tuple[tuple[int, str, int], ...],
+    ) -> bool:
+        """Process one statement; return True to retain it in the block."""
+        call = _direct_statement_call_8616(statement)
+        condition_carrier_call = _condition_return_carrier_call_8616(statement)
+        condition_carrier_call_id = id(condition_carrier_call) if condition_carrier_call is not None else None
+        summary = (
+            self.summary_map.get(condition_carrier_call_id)
+            if isinstance(condition_carrier_call_id, int)
+            else None
+        )
+        self._debug_shared_scan_8616(
+            statement, statements, statement_index, summary, condition_carrier_call_id
+        )
+        if self._bind_condition_carrier_8616(
+            statement, statements, statement_index, condition_carrier_call, summary
+        ):
+            return False
+        if call is None:
+            return True
+        call_id = id(call)
+        summary = _summary_for_direct_call_occurrence_8616(
+            call,
+            self.summary_map,
+            self.inventory,
+        )
+        self._debug_direct_call_8616(statement, call, call_id, summary)
+        if summary is None and self._inherit_prior_callsite_8616(statement, call, control_path):
+            return False
+        if self._coalesce_call_location_8616(statement, call, call_id, summary, control_path):
+            return False
+        return self._coalesce_typed_callsite_8616(statement, call, call_id, summary, control_path)
+
+    def process_block(
+        self,
+        block: structured_c.CStatements,
+        control_path: tuple[tuple[int, str, int], ...],
+    ) -> None:
+        """Coalesce duplicate call statements inside one block."""
+        statements = block.statements
+        if not isinstance(statements, list) or id(statements) in self.seen_statement_lists:
+            return
+        self.seen_statement_lists.add(id(statements))
+        retained: list[structured_c.CStatement] = []
+        child_statement_paths: list[
+            tuple[structured_c.CStatements, tuple[tuple[int, str, int], ...]]
+        ] = []
+        for statement_index, statement in enumerate(statements):
+            if not isinstance(
+                statement,
+                (structured_c.CStatement, structured_c.CDirtyStatement),
+            ):
+                raise TypeError(
+                    "angr CStatements contains a non-CStatement value: "
+                    f"{type(statement).__module__}.{type(statement).__qualname__}"
+                )
+            child_statement_paths.extend(_iter_child_statement_paths_8616(statement, control_path))
+            if self.process_statement(statement, statement_index, statements, control_path):
+                retained.append(statement)
+        if len(retained) != len(statements):
+            block.statements = retained
+        self.pending.extend(reversed(child_statement_paths))
+
+
+def _condition_carrier_bind_candidate_8616(
+    condition_carrier_call: structured_c.CFunctionCall | None,
+    summary: CallsiteSummary8616 | None,
+    statements: list[structured_c.CStatement],
+    statement_index: int,
+) -> bool:
+    """Gate for binding a CONDITION return-use carrier to the next statement."""
+    return (
+        condition_carrier_call is not None
+        and summary is not None
+        and summary.return_used is True
+        and summary.return_use_kind is CallsiteReturnUseKind8616.CONDITION
+        and isinstance(summary.callsite_addr, int)
+        and statement_index + 1 < len(statements)
+    )
+
+
+def _same_drop_surface_8616(
+    statement: structured_c.CStatement,
+    previous_statement: structured_c.CStatement,
+    call: structured_c.CFunctionCall,
+    previous_call: structured_c.CFunctionCall,
+    summary: CallsiteSummary8616 | None,
+    previous_summary_optional: CallsiteSummary8616 | None,
+) -> bool:
+    """Return whether a duplicate call can be dropped for an earlier occurrence."""
+    if not (
+        summary is not None
+        and previous_summary_optional is not None
+        and summary.return_used is True
+        and isinstance(summary.callsite_addr, int)
+    ):
+        return False
+    return (statement is previous_statement and call is previous_call) or _same_callsite_statement_effect_8616(
+        previous_statement,
+        previous_call,
+        previous_summary_optional,
+        statement,
+        call,
+        summary,
+    )
+
+
 def coalesce_shared_call_side_effect_statements_8616(codegen: object) -> bool:
     """Keep one physical AST occurrence for one proven binary callsite.
 
@@ -1863,248 +2291,15 @@ def coalesce_shared_call_side_effect_statements_8616(codegen: object) -> bool:
     if not isinstance(root, structured_c.CStatements):
         return False
 
-    changed = False
-    debug_duplicates: list[tuple[str, int, bool, bool | None]] = []
-    pending: list[tuple[structured_c.CStatements, tuple[tuple[int, str, int], ...]]] = [(root, ())]
-    seen_statement_lists: set[int] = set()
-    seen_call_locations: dict[
-        tuple[tuple[tuple[int, str, int], ...], int],
-        tuple[
-            structured_c.CStatement,
-            structured_c.CFunctionCall,
-            CallsiteSummary8616 | None,
-        ],
-    ] = {}
-    seen_typed_callsites: dict[
-        tuple[tuple[tuple[int, str, int], ...], int],
-        tuple[structured_c.CStatement, structured_c.CFunctionCall, CallsiteSummary8616],
-    ] = {}
-    while pending:
-        block, control_path = pending.pop()
-        statements = block.statements
-        if not isinstance(statements, list) or id(statements) in seen_statement_lists:
-            continue
-        seen_statement_lists.add(id(statements))
-        retained: list[structured_c.CStatement] = []
-        child_statement_paths: list[
-            tuple[structured_c.CStatements, tuple[tuple[int, str, int], ...]]
-        ] = []
-        for statement_index, statement in enumerate(statements):
-            if not isinstance(
-                statement,
-                (structured_c.CStatement, structured_c.CDirtyStatement),
-            ):
-                raise TypeError(
-                    "angr CStatements contains a non-CStatement value: "
-                    f"{type(statement).__module__}.{type(statement).__qualname__}"
-                )
-            child_statement_paths.extend(_iter_child_statement_paths_8616(statement, control_path))
-            call = _direct_statement_call_8616(statement)
-            condition_carrier_call = _condition_return_carrier_call_8616(statement)
-            condition_carrier_call_id = id(condition_carrier_call) if condition_carrier_call is not None else None
-            summary = (
-                summary_map.get(condition_carrier_call_id)
-                if isinstance(condition_carrier_call_id, int)
-                else None
-            )
-            if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
-                logger.warning(
-                    "[shared-call-scan] statement=%s carrier=%r summary=%r next=%s",
-                    type(statement).__name__,
-                    condition_carrier_call_id,
-                    (
-                        summary.callsite_addr,
-                        summary.return_used,
-                        summary.return_use_kind,
-                    )
-                    if summary is not None
-                    else None,
-                    type(statements[statement_index + 1]).__name__
-                    if statement_index + 1 < len(statements)
-                    else None,
-                )
-            if (
-                condition_carrier_call is not None
-                and summary is not None
-                and summary.return_used is True
-                and summary.return_use_kind is CallsiteReturnUseKind8616.CONDITION
-                and isinstance(summary.callsite_addr, int)
-                and statement_index + 1 < len(statements)
-            ):
-                condition_calls = _condition_calls_8616(statements[statement_index + 1])
-                if condition_calls:
-                    stats.raw_fact_count += 1
-                    matches = tuple(
-                        condition_call
-                        for condition_call in condition_calls
-                        if _same_zero_argument_call_target_8616(condition_carrier_call, condition_call)
-                    )
-                    if len(matches) == 1:
-                        stats.normalized_fact_count += 1
-                        condition_call = matches[0]
-                        condition_summary = summary_map.get(id(condition_call))
-                        if condition_summary is None or condition_summary.callsite_addr == summary.callsite_addr:
-                            summary_map[id(condition_call)] = summary
-                            stats.classified_fact_count += 1
-                            stats.materialized_count += 1
-                            debug_duplicates.append(
-                                (type(statement).__name__, id(condition_carrier_call), True, True)
-                            )
-                            changed = True
-                            continue
-                    stats.failure_count += 1
-            if call is None:
-                retained.append(statement)
-                continue
-            call_id = id(call)
-            summary = _summary_for_direct_call_occurrence_8616(
-                call,
-                summary_map,
-                inventory,
-            )
-            if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
-                logger.warning(
-                    "[shared-direct-call] statement=%s call=%#x tags=%r "
-                    "callee_func=(%s,%r,%r) callee_target=(%s,%r) summary=%r",
-                    type(statement).__name__,
-                    call_id,
-                    call.tags,
-                    type(call.callee_func).__name__,
-                    getattr(call.callee_func, "addr", None),
-                    getattr(call.callee_func, "name", None),
-                    type(call.callee_target).__name__,
-                    getattr(call.callee_target, "value", call.callee_target),
-                    (
-                        summary.callsite_addr,
-                        summary.target_addr,
-                        summary.return_used,
-                    )
-                    if summary is not None
-                    else None,
-                )
-            if summary is None:
-                prior_matches = tuple(
-                    (previous_statement, previous_call, previous_summary)
-                    for (previous_path, _callsite_addr), (
-                        previous_statement,
-                        previous_call,
-                        previous_summary,
-                    ) in seen_typed_callsites.items()
-                    if previous_path == control_path
-                    and _same_regenerated_call_surface_8616(previous_call, call)
-                    and _same_callsite_statement_effect_8616(
-                        previous_statement,
-                        previous_call,
-                        previous_summary,
-                        statement,
-                        call,
-                        previous_summary,
-                    )
-                )
-                if prior_matches:
-                    stats.raw_fact_count += 1
-                    normalized_matches = tuple(
-                        match
-                        for match in prior_matches
-                        if isinstance(match[2].target_addr, int)
-                        and _inventory_has_unique_target_callsite_8616(
-                            inventory,
-                            match[2].target_addr,
-                        )
-                    )
-                    if len(normalized_matches) == 1:
-                        stats.normalized_fact_count += 1
-                        previous_summary = normalized_matches[0][2]
-                        summary_map[call_id] = previous_summary
-                        stats.classified_fact_count += 1
-                        stats.materialized_count += 1
-                        changed = True
-                        continue
-                    stats.failure_count += 1
-            call_location = (control_path, call_id)
-            previous_occurrence = seen_call_locations.get(call_location)
-            if previous_occurrence is None:
-                seen_call_locations[call_location] = (statement, call, summary)
-            else:
-                previous_statement, previous_call, previous_summary_optional = previous_occurrence
-                stats.raw_fact_count += 1
-                stats.normalized_fact_count += 1
-                debug_duplicates.append(
-                    (
-                        type(statement).__name__,
-                        call_id,
-                        summary is not None,
-                        summary.return_used if summary is not None else None,
-                    )
-                )
-                if (
-                    summary is not None
-                    and summary.return_used is False
-                    and isinstance(summary.callsite_addr, int)
-                ):
-                    stats.classified_fact_count += 1
-                    stats.materialized_count += 1
-                    changed = True
-                    continue
-                if (
-                    summary is not None
-                    and previous_summary_optional is not None
-                    and summary.return_used is True
-                    and isinstance(summary.callsite_addr, int)
-                    and (
-                        (statement is previous_statement and call is previous_call)
-                        or _same_callsite_statement_effect_8616(
-                            previous_statement,
-                            previous_call,
-                            previous_summary_optional,
-                            statement,
-                            call,
-                            summary,
-                        )
-                    )
-                ):
-                    stats.classified_fact_count += 1
-                    stats.materialized_count += 1
-                    changed = True
-                    continue
-                stats.failure_count += 1
-                retained.append(statement)
-                continue
-
-            if summary is not None and isinstance(summary.callsite_addr, int):
-                callsite_location = (control_path, summary.callsite_addr)
-                previous = seen_typed_callsites.get(callsite_location)
-                if previous is None:
-                    seen_typed_callsites[callsite_location] = (statement, call, summary)
-                else:
-                    previous_statement, previous_call, previous_summary = previous
-                    stats.raw_fact_count += 1
-                    stats.normalized_fact_count += 1
-                    debug_duplicates.append(
-                        (
-                            type(statement).__name__,
-                            call_id,
-                            True,
-                            summary.return_used,
-                        )
-                    )
-                    if _same_callsite_statement_effect_8616(
-                        previous_statement,
-                        previous_call,
-                        previous_summary,
-                        statement,
-                        call,
-                        summary,
-                    ):
-                        stats.classified_fact_count += 1
-                        stats.materialized_count += 1
-                        changed = True
-                        continue
-                    stats.failure_count += 1
-            retained.append(statement)
-        if len(retained) != len(statements):
-            block.statements = retained
-        pending.extend(reversed(child_statement_paths))
+    scan = _SharedCallCoalesce8616(
+        summary_map=summary_map,
+        inventory=inventory,
+        stats=stats,
+        pending=[(root, ())],
+    )
+    while scan.pending:
+        block, control_path = scan.pending.pop()
+        scan.process_block(block, control_path)
 
     if stats.classified_fact_count > 0 and stats.materialized_count == 0:
         raise PipelineHardError("classified shared call occurrences were not materialized")
@@ -2115,9 +2310,9 @@ def coalesce_shared_call_side_effect_statements_8616(codegen: object) -> bool:
             stats.classified_fact_count,
             stats.materialized_count,
             stats.failure_count,
-            tuple(debug_duplicates),
+            tuple(scan.debug_duplicates),
         )
-    return changed
+    return scan.changed
 
 
 def _structured_control_statement_8616(stmt: object) -> bool:
@@ -2131,6 +2326,452 @@ def _structured_control_statement_8616(stmt: object) -> bool:
             structured_c.CWhileLoop,
         ),
     )
+
+
+@dataclass(slots=True)
+class _OwnedRegionStatements8616:
+    """Resolved owned statements for one switch region participant."""
+
+    addrs: tuple[int, ...]
+    keys: tuple[tuple[str, int, int], ...]
+    statements: tuple[structured_c.CStatement, ...]
+    raw_key_statements: tuple[structured_c.CStatement, ...]
+    raw_addr_statements: tuple[structured_c.CStatement, ...]
+
+
+@dataclass(slots=True)
+class _SwitchSafetyScan8616:
+    """Indexed C-AST evidence for one replacement-safety dry run."""
+
+    statements_by_addr: dict[int, tuple[structured_c.CStatement, ...]]
+    statements_by_key: dict[tuple[str, int, int], tuple[structured_c.CStatement, ...]]
+    owner_index_by_statement_id: dict[int, int]
+    statement_positions: dict[int, tuple[list[object], int]]
+    statements_node_positions: dict[int, tuple[list[object], int]]
+    statement_list_paths: dict[int, tuple[str, ...]]
+    statement_container_shapes: dict[int, object]
+    statement_parent_paths: dict[int, tuple[str, ...]]
+    positioned_statements_by_addr: dict[int, tuple[structured_c.CStatement, ...]]
+    positioned_statements_by_key: dict[tuple[str, int, int], tuple[structured_c.CStatement, ...]]
+    top_level_statements: tuple[structured_c.CStatement, ...]
+    root_statements: list[structured_c.CStatement] | None
+    safe_count: int = 0
+    refusal_reasons: list[str] = field(default_factory=list)
+    debug_regions: list[dict[str, object]] = field(default_factory=list)
+    replacement_spans: list[dict[str, object]] = field(default_factory=list)
+
+    @property
+    def top_level_statement_ids(self) -> set[int]:
+        """Return the identity set of top-level statements."""
+        return {id(stmt) for stmt in self.top_level_statements}
+
+    def _refuse(self, reason: str, debug_region: dict[str, object]) -> None:
+        """Record one refusal reason on the region and the scan."""
+        self.refusal_reasons.append(reason)
+        debug_region["refusal_reason"] = reason
+        self.debug_regions.append(debug_region)
+
+    def _resolve_owned_statements_8616(
+        self, region: Region, *, provenance_backed_span: bool
+    ) -> tuple[_OwnedRegionStatements8616, bool]:
+        """Resolve a region's owned statements through keys then addresses."""
+        addrs = _metadata_ints_8616(region.metadata.get("region_statement_ins_addrs"))
+        if not addrs and isinstance(region.block_addr, int):
+            addrs = (int(region.block_addr),)
+        keys = _metadata_provenance_keys_8616(region.metadata.get("region_statement_provenance_keys"))
+        provenance_backed_span = provenance_backed_span or bool(keys)
+        statements = _available_statements_for_keys_8616(self.positioned_statements_by_key, keys) or ()
+        if not statements:
+            statements = _available_statements_for_addrs_8616(self.positioned_statements_by_addr, addrs) or ()
+        raw_key_statements = _available_statements_for_keys_8616(self.statements_by_key, keys) or ()
+        raw_addr_statements = _available_statements_for_addrs_8616(self.statements_by_addr, addrs) or ()
+        return (
+            _OwnedRegionStatements8616(
+                addrs=addrs,
+                keys=keys,
+                statements=statements,
+                raw_key_statements=raw_key_statements,
+                raw_addr_statements=raw_addr_statements,
+            ),
+            provenance_backed_span,
+        )
+
+    def _record_case_debug_8616(
+        self,
+        case_region: Region,
+        owned: _OwnedRegionStatements8616,
+        debug_region: dict[str, object],
+    ) -> None:
+        """Record per-case statement coverage diagnostics."""
+        _debug_list_8616(debug_region, "case_statement_counts").append(len(owned.statements))
+        _debug_list_8616(debug_region, "case_statement_key_counts").append(len(owned.keys))
+        _debug_list_8616(debug_region, "case_raw_key_statement_counts").append(len(owned.raw_key_statements))
+        _debug_list_8616(debug_region, "case_raw_addr_statement_counts").append(len(owned.raw_addr_statements))
+        if (
+            not owned.statements
+            and os.environ.get("INERTIA_DEBUG_TYPED_SWITCH_SAFETY") == "1"
+            and (owned.raw_key_statements or owned.raw_addr_statements)
+        ):
+            _debug_list_8616(debug_region, "case_missing_position_samples").append(
+                _statement_position_debug_samples_8616(
+                    _dedupe_c_statements_by_identity_8616(
+                        tuple(owned.raw_key_statements) + tuple(owned.raw_addr_statements)
+                    ),
+                    self.statement_positions,
+                    self.statement_container_shapes,
+                    self.statement_parent_paths,
+                )
+            )
+        _debug_list_8616(debug_region, "case_region_types").append(case_region.region_type.value)
+        _debug_list_8616(debug_region, "case_statement_addrs").append(list(owned.addrs))
+        if owned.addrs:
+            start = min(int(addr) for addr in owned.addrs)
+            end = max(int(addr) for addr in owned.addrs) + 0x20
+            _debug_list_8616(debug_region, "case_available_statement_addrs").append(
+                [addr for addr in sorted(self.positioned_statements_by_addr) if start <= addr <= end]
+            )
+
+    def _collect_body_statements_8616(
+        self,
+        region: Region,
+        switch_candidates: tuple[Region, ...],
+        provenance_backed_span: bool,
+        debug_region: dict[str, object],
+    ) -> tuple[list[structured_c.CStatement], bool, bool, bool]:
+        """Collect case/default body statements; report missing coverage."""
+        body_statements: list[structured_c.CStatement] = []
+        missing_body_statement = False
+        missing_positioned_body_statement = False
+        for case_region in switch_candidates:
+            owned, provenance_backed_span = self._resolve_owned_statements_8616(
+                case_region, provenance_backed_span=provenance_backed_span
+            )
+            self._record_case_debug_8616(case_region, owned, debug_region)
+            if not owned.statements:
+                if owned.raw_key_statements or owned.raw_addr_statements:
+                    missing_positioned_body_statement = True
+                missing_body_statement = True
+                break
+            body_statements.extend(owned.statements)
+
+        default_region = region.metadata.get("switch_default_target")
+        if isinstance(default_region, Region):
+            owned, provenance_backed_span = self._resolve_owned_statements_8616(
+                default_region, provenance_backed_span=provenance_backed_span
+            )
+            debug_region["default_statement_count"] = len(owned.statements)
+            debug_region["default_statement_key_count"] = len(owned.keys)
+            debug_region["default_raw_key_statement_count"] = len(owned.raw_key_statements)
+            debug_region["default_raw_addr_statement_count"] = len(owned.raw_addr_statements)
+            if (
+                not owned.statements
+                and os.environ.get("INERTIA_DEBUG_TYPED_SWITCH_SAFETY") == "1"
+                and (owned.raw_key_statements or owned.raw_addr_statements)
+            ):
+                debug_region["default_missing_position_samples"] = _statement_position_debug_samples_8616(
+                    _dedupe_c_statements_by_identity_8616(
+                        tuple(owned.raw_key_statements) + tuple(owned.raw_addr_statements)
+                    ),
+                    self.statement_positions,
+                    self.statement_container_shapes,
+                    self.statement_parent_paths,
+                )
+            debug_region["default_region_type"] = default_region.region_type.value
+            debug_region["default_statement_addrs"] = list(owned.addrs)
+            if owned.addrs:
+                start = min(owned.addrs)
+                end = max(owned.addrs) + 0x20
+                debug_region["default_available_statement_addrs"] = [
+                    addr for addr in sorted(self.positioned_statements_by_addr) if start <= addr <= end
+                ]
+            if not owned.statements:
+                if owned.raw_key_statements or owned.raw_addr_statements:
+                    missing_positioned_body_statement = True
+                missing_body_statement = True
+            body_statements.extend(owned.statements)
+        return body_statements, missing_body_statement, missing_positioned_body_statement, provenance_backed_span
+
+    def _single_container_span_8616(
+        self,
+        container: list[object],
+        concrete_positions: list[tuple[list[object], int]],
+        debug_region: dict[str, object],
+    ) -> bool:
+        """Classify a span contained in one statement list; True = handled."""
+        child_indexes = [int(position[1]) for position in concrete_positions]
+        unique_child_indexes = set(child_indexes)
+        if len(unique_child_indexes) == 1:
+            index = child_indexes[0]
+            self._refuse("single_statement_switch_span_unmaterialized", debug_region)
+            debug_region["span"] = [index, index + 1]
+            debug_region["statement_count"] = len(child_indexes)
+            debug_region["span_source"] = "statement_list_single_statement"
+            return True
+        expected_child_indexes = set(range(min(unique_child_indexes), max(unique_child_indexes) + 1))
+        if unique_child_indexes != expected_child_indexes:
+            self._refuse("non_contiguous_switch_statement_list_span", debug_region)
+            return True
+        start_index = min(child_indexes)
+        end_index = max(child_indexes) + 1
+        if container is self.root_statements and any(
+            _structured_control_statement_8616(stmt) for stmt in container[start_index:end_index]
+        ):
+            self._refuse("structured_control_in_switch_span_unmaterialized", debug_region)
+            debug_region["span"] = [start_index, end_index]
+            debug_region["statement_count"] = len(child_indexes)
+            debug_region["span_source"] = "top_level_statement_sequence"
+            return True
+        if any(
+            isinstance(
+                stmt,
+                (
+                    structured_c.CDoWhileLoop,
+                    structured_c.CForLoop,
+                    structured_c.CSwitchCase,
+                    structured_c.CWhileLoop,
+                ),
+            )
+            for stmt in container[start_index:end_index]
+        ):
+            self._refuse("loop_control_in_switch_span_unmaterialized", debug_region)
+            debug_region["span"] = [start_index, end_index]
+            debug_region["statement_count"] = len(child_indexes)
+            debug_region["span_source"] = "statement_list_sequence"
+            return True
+        if end_index - start_index > _MAX_DOMINANT_SWITCH_REPLACEMENT_SPAN_8616:
+            self._refuse("dominant_switch_span_too_large", debug_region)
+            debug_region["span"] = [start_index, end_index]
+            debug_region["statement_count"] = len(child_indexes)
+            debug_region["span_source"] = "statement_list_sequence"
+            debug_region["max_dominant_span"] = _MAX_DOMINANT_SWITCH_REPLACEMENT_SPAN_8616
+            return True
+        debug_region["span"] = [start_index, end_index]
+        debug_region["statement_count"] = len(child_indexes)
+        debug_region["span_source"] = "statement_list_sequence"
+        self.debug_regions.append(debug_region)
+        self.replacement_spans.append(
+            {
+                "statements": container,
+                "start": start_index,
+                "end": end_index,
+                "source": "statement_list_sequence",
+            }
+        )
+        self.safe_count += 1
+        return True
+
+    def _dominant_container_span_8616(
+        self,
+        container_ids: set[int],
+        concrete_positions: list[tuple[list[object], int]],
+        debug_region: dict[str, object],
+    ) -> bool:
+        """Classify via the largest valid non-root container span."""
+        dominant_spans: list[tuple[int, list[object], int, int, int]] = []
+        for container_id in container_ids:
+            container_positions = [
+                position for position in concrete_positions if id(position[0]) == container_id
+            ]
+            if not container_positions:
+                continue
+            container = container_positions[0][0]
+            if container is self.root_statements:
+                continue
+            child_indexes = [int(position[1]) for position in container_positions]
+            unique_child_indexes = set(child_indexes)
+            if len(unique_child_indexes) <= 1:
+                continue
+            expected_child_indexes = set(range(min(unique_child_indexes), max(unique_child_indexes) + 1))
+            if unique_child_indexes != expected_child_indexes:
+                continue
+            start_index = min(child_indexes)
+            end_index = max(child_indexes) + 1
+            if any(_structured_control_statement_8616(stmt) for stmt in container[start_index:end_index]):
+                continue
+            dominant_spans.append((len(unique_child_indexes), container, start_index, end_index, len(child_indexes)))
+        if not dominant_spans:
+            return False
+        _, container, start_index, end_index, statement_count = max(
+            dominant_spans,
+            key=lambda item: (item[0], item[4]),
+        )
+        max_dominant_span = _MAX_DOMINANT_SWITCH_REPLACEMENT_SPAN_8616
+        if end_index - start_index > max_dominant_span:
+            self._refuse("dominant_switch_span_too_large", debug_region)
+            debug_region["span"] = [start_index, end_index]
+            debug_region["statement_count"] = statement_count
+            debug_region["span_source"] = "dominant_statement_list_sequence"
+            debug_region["max_dominant_span"] = max_dominant_span
+            return True
+        debug_region["span"] = [start_index, end_index]
+        debug_region["statement_count"] = statement_count
+        debug_region["span_source"] = "dominant_statement_list_sequence"
+        self.debug_regions.append(debug_region)
+        self.replacement_spans.append(
+            {
+                "statements": container,
+                "start": start_index,
+                "end": end_index,
+                "source": "dominant_statement_list_sequence",
+            }
+        )
+        self.safe_count += 1
+        return True
+
+    def _owner_index_span_8616(
+        self,
+        covered_statements: tuple[structured_c.CStatement, ...],
+        debug_region: dict[str, object],
+    ) -> None:
+        """Classify the covered span via top-level owner indexes."""
+        covered_indexes = [self.owner_index_by_statement_id.get(id(stmt)) for stmt in covered_statements]
+        if any(index is None for index in covered_indexes):
+            self._refuse("non_top_level_switch_statement", debug_region)
+            return
+        concrete_indexes = [int(index) for index in covered_indexes if index is not None]
+        unique_indexes = set(concrete_indexes)
+        if len(unique_indexes) == 1:
+            index = concrete_indexes[0]
+            self._refuse("single_statement_switch_span_unmaterialized", debug_region)
+            debug_region["span"] = [index, index + 1]
+            debug_region["statement_count"] = len(concrete_indexes)
+            debug_region["span_source"] = (
+                "top_level_single_statement"
+                if all(id(stmt) in self.top_level_statement_ids for stmt in covered_statements)
+                else "nested_top_level_owner"
+            )
+            return
+        expected_indexes = set(range(min(unique_indexes), max(unique_indexes) + 1))
+        if unique_indexes != expected_indexes:
+            self._refuse("non_contiguous_switch_statement_span", debug_region)
+            return
+        start_index = min(concrete_indexes)
+        end_index = max(concrete_indexes) + 1
+        if any(_structured_control_statement_8616(stmt) for stmt in self.top_level_statements[start_index:end_index]):
+            self._refuse("structured_control_in_switch_span_unmaterialized", debug_region)
+            debug_region["span"] = [start_index, end_index]
+            debug_region["statement_count"] = len(concrete_indexes)
+            debug_region["span_source"] = "top_level_statement_sequence"
+            return
+
+        debug_region["span"] = [start_index, end_index]
+        debug_region["statement_count"] = len(concrete_indexes)
+        debug_region["span_source"] = "top_level_statement_sequence"
+        self.debug_regions.append(debug_region)
+        self.safe_count += 1
+
+    def _classify_covered_span_8616(
+        self,
+        covered_statements: tuple[structured_c.CStatement, ...],
+        debug_region: dict[str, object],
+    ) -> None:
+        """Classify the covered statement span into safe/refused outcomes."""
+        container_parent_span = _statement_container_parent_span_8616(
+            covered_statements,
+            self.statement_positions,
+            self.statements_node_positions,
+        )
+        if isinstance(container_parent_span, dict):
+            debug_region["container_parent_span"] = {
+                key: value
+                for key, value in container_parent_span.items()
+                if key != "parent"
+            }
+        container_path_summary = _statement_container_path_summary_8616(
+            covered_statements,
+            self.statement_positions,
+            self.statement_list_paths,
+        )
+        debug_region["container_path_summary"] = container_path_summary
+        if os.environ.get("INERTIA_DEBUG_TYPED_SWITCH_SAFETY") == "1":
+            debug_region["provenance_summary"] = _statement_provenance_debug_summary_8616(
+                covered_statements,
+                self.statement_positions,
+            )
+        covered_positions = [self.statement_positions.get(id(stmt)) for stmt in covered_statements]
+        concrete_positions = [position for position in covered_positions if position is not None]
+        debug_region["missing_statement_position_count"] = len(covered_positions) - len(concrete_positions)
+        if concrete_positions:
+            container_ids = {id(position[0]) for position in concrete_positions}
+            if len(container_ids) > 1 and not isinstance(container_parent_span, dict):
+                reason = (
+                    "switch_spans_divergent_structured_children"
+                    if _container_path_summary_has_divergent_structured_children_8616(container_path_summary)
+                    else "multi_container_switch_span_unmaterialized"
+                )
+                self._refuse(reason, debug_region)
+                debug_region["container_count"] = len(container_ids)
+                return
+            if len(container_ids) == 1:
+                container = concrete_positions[0][0]
+                if self._single_container_span_8616(container, concrete_positions, debug_region):
+                    return
+            elif self._dominant_container_span_8616(container_ids, concrete_positions, debug_region):
+                return
+
+        self._owner_index_span_8616(covered_statements, debug_region)
+
+    def evaluate_region_8616(self, region: Region) -> None:
+        """Evaluate one typed edge-guard switch region's replacement safety."""
+        guard_addrs = _metadata_ints_8616(region.metadata.get("switch_guard_statement_ins_addrs"))
+        guard_keys = _metadata_provenance_keys_8616(region.metadata.get("switch_guard_statement_provenance_keys"))
+        switch_candidates = _metadata_regions_8616(region.metadata.get("switch_candidates"))
+        debug_region: dict[str, object] = {
+            "region_addr": region.block_addr,
+            "guard_addrs": list(guard_addrs),
+            "guard_key_count": len(guard_keys),
+            "case_addrs": [case_region.block_addr for case_region in switch_candidates],
+            "default_addr": getattr(region.metadata.get("switch_default_target"), "block_addr", None),
+        }
+        provenance_backed_span = bool(guard_keys)
+        if not guard_addrs:
+            self._refuse("missing_switch_guard_statement_span", debug_region)
+            return
+        missing_guard_addrs = tuple(
+            addr for addr in guard_addrs if int(addr) not in self.positioned_statements_by_addr
+        )
+        debug_region["missing_guard_addrs"] = list(missing_guard_addrs)
+        guard_statements = _available_statements_for_keys_8616(self.positioned_statements_by_key, guard_keys)
+        if guard_statements is None:
+            guard_statements = _available_statements_for_addrs_8616(self.positioned_statements_by_addr, guard_addrs)
+        if guard_statements is None:
+            self._refuse("missing_switch_guard_statements", debug_region)
+            return
+
+        (
+            body_statements,
+            missing_body_statement,
+            missing_positioned_body_statement,
+            provenance_backed_span,
+        ) = self._collect_body_statements_8616(
+            region, switch_candidates, provenance_backed_span, debug_region
+        )
+        if missing_body_statement:
+            reason = (
+                "missing_positioned_switch_body_statements"
+                if missing_positioned_body_statement
+                else "missing_switch_body_statements"
+            )
+            self._refuse(reason, debug_region)
+            return
+
+        covered_statements = _dedupe_c_statements_by_identity_8616(tuple(guard_statements) + tuple(body_statements))
+        debug_region["provenance_backed_span"] = provenance_backed_span
+        if any(id(stmt) not in self.top_level_statement_ids for stmt in covered_statements):
+            covered_statements = tuple(
+                stmt
+                for stmt in covered_statements
+                if not (id(stmt) in self.top_level_statement_ids and _structured_control_statement_8616(stmt))
+            )
+        debug_region["covered_statement_count"] = len(covered_statements)
+        debug_region["scope_summaries"] = list(
+            _statement_scope_debug_summary_8616(
+                covered_statements,
+                self.statement_positions,
+                top_level_statements=self.top_level_statements,
+            )
+        )
+        self._classify_covered_span_8616(covered_statements, debug_region)
 
 
 def evaluate_typed_edge_switch_replacement_safety_8616(
@@ -2153,368 +2794,29 @@ def evaluate_typed_edge_switch_replacement_safety_8616(
         statement_positions,
     )
     top_level_statements = _top_level_c_statements_8616(codegen)
-    top_level_statement_ids = {id(stmt) for stmt in top_level_statements}
-    safe_count = 0
-    refusal_reasons: list[str] = []
-    debug_regions: list[dict[str, object]] = []
-    replacement_spans: list[dict[str, object]] = []
+    scan = _SwitchSafetyScan8616(
+        statements_by_addr=statements_by_addr,
+        statements_by_key=statements_by_key,
+        owner_index_by_statement_id=owner_index_by_statement_id,
+        statement_positions=statement_positions,
+        statements_node_positions=statements_node_positions,
+        statement_list_paths=statement_list_paths,
+        statement_container_shapes=statement_container_shapes,
+        statement_parent_paths=statement_parent_paths,
+        positioned_statements_by_addr=positioned_statements_by_addr,
+        positioned_statements_by_key=positioned_statements_by_key,
+        top_level_statements=top_level_statements,
+        root_statements=root_statements,
+    )
 
     for region in regions:
-        guard_addrs = _metadata_ints_8616(region.metadata.get("switch_guard_statement_ins_addrs"))
-        guard_keys = _metadata_provenance_keys_8616(region.metadata.get("switch_guard_statement_provenance_keys"))
-        switch_candidates = _metadata_regions_8616(region.metadata.get("switch_candidates"))
-        debug_region: dict[str, object] = {
-            "region_addr": region.block_addr,
-            "guard_addrs": list(guard_addrs),
-            "guard_key_count": len(guard_keys),
-            "case_addrs": [case_region.block_addr for case_region in switch_candidates],
-            "default_addr": getattr(region.metadata.get("switch_default_target"), "block_addr", None),
-        }
-        provenance_backed_span = bool(guard_keys)
-        if not guard_addrs:
-            refusal_reasons.append("missing_switch_guard_statement_span")
-            debug_region["refusal_reason"] = "missing_switch_guard_statement_span"
-            debug_regions.append(debug_region)
-            continue
-        missing_guard_addrs = tuple(addr for addr in guard_addrs if int(addr) not in positioned_statements_by_addr)
-        debug_region["missing_guard_addrs"] = list(missing_guard_addrs)
-        guard_statements = _available_statements_for_keys_8616(positioned_statements_by_key, guard_keys)
-        if guard_statements is None:
-            guard_statements = _available_statements_for_addrs_8616(positioned_statements_by_addr, guard_addrs)
-        if guard_statements is None:
-            refusal_reasons.append("missing_switch_guard_statements")
-            debug_region["refusal_reason"] = "missing_switch_guard_statements"
-            debug_regions.append(debug_region)
-            continue
-
-        body_statements: list[structured_c.CStatement] = []
-        missing_body_statement = False
-        missing_positioned_body_statement = False
-        for case_region in switch_candidates:
-            case_addrs = _metadata_ints_8616(case_region.metadata.get("region_statement_ins_addrs"))
-            if not case_addrs and isinstance(case_region.block_addr, int):
-                case_addrs = (int(case_region.block_addr),)
-            case_keys = _metadata_provenance_keys_8616(case_region.metadata.get("region_statement_provenance_keys"))
-            provenance_backed_span = provenance_backed_span or bool(case_keys)
-            case_statements = _available_statements_for_keys_8616(positioned_statements_by_key, case_keys) or ()
-            if not case_statements:
-                case_statements = _available_statements_for_addrs_8616(positioned_statements_by_addr, case_addrs) or ()
-            raw_case_key_statements = _available_statements_for_keys_8616(statements_by_key, case_keys) or ()
-            raw_case_addr_statements = _available_statements_for_addrs_8616(statements_by_addr, case_addrs) or ()
-            _debug_list_8616(debug_region, "case_statement_counts").append(len(case_statements))
-            _debug_list_8616(debug_region, "case_statement_key_counts").append(len(case_keys))
-            _debug_list_8616(debug_region, "case_raw_key_statement_counts").append(len(raw_case_key_statements))
-            _debug_list_8616(debug_region, "case_raw_addr_statement_counts").append(len(raw_case_addr_statements))
-            if (
-                not case_statements
-                and os.environ.get("INERTIA_DEBUG_TYPED_SWITCH_SAFETY") == "1"
-                and (raw_case_key_statements or raw_case_addr_statements)
-            ):
-                _debug_list_8616(debug_region, "case_missing_position_samples").append(
-                    _statement_position_debug_samples_8616(
-                        _dedupe_c_statements_by_identity_8616(
-                            tuple(raw_case_key_statements) + tuple(raw_case_addr_statements)
-                        ),
-                        statement_positions,
-                        statement_container_shapes,
-                        statement_parent_paths,
-                    )
-                )
-            _debug_list_8616(debug_region, "case_region_types").append(case_region.region_type.value)
-            _debug_list_8616(debug_region, "case_statement_addrs").append(list(case_addrs))
-            if case_addrs:
-                start = min(int(addr) for addr in case_addrs)
-                end = max(int(addr) for addr in case_addrs) + 0x20
-                _debug_list_8616(debug_region, "case_available_statement_addrs").append(
-                    [addr for addr in sorted(positioned_statements_by_addr) if start <= addr <= end]
-                )
-            if not case_statements:
-                if raw_case_key_statements or raw_case_addr_statements:
-                    missing_positioned_body_statement = True
-                missing_body_statement = True
-                break
-            body_statements.extend(case_statements)
-        default_region = region.metadata.get("switch_default_target")
-        if isinstance(default_region, Region):
-            default_addrs = _metadata_ints_8616(default_region.metadata.get("region_statement_ins_addrs"))
-            if not default_addrs and isinstance(default_region.block_addr, int):
-                default_addrs = (int(default_region.block_addr),)
-            default_keys = _metadata_provenance_keys_8616(default_region.metadata.get("region_statement_provenance_keys"))
-            provenance_backed_span = provenance_backed_span or bool(default_keys)
-            default_statements = _available_statements_for_keys_8616(positioned_statements_by_key, default_keys) or ()
-            if not default_statements:
-                default_statements = _available_statements_for_addrs_8616(positioned_statements_by_addr, default_addrs) or ()
-            raw_default_key_statements = _available_statements_for_keys_8616(statements_by_key, default_keys) or ()
-            raw_default_addr_statements = _available_statements_for_addrs_8616(statements_by_addr, default_addrs) or ()
-            debug_region["default_statement_count"] = len(default_statements)
-            debug_region["default_statement_key_count"] = len(default_keys)
-            debug_region["default_raw_key_statement_count"] = len(raw_default_key_statements)
-            debug_region["default_raw_addr_statement_count"] = len(raw_default_addr_statements)
-            if (
-                not default_statements
-                and os.environ.get("INERTIA_DEBUG_TYPED_SWITCH_SAFETY") == "1"
-                and (raw_default_key_statements or raw_default_addr_statements)
-            ):
-                debug_region["default_missing_position_samples"] = _statement_position_debug_samples_8616(
-                    _dedupe_c_statements_by_identity_8616(
-                        tuple(raw_default_key_statements) + tuple(raw_default_addr_statements)
-                    ),
-                    statement_positions,
-                    statement_container_shapes,
-                    statement_parent_paths,
-                )
-            debug_region["default_region_type"] = default_region.region_type.value
-            debug_region["default_statement_addrs"] = list(default_addrs)
-            if default_addrs:
-                start = min(default_addrs)
-                end = max(default_addrs) + 0x20
-                debug_region["default_available_statement_addrs"] = [
-                    addr for addr in sorted(positioned_statements_by_addr) if start <= addr <= end
-                ]
-            if not default_statements:
-                if raw_default_key_statements or raw_default_addr_statements:
-                    missing_positioned_body_statement = True
-                missing_body_statement = True
-            body_statements.extend(default_statements)
-        if missing_body_statement:
-            reason = (
-                "missing_positioned_switch_body_statements"
-                if missing_positioned_body_statement
-                else "missing_switch_body_statements"
-            )
-            refusal_reasons.append(reason)
-            debug_region["refusal_reason"] = reason
-            debug_regions.append(debug_region)
-            continue
-
-        covered_statements = _dedupe_c_statements_by_identity_8616(tuple(guard_statements) + tuple(body_statements))
-        debug_region["provenance_backed_span"] = provenance_backed_span
-        if any(id(stmt) not in top_level_statement_ids for stmt in covered_statements):
-            covered_statements = tuple(
-                stmt
-                for stmt in covered_statements
-                if not (id(stmt) in top_level_statement_ids and _structured_control_statement_8616(stmt))
-            )
-        debug_region["covered_statement_count"] = len(covered_statements)
-        debug_region["scope_summaries"] = list(
-            _statement_scope_debug_summary_8616(
-                covered_statements,
-                statement_positions,
-                top_level_statements=top_level_statements,
-            )
-        )
-        container_parent_span = _statement_container_parent_span_8616(
-            covered_statements,
-            statement_positions,
-            statements_node_positions,
-        )
-        if isinstance(container_parent_span, dict):
-            debug_region["container_parent_span"] = {
-                key: value
-                for key, value in container_parent_span.items()
-                if key != "parent"
-            }
-        container_path_summary = _statement_container_path_summary_8616(
-            covered_statements,
-            statement_positions,
-            statement_list_paths,
-        )
-        debug_region["container_path_summary"] = container_path_summary
-        if os.environ.get("INERTIA_DEBUG_TYPED_SWITCH_SAFETY") == "1":
-            debug_region["provenance_summary"] = _statement_provenance_debug_summary_8616(
-                covered_statements,
-                statement_positions,
-            )
-        covered_positions = [statement_positions.get(id(stmt)) for stmt in covered_statements]
-        concrete_positions = [position for position in covered_positions if position is not None]
-        debug_region["missing_statement_position_count"] = len(covered_positions) - len(concrete_positions)
-        if concrete_positions:
-            container_ids = {id(position[0]) for position in concrete_positions}
-            if len(container_ids) > 1 and not isinstance(container_parent_span, dict):
-                reason = (
-                    "switch_spans_divergent_structured_children"
-                    if _container_path_summary_has_divergent_structured_children_8616(container_path_summary)
-                    else "multi_container_switch_span_unmaterialized"
-                )
-                refusal_reasons.append(reason)
-                debug_region["refusal_reason"] = reason
-                debug_region["container_count"] = len(container_ids)
-                debug_regions.append(debug_region)
-                continue
-            if len(container_ids) == 1:
-                container = concrete_positions[0][0]
-                child_indexes = [int(position[1]) for position in concrete_positions]
-                unique_child_indexes = set(child_indexes)
-                if len(unique_child_indexes) == 1:
-                    index = child_indexes[0]
-                    refusal_reasons.append("single_statement_switch_span_unmaterialized")
-                    debug_region["refusal_reason"] = "single_statement_switch_span_unmaterialized"
-                    debug_region["span"] = [index, index + 1]
-                    debug_region["statement_count"] = len(child_indexes)
-                    debug_region["span_source"] = "statement_list_single_statement"
-                    debug_regions.append(debug_region)
-                    continue
-                expected_child_indexes = set(range(min(unique_child_indexes), max(unique_child_indexes) + 1))
-                if unique_child_indexes != expected_child_indexes:
-                    refusal_reasons.append("non_contiguous_switch_statement_list_span")
-                    debug_region["refusal_reason"] = "non_contiguous_switch_statement_list_span"
-                    debug_regions.append(debug_region)
-                    continue
-                start_index = min(child_indexes)
-                end_index = max(child_indexes) + 1
-                if container is root_statements and any(
-                    _structured_control_statement_8616(stmt) for stmt in container[start_index:end_index]
-                ):
-                    refusal_reasons.append("structured_control_in_switch_span_unmaterialized")
-                    debug_region["refusal_reason"] = "structured_control_in_switch_span_unmaterialized"
-                    debug_region["span"] = [start_index, end_index]
-                    debug_region["statement_count"] = len(child_indexes)
-                    debug_region["span_source"] = "top_level_statement_sequence"
-                    debug_regions.append(debug_region)
-                    continue
-                if any(
-                    isinstance(
-                        stmt,
-                        (
-                            structured_c.CDoWhileLoop,
-                            structured_c.CForLoop,
-                            structured_c.CSwitchCase,
-                            structured_c.CWhileLoop,
-                        ),
-                    )
-                    for stmt in container[start_index:end_index]
-                ):
-                    refusal_reasons.append("loop_control_in_switch_span_unmaterialized")
-                    debug_region["refusal_reason"] = "loop_control_in_switch_span_unmaterialized"
-                    debug_region["span"] = [start_index, end_index]
-                    debug_region["statement_count"] = len(child_indexes)
-                    debug_region["span_source"] = "statement_list_sequence"
-                    debug_regions.append(debug_region)
-                    continue
-                if end_index - start_index > _MAX_DOMINANT_SWITCH_REPLACEMENT_SPAN_8616:
-                    refusal_reasons.append("dominant_switch_span_too_large")
-                    debug_region["refusal_reason"] = "dominant_switch_span_too_large"
-                    debug_region["span"] = [start_index, end_index]
-                    debug_region["statement_count"] = len(child_indexes)
-                    debug_region["span_source"] = "statement_list_sequence"
-                    debug_region["max_dominant_span"] = _MAX_DOMINANT_SWITCH_REPLACEMENT_SPAN_8616
-                    debug_regions.append(debug_region)
-                    continue
-                debug_region["span"] = [start_index, end_index]
-                debug_region["statement_count"] = len(child_indexes)
-                debug_region["span_source"] = "statement_list_sequence"
-                debug_regions.append(debug_region)
-                replacement_spans.append(
-                    {
-                        "statements": container,
-                        "start": start_index,
-                        "end": end_index,
-                        "source": "statement_list_sequence",
-                    }
-                )
-                safe_count += 1
-                continue
-            dominant_spans: list[tuple[int, list[object], int, int, int]] = []
-            for container_id in container_ids:
-                container_positions = [
-                    position for position in concrete_positions if id(position[0]) == container_id
-                ]
-                if not container_positions:
-                    continue
-                container = container_positions[0][0]
-                if container is root_statements:
-                    continue
-                child_indexes = [int(position[1]) for position in container_positions]
-                unique_child_indexes = set(child_indexes)
-                if len(unique_child_indexes) <= 1:
-                    continue
-                expected_child_indexes = set(range(min(unique_child_indexes), max(unique_child_indexes) + 1))
-                if unique_child_indexes != expected_child_indexes:
-                    continue
-                start_index = min(child_indexes)
-                end_index = max(child_indexes) + 1
-                if any(_structured_control_statement_8616(stmt) for stmt in container[start_index:end_index]):
-                    continue
-                dominant_spans.append((len(unique_child_indexes), container, start_index, end_index, len(child_indexes)))
-            if dominant_spans:
-                _, container, start_index, end_index, statement_count = max(
-                    dominant_spans,
-                    key=lambda item: (item[0], item[4]),
-                )
-                max_dominant_span = _MAX_DOMINANT_SWITCH_REPLACEMENT_SPAN_8616
-                if end_index - start_index > max_dominant_span:
-                    refusal_reasons.append("dominant_switch_span_too_large")
-                    debug_region["refusal_reason"] = "dominant_switch_span_too_large"
-                    debug_region["span"] = [start_index, end_index]
-                    debug_region["statement_count"] = statement_count
-                    debug_region["span_source"] = "dominant_statement_list_sequence"
-                    debug_region["max_dominant_span"] = max_dominant_span
-                    debug_regions.append(debug_region)
-                    continue
-                debug_region["span"] = [start_index, end_index]
-                debug_region["statement_count"] = statement_count
-                debug_region["span_source"] = "dominant_statement_list_sequence"
-                debug_regions.append(debug_region)
-                replacement_spans.append(
-                    {
-                        "statements": container,
-                        "start": start_index,
-                        "end": end_index,
-                        "source": "dominant_statement_list_sequence",
-                    }
-                )
-                safe_count += 1
-                continue
-
-        covered_indexes = [owner_index_by_statement_id.get(id(stmt)) for stmt in covered_statements]
-        if any(index is None for index in covered_indexes):
-            refusal_reasons.append("non_top_level_switch_statement")
-            debug_region["refusal_reason"] = "non_top_level_switch_statement"
-            debug_regions.append(debug_region)
-            continue
-        concrete_indexes = [int(index) for index in covered_indexes if index is not None]
-        unique_indexes = set(concrete_indexes)
-        if len(unique_indexes) == 1:
-            index = concrete_indexes[0]
-            refusal_reasons.append("single_statement_switch_span_unmaterialized")
-            debug_region["refusal_reason"] = "single_statement_switch_span_unmaterialized"
-            debug_region["span"] = [index, index + 1]
-            debug_region["statement_count"] = len(concrete_indexes)
-            debug_region["span_source"] = (
-                "top_level_single_statement"
-                if all(id(stmt) in top_level_statement_ids for stmt in covered_statements)
-                else "nested_top_level_owner"
-            )
-            debug_regions.append(debug_region)
-            continue
-        expected_indexes = set(range(min(unique_indexes), max(unique_indexes) + 1))
-        if unique_indexes != expected_indexes:
-            refusal_reasons.append("non_contiguous_switch_statement_span")
-            debug_region["refusal_reason"] = "non_contiguous_switch_statement_span"
-            debug_regions.append(debug_region)
-            continue
-        start_index = min(concrete_indexes)
-        end_index = max(concrete_indexes) + 1
-        if any(_structured_control_statement_8616(stmt) for stmt in top_level_statements[start_index:end_index]):
-            refusal_reasons.append("structured_control_in_switch_span_unmaterialized")
-            debug_region["refusal_reason"] = "structured_control_in_switch_span_unmaterialized"
-            debug_region["span"] = [start_index, end_index]
-            debug_region["statement_count"] = len(concrete_indexes)
-            debug_region["span_source"] = "top_level_statement_sequence"
-            debug_regions.append(debug_region)
-            continue
-
-        debug_region["span"] = [start_index, end_index]
-        debug_region["statement_count"] = len(concrete_indexes)
-        debug_region["span_source"] = "top_level_statement_sequence"
-        debug_regions.append(debug_region)
-        safe_count += 1
+        scan.evaluate_region_8616(region)
 
     result = TypedEdgeSwitchReplacementSafetyResult8616(
         attempted_count=len(regions),
-        safe_count=safe_count,
-        refused_count=len(refusal_reasons),
-        refusal_reasons=tuple(refusal_reasons),
+        safe_count=scan.safe_count,
+        refused_count=len(scan.refusal_reasons),
+        refusal_reasons=tuple(scan.refusal_reasons),
     )
     codegen_dynamic = cast(Any, codegen)
     codegen_dynamic._inertia_typed_edge_switch_replacement_safety_8616 = {
@@ -2527,8 +2829,8 @@ def evaluate_typed_edge_switch_replacement_safety_8616(
         "changed": result.changed,
         "owner": "structuring.codegen",
     }
-    codegen_dynamic._inertia_typed_edge_switch_replacement_safety_debug_8616 = {"regions": tuple(debug_regions)}
-    codegen_dynamic._inertia_typed_edge_switch_replacement_spans_8616 = tuple(replacement_spans)
+    codegen_dynamic._inertia_typed_edge_switch_replacement_safety_debug_8616 = {"regions": tuple(scan.debug_regions)}
+    codegen_dynamic._inertia_typed_edge_switch_replacement_spans_8616 = tuple(scan.replacement_spans)
     return result
 
 
@@ -2560,6 +2862,105 @@ def _record_typed_edge_switch_replacement_safety_stats_8616(
     stats["typed_edge_switch_replacement_safety"] = dict(payload)
 
 
+def _transform_blocker_reasons_8616(
+    mapped_artifacts: tuple[object, ...],
+) -> dict[str, int]:
+    """Count transform blocker reasons across normalized-ready mappings."""
+    blocker_reasons: dict[str, int] = {}
+    for mapping in mapped_artifacts:
+        if not isinstance(mapping, dict) or mapping.get("expanded_root_normalization_ready") is not True:
+            continue
+        if mapping.get("expanded_root_transform_ready") is True:
+            continue
+        reason = mapping.get("expanded_root_transform_blocker_reason") or "unknown"
+        reason_text = str(reason)
+        blocker_reasons[reason_text] = blocker_reasons.get(reason_text, 0) + 1
+    return blocker_reasons
+
+
+def _loop_break_blocker_reasons_8616(
+    stage_mappings: tuple[object, ...],
+) -> tuple[int, dict[str, int]]:
+    """Count candidate loop-break-default plans and their blockers."""
+    candidate_count = 0
+    blocker_reasons: dict[str, int] = {}
+    for record in stage_mappings:
+        if not isinstance(record, dict):
+            continue
+        plan = record.get("expanded_root_loop_preserving_materialization_plan")
+        if not isinstance(plan, dict):
+            continue
+        if plan.get("status") != "candidate_loop_break_default_switch":
+            continue
+        candidate_count += 1
+        blocker = plan.get("blocker") or "unknown"
+        blocker_text = str(blocker)
+        blocker_reasons[blocker_text] = blocker_reasons.get(blocker_text, 0) + 1
+    return candidate_count, blocker_reasons
+
+
+def _pre_codegen_probe_counts_8616(
+    project: object,
+    normalization_ready_artifact_count: int,
+) -> tuple[int, int, dict[str, int], int, dict[str, int]]:
+    """Merge the latest pre-codegen probe's readiness/blocker counts."""
+    pre_codegen_transform_ready_artifact_count = 0
+    pre_codegen_transform_blocker_reasons: dict[str, int] = {}
+    loop_break_default_candidate_count = 0
+    loop_break_default_blocker_reasons: dict[str, int] = {}
+    pre_codegen_records = getattr(project, "_inertia_pre_codegen_seqnode_probe_8616", None)
+    if not (isinstance(pre_codegen_records, list) and pre_codegen_records):
+        return (
+            normalization_ready_artifact_count,
+            pre_codegen_transform_ready_artifact_count,
+            pre_codegen_transform_blocker_reasons,
+            loop_break_default_candidate_count,
+            loop_break_default_blocker_reasons,
+        )
+    latest_probe = pre_codegen_records[-1]
+    if not isinstance(latest_probe, dict):
+        return (
+            normalization_ready_artifact_count,
+            pre_codegen_transform_ready_artifact_count,
+            pre_codegen_transform_blocker_reasons,
+            loop_break_default_candidate_count,
+            loop_break_default_blocker_reasons,
+        )
+    mapped_artifacts = tuple(latest_probe.get("pre_codegen_grouped_switch_artifact_mappings", ()) or ())
+    mapped_ready_artifact_count = sum(
+        1
+        for mapping in mapped_artifacts
+        if isinstance(mapping, dict)
+        and isinstance(mapping.get("decision_tree_summary"), dict)
+        and isinstance(
+            mapping["decision_tree_summary"].get("expanded_root_normalization_readiness"),
+            dict,
+        )
+        and mapping["decision_tree_summary"]["expanded_root_normalization_readiness"].get("ready") is True
+    )
+    normalization_ready_artifact_count = max(
+        normalization_ready_artifact_count,
+        mapped_ready_artifact_count,
+    )
+    pre_codegen_transform_ready_artifact_count = sum(
+        1
+        for mapping in mapped_artifacts
+        if isinstance(mapping, dict) and mapping.get("expanded_root_transform_ready") is True
+    )
+    pre_codegen_transform_blocker_reasons = _transform_blocker_reasons_8616(mapped_artifacts)
+    stage_mappings = tuple(latest_probe.get("pre_codegen_structuring_stage_mappings", ()) or ())
+    loop_break_default_candidate_count, loop_break_default_blocker_reasons = (
+        _loop_break_blocker_reasons_8616(stage_mappings)
+    )
+    return (
+        normalization_ready_artifact_count,
+        pre_codegen_transform_ready_artifact_count,
+        pre_codegen_transform_blocker_reasons,
+        loop_break_default_candidate_count,
+        loop_break_default_blocker_reasons,
+    )
+
+
 def _record_typed_edge_switch_lowering_status_8616(codegen: object) -> None:
     """Record whether this pass can production-lower typed switch artifacts."""
     graph = getattr(codegen, "_inertia_grouped_structuring_graph", None)
@@ -2580,81 +2981,30 @@ def _record_typed_edge_switch_lowering_status_8616(codegen: object) -> None:
         and isinstance(artifact["decision_tree_summary"].get("expanded_root_normalization_readiness"), dict)
         and artifact["decision_tree_summary"]["expanded_root_normalization_readiness"].get("ready") is True
     )
-    pre_codegen_transform_ready_artifact_count = 0
-    pre_codegen_transform_blocker_reasons: dict[str, int] = {}
-    loop_break_default_candidate_count = 0
-    loop_break_default_blocker_reasons: dict[str, int] = {}
     project = getattr(codegen, "project", None)
-    pre_codegen_records = getattr(project, "_inertia_pre_codegen_seqnode_probe_8616", None)
-    if isinstance(pre_codegen_records, list) and pre_codegen_records:
-        latest_probe = pre_codegen_records[-1]
-        if isinstance(latest_probe, dict):
-            mapped_artifacts = tuple(latest_probe.get("pre_codegen_grouped_switch_artifact_mappings", ()) or ())
-            mapped_ready_artifact_count = sum(
-                1
-                for mapping in mapped_artifacts
-                if isinstance(mapping, dict)
-                and isinstance(mapping.get("decision_tree_summary"), dict)
-                and isinstance(
-                    mapping["decision_tree_summary"].get("expanded_root_normalization_readiness"),
-                    dict,
-                )
-                and mapping["decision_tree_summary"]["expanded_root_normalization_readiness"].get("ready") is True
-            )
-            normalization_ready_artifact_count = max(
-                normalization_ready_artifact_count,
-                mapped_ready_artifact_count,
-            )
-            pre_codegen_transform_ready_artifact_count = sum(
-                1
-                for mapping in mapped_artifacts
-                if isinstance(mapping, dict) and mapping.get("expanded_root_transform_ready") is True
-            )
-            for mapping in mapped_artifacts:
-                if not isinstance(mapping, dict) or mapping.get("expanded_root_normalization_ready") is not True:
-                    continue
-                if mapping.get("expanded_root_transform_ready") is True:
-                    continue
-                reason = mapping.get("expanded_root_transform_blocker_reason") or "unknown"
-                reason_text = str(reason)
-                pre_codegen_transform_blocker_reasons[reason_text] = (
-                    pre_codegen_transform_blocker_reasons.get(reason_text, 0) + 1
-                )
-            stage_mappings = tuple(latest_probe.get("pre_codegen_structuring_stage_mappings", ()) or ())
-            for record in stage_mappings:
-                if not isinstance(record, dict):
-                    continue
-                plan = record.get("expanded_root_loop_preserving_materialization_plan")
-                if not isinstance(plan, dict):
-                    continue
-                if plan.get("status") != "candidate_loop_break_default_switch":
-                    continue
-                loop_break_default_candidate_count += 1
-                blocker = plan.get("blocker") or "unknown"
-                blocker_text = str(blocker)
-                loop_break_default_blocker_reasons[blocker_text] = (
-                    loop_break_default_blocker_reasons.get(blocker_text, 0) + 1
-                )
+    (
+        normalization_ready_artifact_count,
+        pre_codegen_transform_ready_artifact_count,
+        pre_codegen_transform_blocker_reasons,
+        loop_break_default_candidate_count,
+        loop_break_default_blocker_reasons,
+    ) = _pre_codegen_probe_counts_8616(project, normalization_ready_artifact_count)
     if not regions:
         payload: dict[str, object] = {
             "attempted_count": 0,
-            "artifact_count": artifact_count,
-            "loop_break_default_blocker_reasons": dict(sorted(loop_break_default_blocker_reasons.items())),
-            "loop_break_default_candidate_count": loop_break_default_candidate_count,
-            "partial_artifact_count": partial_artifact_count,
-            "ready_artifact_count": ready_artifact_count,
-            "normalization_ready_artifact_count": normalization_ready_artifact_count,
-            "pre_codegen_transform_ready_artifact_count": pre_codegen_transform_ready_artifact_count,
-            "pre_codegen_transform_blocker_reasons": dict(sorted(pre_codegen_transform_blocker_reasons.items())),
             "status": TypedEdgeSwitchLoweringStatus8616.NoCandidates.value,
             "blocker_layer": None,
             "blocker_reason": "partial_switch_ladder_unready" if partial_artifact_count else None,
-            "changed": False,
-            "owner": "structuring.codegen",
         }
     else:
         payload = {
             "attempted_count": len(regions),
+            "status": TypedEdgeSwitchLoweringStatus8616.BlockedPostCAst.value,
+            "blocker_layer": "structuring.codegen.production_lowering",
+            "blocker_reason": "pre_c_ast_lowering_hook_unavailable",
+        }
+    payload.update(
+        {
             "artifact_count": artifact_count,
             "loop_break_default_blocker_reasons": dict(sorted(loop_break_default_blocker_reasons.items())),
             "loop_break_default_candidate_count": loop_break_default_candidate_count,
@@ -2663,12 +3013,10 @@ def _record_typed_edge_switch_lowering_status_8616(codegen: object) -> None:
             "normalization_ready_artifact_count": normalization_ready_artifact_count,
             "pre_codegen_transform_ready_artifact_count": pre_codegen_transform_ready_artifact_count,
             "pre_codegen_transform_blocker_reasons": dict(sorted(pre_codegen_transform_blocker_reasons.items())),
-            "status": TypedEdgeSwitchLoweringStatus8616.BlockedPostCAst.value,
-            "blocker_layer": "structuring.codegen.production_lowering",
-            "blocker_reason": "pre_c_ast_lowering_hook_unavailable",
             "changed": False,
             "owner": "structuring.codegen",
         }
+    )
     codegen_dynamic = cast(Any, codegen)
     codegen_dynamic._inertia_typed_edge_switch_lowering_status_8616 = dict(payload)
     cfunc = getattr(codegen, "cfunc", None)
@@ -2682,6 +3030,47 @@ def _record_typed_edge_switch_lowering_status_8616(codegen: object) -> None:
         except AttributeError:
             return
     stats["typed_edge_switch_lowering_status"] = dict(payload)
+
+
+def _materialize_edge_switch_node_8616(
+    region: Region,
+    typed_graph: RegionGraph | None,
+    codegen: object,
+) -> structured_c.CSwitchCase | str:
+    """Build one region's CSwitchCase or return its refusal reason."""
+    switch_expr = region.metadata.get("switch_expr_ast")
+    if not isinstance(switch_expr, structured_c.CExpression):
+        return "missing_switch_expr_ast"
+
+    switch_candidates = _metadata_regions_8616(region.metadata.get("switch_candidates"))
+    case_values = _typed_edge_switch_case_values_8616(region)
+    if len(switch_candidates) != len(case_values):
+        return "case_value_count_mismatch"
+
+    cases: list[tuple[int, structured_c.CStatements]] = []
+    missing_case_body = False
+    for case_value, case_region in zip(case_values, switch_candidates, strict=True):
+        case_body = _statements_node_from_region_8616(case_region, codegen)
+        if case_body is None:
+            missing_case_body = True
+            break
+        cases.append((int(case_value), case_body))
+    if missing_case_body:
+        return "missing_case_statements"
+
+    default_body = None
+    default_region = _typed_edge_switch_default_region_8616(typed_graph, region)
+    if isinstance(default_region, Region):
+        default_body = _statements_node_from_region_8616(default_region, codegen)
+        if default_body is None:
+            return "missing_default_statements"
+
+    return structured_c.CSwitchCase(
+        switch_expr,
+        cases,
+        default_body,
+        codegen=codegen,
+    )
 
 
 def materialize_typed_edge_switch_ast_8616(codegen: object) -> TypedEdgeSwitchAstMaterializationResult8616:
@@ -2700,45 +3089,11 @@ def materialize_typed_edge_switch_ast_8616(codegen: object) -> TypedEdgeSwitchAs
     for region in regions:
         if _populate_switch_expr_ast_from_typed_lhs_8616(region, codegen):
             switch_expr_populated_count += 1
-        switch_expr = region.metadata.get("switch_expr_ast")
-        if not isinstance(switch_expr, structured_c.CExpression):
-            refusal_reasons.append("missing_switch_expr_ast")
-            continue
-
-        switch_candidates = _metadata_regions_8616(region.metadata.get("switch_candidates"))
-        case_values = _typed_edge_switch_case_values_8616(region)
-        if len(switch_candidates) != len(case_values):
-            refusal_reasons.append("case_value_count_mismatch")
-            continue
-
-        cases: list[tuple[int, structured_c.CStatements]] = []
-        missing_case_body = False
-        for case_value, case_region in zip(case_values, switch_candidates, strict=True):
-            case_body = _statements_node_from_region_8616(case_region, codegen)
-            if case_body is None:
-                missing_case_body = True
-                break
-            cases.append((int(case_value), case_body))
-        if missing_case_body:
-            refusal_reasons.append("missing_case_statements")
-            continue
-
-        default_body = None
-        default_region = _typed_edge_switch_default_region_8616(typed_graph, region)
-        if isinstance(default_region, Region):
-            default_body = _statements_node_from_region_8616(default_region, codegen)
-            if default_body is None:
-                refusal_reasons.append("missing_default_statements")
-                continue
-
-        ast_nodes.append(
-            structured_c.CSwitchCase(
-                switch_expr,
-                cases,
-                default_body,
-                codegen=codegen,
-            )
-        )
+        node = _materialize_edge_switch_node_8616(region, typed_graph, codegen)
+        if isinstance(node, structured_c.CSwitchCase):
+            ast_nodes.append(node)
+        else:
+            refusal_reasons.append(node)
 
     result = TypedEdgeSwitchAstMaterializationResult8616(
         attempted_count=len(regions),

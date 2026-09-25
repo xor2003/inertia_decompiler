@@ -450,3 +450,43 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   subsection dispatch split; shared directory-entry walker; record/type
   helpers for symbol parsing and source-module line tables.
 - Owning tests: 75 + 82 + 38 + 14 passed.
+
+### structuring_codegen.py — 11 promoted complexity findings → 0
+
+- Statement-ownership traversal split into `_c_statement_parent_paths_8616`,
+  `_c_positioned_statement_ownership_8616`, `_statement_container_parent_span_8616`
+  state helpers; `_populate_region_statements_from_cfunc_8616` simplified.
+- `split_distinct_condition_call_occurrences_8616` → occurrence collector +
+  per-call processing helpers.
+- `coalesce_shared_call_side_effect_statements_8616` → context/state class.
+- `evaluate_typed_edge_switch_replacement_safety_8616` (43) →
+  `_SwitchSafetyScan8616` scan context: `_resolve_owned_statements_8616`,
+  `_record_case_debug_8616`, `_collect_body_statements_8616`,
+  `_single_container_span_8616`, `_dominant_container_span_8616`,
+  `_owner_index_span_8616`, `_classify_covered_span_8616`. All refusal
+  reasons, span sources, and debug projections preserved.
+- Owning tests: 162 passed (segmented stack alias, structuring pass
+  validation, induction summaries, runtime timing guards).
+
+### structuring/condition_materialization.py — 7 promoted complexity findings → 0
+
+- `materialize_same_block_condition_register_projections_8616` →
+  `_matching_conditions_for_node_8616` + `_project_binary_condition_node_8616`
+  with `_ProjectionNodeDelta8616` stat deltas.
+- `_materialize_cfg_condition_chain_expr_8616` (30) → `_CfgChainBuilder8616`
+  dataclass hoisting `prove_wide_pair`/`build_from_address`/`build_from_condition`
+  closures plus `_proven_call_chain_expression_8616`.
+- `_materialize_cfg_shared_body_condition_chain_expr_8616` →
+  `_SharedBodyBuilder8616` + `_lower_shared_body_wide_8616`.
+- `_materialize_cfg_single_branch_expr_8616` (33) → early-expr, region-expr,
+  body-chain, fallback helpers plus `_proven_single_return_orientation_8616`
+  returning `_SingleReturnProof8616`.
+- `_materialize_existing_wide_call_return_conditions_8616` →
+  `_lower_wide_call_return_pair_8616` with `_WideReturnPairDelta8616`.
+- `materialize_structuring_condition_chains_8616` (80) →
+  `_ConditionChainRun8616` pass context with `_semantic_call_arm_8616`,
+  `_multi_arm_node_8616` (+ duplicate/exact/wide-return/shared-body arms),
+  `_single_arm_node_8616` (+ root-fact selection, assignment diamond,
+  arm replacement, apply helpers) and `_SingleArm8616`/`_ArmReplacement8616`
+  per-node state. All debug projections and refusal paths preserved.
+- Owning tests: 160 passed.
