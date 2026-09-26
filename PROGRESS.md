@@ -854,3 +854,29 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verification: ruff 0 (was 48), mypy 174 errors (HEAD baseline 175),
   arch-check 0 violations in file, all HEAD top-level defs preserved,
   `test_dosunit_tool.py` 198 passed.
+
+## cli_decompilation.py — lint debt cleared (was 34 promoted findings)
+
+- The 299-complexity `_decompile_function` became `_DecompileRun8616`: a
+  plain state class whose `run_8616` dispatches phase methods via
+  `_run_phases_8616` in the original order; nested defs hoisted to
+  methods/module helpers and 166 shared fields declared `Any` in `__init__`.
+- Remaining complexity ground down by lane extraction:
+  `_decompiler_attempt_8616` (guarded with-chain + `_decompiler_codegen_empty_stop`
+  + `_decompiler_timeout_lane`/`_partial_payload`/`_stage_detail` helpers),
+  `_decompiler_codegen_none_lane` (isolated-retry + options lanes),
+  `phase_emit_retry_8616` (x87 debug, `_call_semantics_retry_lane` +
+  `_attempt`/`_score`), `phase_no_postprocess_lane_8616`
+  (`_nonpost_arch_facts` + `_nonpost_call_arity_replay`),
+  `_rewrite_round_8616` (prepare/apply/guarded-evidence split),
+  `phase_late_lowering_8616` (three materialization chunks),
+  `phase_cleanup_finalize_8616` (dead-local/stats + three finalize helpers),
+  `phase_callsite_guard_8616` restored (its tail had been swallowed into a
+  neighbor method during an earlier splice — repaired against HEAD text).
+- Hoisted helpers re-typed (`CompilerHelperEvidence8616 | None`,
+  `int | None`, `list[tuple[int, int]]`, `tuple[int, int] | None`, `Any` at
+  dynamic angr/codegen boundaries) so mypy stays clean on this QA-typed file.
+- Verification: ruff 0 (was 34), mypy 0 (HEAD 0), identical 62-failure set
+  on `test_x86_16_cli.py -k "decompile or cli"` vs bare HEAD (all
+  pre-existing env failures — kvikdos UTF-8 decode etc.), 10/10 targeted
+  `_decompile_function`/retry/stub tests pass.
