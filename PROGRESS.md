@@ -8,6 +8,15 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Fresh-result retained FPTR batch completes all six functions in 137.23s,
+  each exit0/tail validation passed and standalone GCC-clean. Program-level GCC
+  LTO rejects `select_and_apply`'s three-scalar `sub_10034` declaration against
+  `apply_twice`'s function-pointer definition. Added typed optional
+  `--check-cross-unit` batch gate and regression controls; the actual six-unit
+  artifact is `compilation_failed`. Focused tests pass (17), scoped linters and
+  ownership check pass. `check-files` still fails unrelated current
+  shared-body-wide-condition architecture violation. No full coverage witness.
+
 - Full-process profile identifies normal-budget cost in target CFG recovery
   (13.63s) and neighbor extension (41.85s: CFGFast 24.63s, ABI seed 17.20s).
   Direct far-call seed at 0x10006 -> 0x104b0 proves extension is relevant.
@@ -40,6 +49,21 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   bound (242.45s including cleanup), before entering the profiled worker.
   No profile/parity evidence; next diagnostic must sample startup, not just
   the analysis worker. Ordinary deadlines remain unchanged.
+
+- DOSUnit part-pairing + argument normalization hardening (Riptide batch
+  triage): normalized block signatures no longer mask 8-bit literals
+  (push 0xa vs push 3 collided -> wrong-part pairing in add_missile);
+  int vectors stay literal; far-pointer push args now proven via MZ
+  relocation-table segment paragraphs (load-bias corrected) plus their
+  adjacent offset partner; seg-register string args got a two-pass
+  content proof (>=4-byte strings establish paragraph witnesses,
+  3-byte strings borrow witnessed pairs or require unique match);
+  part-pairing exact-signature override fixed delta collisions
+  (check_guages). Riptide source-level divergences found via comparator
+  and fixed: game_cast::update var_2++ placement (63/63 parts proven),
+  story_call_up local-init store order. Host reboot wiped /tmp corpus;
+  SSA docs now generated under the repo (orig v2: 10,046 parts /
+  0 refusals / 709 functions).
 
 - DOSUnit Z3 comparator (straightline_ssa) hardened for Riptide verification:
   32-bit register model (EAX-family hi16/low16 split incl. partial writes),
