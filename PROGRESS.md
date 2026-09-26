@@ -8,6 +8,30 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Removed harness-side stack-argument/signature/global repair from acceptance;
+  generated defects now remain visible to compilation. Four controls failed
+  before removal; 70 focused tests pass, including real GCC corruption controls.
+  Old round trips require revalidation under the stricter harness.
+
+- MS C diagnostic bytes cannot crash UTF-8 decoding or erase the compiler verdict;
+  two before-fix failures, then 24 recompile tests pass with scoped Ruff/MyPy clean.
+  Live DOS execution still reports unavailable KVM; quality-dev remains red.
+
+- Missing required fixture procedures now fail before rebuild rather than being
+  skipped by diagnostic text; 65 focused runner/policy tests pass. Default
+  pipeline terminated: 6,475 passed / 48 failed; fresh quality-dev exits 2.
+  These broad failures remain open, with concurrent-edit effects to distinguish.
+
+- Explicit source-free MS C runs can no longer enter sidecar-backed named
+  fallback: before-fix regression reproduced the leak; 64 runner/policy tests
+  now pass, with scoped MyPy clean. Coverage defaults retain their stronger
+  behavioral harness; binary-only target binding remains required.
+
+- Missing-body retry retains the selected small/large procedure model; large
+  regression failed before repair, then 63 focused runner/policy tests passed.
+  Scoped MyPy passes; 12 legacy builder Ruff findings remain. Source-free
+  fallback policy propagation and broad acceptance remain open; see coverage plan.
+
 - Large-model far-frame argument base proven from terminal `retf` evidence
   (`argument_frame_base.py`, `SimCC8616MSClarge`); far `inc_one`
   `validation=passed` with its argument at machine `BP+6` (commit d3dc07573).
@@ -954,7 +978,8 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   they never accept or reject the generated C. CLI diagnostics distinguish this
   from syntax failure and do not cache unavailable results. Three regressions
   failed before repair; the focused neighborhood passes 26 tests in 105.27
-  seconds. Final missing/denied boundary controls are running separately.
+  seconds. Final five availability/cache boundary controls pass in 60.03 seconds;
+  this repair checkpoint ended at 13:03 local (about seven minutes elapsed).
 - Live evidence `.cache/recompile-capability-live.log` reports unavailable,
   exit 252, command `kvikdos --kvm-check`, with no compiler source artifact.
   Scoped Ruff passes. MyPy reports 13 pre-existing `cli_core.py` errors outside
@@ -1030,3 +1055,35 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verification: ruff 0 (was 18 incl. the 299-complexity `_impl`),
   mypy 0, 56 focused stack-lowering tests + 16 cli stack tests pass,
   no public API removed (only nested defs hoisted to `*_8616` methods).
+
+- 2026-09-26: Hardened staged MSC v8 comparator verdicts (schema v2). Two pre-fix regressions reproduced false/unscoped PASS outcomes; now complete identified backend evidence is required, and relocation-dependent equality is `conditional`/exit 2. 25 tests pass; saved-report audit retains all 43 unconditional proofs. Fresh LINK selection: 5 passed; CL selection: 1 mismatch; normalized global leaf: 1 conditional. Standalone Makefile gate and checked nine-file rebuild patch are in `artifacts/msc8-z3cmp32/`; external rebuild remains read-only.
+
+## cli_fallback_decompilation.py — lint debt cleared (was 12 promoted findings)
+
+- Five wrapper+`_impl` pairs converted to typed state classes
+  (`_SidecarSliceFallback8616`, `_NonOptimizedSliceFallback8616`,
+  `_RuntimeHelperEmitter8616`, `_RuntimeHelperTail8616`,
+  `_RuntimeHelperTail2_8616`) with thin compatibility wrappers; shared
+  converter generalized (position-based `self.` insertion, Store-context
+  binding, `nonlocal`/except-handler scopes).
+- Three runtime-helper emitters (ordered `lowered`-dispatch chains of
+  ~25-55 branches returning literal stub C) collapsed into ordered
+  `(matcher, render)` tables consumed by `_runtime_helper_match_8616`;
+  dynamic name-building branches became `(normalized, lowered)` render
+  lambdas. Output verified byte-identical vs HEAD across ~100 names.
+- `_recover_and_decompile`/`_attempt` nested closures hoisted to methods
+  bound via `functools.partial` (decompile/inherit/run-attempt/failure/
+  summarize callbacks keep their original signatures); fresh-project
+  retry lane extracted to `_fresh_project_retry_lane_8616`.
+- Converter regression found and fixed: `except ... as ex` names inside
+  phase statements were wrongly field-qualified (`self.ex`) and then
+  `ruff --fix` dropped the bindings; all five sites restored to real
+  handler-scoped names.
+- Module docstring gained the `Guard:` marker (clears the `cli-header`
+  architecture rule; the remaining `cli-x86-16-import` violation is
+  pre-existing on HEAD).
+- Verification: ruff 0 (was 12), mypy 0 (HEAD 0), arch-check file
+  findings equal-or-better than HEAD, all HEAD top-level defs preserved.
+  5 focused slice-entry/non-optimized-policy tests pass; the
+  ownership-manifest failure in the same run is pre-existing on bare
+  HEAD.
