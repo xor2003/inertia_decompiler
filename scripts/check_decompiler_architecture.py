@@ -3220,6 +3220,15 @@ def _contains_marker(text: str, marker: str) -> bool:
     return " ".join(marker.lower().split()) in " ".join(text.lower().split())
 
 
+def _node_references_any_name_8616(node: ast.AST, names: set[str] | frozenset[str]) -> bool:
+    """Return True when an AST node references any name as attribute, constant literal, or bare name."""
+    return (
+        (isinstance(node, ast.Attribute) and node.attr in names)
+        or (isinstance(node, ast.Constant) and node.value in names)
+        or (isinstance(node, ast.Name) and node.id in names)
+    )
+
+
 def _literal_string_value(node: ast.AST) -> str | None:
     """Return a literal string value from an AST node, if present."""
 
@@ -3589,6 +3598,30 @@ def _check_semantic_layers_do_not_import_postprocess(root: Path) -> tuple[Archit
 def _check_cli_imports(path: Path) -> tuple[ArchitectureViolation, ...]:
     """Reject CLI dependencies and calls that cross the orchestration boundary."""
     tree = _parse_python(path)
+    violations = _cli_import_allowlist_violations_8616(path, tree)
+    forbidden_imports = (
+        _imported_names_from_module(
+            tree,
+            "angr_platforms.X86_16.decompiler_postprocess_calls",
+        )
+        & _CLI_FORBIDDEN_SEMANTIC_CALLS
+    )
+    violations.extend(_cli_forbidden_import_violations_8616(path, forbidden_imports))
+    violations.extend(_cli_semantic_call_violations_8616(path, tree, set(forbidden_imports)))
+    doc = ast.get_docstring(tree) or ""
+    marker = "must not become the owner of decompiler semantics"
+    if not _contains_marker(doc, marker):
+        violations.append(
+            ArchitectureViolation(
+                _relative(path, REPO_ROOT),
+                "cli-header",
+                f"missing guard marker {marker!r}",
+            )
+        )
+    return tuple(violations)
+
+def _cli_import_allowlist_violations_8616(path: Path, tree: ast.Module) -> list[ArchitectureViolation]:
+    """Flag X86_16 imports outside the CLI compatibility allowlist."""
     violations: list[ArchitectureViolation] = []
     for module in _import_modules(tree):
         if not module.startswith("angr_platforms.X86_16."):
@@ -3601,13 +3634,12 @@ def _check_cli_imports(path: Path) -> tuple[ArchitectureViolation, ...]:
                     f"{module!r} is not in the CLI orchestration compatibility allowlist",
                 )
             )
-    forbidden_imports = (
-        _imported_names_from_module(
-            tree,
-            "angr_platforms.X86_16.decompiler_postprocess_calls",
-        )
-        & _CLI_FORBIDDEN_SEMANTIC_CALLS
-    )
+    return violations
+
+
+def _cli_forbidden_import_violations_8616(path: Path, forbidden_imports: frozenset[str] | set[str]) -> list[ArchitectureViolation]:
+    """Flag imports of semantic mutation entrypoints."""
+    violations: list[ArchitectureViolation] = []
     for name in sorted(forbidden_imports):
         violations.append(
             ArchitectureViolation(
@@ -3616,7 +3648,12 @@ def _check_cli_imports(path: Path) -> tuple[ArchitectureViolation, ...]:
                 f"{name!r} mutates semantic AST state and must run in the validated X86_16 pipeline",
             )
         )
-    imported_violations = set(forbidden_imports)
+    return violations
+
+
+def _cli_semantic_call_violations_8616(path: Path, tree: ast.Module, imported_violations: set[str]) -> list[ArchitectureViolation]:
+    """Flag direct calls into forbidden semantic mutation entrypoints."""
+    violations: list[ArchitectureViolation] = []
     for node in _walk_ast(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -3636,17 +3673,9 @@ def _check_cli_imports(path: Path) -> tuple[ArchitectureViolation, ...]:
                 f"{called_name!r} mutates semantic AST state and must run in the validated X86_16 pipeline",
             )
         )
-    doc = ast.get_docstring(tree) or ""
-    marker = "must not become the owner of decompiler semantics"
-    if not _contains_marker(doc, marker):
-        violations.append(
-            ArchitectureViolation(
-                _relative(path, REPO_ROOT),
-                "cli-header",
-                f"missing guard marker {marker!r}",
-            )
-        )
-    return tuple(violations)
+    return violations
+
+
 
 
 def _check_cli_c_text_cleanup(path: Path) -> tuple[ArchitectureViolation, ...]:
@@ -3769,8 +3798,17 @@ def _check_cli_acceptance_not_source_evidence_gated(path: Path) -> tuple[Archite
     if not path.exists():
         return ()
     tree = _parse_python(path)
-    violations: list[ArchitectureViolation] = []
+    violations = _acceptance_sidecar_and_helper_violations_8616(path, tree)
+    guarded = _find_function(tree, "_validated_generated_c_acceptance_8616")
+    if guarded is not None:
+        early = _acceptance_guarded_banned_call_8616(path, guarded)
+        if early is not None:
+            return early
+    return tuple(violations)
 
+def _acceptance_sidecar_and_helper_violations_8616(path: Path, tree: ast.Module) -> list[ArchitectureViolation]:
+    """Flag source-sidecar imports and obsolete source-evidence helpers in the CLI acceptance file."""
+    violations: list[ArchitectureViolation] = []
     for node in _walk_ast(tree):
         imports_source_sidecar = (
             isinstance(node, ast.ImportFrom) and (node.module or "") == "inertia_decompiler.source_sidecar"
@@ -3784,7 +3822,6 @@ def _check_cli_acceptance_not_source_evidence_gated(path: Path) -> tuple[Archite
                 )
             )
             break
-
     for helper_name in ("_with_source_evidence_comments_8616", "_source_evidence_payload_for_function_8616"):
         if _find_function(tree, helper_name) is not None:
             violations.append(
@@ -3794,10 +3831,10 @@ def _check_cli_acceptance_not_source_evidence_gated(path: Path) -> tuple[Archite
                     f"CLI acceptance must not define obsolete source-evidence helper {helper_name}",
                 )
             )
+    return violations
 
-    guarded = _find_function(tree, "_validated_generated_c_acceptance_8616")
-    if guarded is None:
-        return tuple(violations)
+def _acceptance_guarded_banned_call_8616(path: Path, guarded: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[ArchitectureViolation, ...] | None:
+    """Return the early-exit violation when the guarded acceptance fn calls a source-evidence gate."""
     banned_calls = {
         "assess_source_backed_c_text",
         "_source_evidence_return_blocker_8616",
@@ -3827,22 +3864,27 @@ def _check_cli_acceptance_not_source_evidence_gated(path: Path) -> tuple[Archite
                     "CLI acceptance must not accept or reject emitted C by comparing against source/COD evidence",
                 ),
             )
-    return tuple(violations)
+    return None
 
 
 def _check_cli_not_source_backed_quality_gated(path: Path) -> tuple[ArchitectureViolation, ...]:
     if not path.exists():
         return ()
     tree = _parse_python(path)
+    early = _quality_score_helper_violations_8616(path, tree)
+    if early is not None:
+        return early
+    early = _quality_banned_reference_walk_8616(path, tree)
+    if early is not None:
+        return early
+    return ()
 
-    def _function_returns_constant_zero(function: ast.FunctionDef | ast.AsyncFunctionDef | None) -> bool:
-        if function is None or len(function.body) != 1:
-            return False
-        stmt = function.body[0]
-        return isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Constant) and stmt.value.value == 0
-
+def _quality_score_helper_violations_8616(
+    path: Path, tree: ast.Module
+) -> tuple[ArchitectureViolation, ...] | None:
+    """Return the early violation when COD score/global-name helpers drive emitted-C quality."""
     cod_signature_score = _find_function(tree, "_cod_signature_and_stack_alias_score_8616")
-    if cod_signature_score is not None and not _function_returns_constant_zero(cod_signature_score):
+    if cod_signature_score is not None and not _function_returns_only_constant(cod_signature_score, 0):
         return (
             ArchitectureViolation(
                 _relative(path, REPO_ROOT),
@@ -3850,13 +3892,10 @@ def _check_cli_not_source_backed_quality_gated(path: Path) -> tuple[Architecture
                 "CLI must not rank emitted C by COD stack aliases or source signatures",
             ),
         )
-
     expected_globals = _find_function(tree, "_candidate_expected_global_names_8616")
     if expected_globals is not None:
         for node in _walk_ast(expected_globals):
-            if (isinstance(node, ast.Attribute) and node.attr == "global_names") or (
-                isinstance(node, ast.Constant) and node.value == "global_names"
-            ):
+            if _node_references_any_name_8616(node, {"global_names"}):
                 return (
                     ArchitectureViolation(
                         _relative(path, REPO_ROOT),
@@ -3864,88 +3903,86 @@ def _check_cli_not_source_backed_quality_gated(path: Path) -> tuple[Architecture
                         "CLI must not rank emitted C by COD global-name coverage",
                     ),
                 )
+    return None
 
-    banned_calls = {
-        "assess_source_backed_c_text",
-        "_source_evidence_return_blocker_8616",
-        "_missing_expected_return_values_from_embedded_evidence_8616",
-        "_missing_expected_calls_from_embedded_evidence_8616",
-        "_missing_expected_call_multiplicity_8616",
-        "_arg_class_violations_8616",
-        "_call_order_gate_violations_8616",
-        "_loop_presence_violation_8616",
-        "_loop_hoisted_call_violation_8616",
-        "_side_effect_floor_violation_8616",
-        "_stack_slot_evidence_violation_8616",
-        "_recover_missing_direct_calls_from_evidence_8616",
-        "_expected_source_call_arity_counter_8616",
-        "_call_arity_from_call_text_8616",
-        "_rendered_call_arity_counter_8616",
-        "_split_call_args_for_score_8616",
-        "_cod_proc_has_call_heavy_helper_profile",
-        "collect_local_source_sidecar_return_types",
-        "render_local_source_sidecar_function",
-    }
+_CLI_QUALITY_BANNED_CALLS_8616 = {
+    "assess_source_backed_c_text",
+    "_source_evidence_return_blocker_8616",
+    "_missing_expected_return_values_from_embedded_evidence_8616",
+    "_missing_expected_calls_from_embedded_evidence_8616",
+    "_missing_expected_call_multiplicity_8616",
+    "_arg_class_violations_8616",
+    "_call_order_gate_violations_8616",
+    "_loop_presence_violation_8616",
+    "_loop_hoisted_call_violation_8616",
+    "_side_effect_floor_violation_8616",
+    "_stack_slot_evidence_violation_8616",
+    "_recover_missing_direct_calls_from_evidence_8616",
+    "_expected_source_call_arity_counter_8616",
+    "_call_arity_from_call_text_8616",
+    "_rendered_call_arity_counter_8616",
+    "_split_call_args_for_score_8616",
+    "_cod_proc_has_call_heavy_helper_profile",
+    "collect_local_source_sidecar_return_types",
+    "render_local_source_sidecar_function",
+}
+
+def _quality_gate_node_violation_8616(path: Path, node: ast.AST) -> ArchitectureViolation | None:
+    """Classify one walked node against the source/COD evidence-quality ban."""
+    if _node_references_any_name_8616(node, {"call_sources"}):
+        return ArchitectureViolation(
+            _relative(path, REPO_ROOT),
+            "cli-source-backed-quality-gate",
+            "CLI must not use COD call_sources text as emitted C recovery, scoring, or retry evidence",
+        )
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        imported = {alias.name.rsplit(".", 1)[-1] for alias in node.names}
+        if imported.intersection(_CLI_QUALITY_BANNED_CALLS_8616):
+            return ArchitectureViolation(
+                _relative(path, REPO_ROOT),
+                "cli-source-backed-quality-gate",
+                "CLI must not import source/COD evidence gates for emitted C acceptance, ranking, or cache policy",
+            )
+        return None
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in _CLI_QUALITY_BANNED_CALLS_8616:
+        return ArchitectureViolation(
+            _relative(path, REPO_ROOT),
+            "cli-source-backed-quality-gate",
+            "CLI must not define source/COD evidence gates for emitted C acceptance, ranking, or cache policy",
+        )
+    if not isinstance(node, ast.Call):
+        return None
+    call_name = None
+    if isinstance(node.func, ast.Name):
+        call_name = node.func.id
+    elif isinstance(node.func, ast.Attribute):
+        call_name = node.func.attr
+    if call_name in _CLI_QUALITY_BANNED_CALLS_8616:
+        return ArchitectureViolation(
+            _relative(path, REPO_ROOT),
+            "cli-source-backed-quality-gate",
+            "CLI must not accept, reject, rank, or cache-bypass C by comparing emitted code against source/COD evidence",
+        )
+    return None
+
+def _quality_banned_reference_walk_8616(path: Path, tree: ast.Module) -> tuple[ArchitectureViolation, ...] | None:
+    """Walk the CLI file for banned source/COD evidence references."""
     for node in _walk_ast(tree):
-        if (
-            (isinstance(node, ast.Attribute) and node.attr == "call_sources")
-            or (isinstance(node, ast.Constant) and node.value == "call_sources")
-            or (isinstance(node, ast.Name) and node.id == "call_sources")
-        ):
-            return (
-                ArchitectureViolation(
-                    _relative(path, REPO_ROOT),
-                    "cli-source-backed-quality-gate",
-                    "CLI must not use COD call_sources text as emitted C recovery, scoring, or retry evidence",
-                ),
-            )
-        if isinstance(node, ast.ImportFrom):
-            imported = {alias.name for alias in node.names}
-            if imported.intersection(banned_calls):
-                return (
-                    ArchitectureViolation(
-                        _relative(path, REPO_ROOT),
-                        "cli-source-backed-quality-gate",
-                        "CLI must not import source/COD evidence gates for emitted C acceptance, ranking, or cache policy",
-                    ),
-                )
-        if isinstance(node, ast.Import):
-            imported = {alias.name.rsplit(".", 1)[-1] for alias in node.names}
-            if imported.intersection(banned_calls):
-                return (
-                    ArchitectureViolation(
-                        _relative(path, REPO_ROOT),
-                        "cli-source-backed-quality-gate",
-                        "CLI must not import source/COD evidence gates for emitted C acceptance, ranking, or cache policy",
-                    ),
-                )
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in banned_calls:
-            return (
-                ArchitectureViolation(
-                    _relative(path, REPO_ROOT),
-                    "cli-source-backed-quality-gate",
-                    "CLI must not define source/COD evidence gates for emitted C acceptance, ranking, or cache policy",
-                ),
-            )
-        if not isinstance(node, ast.Call):
-            continue
-        call_name = None
-        if isinstance(node.func, ast.Name):
-            call_name = node.func.id
-        elif isinstance(node.func, ast.Attribute):
-            call_name = node.func.attr
-        if call_name in banned_calls:
-            return (
-                ArchitectureViolation(
-                    _relative(path, REPO_ROOT),
-                    "cli-source-backed-quality-gate",
-                    "CLI must not accept, reject, rank, or cache-bypass C by comparing emitted code against source/COD evidence",
-                ),
-            )
-    return ()
+        violation = _quality_gate_node_violation_8616(path, node)
+        if violation is not None:
+            return (violation,)
+    return None
+
 
 
 def _check_cli_ast_cod_callee_names_inert(ast_path: Path, cli_path: Path) -> tuple[ArchitectureViolation, ...]:
+    violations: list[ArchitectureViolation] = []
+    violations.extend(_cli_ast_cod_callee_names_ast_violations_8616(ast_path))
+    violations.extend(_cli_ast_cod_callee_names_cli_violations_8616(cli_path))
+    return tuple(violations)
+
+def _cli_ast_cod_callee_names_ast_violations_8616(ast_path: Path) -> list[ArchitectureViolation]:
+    """Flag COD callee-name recovery inside the CLI AST rewrite helper."""
     violations: list[ArchitectureViolation] = []
     if ast_path.exists():
         tree = _parse_python(ast_path)
@@ -3953,9 +3990,7 @@ def _check_cli_ast_cod_callee_names_inert(ast_path: Path, cli_path: Path) -> tup
         if helper is not None:
             for node in _walk_ast(helper):
                 if (
-                    (isinstance(node, ast.Attribute) and node.attr == "call_names")
-                    or (isinstance(node, ast.Constant) and node.value == "call_names")
-                    or (isinstance(node, ast.Name) and node.id == "call_names")
+                    _node_references_any_name_8616(node, {"call_names"})
                     or (
                         isinstance(node, ast.Call)
                         and isinstance(node.func, ast.Name)
@@ -3970,6 +4005,11 @@ def _check_cli_ast_cod_callee_names_inert(ast_path: Path, cli_path: Path) -> tup
                         )
                     )
                     break
+    return violations
+
+def _cli_ast_cod_callee_names_cli_violations_8616(cli_path: Path) -> list[ArchitectureViolation]:
+    """Flag CLI orchestration calls into the COD callee-name AST rewrite helper."""
+    violations: list[ArchitectureViolation] = []
     if cli_path.exists():
         tree = _parse_python(cli_path)
         for node in _walk_ast(tree):
@@ -3989,7 +4029,8 @@ def _check_cli_ast_cod_callee_names_inert(ast_path: Path, cli_path: Path) -> tup
                     )
                 )
                 break
-    return tuple(violations)
+    return violations
+
 
 
 def _check_cli_cod_call_names_not_semantic(
@@ -3997,15 +4038,21 @@ def _check_cli_cod_call_names_not_semantic(
 ) -> tuple[ArchitectureViolation, ...]:
     violations: list[ArchitectureViolation] = []
 
+    violations.extend(_cli_cod_call_names_cli_violations_8616(cli_path))
+    violations.extend(_cli_cod_call_names_helper_violations_8616(helper_path))
+    violations.extend(_cli_cod_call_names_textpp_violations_8616(text_postprocess_path))
+    return tuple(violations)
+
+def _cli_cod_call_names_cli_violations_8616(cli_path: Path) -> list[ArchitectureViolation]:
+    """cli orchestration must not run COD call-name recovery."""
+    violations: list[ArchitectureViolation] = []
     if cli_path.exists():
         tree = _parse_python(cli_path)
         register_helper = _find_function(tree, "_register_direct_call_target_function_stubs")
         if register_helper is not None:
             for node in _walk_ast(register_helper):
                 uses_call_names = (
-                    (isinstance(node, ast.Attribute) and node.attr == "call_names")
-                    or (isinstance(node, ast.Constant) and node.value == "call_names")
-                    or (isinstance(node, ast.Name) and node.id == "call_names")
+                    _node_references_any_name_8616(node, {"call_names"})
                 )
                 if uses_call_names:
                     violations.append(
@@ -4026,7 +4073,11 @@ def _check_cli_cod_call_names_not_semantic(
                     )
                 )
                 break
+    return violations
 
+def _cli_cod_call_names_helper_violations_8616(helper_path: Path) -> list[ArchitectureViolation]:
+    """postprocess helpers must not read COD call names."""
+    violations: list[ArchitectureViolation] = []
     if helper_path.exists():
         tree = _parse_python(helper_path)
         known_helper = _find_function(tree, "_known_helper_declarations")
@@ -4045,9 +4096,7 @@ def _check_cli_cod_call_names_not_semantic(
                 )
             for node in _walk_ast(known_helper):
                 uses_call_names = (
-                    (isinstance(node, ast.Attribute) and node.attr == "call_names")
-                    or (isinstance(node, ast.Constant) and node.value == "call_names")
-                    or (isinstance(node, ast.Name) and node.id == "call_names")
+                    _node_references_any_name_8616(node, {"call_names"})
                 )
                 if uses_call_names:
                     violations.append(
@@ -4058,7 +4107,11 @@ def _check_cli_cod_call_names_not_semantic(
                         )
                     )
                     break
+    return violations
 
+def _cli_cod_call_names_textpp_violations_8616(text_postprocess_path: Path) -> list[ArchitectureViolation]:
+    """text postprocess must not recover names from COD."""
+    violations: list[ArchitectureViolation] = []
     if text_postprocess_path.exists():
         tree = _parse_python(text_postprocess_path)
         generic_prototype_helper = _find_function(tree, "_materialize_missing_direct_call_prototypes_text")
@@ -4079,9 +4132,7 @@ def _check_cli_cod_call_names_not_semantic(
         if materialize_helper is not None:
             for node in _walk_ast(materialize_helper):
                 uses_call_names = (
-                    (isinstance(node, ast.Attribute) and node.attr == "call_names")
-                    or (isinstance(node, ast.Constant) and node.value == "call_names")
-                    or (isinstance(node, ast.Name) and node.id == "call_names")
+                    _node_references_any_name_8616(node, {"call_names"})
                 )
                 if uses_call_names:
                     violations.append(
@@ -4092,8 +4143,8 @@ def _check_cli_cod_call_names_not_semantic(
                         )
                     )
                     break
+    return violations
 
-    return tuple(violations)
 
 
 def _function_returns_name(function: ast.FunctionDef | ast.AsyncFunctionDef | None, name: str) -> bool:
@@ -4119,6 +4170,13 @@ def _check_cli_cod_stack_alias_rewrites_inert(
     ast_path: Path, text_postprocess_path: Path
 ) -> tuple[ArchitectureViolation, ...]:
     violations: list[ArchitectureViolation] = []
+    violations.extend(_cli_cod_stack_alias_ast_violations_8616(ast_path))
+    violations.extend(_cli_cod_stack_alias_textpp_violations_8616(text_postprocess_path))
+    return tuple(violations)
+
+def _cli_cod_stack_alias_ast_violations_8616(ast_path: Path) -> list[ArchitectureViolation]:
+    """CLI AST rewrite must not rename variables from COD stack_aliases."""
+    violations: list[ArchitectureViolation] = []
     if ast_path.exists():
         tree = _parse_python(ast_path)
         helper = _find_function(tree, "_attach_cod_variable_names")
@@ -4130,6 +4188,11 @@ def _check_cli_cod_stack_alias_rewrites_inert(
                     "CLI AST rewrite must not rename recovered variables from COD stack_aliases",
                 )
             )
+    return violations
+
+def _cli_cod_stack_alias_textpp_violations_8616(text_postprocess_path: Path) -> list[ArchitectureViolation]:
+    """CLI text cleanup must not materialize declarations from COD names."""
+    violations: list[ArchitectureViolation] = []
     if text_postprocess_path.exists():
         tree = _parse_python(text_postprocess_path)
         helper = _find_function(tree, "_collapse_annotated_stack_aliases_text")
@@ -4151,40 +4214,37 @@ def _check_cli_cod_stack_alias_rewrites_inert(
                         "CLI text cleanup must not annotate or rewrite emitted C from COD stack/global/call metadata",
                     )
                 )
-        simplify_helper = _find_function(tree, "_simplify_x86_16_stack_byte_pointers")
-        if simplify_helper is not None:
-            for node in _walk_ast(simplify_helper):
-                if (
-                    (isinstance(node, ast.Attribute) and node.attr == "stack_aliases")
-                    or (isinstance(node, ast.Constant) and node.value == "stack_aliases")
-                    or (isinstance(node, ast.Name) and node.id == "stack_aliases")
-                ):
-                    violations.append(
-                        ArchitectureViolation(
-                            _relative(text_postprocess_path, REPO_ROOT),
-                            "cli-cod-stack-alias-rewrite",
-                            "CLI text cleanup must not infer stack pointer names from COD stack_aliases",
-                        )
-                    )
-                    break
-        globals_helper = _find_function(tree, "_materialize_missing_synthetic_global_declarations_text")
-        if globals_helper is not None:
-            for node in _walk_ast(globals_helper):
-                if (
-                    (isinstance(node, ast.Attribute) and node.attr == "global_names")
-                    or (isinstance(node, ast.Constant) and node.value == "global_names")
-                    or (isinstance(node, ast.Name) and node.id == "global_names")
-                ):
-                    violations.append(
-                        ArchitectureViolation(
-                            _relative(text_postprocess_path, REPO_ROOT),
-                            "cli-cod-stack-alias-rewrite",
-                            "CLI text cleanup must not materialize declarations from COD global_names",
-                        )
-                    )
-                    break
-    return tuple(violations)
+        violations.extend(_textpp_helper_name_scan_violations_8616(
+            text_postprocess_path, tree, "_simplify_x86_16_stack_byte_pointers", "stack_aliases",
+            "CLI text cleanup must not infer stack pointer names from COD stack_aliases",
+        ))
+        violations.extend(_textpp_helper_name_scan_violations_8616(
+            text_postprocess_path, tree, "_materialize_missing_synthetic_global_declarations_text", "global_names",
+            "CLI text cleanup must not materialize declarations from COD global_names",
+        ))
+    return violations
 
+
+
+
+def _textpp_helper_name_scan_violations_8616(
+    text_postprocess_path: Path, tree: ast.Module, helper_name: str, banned_name: str, message: str
+) -> list[ArchitectureViolation]:
+    """Flag one text-cleanup helper that consults a banned COD name."""
+    violations: list[ArchitectureViolation] = []
+    helper = _find_function(tree, helper_name)
+    if helper is not None:
+        for node in _walk_ast(helper):
+            if _node_references_any_name_8616(node, {banned_name}):
+                violations.append(
+                    ArchitectureViolation(
+                        _relative(text_postprocess_path, REPO_ROOT),
+                        "cli-cod-stack-alias-rewrite",
+                        message,
+                    )
+                )
+                break
+    return violations
 
 def _check_cod_source_rewrites_are_inert(path: Path) -> tuple[ArchitectureViolation, ...]:
     if not path.exists():
@@ -4217,19 +4277,20 @@ def _check_source_annotations_do_not_materialize_types(path: Path) -> tuple[Arch
     if not path.exists():
         return ()
     tree = _parse_python(path)
-    violations: list[ArchitectureViolation] = []
-    guarded_functions = {"_apply_source_prototype_annotations_8616", "_source_function_pointer_local_types_8616"}
-    banned_calls = {"annotate_function", "_parse_c_prototype_8616", "_source_args_from_cod_source_lines"}
+    for probe in (
+        _source_annotation_inert_helper_violation_8616,
+        _guarded_fn_banned_call_violation_8616,
+        _metadata_annotation_violation_8616,
+    ):
+        early = probe(path, tree)
+        if early is not None:
+            return early
+    return ()
 
-    def _function_returns_only_constant(function: ast.FunctionDef | ast.AsyncFunctionDef | None, value: object) -> bool:
-        if function is None:
-            return False
-        body = _body_without_leading_docstring(function.body)
-        if len(body) != 1:
-            return False
-        stmt = body[0]
-        return isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Constant) and stmt.value.value is value
-
+def _source_annotation_inert_helper_violation_8616(
+    path: Path, tree: ast.Module
+) -> tuple[ArchitectureViolation, ...] | None:
+    """Flag source-annotation helpers that parse COD/source text instead of returning inert constants."""
     inert_none_helpers = {
         "_source_decl_from_cod_source_lines",
         "_source_decl_from_cod_source_lines_cached_8616",
@@ -4237,25 +4298,29 @@ def _check_source_annotations_do_not_materialize_types(path: Path) -> tuple[Arch
     }
     for helper_name in inert_none_helpers:
         if not _function_returns_only_constant(_find_function(tree, helper_name), None):
-            violations.append(
+            return (
                 ArchitectureViolation(
                     _relative(path, REPO_ROOT),
                     "source-annotation-semantic-materialization",
                     "source annotations must not parse COD/source text into declarations or arguments",
-                )
+                ),
             )
-            return tuple(violations)
-
     if not _function_returns_only_constant(_find_function(tree, "_apply_known_helper_signatures"), False):
-        violations.append(
+        return (
             ArchitectureViolation(
                 _relative(path, REPO_ROOT),
                 "source-annotation-semantic-materialization",
                 "COD call names must not materialize helper signatures",
-            )
+            ),
         )
-        return tuple(violations)
+    return None
 
+def _guarded_fn_banned_call_violation_8616(
+    path: Path, tree: ast.Module
+) -> tuple[ArchitectureViolation, ...] | None:
+    """Flag guarded annotation functions that call semantic materializers or name SimTypePointer."""
+    guarded_functions = {"_apply_source_prototype_annotations_8616", "_source_function_pointer_local_types_8616"}
+    banned_calls = {"annotate_function", "_parse_c_prototype_8616", "_source_args_from_cod_source_lines"}
     for node in _walk_ast(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node.name not in guarded_functions:
             continue
@@ -4267,49 +4332,49 @@ def _check_source_annotations_do_not_materialize_types(path: Path) -> tuple[Arch
                 elif isinstance(child.func, ast.Attribute):
                     call_name = child.func.attr
                 if call_name in banned_calls:
-                    violations.append(
+                    return (
                         ArchitectureViolation(
                             _relative(path, REPO_ROOT),
                             "source-annotation-semantic-materialization",
                             "source annotations must not materialize prototypes, argument names, or local types",
-                        )
+                        ),
                     )
-                    return tuple(violations)
             if isinstance(child, ast.Name) and child.id == "SimTypePointer":
-                violations.append(
+                return (
                     ArchitectureViolation(
                         _relative(path, REPO_ROOT),
                         "source-annotation-semantic-materialization",
                         "source annotations must not materialize prototypes, argument names, or local types",
-                    )
+                    ),
                 )
-                return tuple(violations)
+    return None
 
+def _metadata_annotation_violation_8616(
+    path: Path, tree: ast.Module
+) -> tuple[ArchitectureViolation, ...] | None:
+    """Flag metadata annotation code that consults COD stack/source/call evidence."""
     apply_metadata = _find_function(tree, "apply_x86_16_metadata_annotations")
-    if apply_metadata is not None:
-        for child in _walk_ast(apply_metadata):
-            uses_banned_metadata = (
-                (isinstance(child, ast.Attribute) and child.attr in {"stack_aliases", "source_lines", "call_names"})
-                or (isinstance(child, ast.Constant) and child.value in {"stack_aliases", "source_lines", "call_names"})
-                or (isinstance(child, ast.Name) and child.id in {"stack_aliases", "source_lines", "call_names"})
+    if apply_metadata is None:
+        return None
+    for child in _walk_ast(apply_metadata):
+        uses_banned_metadata = _node_references_any_name_8616(child, {"stack_aliases", "source_lines", "call_names"})
+        calls_semantic_materializer = isinstance(child, ast.Call) and (
+            (isinstance(child.func, ast.Name) and child.func.id in {"annotate_function", "known_cod_object_spec"})
+            or (
+                isinstance(child.func, ast.Attribute)
+                and child.func.attr in {"annotate_function", "known_cod_object_spec"}
             )
-            calls_semantic_materializer = isinstance(child, ast.Call) and (
-                (isinstance(child.func, ast.Name) and child.func.id in {"annotate_function", "known_cod_object_spec"})
-                or (
-                    isinstance(child.func, ast.Attribute)
-                    and child.func.attr in {"annotate_function", "known_cod_object_spec"}
-                )
+        )
+        if uses_banned_metadata or calls_semantic_materializer:
+            return (
+                ArchitectureViolation(
+                    _relative(path, REPO_ROOT),
+                    "source-annotation-semantic-materialization",
+                    "metadata annotations must not materialize stack, type, prototype, or helper semantics from COD/source evidence",
+                ),
             )
-            if uses_banned_metadata or calls_semantic_materializer:
-                violations.append(
-                    ArchitectureViolation(
-                        _relative(path, REPO_ROOT),
-                        "source-annotation-semantic-materialization",
-                        "metadata annotations must not materialize stack, type, prototype, or helper semantics from COD/source evidence",
-                    )
-                )
-                return tuple(violations)
-    return tuple(violations)
+    return None
+
 
 
 def _check_lowering_not_cod_name_backed(root: Path) -> tuple[ArchitectureViolation, ...]:
@@ -4321,9 +4386,7 @@ def _check_lowering_not_cod_name_backed(root: Path) -> tuple[ArchitectureViolati
         tree = _parse_python(path)
         for node in _walk_ast(tree):
             uses_cod_global_names = (
-                (isinstance(node, ast.Attribute) and node.attr == "global_names")
-                or (isinstance(node, ast.Constant) and node.value == "global_names")
-                or (isinstance(node, ast.Name) and node.id == "global_names")
+                _node_references_any_name_8616(node, {"global_names"})
             )
             if uses_cod_global_names:
                 violations.append(
@@ -4691,6 +4754,16 @@ def _check_identical_assignment_arm_structuring_ownership(
         "collapse_surplus_identical_assignment_arms_8616",
     )
     violations: list[ArchitectureViolation] = []
+    violations.extend(_identical_arm_owner_violations_8616(owner_path, rule, owner_names))
+    violations.extend(_identical_arm_stage_violations_8616(stage_path, rule))
+    violations.extend(_identical_arm_postprocess_violations_8616(postprocess_paths, rule, owner_names))
+    return tuple(violations)
+
+def _identical_arm_owner_violations_8616(
+    owner_path: Path, rule: str, owner_names: tuple[str, ...]
+) -> list[ArchitectureViolation]:
+    """Require the assignment-diamond helpers to live in the Structuring owner module."""
+    violations: list[ArchitectureViolation] = []
     if owner_path.exists():
         owner_tree = _parse_python(owner_path)
         for name in owner_names:
@@ -4710,38 +4783,12 @@ def _check_identical_assignment_arm_structuring_ownership(
                 "redundant assignment-diamond owner is missing",
             )
         )
+    return violations
 
-    if stage_path.exists():
-        stage_tree = _parse_python(stage_path)
-        imported_names = _imported_names_from_module(
-            stage_tree,
-            ".structuring.return_chains",
-        )
-        collapse_name = "collapse_surplus_identical_assignment_arms_8616"
-        if collapse_name not in imported_names:
-            violations.append(
-                ArchitectureViolation(
-                    _relative(stage_path, REPO_ROOT),
-                    rule,
-                    f"structuring stage must import {collapse_name} from structuring.return_chains",
-                )
-            )
-        stage_function = _find_function(
-            stage_tree,
-            "_materialize_structuring_return_chains_8616",
-        )
-        has_collapse_call = stage_function is not None and any(
-            isinstance(node, ast.Call) and _call_name(node.func) == collapse_name for node in _walk_ast(stage_function)
-        )
-        if not has_collapse_call:
-            violations.append(
-                ArchitectureViolation(
-                    _relative(stage_path, REPO_ROOT),
-                    rule,
-                    "_materialize_structuring_return_chains_8616 must call the Structuring-owned collapse",
-                )
-            )
-    else:
+def _identical_arm_stage_violations_8616(stage_path: Path, rule: str) -> list[ArchitectureViolation]:
+    """Require the structuring stage to import and call the owned collapse helper."""
+    violations: list[ArchitectureViolation] = []
+    if not stage_path.exists():
         violations.append(
             ArchitectureViolation(
                 _relative(stage_path, REPO_ROOT),
@@ -4749,7 +4796,43 @@ def _check_identical_assignment_arm_structuring_ownership(
                 "structuring stage entry point is missing",
             )
         )
+        return violations
+    stage_tree = _parse_python(stage_path)
+    imported_names = _imported_names_from_module(
+        stage_tree,
+        ".structuring.return_chains",
+    )
+    collapse_name = "collapse_surplus_identical_assignment_arms_8616"
+    if collapse_name not in imported_names:
+        violations.append(
+            ArchitectureViolation(
+                _relative(stage_path, REPO_ROOT),
+                rule,
+                f"structuring stage must import {collapse_name} from structuring.return_chains",
+            )
+        )
+    stage_function = _find_function(
+        stage_tree,
+        "_materialize_structuring_return_chains_8616",
+    )
+    has_collapse_call = stage_function is not None and any(
+        isinstance(node, ast.Call) and _call_name(node.func) == collapse_name for node in _walk_ast(stage_function)
+    )
+    if not has_collapse_call:
+        violations.append(
+            ArchitectureViolation(
+                _relative(stage_path, REPO_ROOT),
+                rule,
+                "_materialize_structuring_return_chains_8616 must call the Structuring-owned collapse",
+            )
+        )
+    return violations
 
+def _identical_arm_postprocess_violations_8616(
+    postprocess_paths: tuple[Path, ...], rule: str, owner_names: tuple[str, ...]
+) -> list[ArchitectureViolation]:
+    """Forbid the owned helpers from being redefined inside postprocess modules."""
+    violations: list[ArchitectureViolation] = []
     for path in postprocess_paths:
         tree = _parse_python(path)
         for name in owner_names:
@@ -4761,7 +4844,8 @@ def _check_identical_assignment_arm_structuring_ownership(
                         f"{name} must not be defined in postprocess",
                     )
                 )
-    return tuple(violations)
+    return violations
+
 
 
 def _check_terminal_call_result_structuring_ownership(
@@ -4791,6 +4875,16 @@ def _check_terminal_call_result_structuring_ownership(
     )
     owner_names = (*owner_class_names, materializer_name)
     violations: list[ArchitectureViolation] = []
+    violations.extend(_terminal_result_owner_violations_8616(owner_path, rule, owner_class_names, materializer_name))
+    violations.extend(_terminal_result_stage_violations_8616(stage_path, rule, materializer_name))
+    violations.extend(_terminal_result_postprocess_violations_8616(postprocess_paths, rule, owner_names))
+    return tuple(violations)
+
+def _terminal_result_owner_violations_8616(
+    owner_path: Path, rule: str, owner_class_names: tuple[str, ...], materializer_name: str
+) -> list[ArchitectureViolation]:
+    """Require the materializer and its typed contracts to live in the Structuring owner module."""
+    violations: list[ArchitectureViolation] = []
     if owner_path.exists():
         owner_tree = _parse_python(owner_path)
         if _find_function(owner_tree, materializer_name) is None:
@@ -4819,61 +4913,44 @@ def _check_terminal_call_result_structuring_ownership(
                 "terminal call-result return owner is missing",
             )
         )
+    return violations
 
-    if stage_path.exists():
-        stage_tree = _parse_python(stage_path)
-        imported_names = _imported_names_from_module(
-            stage_tree,
-            ".structuring.return_chains",
+def _terminal_result_prime_order_violations_8616(
+    stage_path: Path, stage_tree: ast.Module, rule: str, stage_wrapper_name: str
+) -> list[ArchitectureViolation]:
+    """Require terminal materialization to run after the final lowering replay."""
+    violations: list[ArchitectureViolation] = []
+    prime_name = "_prime_structuring_validation_semantics_8616"
+    prime = _find_function(stage_tree, prime_name)
+    prime_call_lines: dict[str, int] = {}
+    if prime is not None:
+        for node in _walk_ast(prime):
+            if not isinstance(node, ast.Call):
+                continue
+            call_name = _call_name(node.func)
+            if call_name in {
+                "_replay_structuring_lowering_before_validation_8616",
+                stage_wrapper_name,
+            }:
+                prime_call_lines.setdefault(call_name, node.lineno)
+    replay_line = prime_call_lines.get("_replay_structuring_lowering_before_validation_8616")
+    terminal_line = prime_call_lines.get(stage_wrapper_name)
+    if replay_line is None or terminal_line is None or terminal_line <= replay_line:
+        violations.append(
+            ArchitectureViolation(
+                _relative(stage_path, REPO_ROOT),
+                rule,
+                f"{prime_name} must run terminal call-result materialization after final lowering replay",
+            )
         )
-        if materializer_name not in imported_names:
-            violations.append(
-                ArchitectureViolation(
-                    _relative(stage_path, REPO_ROOT),
-                    rule,
-                    f"structuring stage must import {materializer_name} from structuring.return_chains",
-                )
-            )
+    return violations
 
-        stage_wrapper_name = "_materialize_structuring_terminal_call_result_return_8616"
-        stage_wrapper = _find_function(stage_tree, stage_wrapper_name)
-        wrapper_calls_owner = stage_wrapper is not None and any(
-            isinstance(node, ast.Call) and _call_name(node.func) == materializer_name
-            for node in _walk_ast(stage_wrapper)
-        )
-        if not wrapper_calls_owner:
-            violations.append(
-                ArchitectureViolation(
-                    _relative(stage_path, REPO_ROOT),
-                    rule,
-                    f"{stage_wrapper_name} must call the Structuring-owned materializer",
-                )
-            )
-
-        prime_name = "_prime_structuring_validation_semantics_8616"
-        prime = _find_function(stage_tree, prime_name)
-        prime_call_lines: dict[str, int] = {}
-        if prime is not None:
-            for node in _walk_ast(prime):
-                if not isinstance(node, ast.Call):
-                    continue
-                call_name = _call_name(node.func)
-                if call_name in {
-                    "_replay_structuring_lowering_before_validation_8616",
-                    stage_wrapper_name,
-                }:
-                    prime_call_lines.setdefault(call_name, node.lineno)
-        replay_line = prime_call_lines.get("_replay_structuring_lowering_before_validation_8616")
-        terminal_line = prime_call_lines.get(stage_wrapper_name)
-        if replay_line is None or terminal_line is None or terminal_line <= replay_line:
-            violations.append(
-                ArchitectureViolation(
-                    _relative(stage_path, REPO_ROOT),
-                    rule,
-                    f"{prime_name} must run terminal call-result materialization after final lowering replay",
-                )
-            )
-    else:
+def _terminal_result_stage_violations_8616(
+    stage_path: Path, rule: str, materializer_name: str
+) -> list[ArchitectureViolation]:
+    """Require the stage to import the materializer, call it from the wrapper, and order it after replay."""
+    violations: list[ArchitectureViolation] = []
+    if not stage_path.exists():
         violations.append(
             ArchitectureViolation(
                 _relative(stage_path, REPO_ROOT),
@@ -4881,7 +4958,43 @@ def _check_terminal_call_result_structuring_ownership(
                 "structuring stage entry point is missing",
             )
         )
+        return violations
+    stage_tree = _parse_python(stage_path)
+    imported_names = _imported_names_from_module(
+        stage_tree,
+        ".structuring.return_chains",
+    )
+    if materializer_name not in imported_names:
+        violations.append(
+            ArchitectureViolation(
+                _relative(stage_path, REPO_ROOT),
+                rule,
+                f"structuring stage must import {materializer_name} from structuring.return_chains",
+            )
+        )
 
+    stage_wrapper_name = "_materialize_structuring_terminal_call_result_return_8616"
+    stage_wrapper = _find_function(stage_tree, stage_wrapper_name)
+    wrapper_calls_owner = stage_wrapper is not None and any(
+        isinstance(node, ast.Call) and _call_name(node.func) == materializer_name
+        for node in _walk_ast(stage_wrapper)
+    )
+    if not wrapper_calls_owner:
+        violations.append(
+            ArchitectureViolation(
+                _relative(stage_path, REPO_ROOT),
+                rule,
+                f"{stage_wrapper_name} must call the Structuring-owned materializer",
+            )
+        )
+    violations.extend(_terminal_result_prime_order_violations_8616(stage_path, stage_tree, rule, stage_wrapper_name))
+    return violations
+
+def _terminal_result_postprocess_violations_8616(
+    postprocess_paths: tuple[Path, ...], rule: str, owner_names: tuple[str, ...]
+) -> list[ArchitectureViolation]:
+    """Forbid owned names from being defined or imported inside postprocess modules."""
+    violations: list[ArchitectureViolation] = []
     for path in postprocess_paths:
         tree = _parse_python(path)
         defined_names: set[str] = set()
@@ -4900,7 +5013,8 @@ def _check_terminal_call_result_structuring_ownership(
                     f"{name} must not be defined or imported in postprocess",
                 )
             )
-    return tuple(violations)
+    return violations
+
 
 
 def _check_shared_body_wide_condition_ownership(
@@ -4918,7 +5032,14 @@ def _check_shared_body_wide_condition_ownership(
     lowering_name = "lower_wide_call_return_condition_chain_8616"
     structuring_name = "_materialize_cfg_shared_body_condition_chain_expr_8616"
     violations: list[ArchitectureViolation] = []
+    violations.extend(_wide_condition_lowering_violations_8616(lowering_path, rule, lowering_name))
+    violations.extend(_wide_condition_structuring_violations_8616(structuring_path, rule, lowering_name, structuring_name))
+    violations.extend(_wide_condition_postprocess_violations_8616(postprocess_paths, rule, (lowering_name, structuring_name)))
+    return tuple(violations)
 
+def _wide_condition_lowering_violations_8616(lowering_path: Path, rule: str, lowering_name: str) -> list[ArchitectureViolation]:
+    """Require the DX:AX wide-join helper to live in Types/Lowering."""
+    violations: list[ArchitectureViolation] = []
     if lowering_path.exists():
         lowering_tree = _parse_python(lowering_path)
         if _find_function(lowering_tree, lowering_name) is None:
@@ -4937,42 +5058,14 @@ def _check_shared_body_wide_condition_ownership(
                 "wide call-return condition Lowering owner is missing",
             )
         )
+    return violations
 
-    if structuring_path.exists():
-        structuring_tree = _parse_python(structuring_path)
-        imported_names = _imported_names_from_module(
-            structuring_tree,
-            "..lowering.call_output_stack_objects",
-        )
-        if lowering_name not in imported_names:
-            violations.append(
-                ArchitectureViolation(
-                    _relative(structuring_path, REPO_ROOT),
-                    rule,
-                    f"Structuring must import {lowering_name} from Types/Lowering",
-                )
-            )
-        shared_body_owner = _find_function(structuring_tree, structuring_name)
-        if shared_body_owner is None:
-            violations.append(
-                ArchitectureViolation(
-                    _relative(structuring_path, REPO_ROOT),
-                    rule,
-                    f"Structuring owner must define {structuring_name}",
-                )
-            )
-        elif not any(
-            isinstance(node, ast.Call) and _call_name(node.func) == lowering_name
-            for node in _walk_ast(shared_body_owner)
-        ):
-            violations.append(
-                ArchitectureViolation(
-                    _relative(structuring_path, REPO_ROOT),
-                    rule,
-                    f"{structuring_name} must call the Types/Lowering-owned wide join",
-                )
-            )
-    else:
+def _wide_condition_structuring_violations_8616(
+    structuring_path: Path, rule: str, lowering_name: str, structuring_name: str
+) -> list[ArchitectureViolation]:
+    """Require the shared-body Structuring owner to import and call the Lowering join."""
+    violations: list[ArchitectureViolation] = []
+    if not structuring_path.exists():
         violations.append(
             ArchitectureViolation(
                 _relative(structuring_path, REPO_ROOT),
@@ -4980,8 +5073,47 @@ def _check_shared_body_wide_condition_ownership(
                 "shared-body condition Structuring owner is missing",
             )
         )
+        return violations
+    structuring_tree = _parse_python(structuring_path)
+    imported_names = _imported_names_from_module(
+        structuring_tree,
+        "..lowering.call_output_stack_objects",
+    )
+    if lowering_name not in imported_names:
+        violations.append(
+            ArchitectureViolation(
+                _relative(structuring_path, REPO_ROOT),
+                rule,
+                f"Structuring must import {lowering_name} from Types/Lowering",
+            )
+        )
+    shared_body_owner = _find_function(structuring_tree, structuring_name)
+    if shared_body_owner is None:
+        violations.append(
+            ArchitectureViolation(
+                _relative(structuring_path, REPO_ROOT),
+                rule,
+                f"Structuring owner must define {structuring_name}",
+            )
+        )
+    elif not any(
+        isinstance(node, ast.Call) and _call_name(node.func) == lowering_name
+        for node in _walk_ast(shared_body_owner)
+    ):
+        violations.append(
+            ArchitectureViolation(
+                _relative(structuring_path, REPO_ROOT),
+                rule,
+                f"{structuring_name} must call the Types/Lowering-owned wide join",
+            )
+        )
+    return violations
 
-    protected_names = (lowering_name, structuring_name)
+def _wide_condition_postprocess_violations_8616(
+    postprocess_paths: tuple[Path, ...], rule: str, protected_names: tuple[str, ...]
+) -> list[ArchitectureViolation]:
+    """Forbid the protected names from being owned or imported by postprocess."""
+    violations: list[ArchitectureViolation] = []
     for path in postprocess_paths:
         tree = _parse_python(path)
         postprocess_imported_names: set[str] = set()
@@ -5001,7 +5133,8 @@ def _check_shared_body_wide_condition_ownership(
                         f"{name} must not be owned or imported by postprocess",
                     )
                 )
-    return tuple(violations)
+    return violations
+
 
 
 def _check_condition_lane_counters_use_dot_access(root: Path) -> tuple[ArchitectureViolation, ...]:
@@ -5324,9 +5457,7 @@ def _check_semantic_layers_not_cod_raw_text_backed(root: Path) -> tuple[Architec
         tree = _parse_python(path)
         for node in _walk_ast(tree):
             uses_cod_raw_entries = (
-                (isinstance(node, ast.Attribute) and node.attr == "cod_raw_entries")
-                or (isinstance(node, ast.Constant) and node.value == "cod_raw_entries")
-                or (isinstance(node, ast.Name) and node.id == "cod_raw_entries")
+                _node_references_any_name_8616(node, {"cod_raw_entries"})
             )
             if uses_cod_raw_entries:
                 violations.append(
@@ -5340,26 +5471,39 @@ def _check_semantic_layers_not_cod_raw_text_backed(root: Path) -> tuple[Architec
     return tuple(violations)
 
 
+def _function_returns_constant_false_8616(function: ast.FunctionDef | ast.AsyncFunctionDef | None) -> bool:
+    if function is None or len(function.body) != 1:
+        return False
+    stmt = function.body[0]
+    return isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Constant) and stmt.value.value is False
+
+
+def _function_returns_empty_tuple_8616(function: ast.FunctionDef | ast.AsyncFunctionDef | None) -> bool:
+    if function is None or len(function.body) != 1:
+        return False
+    stmt = function.body[0]
+    return isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Tuple) and len(stmt.value.elts) == 0
+
+
 def _check_postprocess_calls_source_evidence_is_inert(path: Path) -> tuple[ArchitectureViolation, ...]:
     if not path.exists():
         return ()
     tree = _parse_python(path)
     violations: list[ArchitectureViolation] = []
+    violations.extend(_postprocess_call_gate_violations_8616(path, _find_function(tree, "_source_call_floor_enabled_8616")))
+    violations.extend(_postprocess_width_helper_violations_8616(path, _find_function(tree, "_source_prototype_arg_widths_8616")))
+    violations.extend(_postprocess_source_arg_helper_violations_8616(path, _find_function(tree, "_source_call_arg_semantic_kind_8616")))
+    violations.extend(_postprocess_call_names_helper_violations_8616(path, _find_function(tree, "_cod_source_call_names_8616")))
+    violations.extend(_postprocess_symbol_call_names_violations_8616(path, _find_function(tree, "_cod_source_call_names_for_symbol_8616")))
+    align_helper = _find_function(tree, "_align_cod_call_names_8616")
+    violations.extend(_postprocess_align_default_violations_8616(path, align_helper))
+    violations.extend(_postprocess_align_scan_violations_8616(path, align_helper))
+    return tuple(violations)
 
-    def _function_returns_constant_false(function: ast.FunctionDef | ast.AsyncFunctionDef | None) -> bool:
-        if function is None or len(function.body) != 1:
-            return False
-        stmt = function.body[0]
-        return isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Constant) and stmt.value.value is False
-
-    def _function_returns_empty_tuple(function: ast.FunctionDef | ast.AsyncFunctionDef | None) -> bool:
-        if function is None or len(function.body) != 1:
-            return False
-        stmt = function.body[0]
-        return isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Tuple) and len(stmt.value.elts) == 0
-
-    gate = _find_function(tree, "_source_call_floor_enabled_8616")
-    if gate is None or not _function_returns_constant_false(gate):
+def _postprocess_call_gate_violations_8616(path: Path, gate: ast.FunctionDef | ast.AsyncFunctionDef | None) -> list[ArchitectureViolation]:
+    """`_source_call_floor_enabled_8616` must stay a constant-False stub."""
+    violations: list[ArchitectureViolation] = []
+    if gate is None or not _function_returns_constant_false_8616(gate):
         violations.append(
             ArchitectureViolation(
                 _relative(path, REPO_ROOT),
@@ -5367,8 +5511,12 @@ def _check_postprocess_calls_source_evidence_is_inert(path: Path) -> tuple[Archi
                 "source-call floor recovery must stay inert",
             )
         )
+    return violations
 
-    width_helper = _find_function(tree, "_source_prototype_arg_widths_8616")
+
+def _postprocess_width_helper_violations_8616(path: Path, width_helper: ast.FunctionDef | ast.AsyncFunctionDef | None) -> list[ArchitectureViolation]:
+    """`_source_prototype_arg_widths_8616` must not recover widths from source/COD."""
+    violations: list[ArchitectureViolation] = []
     if width_helper is not None:
         banned_call_names = {"_parse_c_prototype_8616", "_prototype_arg_widths_8616", "read_text", "finditer"}
         for node in _walk_ast(width_helper):
@@ -5393,8 +5541,12 @@ def _check_postprocess_calls_source_evidence_is_inert(path: Path) -> tuple[Archi
                     )
                 )
                 break
+    return violations
 
-    source_arg_helper = _find_function(tree, "_source_call_arg_semantic_kind_8616")
+
+def _postprocess_source_arg_helper_violations_8616(path: Path, source_arg_helper: ast.FunctionDef | ast.AsyncFunctionDef | None) -> list[ArchitectureViolation]:
+    """`_source_call_arg_semantic_kind_8616` must not recover arg kinds from source text."""
+    violations: list[ArchitectureViolation] = []
     if source_arg_helper is not None:
         banned_call_names = {"read_text", "compile", "finditer", "_source_arg_kind_from_part_8616"}
         for node in _walk_ast(source_arg_helper):
@@ -5419,10 +5571,14 @@ def _check_postprocess_calls_source_evidence_is_inert(path: Path) -> tuple[Archi
                     )
                 )
                 break
+    return violations
 
-    call_names_helper = _find_function(tree, "_cod_source_call_names_8616")
+
+def _postprocess_call_names_helper_violations_8616(path: Path, call_names_helper: ast.FunctionDef | ast.AsyncFunctionDef | None) -> list[ArchitectureViolation]:
+    """`_cod_source_call_names_8616` must not read COD call_names/call_sources."""
+    violations: list[ArchitectureViolation] = []
     if call_names_helper is not None:
-        if not _function_returns_empty_tuple(call_names_helper):
+        if not _function_returns_empty_tuple_8616(call_names_helper):
             violations.append(
                 ArchitectureViolation(
                     _relative(path, REPO_ROOT),
@@ -5432,9 +5588,7 @@ def _check_postprocess_calls_source_evidence_is_inert(path: Path) -> tuple[Archi
             )
         for node in _walk_ast(call_names_helper):
             if (
-                (isinstance(node, ast.Attribute) and node.attr == "call_sources")
-                or (isinstance(node, ast.Constant) and node.value == "call_sources")
-                or (isinstance(node, ast.Name) and node.id == "call_sources")
+                _node_references_any_name_8616(node, {"call_sources"})
             ):
                 violations.append(
                     ArchitectureViolation(
@@ -5445,9 +5599,7 @@ def _check_postprocess_calls_source_evidence_is_inert(path: Path) -> tuple[Archi
                 )
                 break
             if (
-                (isinstance(node, ast.Attribute) and node.attr == "call_names")
-                or (isinstance(node, ast.Constant) and node.value == "call_names")
-                or (isinstance(node, ast.Name) and node.id == "call_names")
+                _node_references_any_name_8616(node, {"call_names"})
             ):
                 violations.append(
                     ArchitectureViolation(
@@ -5457,10 +5609,14 @@ def _check_postprocess_calls_source_evidence_is_inert(path: Path) -> tuple[Archi
                     )
                 )
                 break
+    return violations
 
-    symbol_call_names_helper = _find_function(tree, "_cod_source_call_names_for_symbol_8616")
+
+def _postprocess_symbol_call_names_violations_8616(path: Path, symbol_call_names_helper: ast.FunctionDef | ast.AsyncFunctionDef | None) -> list[ArchitectureViolation]:
+    """`_cod_source_call_names_for_symbol_8616` must not read COD call_names."""
+    violations: list[ArchitectureViolation] = []
     if symbol_call_names_helper is not None:
-        if not _function_returns_empty_tuple(symbol_call_names_helper):
+        if not _function_returns_empty_tuple_8616(symbol_call_names_helper):
             violations.append(
                 ArchitectureViolation(
                     _relative(path, REPO_ROOT),
@@ -5470,9 +5626,7 @@ def _check_postprocess_calls_source_evidence_is_inert(path: Path) -> tuple[Archi
             )
         for node in _walk_ast(symbol_call_names_helper):
             if (
-                (isinstance(node, ast.Attribute) and node.attr == "call_names")
-                or (isinstance(node, ast.Constant) and node.value == "call_names")
-                or (isinstance(node, ast.Name) and node.id == "call_names")
+                _node_references_any_name_8616(node, {"call_names"})
             ):
                 violations.append(
                     ArchitectureViolation(
@@ -5482,9 +5636,13 @@ def _check_postprocess_calls_source_evidence_is_inert(path: Path) -> tuple[Archi
                     )
                 )
                 break
+    return violations
 
-    align_helper = _find_function(tree, "_align_cod_call_names_8616")
-    if align_helper is not None and not _function_returns_constant_false(align_helper):
+
+def _postprocess_align_default_violations_8616(path: Path, align_helper: ast.FunctionDef | ast.AsyncFunctionDef | None) -> list[ArchitectureViolation]:
+    """`_align_cod_call_names_8616` default must stay inert."""
+    violations: list[ArchitectureViolation] = []
+    if align_helper is not None and not _function_returns_constant_false_8616(align_helper):
         violations.append(
             ArchitectureViolation(
                 _relative(path, REPO_ROOT),
@@ -5492,12 +5650,16 @@ def _check_postprocess_calls_source_evidence_is_inert(path: Path) -> tuple[Archi
                 "COD call-name alignment must stay inert",
             )
         )
+    return violations
+
+
+def _postprocess_align_scan_violations_8616(path: Path, align_helper: ast.FunctionDef | ast.AsyncFunctionDef | None) -> list[ArchitectureViolation]:
+    """`_align_cod_call_names_8616` must not consult COD call_names/metadata."""
+    violations: list[ArchitectureViolation] = []
     if align_helper is not None:
         for node in _walk_ast(align_helper):
             uses_call_names = (
-                (isinstance(node, ast.Attribute) and node.attr == "call_names")
-                or (isinstance(node, ast.Constant) and node.value == "call_names")
-                or (isinstance(node, ast.Name) and node.id == "call_names")
+                _node_references_any_name_8616(node, {"call_names"})
             )
             uses_cod_metadata = isinstance(node, ast.Call) and (
                 (isinstance(node.func, ast.Name) and node.func.id == "_cod_metadata_for_function_8616")
@@ -5512,91 +5674,85 @@ def _check_postprocess_calls_source_evidence_is_inert(path: Path) -> tuple[Archi
                     )
                 )
                 break
+    return violations
 
-    return tuple(violations)
+
 
 
 def _check_postprocess_return_shape_not_source_backed(path: Path) -> tuple[ArchitectureViolation, ...]:
     if not path.exists():
         return ()
     tree = _parse_python(path)
-    banned_names = {
-        "_source_return_shape_8616",
-        "_collect_source_return_annotation_8616",
-        "_local_source_return_decl_is_void_8616",
-        "collect_local_source_sidecar_return_types",
-    }
     for node in _walk_ast(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
-            "_source_annotation_lines_8616",
-            "_merge_source_annotations_if_missing_8616",
-            "_attach_project_cod_source_annotations_if_missing_8616",
-        }:
-            expected = () if node.name == "_source_annotation_lines_8616" else False
-            if not _function_returns_only_constant(node, expected):
-                return (
-                    ArchitectureViolation(
-                        _relative(path, REPO_ROOT),
-                        "postprocess-source-return-shape",
-                        "postprocess must not attach COD/source annotations after semantic recovery",
-                    ),
-                )
-            for child in _walk_ast(node):
-                if (
-                    (
-                        isinstance(child, ast.Attribute)
-                        and child.attr in {"source_lines", "source_return_lines", "stack_aliases"}
-                    )
-                    or (
-                        isinstance(child, ast.Constant)
-                        and child.value in {"source_lines", "source_return_lines", "stack_aliases"}
-                    )
-                    or (
-                        isinstance(child, ast.Name)
-                        and child.id in {"source_lines", "source_return_lines", "stack_aliases"}
-                    )
-                ):
-                    return (
-                        ArchitectureViolation(
-                            _relative(path, REPO_ROOT),
-                            "postprocess-source-return-shape",
-                            "postprocess must not attach COD/source annotations after semantic recovery",
-                        ),
-                    )
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in banned_names:
-            return (
-                ArchitectureViolation(
-                    _relative(path, REPO_ROOT),
-                    "postprocess-source-return-shape",
-                    "postprocess must not recover return shape or void-ness from COD/source return text",
-                ),
-            )
-        if isinstance(node, ast.ImportFrom):
-            imported = {alias.name for alias in node.names}
-            if imported.intersection(banned_names):
-                return (
-                    ArchitectureViolation(
-                        _relative(path, REPO_ROOT),
-                        "postprocess-source-return-shape",
-                        "postprocess must not import source sidecar return typing as semantic evidence",
-                    ),
-                )
-        if not isinstance(node, ast.Call):
-            continue
-        call_name = None
-        if isinstance(node.func, ast.Name):
-            call_name = node.func.id
-        elif isinstance(node.func, ast.Attribute):
-            call_name = node.func.attr
-        if call_name in banned_names:
-            return (
-                ArchitectureViolation(
-                    _relative(path, REPO_ROOT),
-                    "postprocess-source-return-shape",
-                    "postprocess must not use source/COD return text to classify function returns",
-                ),
-            )
+        violation = _postprocess_return_shape_node_violation_8616(path, node)
+        if violation is not None:
+            return (violation,)
     return ()
+
+_POSTPROCESS_RETURN_SHAPE_BANNED_8616 = {
+    "_source_return_shape_8616",
+    "_collect_source_return_annotation_8616",
+    "_local_source_return_decl_is_void_8616",
+    "collect_local_source_sidecar_return_types",
+}
+
+_POSTPROCESS_ANNOTATION_GUARDED_FNS_8616 = {
+    "_source_annotation_lines_8616",
+    "_merge_source_annotations_if_missing_8616",
+    "_attach_project_cod_source_annotations_if_missing_8616",
+}
+
+def _postprocess_guarded_annotation_violation_8616(
+    path: Path, node: ast.FunctionDef | ast.AsyncFunctionDef
+) -> ArchitectureViolation | None:
+    """Flag annotation-attach helpers that keep non-inert bodies or consult source evidence."""
+    message = "postprocess must not attach COD/source annotations after semantic recovery"
+    expected = () if node.name == "_source_annotation_lines_8616" else False
+    if not _function_returns_only_constant(node, expected):
+        return ArchitectureViolation(
+            _relative(path, REPO_ROOT),
+            "postprocess-source-return-shape",
+            message,
+        )
+    for child in _walk_ast(node):
+        if _node_references_any_name_8616(child, {"source_lines", "source_return_lines", "stack_aliases"}):
+            return ArchitectureViolation(
+                _relative(path, REPO_ROOT),
+                "postprocess-source-return-shape",
+                message,
+            )
+    return None
+
+def _postprocess_return_shape_node_violation_8616(path: Path, node: ast.AST) -> ArchitectureViolation | None:
+    """Classify one walked node against the postprocess source-return-shape ban."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in _POSTPROCESS_ANNOTATION_GUARDED_FNS_8616:
+        return _postprocess_guarded_annotation_violation_8616(path, node)
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in _POSTPROCESS_RETURN_SHAPE_BANNED_8616:
+        return ArchitectureViolation(
+            _relative(path, REPO_ROOT),
+            "postprocess-source-return-shape",
+            "postprocess must not recover return shape or void-ness from COD/source return text",
+        )
+    if isinstance(node, ast.ImportFrom):
+        imported = {alias.name for alias in node.names}
+        if imported.intersection(_POSTPROCESS_RETURN_SHAPE_BANNED_8616):
+            return ArchitectureViolation(
+                _relative(path, REPO_ROOT),
+                "postprocess-source-return-shape",
+                "postprocess must not import source sidecar return typing as semantic evidence",
+            )
+        return None
+    if not isinstance(node, ast.Call):
+        return None
+    call_name = _call_name(node.func)
+    if call_name in _POSTPROCESS_RETURN_SHAPE_BANNED_8616:
+        return ArchitectureViolation(
+            _relative(path, REPO_ROOT),
+            "postprocess-source-return-shape",
+            "postprocess must not use source/COD return text to classify function returns",
+        )
+    return None
+
 
 
 def _check_postprocess_not_cod_stack_alias_backed(root: Path) -> tuple[ArchitectureViolation, ...]:
@@ -5612,9 +5768,7 @@ def _check_postprocess_not_cod_stack_alias_backed(root: Path) -> tuple[Architect
         tree = _parse_python(path)
         for node in _walk_ast(tree):
             uses_stack_aliases = (
-                (isinstance(node, ast.Attribute) and node.attr == "stack_aliases")
-                or (isinstance(node, ast.Constant) and node.value == "stack_aliases")
-                or (isinstance(node, ast.Name) and node.id == "stack_aliases")
+                _node_references_any_name_8616(node, {"stack_aliases"})
             )
             if uses_stack_aliases:
                 violations.append(
@@ -5743,84 +5897,88 @@ def _check_recompilable_source_evidence_inert(
     source_path: Path, bridge_path: Path
 ) -> tuple[ArchitectureViolation, ...]:
     violations: list[ArchitectureViolation] = []
-
     if source_path.exists():
         tree = _parse_python(source_path)
-        builder = _find_function(tree, "build_recompilable_source_evidence_text")
-        if builder is not None:
-            inert = False
-            if len(builder.body) == 1:
-                stmt = builder.body[0]
-                inert = (
-                    isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Constant) and stmt.value.value is None
-                )
-            if not inert:
+        violations.extend(_recompilable_builder_violations_8616(source_path, tree))
+        violations.extend(_recompilable_loader_violations_8616(source_path, tree))
+    violations.extend(_recompilable_bridge_violations_8616(bridge_path))
+    return tuple(violations)
+
+def _recompilable_builder_violations_8616(source_path: Path, tree: ast.Module) -> list[ArchitectureViolation]:
+    """Require the recompilable evidence builder to stay an inert stub."""
+    violations: list[ArchitectureViolation] = []
+    builder = _find_function(tree, "build_recompilable_source_evidence_text")
+    if builder is not None and not _function_returns_only_constant(builder, None):
+        violations.append(
+            ArchitectureViolation(
+                _relative(source_path, REPO_ROOT),
+                "recompilable-source-evidence-fallback",
+                "recompilable subset checks must not synthesize C from COD/source evidence",
+            )
+        )
+    return violations
+
+def _recompilable_loader_violations_8616(source_path: Path, tree: ast.Module) -> list[ArchitectureViolation]:
+    """Forbid the loader from persisting files or shape-checking source-derived C."""
+    violations: list[ArchitectureViolation] = []
+    loader = _find_function(tree, "load_or_build_recompilable_source_evidence")
+    if loader is not None:
+        for node in _walk_ast(loader):
+            writes_file = (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"write_text", "write_bytes"}
+            )
+            reads_shape_text = (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "check_recompilable_c_text_shape"
+            )
+            if writes_file or reads_shape_text:
                 violations.append(
                     ArchitectureViolation(
                         _relative(source_path, REPO_ROOT),
                         "recompilable-source-evidence-fallback",
-                        "recompilable subset checks must not synthesize C from COD/source evidence",
-                    )
-                )
-
-        loader = _find_function(tree, "load_or_build_recompilable_source_evidence")
-        if loader is not None:
-            for node in _walk_ast(loader):
-                writes_file = (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr in {"write_text", "write_bytes"}
-                )
-                reads_shape_text = (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id == "check_recompilable_c_text_shape"
-                )
-                if writes_file or reads_shape_text:
-                    violations.append(
-                        ArchitectureViolation(
-                            _relative(source_path, REPO_ROOT),
-                            "recompilable-source-evidence-fallback",
-                            "recompilable subset checks must not load, validate, or persist source-derived C",
-                        )
-                    )
-                    break
-
-    if bridge_path.exists():
-        tree = _parse_python(bridge_path)
-        for node in _walk_ast(tree):
-            imports_source_evidence = isinstance(node, ast.ImportFrom) and (node.module or "").endswith(
-                "recompilable_source_evidence"
-            )
-            imports_storage_fallback = isinstance(node, ast.ImportFrom) and (node.module or "").endswith(
-                "recompilable_storage_fallback"
-            )
-            if imports_source_evidence or imports_storage_fallback:
-                violations.append(
-                    ArchitectureViolation(
-                        _relative(bridge_path, REPO_ROOT),
-                        "recompilable-source-evidence-fallback",
-                        "recompilable CLI bridge must not select source-evidence fallback text",
+                        "recompilable subset checks must not load, validate, or persist source-derived C",
                     )
                 )
                 break
-            if isinstance(node, ast.Constant) and node.value in {
-                "shape_ok_evidence",
-                "storage_object_shape_ok_evidence",
-                "shape_ok_evidence_fallback",
-                "storage_object_shape_ok_evidence_fallback",
-                "storage_object_refusal_shape_ok_evidence_fallback",
-            }:
-                violations.append(
-                    ArchitectureViolation(
-                        _relative(bridge_path, REPO_ROOT),
-                        "recompilable-source-evidence-fallback",
-                        "recompilable CLI bridge must not select source-evidence fallback text",
-                    )
-                )
-                break
+    return violations
 
-    return tuple(violations)
+def _recompilable_bridge_violations_8616(bridge_path: Path) -> list[ArchitectureViolation]:
+    """Forbid the CLI bridge from importing or naming source-evidence fallback paths."""
+    violations: list[ArchitectureViolation] = []
+    if not bridge_path.exists():
+        return violations
+    tree = _parse_python(bridge_path)
+    banned_strings = {
+        "shape_ok_evidence",
+        "storage_object_shape_ok_evidence",
+        "shape_ok_evidence_fallback",
+        "storage_object_shape_ok_evidence_fallback",
+        "storage_object_refusal_shape_ok_evidence_fallback",
+    }
+    for node in _walk_ast(tree):
+        imports_source_evidence = isinstance(node, ast.ImportFrom) and (node.module or "").endswith(
+            "recompilable_source_evidence"
+        )
+        imports_storage_fallback = isinstance(node, ast.ImportFrom) and (node.module or "").endswith(
+            "recompilable_storage_fallback"
+        )
+        hits_banned = imports_source_evidence or imports_storage_fallback or (
+            isinstance(node, ast.Constant) and node.value in banned_strings
+        )
+        if hits_banned:
+            violations.append(
+                ArchitectureViolation(
+                    _relative(bridge_path, REPO_ROOT),
+                    "recompilable-source-evidence-fallback",
+                    "recompilable CLI bridge must not select source-evidence fallback text",
+                )
+            )
+            break
+    return violations
+
 
 
 def _function_returns_only_constant(function: ast.FunctionDef | ast.AsyncFunctionDef | None, value: object) -> bool:
@@ -6248,28 +6406,39 @@ def _check_promoted_typed_enum_values(repo_root: Path = REPO_ROOT) -> tuple[Arch
     violations: list[ArchitectureViolation] = []
     for filename in _PROMOTED_TYPED_FILES:
         path = repo_root / filename
-        if not path.exists():
-            continue
-        for node in _walk_ast(_parse_python(path)):
-            if not isinstance(node, ast.ClassDef) or not (
-                _class_has_base(node, "Enum") or _class_has_base(node, "StrEnum")
-            ):
-                continue
-            for stmt in node.body:
-                if not isinstance(stmt, ast.Assign):
-                    continue
-                for target in stmt.targets:
-                    if not isinstance(target, ast.Name) or target.id.startswith("_"):
-                        continue
-                    if not (isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str)):
-                        violations.append(
-                            ArchitectureViolation(
-                                _relative(path, repo_root),
-                                "promoted-typed-enum-string-value",
-                                f"promoted enum member {node.name}.{target.id} must use an explicit string value",
-                            )
-                        )
+        if path.exists():
+            violations.extend(_promoted_enum_file_violations_8616(path, repo_root))
     return tuple(violations)
+
+def _promoted_enum_member_violations_8616(path: Path, repo_root: Path, node: ast.ClassDef) -> list[ArchitectureViolation]:
+    """Flag enum members of one promoted class that lack explicit string values."""
+    violations: list[ArchitectureViolation] = []
+    for stmt in node.body:
+        if not isinstance(stmt, ast.Assign):
+            continue
+        for target in stmt.targets:
+            if not isinstance(target, ast.Name) or target.id.startswith("_"):
+                continue
+            if not (isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str)):
+                violations.append(
+                    ArchitectureViolation(
+                        _relative(path, repo_root),
+                        "promoted-typed-enum-string-value",
+                        f"promoted enum member {node.name}.{target.id} must use an explicit string value",
+                    )
+                )
+    return violations
+
+def _promoted_enum_file_violations_8616(path: Path, repo_root: Path) -> list[ArchitectureViolation]:
+    """Scan one promoted file for enums missing explicit string member values."""
+    violations: list[ArchitectureViolation] = []
+    for node in _walk_ast(_parse_python(path)):
+        if not isinstance(node, ast.ClassDef) or not (
+            _class_has_base(node, "Enum") or _class_has_base(node, "StrEnum")
+        ):
+            continue
+        violations.extend(_promoted_enum_member_violations_8616(path, repo_root, node))
+    return violations
 
 
 def _literal_dunder_all_names(value: ast.AST) -> tuple[str, ...] | None:
@@ -6409,58 +6578,64 @@ def _check_promoted_typed_files_avoid_dynamic_attr(repo_root: Path = REPO_ROOT) 
     violations: list[ArchitectureViolation] = []
     for filename in _PROMOTED_TYPED_FILES:
         path = repo_root / filename
-        if not path.exists():
-            continue
-        text = _read_text_if_present(path)
-        if text is None:
-            continue
-        lines = text.splitlines()
-        tree = _parse_python(path)
-        for node in _walk_ast(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            static_setattr_field = _static_setattr_field(node)
-            if static_setattr_field is not None:
-                violations.append(
-                    ArchitectureViolation(
-                        _relative(path, repo_root),
-                        "promoted-typed-file-static-setattr",
-                        f"fixed field {static_setattr_field!r} must use dot assignment, not setattr() at line {node.lineno}",
-                    )
-                )
-                continue
-            if isinstance(node.func, ast.Name) and node.func.id in {"getattr", "setattr"}:
-                if _dynamic_attr_access_has_boundary_reason(
-                    lines,
-                    node.lineno,
-                ) or _dynamic_attr_docstring_has_boundary_reason(tree, node.lineno):
-                    continue
-                violations.append(
-                    ArchitectureViolation(
-                        _relative(path, repo_root),
-                        "promoted-typed-file-dynamic-attr",
-                        "promoted typed quality files must use explicit contracts or document a dynamic boundary, "
-                        f"not unqualified {node.func.id}() at line {node.lineno}",
-                    )
-                )
-                continue
-            if (
-                isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "builtins"
-                and node.func.attr in {"getattr", "setattr"}
-            ):
-                if _dynamic_attr_docstring_has_boundary_reason(tree, node.lineno):
-                    continue
-                violations.append(
-                    ArchitectureViolation(
-                        _relative(path, repo_root),
-                        "promoted-typed-file-dynamic-attr",
-                        "promoted typed quality files must document builtins dynamic attribute wrappers, "
-                        f"not undocumented builtins.{node.func.attr}() at line {node.lineno}",
-                    )
-                )
+        if path.exists():
+            violations.extend(_dynamic_attr_file_violations_8616(path, repo_root))
     return tuple(violations)
+
+def _dynamic_attr_call_violation_8616(
+    path: Path, repo_root: Path, lines: list[str], tree: ast.Module, node: ast.Call
+) -> ArchitectureViolation | None:
+    """Classify one call node against the promoted-file dynamic-attribute ban."""
+    static_setattr_field = _static_setattr_field(node)
+    if static_setattr_field is not None:
+        return ArchitectureViolation(
+            _relative(path, repo_root),
+            "promoted-typed-file-static-setattr",
+            f"fixed field {static_setattr_field!r} must use dot assignment, not setattr() at line {node.lineno}",
+        )
+    if isinstance(node.func, ast.Name) and node.func.id in {"getattr", "setattr"}:
+        if _dynamic_attr_access_has_boundary_reason(
+            lines,
+            node.lineno,
+        ) or _dynamic_attr_docstring_has_boundary_reason(tree, node.lineno):
+            return None
+        return ArchitectureViolation(
+            _relative(path, repo_root),
+            "promoted-typed-file-dynamic-attr",
+            "promoted typed quality files must use explicit contracts or document a dynamic boundary, "
+            f"not unqualified {node.func.id}() at line {node.lineno}",
+        )
+    if (
+        isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "builtins"
+        and node.func.attr in {"getattr", "setattr"}
+    ):
+        if _dynamic_attr_docstring_has_boundary_reason(tree, node.lineno):
+            return None
+        return ArchitectureViolation(
+            _relative(path, repo_root),
+            "promoted-typed-file-dynamic-attr",
+            "promoted typed quality files must document builtins dynamic attribute wrappers, "
+            f"not undocumented builtins.{node.func.attr}() at line {node.lineno}",
+        )
+    return None
+
+def _dynamic_attr_file_violations_8616(path: Path, repo_root: Path) -> list[ArchitectureViolation]:
+    """Scan one promoted file for avoidable dynamic attribute access."""
+    violations: list[ArchitectureViolation] = []
+    text = _read_text_if_present(path)
+    if text is None:
+        return violations
+    lines = text.splitlines()
+    tree = _parse_python(path)
+    for node in _walk_ast(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        violation = _dynamic_attr_call_violation_8616(path, repo_root, lines, tree, node)
+        if violation is not None:
+            violations.append(violation)
+    return violations
 
 
 def _check_gate_script_docstrings(repo_root: Path = REPO_ROOT) -> tuple[ArchitectureViolation, ...]:
@@ -6688,6 +6863,17 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
     if makefile_text is None:
         return ()
     violations: list[ArchitectureViolation] = []
+    violations.extend(_makefile_marker_violations_8616(makefile_path, makefile_text, repo_root))
+    typed_targets = frozenset(_makefile_variable_words(makefile_text, "QA_TYPED_FILES"))
+    ruff_targets = frozenset(_makefile_variable_words(makefile_text, "QA_RUFF_TARGETS"))
+    violations.extend(_makefile_promoted_file_violations_8616(makefile_path, typed_targets, ruff_targets, repo_root))
+    violations.extend(_makefile_focused_target_violations_8616(makefile_path, makefile_text, repo_root))
+    violations.extend(_makefile_qa_variable_violations_8616(makefile_path, makefile_text, repo_root))
+    return tuple(violations)
+
+def _makefile_marker_violations_8616(makefile_path: Path, makefile_text: str, repo_root: Path) -> list[ArchitectureViolation]:
+    """Check required and forbidden Makefile gate markers."""
+    violations: list[ArchitectureViolation] = []
     for marker in _MAKEFILE_MARKERS:
         if not _contains_marker(makefile_text, marker):
             violations.append(
@@ -6706,8 +6892,13 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
                     f"obsolete type-ratchet legacy skip marker {marker!r} must not be present",
                 )
             )
-    typed_targets = frozenset(_makefile_variable_words(makefile_text, "QA_TYPED_FILES"))
-    ruff_targets = frozenset(_makefile_variable_words(makefile_text, "QA_RUFF_TARGETS"))
+    return violations
+
+def _makefile_promoted_file_violations_8616(
+    makefile_path: Path, typed_targets: frozenset[str], ruff_targets: frozenset[str], repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Check promoted and debt files land in the correct QA target variables."""
+    violations: list[ArchitectureViolation] = []
     for filename in _PROMOTED_TYPED_FILES:
         if filename not in typed_targets:
             violations.append(
@@ -6753,6 +6944,13 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
                 f"full-promotion debt file {filename!r} must not be listed in QA_RUFF_TARGETS",
             )
         )
+    return violations
+
+def _makefile_focused_target_violations_8616(
+    makefile_path: Path, makefile_text: str, repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Check focused contract-test markers and pipeline fast targets are wired into the Makefile."""
+    violations: list[ArchitectureViolation] = []
     for marker in _FOCUSED_PYTEST_MARKERS:
         if not _contains_marker(makefile_text, marker):
             violations.append(
@@ -6774,6 +6972,13 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
                         f"fast pipeline pytest target {target!r} must also be included in QA_PYTEST_TARGETS",
                     )
                 )
+    return violations
+
+def _makefile_qa_variable_violations_8616(
+    makefile_path: Path, makefile_text: str, repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Check QA variable lists for duplicates, missing files, and missing pytest nodes."""
+    violations: list[ArchitectureViolation] = []
     pytest_skip_calls = _fast_pytest_skip_calls(repo_root)
     for variable_name in ("QA_PYTEST_TARGETS", "QA_RUFF_TARGETS", "QA_TYPED_FILES"):
         targets = _makefile_variable_words(makefile_text, variable_name)
@@ -6809,7 +7014,8 @@ def _check_makefile_gate_targets(repo_root: Path = REPO_ROOT) -> tuple[Architect
                             f"{variable_name} node {target!r} does not exist",
                         )
                     )
-    return tuple(violations)
+    return violations
+
 
 
 def _check_inertia_decompiler_typed_promotion_coverage(
@@ -6823,55 +7029,58 @@ def _check_inertia_decompiler_typed_promotion_coverage(
     debt: frozenset[str] = frozenset(_INERTIA_TYPED_PROMOTION_DEBT_FILES)
     pyright_only = frozenset(_PYRIGHT_ONLY_TYPED_PROMOTION_FILES)
     violations: list[ArchitectureViolation] = []
+    violations.extend(_inertia_stale_entry_violations_8616(repo_root, promoted, debt, pyright_only))
+    violations.extend(_inertia_uncovered_module_violations_8616(package_root, repo_root, promoted | debt))
+    return tuple(violations)
 
-    for filename in sorted(debt & promoted):
-        violations.append(
-            ArchitectureViolation(
-                filename,
-                "inertia-typed-promotion-debt-stale",
-                "typed promotion debt entries must be removed once the module is promoted",
-            )
-        )
+def _inertia_stale_entry_violations_8616(
+    repo_root: Path, promoted: frozenset[str], debt: frozenset[str], pyright_only: frozenset[str]
+) -> list[ArchitectureViolation]:
+    """Flag stale or untracked inertia_decompiler promotion-debt entries."""
+    violations: list[ArchitectureViolation] = []
+    stale_groups = (
+        (
+            sorted(debt & promoted),
+            "inertia-typed-promotion-debt-stale",
+            "typed promotion debt entries must be removed once the module is promoted",
+        ),
+        (
+            sorted(pyright_only & promoted),
+            "inertia-pyright-only-promotion-stale",
+            "Pyright-only promotion entries must be removed once the module is fully promoted",
+        ),
+        (
+            sorted(pyright_only - debt),
+            "inertia-pyright-only-promotion-untracked-debt",
+            "Pyright-only promotion entries must remain explicit full-promotion debt until Ruff/docs/dynamic-attribute cleanup is complete",
+        ),
+    )
+    for filenames, rule, message in stale_groups:
+        for filename in filenames:
+            violations.append(ArchitectureViolation(filename, rule, message))
+    missing_groups = (
+        (
+            sorted(debt),
+            "inertia-typed-promotion-debt-stale",
+            "typed promotion debt entries must reference existing modules",
+        ),
+        (
+            sorted(pyright_only),
+            "inertia-pyright-only-promotion-stale",
+            "Pyright-only promotion entries must reference existing modules",
+        ),
+    )
+    for filenames, rule, message in missing_groups:
+        for filename in filenames:
+            if not (repo_root / filename).exists():
+                violations.append(ArchitectureViolation(filename, rule, message))
+    return violations
 
-    for filename in sorted(pyright_only & promoted):
-        violations.append(
-            ArchitectureViolation(
-                filename,
-                "inertia-pyright-only-promotion-stale",
-                "Pyright-only promotion entries must be removed once the module is fully promoted",
-            )
-        )
-
-    for filename in sorted(pyright_only - debt):
-        violations.append(
-            ArchitectureViolation(
-                filename,
-                "inertia-pyright-only-promotion-untracked-debt",
-                "Pyright-only promotion entries must remain explicit full-promotion debt until Ruff/docs/dynamic-attribute cleanup is complete",
-            )
-        )
-
-    for filename in sorted(debt):
-        if not (repo_root / filename).exists():
-            violations.append(
-                ArchitectureViolation(
-                    filename,
-                    "inertia-typed-promotion-debt-stale",
-                    "typed promotion debt entries must reference existing modules",
-                )
-            )
-
-    for filename in sorted(pyright_only):
-        if not (repo_root / filename).exists():
-            violations.append(
-                ArchitectureViolation(
-                    filename,
-                    "inertia-pyright-only-promotion-stale",
-                    "Pyright-only promotion entries must reference existing modules",
-                )
-            )
-
-    covered = promoted | debt
+def _inertia_uncovered_module_violations_8616(
+    package_root: Path, repo_root: Path, covered: frozenset[str]
+) -> list[ArchitectureViolation]:
+    """Flag inertia_decompiler modules absent from both promoted and debt sets."""
+    violations: list[ArchitectureViolation] = []
     for path in sorted(package_root.glob("*.py")):
         filename = _relative(path, repo_root)
         if filename not in covered:
@@ -6882,7 +7091,8 @@ def _check_inertia_decompiler_typed_promotion_coverage(
                     "inertia_decompiler modules must be in promoted typed/ruff gates or explicit promotion debt",
                 )
             )
-    return tuple(violations)
+    return violations
+
 
 
 def _check_x86_16_typed_promotion_coverage(
@@ -7021,6 +7231,18 @@ def _check_test_pipeline_fast_targets(repo_root: Path = REPO_ROOT) -> tuple[Arch
     pipeline_tree = _parse_python(pipeline_path)
     pipeline_tiers = _pipeline_tier_literals(pipeline_tree)
     skip_calls = _fast_pytest_skip_calls(repo_root)
+    focused_targets = _focused_pytest_literals(pipeline_tree)
+    violations.extend(_pipeline_lane_contract_violations_8616(pipeline_path, pipeline_text, pipeline_tiers, focused_targets, repo_root))
+    for target in focused_targets:
+        violations.extend(_pipeline_single_target_violations_8616(pipeline_path, target, skip_calls, repo_root))
+    violations.extend(_pipeline_jcc_order_violations_8616(pipeline_path, focused_targets, repo_root))
+    return tuple(violations)
+
+def _pipeline_lane_contract_violations_8616(
+    pipeline_path: Path, pipeline_text: str, pipeline_tiers: dict[str, tuple[str, ...]], focused_targets: tuple[str, ...], repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Check tier lanes, focused markers, duplicates, and forbidden slow targets."""
+    violations: list[ArchitectureViolation] = []
     for tier_name, expected_lanes in _PIPELINE_TIER_CONTRACT.items():
         actual_lanes = pipeline_tiers.get(tier_name)
         if actual_lanes != expected_lanes:
@@ -7040,7 +7262,6 @@ def _check_test_pipeline_fast_targets(repo_root: Path = REPO_ROOT) -> tuple[Arch
                     f"fast focused pytest lane must include {marker!r}",
                 )
             )
-    focused_targets = _focused_pytest_literals(pipeline_tree)
     for duplicate_target in _duplicate_items(focused_targets):
         violations.append(
             ArchitectureViolation(
@@ -7058,36 +7279,46 @@ def _check_test_pipeline_fast_targets(repo_root: Path = REPO_ROOT) -> tuple[Arch
                     f"fast focused pytest lane must not include slow/corpus target {marker!r}",
                 )
             )
-    for target in focused_targets:
-        path_text, *_selectors = target.split("::")
-        target_path = repo_root / path_text
-        if not target_path.exists():
-            violations.append(
-                ArchitectureViolation(
-                    _relative(pipeline_path, repo_root),
-                    "focused-pipeline-missing-target",
-                    f"fast focused pytest lane references missing target {target!r}",
-                )
+    return violations
+
+def _pipeline_single_target_violations_8616(
+    pipeline_path: Path, target: str, skip_calls: frozenset[str], repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Check one focused pytest target for existence and skip/xfail usage."""
+    violations: list[ArchitectureViolation] = []
+    path_text, *_selectors = target.split("::")
+    target_path = repo_root / path_text
+    if not target_path.exists():
+        violations.append(
+            ArchitectureViolation(
+                _relative(pipeline_path, repo_root),
+                "focused-pipeline-missing-target",
+                f"fast focused pytest lane references missing target {target!r}",
             )
-            continue
-        target_exists, skip_xfail_lines = _fast_pytest_target_contract(repo_root, target, skip_calls)
-        if not target_exists:
-            violations.append(
-                ArchitectureViolation(
-                    _relative(pipeline_path, repo_root),
-                    "focused-pipeline-missing-target",
-                    f"fast focused pytest lane references missing pytest node {target!r}",
-                )
+        )
+        return violations
+    target_exists, skip_xfail_lines = _fast_pytest_target_contract(repo_root, target, skip_calls)
+    if not target_exists:
+        violations.append(
+            ArchitectureViolation(
+                _relative(target_path, repo_root),
+                "focused-pipeline-missing-target",
+                f"fast focused pytest lane references missing pytest node {target!r}",
             )
-            continue
-        for line_no in skip_xfail_lines:
-            violations.append(
-                ArchitectureViolation(
-                    _relative(target_path, repo_root),
-                    "focused-pipeline-skip-xfail",
-                    f"fast focused pytest target {target!r} must not use skip/xfail at line {line_no}",
-                )
+        )
+        return violations
+    for line_no in skip_xfail_lines:
+        violations.append(
+            ArchitectureViolation(
+                _relative(target_path, repo_root),
+                "focused-pipeline-skip-xfail",
+                f"fast focused pytest target {target!r} must not use skip/xfail at line {line_no}",
             )
+        )
+    return violations
+
+def _pipeline_jcc_order_violations_8616(pipeline_path: Path, focused_targets: tuple[str, ...], repo_root: Path) -> list[ArchitectureViolation]:
+    """Require typed-condition tests to run before JCC postprocess tests."""
     typed_conditions = "angr_platforms/tests/test_x86_16_decompiler_postprocess_typed_conditions.py"
     jcc = "angr_platforms/tests/test_x86_16_decompiler_postprocess_jcc.py"
     if (
@@ -7095,14 +7326,15 @@ def _check_test_pipeline_fast_targets(repo_root: Path = REPO_ROOT) -> tuple[Arch
         and jcc in focused_targets
         and focused_targets.index(typed_conditions) > focused_targets.index(jcc)
     ):
-        violations.append(
+        return [
             ArchitectureViolation(
                 _relative(pipeline_path, repo_root),
                 "focused-pipeline-jcc-order",
                 "fast focused pytest lane must run typed-condition tests before JCC postprocess tests",
             )
-        )
-    return tuple(violations)
+        ]
+    return []
+
 
 
 def _keyword_value(node: ast.Call, name: str) -> ast.AST | None:
@@ -7246,6 +7478,17 @@ def _check_ownership_manifest_contract(repo_root: Path = REPO_ROOT) -> tuple[Arc
                 "scripts/test_ownership_manifest.py must define literal FAST_PYTEST_SKIP_CALLS",
             )
         )
+    violations.extend(_manifest_fallback_rule_violations_8616(manifest_path, rules, repo_root))
+    violations.extend(_manifest_required_rule_violations_8616(manifest_path, rules, repo_root))
+    violations.extend(_manifest_required_test_violations_8616(manifest_path, tests_by_owner, repo_root))
+    violations.extend(_manifest_skip_xfail_violations_8616(manifest_tree, skip_calls, repo_root))
+    return tuple(violations)
+
+def _manifest_fallback_rule_violations_8616(
+    manifest_path: Path, rules: dict[str, tuple[frozenset[str], bool, str]], repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Require fallback rules to cover their paths and carry a reason."""
+    violations: list[ArchitectureViolation] = []
     for owner, required_path in _OWNERSHIP_MANIFEST_FALLBACK_RULES.items():
         paths, fallback, reason = rules.get(owner, (frozenset(), False, ""))
         if required_path not in paths or not fallback:
@@ -7264,6 +7507,13 @@ def _check_ownership_manifest_contract(repo_root: Path = REPO_ROOT) -> tuple[Arc
                     f"{owner!r} must explain the fast architectural coverage for its fallback rule",
                 )
             )
+    return violations
+
+def _manifest_required_rule_violations_8616(
+    manifest_path: Path, rules: dict[str, tuple[frozenset[str], bool, str]], repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Require each owner rule to cover its mandatory paths."""
+    violations: list[ArchitectureViolation] = []
     for owner, required_paths in _OWNERSHIP_MANIFEST_REQUIRED_RULES.items():
         paths, _fallback, _reason = rules.get(owner, (frozenset(), False, ""))
         for required_path in required_paths:
@@ -7275,6 +7525,13 @@ def _check_ownership_manifest_contract(repo_root: Path = REPO_ROOT) -> tuple[Arc
                         f"{owner!r} must cover {required_path!r}",
                     )
                 )
+    return violations
+
+def _manifest_required_test_violations_8616(
+    manifest_path: Path, tests_by_owner: dict[str, frozenset[str]], repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Require each owner rule to list its mandatory focused tests."""
+    violations: list[ArchitectureViolation] = []
     for owner, required_tests in _OWNERSHIP_MANIFEST_REQUIRED_TESTS.items():
         tests = tests_by_owner.get(owner, frozenset())
         for required_test in required_tests:
@@ -7286,6 +7543,13 @@ def _check_ownership_manifest_contract(repo_root: Path = REPO_ROOT) -> tuple[Arc
                         f"{owner!r} must run focused target {required_test!r}",
                     )
                 )
+    return violations
+
+def _manifest_skip_xfail_violations_8616(
+    manifest_tree: ast.Module, skip_calls: frozenset[str], repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Forbid skip/xfail decorators on fast ownership pytest targets."""
+    violations: list[ArchitectureViolation] = []
     for target in sorted(_ownership_manifest_fast_test_targets(manifest_tree)):
         target_path = repo_root / target.split("::", 1)[0]
         _target_exists, skip_xfail_lines = _fast_pytest_target_contract(repo_root, target, skip_calls)
@@ -7297,7 +7561,8 @@ def _check_ownership_manifest_contract(repo_root: Path = REPO_ROOT) -> tuple[Arc
                     f"fast ownership pytest target {target!r} must not use skip/xfail at line {line_no}",
                 )
             )
-    return tuple(violations)
+    return violations
+
 
 
 def _module_calls_function(tree: ast.Module, function_name: str) -> bool:
@@ -7410,85 +7675,91 @@ def _check_runtime_architecture_guard_entrypoints(repo_root: Path = REPO_ROOT) -
     violations: list[ArchitectureViolation] = []
     for relative_path in ("decompile.py", "inertia_decompiler/cli.py"):
         path = repo_root / relative_path
-        if not path.exists():
-            continue
-        tree = _parse_python(path)
-        guard_line = _first_module_call_line(tree, "assert_decompiler_architecture_clean")
-        if guard_line is None:
-            violations.append(
-                ArchitectureViolation(
-                    _relative(path, repo_root),
-                    "runtime-architecture-guard-entrypoint",
-                    "decompiler entrypoints must call assert_decompiler_architecture_clean() before startup",
-                )
-            )
-            continue
-        first_protected_import = _first_protected_runtime_import_line(tree)
-        if first_protected_import is not None and first_protected_import < guard_line:
-            violations.append(
-                ArchitectureViolation(
-                    _relative(path, repo_root),
-                    "runtime-architecture-guard-order",
-                    "decompiler entrypoints must call assert_decompiler_architecture_clean() before angr/decompiler imports",
-                )
-            )
-        for line_no in _swallowed_module_guard_try_lines(tree, "assert_decompiler_architecture_clean"):
-            violations.append(
-                ArchitectureViolation(
-                    _relative(path, repo_root),
-                    "runtime-architecture-guard-swallowed",
-                    f"decompiler entrypoints must not catch and continue after architecture guard failures at line {line_no}",
-                )
-            )
+        if path.exists():
+            violations.extend(_runtime_guard_entrypoint_file_violations_8616(path, repo_root))
     cli_core_path = repo_root / "inertia_decompiler" / "cli_core.py"
     if cli_core_path.exists():
-        tree = _parse_python(cli_core_path)
-        main_function = _find_function(tree, "main")
-        if not _function_calls_function(main_function, "_ensure_runtime_architecture_guard_8616"):
-            violations.append(
-                ArchitectureViolation(
-                    _relative(cli_core_path, repo_root),
-                    "runtime-architecture-guard-entrypoint",
-                    "cli_core.main() must call _ensure_runtime_architecture_guard_8616() before parsing/running work",
-                )
+        violations.extend(
+            _runtime_guard_main_violations_8616(
+                cli_core_path, repo_root, "_ensure_runtime_architecture_guard_8616",
+                "cli_core.main()", "parsing/running work", nested_name="_impl",
             )
-        impl_function = None
-        if main_function is not None:
-            impl_function = next(
-                (stmt for stmt in main_function.body if isinstance(stmt, ast.FunctionDef) and stmt.name == "_impl"),
-                None,
-            )
-        first_stmt = _first_non_definition_statement(impl_function)
-        if first_stmt is None or not _stmt_calls_function(first_stmt, "_ensure_runtime_architecture_guard_8616"):
-            violations.append(
-                ArchitectureViolation(
-                    _relative(cli_core_path, repo_root),
-                    "runtime-architecture-guard-order",
-                    "cli_core.main() must run _ensure_runtime_architecture_guard_8616() before parsing/running work",
-                )
-            )
+        )
     cod_dir_path = repo_root / "scripts" / "decompile_cod_dir.py"
     if cod_dir_path.exists():
-        tree = _parse_python(cod_dir_path)
-        main_function = _find_function(tree, "main")
-        if not _function_calls_function(main_function, "_run_runtime_architecture_guard"):
-            violations.append(
-                ArchitectureViolation(
-                    _relative(cod_dir_path, repo_root),
-                    "runtime-architecture-guard-entrypoint",
-                    "decompile_cod_dir.main() must call _run_runtime_architecture_guard() before batch work",
-                )
+        violations.extend(
+            _runtime_guard_main_violations_8616(
+                cod_dir_path, repo_root, "_run_runtime_architecture_guard",
+                "decompile_cod_dir.main()", "batch work",
             )
-        first_stmt = _first_non_definition_statement(main_function)
-        if first_stmt is None or not _stmt_calls_function(first_stmt, "_run_runtime_architecture_guard"):
-            violations.append(
-                ArchitectureViolation(
-                    _relative(cod_dir_path, repo_root),
-                    "runtime-architecture-guard-order",
-                    "decompile_cod_dir.main() must run _run_runtime_architecture_guard() before batch work",
-                )
-            )
+        )
     return tuple(violations)
+
+def _runtime_guard_entrypoint_file_violations_8616(path: Path, repo_root: Path) -> list[ArchitectureViolation]:
+    """Check one entrypoint file for guard presence, ordering, and swallowed failures."""
+    violations: list[ArchitectureViolation] = []
+    tree = _parse_python(path)
+    guard_line = _first_module_call_line(tree, "assert_decompiler_architecture_clean")
+    if guard_line is None:
+        violations.append(
+            ArchitectureViolation(
+                _relative(path, repo_root),
+                "runtime-architecture-guard-entrypoint",
+                "decompiler entrypoints must call assert_decompiler_architecture_clean() before startup",
+            )
+        )
+        return violations
+    first_protected_import = _first_protected_runtime_import_line(tree)
+    if first_protected_import is not None and first_protected_import < guard_line:
+        violations.append(
+            ArchitectureViolation(
+                _relative(path, repo_root),
+                "runtime-architecture-guard-order",
+                "decompiler entrypoints must call assert_decompiler_architecture_clean() before angr/decompiler imports",
+            )
+        )
+    for line_no in _swallowed_module_guard_try_lines(tree, "assert_decompiler_architecture_clean"):
+        violations.append(
+            ArchitectureViolation(
+                _relative(path, repo_root),
+                "runtime-architecture-guard-swallowed",
+                f"decompiler entrypoints must not catch and continue after architecture guard failures at line {line_no}",
+            )
+        )
+    return violations
+
+def _runtime_guard_main_violations_8616(
+    path: Path, repo_root: Path, guard_name: str, label: str, work_desc: str, nested_name: str | None = None
+) -> list[ArchitectureViolation]:
+    """Require a main() to call the runtime guard before doing work, in the first executable statement."""
+    violations: list[ArchitectureViolation] = []
+    tree = _parse_python(path)
+    main_function = _find_function(tree, "main")
+    if not _function_calls_function(main_function, guard_name):
+        violations.append(
+            ArchitectureViolation(
+                _relative(path, repo_root),
+                "runtime-architecture-guard-entrypoint",
+                f"{label} must call {guard_name}() before {work_desc}",
+            )
+        )
+    target_function = main_function
+    if nested_name is not None and main_function is not None:
+        target_function = next(
+            (stmt for stmt in main_function.body if isinstance(stmt, ast.FunctionDef) and stmt.name == nested_name),
+            None,
+        )
+    first_stmt = _first_non_definition_statement(target_function)
+    if first_stmt is None or not _stmt_calls_function(first_stmt, guard_name):
+        violations.append(
+            ArchitectureViolation(
+                _relative(path, repo_root),
+                "runtime-architecture-guard-order",
+                f"{label} must run {guard_name}() before {work_desc}",
+            )
+        )
+    return violations
+
 
 
 def _check_architecture_table_unique_keys(repo_root: Path = REPO_ROOT) -> tuple[ArchitectureViolation, ...]:
@@ -7500,6 +7771,27 @@ def _check_architecture_table_unique_keys(repo_root: Path = REPO_ROOT) -> tuple[
     tree = _parse_python(architecture_path)
     violations: list[ArchitectureViolation] = []
     skip_calls = _fast_pytest_skip_calls(repo_root)
+    violations.extend(_table_duplicate_scan_violations_8616(architecture_path, tree, repo_root))
+    required_rule_entries = tuple(
+        _dict_literal_tuple_values(
+            tree,
+            table_names=frozenset({"_OWNERSHIP_MANIFEST_REQUIRED_RULES"}),
+        )
+    )
+    required_rule_owners = {
+        key
+        for table_name, key, _values, _line_no in required_rule_entries
+        if table_name == "_OWNERSHIP_MANIFEST_REQUIRED_RULES"
+    }
+    violations.extend(_required_rule_source_violations_8616(architecture_path, required_rule_entries, repo_root))
+    violations.extend(_required_test_entry_violations_8616(architecture_path, tree, required_rule_owners, skip_calls, repo_root))
+    return tuple(violations)
+
+def _table_duplicate_scan_violations_8616(
+    architecture_path: Path, tree: ast.Module, repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Flag duplicate literal keys/values in the architecture marker tables."""
+    violations: list[ArchitectureViolation] = []
     for table_name, key, line_no in _dict_literal_duplicate_string_keys(
         tree,
         table_names=_ARCHITECTURE_UNIQUE_KEY_TABLES,
@@ -7522,17 +7814,13 @@ def _check_architecture_table_unique_keys(repo_root: Path = REPO_ROOT) -> tuple[
                 f"{table_name} duplicates value {value!r} at line {line_no}; duplicate frozenset entries hide debt-list churn",
             )
         )
-    required_rule_entries = tuple(
-        _dict_literal_tuple_values(
-            tree,
-            table_names=frozenset({"_OWNERSHIP_MANIFEST_REQUIRED_RULES"}),
-        )
-    )
-    required_rule_owners = {
-        key
-        for table_name, key, _values, _line_no in required_rule_entries
-        if table_name == "_OWNERSHIP_MANIFEST_REQUIRED_RULES"
-    }
+    return violations
+
+def _required_rule_source_violations_8616(
+    architecture_path: Path, required_rule_entries: tuple[tuple[str, str, tuple[str, ...], int], ...], repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Flag required-rule paths that point at disallowed source/COD evidence."""
+    violations: list[ArchitectureViolation] = []
     for table_name, owner, required_paths, line_no in required_rule_entries:
         if table_name != "_OWNERSHIP_MANIFEST_REQUIRED_RULES":
             continue
@@ -7546,6 +7834,57 @@ def _check_architecture_table_unique_keys(repo_root: Path = REPO_ROOT) -> tuple[
                         f"_OWNERSHIP_MANIFEST_REQUIRED_RULES owner {owner!r} at line {line_no}: {path_reason}",
                     )
                 )
+    return violations
+
+def _required_test_target_violations_8616(
+    architecture_path: Path, owner: str, required_test: str, skip_calls: frozenset[str], repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Check one required focused test for slow-target use, existence, and skip/xfail."""
+    violations: list[ArchitectureViolation] = []
+    path_text, *_selectors = required_test.split("::")
+    if path_text in _FOCUSED_PYTEST_FORBIDDEN_MARKERS:
+        violations.append(
+            ArchitectureViolation(
+                _relative(architecture_path, repo_root),
+                "architecture-required-test-fast-target",
+                f"_OWNERSHIP_MANIFEST_REQUIRED_TESTS owner {owner!r} must not require slow/corpus target {required_test!r}",
+            )
+        )
+    target_path = repo_root / path_text
+    if not target_path.exists():
+        violations.append(
+            ArchitectureViolation(
+                _relative(architecture_path, repo_root),
+                "architecture-required-test-target",
+                f"_OWNERSHIP_MANIFEST_REQUIRED_TESTS owner {owner!r} references missing focused target {required_test!r}",
+            )
+        )
+        return violations
+    target_exists, skip_xfail_lines = _fast_pytest_target_contract(repo_root, required_test, skip_calls)
+    if not target_exists:
+        violations.append(
+            ArchitectureViolation(
+                _relative(architecture_path, repo_root),
+                "architecture-required-test-target",
+                f"_OWNERSHIP_MANIFEST_REQUIRED_TESTS owner {owner!r} references missing pytest node {required_test!r}",
+            )
+        )
+        return violations
+    for skip_line in skip_xfail_lines:
+        violations.append(
+            ArchitectureViolation(
+                _relative(target_path, repo_root),
+                "architecture-required-test-skip-xfail",
+                f"_OWNERSHIP_MANIFEST_REQUIRED_TESTS target {required_test!r} must not use skip/xfail at line {skip_line}",
+            )
+        )
+    return violations
+
+def _required_test_entry_violations_8616(
+    architecture_path: Path, tree: ast.Module, required_rule_owners: set[str], skip_calls: frozenset[str], repo_root: Path
+) -> list[ArchitectureViolation]:
+    """Check every required-test entry for owner coverage and target validity."""
+    violations: list[ArchitectureViolation] = []
     for _table_name, owner, required_tests, line_no in _dict_literal_tuple_values(
         tree,
         table_names=frozenset({"_OWNERSHIP_MANIFEST_REQUIRED_TESTS"}),
@@ -7559,44 +7898,11 @@ def _check_architecture_table_unique_keys(repo_root: Path = REPO_ROOT) -> tuple[
                 )
             )
         for required_test in required_tests:
-            path_text, *_selectors = required_test.split("::")
-            if path_text in _FOCUSED_PYTEST_FORBIDDEN_MARKERS:
-                violations.append(
-                    ArchitectureViolation(
-                        _relative(architecture_path, repo_root),
-                        "architecture-required-test-fast-target",
-                        f"_OWNERSHIP_MANIFEST_REQUIRED_TESTS owner {owner!r} must not require slow/corpus target {required_test!r}",
-                    )
-                )
-            target_path = repo_root / path_text
-            if not target_path.exists():
-                violations.append(
-                    ArchitectureViolation(
-                        _relative(architecture_path, repo_root),
-                        "architecture-required-test-target",
-                        f"_OWNERSHIP_MANIFEST_REQUIRED_TESTS owner {owner!r} references missing focused target {required_test!r}",
-                    )
-                )
-                continue
-            target_exists, skip_xfail_lines = _fast_pytest_target_contract(repo_root, required_test, skip_calls)
-            if not target_exists:
-                violations.append(
-                    ArchitectureViolation(
-                        _relative(architecture_path, repo_root),
-                        "architecture-required-test-target",
-                        f"_OWNERSHIP_MANIFEST_REQUIRED_TESTS owner {owner!r} references missing pytest node {required_test!r}",
-                    )
-                )
-                continue
-            for skip_line in skip_xfail_lines:
-                violations.append(
-                    ArchitectureViolation(
-                        _relative(target_path, repo_root),
-                        "architecture-required-test-skip-xfail",
-                        f"_OWNERSHIP_MANIFEST_REQUIRED_TESTS target {required_test!r} must not use skip/xfail at line {skip_line}",
-                    )
-                )
-    return tuple(violations)
+            violations.extend(
+                _required_test_target_violations_8616(architecture_path, owner, required_test, skip_calls, repo_root)
+            )
+    return violations
+
 
 
 def _check_architecture_header_marker_contracts(repo_root: Path = REPO_ROOT) -> tuple[ArchitectureViolation, ...]:
@@ -7611,14 +7917,14 @@ def _check_architecture_header_marker_contracts(repo_root: Path = REPO_ROOT) -> 
         tree,
         table_names=_OWNERSHIP_HEADER_MARKER_TABLES,
     ):
-        if (
+        header_shape_ok = (
             len(markers) >= 3
             and markers[0].startswith("Layer:")
-            and markers[1].strip()
-            and markers[2].strip()
             and not markers[1].startswith("Layer:")
             and not markers[2].startswith("Layer:")
-        ):
+        )
+        details_filled = len(markers) >= 3 and markers[1].strip() and markers[2].strip()
+        if header_shape_ok and details_filled:
             continue
         violations.append(
             ArchitectureViolation(
@@ -7712,6 +8018,21 @@ def _check_project_awareness_docs(
 
     violations: list[ArchitectureViolation] = []
     agents_text = _read_text_if_present(agents_path)
+    violations.extend(_agents_doc_violations_8616(agents_path, agents_text, repo_root))
+    project_map_text = _read_text_if_present(project_map_path)
+    violations.extend(_project_map_doc_violations_8616(project_map_path, project_map_text, repo_root))
+    decompiler_map_text = _read_text_if_present(decompiler_map_path)
+    violations.extend(_decompiler_map_doc_violations_8616(decompiler_map_path, decompiler_map_text, repo_root))
+    agent_rules_text = _read_text_if_present(agent_rules_path)
+    violations.extend(_agent_rules_doc_violations_8616(agent_rules_path, agent_rules_text, repo_root))
+    violations.extend(_active_reference_violations_8616(repo_root))
+    config_text = _read_text_if_present(understand_config_path)
+    violations.extend(_understand_config_violations_8616(understand_config_path, config_text, repo_root))
+    return tuple(violations)
+
+def _agents_doc_violations_8616(agents_path: Path, agents_text: str | None, repo_root: Path) -> list[ArchitectureViolation]:
+    """Check AGENTS.md size and marker contract."""
+    violations: list[ArchitectureViolation] = []
     if agents_text is None:
         violations.append(
             ArchitectureViolation(
@@ -7748,8 +8069,12 @@ def _check_project_awareness_docs(
                         f"AGENTS.md must stay concise and avoid duplicate rule sections such as {marker!r}",
                     )
                 )
+    return violations
 
-    project_map_text = _read_text_if_present(project_map_path)
+
+def _project_map_doc_violations_8616(project_map_path: Path, project_map_text: str | None, repo_root: Path) -> list[ArchitectureViolation]:
+    """Check project-map size and marker contract."""
+    violations: list[ArchitectureViolation] = []
     if project_map_text is None:
         violations.append(
             ArchitectureViolation(
@@ -7786,8 +8111,12 @@ def _check_project_awareness_docs(
                         f"reference/project-map.md must stay navigational and not restate AGENTS.md section {marker!r}",
                     )
                 )
+    return violations
 
-    decompiler_map_text = _read_text_if_present(decompiler_map_path)
+
+def _decompiler_map_doc_violations_8616(decompiler_map_path: Path, decompiler_map_text: str | None, repo_root: Path) -> list[ArchitectureViolation]:
+    """Check decompiler-map size and marker contract."""
+    violations: list[ArchitectureViolation] = []
     if decompiler_map_text is None:
         violations.append(
             ArchitectureViolation(
@@ -7824,8 +8153,12 @@ def _check_project_awareness_docs(
                         f"reference/decompiler-map.md must stay navigational and not restate AGENTS.md section {marker!r}",
                     )
                 )
+    return violations
 
-    agent_rules_text = _read_text_if_present(agent_rules_path)
+
+def _agent_rules_doc_violations_8616(agent_rules_path: Path, agent_rules_text: str | None, repo_root: Path) -> list[ArchitectureViolation]:
+    """Check agent-rules size and marker contract."""
+    violations: list[ArchitectureViolation] = []
     if agent_rules_text is None:
         violations.append(
             ArchitectureViolation(
@@ -7862,7 +8195,12 @@ def _check_project_awareness_docs(
                         f"reference/agent-rules.md must not restate canonical AGENTS.md section {marker!r}",
                     )
                 )
+    return violations
 
+
+def _active_reference_violations_8616(repo_root: Path) -> list[ArchitectureViolation]:
+    """Check that all active reference files exist."""
+    violations: list[ArchitectureViolation] = []
     for relative_path in _ACTIVE_REFERENCE_PATHS:
         path = repo_root / relative_path
         if not path.exists():
@@ -7873,8 +8211,12 @@ def _check_project_awareness_docs(
                     f"active agent/decompiler reference path must exist: {relative_path}",
                 )
             )
+    return violations
 
-    config_text = _read_text_if_present(understand_config_path)
+
+def _understand_config_violations_8616(understand_config_path: Path, config_text: str | None, repo_root: Path) -> list[ArchitectureViolation]:
+    """Check Understand-Anything autoUpdate config."""
+    violations: list[ArchitectureViolation] = []
     if config_text is None:
         violations.append(
             ArchitectureViolation(
@@ -7903,6 +8245,8 @@ def _check_project_awareness_docs(
                         "autoUpdate must be false so agent runs do not mutate the graph unexpectedly",
                     )
                 )
+    return violations
+
 
     return tuple(violations)
 
@@ -8609,66 +8953,7 @@ def _check_terminating_guard_narrowed_fields_use_dot(
     if not path.exists():
         return ()
     tree = _parse_python(path)
-
-    def _find_getattr(node: ast.AST, narrowed: dict[str, tuple[str, ...]]) -> tuple[str, str, str] | None:
-        if not narrowed:
-            return None
-        for target_name, field_name in _fixed_name_getattr_calls(node):
-            type_names = narrowed.get(target_name, ())
-            if field_name in _common_narrowed_fields(type_names, class_fields):
-                return target_name, " | ".join(type_names), field_name
-        return None
-
-    def _scan_statements(
-        statements: list[ast.stmt], inherited: dict[str, tuple[str, ...]]
-    ) -> tuple[str, str, str] | None:
-        narrowed = dict(inherited)
-        for statement in statements:
-            found: tuple[str, str, str] | None = None
-            if isinstance(statement, ast.If):
-                found = _find_getattr(statement.test, narrowed)
-                found = found or _scan_statements(statement.body, narrowed)
-                found = found or _scan_statements(statement.orelse, narrowed)
-                guard = _negative_isinstance_narrowing(statement.test, class_fields)
-                if guard is not None and not statement.orelse and _statement_body_terminates(statement.body):
-                    narrowed[guard[0]] = guard[1]
-            elif isinstance(statement, (ast.For, ast.AsyncFor)):
-                found = _find_getattr(statement.iter, narrowed)
-                found = found or _scan_statements(statement.body, narrowed)
-                found = found or _scan_statements(statement.orelse, narrowed)
-                guard = None
-            elif isinstance(statement, ast.While):
-                found = _find_getattr(statement.test, narrowed)
-                found = found or _scan_statements(statement.body, narrowed)
-                found = found or _scan_statements(statement.orelse, narrowed)
-                guard = None
-            elif isinstance(statement, ast.Try):
-                found = _scan_statements(statement.body, narrowed)
-                for handler in statement.handlers:
-                    found = found or _scan_statements(handler.body, narrowed)
-                found = found or _scan_statements(statement.orelse, narrowed)
-                found = found or _scan_statements(statement.finalbody, narrowed)
-                guard = None
-            elif isinstance(statement, (ast.With, ast.AsyncWith)):
-                for item in statement.items:
-                    found = found or _find_getattr(item.context_expr, narrowed)
-                found = found or _scan_statements(statement.body, narrowed)
-                guard = None
-            elif isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                found = _scan_statements(statement.body, {})
-                guard = None
-            else:
-                found = _find_getattr(statement, narrowed)
-                guard = None
-            if found is not None:
-                return found
-            if narrowed:
-                for name in _assigned_ast_names(statement):
-                    if guard is None or guard[0] != name:
-                        narrowed.pop(name, None)
-        return None
-
-    found = _scan_statements(tree.body, {})
+    found = _terminating_guard_scan_8616(tree.body, {}, class_fields)
     if found is None:
         return ()
     target_name, type_name, field_name = found
@@ -8679,6 +8964,75 @@ def _check_terminating_guard_narrowed_fields_use_dot(
             f"{detail_prefix} must use {target_name}.{field_name} after {type_name} guard",
         ),
     )
+
+def _terminating_guard_find_getattr_8616(
+    node: ast.AST, narrowed: dict[str, tuple[str, ...]], class_fields: dict[str, set[str]]
+) -> tuple[str, str, str] | None:
+    """Return the first fixed getattr on a field already narrowed to a common type set."""
+    if not narrowed:
+        return None
+    for target_name, field_name in _fixed_name_getattr_calls(node):
+        type_names = narrowed.get(target_name, ())
+        if field_name in _common_narrowed_fields(type_names, class_fields):
+            return target_name, " | ".join(type_names), field_name
+    return None
+
+def _terminating_guard_scan_statement_8616(
+    statement: ast.stmt, narrowed: dict[str, tuple[str, ...]], class_fields: dict[str, set[str]]
+) -> tuple[tuple[str, str, str] | None, tuple[str, tuple[str, ...]] | None]:
+    """Scan one statement; return (found violation, narrowing guard) for its kind."""
+    if isinstance(statement, ast.If):
+        found = _terminating_guard_find_getattr_8616(statement.test, narrowed, class_fields)
+        found = found or _terminating_guard_scan_8616(statement.body, narrowed, class_fields)
+        found = found or _terminating_guard_scan_8616(statement.orelse, narrowed, class_fields)
+        guard = _negative_isinstance_narrowing(statement.test, class_fields)
+        if guard is None or statement.orelse or not _statement_body_terminates(statement.body):
+            guard = None
+        return found, guard
+    if isinstance(statement, (ast.For, ast.AsyncFor)):
+        found = _terminating_guard_find_getattr_8616(statement.iter, narrowed, class_fields)
+        found = found or _terminating_guard_scan_8616(statement.body, narrowed, class_fields)
+        found = found or _terminating_guard_scan_8616(statement.orelse, narrowed, class_fields)
+        return found, None
+    if isinstance(statement, ast.While):
+        found = _terminating_guard_find_getattr_8616(statement.test, narrowed, class_fields)
+        found = found or _terminating_guard_scan_8616(statement.body, narrowed, class_fields)
+        found = found or _terminating_guard_scan_8616(statement.orelse, narrowed, class_fields)
+        return found, None
+    if isinstance(statement, ast.Try):
+        found = _terminating_guard_scan_8616(statement.body, narrowed, class_fields)
+        for handler in statement.handlers:
+            found = found or _terminating_guard_scan_8616(handler.body, narrowed, class_fields)
+        found = found or _terminating_guard_scan_8616(statement.orelse, narrowed, class_fields)
+        found = found or _terminating_guard_scan_8616(statement.finalbody, narrowed, class_fields)
+        return found, None
+    if isinstance(statement, (ast.With, ast.AsyncWith)):
+        found = None
+        for item in statement.items:
+            found = found or _terminating_guard_find_getattr_8616(item.context_expr, narrowed, class_fields)
+        found = found or _terminating_guard_scan_8616(statement.body, narrowed, class_fields)
+        return found, None
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return _terminating_guard_scan_8616(statement.body, {}, class_fields), None
+    return _terminating_guard_find_getattr_8616(statement, narrowed, class_fields), None
+
+def _terminating_guard_scan_8616(
+    statements: list[ast.stmt], inherited: dict[str, tuple[str, ...]], class_fields: dict[str, set[str]]
+) -> tuple[str, str, str] | None:
+    """Scan statements in order, tracking terminating isinstance guards and invalidation."""
+    narrowed = dict(inherited)
+    for statement in statements:
+        found, guard = _terminating_guard_scan_statement_8616(statement, narrowed, class_fields)
+        if found is not None:
+            return found
+        if guard is not None:
+            narrowed[guard[0]] = guard[1]
+        if narrowed:
+            for name in _assigned_ast_names(statement):
+                if guard is None or guard[0] != name:
+                    narrowed.pop(name, None)
+    return None
+
 
 
 def _check_positive_and_guard_narrowed_fields_use_dot(

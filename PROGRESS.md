@@ -880,3 +880,25 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   on `test_x86_16_cli.py -k "decompile or cli"` vs bare HEAD (all
   pre-existing env failures — kvikdos UTF-8 decode etc.), 10/10 targeted
   `_decompile_function`/retry/stub tests pass.
+
+## check_decompiler_architecture.py — lint debt cleared (was 33 promoted findings)
+
+- All 33 `complex-structure` findings ground down by behavior-preserving
+  helper extraction: per-path/per-node check helpers, parameterized
+  violation probes (`_node_references_any_name_8616`,
+  `_textpp_helper_name_scan_violations_8616`, `_runtime_guard_main_violations_8616`),
+  and table-grouped Makefile/manifest lane validators. Nested closures
+  (`_find_getattr`, `_scan_statements`, `_function_returns_constant_zero`)
+  hoisted to module helpers with explicit `class_fields`/`value` params;
+  the terminating-guard scanner split into a per-statement
+  `(found, guard)` dispatch plus the narrowing/invalidation loop.
+- One defect caught and fixed during verification: the bulk
+  name-reference predicate replacement had rewritten the predicate's own
+  body into a self-call (infinite recursion); restored the leaf
+  `Attribute`/`Constant`/`Name` conditions.
+- Verification: ruff 0 (was 33), mypy 0 (new helper annotations typed
+  concretely — `dict[str, tuple[frozenset[str], bool, str]]`,
+  `frozenset[str]` skip sets, `tuple[tuple[str, str, tuple[str, ...], int], ...]`),
+  checker output byte-identical to the pre-refactor baseline (same 189
+  violations), `test_decompiler_architecture_check.py` 370 passed + the
+  same single pre-existing contract failure as bare HEAD.
