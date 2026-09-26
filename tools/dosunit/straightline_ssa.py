@@ -11183,10 +11183,12 @@ def _call_far_pointer_push_pairs(
     (both >=0x1000); a lone differing push without provenance could be a real
     argument change and stays compared.
     """
-    call_mnemonics = {"call", "lcall"}
-    if not any(str(item.get("mnemonic", "")).lower() in call_mnemonics for item in oracle_instructions):
+    # Push args may occupy a jmp-terminated tail part ahead of the call part;
+    # the relocation-table segment proof below is the actual gate.
+    tail_mnemonics = {"call", "lcall", "jmp", "ljmp"}
+    if not any(str(item.get("mnemonic", "")).lower() in tail_mnemonics for item in oracle_instructions):
         return []
-    if not any(str(item.get("mnemonic", "")).lower() in call_mnemonics for item in candidate_instructions):
+    if not any(str(item.get("mnemonic", "")).lower() in tail_mnemonics for item in candidate_instructions):
         return []
     differing_push_indexes, pushed_values = _differing_push_values(
         oracle_instructions, candidate_instructions
