@@ -119,11 +119,20 @@ def _count_ax_dx_puts_8616(irsb: object, arch: object) -> int:
 
 
 def _iter_function_blocks_8616(project: object, function: object) -> Iterator[object]:
+    """Decode known CFG extents without lifting solely to rediscover their sizes."""
     project_dynamic = cast(Any, project)
     # Dynamic angr function compatibility boundary.
+    size_getter = getattr(function, "get_block_size", None)
     for block_addr in sorted(getattr(function, "block_addrs_set", ()) or ()):
+        address = int(block_addr)
+        block_size = size_getter(address) if callable(size_getter) else None
         try:
-            yield project_dynamic.factory.block(int(block_addr), opt_level=0)
+            # Both consumers need Capstone, not VEX. A known CFG size avoids
+            # angr's eager lift; unknown extents retain normal block discovery.
+            if type(block_size) is int and block_size > 0:
+                yield project_dynamic.factory.block(address, size=block_size, opt_level=0)
+            else:
+                yield project_dynamic.factory.block(address, opt_level=0)
         except SimTranslationError:
             continue
 

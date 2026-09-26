@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import angr_platforms.X86_16 as x8616
@@ -148,6 +151,47 @@ def test_x86_16_decompiler_postprocess_hook_is_idempotent():
     assert Decompiler._decompile is not original or original.__name__ == "_decompile_8616"
 
 
+@pytest.mark.parametrize("function_field", ["function", "func"])
+@pytest.mark.parametrize("raise_in_core", [False, True])
+def test_x86_16_decompiler_entry_runs_core_inside_flag_context(
+    monkeypatch: pytest.MonkeyPatch, function_field: str, raise_in_core: bool
+) -> None:
+    """The installed hook executes once inside the flag context, even on failure."""
+    project = SimpleNamespace(arch=SimpleNamespace(name="86_16"))
+    function = SimpleNamespace(addr=0x1000)
+    state = SimpleNamespace(project=project, codegen=None, **{function_field: function})
+    events: list[str] = []
+    failure = RuntimeError("core failed")
+
+    @contextmanager
+    def flag_context(actual_project: object, actual_function: object) -> Iterator[None]:
+        assert actual_project is project
+        assert actual_function is function
+        events.append("enter")
+        try:
+            yield
+        finally:
+            events.append("exit")
+
+    def run_core(actual_state: object) -> float:
+        assert actual_state is state
+        assert events == ["enter"]
+        events.append("core")
+        if raise_in_core:
+            raise failure
+        return 0.0
+
+    monkeypatch.setattr(decompiler_postprocess_stage, "active_status_flag_lift_context_8616", flag_context)
+    monkeypatch.setattr(decompiler_postprocess_stage, "_run_decompile_core_8616", run_core)
+    if raise_in_core:
+        with pytest.raises(RuntimeError) as caught:
+            Decompiler._decompile(state)
+        assert caught.value is failure
+    else:
+        Decompiler._decompile(state)
+    assert events == ["enter", "core", "exit"]
+
+
 def test_x86_16_bootstrap_hook_is_idempotent():
     original = Decompiler._decompile
 
@@ -156,6 +200,39 @@ def test_x86_16_bootstrap_hook_is_idempotent():
 
     assert Decompiler._decompile.__name__ == "_decompile_8616"
     assert Decompiler._decompile is not original or original.__name__ == "_decompile_8616"
+
+
+def test_x86_16_validation_acceptance_keeps_explicit_function(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Validation consumes its supplied function without opening another lift context."""
+    function = SimpleNamespace(addr=0x1000)
+    state = SimpleNamespace(
+        function=SimpleNamespace(addr=0x2000), project=SimpleNamespace(arch=SimpleNamespace(name="AMD64"))
+    )
+    accepted: list[object] = []
+
+    def accept_arms(
+        actual_state: object, *, function: object, validation: object
+    ) -> list[tuple[Callable[[], bool], str, str | None]]:
+        assert actual_state is state
+        accepted.append(function)
+        return [(lambda: True, "proven test delta", None)]
+
+    def stable_accept(*args: object) -> None:
+        accepted.append(args[0])
+
+    monkeypatch.setattr(decompiler_postprocess_stage, "_postprocess_validation_accept_arms_8616", accept_arms)
+    monkeypatch.setattr(decompiler_postprocess_stage, "_postprocess_stable_accept_8616", stable_accept)
+    assert decompiler_postprocess_stage._try_accept_failed_postprocess_validation_8616(
+        state,
+        validation={},
+        validation_verdict_text="",
+        function=function,
+        snapshot_function_info=None,
+        pre_postprocess_cfunc_snapshot=None,
+        func_addr=0x1000,
+        log=logging.getLogger(__name__),
+    )
+    assert accepted == [function, state]
 
 
 def test_x86_16_decompiler_hooks_do_not_form_wrapper_cycle_after_reapply():

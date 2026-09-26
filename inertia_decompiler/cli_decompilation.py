@@ -5012,7 +5012,12 @@ class _DecompileRun8616:
             self.before_missing = (
                 self._missing_expected_call_names_from_codegen_counts() if self.expected_call_guard_active else ()
             )
-            self.snapshot = self._snapshot_codegen_cfunc() if self.call_loss_guard_active else None
+            # A zero call count cannot decrease. Keep the guard itself active
+            # and retain snapshots whenever named-call coverage is checked.
+            needs_call_loss_snapshot: bool = self.call_loss_guard_active and (
+                self.before_calls != 0 or self.expected_call_guard_active
+            )
+            self.snapshot = self._snapshot_codegen_cfunc() if needs_call_loss_snapshot else None
             rewrite_changed = rewrite()
         rewrite_changed = self._rewrite_round_guarded_evidence_8616(rewrite_idx, rewrite_changed)
         if rewrite_changed:

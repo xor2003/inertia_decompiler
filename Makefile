@@ -1383,6 +1383,7 @@ QA_TYPED_FILES := \
 	inertia_decompiler/rizin_discovery.py \
 	inertia_decompiler/recompile_check.py \
 	inertia_decompiler/recompile_check_contract.py \
+	inertia_decompiler/cli_terminal_status.py \
 	inertia_decompiler/runtime_support.py \
 	inertia_decompiler/sidecar_cache.py \
 	inertia_decompiler/sidecar_metadata.py \
@@ -1409,6 +1410,7 @@ QA_TYPED_FILES := \
 	scripts/build_msc6_examples.py \
 	scripts/msc6_compat_headers.py \
 	scripts/msc6_entrypoint.py \
+	scripts/msc6_function_targets.py \
 	scripts/msc6_runtime_gate_artifacts.py \
 	scripts/verify_msc_example_runtime_gate.py \
 	scripts/compare_ghidra_function_coverage.py \
@@ -2494,6 +2496,7 @@ QA_RUFF_TARGETS := \
 	inertia_decompiler/rizin_discovery.py \
 	inertia_decompiler/recompile_check.py \
 	inertia_decompiler/recompile_check_contract.py \
+	inertia_decompiler/cli_terminal_status.py \
 	inertia_decompiler/runtime_support.py \
 	inertia_decompiler/sidecar_cache.py \
 	inertia_decompiler/sidecar_metadata.py \
@@ -2520,6 +2523,7 @@ QA_RUFF_TARGETS := \
 	scripts/build_msc6_examples.py \
 	scripts/msc6_compat_headers.py \
 	scripts/msc6_entrypoint.py \
+	scripts/msc6_function_targets.py \
 	scripts/msc6_runtime_gate_artifacts.py \
 	scripts/verify_msc_example_runtime_gate.py \
 	scripts/compare_ghidra_function_coverage.py \
@@ -3759,6 +3763,24 @@ LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/lowering/far_poin
 QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/lowering/far_pointer_type.py
 QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/lowering/far_pointer_type.py angr_platforms/tests/test_x86_16_function_pointer_parameters.py
 QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_function_pointer_parameters.py
+QA_TYPED_FILES += ada.py tools/ada_script/__init__.py tools/ada_script/cli.py tools/ada_script/signatures.py tools/ada_script/vendor_bridge.py
+QA_RUFF_TARGETS += ada.py tools/ada_script/__init__.py tools/ada_script/cli.py tools/ada_script/signatures.py tools/ada_script/vendor_bridge.py angr_platforms/tests/test_ada_signature_integration.py
+
+QA_TYPED_FILES += pat_literal_filter.py
+QA_RUFF_TARGETS += pat_literal_filter.py angr_platforms/tests/test_pat_literal_prefilter.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_pat_literal_prefilter.py
+QA_RUFF_TARGETS += angr_platforms/tests/test_pat_catalog_cache_identity.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_pat_catalog_cache_identity.py
+LINTERS_DEV_MYPY_FILES += scripts/compiler_coverage_cross_unit.py
+QA_TYPED_FILES += scripts/compiler_coverage_cross_unit.py
+QA_RUFF_TARGETS += scripts/compiler_coverage_cross_unit.py angr_platforms/tests/test_compiler_coverage_cross_unit.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_compiler_coverage_cross_unit.py
+QA_RUFF_TARGETS += angr_platforms/tests/test_x86_16_high_byte_remnant_walk.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_high_byte_remnant_walk.py
+LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/lowering/binary_callback_targets.py
+QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/lowering/binary_callback_targets.py
+QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/lowering/binary_callback_targets.py angr_platforms/tests/test_x86_16_binary_callback_targets.py
+QA_PYTEST_TARGETS += angr_platforms/tests/test_x86_16_binary_callback_targets.py
 LINTERS_DEV_MYPY_FILES += angr_platforms/angr_platforms/X86_16/semantics/terminal_boundary_paths.py
 QA_TYPED_FILES += angr_platforms/angr_platforms/X86_16/semantics/terminal_boundary_paths.py
 QA_RUFF_TARGETS += angr_platforms/angr_platforms/X86_16/semantics/terminal_boundary_paths.py

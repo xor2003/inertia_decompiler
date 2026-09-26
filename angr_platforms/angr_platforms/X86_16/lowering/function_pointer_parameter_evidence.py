@@ -44,6 +44,17 @@ class FunctionPointerParameterFact8616:
 
 
 @dataclass(frozen=True, slots=True)
+class FunctionPointerCallTargetStats8616:
+    """Closed census of call-target offset projections consumed by Lowering."""
+
+    raw_fact_count: int = 0
+    normalized_fact_count: int = 0
+    classified_fact_count: int = 0
+    materialized_count: int = 0
+    failure_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class FunctionPointerParameterEvidence8616:
     """Closed evidence census for function-pointer parameter recovery."""
 
@@ -54,6 +65,7 @@ class FunctionPointerParameterEvidence8616:
     failure_count: int = 0
     facts: tuple[FunctionPointerParameterFact8616, ...] = ()
     failures: tuple[FunctionPointerParameterFailure8616, ...] = ()
+    call_target_stats: FunctionPointerCallTargetStats8616 = FunctionPointerCallTargetStats8616()
 
 
 def _supported_widths_8616(summary: CallsiteSummary8616) -> tuple[int, ...] | None:
@@ -153,6 +165,7 @@ def collect_function_pointer_parameter_evidence_8616(
 
 
 __all__ = [
+    "FunctionPointerCallTargetStats8616",
     "FunctionPointerParameterEvidence8616",
     "FunctionPointerParameterFact8616",
     "FunctionPointerParameterFailure8616",

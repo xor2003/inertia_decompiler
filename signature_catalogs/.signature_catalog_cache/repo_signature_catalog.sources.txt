@@ -1,3 +1,4 @@
+/home/xor/vextest/signature_catalogs/.zip_catalog_cache/fa448629dbb2636e8abda49e/all_compilers.pat|56374581|1790306537380044500
 /home/xor/vextest/signature_catalogs/f117_from_exe.pat|174042|1784682208464330941
 /home/xor/vextest/signature_catalogs/f15_from_exe.pat|1769|1784682206540507335
 /home/xor/vextest/signature_catalogs/f15_from_exe_soft.pat|134376|1784708632410891495

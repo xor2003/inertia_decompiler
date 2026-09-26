@@ -123,7 +123,7 @@ def _fallback_decompilation_succeeded(profile_text: object) -> bool:
 
 
 def _decompilation_failure(profile_text: object) -> CoverageOutcome:
-    """Preserve explicit validation rejection without interpreting stderr text."""
+    """Preserve final deadline and validation evidence without parsing stderr."""
     if not isinstance(profile_text, str):
         return CoverageOutcome.DECOMPILE_FAILED
     try:
@@ -134,6 +134,10 @@ def _decompilation_failure(profile_text: object) -> CoverageOutcome:
     attempts = fallback.get("function_debug") if isinstance(fallback, dict) else None
     final = _final_function_attempts(attempts) if isinstance(attempts, list) else None
     if final is not None:
+        # A deadline can prevent validation from being collected. Preserve that
+        # cause, but never infer it from the CLI's shared error exit codes.
+        if any(function.get("timeout") is True for function in final.values()):
+            return CoverageOutcome.TIMED_OUT
         for function in final.values():
             if (not _clean_function(function)
                     and function.get("acceptance_reason") == CoverageOutcome.VALIDATION_FAILED.value):

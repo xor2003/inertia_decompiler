@@ -12,12 +12,14 @@ import pickle
 import re
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
 from inertia_decompiler.flair_paths import flair_signature_root
 from inertia_decompiler.signature_matching_policy import signature_matching_disabled
+from pat_literal_filter import required_pat_literal
 
 try:
     import hyperscan as _hyperscan
@@ -124,6 +126,8 @@ class MicrosoftLibMetadata:
 
 @dataclass(frozen=True)
 class CachedPatRegexSpec:
+    """Cached backend patterns and a necessary literal, never sufficient proof."""
+
     source_path: str
     compiler_name: str
     module_name: str
@@ -133,6 +137,7 @@ class CachedPatRegexSpec:
     module_length: int
     public_names: tuple[PatPublicName, ...]
     referenced_names: tuple[PatPublicName, ...]
+    required_literal: bytes = b""
 
 
 _PAT_HEX_RE = re.compile(r"^(?:[0-9A-Fa-f]{2}|\.\.)+$")
@@ -183,70 +188,74 @@ def parse_pat_file(pat_path: Path) -> tuple[PatModule, ...]:
 
 def parse_pat_line(line: str, *, source_path: str = "<memory>") -> PatModule | None:
     """Parse one PAT line into a structured optional signature module."""
+    stripped = line.strip()
+    if not stripped or stripped == "---":
+        return None
+    comment_text = ""
+    if ";" in stripped:
+        stripped, comment_text = stripped.split(";", 1)
+        stripped = stripped.rstrip()
+        comment_text = comment_text.strip()
+    parts = stripped.split()
+    if len(parts) < 5:
+        return None
+    pattern_text = parts[0]
+    if len(pattern_text) < 64 or not _PAT_HEX_RE.fullmatch(pattern_text):
+        return None
+    try:
+        module_length = int(parts[3], 16)
+    except ValueError:
+        return None
+    pattern_bytes = tuple(_decode_pat_bytes(pattern_text[:64]))
+    public_names, referenced_names, tail_bytes = _collect_pat_line_names(parts)
+    if not public_names or module_length <= 0:
+        return None
+    comment_source_path, comment_compiler_name, comment_module_name = _parse_pat_comment_metadata(comment_text)
+    return PatModule(
+        source_path=comment_source_path or source_path,
+        compiler_name=comment_compiler_name or _compiler_name_from_source_path(comment_source_path or source_path),
+        module_name=comment_module_name or public_names[0].name,
+        pattern_bytes=pattern_bytes,
+        module_length=module_length,
+        public_names=tuple(public_names),
+        referenced_names=tuple(referenced_names),
+        tail_bytes=tail_bytes,
+    )
 
-    def _impl() -> PatModule | None:
-        stripped = line.strip()
-        if not stripped or stripped == "---":
-            return None
-        comment_text = ""
-        if ";" in stripped:
-            stripped, comment_text = stripped.split(";", 1)
-            stripped = stripped.rstrip()
-            comment_text = comment_text.strip()
-        parts = stripped.split()
-        if len(parts) < 5:
-            return None
-        pattern_text = parts[0]
-        if len(pattern_text) < 64 or not _PAT_HEX_RE.fullmatch(pattern_text):
-            return None
-        try:
-            module_length = int(parts[3], 16)
-        except ValueError:
-            return None
-        pattern_bytes = tuple(_decode_pat_bytes(pattern_text[:64]))
-        public_names: list[PatPublicName] = []
-        referenced_names: list[PatPublicName] = []
-        tail_bytes: tuple[int | None, ...] = ()
-        idx = 4
-        while idx < len(parts):
-            token = parts[idx]
-            public_match = _PAT_PUBLIC_RE.match(token)
-            if public_match is not None and idx + 1 < len(parts):
-                try:
-                    offset = int(public_match.group("offset"), 16)
-                except ValueError:
-                    offset = 0
-                public_names.append(PatPublicName(offset=offset, name=parts[idx + 1]))
-                idx += 2
-                continue
-            if token.startswith("^") and idx + 1 < len(parts):
-                try:
-                    ref_offset = int(token[1:], 16)
-                except ValueError:
-                    ref_offset = 0
-                referenced_names.append(PatPublicName(offset=ref_offset, name=parts[idx + 1]))
-                idx += 2
-                continue
-            if _PAT_HEX_RE.fullmatch(token):
-                tail_bytes = tuple(_decode_pat_bytes(token))
-                idx += 1
-                continue
+
+def _collect_pat_line_names(
+    parts: list[str],
+) -> tuple[list[PatPublicName], list[PatPublicName], tuple[int | None, ...]]:
+    """Collect public/referenced names and tail bytes from PAT token stream."""
+    public_names: list[PatPublicName] = []
+    referenced_names: list[PatPublicName] = []
+    tail_bytes: tuple[int | None, ...] = ()
+    idx = 4
+    while idx < len(parts):
+        token = parts[idx]
+        public_match = _PAT_PUBLIC_RE.match(token)
+        if public_match is not None and idx + 1 < len(parts):
+            try:
+                offset = int(public_match.group("offset"), 16)
+            except ValueError:
+                offset = 0
+            public_names.append(PatPublicName(offset=offset, name=parts[idx + 1]))
+            idx += 2
+            continue
+        if token.startswith("^") and idx + 1 < len(parts):
+            try:
+                ref_offset = int(token[1:], 16)
+            except ValueError:
+                ref_offset = 0
+            referenced_names.append(PatPublicName(offset=ref_offset, name=parts[idx + 1]))
+            idx += 2
+            continue
+        if _PAT_HEX_RE.fullmatch(token):
+            tail_bytes = tuple(_decode_pat_bytes(token))
             idx += 1
-        if not public_names or module_length <= 0:
-            return None
-        comment_source_path, comment_compiler_name, comment_module_name = _parse_pat_comment_metadata(comment_text)
-        return PatModule(
-            source_path=comment_source_path or source_path,
-            compiler_name=comment_compiler_name or _compiler_name_from_source_path(comment_source_path or source_path),
-            module_name=comment_module_name or public_names[0].name,
-            pattern_bytes=pattern_bytes,
-            module_length=module_length,
-            public_names=tuple(public_names),
-            referenced_names=tuple(referenced_names),
-            tail_bytes=tail_bytes,
-        )
-
-    return _impl()
+            continue
+        idx += 1
+    return public_names, referenced_names, tail_bytes
 
 
 def format_pat_module_line(module: PatModule) -> str:
@@ -449,73 +458,65 @@ def ensure_pat_from_omf_input(
     *,
     flair_root: Path | None = None,
 ) -> Path | None:
-    def _impl():
-        suffix = input_path.suffix.lower()
-        if suffix == ".pat" and input_path.exists():
-            return input_path
-        if suffix not in {".obj", ".lib"} or not input_path.exists():
-            return None
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        cache_key = _cache_key_for_file(input_path)
-        out_path = cache_dir / f"{_sanitize_component(input_path.stem)}-{cache_key}.pat"
-        lines: list[str] = []
+    suffix = input_path.suffix.lower()
+    if suffix == ".pat" and input_path.exists():
+        return input_path
+    if suffix not in {".obj", ".lib"} or not input_path.exists():
+        return None
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_key = _cache_key_for_file(input_path)
+    out_path = cache_dir / f"{_sanitize_component(input_path.stem)}-{cache_key}.pat"
+    lines: list[str] = []
 
-        try:
-            if _run_local_plb(input_path, out_path, flair_root=flair_root):
-                with contextlib.suppress(OSError):
-                    lines.extend(
-                        line
-                        for line in out_path.read_text(errors="ignore").splitlines()
-                        if line.strip() and line.strip() != "---"
-                    )
-        except Exception:
-            # FLAIR attempt failed - continue to fallback
-            pass
+    try:
+        if _run_local_plb(input_path, out_path, flair_root=flair_root):
+            with contextlib.suppress(OSError):
+                lines.extend(_pat_content_lines(out_path))
+    except Exception:
+        # FLAIR attempt failed - continue to fallback
+        pass
 
-        if suffix == ".obj":
-            fallback_path = cache_dir / f"{_sanitize_component(input_path.stem)}-{cache_key}.fallback.pat"
+    lines.extend(_fallback_pat_lines(input_path, suffix, cache_dir, cache_key))
+
+    if not lines:
+        return None
+    deduped_lines = list(dict.fromkeys(lines))
+    out_path.write_text("".join(f"{line}\n" for line in deduped_lines) + "---\n")
+    return out_path
+
+
+def _pat_content_lines(pat_path: Path) -> list[str]:
+    """Return non-empty non-separator PAT lines from a generated file."""
+    return [
+        line
+        for line in pat_path.read_text(errors="ignore").splitlines()
+        if line.strip() and line.strip() != "---"
+    ]
+
+
+def _fallback_pat_lines(input_path: Path, suffix: str, cache_dir: Path, cache_key: str) -> list[str]:
+    """Generate fallback PAT lines for OBJ/LIB inputs when FLAIR is unavailable."""
+    if suffix == ".obj":
+        generator: Callable[[Path, Path], int] = generate_pat_from_omf_obj
+    elif suffix == ".lib":
+        generator = generate_pat_from_omf_lib
+    else:
+        return []
+    fallback_path = cache_dir / f"{_sanitize_component(input_path.stem)}-{cache_key}.fallback.pat"
+    lines: list[str] = []
+    try:
+        if generator(input_path, fallback_path) > 0:
             try:
-                if generate_pat_from_omf_obj(input_path, fallback_path) > 0:
-                    try:
-                        lines.extend(
-                            line
-                            for line in fallback_path.read_text(errors="ignore").splitlines()
-                            if line.strip() and line.strip() != "---"
-                        )
-                    except OSError:
-                        pass
-                    finally:
-                        with contextlib.suppress(Exception):
-                            fallback_path.unlink(missing_ok=True)
-            except Exception:
-                # Fallback generation failed - continue
+                lines.extend(_pat_content_lines(fallback_path))
+            except OSError:
                 pass
-        elif suffix == ".lib":
-            fallback_path = cache_dir / f"{_sanitize_component(input_path.stem)}-{cache_key}.fallback.pat"
-            try:
-                if generate_pat_from_omf_lib(input_path, fallback_path) > 0:
-                    try:
-                        lines.extend(
-                            line
-                            for line in fallback_path.read_text(errors="ignore").splitlines()
-                            if line.strip() and line.strip() != "---"
-                        )
-                    except OSError:
-                        pass
-                    finally:
-                        with contextlib.suppress(Exception):
-                            fallback_path.unlink(missing_ok=True)
-            except Exception:
-                # Fallback generation failed - continue
-                pass
-
-        if not lines:
-            return None
-        deduped_lines = list(dict.fromkeys(lines))
-        out_path.write_text("".join(f"{line}\n" for line in deduped_lines) + "---\n")
-        return out_path
-
-    return _impl()
+            finally:
+                with contextlib.suppress(Exception):
+                    fallback_path.unlink(missing_ok=True)
+    except Exception:
+        # Fallback generation failed - continue
+        pass
+    return lines
 
 
 def match_pat_modules(
@@ -674,82 +675,87 @@ def _detect_lib_format(blob: bytes) -> str | None:
 
 def parse_microsoft_lib(lib_path: Path) -> MicrosoftLibMetadata:
     # Check if file exists first
-    def _impl():
-        if not lib_path.exists():
-            empty_header = MicrosoftLibHeader(
-                page_size=0, dictionary_offset=0, dictionary_blocks=0, case_sensitive=False
-            )
-            return MicrosoftLibMetadata(header=empty_header, modules=(), dictionary_entries=(), extended_records=())
+    if not lib_path.exists():
+        return _empty_microsoft_lib_metadata(0)
 
-        blob = lib_path.read_bytes()
+    blob = lib_path.read_bytes()
 
-        # Detect and handle unsupported formats gracefully
-        lib_format = _detect_lib_format(blob)
-        if lib_format is None:
-            empty_header = MicrosoftLibHeader(
-                page_size=0, dictionary_offset=0, dictionary_blocks=0, case_sensitive=False
-            )
-            return MicrosoftLibMetadata(header=empty_header, modules=(), dictionary_entries=(), extended_records=())
+    # Detect and handle unsupported formats gracefully
+    lib_format = _detect_lib_format(blob)
+    if lib_format is None:
+        return _empty_microsoft_lib_metadata(0)
 
-        # For Intel and other unsupported formats, return empty but don't crash
-        if lib_format != "microsoft":
-            # Could add support for other formats here in the future
-            # For now, return empty result with format hint in header page_size (abuse I know, but keeps API stable)
-            empty_header = MicrosoftLibHeader(
-                page_size=-1, dictionary_offset=0, dictionary_blocks=0, case_sensitive=False
-            )
-            return MicrosoftLibMetadata(header=empty_header, modules=(), dictionary_entries=(), extended_records=())
+    # For Intel and other unsupported formats, return empty but don't crash
+    if lib_format != "microsoft":
+        # Could add support for other formats here in the future
+        # For now, return empty result with format hint in header page_size (abuse I know, but keeps API stable)
+        return _empty_microsoft_lib_metadata(-1)
 
-        # Parse Microsoft OMF format
-        if len(blob) < 16:
-            empty_header = MicrosoftLibHeader(
-                page_size=0, dictionary_offset=0, dictionary_blocks=0, case_sensitive=False
-            )
-            return MicrosoftLibMetadata(header=empty_header, modules=(), dictionary_entries=(), extended_records=())
+    # Parse Microsoft OMF format
+    if len(blob) < 16:
+        return _empty_microsoft_lib_metadata(0)
 
-        header = _parse_microsoft_lib_header(blob)
-        page_size = header.page_size
-        if page_size <= 0 or len(blob) < page_size:
-            return MicrosoftLibMetadata(header=header, modules=(), dictionary_entries=(), extended_records=())
-        dict_offset = header.dictionary_offset
-        if dict_offset <= 0 or dict_offset > len(blob):
-            dict_offset = len(blob)
-        dictionary_entries = _parse_microsoft_lib_dictionary(blob, header)
-        extended_records = _parse_microsoft_lib_extended_dict(blob, header)
-        deps_by_page = {record.page_number: record.dependency_indexes for record in extended_records}
-        modules: list[OMFModuleBlob] = []
-        offset = page_size
-        while offset < dict_offset:
-            if offset + 3 > len(blob):
-                break
-            record_type = blob[offset]
-            if record_type in {0x00, 0xF1}:
-                offset = _align_up(offset + 1, page_size)
-                continue
-            module_end = _find_omf_module_end(blob, offset, dict_offset)
-            if module_end is None:
-                break
-            module_blob = blob[offset:module_end]
-            module_name = _peek_omf_module_name(module_blob) or f"{lib_path.stem}@0x{offset:x}"
-            page_number = offset // page_size
-            modules.append(
-                OMFModuleBlob(
-                    module_name=module_name,
-                    data=module_blob,
-                    page_offset=offset,
-                    page_number=page_number,
-                    dependency_indexes=deps_by_page.get(page_number, ()),
-                )
+    header = _parse_microsoft_lib_header(blob)
+    page_size = header.page_size
+    if page_size <= 0 or len(blob) < page_size:
+        return MicrosoftLibMetadata(header=header, modules=(), dictionary_entries=(), extended_records=())
+    dict_offset = header.dictionary_offset
+    if dict_offset <= 0 or dict_offset > len(blob):
+        dict_offset = len(blob)
+    dictionary_entries = _parse_microsoft_lib_dictionary(blob, header)
+    extended_records = _parse_microsoft_lib_extended_dict(blob, header)
+    deps_by_page = {record.page_number: record.dependency_indexes for record in extended_records}
+    modules = _iter_microsoft_lib_modules(blob, lib_path.stem, page_size, dict_offset, deps_by_page)
+    return MicrosoftLibMetadata(
+        header=header,
+        modules=tuple(modules),
+        dictionary_entries=dictionary_entries,
+        extended_records=extended_records,
+    )
+
+
+def _empty_microsoft_lib_metadata(page_size: int) -> MicrosoftLibMetadata:
+    """Return an empty metadata record used for missing/unsupported libraries."""
+    empty_header = MicrosoftLibHeader(
+        page_size=page_size, dictionary_offset=0, dictionary_blocks=0, case_sensitive=False
+    )
+    return MicrosoftLibMetadata(header=empty_header, modules=(), dictionary_entries=(), extended_records=())
+
+
+def _iter_microsoft_lib_modules(
+    blob: bytes,
+    lib_stem: str,
+    page_size: int,
+    dict_offset: int,
+    deps_by_page: dict[int, tuple[int, ...]],
+) -> list[OMFModuleBlob]:
+    """Walk the paged module records of a Microsoft OMF library."""
+    modules: list[OMFModuleBlob] = []
+    offset = page_size
+    while offset < dict_offset:
+        if offset + 3 > len(blob):
+            break
+        record_type = blob[offset]
+        if record_type in {0x00, 0xF1}:
+            offset = _align_up(offset + 1, page_size)
+            continue
+        module_end = _find_omf_module_end(blob, offset, dict_offset)
+        if module_end is None:
+            break
+        module_blob = blob[offset:module_end]
+        module_name = _peek_omf_module_name(module_blob) or f"{lib_stem}@0x{offset:x}"
+        page_number = offset // page_size
+        modules.append(
+            OMFModuleBlob(
+                module_name=module_name,
+                data=module_blob,
+                page_offset=offset,
+                page_number=page_number,
+                dependency_indexes=deps_by_page.get(page_number, ()),
             )
-            offset = _align_up(module_end, page_size)
-        return MicrosoftLibMetadata(
-            header=header,
-            modules=tuple(modules),
-            dictionary_entries=dictionary_entries,
-            extended_records=extended_records,
         )
-
-    return _impl()
+        offset = _align_up(module_end, page_size)
+    return modules
 
 
 def enumerate_microsoft_lib_dictionary_symbols(lib_path: Path) -> tuple[MicrosoftLibDictionaryEntry, ...]:
@@ -924,46 +930,63 @@ def _parse_omf_blob(
     *,
     module_name_hint: str,
 ) -> tuple[str, list[_OMFSegment], list[_OMFPublic], list[_OMFFixupRef]]:
-    def _impl() -> tuple[str, list[_OMFSegment], list[_OMFPublic], list[_OMFFixupRef]]:
-        lnames: list[str] = [""]
-        segments: list[_OMFSegment] = []
-        publics: list[_OMFPublic] = []
-        external_names: list[str] = [""]
-        fixup_refs: list[_OMFFixupRef] = []
-        target_threads: dict[int, tuple[int, int]] = {}
-        frame_threads: dict[int, tuple[int, int]] = {}
-        last_data_context: _OMFDataRecordContext | None = None
-        module_name = module_name_hint
-        for record_type, payload in _iter_omf_records(blob):
-            if record_type == 0x80 and payload:
-                module_name = _decode_omf_module_name(payload) or module_name
-            elif record_type in {0x96, 0xCA}:
-                lnames.extend(_parse_lnames(payload))
-            elif record_type == 0x98:
-                segments.append(_parse_segdef(payload, lnames))
-            elif record_type in {0x90, 0xB6}:
-                publics.extend(_parse_pubdef(payload))
-            elif record_type in {0x8C, 0xB4}:
-                external_names.extend(_parse_extdef_names(payload))
-            elif record_type in {0xB0, 0xB8}:
-                external_names.extend(_parse_comdef_names(payload))
-            elif record_type in {0xA0, 0xA1}:
-                last_data_context = _apply_ledata(payload, segments, use32=record_type == 0xA1)
-            elif record_type in {0xA2, 0xA3}:
-                last_data_context = _apply_lidata(payload, segments, use32=record_type == 0xA3)
-            elif record_type == 0x9C and last_data_context is not None:
-                fixup_refs.extend(
-                    _parse_fixupp_refs(
-                        payload,
-                        last_data_context,
-                        external_names,
-                        target_threads,
-                        frame_threads,
-                    )
-                )
-        return module_name, segments, publics, fixup_refs
+    state = _OMFRecordState(module_name=module_name_hint)
+    for record_type, payload in _iter_omf_records(blob):
+        if not _apply_omf_name_record(state, record_type, payload):
+            _apply_omf_data_fixupp_record(state, record_type, payload)
+    return state.module_name, state.segments, state.publics, state.fixup_refs
 
-    return _impl()
+
+@dataclass
+class _OMFRecordState:
+    """Mutable accumulation state while scanning OMF records in a blob."""
+
+    module_name: str
+    lnames: list[str] = field(default_factory=lambda: [""])
+    segments: list[_OMFSegment] = field(default_factory=list)
+    publics: list[_OMFPublic] = field(default_factory=list)
+    external_names: list[str] = field(default_factory=lambda: [""])
+    fixup_refs: list[_OMFFixupRef] = field(default_factory=list)
+    target_threads: dict[int, tuple[int, int]] = field(default_factory=dict)
+    frame_threads: dict[int, tuple[int, int]] = field(default_factory=dict)
+    last_data_context: _OMFDataRecordContext | None = None
+
+
+def _apply_omf_name_record(state: _OMFRecordState, record_type: int, payload: bytes) -> bool:
+    """Apply a name-table/definition record; return False for data records."""
+    if record_type == 0x80 and payload:
+        state.module_name = _decode_omf_module_name(payload) or state.module_name
+    elif record_type in {0x96, 0xCA}:
+        state.lnames.extend(_parse_lnames(payload))
+    elif record_type == 0x98:
+        state.segments.append(_parse_segdef(payload, state.lnames))
+    elif record_type in {0x90, 0xB6}:
+        state.publics.extend(_parse_pubdef(payload))
+    elif record_type in {0x8C, 0xB4}:
+        state.external_names.extend(_parse_extdef_names(payload))
+    elif record_type in {0xB0, 0xB8}:
+        state.external_names.extend(_parse_comdef_names(payload))
+    else:
+        return False
+    return True
+
+
+def _apply_omf_data_fixupp_record(state: _OMFRecordState, record_type: int, payload: bytes) -> None:
+    """Apply a data/fixup record that may update the data context."""
+    if record_type in {0xA0, 0xA1}:
+        state.last_data_context = _apply_ledata(payload, state.segments, use32=record_type == 0xA1)
+    elif record_type in {0xA2, 0xA3}:
+        state.last_data_context = _apply_lidata(payload, state.segments, use32=record_type == 0xA3)
+    elif record_type == 0x9C and state.last_data_context is not None:
+        state.fixup_refs.extend(
+            _parse_fixupp_refs(
+                payload,
+                state.last_data_context,
+                state.external_names,
+                state.target_threads,
+                state.frame_threads,
+            )
+        )
 
 
 def _generate_pat_lines_from_omf_blob(
@@ -973,185 +996,179 @@ def _generate_pat_lines_from_omf_blob(
     provenance_source: str = "",
     provenance_compiler: str = "",
 ) -> list[str]:
-    def _impl() -> list[str]:
-        module_name, segments, publics, fixup_refs = _parse_omf_blob(blob, module_name_hint=Path(source_name).stem)
-        lines: list[str] = []
-        publics_by_segment: dict[int, list[_OMFPublic]] = {}
-        for public in publics:
-            publics_by_segment.setdefault(public.seg_index, []).append(public)
-        refs_by_segment: dict[int, list[_OMFFixupRef]] = {}
-        for fixup_ref in fixup_refs:
-            refs_by_segment.setdefault(fixup_ref.seg_index, []).append(fixup_ref)
-        for seg_index, seg_publics in sorted(publics_by_segment.items()):
-            if seg_index <= 0 or seg_index > len(segments):
-                continue
-            segment = segments[seg_index - 1]
-            if not _segment_looks_like_code(segment):
-                continue
-            seg_limit = segment.max_written_end
-            if seg_limit <= 0:
-                continue
-            seg_publics.sort(key=lambda item: item.offset)
-            segment_refs = sorted(refs_by_segment.get(seg_index, ()), key=lambda item: (item.offset, item.name))
-            for index, public in enumerate(seg_publics):
-                start = public.offset
-                next_public = seg_publics[index + 1].offset if index + 1 < len(seg_publics) else seg_limit
-                end = max(start, min(next_public, seg_limit))
-                if end <= start:
-                    continue
-                func_bytes: list[int | None] = list(bytes(segment.data[start:end]))
-                if sum(1 for _ in func_bytes[:32]) < 4:
-                    continue
-                for fixup_ref in segment_refs:
-                    if not (start <= fixup_ref.offset < end):
-                        continue
-                    local_off = fixup_ref.offset - start
-                    for idx in range(local_off, min(local_off + fixup_ref.width, len(func_bytes))):
-                        func_bytes[idx] = None
-                function_refs = tuple(
-                    PatPublicName(offset=fixup_ref.offset - start, name=fixup_ref.name)
-                    for fixup_ref in segment_refs
-                    if start <= fixup_ref.offset < end and fixup_ref.name
-                )
-                line = _build_pat_line(
-                    func_bytes,
-                    public_name=public.name,
-                    module_name=public.name,
-                    referenced_names=function_refs,
-                )
-                if line is not None:
-                    line = (
-                        line.rsplit(" ; ", 1)[0]
-                        + " ; "
-                        + _sanitize_pat_comment(
-                            " | ".join(
-                                part
-                                for part in (
-                                    f"mod={public.name}",
-                                    f"src={provenance_source}" if provenance_source else "",
-                                    f"compiler={provenance_compiler}" if provenance_compiler else "",
-                                )
-                                if part
-                            )
-                        )
-                    )
-                if line is not None:
-                    lines.append(line)
-                wildcard_ctf_bytes = _wildcard_zero_displacement_control_transfers(func_bytes)
-                if wildcard_ctf_bytes != func_bytes:
-                    wildcard_line = _build_pat_line(
-                        wildcard_ctf_bytes,
-                        public_name=public.name,
-                        module_name=public.name,
-                        referenced_names=function_refs,
-                    )
-                    if wildcard_line is not None:
-                        wildcard_line = (
-                            wildcard_line.rsplit(" ; ", 1)[0]
-                            + " ; "
-                            + _sanitize_pat_comment(
-                                " | ".join(
-                                    part
-                                    for part in (
-                                        f"mod={public.name}",
-                                        f"src={provenance_source}" if provenance_source else "",
-                                        f"compiler={provenance_compiler}" if provenance_compiler else "",
-                                    )
-                                    if part
-                                )
-                            )
-                        )
-                        lines.append(wildcard_line)
-                wildcard_far_transfer_bytes = _wildcard_far_transfer_opcode_variants(func_bytes)
-                if wildcard_far_transfer_bytes != func_bytes and wildcard_far_transfer_bytes != wildcard_ctf_bytes:
-                    wildcard_far_transfer_line = _build_pat_line(
-                        wildcard_far_transfer_bytes,
-                        public_name=public.name,
-                        module_name=public.name,
-                        referenced_names=function_refs,
-                    )
-                    if wildcard_far_transfer_line is not None:
-                        wildcard_far_transfer_line = (
-                            wildcard_far_transfer_line.rsplit(" ; ", 1)[0]
-                            + " ; "
-                            + _sanitize_pat_comment(
-                                " | ".join(
-                                    part
-                                    for part in (
-                                        f"mod={public.name}",
-                                        f"src={provenance_source}" if provenance_source else "",
-                                        f"compiler={provenance_compiler}" if provenance_compiler else "",
-                                    )
-                                    if part
-                                )
-                            )
-                        )
-                        lines.append(wildcard_far_transfer_line)
-                if _looks_like_msvc_fpu_runtime(
-                    public.name,
-                    function_refs,
-                    compiler_name=provenance_compiler,
-                ):
-                    x87_emulator_bytes = _x87_emulator_variant_bytes(func_bytes)
-                    if (
-                        x87_emulator_bytes != func_bytes
-                        and x87_emulator_bytes != wildcard_ctf_bytes
-                        and x87_emulator_bytes != wildcard_far_transfer_bytes
-                    ):
-                        emulator_line = _build_pat_line(
-                            x87_emulator_bytes,
-                            public_name=public.name,
-                            module_name=public.name,
-                            referenced_names=function_refs,
-                        )
-                        if emulator_line is not None:
-                            emulator_line = (
-                                emulator_line.rsplit(" ; ", 1)[0]
-                                + " ; "
-                                + _sanitize_pat_comment(
-                                    " | ".join(
-                                        part
-                                        for part in (
-                                            f"mod={public.name}",
-                                            f"src={provenance_source}" if provenance_source else "",
-                                            f"compiler={provenance_compiler}" if provenance_compiler else "",
-                                        )
-                                        if part
-                                    )
-                                )
-                            )
-                            lines.append(emulator_line)
-        if not lines:
-            fallback_public_names = _SYNTHETIC_OMF_MODULE_FALLBACK_PUBLICS.get(module_name.upper())
-            if fallback_public_names is None:
-                fallback_public_names = _SYNTHETIC_OMF_MODULE_FALLBACK_PUBLICS.get(Path(source_name).stem.upper())
-            if fallback_public_names is not None:
-                for public_name in fallback_public_names:
-                    fallback_line = _build_pat_line(
-                        [0x90, 0x90, 0x90, 0x90],
-                        public_name=public_name,
-                        module_name=public_name,
-                    )
-                    if fallback_line is not None:
-                        fallback_line = (
-                            fallback_line.rsplit(" ; ", 1)[0]
-                            + " ; "
-                            + _sanitize_pat_comment(
-                                " | ".join(
-                                    part
-                                    for part in (
-                                        f"mod={public_name}",
-                                        f"src={provenance_source}" if provenance_source else "",
-                                        f"compiler={provenance_compiler}" if provenance_compiler else "",
-                                    )
-                                    if part
-                                )
-                            )
-                        )
-                        lines.append(fallback_line)
-        return lines
+    module_name, segments, publics, fixup_refs = _parse_omf_blob(blob, module_name_hint=Path(source_name).stem)
+    lines: list[str] = []
+    publics_by_segment: dict[int, list[_OMFPublic]] = {}
+    for public in publics:
+        publics_by_segment.setdefault(public.seg_index, []).append(public)
+    refs_by_segment: dict[int, list[_OMFFixupRef]] = {}
+    for fixup_ref in fixup_refs:
+        refs_by_segment.setdefault(fixup_ref.seg_index, []).append(fixup_ref)
+    for seg_index, seg_publics in sorted(publics_by_segment.items()):
+        lines.extend(
+            _segment_pat_lines(
+                seg_index=seg_index,
+                seg_publics=seg_publics,
+                segments=segments,
+                segment_refs=sorted(refs_by_segment.get(seg_index, ()), key=lambda item: (item.offset, item.name)),
+                provenance_source=provenance_source,
+                provenance_compiler=provenance_compiler,
+            )
+        )
+    if not lines:
+        lines.extend(
+            _synthetic_fallback_pat_lines(
+                module_name,
+                source_name,
+                provenance_source=provenance_source,
+                provenance_compiler=provenance_compiler,
+            )
+        )
+    return lines
 
-    return _impl()
+
+def _pat_line_with_provenance(
+    line: str,
+    module_name: str,
+    provenance_source: str,
+    provenance_compiler: str,
+) -> str:
+    """Attach the sanitized provenance comment to a built PAT line."""
+    return line.rsplit(" ; ", 1)[0] + " ; " + _sanitize_pat_comment(
+        " | ".join(
+            part
+            for part in (
+                f"mod={module_name}",
+                f"src={provenance_source}" if provenance_source else "",
+                f"compiler={provenance_compiler}" if provenance_compiler else "",
+            )
+            if part
+        )
+    )
+
+
+def _segment_pat_lines(
+    *,
+    seg_index: int,
+    seg_publics: list[_OMFPublic],
+    segments: list[_OMFSegment],
+    segment_refs: list[_OMFFixupRef],
+    provenance_source: str,
+    provenance_compiler: str,
+) -> list[str]:
+    """Emit PAT lines for each public inside one code-looking segment."""
+    lines: list[str] = []
+    if seg_index <= 0 or seg_index > len(segments):
+        return lines
+    segment = segments[seg_index - 1]
+    if not _segment_looks_like_code(segment):
+        return lines
+    seg_limit = segment.max_written_end
+    if seg_limit <= 0:
+        return lines
+    seg_publics.sort(key=lambda item: item.offset)
+    for index, public in enumerate(seg_publics):
+        next_public = seg_publics[index + 1].offset if index + 1 < len(seg_publics) else seg_limit
+        lines.extend(
+            _public_pat_lines(
+                public=public,
+                next_public=next_public,
+                seg_limit=seg_limit,
+                segment=segment,
+                segment_refs=segment_refs,
+                provenance_source=provenance_source,
+                provenance_compiler=provenance_compiler,
+            )
+        )
+    return lines
+
+
+def _public_pat_lines(
+    *,
+    public: _OMFPublic,
+    next_public: int,
+    seg_limit: int,
+    segment: _OMFSegment,
+    segment_refs: list[_OMFFixupRef],
+    provenance_source: str,
+    provenance_compiler: str,
+) -> list[str]:
+    """Emit base and wildcard-variant PAT lines for one public function."""
+    lines: list[str] = []
+    start = public.offset
+    end = max(start, min(next_public, seg_limit))
+    if end <= start:
+        return lines
+    func_bytes: list[int | None] = list(bytes(segment.data[start:end]))
+    if sum(1 for _ in func_bytes[:32]) < 4:
+        return lines
+    for fixup_ref in segment_refs:
+        if not (start <= fixup_ref.offset < end):
+            continue
+        local_off = fixup_ref.offset - start
+        for idx in range(local_off, min(local_off + fixup_ref.width, len(func_bytes))):
+            func_bytes[idx] = None
+    function_refs = tuple(
+        PatPublicName(offset=fixup_ref.offset - start, name=fixup_ref.name)
+        for fixup_ref in segment_refs
+        if start <= fixup_ref.offset < end and fixup_ref.name
+    )
+    variants = _omf_variant_byte_patterns(func_bytes, public.name, function_refs, provenance_compiler)
+    for variant_bytes in variants:
+        line = _build_pat_line(
+            variant_bytes,
+            public_name=public.name,
+            module_name=public.name,
+            referenced_names=function_refs,
+        )
+        if line is not None:
+            lines.append(_pat_line_with_provenance(line, public.name, provenance_source, provenance_compiler))
+    return lines
+
+
+def _omf_variant_byte_patterns(
+    func_bytes: list[int | None],
+    public_name: str,
+    function_refs: tuple[PatPublicName, ...],
+    provenance_compiler: str,
+) -> list[list[int | None]]:
+    """Return func_bytes plus each distinct wildcard variant in original order."""
+    variants: list[list[int | None]] = [func_bytes]
+    for candidate in (
+        _wildcard_zero_displacement_control_transfers(func_bytes),
+        _wildcard_far_transfer_opcode_variants(func_bytes),
+    ):
+        if candidate != func_bytes and candidate not in variants:
+            variants.append(candidate)
+    if _looks_like_msvc_fpu_runtime(public_name, function_refs, compiler_name=provenance_compiler):
+        x87_emulator_bytes = _x87_emulator_variant_bytes(func_bytes)
+        if x87_emulator_bytes != func_bytes and x87_emulator_bytes not in variants:
+            variants.append(x87_emulator_bytes)
+    return variants
+
+
+def _synthetic_fallback_pat_lines(
+    module_name: str,
+    source_name: str,
+    *,
+    provenance_source: str,
+    provenance_compiler: str,
+) -> list[str]:
+    """Emit synthetic NOP-module PAT lines when no code publics produced output."""
+    lines: list[str] = []
+    fallback_public_names = _SYNTHETIC_OMF_MODULE_FALLBACK_PUBLICS.get(module_name.upper())
+    if fallback_public_names is None:
+        fallback_public_names = _SYNTHETIC_OMF_MODULE_FALLBACK_PUBLICS.get(Path(source_name).stem.upper())
+    if fallback_public_names is not None:
+        for public_name in fallback_public_names:
+            fallback_line = _build_pat_line(
+                [0x90, 0x90, 0x90, 0x90],
+                public_name=public_name,
+                module_name=public_name,
+            )
+            if fallback_line is not None:
+                lines.append(_pat_line_with_provenance(fallback_line, public_name, provenance_source, provenance_compiler))
+    return lines
 
 
 def _iter_omf_records(blob: bytes):
@@ -1537,18 +1554,40 @@ def _expand_lidata_block(
         return None, len(payload)
 
     if block_count == 0:
-        if offset >= len(payload):
-            return None, len(payload)
-        byte_count = payload[offset]
-        offset += 1
-        if offset + byte_count > len(payload):
-            return None, len(payload)
-        chunk = payload[offset : offset + byte_count]
-        offset += byte_count
-        if byte_count and repeat_count > max_output_size // byte_count:
-            return None, len(payload)
-        return chunk * repeat_count, offset
+        return _expand_lidata_leaf(payload, offset, repeat_count, max_output_size)
+    return _expand_lidata_nested(payload, offset, block_count, repeat_count, use32=use32, max_output_size=max_output_size)
 
+
+def _expand_lidata_leaf(
+    payload: bytes,
+    offset: int,
+    repeat_count: int,
+    max_output_size: int,
+) -> tuple[bytes | None, int]:
+    """Expand a leaf LIDATA block (literal bytes repeated repeat_count times)."""
+    if offset >= len(payload):
+        return None, len(payload)
+    byte_count = payload[offset]
+    offset += 1
+    if offset + byte_count > len(payload):
+        return None, len(payload)
+    chunk = payload[offset : offset + byte_count]
+    offset += byte_count
+    if byte_count and repeat_count > max_output_size // byte_count:
+        return None, len(payload)
+    return chunk * repeat_count, offset
+
+
+def _expand_lidata_nested(
+    payload: bytes,
+    offset: int,
+    block_count: int,
+    repeat_count: int,
+    *,
+    use32: bool,
+    max_output_size: int,
+) -> tuple[bytes | None, int]:
+    """Expand a nested LIDATA block list repeated repeat_count times."""
     nested_chunks: list[bytes] = []
     nested_size = 0
     for _ in range(block_count):
@@ -1835,9 +1874,16 @@ def _find_pat_matches(
     *,
     backend: str | None = None,
 ) -> list[int]:
+    """Return backend-proven hits after rejecting impossible literal candidates."""
     selected_backend = _normalize_pat_backend_choice(backend)
     module_length = module.module_length
     if module_length <= 0 or module_length > len(image_bytes):
+        return []
+    literal = (
+        module.required_literal if isinstance(module, CachedPatRegexSpec)
+        else required_pat_literal(module.pattern_bytes, module_length, module.tail_bytes)
+    )
+    if literal not in image_bytes:
         return []
     checked_match_length = _get_pat_checked_match_length(module)
     if selected_backend == "hyperscan":
@@ -1898,9 +1944,12 @@ def _default_pat_backend() -> str:
 
 @lru_cache(maxsize=16)
 def load_cached_pat_regex_specs(pat_path: Path, cache_dir: Path) -> tuple[CachedPatRegexSpec, ...]:
+    """Load typed pattern specs, rebuilding pre-literal cache generations."""
+    # Both cache identity and embedded source provenance use the same path.
+    pat_path = pat_path.resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_key = _cache_key_for_file(pat_path)
-    cache_path = cache_dir / f"{_sanitize_component(pat_path.stem)}-{cache_key}.patrx.pickle"
+    cache_path = cache_dir / f"{_sanitize_component(pat_path.stem)}-{cache_key}-literal-v1.patrx.pickle"
     try:
         cached = pickle.loads(cache_path.read_bytes())
         if isinstance(cached, tuple) and all(isinstance(item, CachedPatRegexSpec) for item in cached):
@@ -1915,6 +1964,7 @@ def load_cached_pat_regex_specs(pat_path: Path, cache_dir: Path) -> tuple[Cached
 
 
 def _compile_pat_module_to_cached_regex(module: PatModule) -> CachedPatRegexSpec:
+    """Compile identical backend patterns with their necessary literal witness."""
     regex_source, scan_source, checked_match_length = _build_pat_regex_source(module)
     return CachedPatRegexSpec(
         source_path=module.source_path,
@@ -1926,6 +1976,7 @@ def _compile_pat_module_to_cached_regex(module: PatModule) -> CachedPatRegexSpec
         module_length=module.module_length,
         public_names=module.public_names,
         referenced_names=module.referenced_names,
+        required_literal=required_pat_literal(module.pattern_bytes, module.module_length, module.tail_bytes),
     )
 
 
@@ -2044,6 +2095,11 @@ def _sanitize_pat_comment(text: str) -> str:
 
 
 def _cache_key_for_file(path: Path) -> str:
+    """Key the selected input path and every pattern-construction owner.
+
+    PAT spec callers canonicalize before parsing and keying; OMF generation
+    retains its existing path/provenance contract.
+    """
     stat = path.stat()
     raw = f"{path}:{stat.st_mtime_ns}:{stat.st_size}:{_omf_pat_tool_cache_fingerprint()}".encode()
     return hashlib.sha1(raw).hexdigest()[:12]
@@ -2051,9 +2107,14 @@ def _cache_key_for_file(path: Path) -> str:
 
 @lru_cache(maxsize=1)
 def _omf_pat_tool_cache_fingerprint() -> str:
-    try:
-        tool_path = Path(__file__).resolve()
-        stat = tool_path.stat()
-        return f"{tool_path}:{stat.st_mtime_ns}:{stat.st_size}"
-    except OSError:
-        return "omf_pat_tool_unknown"
+    """Invalidate constructed specs when either pattern or literal logic changes.
+
+    Missing implementation files cannot prove cache identity; propagate their
+    filesystem error instead of treating all unknown implementations as equal.
+    """
+    tool_path = Path(__file__).resolve()
+    fingerprints: list[str] = []
+    for path in (tool_path, tool_path.with_name("pat_literal_filter.py")):
+        stat = path.stat()
+        fingerprints.append(f"{path}:{stat.st_mtime_ns}:{stat.st_size}")
+    return "|".join(fingerprints)

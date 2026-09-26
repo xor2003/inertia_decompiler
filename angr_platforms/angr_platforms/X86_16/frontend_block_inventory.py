@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol, cast
 
+from angr import Project
+from cle.backends.externs import ExternObject
+
 from .frontend_capstone_decode import decode_bounded_capstone_block_8616
 from .frontend_instruction_kinds import is_x86_16_call_mnemonic_8616
 
@@ -119,6 +122,15 @@ def _raise_cached_decode_failure_8616(evidence: DecodedBlockEvidence8616) -> Non
     raise failure
 
 
+def _refuse_synthetic_memory_8616(project: object, address: int) -> None:
+    """Reject CLE external stubs before any cache, direct decode or VEX fallback."""
+    # CLE's external object contains synthetic stubs, not input-program bytes.
+    # Limit this adapter check to actual angr projects; standalone byte decoders
+    # use the narrower factory protocol and have no CLE object ownership model.
+    if isinstance(project, Project) and isinstance(project.loader.find_object_containing(address), ExternObject):
+        raise ValueError("synthetic external memory is not binary instruction evidence")
+
+
 def collect_decoded_block_evidence_8616(
     project: object,
     address: int,
@@ -127,6 +139,7 @@ def collect_decoded_block_evidence_8616(
     opt_level: int = 0,
 ) -> DecodedBlockEvidence8616:
     """Collect one exact request, using VEX only when direct decode refuses."""
+    _refuse_synthetic_memory_8616(project, address)
     boundary = cast(_ProjectBoundary8616, project)
     request = DecodedBlockRequest8616(int(address), num_inst, int(opt_level))
     try:

@@ -32,6 +32,7 @@ from datetime import datetime
 from .analysis_timeout import AnalysisTimeout as AnalysisTimeout
 from .analysis_timeout import analysis_timeout as analysis_timeout
 from .angr_codegen_tags import normalize_codegen_node_tags_8616
+from .cli_terminal_status import CliTerminalStatus, emit_terminal_status
 from .fork_timeout import run_with_timeout_in_fork as run_with_timeout_in_fork
 from .prefork_job_pool import PreforkJobPool as PreforkJobPool
 from .variable_recovery_sub_guard import (
@@ -3192,6 +3193,7 @@ def emit_timeout_and_exit(args_timeout: int, recovery_detail: str | None) -> Non
     else:
         print(f"/* Timed out while recovering a function after {args_timeout}s {recovery_detail}. */")
     print("/* Tip: try a larger --timeout for larger binaries. */")
+    emit_terminal_status(CliTerminalStatus.TIMEOUT)
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(3)

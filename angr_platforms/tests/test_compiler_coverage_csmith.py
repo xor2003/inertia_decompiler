@@ -1,5 +1,6 @@
 """Csmith candidates must be bounded, reproducible and never counted as passes."""
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -8,6 +9,19 @@ from unittest.mock import Mock
 import pytest
 
 from scripts import compiler_coverage_csmith as generator
+
+
+def test_unpinned_generator_is_refused_before_execution_or_artifacts(tmp_path, monkeypatch):
+    """A version string or user-selected path cannot substitute for build identity."""
+    executable = tmp_path / "csmith"
+    executable.write_bytes(b"unverified generator")
+    execute = Mock(return_value=subprocess.CompletedProcess([], 0))
+    monkeypatch.setattr(generator.subprocess, "run", execute)
+    output = tmp_path / "candidate"
+    with pytest.raises(ValueError, match="pinned"):
+        generator.generate_candidate(executable, 2, output)
+    execute.assert_not_called()
+    assert not output.exists()
 
 
 def test_roundtrip_cli_uses_shared_runner_and_propagates_failure(tmp_path, monkeypatch):
@@ -50,6 +64,7 @@ def test_invalid_timeout_creates_no_artifacts(tmp_path, timeout):
 def test_seed_replay_retains_source_and_separate_diagnostics(tmp_path, monkeypatch):
     executable = tmp_path / "csmith"
     executable.write_bytes(b"test generator identity")
+    monkeypatch.setattr(generator, "PINNED_GENERATOR_SHA256", hashlib.sha256(executable.read_bytes()).hexdigest())
     commands = []
 
     def execute(command, **kwargs):
@@ -74,6 +89,7 @@ def test_seed_replay_retains_source_and_separate_diagnostics(tmp_path, monkeypat
     assert results[0]["roundtrip_attempted"] is False
     assert results[0]["feature_coverage_verified"] is False
     assert results[0]["generator"]["sha256"]
+    assert results[0]["generator_revision"] == generator.PINNED_GENERATOR_REVISION
     with pytest.raises(FileExistsError):
         generator.generate_candidate(executable, 2, tmp_path / "first")
 
@@ -87,6 +103,7 @@ def test_seed_replay_retains_source_and_separate_diagnostics(tmp_path, monkeypat
 def test_generation_failures_preserve_artifacts(tmp_path, monkeypatch, failure, expected):
     executable = tmp_path / "csmith"
     executable.write_bytes(b"test generator identity")
+    monkeypatch.setattr(generator, "PINNED_GENERATOR_SHA256", hashlib.sha256(executable.read_bytes()).hexdigest())
 
     def execute(command, **kwargs):
         if failure != "empty":

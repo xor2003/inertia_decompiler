@@ -29,6 +29,15 @@ _SEMANTIC_ENV_PREFIX = "INERTIA_"
 _NON_SEMANTIC_ENV_NAMES = frozenset({"INERTIA_MSC_RUNTIME_DECOMPILE_WORKERS"})
 
 
+def retain_focused_output(stem: Path, stdout: str, stderr: str) -> dict[str, str]:
+    """Retain one numbered recovery attempt without interpreting its verdict."""
+    stdout_path = stem.with_name(stem.name + ".stdout.c")
+    stderr_path = stem.with_name(stem.name + ".stderr.log")
+    stdout_path.write_text(stdout, encoding="utf-8")
+    stderr_path.write_text(stderr, encoding="utf-8")
+    return {"stdout_path": str(stdout_path), "stderr_path": str(stderr_path)}
+
+
 class _Digest(Protocol):
     """Minimal hash interface used by deterministic cache-key builders."""
 

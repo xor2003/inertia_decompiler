@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.compiler_coverage_provenance import input_fingerprint  # noqa: E402
+from scripts.compiler_coverage_provenance import implementation_fingerprint, input_fingerprint  # noqa: E402
 from scripts.compiler_coverage_result import (  # noqa: E402
     CoverageOutcome,
     classify_roundtrip_report,
@@ -88,6 +88,14 @@ def _validated_runtime_headers(runtime_headers: Mapping[str, Path] | None) -> di
     return headers
 
 
+def _read_roundtrip_report(report: Path) -> object:
+    """Return report evidence, or no evidence when the child left none usable."""
+    try:
+        return json.loads(report.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def run_source_case(
     source: Path, output: Path, *, timeout: float = 600,
     memory_model: MSCMemoryModel = MSCMemoryModel.SMALL,
@@ -117,6 +125,7 @@ def run_source_case(
         "--only-constructs", case, "--out-dir", str(output),
         "--examples-dir", str(source.parent), "--harvest-success-code", str(expected_exit_code),
         "--decompile-mode", "functions", "--decompile-max-functions", "0",
+        "--decompile-ignore-local-sidecar-hints",
         "--decompile-timeout", "60", "--decompile-run-timeout", "600",
         "--msc6-root", str(COMPILER_ROOT), "--kvikdos", str(KVIKDOS),
         "--memory-model", memory_model.value,
@@ -127,6 +136,7 @@ def run_source_case(
                   "runner": input_fingerprint(ROOT / "scripts/build_msc6_examples.py")}
     provenance["runtime_headers"] = {name: input_fingerprint(path) for name, path in headers.items()}
     provenance["signature_catalog"] = input_fingerprint(catalog) if catalog is not None else None
+    provenance["implementation"] = implementation_fingerprint(ROOT)
     start = time.monotonic()
     outcome = CoverageOutcome.HARNESS_FAILED
     returncode: int | None = None
@@ -142,11 +152,13 @@ def run_source_case(
     report = output / "report.json"
     payload: object = None
     if outcome is not CoverageOutcome.TIMED_OUT and returncode is not None:
-        try:
-            payload = json.loads(report.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            payload = None
+        payload = _read_roundtrip_report(report)
         outcome = classify_roundtrip_report(payload, case, returncode)
+    implementation_after = implementation_fingerprint(ROOT)
+    implementation_unchanged = provenance["implementation"] == implementation_after
+    if not implementation_unchanged and outcome is CoverageOutcome.PASSED:
+        outcome = CoverageOutcome.HARNESS_FAILED
+        error = "Owned Python sources changed during execution; replay with stable inputs"
     summary = {
         "schema": 1, "case": case, "outcome": outcome.value,
         "seconds": time.monotonic() - start, "returncode": returncode,
@@ -154,6 +166,8 @@ def run_source_case(
         "error": error,
         "diagnostics": roundtrip_diagnostics(payload),
         "inputs": provenance,
+        "implementation_after": implementation_after,
+        "implementation_unchanged": implementation_unchanged,
         "memory_model": memory_model.value,
         "scope": "existing_roundtrip_only_not_feature_coverage",
     }

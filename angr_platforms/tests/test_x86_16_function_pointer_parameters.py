@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 
 import pytest
-from angr.analyses.decompiler.structured_codegen.c import CVariable
-from angr.sim_type import SimTypeFunction, SimTypePointer, SimTypeShort
+from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CConstant, CFunctionCall, CVariable
+from angr.sim_type import SimTypeFunction, SimTypeLong, SimTypePointer, SimTypeShort
 from angr.sim_variable import SimStackVariable
 from angr_platforms.X86_16.alias.segment_stack_restore import (
     SegmentStackRestoreArtifact8616,
@@ -259,11 +259,11 @@ def _far_fixture() -> tuple[object, object, object]:
     The terminal ``retf`` frame is proven by a caller-pushed CS restore at a
     block-terminal RET; ``fn`` sits at machine ``BP+6`` with a 2-byte near
     type while the binary's ``call DWORD PTR [bp+6]`` proves a 4-byte far
-    function pointer, so ``value`` must re-site from ``BP+8`` to ``BP+10``.
+    function pointer. Its segment word occupies BP+8; value stays at BP+10.
     """
     arch = Arch86_16()
     word = SimTypeShort(False).with_arch(arch)
-    prototype = SimTypeFunction([word, word], word, arg_names=("fn", "value")).with_arch(arch)
+    prototype = SimTypeFunction([word, word, word], word, arg_names=("fn", "segment", "value")).with_arch(arch)
     function = SimpleNamespace(prototype=prototype, is_prototype_guessed=True)
     project = SimpleNamespace(
         arch=arch,
@@ -306,14 +306,15 @@ def _far_fixture() -> tuple[object, object, object]:
         ),
     )
     fn_variable = SimStackVariable(4, 2, base="bp", name="fn", region=0x1000)
-    value_variable = SimStackVariable(6, 2, base="bp", name="value", region=0x1000)
+    segment_variable = SimStackVariable(6, 2, base="bp", name="segment", region=0x1000)
+    value_variable = SimStackVariable(8, 2, base="bp", name="value", region=0x1000)
     fn_argument = CVariable(fn_variable, variable_type=word, codegen=codegen)
     value_argument = CVariable(value_variable, variable_type=word, codegen=codegen)
     fn_use = CVariable(fn_variable, variable_type=word, codegen=codegen)
     manager = _VariableManager()
     codegen.cfunc = SimpleNamespace(
         addr=0x1000,
-        arg_list=[fn_argument, value_argument],
+        arg_list=[fn_argument, CVariable(segment_variable, variable_type=word, codegen=codegen), value_argument],
         functy=prototype,
         variable_manager=manager,
         body=fn_use,
@@ -326,10 +327,82 @@ def _far_fixture() -> tuple[object, object, object]:
     return project, codegen, function
 
 
-def test_far_pointer_fact_widens_slot_and_resites_tail() -> None:
+@pytest.mark.parametrize("mask_first", [False, True])
+def test_far_pointer_call_target_consumes_proven_offset_projection(mask_first: bool) -> None:
+    """A proven far call consumes its full typed pointer, not an IP bit mask."""
+    project, codegen, _function = _far_fixture()
+    codegen.cstyle_null_cmp = False
+    target = codegen.cfunc.body
+    mask = CConstant(0xffff, SimTypeShort(False), codegen=codegen)
+    lhs, rhs = (mask, target) if mask_first else (target, mask)
+    masked = CBinaryOp("And", lhs, rhs, codegen=codegen)
+    call = CFunctionCall(masked, None, [codegen.cfunc.arg_list[1]], codegen=codegen, tags={"ins_addr": 0x100E})
+    original_args = tuple(call.args)
+    codegen.cfunc.body = call
+
+    materialize_function_pointer_parameters_8616(project, codegen)
+
+    assert isinstance(call.callee_target, CVariable)
+    assert isinstance(call.callee_target.variable_type, SimTypeFarPointer16_8616)
+    assert call.callee_target is codegen.cfunc.arg_list[0]
+    assert tuple(call.args) == original_args
+    stats = codegen._inertia_function_pointer_parameter_evidence_8616.call_target_stats
+    assert (stats.raw_fact_count, stats.normalized_fact_count, stats.classified_fact_count) == (1, 1, 1)
+    assert (stats.materialized_count, stats.failure_count) == (1, 0)
+    materialize_function_pointer_parameters_8616(project, codegen)
+    assert codegen._inertia_function_pointer_parameter_evidence_8616.call_target_stats.raw_fact_count == 0
+
+
+@pytest.mark.parametrize("refusal", ["unknown_site", "other_region", "other_slot", "partial_mask", "not_call"])
+def test_far_pointer_target_projection_preserves_unproven_expression(refusal: str) -> None:
+    """A type alone never authorizes deleting arbitrary pointer arithmetic."""
+    project, codegen, _function = _far_fixture()
+    codegen.cstyle_null_cmp = False
+    target = codegen.cfunc.body
+    if refusal == "other_region":
+        target.variable = SimStackVariable(4, 2, base="bp", region=0x2000)
+    elif refusal == "other_slot":
+        target.variable = SimStackVariable(6, 2, base="bp", region=0x1000)
+    mask = CConstant(0xff if refusal == "partial_mask" else 0xffff, SimTypeShort(False), codegen=codegen)
+    masked = CBinaryOp("And", target, mask, codegen=codegen)
+    call = CFunctionCall(
+        masked, None, [codegen.cfunc.arg_list[1]], codegen=codegen,
+        tags={"ins_addr": 0x1050 if refusal == "unknown_site" else 0x100E},
+    )
+    codegen.cfunc.body = masked if refusal == "not_call" else call
+
+    materialize_function_pointer_parameters_8616(project, codegen)
+
+    assert call.callee_target is masked
+    assert codegen.cfunc.body is (masked if refusal == "not_call" else call)
+
+
+@pytest.mark.parametrize("bp_delta,address_bits", [(0, 16), (-2, 32)])
+def test_near_pointer_call_projection_uses_machine_bp_identity(bp_delta: int, address_bits: int) -> None:
+    """Native analysis width does not alter the proven two-byte call target."""
+    project, codegen, _function, _manager, target = _fixture(
+        bp_entry_sp_delta=bp_delta, analysis_address_bits=address_bits,
+    )
+    codegen.cstyle_null_cmp = False
+    masked = CBinaryOp("And", target, CConstant(0xffff, SimTypeShort(False), codegen=codegen), codegen=codegen)
+    call = CFunctionCall(masked, None, [], codegen=codegen, tags={"ins_addr": 0x100E})
+    codegen.cfunc.body = call
+
+    materialize_function_pointer_parameters_8616(project, codegen)
+
+    assert call.callee_target is codegen.cfunc.arg_list[0]
+    assert call.callee_target.variable_type.size == 16
+    assert call.args == []  # Target projection must not fill missing call arguments.
+
+
+def test_far_pointer_fact_joins_words_and_preserves_tail_coordinates() -> None:
     project, codegen, function = _far_fixture()
+    original_value = codegen.cfunc.arg_list[2]
 
     assert materialize_function_pointer_parameters_8616(project, codegen) is True
+    assert len(codegen.cfunc.arg_list) == 2
+    assert len(function.prototype.args) == 2
+    assert codegen.cfunc.arg_list[1] is original_value
 
     fn_cvar = codegen.cfunc.arg_list[0]
     value_cvar = codegen.cfunc.arg_list[1]
@@ -366,6 +439,28 @@ def test_far_pointer_reflow_requests_refresh_when_kb_type_already_matches() -> N
     codegen._inertia_codegen_decl_refresh_required_8616 = False
     assert not materialize_function_pointer_parameters_8616(project, codegen)
     assert codegen._inertia_codegen_decl_refresh_required_8616 is False
+
+
+def test_far_pointer_join_refuses_crossing_argument_without_mutation() -> None:
+    """A pointer proof cannot consume half of an existing wider argument."""
+    project, codegen, function = _far_fixture()
+    word = SimTypeShort(False).with_arch(project.arch)
+    wide = SimTypeLong(False).with_arch(project.arch)
+    prototype = SimTypeFunction([word, wide, word], word).with_arch(project.arch)
+    codegen.cfunc.functy = function.prototype = prototype
+    segment = codegen.cfunc.arg_list[1]
+    segment.variable = SimStackVariable(6, 4, base="bp", region=0x1000)
+    segment.variable_type = wide
+    codegen.cfunc.arg_list[2].variable = SimStackVariable(10, 2, base="bp", region=0x1000)
+    original_arguments = tuple(codegen.cfunc.arg_list)
+
+    with pytest.raises(PipelineHardError, match="classified but not materialized"):
+        materialize_function_pointer_parameters_8616(project, codegen)
+
+    assert codegen.cfunc.functy is prototype
+    assert function.prototype is prototype
+    assert tuple(codegen.cfunc.arg_list) == original_arguments
+    assert codegen.cfunc.variable_manager.types == {}
 
 
 def test_far_pointer_reflow_preserves_codegen_rebuild_argument_storage() -> None:

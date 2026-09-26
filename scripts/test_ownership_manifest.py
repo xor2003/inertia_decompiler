@@ -66,6 +66,20 @@ class ManifestViolation:
 
 TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
     TestOwnershipRule(
+        owner="ada-script-library-signature-integration",
+        paths=("ada.py", "tools/ada_script", "vendor/ada_script"),
+        tests=("angr_platforms/tests/test_ada_signature_integration.py",),
+    ),
+    TestOwnershipRule(
+        owner="PAT necessary-literal candidate filtering",
+        paths=("pat_literal_filter.py", "omf_pat.py", "signature_catalog.py"),
+        tests=(
+            "angr_platforms/tests/test_pat_literal_prefilter.py",
+            "angr_platforms/tests/test_pat_catalog_cache_identity.py",
+            "angr_platforms/tests/test_signature_catalog_without_flair.py",
+        ),
+    ),
+    TestOwnershipRule(
         owner="x86-16-discarded-return-proof",
         paths=("angr_platforms/angr_platforms/X86_16/lowering/interprocedural_storage_return_discard.py",),
         tests=("angr_platforms/tests/test_x86_16_interprocedural_discarded_return.py",),
@@ -244,9 +258,26 @@ TEST_OWNERSHIP_RULES: tuple[TestOwnershipRule, ...] = (
         tests=("angr_platforms/tests/test_msc6_compat_headers.py",),
     ),
     TestOwnershipRule(
+        owner="batch-decompile-runtime",
+        paths=("scripts/batch_decompile_procs.py", "scripts/decompile_process_budget.py"),
+        tests=("angr_platforms/tests/test_batch_decompile_procs_runtime.py",),
+    ),
+    TestOwnershipRule(
         owner="msc6-fixture-entrypoint",
-        paths=("scripts/msc6_entrypoint.py", "scripts/build_msc6_examples.py"),
+        paths=("scripts/msc6_entrypoint.py", "scripts/build_msc6_examples.py", "scripts/batch_decompile_procs.py"),
         tests=("angr_platforms/tests/test_msc6_entrypoint.py", "angr_platforms/tests/test_build_msc6_examples.py"),
+    ),
+    TestOwnershipRule(
+        owner="msc6-binary-function-targets",
+        paths=("scripts/msc6_function_targets.py", "scripts/build_msc6_examples.py",
+               "inertia_decompiler/cli_terminal_status.py"),
+        tests=("angr_platforms/tests/test_msc6_binary_recovery_policy.py",),
+    ),
+    TestOwnershipRule(
+        owner="frontend-binary-block-evidence",
+        paths=("angr_platforms/angr_platforms/X86_16/frontend_block_inventory.py",),
+        tests=("angr_platforms/tests/test_x86_16_frontend_capstone_decode.py",
+               "angr_platforms/tests/test_x86_16_terminal_stack_cleanup.py"),
     ),
     TestOwnershipRule(
         owner="condition-operand-views",

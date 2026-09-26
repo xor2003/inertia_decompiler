@@ -17652,6 +17652,9 @@ def _decompile_8616(self: StructuredAstValue) -> None:
         self.project._inertia_decompiler_stage = "done"
         _debug_decompile_done_8616(self, func_addr)
 
+    function = getattr(self, "function", None) or getattr(self, "func", None)
+    with active_status_flag_lift_context_8616(self.project, function):
+        return _impl()
 
 
 def _handle_failed_postprocess_validation_8616(
@@ -17928,6 +17931,7 @@ def _try_accept_failed_postprocess_validation_8616(
     func_addr: StructuredAstValue,
     log: logging.Logger,
 ) -> bool:
+    """Accept only an evidenced validation delta for the supplied function."""
     def _impl() -> bool:
         allow_validation_override = str(
             os.environ.get("INERTIA_ALLOW_POSTPROCESS_VALIDATION_OVERRIDE", "")
@@ -18004,9 +18008,7 @@ def _try_accept_failed_postprocess_validation_8616(
                 return True
         return False
 
-    function = getattr(self, "function", None) or getattr(self, "func", None)
-    with active_status_flag_lift_context_8616(self.project, function):
-        return _impl()
+    return _impl()
 
 
 def _salvage_signed_idiv_stack_move_after_discard_8616(

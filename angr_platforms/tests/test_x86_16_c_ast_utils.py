@@ -43,6 +43,46 @@ class _DummyCodegen:
         return name
 
 
+@pytest.mark.parametrize("variable", [False, True])
+def test_exact_leaf_child_slots_do_not_scan_display_metadata(variable):
+    """Real leaf classes have explicit fields, excluding ident/collapsed metadata."""
+    codegen = _DummyCodegen()
+    if variable:
+        node = CVariable(SimRegisterVariable(0, 2, name="ax"), codegen=codegen)
+        expected = ("unified_variable", "variable", "variable_type", "vvar_id")
+    else:
+        node = CConstant(1, SimTypeShort(False), codegen=codegen)
+        expected = ("reference_values", "value")
+    assert type(node).__slots__ == expected
+    assert c_ast_utils._structured_slot_names_8616(node) == expected
+
+
+def test_constant_reference_children_survive_exact_leaf_schema():
+    codegen = _DummyCodegen()
+    child = CConstant(7, SimTypeShort(False), codegen=codegen)
+    root = CConstant(1, SimTypeShort(False), reference_values={1: [child]}, codegen=codegen)
+    assert tuple(_iter_c_nodes_deep_8616(root)) == (root, child)
+
+
+def test_leaf_subclasses_and_same_name_extensions_keep_dynamic_children():
+    """Exact leaf schemas must not cover extensions merely by name or inheritance."""
+    class ExtendedConstant(CConstant):
+        __slots__ = ("extra",)
+
+    codegen = _DummyCodegen()
+    child = CConstant(7, SimTypeShort(False), codegen=codegen)
+    extended = ExtendedConstant(1, SimTypeShort(False), codegen=codegen)
+    extended.extra = child
+    assert tuple(_iter_c_nodes_deep_8616(extended)) == (extended, child)
+
+    boundary_type = type("CConstant", (), {
+        "__module__": "angr.analyses.decompiler.structured_codegen.synthetic",
+    })
+    boundary = boundary_type()
+    boundary.extra = child
+    assert tuple(_iter_c_nodes_deep_8616(boundary)) == (boundary, child)
+
+
 @pytest.mark.parametrize("switch", (False, True))
 def test_replace_c_children_preserves_conditional_pair_and_case_structure(switch: bool) -> None:
     """Typed boundary views must preserve replacement and idempotence behavior."""

@@ -41,6 +41,38 @@ def test_failed_function_retains_structured_failure_reason(reason, outcome):
     assert classify_roundtrip_report([row], "sample", 1) is outcome
 
 
+@pytest.mark.parametrize("timeout,outcome", [
+    (True, CoverageOutcome.TIMED_OUT),
+    (False, CoverageOutcome.VALIDATION_FAILED),
+    ("true", CoverageOutcome.VALIDATION_FAILED),
+])
+def test_failed_function_timeout_precedes_uncollected_validation(timeout, outcome):
+    """Use the structured deadline field, never the ambiguous CLI exit code."""
+    row = _row()
+    row["decompile_ok"] = False
+    profile = json.loads(row["decompile_profile"])
+    profile["fallback_rebuild"]["function_debug"][0][3].update(
+        returncode=3, timeout=timeout, acceptance_reason="validation_failed",
+        tail_validation_status="uncollected", tail_validation_uncollected=True,
+    )
+    row["decompile_profile"] = json.dumps(profile)
+    assert classify_roundtrip_report([row], "sample", 1) is outcome
+
+
+def test_superseded_timeout_does_not_hide_final_validation_failure():
+    """Only the final attempt for each function determines its failure class."""
+    row = _row()
+    row["decompile_ok"] = False
+    profile = json.loads(row["decompile_profile"])
+    attempts = profile["fallback_rebuild"]["function_debug"]
+    attempts[0][3].update(returncode=3, timeout=True)
+    attempts.append(["f", "f", "retry", {
+        "returncode": 4, "timeout": False, "acceptance_reason": "validation_failed",
+    }])
+    row["decompile_profile"] = json.dumps(profile)
+    assert classify_roundtrip_report([row], "sample", 1) is CoverageOutcome.VALIDATION_FAILED
+
+
 @pytest.mark.parametrize("payload", [None, [], [{}, {}], [None]])
 def test_malformed_report_has_compact_diagnostic(payload):
     assert "report_error" in roundtrip_diagnostics(payload)

@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 from threading import Barrier, Lock
 
 import pytest
@@ -30,7 +31,6 @@ from scripts.build_msc6_examples import (
     _focused_decompile_process_timeout,
     _is_decompile_output_acceptable,
     _make_decompile_env,
-    _normalize_extracted_function_arg_placeholders,
     _parse_decompile_profile,
     _prepare_decompiled_source_for_c89,
     _run,
@@ -78,7 +78,8 @@ def test_build_fallback_source_includes_dos_header_for_mk_fp():
         assert f"#define {macro}(ptr)" in prepared
 
 
-def test_prepare_decompiled_source_for_c89_normalizes_merged_signature_arg_collisions():
+def test_prepare_decompiled_source_for_c89_preserves_unresolved_signature_collisions():
+    """A harness must not repair a signature without typed variable identity."""
     c_text = """\
 unsigned short select_and_apply(unsigned short local, unsigned long *local_2)
 {
@@ -89,9 +90,8 @@ unsigned short select_and_apply(unsigned short local, unsigned long *local_2)
 
     prepared = _prepare_decompiled_source_for_c89(c_text)
 
-    assert "select_and_apply(unsigned short local, unsigned long *local_2_2)" in prepared
-    assert "unsigned long *local_2)" not in prepared
-    assert "unsigned short (*local_2)(unsigned short);" in prepared
+    assert c_text.rstrip() in prepared
+    assert "local_2_2" not in prepared
 
 
 def test_extract_decompiled_function_definition_accepts_msvc_public_symbol_alias():
@@ -664,10 +664,7 @@ def test_run_merges_environment_overrides(monkeypatch):
 
 
 def test_batch_decompile_procs_writes_per_proc_outputs_and_report(monkeypatch, tmp_path):
-    calls: list[list[str]] = []
-
     def fake_main(argv):
-        calls.append(list(argv))
         proc_name = argv[argv.index("--proc") + 1]
         print(f"int {proc_name}(void) {{ return 1; }}")
         print(f"[tail-validation] {proc_name} clean", file=sys.stderr)
@@ -690,6 +687,8 @@ def test_batch_decompile_procs_writes_per_proc_outputs_and_report(monkeypatch, t
     )
 
     assert rc == 1
+    report = json.loads((tmp_path / "batch" / "batch_report.json").read_text(encoding="utf-8"))
+    calls = [item["argv"] for item in report["results"]]
     assert len(calls) == 2
     assert calls[0][calls[0].index("--proc") + 1] == "good_proc"
     assert calls[1][calls[1].index("--proc") + 1] == "bad_proc"
@@ -703,10 +702,7 @@ def test_batch_decompile_procs_writes_per_proc_outputs_and_report(monkeypatch, t
 
 
 def test_batch_decompile_procs_accepts_json_job_file(monkeypatch, tmp_path):
-    calls: list[list[str]] = []
-
     def fake_main(argv):
-        calls.append(list(argv))
         print("int sub_10010(void) { return 0; }")
         return 0
 
@@ -722,6 +718,7 @@ def test_batch_decompile_procs_accepts_json_job_file(monkeypatch, tmp_path):
                         "max_functions": 1,
                         "timeout": 9,
                         "alternate_source_c": False,
+                        "ignore_local_sidecar_hints": True,
                         "brief": True,
                     }
                 ]
@@ -734,12 +731,15 @@ def test_batch_decompile_procs_accepts_json_job_file(monkeypatch, tmp_path):
     rc = batch_decompile_procs.main(["--out-dir", str(tmp_path / "batch"), "--job-file", str(job_file)])
 
     assert rc == 0
+    report = json.loads((tmp_path / "batch" / "batch_report.json").read_text(encoding="utf-8"))
+    calls = [item["argv"] for item in report["results"]]
     assert calls == [
         [
             "--no-alternate-source-c",
             "--brief",
             "--timeout",
             "9",
+            "--ignore-local-sidecar-hints",
             "--addr",
             "0x10010",
             "--max-functions",
@@ -754,11 +754,10 @@ def test_batch_decompile_procs_accepts_json_job_file(monkeypatch, tmp_path):
 
 
 def test_batch_decompile_procs_direct_in_process_sets_and_restores_env(monkeypatch, tmp_path):
-    observed_values: list[str | None] = []
     monkeypatch.setenv("INERTIA_OTEL_PROFILE_IN_PROCESS", "already-set")
 
     def fake_main(argv):
-        observed_values.append(os.environ.get("INERTIA_OTEL_PROFILE_IN_PROCESS"))
+        assert os.environ.get("INERTIA_OTEL_PROFILE_IN_PROCESS") == "1"
         proc_name = argv[argv.index("--proc") + 1]
         print(f"int {proc_name}(void) {{ return 0; }}")
         return 0
@@ -777,7 +776,6 @@ def test_batch_decompile_procs_direct_in_process_sets_and_restores_env(monkeypat
     )
 
     assert rc == 0
-    assert observed_values == ["1"]
     assert os.environ["INERTIA_OTEL_PROFILE_IN_PROCESS"] == "already-set"
 
 
@@ -909,17 +907,32 @@ def test_function_fallback_retries_transient_asm_fallback(monkeypatch, tmp_path)
     ]
 
 
-def test_function_fallback_uses_batch_report_when_proc_returns_nonzero_with_body(monkeypatch, tmp_path):
+@pytest.mark.parametrize("source_free", [False, True])
+def test_function_fallback_uses_batch_report_when_proc_returns_nonzero_with_body(monkeypatch, tmp_path, source_free):
+    from scripts.msc6_function_targets import BinaryFunctionTarget
+
     exe_path = tmp_path / "TEST.EXE"
     exe_path.write_bytes(b"MZ")
+    returncode = 0 if source_free else 4
 
     def fake_run(cmd, **_kwargs):
         assert "--direct-in-process" not in cmd
         batch_dir = tmp_path / "TEST1.batch"
-        batch_dir.mkdir()
+        batch_dir.mkdir(exist_ok=True)
+        if source_free:
+            assert "--proc" not in cmd
+            jobs = batch_decompile_procs._load_jobs(Path(cmd[cmd.index("--job-file") + 1]))
+            assert len(jobs) == 1
+            assert jobs[0].name == "f"
+            assert jobs[0].direct_in_process is False
+            assert "--ignore-local-sidecar-hints" in jobs[0].argv
+            assert "--no-alternate-source-c" in jobs[0].argv
+            assert jobs[0].argv[jobs[0].argv.index("--addr") + 1] == "0x10010"
+            assert "--proc" not in jobs[0].argv
         stdout_path = batch_dir / "f.stdout.c"
         stderr_path = batch_dir / "f.stderr.txt"
-        stdout_path.write_text("int f(void) { return 1; }\n", encoding="utf-8")
+        emitted_name = "sub_10010" if source_free else "f"
+        stdout_path.write_text(f"int {emitted_name}(void) {{ return 1; }}\n", encoding="utf-8")
         stderr_path.write_text("[tail-validation] whole-tail validation clean across 1 functions\n", encoding="utf-8")
         (batch_dir / "batch_report.json").write_text(
             json.dumps(
@@ -929,7 +942,7 @@ def test_function_fallback_uses_batch_report_when_proc_returns_nonzero_with_body
                     "results": [
                         {
                             "proc": "f",
-                            "returncode": 4,
+                            "returncode": returncode,
                             "stdout_path": str(stdout_path),
                             "stderr_path": str(stderr_path),
                             "wall_seconds": 1.5,
@@ -980,6 +993,7 @@ def test_function_fallback_uses_batch_report_when_proc_returns_nonzero_with_body
         kvikdos=tmp_path / "kvikdos",
         msc6_root=tmp_path / "msc6",
         fallback_debug=fallback_debug,
+        binary_targets=(BinaryFunctionTarget("f", 0x10010),) if source_free else None,
     )
 
     assert ok is True
@@ -992,11 +1006,78 @@ def test_function_fallback_uses_batch_report_when_proc_returns_nonzero_with_body
     assert function_debug[0][0:2] == ["f", "f"]
     assert str(batch_decompile_procs.REPO_ROOT / "scripts" / "batch_decompile_procs.py") in function_debug[0][2]
     profile = function_debug[0][3]
-    assert profile["acceptance_reason"] == "nonzero_exit"
+    assert profile["acceptance_reason"] == (None if source_free else "nonzero_exit")
     assert profile["batch_attempt"] is True
-    assert profile["returncode"] == 4
+    assert profile["returncode"] == returncode
     assert profile["tail_validation_status"] == "clean"
     assert profile["wall_seconds"] == 1.5
+
+
+@pytest.mark.parametrize("failed_kind", ["timeout", "nonzero", "missing_body", "missing_record", "uncollected", "no_validation"])
+def test_source_free_batch_retries_only_failed_functions_in_original_order(monkeypatch, tmp_path, failed_kind):
+    """A bad first job cannot discard a later validated body or bypass refusal."""
+    from scripts.msc6_function_targets import BinaryFunctionTarget
+
+    exe_path = tmp_path / "TEST.EXE"
+    exe_path.write_bytes(b"MZ")
+    targets = (BinaryFunctionTarget("first", 0x10010), BinaryFunctionTarget("second", 0x10020))
+    retried = []
+
+    def fake_run(cmd, **kwargs):
+        batch_dir = tmp_path / "TEST1.batch"
+        results = []
+        for index, target in enumerate(targets):
+            if index == 0 and failed_kind == "missing_record":
+                continue
+            out = batch_dir / f"{target.name}.stdout.c"
+            err = batch_dir / f"{target.name}.stderr.txt"
+            body = f"int {target.emitted_name}(void) {{ return {index + 1}; }}\n"
+            out.write_text("" if index == 0 and failed_kind == "missing_body" else body)
+            diagnostic = "[tail-validation] whole-tail validation clean across 1 functions\n"
+            if index == 0 and failed_kind == "timeout":
+                diagnostic = '[inertia-terminal] {"schema":1,"status":"timeout"}\n'
+            elif index == 0 and failed_kind == "uncollected":
+                diagnostic = "[tail-validation] whole-tail validation not collected across 1 functions\n"
+            elif index == 0 and failed_kind == "no_validation":
+                diagnostic = ""
+            err.write_text(diagnostic)
+            results.append({"proc": target.name, "returncode": 4 if index == 0 and failed_kind == "nonzero" else 0,
+                            "stdout_path": str(out), "stderr_path": str(err), "wall_seconds": 1.0})
+        (batch_dir / "batch_report.json").write_text(json.dumps({"results": results}))
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    def recover(*args, function_name, binary_target, **kwargs):
+        retried.append(function_name)
+        assert binary_target == targets[0]
+        return True, "int sub_10010(void) { return 1; }\n", "", {}, "retry", function_name
+
+    def compile_source(source_path, out_dir, **kwargs):
+        text = source_path.read_text()
+        assert text.index("int sub_10010(void)") < text.index("int sub_10020(void)")
+        assert text.count("int sub_10020(void)") == 1
+        (out_dir / kwargs["exe_name"]).write_bytes(b"MZ")
+        return True, "", "", "", ""
+
+    monkeypatch.setattr("scripts.build_msc6_examples._run", fake_run)
+    monkeypatch.setattr("scripts.build_msc6_examples._decompile_function_with_options", recover)
+    monkeypatch.setattr("scripts.build_msc6_examples._compile_and_link", compile_source)
+    monkeypatch.setattr("scripts.build_msc6_examples._run_example", lambda *args, **kwargs: (True, 255, "", ""))
+    debug = {}
+    result = _build_from_function_decompiles(
+        exe_path, tmp_path, decompile_py=tmp_path / "decompile.py",
+        decompile_timeout=60, decompile_run_timeout=60,
+        decompile_function_discovery_backend="auto", decompile_seed_engine="auto",
+        decompile_rizin_timeout=8, decompile_force_rizin_8616=False,
+        decompile_pat_backend=None, decompile_signature_catalog=None,
+        fallback_functions=("first", "second"), fallback_harness="int main(void) { return 255; }",
+        fallback_prefix="", decompile_c_name="TEST1.C", decompile_obj_name="TEST1.OBJ",
+        decompile_exe_name="TEST1.EXE", decompile_map_name="TEST1.MAP",
+        kvikdos=tmp_path / "kvikdos", msc6_root=tmp_path / "msc6",
+        binary_targets=targets, fallback_debug=debug,
+    )
+    assert result[:3] == (True, True, 255)
+    assert retried == ["first"]
+    assert debug["batch_used"] is True
 
 
 def test_function_fallback_retries_transient_tail_validation_failure(monkeypatch, tmp_path):
@@ -1155,7 +1236,7 @@ def test_function_fallback_accepts_extractable_nonzero_function_exit(monkeypatch
     assert calls == ["f"]
 
 
-def test_extract_normalizes_undeclared_stack_arg_placeholders_to_signature_names():
+def test_extract_preserves_undeclared_stack_arg_placeholders():
     body = """int switch_fold(int x)
 {
     if (!arg_4)
@@ -1166,11 +1247,8 @@ def test_extract_normalizes_undeclared_stack_arg_placeholders_to_signature_names
 }
 """
 
-    normalized = _normalize_extracted_function_arg_placeholders(body)
-
-    assert "arg_4" not in normalized
-    assert "if (!x)" in normalized
-    assert "return x + 20;" in normalized
+    extracted = _extract_decompiled_function_definition(body, "switch_fold")
+    assert extracted == body
 
 
 def test_extract_does_not_rewrite_declared_local_arg_placeholder():
@@ -1182,10 +1260,8 @@ def test_extract_does_not_rewrite_declared_local_arg_placeholder():
 }
 """
 
-    normalized = _normalize_extracted_function_arg_placeholders(body)
-
-    assert "int arg_4;" in normalized
-    assert "return arg_4;" in normalized
+    extracted = _extract_decompiled_function_definition(body, "f")
+    assert extracted == body
 
 
 def test_runtime_gate_links_generic_runtime_support(monkeypatch, tmp_path):

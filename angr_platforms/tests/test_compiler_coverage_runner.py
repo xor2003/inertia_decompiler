@@ -52,6 +52,7 @@ def test_external_fixture_uses_existing_owner_and_fingerprints_headers(tmp_path,
     assert result is CoverageOutcome.HARNESS_FAILED  # No report, not a fabricated pass.
     command = execute.call_args.args[0]
     assert command[1].endswith("scripts/build_msc6_examples.py")
+    assert "--decompile-ignore-local-sidecar-hints" in command
     assert command[command.index("--examples-dir") + 1] == str(tmp_path)
     assert command[command.index("--harvest-success-code") + 1] == "0"
     assert command[command.index("--signature-catalog") + 1] == str(catalog)
@@ -59,6 +60,34 @@ def test_external_fixture_uses_existing_owner_and_fingerprints_headers(tmp_path,
     report = json.loads((output / "coverage-result.json").read_text())
     assert report["inputs"]["runtime_headers"]["RUNTIME.H"]["sha256"]
     assert report["inputs"]["signature_catalog"]["sha256"]
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_source_identity_is_retained_and_changes_refuse_acceptance(tmp_path, monkeypatch, changed):
+    """A successful child must not hide concurrent edits to its implementation."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    helper = root / "decompile.py"
+    helper.write_text("# before\n")
+    source = tmp_path / "fixture.c"
+    source.write_text("int main(void) { return 0; }")
+    monkeypatch.setattr(runner, "ROOT", root)
+    monkeypatch.setattr(runner, "classify_roundtrip_report", lambda *args: CoverageOutcome.PASSED)
+
+    def execute(*args):
+        if changed:
+            helper.write_text("# after\n")
+        return 0, False
+
+    monkeypatch.setattr(runner, "_execute", execute)
+    output = tmp_path / "case"
+    outcome = runner.run_source_case(source, output)
+    expected = CoverageOutcome.HARNESS_FAILED if changed else CoverageOutcome.PASSED
+    assert outcome is expected
+    report = json.loads((output / "coverage-result.json").read_text())
+    assert report["implementation_unchanged"] is (not changed)
+    assert report["inputs"]["implementation"]["sha256"]
+    assert (report["inputs"]["implementation"] == report["implementation_after"]) is (not changed)
 
 
 @pytest.mark.parametrize("names", [("../escape.h",), ("file.c",), ("R.H", "r.h")])

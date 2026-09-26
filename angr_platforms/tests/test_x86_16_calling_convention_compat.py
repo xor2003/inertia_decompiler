@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import archinfo
+import pytest
 from angr.errors import SimEngineError
 from angr.sim_type import SimTypeBottom, SimTypeFunction, SimTypeLong, SimTypeShort
 from angr_platforms.X86_16.analysis_helpers import (
@@ -255,6 +256,74 @@ class _FakeMovSpBpInsn:
 class _FakeBlock:
     def __init__(self, insns: tuple[_FakeInsn | object, ...]) -> None:
         self.capstone = SimpleNamespace(insns=insns)
+
+
+def test_abi_instruction_blocks_reuse_cfg_proven_sizes():
+    """Known extents avoid lifting a block merely to obtain Capstone instructions."""
+    from angr_platforms.X86_16.calling_convention_compat import _iter_function_blocks_8616
+
+    requests = []
+    blocks = {0x1000: _FakeBlock(()), 0x1010: _FakeBlock(())}
+
+    def block(address, *, opt_level, size=None):
+        requests.append((address, opt_level, size))
+        return blocks[address]
+
+    function = SimpleNamespace(block_addrs_set={0x1010, 0x1000}, get_block_size={0x1000: 3, 0x1010: 7}.get)
+    project = SimpleNamespace(factory=SimpleNamespace(block=block))
+    assert tuple(_iter_function_blocks_8616(project, function)) == (blocks[0x1000], blocks[0x1010])
+    assert requests == [(0x1000, 0, 3), (0x1010, 0, 7)]
+
+
+@pytest.mark.parametrize("size", [None, 0, -1, True, "3"])
+def test_abi_instruction_blocks_preserve_unsized_fallback(size):
+    """Absent or invalid third-party extents must not become guessed byte bounds."""
+    from angr_platforms.X86_16.calling_convention_compat import _iter_function_blocks_8616
+
+    requests = []
+    expected = _FakeBlock(())
+
+    def block(address, **options):
+        requests.append((address, options))
+        return expected
+
+    function = SimpleNamespace(block_addrs_set={0x1000}, get_block_size=lambda _address: size)
+    project = SimpleNamespace(factory=SimpleNamespace(block=block))
+    assert tuple(_iter_function_blocks_8616(project, function)) == (expected,)
+    assert requests == [(0x1000, {"opt_level": 0})]
+
+
+def test_abi_instruction_block_extent_errors_remain_loud():
+    """A broken size provider must not silently masquerade as missing evidence."""
+    from angr_platforms.X86_16.calling_convention_compat import _iter_function_blocks_8616
+
+    def broken_size(_address):
+        raise ValueError("broken CFG extent")
+
+    function = SimpleNamespace(block_addrs_set={0x1000}, get_block_size=broken_size)
+    with pytest.raises(ValueError, match="broken CFG extent"):
+        tuple(_iter_function_blocks_8616(_FakeProject(()), function))
+
+
+def test_abi_known_block_decodes_real_bytes_without_vex(monkeypatch):
+    """The installed angr boundary must preserve instruction bytes without a relift."""
+    import angr
+    from angr.block import Block
+    from angr_platforms.X86_16.calling_convention_compat import _function_instruction_groups_8616
+
+    code = bytes.fromhex("55 8b ec 8b 46 06 5d cb")
+    project = angr.load_shellcode(code, arch=Arch86_16(), load_address=0x1000)
+    function = SimpleNamespace(block_addrs_set={0x1000}, get_block_size=lambda _address: len(code))
+
+    def refuse_lift(*_args, **_kwargs):
+        raise AssertionError("known CFG extent must not be lifted again")
+
+    monkeypatch.setattr(Block, "_lift_nocache", refuse_lift)
+    groups = tuple(_function_instruction_groups_8616(project, function))
+    assert len(groups) == 1
+    assert [(insn.address, insn.size) for insn in groups[0]] == [
+        (0x1000, 1), (0x1001, 2), (0x1003, 3), (0x1006, 1), (0x1007, 1),
+    ]
 
 
 class _FakeFactory:

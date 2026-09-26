@@ -23394,6 +23394,7 @@ def _hb_walk_statement(
     seen: StructuredAstValue,
     summary_map: StructuredAstValue,
 ) -> bool:
+    """Visit conditional children with the same proven cleanup context."""
     local_changed = _hb_prune_statement_owner(stmt, codegen=codegen, seen=seen, summary_map=summary_map)
     for attr in ("body", "else_node"):
         child = getattr(stmt, attr, None)
@@ -23401,7 +23402,9 @@ def _hb_walk_statement(
             local_changed = _hb_walk_statement(child, codegen=codegen, seen=seen, summary_map=summary_map) or local_changed
     for pair in _boundary_tuple_8616(getattr(stmt, "condition_and_nodes", ()) or ()):
         if isinstance(pair, tuple) and len(pair) == 2 and pair[1] is not None:
-            local_changed = _hb_walk_statement(pair[1]) or local_changed
+            local_changed = _hb_walk_statement(
+                pair[1], codegen=codegen, seen=seen, summary_map=summary_map
+            ) or local_changed
     return local_changed
 
 

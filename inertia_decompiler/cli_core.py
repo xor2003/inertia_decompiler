@@ -84,6 +84,7 @@ from inertia_decompiler.cli_output import (
     _print_diagnostic_text,
     _timestamped_print,
 )
+from inertia_decompiler.cli_terminal_status import CliTerminalStatus, emit_terminal_status
 from inertia_decompiler.cli_timeout import (
     PARALLEL_CLEAN_WORKER_TIMEOUT_CAP,
     _AdaptivePerByteTimeoutModel,
@@ -2619,6 +2620,7 @@ def _run_canonicalized_direct_clean_worker_8616(
         print(result.partial_payload)
     print(f"/* canonical clean worker {result.status}: {result.payload} */", file=sys.stderr)
     if result.status == WorkItemStatus.TIMEOUT.value:
+        emit_terminal_status(CliTerminalStatus.TIMEOUT)
         return 3
     if result.status == WorkItemStatus.VALIDATION_FAILED.value:
         return 4
@@ -2761,6 +2763,7 @@ _RECOMPILE_RESULT_CACHE_LOCK_8616 = threading.Lock()
 
 
 def _collect_recompilation_payloads_8616(accepted_payload: str) -> tuple[list[tuple[str, str]], str | None]:
+    """Require every target while keeping unavailable-tool evidence retryable."""
     def _impl() -> tuple[list[tuple[str, str]], str | None]:
         recompilation_targets = ("portable-flat", "msc-dos")
         checked_payloads: list[tuple[str, str]] = []
@@ -2771,8 +2774,9 @@ def _collect_recompilation_payloads_8616(accepted_payload: str) -> tuple[list[tu
                 recompilation = _RECOMPILE_RESULT_CACHE_8616.get(cache_key)
             if recompilation is None:
                 recompilation = check_c_recompiles_8616(accepted_payload, target=recomp_target)
-                with _RECOMPILE_RESULT_CACHE_LOCK_8616:
-                    _RECOMPILE_RESULT_CACHE_8616[cache_key] = recompilation
+                if not recompilation.toolchain_unavailable:
+                    with _RECOMPILE_RESULT_CACHE_LOCK_8616:
+                        _RECOMPILE_RESULT_CACHE_8616[cache_key] = recompilation
             if recompilation.passed:
                 checked_payload = _normalize_gcc_checked_payload_8616(
                     recompilation.checked_payload,
@@ -2799,7 +2803,8 @@ def _collect_recompilation_payloads_8616(accepted_payload: str) -> tuple[list[tu
             if isinstance(source_path, str) and source_path:
                 detail = f"{detail} [source: {source_path}]"
             toolchain = "gcc portable-flat" if recomp_target == "portable-flat" else "MS C 5.1 msc-dos"
-            return checked_payloads, f"{toolchain} syntax check failed: {detail}"
+            failure_kind = "toolchain unavailable" if recompilation.toolchain_unavailable else "syntax check failed"
+            return checked_payloads, f"{toolchain} {failure_kind}: {detail}"
         return checked_payloads, None
 
     return _impl()
@@ -6517,6 +6522,7 @@ class _DirectAddrCliRun8616:
             print(f"[dbg] direct decompilation timeout detail: {self.direct_result.payload}", file=sys.stderr)
             print(f"\n/* Decompilation timeout: Timed out while recovering a function after {self.args.timeout}s during x86-16 function recovery. */")
             print("/* Direct decompilation timeout is terminal for this function; skipping fallback lanes. */\n/* Tip: try a larger --timeout for larger binaries. */")
+            emit_terminal_status(CliTerminalStatus.TIMEOUT)
             return 3
         return None
 
@@ -11069,7 +11075,5 @@ def main(argv: list[str] | None = None) -> int:
             return _impl()
         finally:
             emit_compact_summary()
-
-
 
 

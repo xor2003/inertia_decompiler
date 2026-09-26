@@ -14,6 +14,55 @@ from inertia_decompiler.cli_semantic_rollback import (
 from inertia_decompiler.sidecar_metadata import LSTMetadata
 
 
+@pytest.mark.parametrize("before,after,named_guard,copies,expected", [
+    ([], [], False, 0, []),
+    ([], ["new"], False, 0, ["new"]),
+    (["call"], [], False, 1, ["call"]),
+    ([], [], True, 1, []),
+    (["needed"], ["other"], True, 1, ["needed"]),
+])
+def test_rewrite_call_loss_snapshot_requires_calls_or_named_guard(
+    monkeypatch, before, after, named_guard, copies, expected,
+):
+    """Skip zero-risk copies, but retain actual call-loss and named-call rollback."""
+    from inertia_decompiler import cli_decompilation
+
+    calls = list(before)
+    snapshots = []
+
+    def snapshot():
+        saved = list(calls)
+        snapshots.append(saved)
+        return saved
+
+    def restore(saved):
+        calls[:] = saved
+        return True
+
+    def rewrite():
+        calls[:] = after
+        return True
+
+    state = SimpleNamespace(
+        current_func_addr=0x10000, function=SimpleNamespace(addr=0x10000, name="probe"),
+        pass_name="test", call_loss_guard_active=True, expected_call_guard_active=named_guard,
+        _codegen_call_expr_count=lambda: len(calls),
+        _missing_expected_call_names_from_codegen_counts=lambda: [] if "needed" in calls else ["needed"],
+        _snapshot_codegen_cfunc=snapshot, _restore_codegen_cfunc=restore,
+        _run_stack_lowering_pass=object(), _stack_lowering_already_attempted=False,
+        iter_changed=False, dec=SimpleNamespace(codegen=None),
+    )
+    state._rewrite_round_guarded_evidence_8616 = lambda index, changed: (
+        cli_decompilation._DecompileRun8616._rewrite_round_guarded_evidence_8616(state, index, changed)
+    )
+    monkeypatch.setattr(cli_decompilation, "_debug_dump_rewrite_pass_lines_8616", lambda *a, **kw: None)
+    monkeypatch.setattr(cli_decompilation, "function_original_addr", lambda function: function.addr)
+    cli_decompilation._DecompileRun8616._rewrite_round_apply_8616(state, rewrite, 0, 0)
+    assert len(snapshots) == copies
+    assert calls == expected
+    assert state.call_loss_guard_active is True
+
+
 @dataclass(frozen=True)
 class _Report:
     failures: dict[str, object]

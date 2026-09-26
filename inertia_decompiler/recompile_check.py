@@ -297,7 +297,48 @@ def _prepare_msc51_mirror_tree(source_root: Path) -> Path:
     return mirror_root
 
 
+def _probe_kvikdos_execution_8616(
+    kvikdos: Path, c_text: str, *, target: str
+) -> RecompileCheckResult | None:
+    """Refuse compilation when the emulator cannot execute in this environment.
+
+    Probe the documented capability command instead of classifying compiler
+    diagnostics by their wording. An unavailable or timed-out probe is never
+    evidence that generated C was accepted or rejected by the compiler.
+    """
+    command = (str(kvikdos), "--kvm-check")
+    try:
+        probe = subprocess.run(
+            command, capture_output=True, text=True, check=False, timeout=_recompile_timeout_sec()
+        )
+    except subprocess.TimeoutExpired as error:
+        exit_code = 124
+        stdout = _timeout_stream_text(error.stdout)
+        stderr = _timeout_stream_text(error.stderr) + "\nkvikdos execution probe timed out"
+    except (FileNotFoundError, PermissionError) as error:
+        exit_code = 127 if isinstance(error, FileNotFoundError) else 126
+        stdout = ""
+        stderr = str(error)
+    else:
+        if probe.returncode == 0:
+            return None
+        exit_code, stdout, stderr = probe.returncode, probe.stdout, probe.stderr
+    checked_payload, checked_hash = _checked_payload_identity_8616(c_text)
+    return RecompileCheckResult(
+        outcome=RecompileCheckOutcome.TOOLCHAIN_UNAVAILABLE,
+        target=target,
+        exit_code=exit_code,
+        compiler=str(kvikdos),
+        stdout=stdout,
+        stderr=stderr,
+        command=command,
+        checked_payload=checked_payload,
+        checked_payload_hash=checked_hash,
+    )
+
+
 def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileCheckResult:
+    """Require an executable DOS toolchain before checking the emitted C."""
     def _impl() -> RecompileCheckResult:
         kvikdos = _resolve_kvikdos_path()
         if kvikdos is None:
@@ -333,6 +374,10 @@ def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileChec
                 source_path=None,
             )
 
+        unavailable = _probe_kvikdos_execution_8616(kvikdos, c_text, target=target)
+        if unavailable is not None:
+            return unavailable
+
         tmpdir = Path(tempfile.mkdtemp(prefix="inertia-recompile-msc51-"))
         src_path = tmpdir / "GEN.C"
         compile_payload = _compile_input_payload_8616(c_text, target=target)
@@ -360,10 +405,15 @@ def _check_c_recompiles_msc51_8616(c_text: str, *, target: str) -> RecompileChec
         with _msc51_compiler_lock_8616():
             for _attempt_index in range(_MSC51_TRANSIENT_RETRY_LIMIT):
                 try:
+                    # DOS output and host-emulator diagnostics may mix encodings.
+                    # Expose undecodable bytes without guessing a DOS code page
+                    # or discarding the compiler's exit status.
                     proc = subprocess.run(
                         command,
                         capture_output=True,
                         text=True,
+                        encoding="utf-8",
+                        errors="backslashreplace",
                         check=False,
                         timeout=_recompile_timeout_sec(),
                     )

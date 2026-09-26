@@ -118,6 +118,10 @@ from ..semantics.carry_borrow_contracts import CarryBorrowKind8616
 from ..structured_tags import copy_structured_tags_8616
 from ..widening.stack_widening import prove_adjacent_storage_slices
 from .balanced_memory_stack_restore import rebind_balanced_memory_stack_restores_8616
+from .binary_callback_targets import (
+    BinaryCallbackTargetStatus8616,
+    prove_binary_near_callback_target_8616,
+)
 from .c_runtime_header import LOWERED_ZERO_ARG_RUNTIME_HELPER_DECLARATIONS_8616
 from .call_argument_carrier_liveness import (
     CallArgumentCarrierLivenessVerdict8616,
@@ -167,6 +171,7 @@ from .frame_prologue_carriers import (
     is_exact_push_bp_carrier_8616,
 )
 from .frame_register_carriers import collect_frame_register_carriers_8616
+from .function_pointer_parameters import _function_pointer_type_8616
 from .global_declarations import (
     ctype_for_global_width_8616,
     record_global_declaration_spec_8616,
@@ -615,6 +620,7 @@ class DirectStackFunctionTargetEvidence8616(Enum):
     SYNTHETIC_GLOBAL = "synthetic_global"
     LABEL = "label"
     FUNCTION = "function"
+    BINARY_CALL_FLOW = "binary_call_flow"
 
 
 class DirectStackMoveArtifactReplacementKind8616(Enum):
@@ -9309,6 +9315,36 @@ def _record_function_pointer_target_prototype_decl_8616(
     )
 
 
+def _binary_direct_stack_callback_binding_8616(
+    codegen: StructuredCodegenValue,
+    project: AngrProjectValue,
+    fact: DirectStackMoveFact8616,
+    target: int,
+) -> tuple[DirectStackFunctionTarget8616, SimTypePointer] | None:
+    """Bind a code offset only when binary caller and callee prove its ABI."""
+    if fact.width != 2:
+        return None
+    result = prove_binary_near_callback_target_8616(
+        project,
+        codegen,
+        stack_offset=fact.dst_offset,
+        source_value=target,
+        candidates=_direct_stack_move_call_target_candidates_8616(
+            project, target, include_padding_aliases=False
+        ),
+    )
+    if result.status is not BinaryCallbackTargetStatus8616.PROVEN or result.proof is None:
+        return None
+    proof = result.proof
+    resolved = DirectStackFunctionTarget8616(
+        name=proof.name,
+        addr=proof.addr,
+        evidence=DirectStackFunctionTargetEvidence8616.BINARY_CALL_FLOW,
+    )
+    pointer_type = cast(SimTypePointer, _function_pointer_type_8616(proof.parameter_fact, project.arch))
+    return resolved, pointer_type
+
+
 def _direct_stack_near_function_pointer_expr_8616(
     codegen: StructuredAstValue, fact: DirectStackMoveFact8616, dst_cvar: StructuredAstValue
 ) -> StructuredAstValue | None:
@@ -9321,20 +9357,21 @@ def _direct_stack_near_function_pointer_expr_8616(
         return None
     mask = (1 << (fact.width * 8)) - 1
     target = fact.source_value & mask
-    if target == 0:
-        return None
-    resolved = _direct_stack_function_target_8616(
-        project,
-        target,
-        include_padding_aliases=False,
+    resolved = (
+        _direct_stack_function_target_8616(project, target, include_padding_aliases=False)
+        if target != 0 else None
     )
     if resolved is None:
-        return None
-    pointer_type = _function_pointer_stack_slot_type_8616(dst_cvar)
-    if pointer_type is None:
-        pointer_type = _default_near_function_pointer_type_8616(codegen, fact.width)
-        if isinstance(dst_cvar, structured_c.CVariable):
-            dst_cvar.variable_type = pointer_type
+        binary_binding = _binary_direct_stack_callback_binding_8616(codegen, project, fact, target)
+        if binary_binding is None:
+            return None
+        resolved, pointer_type = binary_binding
+    else:
+        pointer_type = _function_pointer_stack_slot_type_8616(dst_cvar)
+        if pointer_type is None:
+            pointer_type = _default_near_function_pointer_type_8616(codegen, fact.width)
+    if isinstance(dst_cvar, structured_c.CVariable):
+        dst_cvar.variable_type = pointer_type
     _record_function_pointer_target_prototype_decl_8616(codegen, resolved, pointer_type)
     variable = SimMemoryVariable(
         resolved.addr,

@@ -70,6 +70,321 @@ python -m pip install -e ".[test]"
 
 The root `./decompile.py` wrapper re-execs through `./.venv/bin/python` when that virtualenv exists.
 
+## DOS Game Reconstruction Workflow
+
+Use this order for C, assembly, and mixed DOS games:
+
+```mermaid
+flowchart TD
+    A[Original binary and game assets] --> B[libdosbox batch collection]
+    A --> C[Static analysis]
+    B --> C
+    C --> D[ada_script: annotated ASM and LST]
+    C --> E[Inertia with Ghidra or Reko: C reconstruction]
+    D --> F[masm2c: translated C++]
+    D --> G[DOS assembler, compiler and linker]
+    E --> G
+    G --> H[Byte and instruction checks, then SSA/Z3]
+    H --> I[dosunit concrete oracle tests]
+    F --> J[libdosbox translated-runtime comparison]
+    I --> K[Full game scenarios]
+    J --> K
+    K --> B
+```
+
+Use the real-mode model for both 16-bit instructions and 386 instructions with
+32-bit operands/addresses in real mode. EAX usage does not make a program a
+flat32 executable. Protected-mode DOS extenders and the PE32 MSC compiler
+binaries require separate loaders/contracts; see the
+[flat32 comparator](artifacts/msc8-z3cmp32/README.md).
+
+The commands below are a **local workflow template**. CLI options and relevant
+source paths were checked on 2026-09-26; a complete game run was not performed
+for this documentation. Replace the game paths, configuration and build recipe.
+Do not proceed past a failed stage or treat missing artifacts as success.
+
+### 1. Prepare inputs and isolate each run
+
+Required inputs are the original executable, its game assets, CPU/memory mode,
+and a reproducible scenario. Optional inputs include IDC, MAP/LST/COD, symbols,
+original ASM/C, runtime dumps and library signatures. Preserve originals; run
+the game from a copy because games and instrumentation can write files.
+
+```bash
+export VEXTEST=/home/xor/vextest
+export PY="$VEXTEST/.venv/bin/python"
+export PYTHON_JIT=1
+export ADA="$VEXTEST"
+export MASM2C=/home/xor/masm2c
+export LIBDOSBOX=/home/xor/inertia_player/libdosbox
+export MZTOOLS=/home/xor/games/f19ru/F19/mzretools/build
+export WORK="$VEXTEST/.cache/game-reconstruction/run-001"
+export GAME_SOURCE=/absolute/path/to/original-game-directory
+export GAME_EXE=GAME.EXE
+
+mkdir -p "$WORK"/{game,analysis,src,build,reports,runtime,translated}
+cp -a "$GAME_SOURCE/." "$WORK/game/"
+export ORIGINAL="$WORK/game/$GAME_EXE"
+export CANDIDATE="$WORK/build/REBUILT.EXE"
+sha256sum "$GAME_SOURCE/$GAME_EXE" "$ORIGINAL" > "$WORK/reports/input.sha256"
+```
+
+Use a fresh `WORK` for each collection scenario. Record component revisions and
+local changes, compiler/linker flags, DOSBox settings, scenario actions, limits,
+and artifact hashes. Runtime evidence must include actual load-segment metadata.
+Never confuse file offsets, analysis VAs, module offsets and runtime CS:IP.
+
+| Artifact | Required content / consumer |
+| --- | --- |
+| Runtime JSON | Executed code, observed edges, segment values, access widths/directions, pointer evidence and load metadata; ada_script and dosunit import |
+| ASM/LST and analysis DB | Bytes, labels, boundaries and annotations; reassembly, masm2c and catalog discovery |
+| Function catalogs + mapping | Original/candidate correspondence with correct address model; SSA and concrete comparisons |
+| Candidate + build record | Linked image, maps, retained objects, exact toolchain/options; comparison input |
+| Test vectors | Registers, flags, segments, valid memory, stack/return setup and observables; concrete execution |
+| Proof/test reports | Requested coverage, passes, mismatches, conditional results, refusals and assumptions; acceptance review |
+
+### 2. Collect initial runtime evidence in batch mode
+
+The local instrumentation build is
+`$LIBDOSBOX/build/custom-instrument/dosbox`. To build it when needed:
+
+```bash
+"$LIBDOSBOX/scripts/build_custom.sh" instrument
+```
+
+Prepare `$WORK/runtime/dosbox.conf` for the game's machine, CPU, cycles and
+devices. Use `core = normal` in its `[cpu]` section for the inspected normal-core
+collection hooks. The instrumentation build starts in its analysis profile and
+has original-code collection without converted-game dispatch.
+
+```bash
+DOSBOX_BIN="$LIBDOSBOX/build/custom-instrument/dosbox"
+run_status=0
+timeout --signal=TERM --kill-after=10s 30s \
+  "$DOSBOX_BIN" --noprimaryconf --nolocalconf --noautoexec \
+  --conf "$WORK/runtime/dosbox.conf" "$ORIGINAL" \
+  > "$WORK/reports/collection.log" 2>&1 || run_status=$?
+printf '%s\n' "$run_status" > "$WORK/reports/collection.exit"
+```
+
+This bounds an unattended startup run; it does not automate menu/gameplay input.
+Use recorded scenario inputs or a game-specific driver for deeper coverage.
+A display is needed unless a headless display setup has been validated for the
+chosen renderer. Do not assume dummy SDL video/audio preserves a game scenario.
+
+The inspected instrument source dumps JSON on program exit and SIGTERM/SIGINT.
+Exit 124 records a timeout, not successful completion; SIGKILL cannot guarantee
+a dump. Locate the `Dumping run-time info into ...` path in `collection.log`,
+copy that artifact to `$WORK/runtime/trace.json`, and inspect it before continuing:
+
+```bash
+export TRACE="$WORK/runtime/trace.json"
+"$PY" - "$TRACE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+trace = json.loads(Path(sys.argv[1]).read_text())
+assert isinstance(trace.get('Meta', {}).get('DosboxLoadSeg'), int), 'missing load segment'
+assert trace.get('Code'), 'no executed-code evidence'
+print('load segment:', hex(trace['Meta']['DosboxLoadSeg']))
+print('code sites:', len(trace['Code']), 'data sites:', len(trace.get('Data', {})))
+print('call snapshots:', len(trace.get('CallSnapshots', [])))
+PY
+```
+
+Confirm the log identifies the intended executable; startup may launch overlays
+or child programs. Check dump freshness and retain separate module identities.
+Memory dumps and metadata are additional artifacts, not guaranteed by this JSON
+collection command. Access widths suggest byte/word/dword uses; they do not by
+themselves prove complete C types. Unobserved code is not dead code.
+
+### 3. Analyze with ada_script, Inertia, Ghidra and Reko
+
+Run ada_script in an isolated working directory: its loader recreates
+`analysis.db` in the current directory. For supported MZ inputs:
+
+ada_script is now included in this checkout. Install its IDC parser dependency
+with `uv pip install --python "$PY" -e "$VEXTEST[ada]"` (or use pip from that
+environment). The imported sources are pinned under `vendor/ada_script`; the
+integrated CLI and signature adapter are under `tools/ada_script`.
+
+```bash
+(
+  cd "$WORK/analysis"
+  "$PY" "$ADA/ada.py" "$ORIGINAL" \
+    --runtime "$TRACE" --full --classify --xrefs \
+    -o "$WORK/reports/ada.md"
+)
+export LISTING="$WORK/analysis/${GAME_EXE%.*}.lst"
+export ASSEMBLY="$WORK/analysis/${GAME_EXE%.*}.asm"
+"$PY" "$VEXTEST/z3func.py" discover --exe "$ORIGINAL" \
+  --ida-listing "$LISTING" --out "$WORK/analysis/original.functions.json"
+"$PY" "$VEXTEST/z3func.py" import-libdosbox --trace "$TRACE" \
+  --functions "$WORK/analysis/original.functions.json" \
+  --out "$WORK/analysis/runtime-evidence.json"
+```
+
+Add `--idc-script /absolute/path/game.idc` when available. Inspect proposed
+function boundaries and address mappings. The imported evidence document is
+not itself a vector file. Aggregate-only traces provide priorities/access
+ranges; replay requires adequate per-call snapshots and explicit vector export.
+
+Library naming uses Inertia's shared PAT matcher before ASM/LST rendering.
+The automatic catalog includes library-archive provenance; use repeatable
+`--signature-catalog /path/runtime.pat` for explicit catalogs, or
+`--no-signatures` to disable it. Matched library names replace automatic labels,
+while explicit user/IDC names survive. Conflicting matches stay unnamed and
+are recorded in `signatures.json` and the SQLite `signature_matches` table.
+See [Ada Script integration](tools/ada_script/README.md) for controls and tests.
+
+Generate C independently from the original binary:
+
+```bash
+INERTIA_ENABLE_TAIL_VALIDATION=1 "$PY" "$VEXTEST/decompile.py" "$ORIGINAL" \
+  --c-target msc-dos --output-c-dir "$WORK/src/inertia" \
+  --dump-layers --dump-layer-dir "$WORK/analysis/layers" \
+  > "$WORK/reports/inertia.log" 2>&1
+```
+
+Use `--c-target portable-flat` for a native reconstruction and `--addr` for a
+focused function. Output/validation failures remain work items.
+
+Open the same hashed binary in Ghidra and/or Reko with the correct loader,
+CPU mode and load addresses. Record their function boundaries, cross-references,
+type hypotheses and pseudocode under `analysis/ghidra` or `analysis/reko`.
+Reconcile disagreements against bytes and observations. These tools complement
+Inertia; bidirectional import and direct runtime-JSON ingestion into Inertia
+are integration work, not flags provided by the commands above. Do not infer
+semantics by parsing another decompiler's rendered C.
+
+### 4. Build one of two candidate types
+
+**DOS reconstruction:** assemble recovered ASM, progressively replace routines
+with C, and use the target compiler/assembler/linker and appropriate CRT.
+Produce `$CANDIDATE` plus `$WORK/build/rebuilt.map`. A `.obj` is useful build
+evidence, but the current binary-comparison pipeline needs a linked image.
+Use the game's build recipe: memory model, near/far ABI, segment order, startup,
+libraries and compiler options are not interchangeable across games.
+
+**Native translation:** translate a copy of the recovered ASM with masm2c:
+
+```bash
+cp "$ASSEMBLY" "$WORK/translated/"
+LOADSEG=$("$PY" -c 'import json,sys; print(hex(json.load(open(sys.argv[1]))["Meta"]["DosboxLoadSeg"]))' "$TRACE")
+(
+  cd "$WORK/translated"
+  "$MASM2C/.venv/bin/python" "$MASM2C/masm2c.py" \
+    -j 1 -m separate -lo "$LOADSEG" "${GAME_EXE%.*}.asm"
+)
+```
+
+Build the resulting C++ with the game's masm2c/libdosbox runtime integration;
+translation alone does not link a native game. Preserve segment layout and
+dispatch mappings. Use faithful runtime settings, not `M2CDEBUG == -1`, for
+acceptance. Native translated code needs a guest-state adapter for dosunit;
+do not feed it to the DOS-image runner or assume flat32 Z3 proves its relation
+to segmented original code. Use libdosbox translated-runtime comparison while
+that adapter is absent. Existing ASM source can enter this workflow directly.
+
+### 5. Compare linked DOS binaries: instructions, then SSA/Z3
+
+First check supported MZ instructions with the local mzretools (v1.0.20):
+
+```bash
+"$MZTOOLS/mzdiff" "$ORIGINAL" "$CANDIDATE" \
+  --map "$WORK/analysis/original.map" --tmap "$WORK/build/rebuilt.map:link" \
+  > "$WORK/reports/mzdiff.log" 2>&1
+```
+
+This requires a prepared mzretools reference map; an arbitrary linker MAP is
+not that map format. For supported inputs without one, omit both map options
+for a limited entry-point comparison. Copy maps into the workdir because
+mzdiff can emit a companion `.tgt` map. Do not use ignore/skip/loose settings
+as acceptance. Its documented MZ/8086 scope is not verified 386 coverage.
+
+Create the candidate catalog and mapping using the original catalog from step 3:
+
+```bash
+"$PY" "$VEXTEST/z3func.py" discover --exe "$CANDIDATE" \
+  --map "$WORK/build/rebuilt.map" --out "$WORK/analysis/candidate.functions.json"
+"$PY" "$VEXTEST/z3func.py" make-mapping \
+  --oracle-functions "$WORK/analysis/original.functions.json" \
+  --candidate-functions "$WORK/analysis/candidate.functions.json" \
+  --out "$WORK/analysis/mapping.json"
+```
+
+Review the mapping before proving anything; names propose correspondence, they
+do not prove it. Use an explicit ABI/observable contract for assembly routines
+instead of assuming the default `msc16-near` ABI in this example:
+
+```bash
+"$PY" "$VEXTEST/z3func.py" ssa --exe "$ORIGINAL" \
+  --functions "$WORK/analysis/original.functions.json" \
+  --cache-dir "$WORK/build/ssa-cache" --out "$WORK/analysis/original.ssa.json"
+"$PY" "$VEXTEST/z3func.py" ssa --exe "$CANDIDATE" \
+  --functions "$WORK/analysis/candidate.functions.json" \
+  --cache-dir "$WORK/build/ssa-cache" --out "$WORK/analysis/candidate.ssa.json"
+"$PY" "$VEXTEST/z3func.py" compare-ssa \
+  --oracle-ssa "$WORK/analysis/original.ssa.json" \
+  --candidate-ssa "$WORK/analysis/candidate.ssa.json" \
+  --mapping "$WORK/analysis/mapping.json" --out "$WORK/reports/z3.json"
+"$PY" "$VEXTEST/z3func.py" report-failures \
+  --results "$WORK/reports/z3.json" --out "$WORK/reports/z3.md"
+```
+
+For process-bounded comparison of larger selections, see
+[Z3 Function Comparator](#z3-function-comparator).
+
+Byte identity, mapped instruction agreement and Z3 semantic equivalence are
+different results. Run eligible SSA/Z3 checks before concrete dosunit tests.
+Keep timeouts/refusals and normalization assumptions visible; a partial-region
+proof is not a whole-function proof. Preserve counterexamples for replay.
+
+### 6. Run concrete oracle tests, then full game scenarios
+
+With reviewed `original.functions.json`, `candidate.functions.json` and
+`mapping.json` under `$WORK/analysis`, generate bounded vectors and inspect
+their pointer/memory, stack and return setup before execution:
+
+```bash
+"$PY" "$VEXTEST/z3func.py" gen-vectors --exe "$ORIGINAL" \
+  --functions "$WORK/analysis/original.functions.json" --strategy edge \
+  --max-vectors-per-function 8 --out "$WORK/analysis/vectors.json"
+
+export DOSUNIT_KVIKDOS_C=/home/xor/kvikdos/kvikdos.c
+export DOSUNIT_CACHE_DIR="$WORK/build/dosunit-cache"
+"$PY" "$VEXTEST/z3func.py" record-oracle --exe "$ORIGINAL" \
+  --functions "$WORK/analysis/original.functions.json" \
+  --vectors "$WORK/analysis/vectors.json" --backend libkvikdos \
+  --out "$WORK/analysis/oracle-vectors.json"
+"$PY" "$VEXTEST/z3func.py" compare --candidate "$CANDIDATE" \
+  --functions "$WORK/analysis/candidate.functions.json" \
+  --vectors "$WORK/analysis/oracle-vectors.json" \
+  --mapping "$WORK/analysis/mapping.json" --backend libkvikdos \
+  --out "$WORK/reports/concrete.json"
+"$PY" "$VEXTEST/z3func.py" report-failures \
+  --results "$WORK/reports/concrete.json" --out "$WORK/reports/concrete.md"
+```
+
+The current libkvikdos backend builds a cached wrapper from `kvikdos.c`; it
+needs the native compiler and usable KVM access. Smoke-test it on a small
+fixture before a game batch. Backend failure is not candidate equivalence.
+The fixture backend tests orchestration, not the actual executable.
+
+Add boundary cases, realistic snapshots and realizable Z3 counterexamples.
+Run tested/proved functions as well as symbolic refusals; retain handwritten
+C tests for readable intent. Finish with loading, menus, gameplay transitions,
+input, graphics, sound, saving/loading and exit as applicable. Reset resources
+between original/candidate runs and record scenario coverage. Preserve the
+live guest-memory contract of `m2c::m` when using libdosbox.
+
+Track independent per-function build, instruction-match, symbolic-proof and
+concrete-test statuses, plus whole-game scenario results. Missing/unmapped
+functions stay in the denominator. See the
+[toolchain guide](reference/dos-c-reconstruction-toolchain.md) and
+[component integration plan](reference/dos-game-toolchain-integration.md).
+
 ## Decompile
 
 Main entry points:

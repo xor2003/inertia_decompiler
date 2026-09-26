@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run multiple focused decompile CLI invocations in one Python process.
+"""Run focused CLI jobs in disposable children of one warmed Python parent.
 
 Layer: Tooling/gates.
 Responsibility: owns batched focused decompile subprocess orchestration.
@@ -9,14 +9,16 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import io
 import json
+import logging
 import os
 import sys
 import time
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
+from typing import TextIO
 
 REPO_ROOT: Path = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -40,6 +42,14 @@ if __name__ == "__main__":
     _ensure_deterministic_python_runtime_8616()
 
 from inertia_decompiler import cli as decompiler_cli  # noqa: E402
+from inertia_decompiler.cli_terminal_status import CliTerminalStatus, emit_terminal_status  # noqa: E402
+from inertia_decompiler.fork_timeout import ForkChildExitError, run_with_timeout_in_fork  # noqa: E402
+from scripts.compiler_coverage_cross_unit import (  # noqa: E402
+    CrossUnitResult,
+    CrossUnitStatus,
+    check_cross_unit_c,
+)
+from scripts.decompile_process_budget import focused_decompile_process_timeout  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +72,7 @@ class BatchDecompileJob:
     binary: Path
     argv: list[str]
     direct_in_process: bool = False
+    timeout: int = 60
 
 
 @contextlib.contextmanager
@@ -109,21 +120,49 @@ def _build_proc_argv(args: argparse.Namespace, proc_name: str) -> list[str]:
     return argv
 
 
+def _rebind_logging_streams(sources: tuple[TextIO, TextIO], targets: tuple[TextIO, TextIO]) -> None:
+    """Retarget only logging handlers attached to the batch's exact console streams."""
+    loggers = [logging.getLogger()]
+    loggers.extend(item for item in tuple(logging.Logger.manager.loggerDict.values()) if isinstance(item, logging.Logger))
+    for logger in loggers:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.StreamHandler):
+                for source, target in zip(sources, targets, strict=True):
+                    if handler.stream is source:
+                        handler.setStream(target)
+                        break
+
+
+@contextlib.contextmanager
+def _job_logging_streams(stdout_file: TextIO, stderr_file: TextIO) -> Iterator[None]:
+    """Route existing and lazily created console handlers without leaving closed streams."""
+    previous = (sys.stdout, sys.stderr)
+    current = (stdout_file, stderr_file)
+    _rebind_logging_streams(previous, current)
+    try:
+        yield
+    finally:
+        _rebind_logging_streams(current, previous)
+
+
 def _run_one_job(args: argparse.Namespace, job: BatchDecompileJob) -> BatchProcResult:
-    """Run one focused decompile job through the public CLI and persist captured output."""
+    """Run a focused CLI job while retaining completed output lines on interruption."""
 
     stdout_path = args.out_dir / f"{job.name}.stdout.c"
     stderr_path = args.out_dir / f"{job.name}.stderr.txt"
     original_argv = sys.argv[:]
-    stdout_buffer = io.StringIO()
-    stderr_buffer = io.StringIO()
     start = time.perf_counter()
     try:
         sys.argv = [str(REPO_ROOT / "decompile.py"), *job.argv]
         with (
+            # Case deadlines may kill this process before the CLI returns.
+            # Line buffering preserves emitted evidence without a final copy.
+            stdout_path.open("w", encoding="utf-8", buffering=1) as stdout_file,
+            stderr_path.open("w", encoding="utf-8", buffering=1) as stderr_file,
             _direct_in_process_env(job.direct_in_process),
-            contextlib.redirect_stdout(stdout_buffer),
-            contextlib.redirect_stderr(stderr_buffer),
+            _job_logging_streams(stdout_file, stderr_file),
+            contextlib.redirect_stdout(stdout_file),
+            contextlib.redirect_stderr(stderr_file),
         ):
             returncode = int(decompiler_cli.main(job.argv))
     except SystemExit as ex:
@@ -132,8 +171,6 @@ def _run_one_job(args: argparse.Namespace, job: BatchDecompileJob) -> BatchProcR
     finally:
         elapsed = time.perf_counter() - start
         sys.argv = original_argv
-    stdout_path.write_text(stdout_buffer.getvalue(), encoding="utf-8")
-    stderr_path.write_text(stderr_buffer.getvalue(), encoding="utf-8")
     return BatchProcResult(
         proc=job.name,
         returncode=returncode,
@@ -144,16 +181,46 @@ def _run_one_job(args: argparse.Namespace, job: BatchDecompileJob) -> BatchProcR
     )
 
 
+def _run_isolated_job(args: argparse.Namespace, job: BatchDecompileJob) -> BatchProcResult:
+    """Contain hard exits and timed-out analysis state within one disposable job."""
+    start = time.perf_counter()
+    timeout = focused_decompile_process_timeout(job.timeout)
+    try:
+        result: BatchProcResult = run_with_timeout_in_fork(partial(_run_one_job, args, job), timeout=timeout)
+        return result
+    except ForkChildExitError as error:
+        if error.returncode == 0:
+            # A clean exit without its result is transport failure, not success.
+            raise
+        returncode = error.returncode
+        detail = str(error)
+        timed_out = False
+    except TimeoutError as error:
+        returncode = 3
+        detail = str(error)
+        timed_out = True
+    stderr_path = args.out_dir / f"{job.name}.stderr.txt"
+    with stderr_path.open("a", encoding="utf-8") as diagnostics, contextlib.redirect_stderr(diagnostics):
+        print(f"[batch-process] {detail}", file=diagnostics)
+        if timed_out:
+            emit_terminal_status(CliTerminalStatus.TIMEOUT)
+    return BatchProcResult(
+        job.name, returncode, str(args.out_dir / f"{job.name}.stdout.c"), str(stderr_path),
+        time.perf_counter() - start, job.argv,
+    )
+
+
 def _run_one_proc(args: argparse.Namespace, proc_name: str) -> BatchProcResult:
     """Run one legacy same-binary focused proc job."""
 
-    return _run_one_job(
+    return _run_isolated_job(
         args,
         BatchDecompileJob(
             name=proc_name,
             binary=args.binary,
             argv=_build_proc_argv(args, proc_name),
             direct_in_process=bool(args.direct_in_process),
+            timeout=args.timeout,
         ),
     )
 
@@ -206,6 +273,8 @@ def _build_job_argv(raw_job: dict[str, object]) -> list[str]:
 
 def _extend_optional_flag_args(argv: list[str], raw_job: dict[str, object]) -> None:
     """Append job-specific CLI flags for each populated optional field."""
+    if raw_job.get("ignore_local_sidecar_hints") is True:
+        argv.append("--ignore-local-sidecar-hints")
     function_discovery_backend = _optional_str(raw_job, "function_discovery_backend")
     if function_discovery_backend is not None:
         argv.extend(["--function-discovery-backend", function_discovery_backend])
@@ -247,6 +316,7 @@ def _load_jobs(job_file: Path) -> list[BatchDecompileJob]:
                 binary=_path_field(raw_job, "binary"),
                 argv=_build_job_argv(raw_job),
                 direct_in_process=bool(_optional_bool(raw_job, "direct_in_process")),
+                timeout=_optional_int(raw_job, "timeout") or 60,
             )
         )
     return jobs
@@ -268,6 +338,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--pat-backend", default=None)
     parser.add_argument("--signature-catalog", type=Path, default=None)
     parser.add_argument(
+        "--check-cross-unit", action="store_true",
+        help="Link generated C units with GCC LTO and reject conflicting interfaces.",
+    )
+    parser.add_argument(
         "--direct-in-process",
         action="store_true",
         help="Run direct-address focused jobs in-process instead of through the CLI fork lane.",
@@ -275,23 +349,71 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _write_batch_report(
+    args: argparse.Namespace,
+    results: list[BatchProcResult],
+    cross_unit: CrossUnitResult | None = None,
+) -> None:
+    """Atomically checkpoint finished jobs; absent records never imply success."""
+    report: dict[str, object] = {
+        "schema": "inertia.batch_decompile_procs.v1",
+        "binary": str(args.binary) if args.binary is not None else None,
+        "results": [asdict(result) for result in results],
+    }
+    if cross_unit is not None:
+        report["cross_unit"] = asdict(cross_unit)
+    report_path = args.out_dir / "batch_report.json"
+    temporary_path = args.out_dir / f".batch_report.{os.getpid()}.tmp"
+    try:
+        temporary_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        temporary_path.replace(report_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Run the requested focused proc batch and write ``batch_report.json``."""
+    """Run focused jobs, checkpointing their report before starting the next job."""
 
     args = _parse_args(argv)
     if args.job_file is None and (args.binary is None or not args.proc):
         raise SystemExit("--job-file or both binary and --proc are required")
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    results: list[BatchProcResult] = []
+    _write_batch_report(args, results)
     jobs = _load_jobs(args.job_file) if args.job_file is not None else []
-    results = [_run_one_job(args, job) for job in jobs] if jobs else [_run_one_proc(args, proc_name) for proc_name in args.proc]
-    report = {
-        "schema": "inertia.batch_decompile_procs.v1",
-        "binary": str(args.binary) if args.binary is not None else None,
-        "results": [asdict(result) for result in results],
-    }
-    (args.out_dir / "batch_report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({"failed": sum(1 for item in results if item.returncode != 0), "selected": len(results)}))
-    return 1 if any(result.returncode != 0 for result in results) else 0
+    # Resolve the lazy CLI implementation once, before forking any jobs. Only
+    # imports are shared: analysis and its hard exits stay in disposable children.
+    _ = decompiler_cli.main
+    if jobs:
+        for job in jobs:
+            results.append(_run_isolated_job(args, job))
+            _write_batch_report(args, results)
+    else:
+        for proc_name in args.proc:
+            results.append(_run_one_proc(args, proc_name))
+            _write_batch_report(args, results)
+    failed_jobs = sum(1 for item in results if item.returncode != 0)
+    cross_unit: CrossUnitResult | None = None
+    if args.check_cross_unit:
+        sources = [Path(item.stdout_path) for item in results]
+        cross_unit = (
+            check_cross_unit_c(sources, args.out_dir / "batch_cross_unit.o")
+            if failed_jobs == 0
+            else CrossUnitResult(
+                CrossUnitStatus.NOT_ATTEMPTED,
+                tuple(str(source) for source in sources),
+                (),
+                None,
+                "",
+            )
+        )
+        _write_batch_report(args, results, cross_unit)
+    cross_unit_failed = args.check_cross_unit and (
+        cross_unit is None or cross_unit.status is not CrossUnitStatus.PASSED
+    )
+    print(json.dumps({"failed": failed_jobs, "selected": len(results),
+                      "cross_unit": cross_unit.status.value if cross_unit is not None else None}))
+    return 1 if failed_jobs or cross_unit_failed else 0
 
 
 if __name__ == "__main__":

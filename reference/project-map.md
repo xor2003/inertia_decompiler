@@ -7,6 +7,9 @@ This is the fast startup map for agents. Read `AGENTS.md` first, then this file,
 - `angr_platforms/angr_platforms/X86_16/` owns the 16-bit x86 decompiler core: frontend, IR, semantics, alias, widening, lowering, structuring, postprocess cleanup, and tail validation. Use `reference/decompiler-map.md` before changing this area.
 - `inertia_decompiler/` owns CLI orchestration, fallback/reporting, cache, sidecar loading, debugger helpers, and user-facing command behavior. It must not become the owner of decompiler semantics.
 - `dosunit.py` owns the DOS unit execution harness. Use `reference/dosunit-execution-spec.md` plus the related `reference/dosunit-*-dod.md` files before changing execution or equivalence logic.
+- `ada.py` and `tools/ada_script/` integrate annotated DOS disassembly and shared
+  signature naming. `vendor/ada_script/` is the pinned upstream snapshot, not
+  the semantic IR owner; see `tools/ada_script/README.md`.
 - `signature_catalog.py`, `omf_pat.py`, `signature_catalogs/`, and `scripts/build_signature_catalog.py` own compiler/library signature catalogs and pattern import/export. They are evidence inputs, not proof of general decompiler semantics.
 - `scripts/test_pipeline.py` owns the curated project pipeline. Its fast tier is unit-focused only; default and expanded tiers own external compiler/decompiler smoke lanes.
 - `scripts/build_msc6_examples.py` owns the MS C example build/decompile/recompile/run lane.
@@ -26,6 +29,8 @@ Rewrite and `decompiler_postprocess_*.py` are cleanup bridges only. Do not add a
 ## Startup Reading
 
 - General work: `AGENTS.md`, then `reference/project-map.md`.
+- Choosing reconstruction tools: `reference/dos-c-reconstruction-toolchain.md`
+  orders instruction matching, concrete oracle tests, SSA/Z3 proofs and runtime acceptance.
 - Decompiler work: add `reference/decompiler-map.md` and `reference/agent-rules.md`.
 - DOS execution work: add `reference/dosunit-execution-spec.md` and the matching DoD file.
 - SORTDEMO/SORTD work: read `SORTD_GHIDRA_PLAN.md` before touching ReInitBars,

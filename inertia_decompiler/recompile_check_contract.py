@@ -41,5 +41,5 @@ class RecompileCheckResult:
 
     @property
     def toolchain_unavailable(self) -> bool:
-        """Return whether the check could not run because its toolchain is missing."""
+        """Return whether the toolchain is missing or cannot execute in this environment."""
         return self.outcome is RecompileCheckOutcome.TOOLCHAIN_UNAVAILABLE

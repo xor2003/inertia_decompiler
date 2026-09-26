@@ -250,6 +250,13 @@ def _structured_slot_names_for_type_8616(value_type: type) -> tuple[str, ...]:
 
 def _structured_slot_names_8616(value: object) -> tuple[str, ...]:
     """List child slots across the dynamic third-party angr C AST boundary."""
+    # These exact leaf classes own every value/reference field in their slots.
+    # Inherited ident/collapsed fields are display metadata, not AST children.
+    # Subclasses and same-named extensions must retain generic field discovery.
+    if type(value) is CConstant:
+        return ("reference_values", "value")
+    if type(value) is CVariable:
+        return ("unified_variable", "variable", "variable_type", "vvar_id")
     child_attrs = _STRUCTURED_CHILD_ATTRS_BY_CLASS_8616.get(type(value).__name__)
     if child_attrs is not None:
         return child_attrs

@@ -20,7 +20,12 @@ from scripts.compiler_coverage_result import CoverageOutcome
 from scripts.compiler_coverage_runner import run_source_case
 from scripts.msc6_memory_model import MSCMemoryModel
 
-BOUNDED_OPTIONS = (
+# The verified Release build of the plan's MS-DOS branch revision. Updating this
+# pair requires an explicit rebuild/replay checkpoint, not trusting --version.
+PINNED_GENERATOR_REVISION: str = "35e702de01e158bc948a2024d0e187c1803d1ebb"
+PINNED_GENERATOR_SHA256: str = "f75bbeaacab98f1048340db1462700d035dd1f7c03e3470e6beb010b1f0511eb"
+
+BOUNDED_OPTIONS: tuple[str, ...] = (
     "--max-funcs", "1", "--max-block-depth", "2", "--max-block-size", "2",
     "--max-expr-complexity", "3", "--max-array-dim", "1", "--max-array-len-per-dim", "4",
 )
@@ -43,11 +48,13 @@ def generate_candidate(csmith: Path, seed: int, output: Path, *, timeout: float 
     executable = csmith.resolve(strict=True)
     if not executable.is_file():
         raise ValueError("Csmith executable must be a file")
+    generator = input_fingerprint(executable)
+    if generator.get("sha256") != PINNED_GENERATOR_SHA256:
+        raise ValueError(f"Csmith executable does not match the pinned build of {PINNED_GENERATOR_REVISION}")
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     # --output embeds its path in the source header, breaking cross-directory replay.
     command = [str(executable), "--seed", str(seed), *BOUNDED_OPTIONS]
-    generator = input_fingerprint(executable)
     source = output / "csmith.c"
     outcome = GenerationOutcome.FAILED
     returncode: int | None = None
@@ -66,6 +73,7 @@ def generate_candidate(csmith: Path, seed: int, output: Path, *, timeout: float 
             error = str(failure)
     report = {
         "schema": 1, "seed": seed, "command": command, "generator": generator,
+        "generator_revision": PINNED_GENERATOR_REVISION,
         "outcome": outcome.value, "returncode": returncode, "error": error,
         "seconds": time.monotonic() - start, "timeout_seconds": timeout,
         "source": input_fingerprint(source), "roundtrip_attempted": False,

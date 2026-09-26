@@ -11890,6 +11890,8 @@ def test_recompile_check_msc51_retries_transient_kvikdos_failure(monkeypatch, tm
     calls = {"count": 0}
 
     def _fake_run(_command, **_kwargs):
+        if _command[-1] == "--kvm-check":
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
         calls["count"] += 1
         if calls["count"] == 1:
             return SimpleNamespace(

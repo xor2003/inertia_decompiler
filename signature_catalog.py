@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from inertia_decompiler.cache import (
+    DECOMPILATION_CACHE_DIR,
     _cache_file_fingerprint,
     _cache_source_digest,
     _load_cache_json,
@@ -32,6 +33,7 @@ from omf_pat import (
 _SIGNATURE_MATCH_CACHE_COMPONENTS = (
     Path(__file__).resolve(),
     Path(__file__).resolve().parent / "omf_pat.py",
+    Path(__file__).resolve().parent / "pat_literal_filter.py",
 )
 
 
@@ -53,36 +55,44 @@ def discover_signature_inputs(
     recursive: bool = True,
 ) -> tuple[Path, ...]:
     """Return PAT/OBJ/LIB inputs selected for optional signature catalog import."""
+    inputs: list[Path] = []
+    seen: set[Path] = set()
+    suffixes = {".pat", ".obj", ".lib"}
+    for root in roots:
+        root = root.resolve()
+        if root.is_file():
+            if root.suffix.lower() in suffixes and root not in seen:
+                seen.add(root)
+                inputs.append(root)
+            continue
+        if not root.is_dir():
+            continue
+        inputs.extend(_iter_dir_signature_inputs(root, suffixes, recursive, seen))
+    return tuple(inputs)
 
-    def _impl() -> tuple[Path, ...]:
-        inputs: list[Path] = []
-        seen: set[Path] = set()
-        suffixes = {".pat", ".obj", ".lib"}
-        for root in roots:
-            root = root.resolve()
-            if root.is_file():
-                if root.suffix.lower() in suffixes and root not in seen:
-                    seen.add(root)
-                    inputs.append(root)
-                continue
-            if not root.is_dir():
-                continue
-            iterator = root.rglob("*") if recursive else root.glob("*")
-            for candidate in sorted(iterator):
-                if not candidate.is_file():
-                    continue
-                if candidate.suffix.lower() not in suffixes:
-                    continue
-                if any(part in {".inertia_pat_cache", ".signature_catalog_cache", "__pycache__"} for part in candidate.parts):
-                    continue
-                resolved = candidate.resolve()
-                if resolved in seen:
-                    continue
-                seen.add(resolved)
-                inputs.append(resolved)
-        return tuple(inputs)
 
-    return _impl()
+def _iter_dir_signature_inputs(
+    root: Path,
+    suffixes: set[str],
+    recursive: bool,
+    seen: set[Path],
+) -> list[Path]:
+    """Collect signature inputs under one directory root."""
+    inputs: list[Path] = []
+    iterator = root.rglob("*") if recursive else root.glob("*")
+    for candidate in sorted(iterator):
+        if not candidate.is_file():
+            continue
+        if candidate.suffix.lower() not in suffixes:
+            continue
+        if any(part in {".inertia_pat_cache", ".signature_catalog_cache", "__pycache__"} for part in candidate.parts):
+            continue
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        inputs.append(resolved)
+    return inputs
 
 
 def build_signature_catalog(
@@ -194,57 +204,76 @@ def match_signature_catalog(
     compiler_names: tuple[str, ...] = (),
 ) -> LocalPatMatchResult:
     """Match an optional signature catalog against a loaded angr project image."""
+    if signature_matching_disabled():
+        return LocalPatMatchResult({}, {}, ())
+    if not catalog_path.exists():
+        return LocalPatMatchResult({}, {}, ())
+    loaded_image = _load_project_image(project)
+    if loaded_image is None:
+        return LocalPatMatchResult({}, {}, ())
+    image_bytes, min_addr = loaded_image
+    cache_key = _signature_catalog_match_cache_key(
+        catalog_path=catalog_path,
+        binary_path=binary_path,
+        backend=backend,
+        compiler_names=compiler_names,
+    )
+    if cache_key is not None:
+        cached = _load_cache_json("signature_catalog_match", cache_key)
+        cached_result = _decode_signature_catalog_match(cached)
+        if cached_result is not None:
+            return cached_result
 
-    def _impl() -> LocalPatMatchResult:
-        if signature_matching_disabled():
-            return LocalPatMatchResult({}, {}, ())
-        if not catalog_path.exists():
-            return LocalPatMatchResult({}, {}, ())
-        main_object = getattr(getattr(project, "loader", None), "main_object", None)
-        memory = getattr(getattr(project, "loader", None), "memory", None)
-        if main_object is None or memory is None:
-            return LocalPatMatchResult({}, {}, ())
-        min_addr = getattr(main_object, "min_addr", None)
-        max_addr = getattr(main_object, "max_addr", None)
-        if not isinstance(min_addr, int) or not isinstance(max_addr, int) or max_addr < min_addr:
-            return LocalPatMatchResult({}, {}, ())
-        size = max_addr - min_addr + 1
-        try:
-            image_bytes = bytes(memory.load(min_addr, size))
-        except Exception:
-            return LocalPatMatchResult({}, {}, ())
-        cache_key = _signature_catalog_match_cache_key(
-            catalog_path=catalog_path,
-            binary_path=binary_path,
-            backend=backend,
-            compiler_names=compiler_names,
-        )
-        if cache_key is not None:
-            cached = _load_cache_json("signature_catalog_match", cache_key)
-            cached_result = _decode_signature_catalog_match(cached)
-            if cached_result is not None:
-                return cached_result
+    specs = _load_filtered_catalog_specs(catalog_path, cache_dir, compiler_names)
+    if not specs:
+        return LocalPatMatchResult({}, {}, ())
+    code_labels, code_ranges, matched_compiler_names = match_pat_modules(
+        image_bytes,
+        min_addr,
+        specs,
+        backend=backend,
+    )
+    source_formats = ("signature_catalog",) if code_labels or code_ranges else ()
+    result = LocalPatMatchResult(code_labels, code_ranges, source_formats, matched_compiler_names)
+    if cache_key is not None:
+        _store_cache_json("signature_catalog_match", cache_key, _encode_signature_catalog_match(result))
+    return result
 
-        effective_cache_dir = cache_dir or (binary_path.parent / ".inertia_pat_cache")
-        specs = load_cached_pat_regex_specs(catalog_path, effective_cache_dir)
-        if not specs:
-            return LocalPatMatchResult({}, {}, ())
-        filtered_specs = _filter_specs_by_compiler_names(specs, compiler_names)
-        if filtered_specs:
-            specs = filtered_specs
-        code_labels, code_ranges, matched_compiler_names = match_pat_modules(
-            image_bytes,
-            min_addr,
-            specs,
-            backend=backend,
-        )
-        source_formats = ("signature_catalog",) if code_labels or code_ranges else ()
-        result = LocalPatMatchResult(code_labels, code_ranges, source_formats, matched_compiler_names)
-        if cache_key is not None:
-            _store_cache_json("signature_catalog_match", cache_key, _encode_signature_catalog_match(result))
-        return result
 
-    return _impl()
+def _load_project_image(project: object) -> tuple[bytes, int] | None:
+    """Return (image_bytes, min_addr) for the project main object, or None."""
+    main_object = getattr(getattr(project, "loader", None), "main_object", None)
+    memory = getattr(getattr(project, "loader", None), "memory", None)
+    if main_object is None or memory is None:
+        return None
+    min_addr = getattr(main_object, "min_addr", None)
+    max_addr = getattr(main_object, "max_addr", None)
+    if not isinstance(min_addr, int) or not isinstance(max_addr, int) or max_addr < min_addr:
+        return None
+    size = max_addr - min_addr + 1
+    try:
+        image_bytes = bytes(memory.load(min_addr, size))
+    except Exception:
+        return None
+    return image_bytes, min_addr
+
+
+def _load_filtered_catalog_specs(
+    catalog_path: Path,
+    cache_dir: Path | None,
+    compiler_names: tuple[str, ...],
+) -> tuple[CachedPatRegexSpec, ...]:
+    """Load cached PAT regex specs, narrowed by compiler-name filters."""
+    # Pattern specs depend on the catalog and builder, not the executable.
+    # Fresh per-case artifact directories must not force repeated parsing.
+    effective_cache_dir = cache_dir or (DECOMPILATION_CACHE_DIR / "signature_catalog_specs")
+    specs = load_cached_pat_regex_specs(catalog_path, effective_cache_dir)
+    if not specs:
+        return ()
+    filtered_specs = _filter_specs_by_compiler_names(specs, compiler_names)
+    if filtered_specs:
+        specs = filtered_specs
+    return specs
 
 
 def _signature_catalog_match_cache_key(
@@ -279,37 +308,46 @@ def _encode_signature_catalog_match(result: LocalPatMatchResult) -> dict[str, ob
 
 
 def _decode_signature_catalog_match(payload: dict[str, object] | None) -> LocalPatMatchResult | None:
-    def _impl() -> LocalPatMatchResult | None:
-        if not isinstance(payload, dict):
-            return None
-        raw_labels = payload.get("code_labels")
-        raw_ranges = payload.get("code_ranges")
-        if not isinstance(raw_labels, dict) or not isinstance(raw_ranges, dict):
-            return None
-        code_labels: dict[int, str] = {}
-        code_ranges: dict[int, tuple[int, int]] = {}
-        try:
-            for addr_text, name in raw_labels.items():
-                if not isinstance(name, str):
-                    return None
-                code_labels[int(addr_text)] = name
-            for addr_text, span in raw_ranges.items():
-                if not (isinstance(span, list) and len(span) == 2 and all(isinstance(value, int) for value in span)):
-                    return None
-                code_ranges[int(addr_text)] = (span[0], span[1])
-        except (TypeError, ValueError):
-            return None
-        raw_formats = payload.get("source_formats", ())
-        if not isinstance(raw_formats, (tuple, list)):
-            return None
-        raw_compilers = payload.get("matched_compiler_names", ())
-        if not isinstance(raw_compilers, (tuple, list)):
-            return None
-        source_formats = tuple(value for value in raw_formats if isinstance(value, str))
-        matched_compiler_names = tuple(value for value in raw_compilers if isinstance(value, str))
-        return LocalPatMatchResult(code_labels, code_ranges, source_formats, matched_compiler_names)
+    if not isinstance(payload, dict):
+        return None
+    raw_labels = payload.get("code_labels")
+    raw_ranges = payload.get("code_ranges")
+    if not isinstance(raw_labels, dict) or not isinstance(raw_ranges, dict):
+        return None
+    decoded = _decode_match_label_range_maps(raw_labels, raw_ranges)
+    if decoded is None:
+        return None
+    code_labels, code_ranges = decoded
+    raw_formats = payload.get("source_formats", ())
+    if not isinstance(raw_formats, (tuple, list)):
+        return None
+    raw_compilers = payload.get("matched_compiler_names", ())
+    if not isinstance(raw_compilers, (tuple, list)):
+        return None
+    source_formats = tuple(value for value in raw_formats if isinstance(value, str))
+    matched_compiler_names = tuple(value for value in raw_compilers if isinstance(value, str))
+    return LocalPatMatchResult(code_labels, code_ranges, source_formats, matched_compiler_names)
 
-    return _impl()
+
+def _decode_match_label_range_maps(
+    raw_labels: dict[object, object],
+    raw_ranges: dict[object, object],
+) -> tuple[dict[int, str], dict[int, tuple[int, int]]] | None:
+    """Decode the label and range maps from a cached match payload."""
+    code_labels: dict[int, str] = {}
+    code_ranges: dict[int, tuple[int, int]] = {}
+    try:
+        for addr_text, name in raw_labels.items():
+            if not isinstance(name, str):
+                return None
+            code_labels[int(addr_text)] = name
+        for addr_text, span in raw_ranges.items():
+            if not (isinstance(span, list) and len(span) == 2 and all(isinstance(value, int) for value in span)):
+                return None
+            code_ranges[int(addr_text)] = (span[0], span[1])
+    except (TypeError, ValueError):
+        return None
+    return code_labels, code_ranges
 
 
 def _filter_specs_by_compiler_names(

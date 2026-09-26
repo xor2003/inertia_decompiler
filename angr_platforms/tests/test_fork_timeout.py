@@ -4,7 +4,17 @@ import sys
 import time
 from pathlib import Path
 
-from inertia_decompiler.fork_timeout import run_captured_subprocess_tree, run_with_timeout_in_fork
+import pytest
+
+from inertia_decompiler.fork_timeout import ForkChildExitError, run_captured_subprocess_tree, run_with_timeout_in_fork
+
+
+@pytest.mark.parametrize("exit_code", [0, 3, 17])
+def test_fork_hard_exit_preserves_typed_returncode(exit_code):
+    """No-result exits retain OS status, including zero without an IPC result."""
+    with pytest.raises(ForkChildExitError) as captured:
+        run_with_timeout_in_fork(lambda: os._exit(exit_code), timeout=5)
+    assert captured.value.returncode == exit_code
 
 
 def _process_is_running(pid: int) -> bool:

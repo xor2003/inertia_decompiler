@@ -28,6 +28,11 @@ DEFAULT_MSC6_ROOT: Path = Path("/home/xor/inertia_player/dos_compilers/Microsoft
 DEFAULT_ULTRA_QUICKC_ROOT: Path = REPO_ROOT / "borrow" / "UltraDecompiler" / "QuickC"
 
 FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
+    "angr_platforms/tests/test_x86_16_calling_convention_compat.py",
+    "angr_platforms/tests/test_fork_timeout.py",
+    "angr_platforms/tests/test_batch_decompile_procs_runtime.py",
+    "angr_platforms/tests/test_x86_16_c_ast_utils.py",
+    "angr_platforms/tests/test_cli_semantic_rollback.py",
     "angr_platforms/tests/test_cli_c_text_postprocess.py::test_known_helper_signature_text_preserves_recovered_signature",
     "angr_platforms/tests/test_x86_16_cod_samples.py::test_dosfunc_cod_sample_process_helpers_stay_empty",
     "angr_platforms/tests/test_cod_stability_sweep.py",
@@ -100,6 +105,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_x86_16_smoketest.py",
     "angr_platforms/tests/test_build_msc6_examples.py",
     "angr_platforms/tests/test_msc6_binary_recovery_policy.py",
+    "angr_platforms/tests/test_x86_16_frontend_capstone_decode.py",
     "angr_platforms/tests/test_compiler_coverage_manifest.py",
     "angr_platforms/tests/test_compiler_coverage_csmith.py",
     "angr_platforms/tests/test_compiler_coverage_pointer_oracle.py",
@@ -117,6 +123,8 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_import_ultra_quickc_fixtures.py",
     "angr_platforms/tests/test_generated_c_indexed_argument_contract.py",
     "angr_platforms/tests/test_omf_pat_lidata.py",
+    "angr_platforms/tests/test_pat_literal_prefilter.py",
+    "angr_platforms/tests/test_pat_catalog_cache_identity.py",
     "angr_platforms/tests/test_omf_pat_fixup_encoding.py",
     "angr_platforms/tests/test_test_pipeline.py",
     "angr_platforms/tests/test_msc6_runtime_gate_artifacts.py",
@@ -125,6 +133,7 @@ FOCUSED_PYTEST_TARGETS: tuple[str, ...] = (
     "angr_platforms/tests/test_signature_catalog_without_flair.py",
     "angr_platforms/tests/test_binary_signature_metadata.py",
     "angr_platforms/tests/test_signature_match_ambiguity.py",
+    "angr_platforms/tests/test_ada_signature_integration.py",
     "angr_platforms/tests/test_default_signature_provenance.py",
     "angr_platforms/tests/test_metadata_evidence.py",
     "angr_platforms/tests/test_near_pointer_argument_values.py",

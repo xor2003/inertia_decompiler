@@ -26,6 +26,17 @@ from dataclasses import dataclass
 _ROOT_PROCESS_GROUP: int | None = None
 
 
+class ForkChildExitError(RuntimeError):
+    """Expose a reaped child's exit status when no complete IPC result exists."""
+
+    returncode: int
+
+    def __init__(self, message: str, child_status: int) -> None:
+        """Keep the full diagnostic and an OS-decoded exit code or negative signal."""
+        super().__init__(message)
+        self.returncode = os.waitstatus_to_exitcode(child_status)
+
+
 class _ForkResultKind(enum.Enum):
     """Classify the structured result sent by a timeout child."""
 
@@ -182,7 +193,7 @@ def _fail_incomplete_child_8616(
     _waited_pid, child_status = os.waitpid(pid, 0)
     if timed_out:
         raise TimeoutError(f"Timed out after {timeout}s (child {_child_exit_detail(child_status)}).")
-    raise RuntimeError(render_error(child_status))
+    raise ForkChildExitError(render_error(child_status), child_status)
 
 
 def _read_result_frame_8616(
@@ -219,11 +230,11 @@ def _read_result_frame_8616(
     return framed_data, child_status
 
 
-def _decode_fork_result_8616[ResultT](
+def _decode_fork_result_8616(
     framed_data: bytes,
     child_status: int,
     timeout: int,
-) -> ResultT:
+) -> object:
     """Decode the child's framed result, re-raising its typed failure."""
     result = pickle.loads(framed_data)
     if not isinstance(result, _ForkResult):
@@ -231,7 +242,7 @@ def _decode_fork_result_8616[ResultT](
             f"fork child returned invalid payload ({_child_exit_detail(child_status)})"
         )
     if result.kind is _ForkResultKind.OK:
-        return typing.cast(ResultT, result.value)
+        return result.value
     if result.error_type in {"TimeoutError", "AnalysisTimeout"}:
         raise TimeoutError(result.error_detail or f"Timed out after {timeout}s.")
     raise RuntimeError(
@@ -268,7 +279,7 @@ def run_with_timeout_in_fork[ResultT](
         framed_data, child_status = _read_result_frame_8616(
             read_fd, pid, owns_process_group, deadline, timeout
         )
-        return _decode_fork_result_8616(framed_data, child_status, timeout)
+        return typing.cast(ResultT, _decode_fork_result_8616(framed_data, child_status, timeout))
     finally:
         with contextlib.suppress(OSError):
             os.close(read_fd)

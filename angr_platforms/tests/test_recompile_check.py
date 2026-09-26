@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 import inertia_decompiler.recompile_check as recompile_check
 from inertia_decompiler.recompile_check import check_c_recompiles_8616
+from inertia_decompiler.recompile_check_contract import RecompileCheckOutcome, RecompileCheckResult
 
 
 def _completed_process(
@@ -163,13 +165,17 @@ def test_msc_recompile_rejects_nonzero_exit_without_diagnostic_keyword(
     monkeypatch.setattr(
         recompile_check.subprocess,
         "run",
-        lambda *_args, **_kwargs: _completed_process(1, stderr="compilation stopped\n"),
+        lambda command, **_kwargs: (
+            _completed_process(0) if command[-1] == "--kvm-check"
+            else _completed_process(1, stderr="compilation stopped\n")
+        ),
     )
 
     result = check_c_recompiles_8616("int demo(void) { return 0; }\n", target="msc-dos")
 
     assert result.passed is False
     assert result.exit_code == 1
+    assert result.outcome is RecompileCheckOutcome.FAILED
 
 
 def test_msc_compile_payload_uses_dos_header_aggregate_definitions() -> None:
@@ -192,3 +198,90 @@ def test_msc_compile_payload_uses_dos_header_aggregate_definitions() -> None:
     assert "typedef struct SREGS SREGS;" in payload
     assert "extern REGS rin;" in payload
     assert "extern SREGS sreg;" in payload
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_msc_non_utf8_diagnostics_preserve_compiler_verdict(monkeypatch, tmp_path, exit_code):
+    """DOS/emulator bytes must not replace the compiler result with a decode crash."""
+    monkeypatch.setattr(recompile_check, "_resolve_kvikdos_path", lambda: tmp_path / "kvikdos")
+    monkeypatch.setattr(recompile_check, "_resolve_msc51_root", lambda: tmp_path)
+    real_run = subprocess.run
+
+    def run(command, **kwargs):
+        if command[-1] == "--kvm-check":
+            return _completed_process(0)
+        return real_run(
+            [sys.executable, "-c",
+             "import os, sys; os.write(1, b'\\xc1 diagnostic\\n'); "
+             "os.write(2, b'\\xff diagnostic\\n'); sys.exit(int(sys.argv[1]))", str(exit_code)],
+            **kwargs,
+        )
+
+    monkeypatch.setattr(recompile_check.subprocess, "run", run)
+    result = check_c_recompiles_8616("int demo(void) { return 0; }", target="msc-dos")
+    assert result.exit_code == exit_code
+    assert result.passed is (exit_code == 0)
+    assert result.stdout == "\\xc1 diagnostic\n"
+    assert result.stderr == "\\xff diagnostic\n"
+
+
+@pytest.mark.parametrize("probe_failure,exit_code", [("exit", 252), ("timeout", 124), ("missing", 127), ("denied", 126)])
+def test_msc_unavailable_execution_capability_is_not_a_c_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, probe_failure: str, exit_code: int
+) -> None:
+    """A failed emulator probe must not attempt or blame compilation of the C."""
+    kvikdos = tmp_path / "kvikdos"
+    monkeypatch.setattr(recompile_check, "_resolve_kvikdos_path", lambda: kvikdos)
+    monkeypatch.setattr(recompile_check, "_resolve_msc51_root", lambda: tmp_path)
+    commands: list[tuple[str, ...]] = []
+
+    def run(command: tuple[str, ...], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        if probe_failure == "timeout":
+            raise subprocess.TimeoutExpired(command, timeout=20, stderr="probe incomplete")
+        if probe_failure == "missing":
+            raise FileNotFoundError("emulator disappeared")
+        if probe_failure == "denied":
+            raise PermissionError("emulator execution denied")
+        return _completed_process(252, stderr="device unavailable")
+
+    monkeypatch.setattr(recompile_check.subprocess, "run", run)
+    result = check_c_recompiles_8616("int demo(void) { return 0; }", target="msc-dos")
+
+    assert result.outcome is RecompileCheckOutcome.TOOLCHAIN_UNAVAILABLE
+    assert not result.passed
+    assert commands == [(str(kvikdos), "--kvm-check")]
+    assert result.exit_code == exit_code
+    assert result.checked_payload_hash
+    assert result.source_path is None
+
+
+def test_unavailable_recompile_gate_is_diagnostic_and_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unavailable target holds acceptance and is retried on the next request."""
+    from inertia_decompiler import cli_core
+
+    source = "int demo(void) { return 0; }"
+    calls: list[str] = []
+
+    def compile_source(payload: str, *, target: str) -> RecompileCheckResult:
+        calls.append(target)
+        unavailable = target == "msc-dos" and calls.count(target) == 1
+        return RecompileCheckResult(
+            outcome=RecompileCheckOutcome.TOOLCHAIN_UNAVAILABLE if unavailable else RecompileCheckOutcome.PASSED,
+            target=target, exit_code=252 if unavailable else 0, compiler="test-compiler",
+            stdout="", stderr="device unavailable" if unavailable else "", command=("test-compiler",),
+            checked_payload=payload, checked_payload_hash="test-payload",
+        )
+
+    monkeypatch.setattr(cli_core, "_RECOMPILE_RESULT_CACHE_8616", {})
+    monkeypatch.setattr(cli_core, "check_c_recompiles_8616", compile_source)
+    monkeypatch.setattr(cli_core, "_normalize_gcc_checked_payload_8616", lambda checked, _accepted: checked)
+
+    payloads, error = cli_core._collect_recompilation_payloads_8616(source)
+    assert payloads == [("portable-flat", source)]
+    assert error is not None and "toolchain unavailable" in error
+    assert "syntax check failed" not in error
+    payloads, error = cli_core._collect_recompilation_payloads_8616(source)
+    assert error is None
+    assert payloads == [("portable-flat", source), ("msc-dos", source)]
+    assert calls == ["portable-flat", "msc-dos", "msc-dos"]
