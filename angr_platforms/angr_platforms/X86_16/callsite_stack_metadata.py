@@ -11,6 +11,7 @@ import enum
 import logging
 import os
 import re
+from collections.abc import Callable
 from typing import Any, Protocol, cast, runtime_checkable
 
 from angr.analyses.decompiler.structured_codegen.c import CBinaryOp, CFunctionCall, CTypeCast, CUnaryOp
@@ -190,45 +191,52 @@ class SafeDeadCarrierPruneMode8616(enum.Enum):
 
 def _safe_dead_carrier_prune_mode_8616(codegen: object | None) -> SafeDeadCarrierPruneMode8616:
     def _impl() -> SafeDeadCarrierPruneMode8616:
-        mode = os.environ.get("INERTIA_SAFE_DEAD_CARRIER_PRUNE_MODE", "").strip().lower()
-        if mode in {"disabled", "off", "0", "false", "no"}:
-            return SafeDeadCarrierPruneMode8616.DISABLED
-        if mode in {"diagnostic", "diag"}:
-            return SafeDeadCarrierPruneMode8616.DIAGNOSTIC
-        if mode in {"production", "prod", "on", "1", "true", "yes"}:
-            return SafeDeadCarrierPruneMode8616.PRODUCTION
-        flag = os.environ.get("INERTIA_ENABLE_SAFE_DEAD_CARRIER_PRUNE", "").strip().lower()
-        if flag in {"1", "true", "yes", "on"}:
-            return SafeDeadCarrierPruneMode8616.PRODUCTION
-        if flag in {"0", "false", "off", "no"}:
-            return SafeDeadCarrierPruneMode8616.DISABLED
-
-        legacy_disable = os.environ.get("INERTIA_DISABLE_SAFE_DEAD_CARRIER_PRUNE", "").strip().lower()
-        if legacy_disable in {"1", "true", "yes", "on"}:
-            return SafeDeadCarrierPruneMode8616.DISABLED
-        if legacy_disable in {"0", "false", "off", "no"}:
-            return SafeDeadCarrierPruneMode8616.DIAGNOSTIC
-
-        if codegen is not None:
-            explicit_mode = _dynamic_codegen_getattr_8616(codegen, "_inertia_safe_dead_carrier_prune_mode", None)
-            if isinstance(explicit_mode, SafeDeadCarrierPruneMode8616):
-                return explicit_mode
-            if isinstance(explicit_mode, str):
-                explicit = explicit_mode.strip().lower()
-                if explicit in {"disabled", "off", "0", "false", "no"}:
-                    return SafeDeadCarrierPruneMode8616.DISABLED
-                if explicit in {"diagnostic", "diag"}:
-                    return SafeDeadCarrierPruneMode8616.DIAGNOSTIC
-                if explicit in {"production", "prod", "on", "1", "true", "yes"}:
-                    return SafeDeadCarrierPruneMode8616.PRODUCTION
-            attr = _dynamic_codegen_getattr_8616(codegen, "_inertia_enable_safe_dead_carrier_prune", None)
-            if isinstance(attr, bool):
-                return SafeDeadCarrierPruneMode8616.PRODUCTION if attr else SafeDeadCarrierPruneMode8616.DISABLED
-
+        resolved = _env_dead_carrier_prune_mode_8616() or _codegen_dead_carrier_prune_mode_8616(codegen)
         # Conservative default keeps proof and avoids semantic regression.
-        return SafeDeadCarrierPruneMode8616.DIAGNOSTIC
+        return resolved if resolved is not None else SafeDeadCarrierPruneMode8616.DIAGNOSTIC
 
     return _impl()
+
+
+def _env_dead_carrier_prune_mode_8616() -> SafeDeadCarrierPruneMode8616 | None:
+    mode = os.environ.get("INERTIA_SAFE_DEAD_CARRIER_PRUNE_MODE", "").strip().lower()
+    if mode in {"disabled", "off", "0", "false", "no"}:
+        return SafeDeadCarrierPruneMode8616.DISABLED
+    if mode in {"diagnostic", "diag"}:
+        return SafeDeadCarrierPruneMode8616.DIAGNOSTIC
+    if mode in {"production", "prod", "on", "1", "true", "yes"}:
+        return SafeDeadCarrierPruneMode8616.PRODUCTION
+    flag = os.environ.get("INERTIA_ENABLE_SAFE_DEAD_CARRIER_PRUNE", "").strip().lower()
+    if flag in {"1", "true", "yes", "on"}:
+        return SafeDeadCarrierPruneMode8616.PRODUCTION
+    if flag in {"0", "false", "off", "no"}:
+        return SafeDeadCarrierPruneMode8616.DISABLED
+    legacy_disable = os.environ.get("INERTIA_DISABLE_SAFE_DEAD_CARRIER_PRUNE", "").strip().lower()
+    if legacy_disable in {"1", "true", "yes", "on"}:
+        return SafeDeadCarrierPruneMode8616.DISABLED
+    if legacy_disable in {"0", "false", "off", "no"}:
+        return SafeDeadCarrierPruneMode8616.DIAGNOSTIC
+    return None
+
+
+def _codegen_dead_carrier_prune_mode_8616(codegen: object | None) -> SafeDeadCarrierPruneMode8616 | None:
+    if codegen is None:
+        return None
+    explicit_mode = _dynamic_codegen_getattr_8616(codegen, "_inertia_safe_dead_carrier_prune_mode", None)
+    if isinstance(explicit_mode, SafeDeadCarrierPruneMode8616):
+        return explicit_mode
+    if isinstance(explicit_mode, str):
+        explicit = explicit_mode.strip().lower()
+        if explicit in {"disabled", "off", "0", "false", "no"}:
+            return SafeDeadCarrierPruneMode8616.DISABLED
+        if explicit in {"diagnostic", "diag"}:
+            return SafeDeadCarrierPruneMode8616.DIAGNOSTIC
+        if explicit in {"production", "prod", "on", "1", "true", "yes"}:
+            return SafeDeadCarrierPruneMode8616.PRODUCTION
+    attr = _dynamic_codegen_getattr_8616(codegen, "_inertia_enable_safe_dead_carrier_prune", None)
+    if isinstance(attr, bool):
+        return SafeDeadCarrierPruneMode8616.PRODUCTION if attr else SafeDeadCarrierPruneMode8616.DISABLED
+    return None
 
 
 def _safe_dead_carrier_prune_enabled_8616(codegen: object | None) -> bool:
@@ -443,20 +451,7 @@ def _collect_stack_carrier_assignments_8616(block: object) -> set[CarrierKey8616
 def _prune_dead_stack_carrier_assignments_8616(block: object, codegen: object | None = None) -> bool:
     def _impl() -> bool:
         """Remove dead generic address carriers left after call arguments are materialized."""
-        prune_mode = _safe_dead_carrier_prune_mode_8616(codegen)
-        if prune_mode == SafeDeadCarrierPruneMode8616.DISABLED:
-            _bump_dead_setup_counter_8616(codegen, "dead_setup_refused")
-            _bump_dead_setup_counter_8616(codegen, "dead_setup_unknown_refuse")
-            return False
-        if prune_mode == SafeDeadCarrierPruneMode8616.DIAGNOSTIC:
-            _bump_dead_setup_counter_8616(codegen, "dead_setup_refused")
-            _bump_dead_setup_counter_8616(codegen, "dead_setup_unknown_refuse")
-            return False
-        if not _callsite_materialization_complete_8616(codegen):
-            # Evidence gate: do not prune carrier setup until callsite argument facts
-            # are fully materialized.
-            _bump_dead_setup_counter_8616(codegen, "dead_setup_refused")
-            _bump_dead_setup_counter_8616(codegen, "dead_setup_live_call_arg")
+        if not _dead_carrier_prune_gate_8616(codegen):
             return False
         changed = False
         if not _is_plain_statement_block_8616(block):
@@ -465,18 +460,7 @@ def _prune_dead_stack_carrier_assignments_8616(block: object, codegen: object | 
         if not isinstance(statements, (list, tuple)):
             return False
 
-        for stmt in list(statements):
-            for child in (
-                _dynamic_codegen_getattr_8616(stmt, "body", None),
-                _dynamic_codegen_getattr_8616(stmt, "else_node", None),
-            ):
-                if _is_plain_statement_block_8616(child):
-                    changed |= _prune_dead_stack_carrier_assignments_8616(child, codegen=codegen)
-            if _is_plain_statement_block_8616(stmt):
-                changed |= _prune_dead_stack_carrier_assignments_8616(stmt, codegen=codegen)
-            for pair in _dynamic_codegen_getattr_8616(stmt, "condition_and_nodes", ()) or ():
-                if isinstance(pair, tuple) and len(pair) == 2 and _is_plain_statement_block_8616(pair[1]):
-                    changed |= _prune_dead_stack_carrier_assignments_8616(pair[1], codegen=codegen)
+        changed |= _prune_dead_carriers_in_child_blocks_8616(statements, codegen)
 
         # Dynamic angr codegen boundary: CStatements exposes statements structurally.
         statement_list: list[object] = list(_dynamic_codegen_getattr_8616(block, "statements", ()) or ())
@@ -490,51 +474,19 @@ def _prune_dead_stack_carrier_assignments_8616(block: object, codegen: object | 
         for stmt_index, stmt in reversed_pairs:
             carrier = _dead_stack_carrier_assignment_8616(stmt, known_carriers)
             if carrier is not None:
-                lhs_key, rhs = carrier
-                _bump_dead_setup_counter_8616(codegen, "dead_setup_candidates")
-                _bump_dead_setup_counter_8616(codegen, "dead_setup_raw_fact_count")
-                _bump_dead_setup_counter_8616(codegen, "dead_setup_normalized_fact_count")
-                _bump_dead_setup_counter_8616(codegen, "dead_setup_classified_fact_count")
-                decision = _classify_dead_carrier_candidate_8616(
+                if _prune_dead_carrier_candidate_8616(
                     stmt,
-                    lhs_key,
-                    rhs,
-                    live=live,
-                    known_carriers=known_carriers,
-                    call_indices=call_indices,
-                    stmt_index=stmt_index,
-                    statements=statement_list,
-                    codegen=codegen,
-                )
-                if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-                    logger.warning(
-                        "[stack-carrier-prune] index=%d lhs=%r rhs=%s tags=%r decision=%s",
-                        stmt_index,
-                        lhs_key,
-                        type(rhs).__name__,
-                        _dynamic_codegen_getattr_8616(stmt, "tags", None),
-                        decision.name,
-                    )
-                if decision == StackCarrierPruneDecision8616.DEFINITELY_DEAD:
+                    stmt_index,
+                    carrier,
+                    live,
+                    kept_reversed,
+                    known_carriers,
+                    call_indices,
+                    statement_list,
+                    codegen,
+                ):
                     changed = True
                     removed += 1
-                    _bump_dead_setup_counter_8616(codegen, "dead_setup_pruned")
-                    _bump_dead_setup_counter_8616(codegen, "dead_setup_materialized_count")
-                    continue
-                if decision == StackCarrierPruneDecision8616.LIVE_CALL_ARG_SETUP:
-                    _bump_dead_setup_counter_8616(codegen, "dead_setup_live_call_arg")
-                elif decision == StackCarrierPruneDecision8616.LIVE_STACK_CARRIER:
-                    _bump_dead_setup_counter_8616(codegen, "dead_setup_live_stack_carrier")
-                elif decision == StackCarrierPruneDecision8616.LIVE_WIDENING_CARRIER:
-                    _bump_dead_setup_counter_8616(codegen, "dead_setup_live_widening_carrier")
-                elif decision == StackCarrierPruneDecision8616.LIVE_CONDITION_SOURCE:
-                    _bump_dead_setup_counter_8616(codegen, "dead_setup_live_condition_source")
-                else:
-                    _bump_dead_setup_counter_8616(codegen, "dead_setup_unknown_refuse")
-                _bump_dead_setup_counter_8616(codegen, "dead_setup_refused")
-                live.discard(lhs_key)
-                live.update(_generic_stack_carrier_keys_8616(rhs).intersection(known_carriers))
-                kept_reversed.append(stmt)
                 continue
             live.update(_generic_stack_carrier_keys_8616(stmt).intersection(known_carriers))
             kept_reversed.append(stmt)
@@ -552,6 +504,99 @@ def _prune_dead_stack_carrier_assignments_8616(block: object, codegen: object | 
         return changed
 
     return _impl()
+
+
+def _dead_carrier_prune_gate_8616(codegen: object | None) -> bool:
+    """Gate dead-carrier pruning on mode and callsite materialization completeness."""
+    prune_mode = _safe_dead_carrier_prune_mode_8616(codegen)
+    if prune_mode in {SafeDeadCarrierPruneMode8616.DISABLED, SafeDeadCarrierPruneMode8616.DIAGNOSTIC}:
+        _bump_dead_setup_counter_8616(codegen, "dead_setup_refused")
+        _bump_dead_setup_counter_8616(codegen, "dead_setup_unknown_refuse")
+        return False
+    if not _callsite_materialization_complete_8616(codegen):
+        # Evidence gate: do not prune carrier setup until callsite argument facts
+        # are fully materialized.
+        _bump_dead_setup_counter_8616(codegen, "dead_setup_refused")
+        _bump_dead_setup_counter_8616(codegen, "dead_setup_live_call_arg")
+        return False
+    return True
+
+
+_DEAD_CARRIER_DECISION_COUNTERS_8616: dict[StackCarrierPruneDecision8616, str] = {
+    StackCarrierPruneDecision8616.LIVE_CALL_ARG_SETUP: "dead_setup_live_call_arg",
+    StackCarrierPruneDecision8616.LIVE_STACK_CARRIER: "dead_setup_live_stack_carrier",
+    StackCarrierPruneDecision8616.LIVE_WIDENING_CARRIER: "dead_setup_live_widening_carrier",
+    StackCarrierPruneDecision8616.LIVE_CONDITION_SOURCE: "dead_setup_live_condition_source",
+}
+
+
+def _prune_dead_carriers_in_child_blocks_8616(
+    statements: list[object] | tuple[object, ...], codegen: object | None
+) -> bool:
+    changed = False
+    for stmt in list(statements):
+        for child in (
+            _dynamic_codegen_getattr_8616(stmt, "body", None),
+            _dynamic_codegen_getattr_8616(stmt, "else_node", None),
+        ):
+            if _is_plain_statement_block_8616(child):
+                changed |= _prune_dead_stack_carrier_assignments_8616(child, codegen=codegen)
+        if _is_plain_statement_block_8616(stmt):
+            changed |= _prune_dead_stack_carrier_assignments_8616(stmt, codegen=codegen)
+        for pair in _dynamic_codegen_getattr_8616(stmt, "condition_and_nodes", ()) or ():
+            if isinstance(pair, tuple) and len(pair) == 2 and _is_plain_statement_block_8616(pair[1]):
+                changed |= _prune_dead_stack_carrier_assignments_8616(pair[1], codegen=codegen)
+    return changed
+
+
+def _prune_dead_carrier_candidate_8616(
+    stmt: object,
+    stmt_index: int,
+    carrier: tuple[CarrierKey8616, object],
+    live: set[CarrierKey8616],
+    kept_reversed: list[object],
+    known_carriers: set[CarrierKey8616],
+    call_indices: set[int],
+    statement_list: list[object],
+    codegen: object | None,
+) -> bool:
+    """Classify one dead-carrier candidate; return True when the statement is pruned."""
+    lhs_key, rhs = carrier
+    _bump_dead_setup_counter_8616(codegen, "dead_setup_candidates")
+    _bump_dead_setup_counter_8616(codegen, "dead_setup_raw_fact_count")
+    _bump_dead_setup_counter_8616(codegen, "dead_setup_normalized_fact_count")
+    _bump_dead_setup_counter_8616(codegen, "dead_setup_classified_fact_count")
+    decision = _classify_dead_carrier_candidate_8616(
+        stmt,
+        lhs_key,
+        rhs,
+        live=live,
+        known_carriers=known_carriers,
+        call_indices=call_indices,
+        stmt_index=stmt_index,
+        statements=statement_list,
+        codegen=codegen,
+    )
+    if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+        logger.warning(
+            "[stack-carrier-prune] index=%d lhs=%r rhs=%s tags=%r decision=%s",
+            stmt_index,
+            lhs_key,
+            type(rhs).__name__,
+            _dynamic_codegen_getattr_8616(stmt, "tags", None),
+            decision.name,
+        )
+    if decision == StackCarrierPruneDecision8616.DEFINITELY_DEAD:
+        _bump_dead_setup_counter_8616(codegen, "dead_setup_pruned")
+        _bump_dead_setup_counter_8616(codegen, "dead_setup_materialized_count")
+        return True
+    counter = _DEAD_CARRIER_DECISION_COUNTERS_8616.get(decision, "dead_setup_unknown_refuse")
+    _bump_dead_setup_counter_8616(codegen, counter)
+    _bump_dead_setup_counter_8616(codegen, "dead_setup_refused")
+    live.discard(lhs_key)
+    live.update(_generic_stack_carrier_keys_8616(rhs).intersection(known_carriers))
+    kept_reversed.append(stmt)
+    return False
 
 
 def _prune_trailing_segment_metadata_8616(statements: list[object], project: object) -> bool:
@@ -585,22 +630,8 @@ def prune_materialized_callsite_segment_metadata_8616(project: object, codegen: 
         return False
 
     summary_map = _typed_callsite_summary_map_8616(codegen)
-    typed_fact_map = _dynamic_codegen_getattr_8616(codegen, "_inertia_typed_stack_probe_return_facts", None)
-    if not isinstance(typed_fact_map, dict):
-        typed_fact_map = {}
-    else:
-        typed_fact_map = {
-            key: value
-            for key, value in typed_fact_map.items()
-            if isinstance(key, int) and isinstance(value, TypedStackProbeReturnFact8616)
-        }
-    # Dynamic angr codegen boundary: metadata IDs are attached by earlier materialization.
-    raw_materialized_metadata_ids = _dynamic_codegen_getattr_8616(codegen, "_inertia_materialized_callsite_metadata_ids", None)
-    materialized_metadata_ids: dict[int, tuple[int, ...]] = {}
-    if isinstance(raw_materialized_metadata_ids, dict):
-        for key, value in raw_materialized_metadata_ids.items():
-            if isinstance(key, int) and isinstance(value, (list, tuple, set, frozenset)):
-                materialized_metadata_ids[key] = tuple(item for item in value if isinstance(item, int))
+    typed_fact_map = _normalized_typed_probe_facts_8616(codegen)
+    materialized_metadata_ids = _normalized_materialized_metadata_ids_8616(codegen)
     use_typed_facts = bool(typed_fact_map)
 
     changed = False
@@ -613,44 +644,24 @@ def prune_materialized_callsite_segment_metadata_8616(project: object, codegen: 
         if not isinstance(statements, (list, tuple)):
             return inherited_stack_probe_address_seen
 
-        stack_probe_address_seen = inherited_stack_probe_address_seen or (
-            bool(typed_fact_map)
-            if use_typed_facts
-            else any(
-                item.stack_probe_helper
-                and item.helper_return_state == "stack_address"
-                and item.helper_return_space in {None, "ss"}
-                for item in summary_map.values()
-            )
+        stack_probe_address_seen = _stack_probe_address_seen_8616(
+            inherited_stack_probe_address_seen, use_typed_facts, typed_fact_map, summary_map
         )
         new_statements: list[object] = []
         for stmt in list(statements):
             call = _call_from_statement_8616(stmt)
             summary = summary_map.get(id(call)) if call is not None else None
-            if call is not None and summary is not None and summary.stack_probe_helper:
-                if use_typed_facts:
-                    stack_probe_address_seen = id(call) in typed_fact_map
-                elif summary.helper_return_state == "stack_address":
-                    stack_probe_address_seen = summary.helper_return_space in {None, "ss"}
+            stack_probe_address_seen = _refresh_probe_seen_for_call_8616(
+                call, summary, use_typed_facts, typed_fact_map, stack_probe_address_seen
+            )
             # Allow pruning for any call that has recorded segment-metadata store IDs.
             # Far calls (opcode 0x9A / CALL FAR) push CS as part of their call frame;
             # those stores are segment metadata and should be pruned even without a
             # preceding stack-probe helper call.
-            has_materialized_metadata = call is not None and bool(materialized_metadata_ids.get(id(call), ()))
-            if (
-                call is not None
-                and (stack_probe_address_seen or has_materialized_metadata)
-                and (summary is None or not summary.stack_probe_helper)
+            if _prune_recorded_metadata_statements_8616(
+                call, summary, stack_probe_address_seen, materialized_metadata_ids, project, new_statements
             ):
-                # Dynamic angr codegen boundary: CFunctionCall exposes args structurally.
-                args: tuple[object, ...] = tuple(_dynamic_codegen_getattr_8616(call, "args", ()) or ())
-                if args and all(not _segment_register_value_expr_8616(arg, project) for arg in args):
-                    prunable_ids = set(materialized_metadata_ids.get(id(call), ()))
-                    if prunable_ids:
-                        kept_statements = [old_stmt for old_stmt in new_statements if id(old_stmt) not in prunable_ids]
-                        if len(kept_statements) != len(new_statements):
-                            new_statements = kept_statements
-                            changed = True
+                changed = True
             # Ownership boundary:
             # This pass may prune call-frame metadata stores and their dead generic
             # carrier feeders after call arguments / metadata have already been
@@ -658,50 +669,10 @@ def prune_materialized_callsite_segment_metadata_8616(project: object, codegen: 
             # If a vvar_/ir_/tmp_ carrier chain still needs to become a stack local,
             # that belongs in stack lowering / AST stack-alias rewrites, not in this
             # cleanup pass.
-            #
-            # Far calls push CS + IP as a far return frame BEFORE the call.
-            # The stores look like: *(vvar_N + 1) = cs >> 8;
-            # Detect any preceding memory store whose rhs is a segment register
-            # value, then prune it and its carrier-temp feeders.
-            # Only prune stores recorded in materialized_metadata_ids for this call.
-            # Dynamic angr codegen boundary: CFunctionCall exposes args structurally.
-            _call_args: tuple[object, ...] = tuple(_dynamic_codegen_getattr_8616(call, "args", ()) or ()) if call is not None else ()
-            if (
-                call is not None
-                and _call_args
-                and all(not _segment_register_value_expr_8616(arg, project) for arg in _call_args)
+            if _prune_call_frame_metadata_stores_8616(
+                call, materialized_metadata_ids, project, new_statements
             ):
-                call_metadata_ids = set(materialized_metadata_ids.get(id(call), ())) if call is not None else set()
-                if call_metadata_ids:
-                    removed = 0
-                    scan = len(new_statements) - 1
-                    while scan >= 0:
-                        candidate = new_statements[scan]
-                        if id(candidate) in call_metadata_ids:
-                            removed += 1
-                            scan -= 1
-                            continue
-                        assignments = _assignment_nodes_8616(candidate)
-                        if not assignments:
-                            break
-                        lhs, rhs = _assignment_lhs_rhs_8616(assignments[-1])
-                        if not _lhs_writes_memory_8616(lhs) or not _segment_register_value_expr_8616(rhs, project):
-                            break
-                        removed += 1
-                        scan -= 1
-                    # Also prune carrier-temp assignments (vvar_*) that feed the stores
-                    while scan >= 0:
-                        candidate = new_statements[scan]
-                        lhs, _rhs = _assignment_lhs_rhs_8616(candidate)
-                        if _lhs_writes_memory_8616(lhs):
-                            break
-                        if _generic_stack_carrier_name_8616(lhs if lhs is not None else candidate) is None:
-                            break
-                        removed += 1
-                        scan -= 1
-                    if removed > 0:
-                        new_statements = new_statements[:-removed]
-                        changed = True
+                changed = True
             new_statements.append(stmt)
 
         if new_statements != list(statements):
@@ -709,21 +680,175 @@ def prune_materialized_callsite_segment_metadata_8616(project: object, codegen: 
                 new_statements if isinstance(statements, list) else tuple(new_statements)
             )
 
-        for stmt in _dynamic_codegen_getattr_8616(block, "statements", ()) or ():
-            for child in (
-                _dynamic_codegen_getattr_8616(stmt, "body", None),
-                _dynamic_codegen_getattr_8616(stmt, "else_node", None),
-            ):
-                if _is_plain_statement_block_8616(child):
-                    rewrite_block(child, stack_probe_address_seen)
-            if _is_plain_statement_block_8616(stmt):
-                rewrite_block(stmt, stack_probe_address_seen)
-            for pair in _dynamic_codegen_getattr_8616(stmt, "condition_and_nodes", ()) or ():
-                if isinstance(pair, tuple) and len(pair) == 2 and _is_plain_statement_block_8616(pair[1]):
-                    rewrite_block(pair[1], stack_probe_address_seen)
+        _rewrite_nested_blocks_8616(block, stack_probe_address_seen, rewrite_block)
         return stack_probe_address_seen
 
     rewrite_block(root)
     if _prune_dead_stack_carrier_assignments_8616(root, codegen=codegen):
         changed = True
-    return changed
+    return changed 
+
+
+def _stack_probe_address_seen_8616(
+    inherited_stack_probe_address_seen: bool,
+    use_typed_facts: bool,
+    typed_fact_map: dict[int, object],
+    summary_map: dict[int, CallsiteSummary8616],
+) -> bool:
+    if inherited_stack_probe_address_seen:
+        return True
+    if use_typed_facts:
+        return bool(typed_fact_map)
+    return any(
+        item.stack_probe_helper
+        and item.helper_return_state == "stack_address"
+        and item.helper_return_space in {None, "ss"}
+        for item in summary_map.values()
+    )
+
+
+def _refresh_probe_seen_for_call_8616(
+    call: object | None,
+    summary: CallsiteSummary8616 | None,
+    use_typed_facts: bool,
+    typed_fact_map: dict[int, object],
+    stack_probe_address_seen: bool,
+) -> bool:
+    if call is None or summary is None or not summary.stack_probe_helper:
+        return stack_probe_address_seen
+    if use_typed_facts:
+        return id(call) in typed_fact_map
+    if summary.helper_return_state == "stack_address":
+        return summary.helper_return_space in {None, "ss"}
+    return stack_probe_address_seen
+
+
+def _prune_recorded_metadata_statements_8616(
+    call: object | None,
+    summary: CallsiteSummary8616 | None,
+    stack_probe_address_seen: bool,
+    materialized_metadata_ids: dict[int, tuple[int, ...]],
+    project: object,
+    new_statements: list[object],
+) -> bool:
+    has_materialized_metadata = call is not None and bool(materialized_metadata_ids.get(id(call), ()))
+    if not (
+        call is not None
+        and (stack_probe_address_seen or has_materialized_metadata)
+        and (summary is None or not summary.stack_probe_helper)
+    ):
+        return False
+    # Dynamic angr codegen boundary: CFunctionCall exposes args structurally.
+    args: tuple[object, ...] = tuple(_dynamic_codegen_getattr_8616(call, "args", ()) or ())
+    if not (args and all(not _segment_register_value_expr_8616(arg, project) for arg in args)):
+        return False
+    prunable_ids = set(materialized_metadata_ids.get(id(call), ()))
+    if not prunable_ids:
+        return False
+    kept_statements = [old_stmt for old_stmt in new_statements if id(old_stmt) not in prunable_ids]
+    if len(kept_statements) == len(new_statements):
+        return False
+    new_statements[:] = kept_statements
+    return True
+
+
+def _prune_call_frame_metadata_stores_8616(
+    call: object | None,
+    materialized_metadata_ids: dict[int, tuple[int, ...]],
+    project: object,
+    new_statements: list[object],
+) -> bool:
+    # Far calls push CS + IP as a far return frame BEFORE the call.
+    # The stores look like: *(vvar_N + 1) = cs >> 8;
+    # Detect any preceding memory store whose rhs is a segment register
+    # value, then prune it and its carrier-temp feeders.
+    # Only prune stores recorded in materialized_metadata_ids for this call.
+    # Dynamic angr codegen boundary: CFunctionCall exposes args structurally.
+    _call_args: tuple[object, ...] = tuple(_dynamic_codegen_getattr_8616(call, "args", ()) or ()) if call is not None else ()
+    if not (
+        call is not None
+        and _call_args
+        and all(not _segment_register_value_expr_8616(arg, project) for arg in _call_args)
+    ):
+        return False
+    call_metadata_ids = set(materialized_metadata_ids.get(id(call), ())) if call is not None else set()
+    if not call_metadata_ids:
+        return False
+    removed = _count_prunable_metadata_stores_8616(new_statements, call_metadata_ids, project)
+    if removed <= 0:
+        return False
+    del new_statements[len(new_statements) - removed:]
+    return True
+
+
+def _normalized_typed_probe_facts_8616(codegen: object) -> dict[int, object]:
+    typed_fact_map = _dynamic_codegen_getattr_8616(codegen, "_inertia_typed_stack_probe_return_facts", None)
+    if not isinstance(typed_fact_map, dict):
+        return {}
+    return {
+        key: value
+        for key, value in typed_fact_map.items()
+        if isinstance(key, int) and isinstance(value, TypedStackProbeReturnFact8616)
+    }
+
+
+def _normalized_materialized_metadata_ids_8616(codegen: object) -> dict[int, tuple[int, ...]]:
+    # Dynamic angr codegen boundary: metadata IDs are attached by earlier materialization.
+    raw_materialized_metadata_ids = _dynamic_codegen_getattr_8616(codegen, "_inertia_materialized_callsite_metadata_ids", None)
+    materialized_metadata_ids: dict[int, tuple[int, ...]] = {}
+    if isinstance(raw_materialized_metadata_ids, dict):
+        for key, value in raw_materialized_metadata_ids.items():
+            if isinstance(key, int) and isinstance(value, (list, tuple, set, frozenset)):
+                materialized_metadata_ids[key] = tuple(item for item in value if isinstance(item, int))
+    return materialized_metadata_ids
+
+
+def _count_prunable_metadata_stores_8616(
+    new_statements: list[object], call_metadata_ids: set[int], project: object
+) -> int:
+    removed = 0
+    scan = len(new_statements) - 1
+    while scan >= 0:
+        candidate = new_statements[scan]
+        if id(candidate) in call_metadata_ids:
+            removed += 1
+            scan -= 1
+            continue
+        assignments = _assignment_nodes_8616(candidate)
+        if not assignments:
+            break
+        lhs, rhs = _assignment_lhs_rhs_8616(assignments[-1])
+        if not _lhs_writes_memory_8616(lhs) or not _segment_register_value_expr_8616(rhs, project):
+            break
+        removed += 1
+        scan -= 1
+    # Also prune carrier-temp assignments (vvar_*) that feed the stores
+    while scan >= 0:
+        candidate = new_statements[scan]
+        lhs, _rhs = _assignment_lhs_rhs_8616(candidate)
+        if _lhs_writes_memory_8616(lhs):
+            break
+        if _generic_stack_carrier_name_8616(lhs if lhs is not None else candidate) is None:
+            break
+        removed += 1
+        scan -= 1
+    return removed
+
+
+def _rewrite_nested_blocks_8616(
+    block: object,
+    stack_probe_address_seen: bool,
+    rewrite_block: Callable[[object, bool], bool],
+) -> None:
+    for stmt in _dynamic_codegen_getattr_8616(block, "statements", ()) or ():
+        for child in (
+            _dynamic_codegen_getattr_8616(stmt, "body", None),
+            _dynamic_codegen_getattr_8616(stmt, "else_node", None),
+        ):
+            if _is_plain_statement_block_8616(child):
+                rewrite_block(child, stack_probe_address_seen)
+        if _is_plain_statement_block_8616(stmt):
+            rewrite_block(stmt, stack_probe_address_seen)
+        for pair in _dynamic_codegen_getattr_8616(stmt, "condition_and_nodes", ()) or ():
+            if isinstance(pair, tuple) and len(pair) == 2 and _is_plain_statement_block_8616(pair[1]):
+                rewrite_block(pair[1], stack_probe_address_seen)

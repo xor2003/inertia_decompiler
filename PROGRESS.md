@@ -8,6 +8,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Catalog candidate filter implemented from a measured 66.287s Python-regex
+  match over 49,283 patterns. Typed necessary literals reject impossible
+  candidates without changing surviving backend checks. Two before failures;
+  11 focused parity/cache tests pass afterward; full retained-catalog parity
+  and timing are pending in `.cache/catalog-match-filtered-artifact.log`.
+  No end-to-end performance or feature-witness acceptance yet.
+
 - Compiler-coverage far-pointer storage repair: source-free typed evidence
   exposed a contained segment word incorrectly kept as a separate argument,
   shifting BP+10 to BP+12. Lowering now joins contained slots without moving
@@ -1296,3 +1303,10 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   and synthetic-global label application, and arg-name tokenization.
 - Verified: ruff 0, mypy 0, 10 annotation tests pass, def-integrity vs HEAD
   clean, zero architecture violations against the file.
+- `angr_platforms/angr_platforms/X86_16/callsite_stack_metadata.py`: Ruff
+  complexity debt cleared to zero (6 findings). Extracted env/codegen prune
+  modes, prune gating, child-block recursion, per-candidate dead-carrier
+  classification, probe-seen tracking, metadata-ID normalization, recorded
+  store pruning, and nested-block recursion.
+- Verified: ruff 0, mypy 0, 90 callsite/stack-probe tests pass,
+  def-integrity vs HEAD clean, zero architecture violations against the file.
