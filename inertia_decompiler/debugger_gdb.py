@@ -388,52 +388,68 @@ class GDBServer:
 
     def _handle_q_command(self, cmd: str) -> bool:
         def _impl() -> bool:
-            if cmd.startswith("qSupported"):
-                self._send_packet(
-                    "PacketSize=3fff;qXfer:memory-map:read+;"
-                    "qXfer:features:read+;vContSupported+;"
-                    "multiprocess-;swbreak+;hwbreak+;"
-                    "ConditionalBreakpoints+;UnconditionalBreakpoints+;"
-                    "ExtendedMode+;QStartNoAckMode+"
-                )
-                return True
-            if cmd.startswith("qXfer:memory-map:read::"):
-                self._send_packet(self._get_memory_map_xml())
-                return True
-            if cmd.startswith("qXfer:features:read:"):
-                self._send_packet(self._get_target_description_xml())
-                return True
-            if cmd.startswith("qXfer:"):
-                self._send_packet("l")
-                return True
-            if cmd == "qAttached":
-                self._send_packet("0")
-                return True
-            if cmd == "qTStatus":
-                self._send_packet("")
-                return True
-            if cmd == "qfThreadInfo":
-                threads_hex = ",".join(f"{tid:x}" for tid in self.threads)
-                self._send_packet(f"m{threads_hex}")
-                return True
-            if cmd == "qsThreadInfo":
-                self._send_packet("l")
-                return True
-            if cmd == "qC":
-                self._send_packet(f"QC{self.current_thread:x}")
-                return True
-            if cmd == "qOffsets":
-                self._send_packet("Text=0;Data=0;Bss=0")
-                return True
-            if cmd == "qInertiaHelpers":
-                self._send_packet(json.dumps(self._build_helper_info(), separators=(",", ":")))
-                return True
-            if cmd.startswith("qSymbol"):
-                self._send_packet("OK")
-                return True
-            return False
+            return (
+                self._handle_q_supported_and_xfer(cmd)
+                or self._handle_q_thread_status(cmd)
+                or self._handle_q_extensions(cmd)
+            )
 
         return _impl()
+
+    def _handle_q_supported_and_xfer(self, cmd: str) -> bool:
+        """Answer qSupported and qXfer feature/memory-map queries."""
+        if cmd.startswith("qSupported"):
+            self._send_packet(
+                "PacketSize=3fff;qXfer:memory-map:read+;"
+                "qXfer:features:read+;vContSupported+;"
+                "multiprocess-;swbreak+;hwbreak+;"
+                "ConditionalBreakpoints+;UnconditionalBreakpoints+;"
+                "ExtendedMode+;QStartNoAckMode+"
+            )
+            return True
+        if cmd.startswith("qXfer:memory-map:read::"):
+            self._send_packet(self._get_memory_map_xml())
+            return True
+        if cmd.startswith("qXfer:features:read:"):
+            self._send_packet(self._get_target_description_xml())
+            return True
+        if cmd.startswith("qXfer:"):
+            self._send_packet("l")
+            return True
+        return False
+
+    def _handle_q_thread_status(self, cmd: str) -> bool:
+        """Answer thread/attached/offsets status queries."""
+        if cmd == "qAttached":
+            self._send_packet("0")
+            return True
+        if cmd == "qTStatus":
+            self._send_packet("")
+            return True
+        if cmd == "qfThreadInfo":
+            threads_hex = ",".join(f"{tid:x}" for tid in self.threads)
+            self._send_packet(f"m{threads_hex}")
+            return True
+        if cmd == "qsThreadInfo":
+            self._send_packet("l")
+            return True
+        if cmd == "qC":
+            self._send_packet(f"QC{self.current_thread:x}")
+            return True
+        if cmd == "qOffsets":
+            self._send_packet("Text=0;Data=0;Bss=0")
+            return True
+        return False
+
+    def _handle_q_extensions(self, cmd: str) -> bool:
+        """Answer Inertia-helper and symbol-extension queries."""
+        if cmd == "qInertiaHelpers":
+            self._send_packet(json.dumps(self._build_helper_info(), separators=(",", ":")))
+            return True
+        if cmd.startswith("qSymbol"):
+            self._send_packet("OK")
+            return True
+        return False
 
     def _handle_vcont_command(self, cmd: str) -> bool:
         if cmd == "vCont?":
@@ -506,31 +522,33 @@ class GDBServer:
             return True
         return False
 
+    def _normalize_command(self, cmd: str) -> str | None:
+        """Strip RSP packet framing; return the command payload or ``None`` to ignore."""
+        print(f"[GDB] Received raw command: {cmd!r}")
+        if not cmd or cmd.startswith("+"):
+            return None
+        if cmd.startswith("$"):
+            cmd = cmd[1:].split("#")[0]
+        print(f"[GDB] Parsed command: {cmd!r}")
+        return cmd
+
     def _handle_command(self, cmd: str) -> None:
         def _impl() -> None:
             """Dispatch GDB RSP command."""
-            current_cmd = cmd
-            print(f"[GDB] Received raw command: {current_cmd!r}")
-            if not current_cmd or current_cmd.startswith("+"):
+            current_cmd = self._normalize_command(cmd)
+            if current_cmd is None:
                 return
-
-            if current_cmd.startswith("$"):
-                current_cmd = current_cmd[1:].split("#")[0]
-            print(f"[GDB] Parsed command: {current_cmd!r}")
-            if self._handle_q_command(current_cmd):
-                return
-            if self._handle_vcont_command(current_cmd):
-                return
-            if self._handle_thread_command(current_cmd):
-                return
-            if self._handle_register_command(current_cmd):
-                return
-            if self._handle_memory_command(current_cmd):
-                return
-            if self._handle_execution_command(current_cmd):
-                return
-            if self._handle_breakpoint_command(current_cmd):
-                return
+            for handler in (
+                self._handle_q_command,
+                self._handle_vcont_command,
+                self._handle_thread_command,
+                self._handle_register_command,
+                self._handle_memory_command,
+                self._handle_execution_command,
+                self._handle_breakpoint_command,
+            ):
+                if handler(current_cmd):
+                    return
             if current_cmd == "QStartNoAckMode":
                 self._send_packet("OK")
                 return
@@ -698,36 +716,9 @@ class GDBServer:
                 concrete = _state_bytes(self.state, mem)
 
                 # Check if it's a call instruction (0xE8 = call rel32, 0xFF/2 = call r/m)
-                is_call = False
-                insn_len = 0
+                insn_len = _call_instruction_length(concrete)
 
-                if concrete[0] == 0xE8:
-                    # call rel32
-                    is_call = True
-                    if len(concrete) >= 5:
-                        insn_len = 5
-                        next_ip = ip + insn_len
-                elif concrete[0] == 0xFF and len(concrete) >= 2:
-                    # call r/m - check modrm
-                    modrm = concrete[1]
-                    if (modrm >> 3) & 0x7 == 2:  # call
-                        is_call = True
-                        # Approximate length
-                        insn_len = 2
-                        if (modrm & 0xC0) == 0x00:
-                            if (modrm & 0x07) == 0x05:
-                                insn_len = 6  # disp32
-                            else:
-                                insn_len = 2
-                        elif (modrm & 0xC0) == 0x40:
-                            insn_len = 3  # disp8
-                        elif (modrm & 0xC0) == 0x80:
-                            insn_len = 6  # disp32
-                        else:
-                            insn_len = 2
-                        next_ip = ip + insn_len
-
-                if is_call and insn_len > 0:
+                if insn_len > 0:
                     # Set temporary breakpoint at next instruction
                     next_ip = ip + insn_len
                     self.breakpoints[next_ip] = Breakpoint(next_ip)
@@ -887,3 +878,25 @@ __all__ = [
     "GDBServer",
     "GDBStopReason",
 ]
+
+
+def _call_instruction_length(concrete: bytes) -> int:
+    """Return the instruction length when the leading bytes form a call, else ``0``."""
+    if concrete[0] == 0xE8:
+        # call rel32
+        return 5 if len(concrete) >= 5 else 0
+    if concrete[0] != 0xFF or len(concrete) < 2:
+        return 0
+    # call r/m - check modrm
+    modrm = concrete[1]
+    if (modrm >> 3) & 0x7 != 2:
+        return 0
+    # Approximate length
+    mod = modrm & 0xC0
+    if mod == 0x00:
+        return 6 if (modrm & 0x07) == 0x05 else 2
+    if mod == 0x40:
+        return 3  # disp8
+    if mod == 0x80:
+        return 6  # disp32
+    return 2

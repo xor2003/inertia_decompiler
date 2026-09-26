@@ -8,6 +8,14 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Exact AST leaf schemas skip display metadata while retaining reference fields
+  and generic extension traversal. Final focused suite: 39 passed; scoped Ruff
+  and MyPy pass. Diagnostic output is byte-identical, validated and GCC-clean;
+  classifier calls fall 619247 -> 521583. Normal 60s fresh-cache replay passes
+  with validated, byte-identical GCC-clean C (`.cache/leaf-schema-normal.*`).
+  Quality-dev fails broader lint/type/mypyc debt;
+  no new coverage witness or end-to-end speedup is claimed.
+
 - Fresh-JSON normal-budget replay still times out. Larger-budget diagnostic
   profiling completes with validated byte-identical C: 12M calls, 56s worker,
   16.4s cumulative deep AST traversal and 619k boundary classifications.
@@ -1457,3 +1465,11 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   ModR/M fallthrough-length lane.
 - Verified: ruff 0, mypy 0, 3 TUI step-over tests pass, def-integrity
   vs HEAD clean, zero architecture violations.
+- `inertia_decompiler/debugger_gdb.py`: Ruff debt cleared to zero (6
+  findings). Split the RSP query chain into qSupported/qXfer, thread
+  status, and Inertia-extension helpers; extracted packet normalization
+  and an ordered handler tuple for command dispatch; and extracted the
+  call-instruction length classifier for step-over.
+- Verified: ruff 0, mypy 0, module imports clean, def-integrity vs HEAD
+  clean, zero architecture violations (no dedicated debugger_gdb test
+  file exists; TUI step-over tests pass on the sibling gdb_tui file).
