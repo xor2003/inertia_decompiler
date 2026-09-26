@@ -1181,6 +1181,21 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   initial invalid-frame samples are insufficient to select an optimization.
   Next action: poll that process, then profile the measured seeding boundary.
   No production changes or relaxed routine deadlines were made.
+
+### Synthetic-code refusal checkpoint (2026-09-26 13:00 UTC)
+
+- Profiling identified terminal-stack-cleanup scanning of CLE's synthetic
+  external object. Frontend inventory now refuses those bytes as binary code,
+  without excluding real loaded code or guessing a callee ABI.
+- Before: 3 failed / 1 passed. Final focused checks: 22 passed in 58.63s;
+  scoped Ruff/MyPy and ownership checks pass. Quality-dev fails on broader debt.
+- Far-call replay now reaches decompilation (seeding 19.70s versus prior 154.04s
+  diagnostic). It still exits 4: postprocess validation rejects an observable
+  delta. Partial C keeps both indirect calls but has unresolved parameter
+  storage/width; this is not function acceptance or a verified speedup claim.
+- Required default pipeline is active in `.cache/synthetic-code-refusal-pipeline.log`.
+  Raw replay: `.cache/sourcefree-seeding-refused.{c,err}`. Next: poll the gate;
+  trace the parameter contract at its earlier owner, not Rewrite.
 ## Lint debt: dce.py cleanup (2026-09-26)
 
 - `angr_platforms/X86_16/postprocess/optimization/dce.py`: Ruff complexity
@@ -1233,3 +1248,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   resolve-or-materialize lanes in `transform` into shared helpers.
 - Verified: ruff 0, mypy 0, 11 stack-byte-offset tests pass, def-integrity
   vs HEAD clean, zero architecture violations against the file.
+- `inertia_decompiler/cli_linear_recurrence.py`: Ruff complexity debt cleared
+  to zero (8 findings, including the 53-complexity `visit` closure inside
+  `_coalesce_linear_recurrence_statements`). Hoisted `visit` to a module-level
+  dispatcher, split its CStatements/IfElse/While/DoWhile/ForLoop arms into
+  helpers, extracted pair-combine/shift-combine/linear-temp/self-update
+  lanes, hoisted the five loop-rebind closures, and split delta/carrier
+  matchers. Preserved protected-alias ordering and distinct loop debug kinds.
+- Verified: ruff 0, mypy 0, 12 linear-recurrence unit tests + 7 cod
+  regression tests pass, def-integrity vs HEAD clean (missing names are
+  hoisted closures), zero architecture violations against the file.
