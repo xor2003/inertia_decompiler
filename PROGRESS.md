@@ -773,3 +773,25 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   ("proven dead status-flag writes"), 1 wall-clock timeout flake,
   1 cli_decompilation CompilerHelperEvidenceKind attr failure on an
   untouched file.
+
+## cli_function_discovery.py lint cleanup (ruff 53 -> 0)
+
+- Same `_impl`-closure decomposition pattern: every promoted closure hoisted to
+  module helpers or typed state dataclasses (`_SeededRecoveryState8616`,
+  `_CandidateRecoveryCtx8616`, `_SeededExeCtx8616`, `_DisplayRankState8616`,
+  `_SidecarShowcaseState8616`, `_GraphRepairDiscovery8616`).
+- LST recovery split into lanes: exact-region derivation/validation,
+  rebased-slice build/recover/evidence, lean windows, stitching + data-ref
+  retry, truncated escalation, bounded fallback, tiny-candidate promotion.
+- Seeded/cached/prologue recovery decomposed into context resolution,
+  per-address processing, follow-on queueing, and merge/finalize phases.
+- Label/seed ranking became ordered bucket helpers preserving the original
+  elif priority; graph repair split into entry gates, BFS discovery, node
+  seeding, and edge/return-site installation.
+- Contract fixes preserved: stitch helper returns `(pair, score, stitched)` so
+  `truncated` resets only on real stitch success; `nonlocal addr` rebase and
+  raising semantics retained.
+- Verification: ruff 0, mypy 0 (HEAD parity), arch-check 0 violations in file.
+  Owning suite 78 passed; 5 failures all pre-existing on bare HEAD —
+  cache-policy SimpleNamespace monkeypatch gaps in
+  test_discovery_cache_contract / test_cli_function_discovery_regions.
