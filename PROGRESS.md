@@ -8,6 +8,12 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Startup stacks identify a missing current-generation PAT spec cache, not a
+  stalled analysis worker. Existing cache owner builds 49,283 specs in 115.54s.
+  Fresh normal-budget replay then reaches recovery but times out (118.80s,
+  validation uncollected). Fresh diagnostic worker profile is active at
+  `.cache/post-warm-profile-001.{c,err}`; no normal-budget acceptance claim.
+
 - Warm-parent six-job replay ends at the 600.93s external bound: three exit3
   timeouts, `select_and_apply` and `combine_args` exit0/validation passed,
   `nested_arguments` interrupted without a completed record. No full round trip
@@ -1642,3 +1648,12 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   bind/filter lanes.
 - Verified: ruff 0, mypy 0, 84 condition-transfer/evidence/carrier
   tests pass, def-integrity vs HEAD clean, zero architecture violations.
+- `angr_platforms/angr_platforms/X86_16/lowering/callsite_prototype_declarations.py`:
+  Ruff debt cleared to zero (4 findings + moved bool-exprs). Extracted
+  summary matching, call-identity canonicalization, return-contract
+  joins, declaration selection/recording, ambiguous resolution, and
+  per-call processing lanes; preserved matched-count semantics on
+  macro/refused exits.
+- Verified: ruff 0, mypy 0, 93 callsite-prototype/identity tests pass
+  (1 pre-existing cache-surface failure reproduced on bare HEAD),
+  def-integrity vs HEAD clean, zero architecture violations.

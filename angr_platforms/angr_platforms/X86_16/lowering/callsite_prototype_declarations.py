@@ -17,7 +17,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from angr.analyses.decompiler.structured_codegen.c import CConstant, CFunctionCall, CUnaryOp
 from angr.knowledge_plugins.functions import Function
@@ -253,32 +253,27 @@ def _summary_for_call_8616(
     exact = summaries.get(id(node))
     if exact is not None:
         return exact
-    tags = node.tags
-    callsite_addr = None
-    if isinstance(tags, Mapping):
-        for key in ("ins_addr", "insn_addr", "stmt_addr", "addr"):
-            value = tags.get(key)
-            if isinstance(value, int):
-                callsite_addr = value
-                break
-    if not isinstance(callsite_addr, int):
-        matches: tuple[CallsiteSummary8616, ...] = ()
-    else:
-        matches = tuple(summary for summary in summaries.values() if summary.callsite_addr == callsite_addr)
+    callsite_addr = _call_tag_addr_8616(node)
+    matches: tuple[CallsiteSummary8616, ...] = (
+        ()
+        if not isinstance(callsite_addr, int)
+        else tuple(summary for summary in summaries.values() if summary.callsite_addr == callsite_addr)
+    )
     compatible = _compatible_summary_8616(matches)
     if compatible is not None:
         return compatible
-    callee = node.callee_func
-    if callee is not None:
-        try:
-            callee_addr = cast(_AddressedFunctionSurface8616, callee).addr
-        except AttributeError:
-            callee_addr = None
-        if isinstance(callee_addr, int):
-            matches = tuple(summary for summary in summaries.values() if summary.target_addr == callee_addr)
-            compatible = _compatible_summary_8616(matches)
-            if compatible is not None:
-                return compatible
+    compatible = _callee_summary_8616(node, summaries)
+    if compatible is not None:
+        return compatible
+    return _name_summary_8616(project, node, summaries)
+
+
+def _name_summary_8616(
+    project: object,
+    node: CFunctionCall,
+    summaries: Mapping[int, CallsiteSummary8616],
+) -> CallsiteSummary8616 | None:
+    """Resolve a summary whose target's symbol name equals the call name."""
     call_name = _call_name_8616(node)
     if call_name is None:
         return None
@@ -352,29 +347,122 @@ def _constant_register_indirect_target_addr_8616(
     target = node.callee_target
     target_source = summary.target_source
     target_value = target.value if isinstance(target, CConstant) else None
-    if (
-        summary.target_addr is not None
-        or not isinstance(target_source, tuple)
-        or len(target_source) != 2
-        or target_source[0] != "reg"
-        or not isinstance(target_source[1], str)
-        or not isinstance(target, CConstant)
-        or not isinstance(target.type, SimTypePointer)
-        or not isinstance(target_value, int)
-        or not 0 <= target_value <= 0xFFFF
-        or not isinstance(summary.arg_count, int)
-        or summary.arg_count
-        != len(tuple(cast(Sequence[object], node.args or ())))
-    ):
+    register_name = _indirect_register_call_reg_name_8616(
+        summary, node, target, target_source, target_value
+    )
+    if register_name is None:
         return None
     try:
-        register_shape = cast(_ProjectSurface8616, project).arch.registers[target_source[1]]
+        register_shape = cast(_ProjectSurface8616, project).arch.registers[register_name]
     except (AttributeError, KeyError, TypeError):
         return None
     if len(register_shape) < 2 or register_shape[1] != 2:
         return None
     normalized_target = normalize_x86_16_call_target_addr_8616(project, target_value)
     return normalized_target if isinstance(normalized_target, int) else None
+
+
+def _indirect_register_call_reg_name_8616(
+    summary: CallsiteSummary8616,
+    node: CFunctionCall,
+    target: object,
+    target_source: object,
+    target_value: object,
+) -> str | None:
+    """Return the proven near-register name, or None when unproven."""
+    if (
+        summary.target_addr is not None
+        or not isinstance(target_source, tuple)
+        or len(target_source) != 2
+        or target_source[0] != "reg"
+        or not isinstance(target_source[1], str)
+    ):
+        return None
+    if (
+        not isinstance(target, CConstant)
+        or not isinstance(target.type, SimTypePointer)
+        or not isinstance(target_value, int)
+        or not 0 <= target_value <= 0xFFFF
+    ):
+        return None
+    if not isinstance(summary.arg_count, int) or summary.arg_count != len(
+        tuple(cast(Sequence[object], node.args or ()))
+    ):
+        return None
+    return target_source[1]
+
+
+def _storage_contract_return_decision_8616(
+    project: object, target_addr: int
+) -> tuple[bool, str | None]:
+    """Resolve the storage-contract return lane: (decided, c_type)."""
+    storage_resolution = function_storage_resolution_8616(
+        project,
+        target_addr,
+    )
+    if storage_resolution is None:
+        return False, None
+    if storage_resolution.contract is None:
+        return True, None
+    storage_return = storage_contract_return_type_8616(
+        storage_resolution.contract,
+        cast(_ProjectSurface8616, project).arch,
+    )
+    if storage_return.verdict is StorageSimTypeVerdict8616.REFUSED:
+        return True, None
+    if storage_return.accepted:
+        return True, storage_return.c_type if isinstance(storage_return.c_type, str) else None
+    return False, None
+
+
+def _prototype_is_void_return_8616(project: object, target_addr: int) -> bool:
+    """True when the target function's prototype declares a void return."""
+    try:
+        function = cast(_ProjectSurface8616, project).kb.functions.function(
+            addr=target_addr,
+            create=False,
+        )
+        prototype = (
+            cast(_PrototypeFunctionSurface8616, function).prototype
+            if function is not None
+            else None
+        )
+    except (AttributeError, KeyError, TypeError):
+        prototype = None
+    if isinstance(prototype, SimTypeFunction) and isinstance(prototype.returnty, SimTypeBottom):  # noqa: SIM102
+        if prototype.returnty.label == "void":
+            return True
+    return False
+
+
+def _call_tag_addr_8616(node: CFunctionCall) -> int | None:
+    """Return the exact callsite instruction address recorded in node tags."""
+    tags = node.tags
+    callsite_addr = None
+    if isinstance(tags, Mapping):
+        for key in ("ins_addr", "insn_addr", "stmt_addr", "addr"):
+            value = tags.get(key)
+            if isinstance(value, int):
+                callsite_addr = value
+                break
+    return callsite_addr
+
+
+def _callee_summary_8616(
+    node: CFunctionCall, summaries: Mapping[int, CallsiteSummary8616]
+) -> CallsiteSummary8616 | None:
+    """Resolve a summary by the callee's exact target address."""
+    callee = node.callee_func
+    if callee is None:
+        return None
+    try:
+        callee_addr = cast(_AddressedFunctionSurface8616, callee).addr
+    except AttributeError:
+        callee_addr = None
+    if not isinstance(callee_addr, int):
+        return None
+    matches = tuple(summary for summary in summaries.values() if summary.target_addr == callee_addr)
+    return _compatible_summary_8616(matches)
 
 
 def canonicalize_callsite_target_identities_8616(
@@ -406,78 +494,9 @@ def canonicalize_callsite_target_identities_8616(
         summary = _summary_for_call_8616(project, node, summaries)
         if summary is None:
             continue
-        constant_target_addr = _constant_register_indirect_target_addr_8616(
-            project,
-            node,
-            summary,
-        )
-        authoritative_target_addr = (
-            summary.target_addr
-            if isinstance(summary.target_addr, int)
-            else constant_target_addr
-        )
-        if not isinstance(authoritative_target_addr, int):
-            continue
-        stats.raw_fact_count += 1
-        if not _callsite_matches_summary_8616(project, node, summary):
-            stats.failure_count += 1
-            decisions.append(
-                (_callee_addr_8616(node), authoritative_target_addr, "callsite-mismatch")
-            )
-            continue
-        current_addr = _callee_addr_8616(node)
-        if constant_target_addr is None and current_addr != authoritative_target_addr:
-            exact_far_target = (
-                callsite_machine_frame_kind_8616(summary)
-                is CallsiteMachineFrameKind8616.FAR
-            )
-            canonical_addr = (
-                authoritative_target_addr
-                if exact_far_target
-                else normalize_x86_16_call_target_addr_8616(project, current_addr)
-            )
-            if canonical_addr != authoritative_target_addr:
-                stats.failure_count += 1
-                decisions.append((current_addr, authoritative_target_addr, "target-mismatch"))
-                continue
-        stats.normalized_fact_count += 1
-        try:
-            canonical_function = functions.function(
-                addr=authoritative_target_addr,
-                create=False,
-            )
-        except (KeyError, TypeError):
-            canonical_function = None
-        if canonical_function is None:
-            if current_addr == authoritative_target_addr:
-                canonical_function = node.callee_func
-            canonical_name: object = f"sub_{authoritative_target_addr:x}"
-            decision = "materialized-generic"
-        else:
-            try:
-                canonical_name = cast(
-                    _AddressedFunctionSurface8616,
-                    canonical_function,
-                ).name
-            except AttributeError:
-                canonical_name = None
-            decision = "materialized-function"
-        if (
-            not isinstance(canonical_name, str)
-            or _C_IDENTIFIER_RE_8616.fullmatch(canonical_name) is None
-        ):
-            stats.failure_count += 1
-            decisions.append((current_addr, authoritative_target_addr, "name-missing"))
-            continue
-        if node.callee_func is canonical_function and node.callee_target == canonical_name:
-            decisions.append((current_addr, authoritative_target_addr, "already-canonical"))
-            continue
-        stats.classified_fact_count += 1
-        node.callee_func = canonical_function
-        node.callee_target = canonical_name
-        stats.materialized_count += 1
-        decisions.append((current_addr, authoritative_target_addr, decision))
-        changed = True
+        changed = _canonicalize_call_identity_8616(
+            project, functions, node, summary, stats, decisions
+        ) or changed
 
     if os.environ.get("INERTIA_DEBUG_CALL_MATERIALIZATION"):
         _LOGGER.warning(
@@ -495,6 +514,99 @@ def canonicalize_callsite_target_identities_8616(
             "classified canonical call targets were not materialized"
         )
     return changed
+
+
+def _canonicalize_call_identity_8616(
+    project: object,
+    functions: object,
+    node: CFunctionCall,
+    summary: CallsiteSummary8616,
+    stats: CallTargetIdentityStats8616,
+    decisions: list[tuple[int | None, int | None, str]],
+) -> bool:
+    """Rebind one call to its authoritative target identity; True when changed."""
+    constant_target_addr = _constant_register_indirect_target_addr_8616(
+        project,
+        node,
+        summary,
+    )
+    authoritative_target_addr = (
+        summary.target_addr
+        if isinstance(summary.target_addr, int)
+        else constant_target_addr
+    )
+    if not isinstance(authoritative_target_addr, int):
+        return False
+    stats.raw_fact_count += 1
+    if not _callsite_matches_summary_8616(project, node, summary):
+        stats.failure_count += 1
+        decisions.append(
+            (_callee_addr_8616(node), authoritative_target_addr, "callsite-mismatch")
+        )
+        return False
+    current_addr = _callee_addr_8616(node)
+    if constant_target_addr is None and current_addr != authoritative_target_addr:
+        exact_far_target = (
+            callsite_machine_frame_kind_8616(summary)
+            is CallsiteMachineFrameKind8616.FAR
+        )
+        canonical_addr = (
+            authoritative_target_addr
+            if exact_far_target
+            else normalize_x86_16_call_target_addr_8616(project, current_addr)
+        )
+        if canonical_addr != authoritative_target_addr:
+            stats.failure_count += 1
+            decisions.append((current_addr, authoritative_target_addr, "target-mismatch"))
+            return False
+    stats.normalized_fact_count += 1
+    canonical_function, canonical_name, decision = _canonical_target_identity_8616(
+        functions, node, current_addr, authoritative_target_addr
+    )
+    if (
+        not isinstance(canonical_name, str)
+        or _C_IDENTIFIER_RE_8616.fullmatch(canonical_name) is None
+    ):
+        stats.failure_count += 1
+        decisions.append((current_addr, authoritative_target_addr, "name-missing"))
+        return False
+    if node.callee_func is canonical_function and node.callee_target == canonical_name:
+        decisions.append((current_addr, authoritative_target_addr, "already-canonical"))
+        return False
+    stats.classified_fact_count += 1
+    node.callee_func = canonical_function
+    node.callee_target = canonical_name
+    stats.materialized_count += 1
+    decisions.append((current_addr, authoritative_target_addr, decision))
+    return True
+
+
+def _canonical_target_identity_8616(
+    functions: Any,  # noqa: ANN401
+    node: CFunctionCall,
+    current_addr: int | None,
+    authoritative_target_addr: int,
+) -> tuple[object, object, str]:
+    """Resolve the canonical function object and name for a proven target."""
+    try:
+        canonical_function = functions.function(
+            addr=authoritative_target_addr,
+            create=False,
+        )
+    except (KeyError, TypeError):
+        canonical_function = None
+    if canonical_function is None:
+        if current_addr == authoritative_target_addr:
+            canonical_function = node.callee_func
+        return canonical_function, f"sub_{authoritative_target_addr:x}", "materialized-generic"
+    try:
+        canonical_name = cast(
+            _AddressedFunctionSurface8616,
+            canonical_function,
+        ).name
+    except AttributeError:
+        canonical_name = None
+    return canonical_function, canonical_name, "materialized-function"
 
 
 def _summary_arg_widths_8616(summary: CallsiteSummary8616) -> tuple[int, ...] | None:
@@ -607,36 +719,11 @@ def _joined_return_type_8616(
 ) -> str | None:
     """Join caller-use evidence for one exact target or refuse ABI conflict."""
     if isinstance(summary.target_addr, int):
-        storage_resolution = function_storage_resolution_8616(
-            project,
-            summary.target_addr,
-        )
-        if storage_resolution is not None:
-            if storage_resolution.contract is None:
-                return None
-            storage_return = storage_contract_return_type_8616(
-                storage_resolution.contract,
-                cast(_ProjectSurface8616, project).arch,
-            )
-            if storage_return.verdict is StorageSimTypeVerdict8616.REFUSED:
-                return None
-            if storage_return.accepted:
-                return storage_return.c_type if isinstance(storage_return.c_type, str) else None
-        try:
-            function = cast(_ProjectSurface8616, project).kb.functions.function(
-                addr=summary.target_addr,
-                create=False,
-            )
-            prototype = (
-                cast(_PrototypeFunctionSurface8616, function).prototype
-                if function is not None
-                else None
-            )
-        except (AttributeError, KeyError, TypeError):
-            prototype = None
-        if isinstance(prototype, SimTypeFunction) and isinstance(prototype.returnty, SimTypeBottom):  # noqa: SIM102
-            if prototype.returnty.label == "void":
-                return "void"
+        decided, storage_type = _storage_contract_return_decision_8616(project, summary.target_addr)
+        if decided:
+            return storage_type
+        if _prototype_is_void_return_8616(project, summary.target_addr):
+            return "void"
     evidence = (
         caller_return_use_evidence_by_addr_8616(project).get(summary.target_addr)
         if isinstance(summary.target_addr, int)
@@ -701,6 +788,324 @@ def _compatible_summary_8616(
         if _declaration_interface_8616(summary) != expected:
             return None
     return first
+
+
+
+def _process_callsite_declaration_8616(
+    project: object,
+    codegen: object,
+    node: CFunctionCall,
+    summary: CallsiteSummary8616 | None,
+    all_summaries: tuple[CallsiteSummary8616, ...],
+    result_contracts: dict[int, CallsiteCResultContract8616],
+    desired_by_name: dict[str, str],
+    fallback_declarations_by_name: dict[str, set[str]],
+    required_forward_decls: set[str],
+    ambiguous_names: set[str],
+) -> int:
+    """Process one resolved call; returns 1 when a summary was consumed."""
+    if summary is None or summary.stack_probe_helper:
+        if summary is None:
+            _debug_callsite_unmatched_8616(node)
+        return 0
+    _debug_callsite_declaration_evidence_8616(node, summary)
+    call_name = _call_name_8616(node)
+    if call_name is not None and is_lowered_runtime_macro_8616(call_name):
+        return 1
+    return_type = _call_return_contract_8616(
+        project, summary, call_name, all_summaries, result_contracts
+    )
+    declaration, runtime_declaration = _select_call_declaration_8616(
+        project, codegen, node, summary, call_name, return_type
+    )
+    if declaration is None:
+        _debug_callsite_declaration_refused_8616(node, summary)
+        return 1
+    _record_call_declaration_8616(
+        codegen,
+        node,
+        summary,
+        declaration,
+        runtime_declaration,
+        return_type,
+        desired_by_name,
+        fallback_declarations_by_name,
+        required_forward_decls,
+        ambiguous_names,
+    )
+    return 1
+
+
+def _debug_callsite_unmatched_8616(node: CFunctionCall) -> None:
+    """Emit the unmatched-callsite diagnostic when enabled."""
+    if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
+        _LOGGER.warning(
+            "callsite declaration unmatched: name=%s callsite=%s callee=%s",
+            _call_name_8616(node),
+            _callsite_addr_8616(node),
+            _callee_addr_8616(node),
+        )
+
+
+def _debug_callsite_declaration_evidence_8616(node: CFunctionCall, summary: CallsiteSummary8616) -> None:
+    """Emit the per-callsite evidence diagnostic when enabled."""
+    if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
+        _LOGGER.warning(
+            "callsite declaration evidence: name=%s callsite=%#x target=%s "
+            "arg_count=%s arg_widths=%s logical_widths=%s return_register=%s "
+            "return_used=%s return_shape=%s",
+            _call_name_8616(node),
+            summary.callsite_addr,
+            None if summary.target_addr is None else hex(summary.target_addr),
+            summary.arg_count,
+            summary.arg_widths,
+            summary.logical_arg_widths,
+            summary.return_register,
+            summary.return_used,
+            summary.return_shape,
+        )
+
+
+def _debug_callsite_declaration_refused_8616(node: CFunctionCall, summary: CallsiteSummary8616) -> None:
+    """Emit the refused-declaration diagnostic when enabled."""
+    if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
+        _LOGGER.warning(
+            "callsite declaration refused: callsite=%#x name=%s args=%d widths=%s",
+            summary.callsite_addr,
+            _call_name_8616(node),
+            len(tuple(cast(Sequence[object], node.args or ()))),
+            _summary_arg_widths_8616(summary),
+        )
+
+
+def _call_return_contract_8616(
+    project: object,
+    summary: CallsiteSummary8616,
+    call_name: str | None,
+    all_summaries: tuple[CallsiteSummary8616, ...],
+    result_contracts: dict[int, CallsiteCResultContract8616],
+) -> str | None:
+    """Join the call's return type and record the result contract."""
+    inferred_return_type = _joined_return_type_8616(project, summary, all_summaries)
+    return_type = (
+        KNOWN_EXTERNAL_RETURN_TYPES_8616.get(call_name, inferred_return_type)
+        if call_name is not None
+        else inferred_return_type
+    )
+    if return_type is not None:
+        result_contracts[summary.callsite_addr] = CallsiteCResultContract8616(
+            kind=(
+                CallsiteCResultKind8616.VOID
+                if return_type == "void"
+                else CallsiteCResultKind8616.VALUE
+            ),
+            c_type=return_type,
+        )
+    return return_type
+
+
+def _debug_callsite_no_declarations_8616(
+    call_count: int,
+    summaries: Mapping[int, CallsiteSummary8616],
+    matched_count: int,
+    existing: tuple[str, ...],
+    ambiguous_names: set[str],
+) -> None:
+    """Emit the no-declarations diagnostic when enabled."""
+    if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
+        _LOGGER.warning(
+            "callsite declaration lowering produced no declarations: "
+            "calls=%d summaries=%d matched=%d existing=%d ambiguous=%s",
+            call_count,
+            len(summaries),
+            matched_count,
+            len(existing),
+            tuple(sorted(ambiguous_names)),
+        )
+
+
+def _select_call_declaration_8616(
+    project: object,
+    codegen: object,
+    node: CFunctionCall,
+    summary: CallsiteSummary8616,
+    call_name: str | None,
+    return_type: str | None,
+) -> tuple[str | None, object]:
+    """Choose the declaration for one call; also returns the runtime decl."""
+    runtime_declaration = (
+        runtime_helper_declaration_8616(call_name, _project_c_target_8616(project))
+        if call_name is not None
+        else None
+    )
+    known_helper_declaration = (
+        preferred_known_helper_signature_decl(call_name)
+        if call_name is not None
+        else None
+    )
+    abi_declaration = dos_interrupt_prototype_declaration_8616(call_name)
+    inferred_declaration = (
+        _prototype_decl_8616(project, codegen, node, summary, return_type)
+        if return_type is not None
+        else None
+    )
+    declaration = (
+        inferred_declaration
+        if inferred_declaration is not None and _has_typed_aggregate_pointer_argument_8616(node)
+        else abi_declaration or runtime_declaration or known_helper_declaration
+    )
+    if (
+        isinstance(known_helper_declaration, str)
+        and declaration == known_helper_declaration
+        and isinstance(call_name, str)
+        and call_name
+        and _declaration_name_8616(known_helper_declaration) != call_name
+    ):
+        declaration = _declaration_with_call_name_8616(known_helper_declaration, call_name)
+    if declaration is None and return_type is not None:
+        declaration = inferred_declaration if summary.logical_arg_widths else None
+        if declaration is None:
+            declaration = (
+                _program_arity_fallback_decl_8616(
+                    project,
+                    summary,
+                    call_name,
+                    return_type,
+                )
+                if call_name is not None
+                else None
+            )
+        if declaration is None:
+            declaration = _prototype_decl_8616(project, codegen, node, summary, return_type)
+    return declaration, runtime_declaration
+
+
+def _record_call_declaration_8616(
+    codegen: object,
+    node: CFunctionCall,
+    summary: CallsiteSummary8616,
+    declaration: str,
+    runtime_declaration: object,
+    return_type: str | None,
+    desired_by_name: dict[str, str],
+    fallback_declarations_by_name: dict[str, set[str]],
+    required_forward_decls: set[str],
+    ambiguous_names: set[str],
+) -> None:
+    """Record one call's declaration, forward decls, and conflicts."""
+    for argument in tuple(cast(Sequence[object], node.args or ())):
+        required_forward_decls.update(_argument_forward_declarations_8616(codegen, argument))
+    name = _declaration_name_8616(declaration)
+    if name is None or name in ambiguous_names:
+        return
+    if runtime_declaration is None and return_type is not None:
+        fallback_declarations_by_name.setdefault(name, set()).add(f"{return_type} {name}();")
+    previous = desired_by_name.get(name)
+    if previous is not None and previous != declaration:
+        if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
+            _LOGGER.warning(
+                "callsite declaration conflict: name=%s previous=%s current=%s callsite=%#x",
+                name,
+                previous,
+                declaration,
+                summary.callsite_addr,
+            )
+        desired_by_name.pop(name, None)
+        ambiguous_names.add(name)
+        return
+    desired_by_name[name] = declaration
+
+
+def _debug_callsite_lowering_unavailable_8616(
+    root: object,
+    summaries: Mapping[int, CallsiteSummary8616],
+    inventory: Mapping[int, CallsiteSummary8616],
+) -> None:
+    """Emit the lowering-unavailable diagnostic when enabled."""
+    if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
+        _LOGGER.warning(
+            "callsite declaration lowering unavailable: root=%s summaries=%d inventory=%d",
+            root is not None,
+            len(summaries),
+            len(inventory),
+        )
+
+
+def _resolved_call_summary_pairs_8616(
+    project: object,
+    root: object,
+    summaries: Mapping[int, CallsiteSummary8616],
+    inventory: Mapping[int, CallsiteSummary8616],
+) -> list[tuple[CFunctionCall, CallsiteSummary8616 | None]]:
+    """Resolve every structured call to its summary when provable."""
+    call_nodes = tuple(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CFunctionCall))
+    resolved_calls: list[tuple[CFunctionCall, CallsiteSummary8616 | None]] = []
+    for node in call_nodes:
+        summary = _summary_for_call_8616(project, node, summaries)
+        if summary is None:
+            summary = _summary_for_call_8616(project, node, inventory)
+        resolved_calls.append((node, summary))
+    return resolved_calls
+
+
+def _call_name_sets_8616(
+    resolved_calls: list[tuple[CFunctionCall, CallsiteSummary8616 | None]],
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Return (active call names, obsolete numeric sub_ names)."""
+    active_call_names = frozenset(
+        name for node, _summary in resolved_calls if (name := _call_name_8616(node)) is not None
+    )
+    obsolete_numeric_names = frozenset(
+        numeric_name
+        for node, summary in resolved_calls
+        if summary is not None and isinstance(summary.target_addr, int)
+        and (numeric_name := f"sub_{summary.target_addr:x}") not in active_call_names
+        and _call_name_8616(node) != numeric_name
+    )
+    return active_call_names, obsolete_numeric_names
+
+
+def _resolve_ambiguous_declarations_8616(
+    desired_by_name: dict[str, str],
+    fallback_declarations_by_name: dict[str, set[str]],
+    ambiguous_names: set[str],
+) -> None:
+    """Re-admit ambiguous names only when one fallback spelling survives."""
+    for name in ambiguous_names:
+        fallback_declarations = fallback_declarations_by_name.get(name, set())
+        if len(fallback_declarations) == 1:
+            desired_by_name[name] = next(iter(fallback_declarations))
+
+
+def _merge_prototype_declarations_8616(
+    existing: tuple[str, ...],
+    desired_by_name: dict[str, str],
+    obsolete_numeric_names: frozenset[str],
+    required_forward_decls: set[str],
+) -> tuple[str, ...]:
+    """Merge desired declarations into the existing surface deterministically."""
+    merged: list[str] = []
+    materialized_names: set[str] = set()
+    for declaration in existing:
+        name = _declaration_name_8616(declaration)
+        if name in obsolete_numeric_names:
+            continue
+        desired = desired_by_name.get(name or "")
+        if desired is None:
+            merged.append(declaration)
+            continue
+        if name is not None and name not in materialized_names:
+            merged.append(desired)
+            materialized_names.add(name)
+    for name, declaration in desired_by_name.items():
+        if name not in materialized_names:
+            merged.append(declaration)
+            materialized_names.add(name)
+    ordered_forward_decls = tuple(sorted(required_forward_decls))
+    return (
+        *ordered_forward_decls,
+        *(declaration for declaration in merged if declaration not in required_forward_decls),
+    )
 
 
 def _prototype_decl_8616(
@@ -838,31 +1243,10 @@ def materialize_callsite_prototype_declarations_8616(project: object, codegen: o
     inventory = callsite_summary_inventory_8616(codegen)
     all_summaries = tuple({summary.callsite_addr: summary for summary in (*summaries.values(), *inventory.values())}.values())
     if root is None or not all_summaries:
-        if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
-            _LOGGER.warning(
-                "callsite declaration lowering unavailable: root=%s summaries=%d inventory=%d",
-                root is not None,
-                len(summaries),
-                len(inventory),
-            )
+        _debug_callsite_lowering_unavailable_8616(root, summaries, inventory)
         return False
-    call_nodes = tuple(node for node in _iter_c_nodes_deep_8616(root) if isinstance(node, CFunctionCall))
-    resolved_calls: list[tuple[CFunctionCall, CallsiteSummary8616 | None]] = []
-    for node in call_nodes:
-        summary = _summary_for_call_8616(project, node, summaries)
-        if summary is None:
-            summary = _summary_for_call_8616(project, node, inventory)
-        resolved_calls.append((node, summary))
-    active_call_names = frozenset(
-        name for node, _summary in resolved_calls if (name := _call_name_8616(node)) is not None
-    )
-    obsolete_numeric_names = frozenset(
-        numeric_name
-        for node, summary in resolved_calls
-        if summary is not None and isinstance(summary.target_addr, int)
-        and (numeric_name := f"sub_{summary.target_addr:x}") not in active_call_names
-        and _call_name_8616(node) != numeric_name
-    )
+    resolved_calls = _resolved_call_summary_pairs_8616(project, root, summaries, inventory)
+    _active_call_names, obsolete_numeric_names = _call_name_sets_8616(resolved_calls)
     materialize_callsite_pointer_table_types_8616(
         project,
         codegen,
@@ -878,162 +1262,29 @@ def materialize_callsite_prototype_declarations_8616(project: object, codegen: o
     matched_count = 0
     for node, summary in resolved_calls:
         call_count += 1
-        if summary is None or summary.stack_probe_helper:
-            if summary is None and os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
-                _LOGGER.warning(
-                    "callsite declaration unmatched: name=%s callsite=%s callee=%s",
-                    _call_name_8616(node),
-                    _callsite_addr_8616(node),
-                    _callee_addr_8616(node),
-                )
-            continue
-        matched_count += 1
-        if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
-            _LOGGER.warning(
-                "callsite declaration evidence: name=%s callsite=%#x target=%s "
-                "arg_count=%s arg_widths=%s logical_widths=%s return_register=%s "
-                "return_used=%s return_shape=%s",
-                _call_name_8616(node),
-                summary.callsite_addr,
-                None if summary.target_addr is None else hex(summary.target_addr),
-                summary.arg_count,
-                summary.arg_widths,
-                summary.logical_arg_widths,
-                summary.return_register,
-                summary.return_used,
-                summary.return_shape,
-            )
-        call_name = _call_name_8616(node)
-        if call_name is not None and is_lowered_runtime_macro_8616(call_name):
-            continue
-        inferred_return_type = _joined_return_type_8616(project, summary, all_summaries)
-        return_type = (
-            KNOWN_EXTERNAL_RETURN_TYPES_8616.get(call_name, inferred_return_type)
-            if call_name is not None
-            else inferred_return_type
+        matched_count += _process_callsite_declaration_8616(
+            project,
+            codegen,
+            node,
+            summary,
+            all_summaries,
+            result_contracts,
+            desired_by_name,
+            fallback_declarations_by_name,
+            required_forward_decls,
+            ambiguous_names,
         )
-        if return_type is not None:
-            result_contracts[summary.callsite_addr] = CallsiteCResultContract8616(
-                kind=(
-                    CallsiteCResultKind8616.VOID
-                    if return_type == "void"
-                    else CallsiteCResultKind8616.VALUE
-                ),
-                c_type=return_type,
-            )
-        runtime_declaration = (
-            runtime_helper_declaration_8616(call_name, _project_c_target_8616(project))
-            if call_name is not None
-            else None
-        )
-        known_helper_declaration = (
-            preferred_known_helper_signature_decl(call_name)
-            if call_name is not None
-            else None
-        )
-        abi_declaration = dos_interrupt_prototype_declaration_8616(call_name)
-        inferred_declaration = (
-            _prototype_decl_8616(project, codegen, node, summary, return_type)
-            if return_type is not None
-            else None
-        )
-        declaration = (
-            inferred_declaration
-            if inferred_declaration is not None and _has_typed_aggregate_pointer_argument_8616(node)
-            else abi_declaration or runtime_declaration or known_helper_declaration
-        )
-        if (
-            isinstance(known_helper_declaration, str)
-            and declaration == known_helper_declaration
-            and isinstance(call_name, str)
-            and call_name
-            and _declaration_name_8616(known_helper_declaration) != call_name
-        ):
-            declaration = _declaration_with_call_name_8616(known_helper_declaration, call_name)
-        if declaration is None and return_type is not None:
-            declaration = inferred_declaration if summary.logical_arg_widths else None
-            if declaration is None:
-                declaration = (
-                    _program_arity_fallback_decl_8616(
-                        project,
-                        summary,
-                        call_name,
-                        return_type,
-                    )
-                    if call_name is not None
-                    else None
-                )
-            if declaration is None:
-                declaration = _prototype_decl_8616(project, codegen, node, summary, return_type)
-        if declaration is None:
-            if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
-                _LOGGER.warning(
-                    "callsite declaration refused: callsite=%#x name=%s args=%d widths=%s",
-                    summary.callsite_addr,
-                    _call_name_8616(node),
-                    len(tuple(cast(Sequence[object], node.args or ()))),
-                    _summary_arg_widths_8616(summary),
-                )
-            continue
-        for argument in tuple(cast(Sequence[object], node.args or ())):
-            required_forward_decls.update(_argument_forward_declarations_8616(codegen, argument))
-        name = _declaration_name_8616(declaration)
-        if name is None or name in ambiguous_names:
-            continue
-        if runtime_declaration is None and return_type is not None:
-            fallback_declarations_by_name.setdefault(name, set()).add(f"{return_type} {name}();")
-        previous = desired_by_name.get(name)
-        if previous is not None and previous != declaration:
-            if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
-                _LOGGER.warning(
-                    "callsite declaration conflict: name=%s previous=%s current=%s callsite=%#x",
-                    name,
-                    previous,
-                    declaration,
-                    summary.callsite_addr,
-                )
-            desired_by_name.pop(name, None)
-            ambiguous_names.add(name)
-            continue
-        desired_by_name[name] = declaration
-    for name in ambiguous_names:
-        fallback_declarations = fallback_declarations_by_name.get(name, set())
-        if len(fallback_declarations) == 1:
-            desired_by_name[name] = next(iter(fallback_declarations))
+    _resolve_ambiguous_declarations_8616(
+        desired_by_name, fallback_declarations_by_name, ambiguous_names
+    )
     surface._inertia_callsite_c_result_contracts_8616 = result_contracts
     if not desired_by_name:
-        if os.environ.get("INERTIA_DEBUG_CALLSITE_PROTOTYPE_DECLS") == "1":
-            _LOGGER.warning(
-                "callsite declaration lowering produced no declarations: "
-                "calls=%d summaries=%d matched=%d existing=%d ambiguous=%s",
-                call_count,
-                len(summaries),
-                matched_count,
-                len(existing),
-                tuple(sorted(ambiguous_names)),
-            )
+        _debug_callsite_no_declarations_8616(
+            call_count, summaries, matched_count, existing, ambiguous_names
+        )
         return False
-    merged: list[str] = []
-    materialized_names: set[str] = set()
-    for declaration in existing:
-        name = _declaration_name_8616(declaration)
-        if name in obsolete_numeric_names:
-            continue
-        desired = desired_by_name.get(name or "")
-        if desired is None:
-            merged.append(declaration)
-            continue
-        if name is not None and name not in materialized_names:
-            merged.append(desired)
-            materialized_names.add(name)
-    for name, declaration in desired_by_name.items():
-        if name not in materialized_names:
-            merged.append(declaration)
-            materialized_names.add(name)
-    ordered_forward_decls = tuple(sorted(required_forward_decls))
-    merged_tuple = (
-        *ordered_forward_decls,
-        *(declaration for declaration in merged if declaration not in required_forward_decls),
+    merged_tuple = _merge_prototype_declarations_8616(
+        existing, desired_by_name, obsolete_numeric_names, required_forward_decls
     )
     if merged_tuple == existing:
         return False
