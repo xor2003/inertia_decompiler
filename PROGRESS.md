@@ -8,6 +8,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Two full large-model replays stop before compilation with `/dev/kvm` absent
+  (24.43s / 23.28s, unchanged implementation). A direct original-EXE run passes
+  between failures, so device availability is inconsistent. No acceptance claim.
+  Retained-EXE six-function source-free batch is active at
+  `.cache/compiler-coverage/retained-far-leaf-schema-batch-001/`; DOS build/runtime
+  remains an independently open requirement.
+
 - Exact AST leaf schemas skip display metadata while retaining reference fields
   and generic extension traversal. Final focused suite: 39 passed; scoped Ruff
   and MyPy pass. Diagnostic output is byte-identical, validated and GCC-clean;
@@ -1473,3 +1480,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verified: ruff 0, mypy 0, module imports clean, def-integrity vs HEAD
   clean, zero architecture violations (no dedicated debugger_gdb test
   file exists; TUI step-over tests pass on the sibling gdb_tui file).
+- `scripts/decompile_cod_dir.py`: Ruff debt cleared to zero (5
+  findings). Split the 35-complexity `main` into a typed
+  `_RunAccumulator` state (result/failure/scheduler-timeout handlers)
+  plus `_build_arg_parser`, `_collect_work_items`,
+  `_print_parallelism_banner`, `_run_single_worker_lane`,
+  `_run_task_batches`/`_drain_batch_futures`, `_finish_writers`, and
+  `_emit_tail_validation_report` lanes; extracted the scan-safe field
+  tail and the COD selector-match lane.
+- Verified: ruff 0, mypy 0, `--help` smoke clean, def-integrity vs HEAD
+  clean, zero architecture violations.

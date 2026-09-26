@@ -25,7 +25,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Iterator
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Any, TextIO
@@ -579,29 +579,43 @@ def _render_scan_safe_block(result: CodWorkResult, scan_result: FunctionScanResu
         if result.child_exit_detail:
             parts.append(f"/* child exit detail: {result.child_exit_detail} */")
         parts.append(f"/* scan-safe ok: {scan_result.ok} */")
-        if scan_result.fallback_kind not in (None, "none"):
-            parts.append(f"/* fallback kind: {scan_result.fallback_kind} */")
-        if scan_result.failure_class is not None:
-            parts.append(f"/* failure class: {scan_result.failure_class} */")
-        if scan_result.reason is not None:
-            parts.append(f"/* reason: {scan_result.reason} */")
-        if scan_result.stage_reached:
-            parts.append(f"/* stage reached: {scan_result.stage_reached} */")
-        if scan_result.semantic_family is not None:
-            parts.append(f"/* semantic family: {scan_result.semantic_family} */")
-        if scan_result.semantic_family_reason is not None:
-            parts.append(f"/* family reason: {scan_result.semantic_family_reason} */")
-        if scan_result.confidence_scan_safe_classification is not None:
-            parts.append(f"/* confidence scan-safe: {scan_result.confidence_scan_safe_classification} */")
-        if scan_result.confidence_status is not None:
-            parts.append(f"/* confidence status: {scan_result.confidence_status} */")
-        if scan_result.confidence_assumption_kinds:
-            parts.append(f"/* assumptions: {', '.join(scan_result.confidence_assumption_kinds)} */")
-        if scan_result.confidence_evidence_kinds:
-            parts.append(f"/* evidence: {', '.join(scan_result.confidence_evidence_kinds)} */")
+        parts.extend(_scan_result_field_lines(scan_result))
         return "\n".join(parts)
 
     return _impl()
+
+
+def _scan_result_field_lines(scan_result: FunctionScanResult) -> list[str]:
+    """Render the optional scan-result fields as comment lines."""
+    parts: list[str] = []
+    if scan_result.fallback_kind not in (None, "none"):
+        parts.append(f"/* fallback kind: {scan_result.fallback_kind} */")
+    if scan_result.failure_class is not None:
+        parts.append(f"/* failure class: {scan_result.failure_class} */")
+    if scan_result.reason is not None:
+        parts.append(f"/* reason: {scan_result.reason} */")
+    if scan_result.stage_reached:
+        parts.append(f"/* stage reached: {scan_result.stage_reached} */")
+    if scan_result.semantic_family is not None:
+        parts.append(f"/* semantic family: {scan_result.semantic_family} */")
+    if scan_result.semantic_family_reason is not None:
+        parts.append(f"/* family reason: {scan_result.semantic_family_reason} */")
+    parts.extend(_scan_result_confidence_lines(scan_result))
+    return parts
+
+
+def _scan_result_confidence_lines(scan_result: FunctionScanResult) -> list[str]:
+    """Render the confidence-related scan-result fields as comment lines."""
+    parts: list[str] = []
+    if scan_result.confidence_scan_safe_classification is not None:
+        parts.append(f"/* confidence scan-safe: {scan_result.confidence_scan_safe_classification} */")
+    if scan_result.confidence_status is not None:
+        parts.append(f"/* confidence status: {scan_result.confidence_status} */")
+    if scan_result.confidence_assumption_kinds:
+        parts.append(f"/* assumptions: {', '.join(scan_result.confidence_assumption_kinds)} */")
+    if scan_result.confidence_evidence_kinds:
+        parts.append(f"/* evidence: {', '.join(scan_result.confidence_evidence_kinds)} */")
+    return parts
 
 
 @dataclasses.dataclass
@@ -684,19 +698,7 @@ def _resolve_selected_cod_files(cod_dir: Path, selectors: list[str] | None) -> l
             base_names.setdefault(path.name.lower(), []).append(path)
 
         for selector in selectors:
-            wanted = Path(selector)
-            matches: list[Path] = []
-            if wanted.is_absolute():
-                if wanted.is_file() and wanted.suffix.lower() == ".cod":
-                    matches.append(wanted)
-            else:
-                direct = cod_dir / wanted
-                if direct.is_file() and direct.suffix.lower() == ".cod":
-                    matches.append(direct)
-                matches.extend(base_names.get(selector.lower(), ()))
-                rel_match = rel_names.get(selector.lower())
-                if rel_match is not None:
-                    matches.append(rel_match)
+            matches = _selector_matches(selector, cod_dir, rel_names, base_names)
             if not matches:
                 raise ValueError(f"COD file selector matched nothing: {selector}")
             for match in matches:
@@ -705,6 +707,29 @@ def _resolve_selected_cod_files(cod_dir: Path, selectors: list[str] | None) -> l
         return sorted(selected.values())
 
     return _impl()
+
+
+def _selector_matches(
+    selector: str,
+    cod_dir: Path,
+    rel_names: dict[str, Path],
+    base_names: dict[str, list[Path]],
+) -> list[Path]:
+    """Return all COD files matched by one selector token."""
+    wanted = Path(selector)
+    matches: list[Path] = []
+    if wanted.is_absolute():
+        if wanted.is_file() and wanted.suffix.lower() == ".cod":
+            matches.append(wanted)
+        return matches
+    direct = cod_dir / wanted
+    if direct.is_file() and direct.suffix.lower() == ".cod":
+        matches.append(direct)
+    matches.extend(base_names.get(selector.lower(), ()))
+    rel_match = rel_names.get(selector.lower())
+    if rel_match is not None:
+        matches.append(rel_match)
+    return matches
 
 
 def _filter_work_items_by_proc_names(
@@ -1137,6 +1162,318 @@ def _write_tail_validation_baseline(path: Path, baseline: dict[str, object]) -> 
     path.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n")
 
 
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Build the decompile-cod-dir CLI argument parser."""
+    parser = argparse.ArgumentParser(description="Decompile all .COD files into sibling .dec files.")
+    parser.add_argument("cod_dir", type=Path, help="Root directory containing .COD files.")
+    parser.add_argument(
+        "--cod-file",
+        action="append",
+        default=None,
+        help=(
+            "Limit the run to one COD file. Can be repeated. "
+            "Accepts a basename, a path relative to cod_dir, or an absolute path."
+        ),
+    )
+    parser.add_argument(
+        "--proc-name",
+        action="append",
+        default=None,
+        help="Limit the run to one PROC name. Can be repeated. Matching is case-insensitive.",
+    )
+    parser.add_argument("--timeout", type=int, default=60, help="Per-procedure decompiler timeout in seconds.")
+    parser.add_argument(
+        "--max-memory-mb",
+        type=int,
+        default=DEFAULT_MAX_MEMORY_MB,
+        help="Per-worker RLIMIT_AS cap in MB, also used as the parallelism memory floor.",
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=DEFAULT_MAX_WORKERS,
+        help="Hard cap for the worker pool. Lower this if decompilation memory grows too high.",
+    )
+    parser.add_argument(
+        "--max-tasks-per-worker",
+        type=int,
+        default=DEFAULT_MAX_TASKS_PER_WORKER,
+        help="Recycle the worker pool after this many procedures per worker to bound memory growth.",
+    )
+    parser.add_argument(
+        "--subprocess-timeout",
+        type=int,
+        default=900,
+        help="Soft wait timeout in seconds for the worker pool scheduler before outstanding work is marked failed.",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip files whose sibling .dec already exists.",
+    )
+    parser.add_argument(
+        "--tail-validation-baseline",
+        type=Path,
+        default=None,
+        help="Optional baseline JSON for accepted whole-tail changed verdicts. Defaults to a per-corpus cache path if present.",
+    )
+    parser.add_argument(
+        "--write-tail-validation-baseline",
+        action="store_true",
+        help="Write the current whole-tail changed-set to the selected baseline path after the run.",
+    )
+    return parser
+
+
+def _collect_work_items(
+    cod_files: list[Path], args: argparse.Namespace
+) -> tuple[list[CodWorkItem], dict[Path, list[CodWorkItem]]]:
+    """Build the selected per-file work-item lists, honoring skip filters."""
+    work_items: list[CodWorkItem] = []
+    items_by_file: dict[Path, list[CodWorkItem]] = {}
+    for cod_path in cod_files:
+        if args.skip_existing and cod_path.with_suffix(".dec").exists():
+            print(f"[skip] {cod_path}")
+            continue
+        items = _filter_work_items_by_proc_names(_build_work_items(cod_path), args.proc_name)
+        if args.proc_name and not items:
+            print(f"[skip] {cod_path}: no selected PROC matched")
+            continue
+        items_by_file[cod_path] = items
+        work_items.extend(items)
+    return work_items, items_by_file
+
+
+def _print_parallelism_banner(workers: int, args: argparse.Namespace, worker_memory_limit_mb: int) -> None:
+    """Print the selected worker-pool configuration line."""
+    if workers <= 1:
+        print(f"/* parallelism: single worker process, worker-memory-limit={worker_memory_limit_mb}MB */")
+        return
+    available_mb = _mem_available_mb()
+    budget_mb = int(available_mb * DEFAULT_FREE_RAM_BUDGET_FRACTION) if available_mb is not None else -1
+    print(
+        f"/* parallelism: {workers} worker processes, shared imports, n-1 CPU target, "
+        f"max-workers={args.max_workers}, budget={budget_mb}MB, "
+        f"worker-memory-limit={worker_memory_limit_mb}MB, "
+        f"max-tasks-per-worker={args.max_tasks_per_worker}, "
+        f"free-ram-fraction={DEFAULT_FREE_RAM_BUDGET_FRACTION:.2f}, "
+        f"avail={available_mb if available_mb is not None else 'unknown'}MB */"
+    )
+
+
+@dataclasses.dataclass
+class _RunAccumulator:
+    """Shared counters, writers, and tail-validation records for the run."""
+
+    file_writers: dict[Path, CodFileWriter]
+    tail_validation_records: list[dict[str, object]]
+    failures: int = 0
+    tail_validation_scanned: int = 0
+
+    def handle_result(self, item: CodWorkItem, result: CodWorkResult) -> None:
+        """Record one completed work item."""
+        writer = self.file_writers[item.cod_path]
+        writer.add_block(item.proc_index, _render_result_block(result))
+        self.tail_validation_scanned += _append_tail_validation_records_for_result(
+            self.tail_validation_records,
+            result,
+        )
+        if result.exit_kind not in {"ok", "fallback"}:
+            self.failures += 1
+        source = "cache" if result.from_cache else "child"
+        print(f"  captured {item.label} ({source})")
+        if writer.is_complete():
+            writer.close()
+            writer.reported = True
+            print(f"  wrote {writer.out_path}")
+
+    def handle_failure(self, item: CodWorkItem, ex: BaseException) -> None:
+        """Record one work item that raised in the worker."""
+        self.failures += 1
+        print(f"  {_worker_failure_summary(item, ex)}: {item.cod_path} :: {item.label}")
+        self.tail_validation_scanned += _append_uncollected_tail_validation_record(
+            self.tail_validation_records,
+            cod_path=item.cod_path,
+            proc_name=item.proc_name,
+            proc_kind=item.proc_kind,
+            exit_kind="worker_exception",
+            exit_detail=f"{type(ex).__name__}: {ex}",
+        )
+        writer = self.file_writers[item.cod_path]
+        writer.add_failure(item.proc_index, _format_worker_failure(item, ex))
+        if writer.is_complete():
+            writer.close()
+            writer.reported = True
+            print(f"  wrote {writer.out_path}")
+
+    def handle_scheduler_timeout(self, item: CodWorkItem, subprocess_timeout: int) -> None:
+        """Record one work item dropped by the pool scheduler deadline."""
+        self.failures += 1
+        print(f"  timeout after {subprocess_timeout}s: {item.cod_path} :: {item.label}")
+        writer = self.file_writers[item.cod_path]
+        self.tail_validation_scanned += _append_uncollected_tail_validation_record(
+            self.tail_validation_records,
+            cod_path=item.cod_path,
+            proc_name=item.proc_name,
+            proc_kind=item.proc_kind,
+            exit_kind="subprocess_timeout",
+            exit_detail=f"worker pool scheduler timeout after {subprocess_timeout}s",
+        )
+        writer.add_failure(
+            item.proc_index,
+            f"/* timeout after {subprocess_timeout}s */",
+        )
+        if writer.is_complete():
+            writer.close()
+            writer.reported = True
+            print(f"  wrote {writer.out_path}")
+
+
+def _run_single_worker_lane(
+    work_items: list[CodWorkItem], state: _RunAccumulator, args: argparse.Namespace, worker_memory_limit_mb: int
+) -> None:
+    """Run all work items inline when parallelism is disabled."""
+    # Avoid wrapping the CLI child in a memory-limited forked worker.  The CLI
+    # applies its own limit after imports; inheriting RLIMIT_AS before Python
+    # startup changes COD fallback behavior and can turn clean direct runs into
+    # timeouts.
+    for task_counter, item in enumerate(work_items, start=1):
+        print(f"[{task_counter}/{len(work_items)}] {item.cod_path} :: {item.label}")
+        cached_result = _load_success_cache(item, timeout=args.timeout, max_memory_mb=worker_memory_limit_mb)
+        if cached_result is not None:
+            state.handle_result(item, cached_result)
+            continue
+        try:
+            result = _run_work_item(item, timeout=args.timeout, max_memory_mb=worker_memory_limit_mb)
+        except Exception as ex:  # pragma: no cover - defensive fallback
+            state.handle_failure(item, ex)
+            continue
+        state.handle_result(item, result)
+
+
+def _drain_batch_futures(
+    future_map: dict[Future[CodWorkResult], CodWorkItem],
+    state: _RunAccumulator,
+    args: argparse.Namespace,
+) -> bool:
+    """Drain submitted futures until done or the scheduler deadline; return True on timeout."""
+    pending = set(future_map)
+    deadline = time.monotonic() + max(1, args.subprocess_timeout)
+    while pending:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            for future in pending:
+                state.handle_scheduler_timeout(future_map[future], args.subprocess_timeout)
+            return True
+        done, pending = wait(pending, timeout=min(1.0, remaining), return_when=FIRST_COMPLETED)
+        for future in done:
+            item = future_map[future]
+            try:
+                result = future.result()
+            except Exception as ex:  # pragma: no cover - defensive fallback
+                state.handle_failure(item, ex)
+                continue
+            state.handle_result(item, result)
+    return False
+
+
+def _run_task_batches(
+    task_batches: list[list[CodWorkItem]],
+    work_items: list[CodWorkItem],
+    state: _RunAccumulator,
+    args: argparse.Namespace,
+    workers: int,
+    worker_memory_limit_mb: int,
+) -> None:
+    """Run work items through the recycling worker-pool scheduler."""
+    task_counter = 0
+    for batch_index, batch in enumerate(task_batches, start=1):
+        print(f"/* batch {batch_index}/{len(task_batches)}: recycling worker pool */")
+        future_map: dict[Future[CodWorkResult], CodWorkItem] = {}
+        executor = None
+        scheduler_timed_out = False
+        try:
+            for item in batch:
+                task_counter += 1
+                print(f"[{task_counter}/{len(work_items)}] {item.cod_path} :: {item.label}")
+                cached_result = _load_success_cache(
+                    item, timeout=args.timeout, max_memory_mb=worker_memory_limit_mb
+                )
+                if cached_result is not None:
+                    state.handle_result(item, cached_result)
+                    continue
+                if executor is None:
+                    executor = _make_executor(max(1, workers), worker_memory_limit_mb)
+                future = executor.submit(
+                    _run_work_item,
+                    item,
+                    timeout=args.timeout,
+                    max_memory_mb=worker_memory_limit_mb,
+                )
+                future_map[future] = item
+
+            if not future_map:
+                continue
+            scheduler_timed_out = _drain_batch_futures(future_map, state, args)
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=not scheduler_timed_out, cancel_futures=True)
+
+
+def _finish_writers(file_writers: dict[Path, CodFileWriter]) -> None:
+    """Close all writers and report unreported completed outputs."""
+    for writer in file_writers.values():
+        if not writer.closed:
+            writer.close()
+        if writer.received_count > 0 and not writer.reported and writer.out_path.exists():
+            writer.reported = True
+            print(f"  wrote {writer.out_path}")
+
+
+def _emit_tail_validation_report(
+    state: _RunAccumulator, args: argparse.Namespace, cod_files: list[Path]
+) -> None:
+    """Aggregate, compare against baseline, and emit the tail-validation surface."""
+    aggregate = build_x86_16_tail_validation_aggregate(state.tail_validation_records, scanned=state.tail_validation_scanned)
+    baseline_path = args.tail_validation_baseline or _default_tail_validation_baseline_path(
+        args.cod_dir,
+        timeout=args.timeout,
+        cod_files=cod_files,
+        proc_names=args.proc_name,
+    )
+    baseline_payload = _load_tail_validation_baseline(baseline_path)
+    comparison = compare_x86_16_tail_validation_baseline(aggregate.get("summary", {}), baseline_payload)
+    surface = annotate_x86_16_tail_validation_surface_with_baseline(
+        dict(aggregate.get("surface", {}) or {}),
+        comparison,
+    )
+    console_cache_path = _default_tail_validation_console_cache_path(
+        args.cod_dir,
+        timeout=args.timeout,
+        cod_files=cod_files,
+        proc_names=args.proc_name,
+    )
+    detail_cache_path = _default_tail_validation_detail_path(
+        args.cod_dir,
+        timeout=args.timeout,
+        cod_files=cod_files,
+        proc_names=args.proc_name,
+    )
+    sys.stdout.flush()
+    emit_tail_validation_surface_summary(
+        records=state.tail_validation_records,
+        scanned=state.tail_validation_scanned,
+        summary=dict(aggregate.get("summary", {}) or {}),
+        surface=surface,
+        console_cache_path=console_cache_path,
+        detail_cache_path=detail_cache_path,
+    )
+    if args.write_tail_validation_baseline:
+        baseline = build_x86_16_tail_validation_baseline(aggregate.get("summary", {}))
+        _write_tail_validation_baseline(baseline_path, baseline)
+        print(f"{_TAIL_VALIDATION_STDERR_PREFIX}wrote baseline {baseline_path}", file=sys.stderr)
+
+
 def main() -> int:
     """Run COD-directory decompilation after the architecture guard passes."""
 
@@ -1145,64 +1482,7 @@ def main() -> int:
         return guard_exit
 
     def _impl() -> int:
-        parser = argparse.ArgumentParser(description="Decompile all .COD files into sibling .dec files.")
-        parser.add_argument("cod_dir", type=Path, help="Root directory containing .COD files.")
-        parser.add_argument(
-            "--cod-file",
-            action="append",
-            default=None,
-            help=(
-                "Limit the run to one COD file. Can be repeated. "
-                "Accepts a basename, a path relative to cod_dir, or an absolute path."
-            ),
-        )
-        parser.add_argument(
-            "--proc-name",
-            action="append",
-            default=None,
-            help="Limit the run to one PROC name. Can be repeated. Matching is case-insensitive.",
-        )
-        parser.add_argument("--timeout", type=int, default=60, help="Per-procedure decompiler timeout in seconds.")
-        parser.add_argument(
-            "--max-memory-mb",
-            type=int,
-            default=DEFAULT_MAX_MEMORY_MB,
-            help="Per-worker RLIMIT_AS cap in MB, also used as the parallelism memory floor.",
-        )
-        parser.add_argument(
-            "--max-workers",
-            type=int,
-            default=DEFAULT_MAX_WORKERS,
-            help="Hard cap for the worker pool. Lower this if decompilation memory grows too high.",
-        )
-        parser.add_argument(
-            "--max-tasks-per-worker",
-            type=int,
-            default=DEFAULT_MAX_TASKS_PER_WORKER,
-            help="Recycle the worker pool after this many procedures per worker to bound memory growth.",
-        )
-        parser.add_argument(
-            "--subprocess-timeout",
-            type=int,
-            default=900,
-            help="Soft wait timeout in seconds for the worker pool scheduler before outstanding work is marked failed.",
-        )
-        parser.add_argument(
-            "--skip-existing",
-            action="store_true",
-            help="Skip files whose sibling .dec already exists.",
-        )
-        parser.add_argument(
-            "--tail-validation-baseline",
-            type=Path,
-            default=None,
-            help="Optional baseline JSON for accepted whole-tail changed verdicts. Defaults to a per-corpus cache path if present.",
-        )
-        parser.add_argument(
-            "--write-tail-validation-baseline",
-            action="store_true",
-            help="Write the current whole-tail changed-set to the selected baseline path after the run.",
-        )
+        parser = _build_arg_parser()
         args = parser.parse_args()
 
         _lower_process_priority()
@@ -1216,18 +1496,7 @@ def main() -> int:
         if args.proc_name:
             print(f"/* PROC name filter: {', '.join(args.proc_name)} */")
 
-        work_items: list[CodWorkItem] = []
-        items_by_file: dict[Path, list[CodWorkItem]] = {}
-        for cod_path in cod_files:
-            if args.skip_existing and cod_path.with_suffix(".dec").exists():
-                print(f"[skip] {cod_path}")
-                continue
-            items = _filter_work_items_by_proc_names(_build_work_items(cod_path), args.proc_name)
-            if args.proc_name and not items:
-                print(f"[skip] {cod_path}: no selected PROC matched")
-                continue
-            items_by_file[cod_path] = items
-            work_items.extend(items)
+        work_items, items_by_file = _collect_work_items(cod_files, args)
 
         start = time.perf_counter()
         if not work_items:
@@ -1236,210 +1505,32 @@ def main() -> int:
 
         workers = _choose_parallelism(len(work_items), args.max_memory_mb, args.max_workers)
         worker_memory_limit_mb = _determine_worker_memory_limit_mb(args.max_memory_mb, workers)
-        if workers <= 1:
-            print(f"/* parallelism: single worker process, worker-memory-limit={worker_memory_limit_mb}MB */")
-        else:
-            available_mb = _mem_available_mb()
-            budget_mb = int(available_mb * DEFAULT_FREE_RAM_BUDGET_FRACTION) if available_mb is not None else -1
-            print(
-                f"/* parallelism: {workers} worker processes, shared imports, n-1 CPU target, "
-                f"max-workers={args.max_workers}, budget={budget_mb}MB, "
-                f"worker-memory-limit={worker_memory_limit_mb}MB, "
-                f"max-tasks-per-worker={args.max_tasks_per_worker}, "
-                f"free-ram-fraction={DEFAULT_FREE_RAM_BUDGET_FRACTION:.2f}, "
-                f"avail={available_mb if available_mb is not None else 'unknown'}MB */"
-            )
+        _print_parallelism_banner(workers, args, worker_memory_limit_mb)
 
-        file_writers: dict[Path, CodFileWriter] = {
-            cod_path: CodFileWriter(
-                cod_path=cod_path,
-                out_path=cod_path.with_suffix(".dec"),
-                proc_total=len(items),
-            )
-            for cod_path, items in items_by_file.items()
-        }
-        failures = 0
-        tail_validation_records: list[dict[str, object]] = []
-        tail_validation_scanned = 0
-
-        def handle_result(item: CodWorkItem, result: CodWorkResult) -> None:
-            nonlocal failures, tail_validation_scanned
-            writer = file_writers[item.cod_path]
-            writer.add_block(item.proc_index, _render_result_block(result))
-            tail_validation_scanned += _append_tail_validation_records_for_result(
-                tail_validation_records,
-                result,
-            )
-            if result.exit_kind not in {"ok", "fallback"}:
-                failures += 1
-            source = "cache" if result.from_cache else "child"
-            print(f"  captured {item.label} ({source})")
-            if writer.is_complete():
-                writer.close()
-                writer.reported = True
-                print(f"  wrote {writer.out_path}")
-
-        def handle_failure(item: CodWorkItem, ex: BaseException) -> None:
-            nonlocal failures, tail_validation_scanned
-            failures += 1
-            print(f"  {_worker_failure_summary(item, ex)}: {item.cod_path} :: {item.label}")
-            tail_validation_scanned += _append_uncollected_tail_validation_record(
-                tail_validation_records,
-                cod_path=item.cod_path,
-                proc_name=item.proc_name,
-                proc_kind=item.proc_kind,
-                exit_kind="worker_exception",
-                exit_detail=f"{type(ex).__name__}: {ex}",
-            )
-            writer = file_writers[item.cod_path]
-            writer.add_failure(item.proc_index, _format_worker_failure(item, ex))
-            if writer.is_complete():
-                writer.close()
-                writer.reported = True
-                print(f"  wrote {writer.out_path}")
+        state = _RunAccumulator(
+            file_writers={
+                cod_path: CodFileWriter(
+                    cod_path=cod_path,
+                    out_path=cod_path.with_suffix(".dec"),
+                    proc_total=len(items),
+                )
+                for cod_path, items in items_by_file.items()
+            },
+            tail_validation_records=[],
+        )
 
         if workers <= 1:
-            # Avoid wrapping the CLI child in a memory-limited forked worker.  The CLI
-            # applies its own limit after imports; inheriting RLIMIT_AS before Python
-            # startup changes COD fallback behavior and can turn clean direct runs into
-            # timeouts.
-            for task_counter, item in enumerate(work_items, start=1):
-                print(f"[{task_counter}/{len(work_items)}] {item.cod_path} :: {item.label}")
-                cached_result = _load_success_cache(item, timeout=args.timeout, max_memory_mb=worker_memory_limit_mb)
-                if cached_result is not None:
-                    handle_result(item, cached_result)
-                    continue
-                try:
-                    result = _run_work_item(item, timeout=args.timeout, max_memory_mb=worker_memory_limit_mb)
-                except Exception as ex:  # pragma: no cover - defensive fallback
-                    handle_failure(item, ex)
-                    continue
-                handle_result(item, result)
-
-            task_batches = []
+            _run_single_worker_lane(work_items, state, args, worker_memory_limit_mb)
         else:
             task_batches = _iter_task_batches(work_items, workers, args.max_tasks_per_worker)
+            _run_task_batches(task_batches, work_items, state, args, workers, worker_memory_limit_mb)
 
-        task_counter = 0
-        for batch_index, batch in enumerate(task_batches, start=1):
-            if workers > 1:
-                print(f"/* batch {batch_index}/{len(task_batches)}: recycling worker pool */")
-            future_map = {}
-            executor = None
-            scheduler_timed_out = False
-            try:
-                for item in batch:
-                    task_counter += 1
-                    print(f"[{task_counter}/{len(work_items)}] {item.cod_path} :: {item.label}")
-                    cached_result = _load_success_cache(
-                        item, timeout=args.timeout, max_memory_mb=worker_memory_limit_mb
-                    )
-                    if cached_result is not None:
-                        handle_result(item, cached_result)
-                        continue
-                    if executor is None:
-                        executor = _make_executor(max(1, workers), worker_memory_limit_mb)
-                    future = executor.submit(
-                        _run_work_item,
-                        item,
-                        timeout=args.timeout,
-                        max_memory_mb=worker_memory_limit_mb,
-                    )
-                    future_map[future] = item
-
-                if not future_map:
-                    continue
-                pending = set(future_map)
-                deadline = time.monotonic() + max(1, args.subprocess_timeout)
-                while pending:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        scheduler_timed_out = True
-                        for future in pending:
-                            item = future_map[future]
-                            failures += 1
-                            print(f"  timeout after {args.subprocess_timeout}s: {item.cod_path} :: {item.label}")
-                            writer = file_writers[item.cod_path]
-                            tail_validation_scanned += _append_uncollected_tail_validation_record(
-                                tail_validation_records,
-                                cod_path=item.cod_path,
-                                proc_name=item.proc_name,
-                                proc_kind=item.proc_kind,
-                                exit_kind="subprocess_timeout",
-                                exit_detail=f"worker pool scheduler timeout after {args.subprocess_timeout}s",
-                            )
-                            writer.add_failure(
-                                item.proc_index,
-                                f"/* timeout after {args.subprocess_timeout}s */",
-                            )
-                            if writer.is_complete():
-                                writer.close()
-                                writer.reported = True
-                                print(f"  wrote {writer.out_path}")
-                        break
-
-                    done, pending = wait(pending, timeout=min(1.0, remaining), return_when=FIRST_COMPLETED)
-                    for future in done:
-                        item = future_map[future]
-                        try:
-                            result = future.result()
-                        except Exception as ex:  # pragma: no cover - defensive fallback
-                            handle_failure(item, ex)
-                            continue
-                        handle_result(item, result)
-            finally:
-                if executor is not None:
-                    executor.shutdown(wait=not scheduler_timed_out, cancel_futures=True)
-
-        for cod_path, writer in file_writers.items():  # noqa: B007
-            if not writer.closed:
-                writer.close()
-            if writer.received_count > 0 and not writer.reported and writer.out_path.exists():
-                writer.reported = True
-                print(f"  wrote {writer.out_path}")
-
-        aggregate = build_x86_16_tail_validation_aggregate(tail_validation_records, scanned=tail_validation_scanned)
-        baseline_path = args.tail_validation_baseline or _default_tail_validation_baseline_path(
-            args.cod_dir,
-            timeout=args.timeout,
-            cod_files=cod_files,
-            proc_names=args.proc_name,
-        )
-        baseline_payload = _load_tail_validation_baseline(baseline_path)
-        comparison = compare_x86_16_tail_validation_baseline(aggregate.get("summary", {}), baseline_payload)
-        surface = annotate_x86_16_tail_validation_surface_with_baseline(
-            dict(aggregate.get("surface", {}) or {}),
-            comparison,
-        )
-        console_cache_path = _default_tail_validation_console_cache_path(
-            args.cod_dir,
-            timeout=args.timeout,
-            cod_files=cod_files,
-            proc_names=args.proc_name,
-        )
-        detail_cache_path = _default_tail_validation_detail_path(
-            args.cod_dir,
-            timeout=args.timeout,
-            cod_files=cod_files,
-            proc_names=args.proc_name,
-        )
-        sys.stdout.flush()
-        emit_tail_validation_surface_summary(
-            records=tail_validation_records,
-            scanned=tail_validation_scanned,
-            summary=dict(aggregate.get("summary", {}) or {}),
-            surface=surface,
-            console_cache_path=console_cache_path,
-            detail_cache_path=detail_cache_path,
-        )
-        if args.write_tail_validation_baseline:
-            baseline = build_x86_16_tail_validation_baseline(aggregate.get("summary", {}))
-            _write_tail_validation_baseline(baseline_path, baseline)
-            print(f"{_TAIL_VALIDATION_STDERR_PREFIX}wrote baseline {baseline_path}", file=sys.stderr)
+        _finish_writers(state.file_writers)
+        _emit_tail_validation_report(state, args, cod_files)
 
         elapsed = time.perf_counter() - start
-        print(f"done in {elapsed:.1f}s; failures={failures}/{len(work_items)}")
-        return 0 if failures == 0 else 1
+        print(f"done in {elapsed:.1f}s; failures={state.failures}/{len(work_items)}")
+        return 0 if state.failures == 0 else 1
 
     return _impl()
 
