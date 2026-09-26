@@ -189,38 +189,11 @@ def _current_function_condition_ownership_8616(func: object) -> _ConditionFuncti
         block_size = _dynamic_boundary_attr_8616(block, "size", None)
         if isinstance(block_size, int) and block_size > 0:
             relift_blocks_by_addr[block_addr] = ConditionReliftBlock8616(block_addr, block_size)
-        capstone = _dynamic_boundary_attr_8616(block, "capstone", None)
-        wrappers: tuple[object, ...] = tuple(_dynamic_boundary_attr_8616(capstone, "insns", ()) or ())
-        if not wrappers:
+        decoded, owner = _decode_block_condition_owner_8616(block, block_addr)
+        if decoded:
+            decoded_block_addrs.add(block_addr)
+        if owner is None:
             continue
-        decoded_block_addrs.add(block_addr)
-        terminal = _dynamic_boundary_attr_8616(wrappers[-1], "insn", wrappers[-1])
-        terminal_addr = _dynamic_boundary_attr_8616(terminal, "address", None)
-        terminal_size = _dynamic_boundary_attr_8616(terminal, "size", None)
-        mnemonic = str(_dynamic_boundary_attr_8616(terminal, "mnemonic", "") or "").strip().lower()
-        if (
-            not isinstance(terminal_addr, int)
-            or not isinstance(terminal_size, int)
-            or terminal_size <= 0
-            or (
-                mnemonic not in JCC_TO_COND_8616
-                and _direct_counter_condition_op_8616(mnemonic) is None
-            )
-        ):
-            continue
-        operands = tuple(_dynamic_boundary_attr_8616(terminal, "operands", ()) or ())
-        target: int | None
-        if mnemonic != "loop" and _direct_counter_condition_op_8616(mnemonic) is not None:
-            target = terminal_addr
-        else:
-            target = _dynamic_boundary_attr_8616(operands[-1], "imm", None) if operands else None
-        owner = _ConditionBlockOwner8616(
-            block_addr=block_addr,
-            terminal_insn=terminal_addr,
-            mnemonic=mnemonic,
-            taken_target=target if isinstance(target, int) else None,
-            fallthrough_target=terminal_addr + terminal_size,
-        )
         existing = owners.get(block_addr)
         if existing is not None and existing != owner:
             conflicting_owners.add(block_addr)
@@ -235,6 +208,60 @@ def _current_function_condition_ownership_8616(func: object) -> _ConditionFuncti
         if isinstance(func, ExactFunctionRangeBoundary8616)
         else {}
     )
+    condition_only_blocks = _condition_only_block_addrs_8616(blocks)
+    if not isinstance(func, ExactFunctionRangeBoundary8616):
+        predecessors_by_block.update(_graph_predecessors_by_block_8616(graph))
+
+    return _ConditionFunctionOwnership8616(
+        decoded_block_addrs=frozenset(decoded_block_addrs),
+        conditional_owners=owners,
+        register_topology=ConditionRegisterTopology8616(
+            predecessors_by_block,
+            frozenset(condition_only_blocks),
+        ),
+        relift_blocks=tuple(relift_blocks_by_addr[address] for address in sorted(relift_blocks_by_addr)),
+    )
+
+
+def _decode_block_condition_owner_8616(
+    block: object, block_addr: int
+) -> tuple[bool, _ConditionBlockOwner8616 | None]:
+    """Decode one block's terminal instruction into a condition owner."""
+    capstone = _dynamic_boundary_attr_8616(block, "capstone", None)
+    wrappers: tuple[object, ...] = tuple(_dynamic_boundary_attr_8616(capstone, "insns", ()) or ())
+    if not wrappers:
+        return False, None
+    terminal = _dynamic_boundary_attr_8616(wrappers[-1], "insn", wrappers[-1])
+    terminal_addr = _dynamic_boundary_attr_8616(terminal, "address", None)
+    terminal_size = _dynamic_boundary_attr_8616(terminal, "size", None)
+    mnemonic = str(_dynamic_boundary_attr_8616(terminal, "mnemonic", "") or "").strip().lower()
+    if (
+        not isinstance(terminal_addr, int)
+        or not isinstance(terminal_size, int)
+        or terminal_size <= 0
+        or (
+            mnemonic not in JCC_TO_COND_8616
+            and _direct_counter_condition_op_8616(mnemonic) is None
+        )
+    ):
+        return True, None
+    operands = tuple(_dynamic_boundary_attr_8616(terminal, "operands", ()) or ())
+    target: int | None
+    if mnemonic != "loop" and _direct_counter_condition_op_8616(mnemonic) is not None:
+        target = terminal_addr
+    else:
+        target = _dynamic_boundary_attr_8616(operands[-1], "imm", None) if operands else None
+    return True, _ConditionBlockOwner8616(
+        block_addr=block_addr,
+        terminal_insn=terminal_addr,
+        mnemonic=mnemonic,
+        taken_target=target if isinstance(target, int) else None,
+        fallthrough_target=terminal_addr + terminal_size,
+    )
+
+
+def _condition_only_block_addrs_8616(blocks: tuple[object, ...]) -> set[int]:
+    """Collect blocks whose decoded instruction stream is condition-only."""
     condition_only_blocks: set[int] = set()
     for block in blocks:
         block_addr = _dynamic_boundary_attr_8616(block, "addr", None)
@@ -253,56 +280,61 @@ def _current_function_condition_ownership_8616(func: object) -> _ConditionFuncti
             ).strip().lower()
             for wrapper in wrappers
         )
-        if all(
+        if _mnemonics_are_condition_only_8616(mnemonics):
+            condition_only_blocks.add(block_addr)
+    return condition_only_blocks
+
+
+def _mnemonics_are_condition_only_8616(mnemonics: tuple[str, ...]) -> bool:
+    """True when a block's mnemonics form a pure compare/branch sequence."""
+    return (
+        all(
             item in JCC_TO_COND_8616 or _direct_counter_condition_op_8616(item) is not None
             for item in mnemonics
-        ) or (
+        )
+        or (
             len(mnemonics) >= 2
             and mnemonics[-1] in JCC_TO_COND_8616
             and mnemonics[-2] == "cmp"
             and all(item == "cmp" or item in JCC_TO_COND_8616 for item in mnemonics)
-        ) or (
+        )
+        or (
             len(mnemonics) == 2
             and mnemonics[0] == "dec"
             and mnemonics[1] in JCC_TO_COND_8616
-        ):
-            condition_only_blocks.add(block_addr)
-    if not isinstance(func, ExactFunctionRangeBoundary8616):
-        try:
-            graph_nodes = tuple(graph.nodes())
-        except (AttributeError, TypeError):
-            graph_nodes = ()
-        for node in graph_nodes:
-            node_addr = node if isinstance(node, int) else _dynamic_boundary_attr_8616(node, "addr", None)
-            if not isinstance(node_addr, int):
-                continue
-            try:
-                predecessor_nodes = tuple(graph.predecessors(node))
-            except (AttributeError, TypeError):
-                continue
-            predecessor_addrs = frozenset(
-                predecessor_addr
-                for predecessor in predecessor_nodes
-                if isinstance(
-                    predecessor_addr := (
-                        predecessor
-                        if isinstance(predecessor, int)
-                        else _dynamic_boundary_attr_8616(predecessor, "addr", None)
-                    ),
-                    int,
-                )
-            )
-            predecessors_by_block[node_addr] = predecessor_addrs
-
-    return _ConditionFunctionOwnership8616(
-        decoded_block_addrs=frozenset(decoded_block_addrs),
-        conditional_owners=owners,
-        register_topology=ConditionRegisterTopology8616(
-            predecessors_by_block,
-            frozenset(condition_only_blocks),
-        ),
-        relift_blocks=tuple(relift_blocks_by_addr[address] for address in sorted(relift_blocks_by_addr)),
+        )
     )
+
+
+def _graph_predecessors_by_block_8616(graph: Any) -> dict[int, frozenset[int]]:  # noqa: ANN401
+    """Build the predecessor map from a networkx-style block graph."""
+    predecessors_by_block: dict[int, frozenset[int]] = {}
+    try:
+        graph_nodes = tuple(graph.nodes())
+    except (AttributeError, TypeError):
+        graph_nodes = ()
+    for node in graph_nodes:
+        node_addr = node if isinstance(node, int) else _dynamic_boundary_attr_8616(node, "addr", None)
+        if not isinstance(node_addr, int):
+            continue
+        try:
+            predecessor_nodes = tuple(graph.predecessors(node))
+        except (AttributeError, TypeError):
+            continue
+        predecessor_addrs = frozenset(
+            predecessor_addr
+            for predecessor in predecessor_nodes
+            if isinstance(
+                predecessor_addr := (
+                    predecessor
+                    if isinstance(predecessor, int)
+                    else _dynamic_boundary_attr_8616(predecessor, "addr", None)
+                ),
+                int,
+            )
+        )
+        predecessors_by_block[node_addr] = predecessor_addrs
+    return predecessors_by_block
 
 
 def _expected_condition_op_for_owner_8616(
@@ -559,49 +591,63 @@ def _collect_pending_fallthrough_conditions_8616(
             break
         for addr in candidates:
             processed.add(addr)
-            source = pending_sources.get(addr)
-            if not isinstance(source, ConditionSource):
-                pending_sources.pop(addr, None)
-                continue
-            insn = _decode_first_insn_at_addr_8616(project, addr)
-            mnemonic = str(_dynamic_boundary_attr_8616(insn, "mnemonic", "") or "").strip().lower() if insn is not None else None
-            pending_sources.pop(addr, None)
+            _process_pending_fallthrough_source_8616(
+                project, pending_sources, addr, conditions, edge_evidence
+            )
+    return conditions, edge_evidence
+
+
+
+def _process_pending_fallthrough_source_8616(
+    project: object,
+    pending_sources: dict[int, ConditionSource],
+    addr: int,
+    conditions: list[ConditionIR],
+    edge_evidence: list[ConditionEdgeEvidence],
+) -> None:
+    """Convert one pending lifter source into typed condition evidence."""
+    source = pending_sources.get(addr)
+    if not isinstance(source, ConditionSource):
+        pending_sources.pop(addr, None)
+        return
+    insn = _decode_first_insn_at_addr_8616(project, addr)
+    mnemonic = str(_dynamic_boundary_attr_8616(insn, "mnemonic", "") or "").strip().lower() if insn is not None else None
+    pending_sources.pop(addr, None)
+    if os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):
+        log.warning(
+            "[condition-transfer] pending_decode addr=%#x mnemonic=%r source_kind=%s",
+            addr,
+            mnemonic,
+            source.kind,
+        )
+    if not isinstance(mnemonic, str) or mnemonic not in JCC_TO_COND_8616:
+        edge = _edge_evidence_from_pending_source_8616(source, mnemonic, edge_block_addr=addr)
+        if edge is not None:
+            edge_evidence.append(edge)
             if os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):
                 log.warning(
-                    "[condition-transfer] pending_decode addr=%#x mnemonic=%r source_kind=%s",
+                    "[condition-transfer] edge pending src_insn=%#x block=%#x op=%s source_jcc=%s lhs=%r rhs=%r",
                     addr,
-                    mnemonic,
-                    source.kind,
+                    edge.edge_block_addr,
+                    edge.condition.op,
+                    edge.source_jcc,
+                    edge.condition.lhs,
+                    edge.condition.rhs,
                 )
-            if not isinstance(mnemonic, str) or mnemonic not in JCC_TO_COND_8616:
-                edge = _edge_evidence_from_pending_source_8616(source, mnemonic, edge_block_addr=addr)
-                if edge is not None:
-                    edge_evidence.append(edge)
-                    if os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):
-                        log.warning(
-                            "[condition-transfer] edge pending src_insn=%#x block=%#x op=%s source_jcc=%s lhs=%r rhs=%r",
-                            addr,
-                            edge.edge_block_addr,
-                            edge.condition.op,
-                            edge.source_jcc,
-                            edge.condition.lhs,
-                            edge.condition.rhs,
-                        )
-                continue
-            cond = _condition_from_pending_source_8616(source, mnemonic, src_insn=addr, block_addr=addr)
-            if isinstance(cond, ConditionIR):
-                conditions.append(cond)
-                if os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):
-                    log.warning(
-                        "[condition-transfer] cond pending src_insn=%#x block=%#x op=%s source=%s lhs=%r rhs=%r",
-                        addr,
-                        addr,
-                        cond.op,
-                        cond.source,
-                        cond.lhs,
-                        cond.rhs,
-                    )
-    return conditions, edge_evidence
+        return
+    cond = _condition_from_pending_source_8616(source, mnemonic, src_insn=addr, block_addr=addr)
+    if isinstance(cond, ConditionIR):
+        conditions.append(cond)
+        if os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):
+            log.warning(
+                "[condition-transfer] cond pending src_insn=%#x block=%#x op=%s source=%s lhs=%r rhs=%r",
+                addr,
+                addr,
+                cond.op,
+                cond.source,
+                cond.lhs,
+                cond.rhs,
+            )
 
 
 def _collect_typed_condition_artifacts_8616(
@@ -644,92 +690,26 @@ def _collect_typed_condition_artifacts_8616(
         ownership = _current_function_condition_ownership_8616(func)
 
         # Seed loader-less fixtures from the ambient lifter compatibility cache.
-        module_cache: typing.Mapping[int, typing.Sequence[ConditionResult]]
-        try:
-            from ..lift_86_16 import Instruction_ANY
-
-            module_cache = Instruction_ANY._inertia_module_condition_cache
-            pending_sources = Instruction_ANY._inertia_pending_condition_sources_by_addr
-        except Exception as ex:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "condition transfer import failed: %s: %s",
-                type(ex).__name__,
-                ex,
-            )
-            module_cache = {}
-            pending_sources = {}
-
+        module_cache, pending_sources, lifter_available = _seed_lifter_condition_caches_8616()
         condition_block_addrs = sorted(ownership.conditional_owners) or block_addrs
 
-        registered = registered_function_ssa_artifact_8616(project, func_addr)
-        registered_condition_evidence = (
-            registered.artifact.condition_evidence
-            if registered.verdict is FunctionSSAArtifactVerdict8616.PROVEN
-            and registered.artifact is not None
-            else None
-        )
-        relift_stats: ConditionCacheReliftStats8616 | None = None
-        relift_artifact = (
-            registered_condition_evidence.source
-            if registered_condition_evidence is not None
-            and registered_condition_evidence.complete
-            and registered_condition_evidence.function_addr == func_addr
-            and registered_condition_evidence.block_ranges == ownership.relift_blocks
-            and registered_condition_evidence.expected_condition_blocks
-            == tuple(condition_block_addrs)
-            else relift_function_condition_cache_8616(
-                project,
-                ownership.relift_blocks,
-                frozenset(condition_block_addrs),
-            )
+        relift_artifact, relift_stats = _resolve_condition_relift_artifact_8616(
+            project, func_addr, ownership, condition_block_addrs
         )
         if relift_artifact is not None:
             module_cache = relift_artifact.condition_cache()
             pending_sources = relift_artifact.pending_source_cache()
-            relift_stats = relift_artifact.stats
         elif any(
             not has_typed_condition_cache_evidence_8616(module_cache, pending_sources, block_addr)
             for block_addr in condition_block_addrs
         ):
-            if "Instruction_ANY" in locals():
+            if lifter_available:
                 reset_lifter_condition_state_8616()
             relift_cached_project_blocks_8616(project, tuple(block_addrs))
-        if os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):
-            cache_keys = tuple(sorted(k for k in module_cache if isinstance(k, int)))
-            pending_keys = tuple(sorted(k for k in pending_sources if isinstance(k, int)))
-            log.warning(
-                "[condition-transfer] func=%#x blocks=%s cache_keys=%s pending_keys=%s",
-                func_addr,
-                tuple(hex(a) for a in block_addrs),
-                tuple(hex(a) for a in cache_keys),
-                tuple(hex(a) for a in pending_keys),
-            )
+        _debug_condition_transfer_cache_8616(func_addr, block_addrs, module_cache, pending_sources)
 
-        all_conditions: list[ConditionIR] = []
+        all_conditions = _cached_block_conditions_8616(block_addrs, module_cache)
         edge_evidence: list[ConditionEdgeEvidence] = []
-        for block_addr in block_addrs:
-            block_conds = module_cache.get(block_addr, None)
-            if isinstance(block_conds, list):
-                for cond in block_conds:
-                    if isinstance(cond, ConditionIR):
-                        all_conditions.append(cond)
-                        if os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):
-                            log.warning(
-                                "[condition-transfer] cond cache_block=%#x src_insn=%r block=%r "
-                                "taken=%r fallthrough=%r op=%s source=%s lhs=%r rhs=%r",
-                                block_addr,
-                                cond.src_insn,
-                                cond.block_addr,
-                                cond.taken_target,
-                                cond.fallthrough_target,
-                                cond.op,
-                                cond.source,
-                                cond.lhs,
-                                cond.rhs,
-                        )
-
         if isinstance(pending_sources, dict):
             pending_conditions, pending_edges = _collect_pending_fallthrough_conditions_8616(
                 project, block_addrs, pending_sources
@@ -737,29 +717,149 @@ def _collect_typed_condition_artifacts_8616(
             all_conditions.extend(pending_conditions)
             edge_evidence.extend(pending_edges)
 
-        binding_resolution = bind_condition_register_sources_8616(func, all_conditions)
-        conditions, ownership_stats = _filter_conditions_to_current_function_8616(
-            list(binding_resolution.conditions), ownership
+        conditions, ownership_stats = _bind_and_filter_conditions_8616(
+            func, all_conditions, ownership, relift_stats
         )
-        ownership_stats = replace(
-            ownership_stats,
-            failure_count=(
-                ownership_stats.failure_count
-                + binding_resolution.stats.failure_count
-            ),
-        )
-        if relift_stats is not None and relift_stats.failure_count:
-            ownership_stats = replace(
-                ownership_stats,
-                failure_count=ownership_stats.failure_count + relift_stats.failure_count,
-            )
-        if os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):
-            log.warning("[condition-transfer] source-bindings=%s", binding_resolution.stats)
-            log.warning("[condition-transfer] ownership=%s", ownership_stats)
         return conditions, edge_evidence, ownership_stats, relift_stats
 
     return _impl()
 
+
+
+def _seed_lifter_condition_caches_8616() -> tuple[
+    typing.Mapping[int, typing.Sequence[ConditionResult]],
+    typing.Mapping[int, ConditionSource] | dict[int, ConditionSource],
+    bool,
+]:
+    """Read the ambient lifter caches, tolerating absent lifter imports."""
+    try:
+        from ..lift_86_16 import Instruction_ANY
+
+        return (
+            Instruction_ANY._inertia_module_condition_cache,
+            Instruction_ANY._inertia_pending_condition_sources_by_addr,
+            True,
+        )
+    except Exception as ex:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "condition transfer import failed: %s: %s",
+            type(ex).__name__,
+            ex,
+        )
+        return {}, {}, False
+
+
+def _resolve_condition_relift_artifact_8616(
+    project: object,
+    func_addr: int,
+    ownership: _ConditionFunctionOwnership8616,
+    condition_block_addrs: list[int],
+) -> tuple[Any | None, ConditionCacheReliftStats8616 | None]:
+    """Pick the proven registered artifact or relift the condition cache."""
+    registered = registered_function_ssa_artifact_8616(project, func_addr)
+    registered_condition_evidence = (
+        registered.artifact.condition_evidence
+        if registered.verdict is FunctionSSAArtifactVerdict8616.PROVEN
+        and registered.artifact is not None
+        else None
+    )
+    relift_artifact = (
+        registered_condition_evidence.source
+        if registered_condition_evidence is not None
+        and registered_condition_evidence.complete
+        and registered_condition_evidence.function_addr == func_addr
+        and registered_condition_evidence.block_ranges == ownership.relift_blocks
+        and registered_condition_evidence.expected_condition_blocks
+        == tuple(condition_block_addrs)
+        else relift_function_condition_cache_8616(
+            project,
+            ownership.relift_blocks,
+            frozenset(condition_block_addrs),
+        )
+    )
+    if relift_artifact is None:
+        return None, None
+    return relift_artifact, relift_artifact.stats
+
+
+def _debug_condition_transfer_cache_8616(
+    func_addr: int,
+    block_addrs: list[int],
+    module_cache: typing.Mapping[int, typing.Sequence[ConditionResult]],
+    pending_sources: typing.Mapping[int, ConditionSource] | dict[int, ConditionSource],
+) -> None:
+    """Emit the optional cache-key diagnostic for condition transfer."""
+    if not os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):
+        return
+    cache_keys = tuple(sorted(k for k in module_cache if isinstance(k, int)))
+    pending_keys = tuple(sorted(k for k in pending_sources if isinstance(k, int)))
+    log.warning(
+        "[condition-transfer] func=%#x blocks=%s cache_keys=%s pending_keys=%s",
+        func_addr,
+        tuple(hex(a) for a in block_addrs),
+        tuple(hex(a) for a in cache_keys),
+        tuple(hex(a) for a in pending_keys),
+    )
+
+
+def _cached_block_conditions_8616(
+    block_addrs: list[int],
+    module_cache: typing.Mapping[int, typing.Sequence[ConditionResult]],
+) -> list[ConditionIR]:
+    """Flatten cached ConditionIR entries across the function's blocks."""
+    all_conditions: list[ConditionIR] = []
+    for block_addr in block_addrs:
+        block_conds = module_cache.get(block_addr, None)
+        if isinstance(block_conds, list):
+            for cond in block_conds:
+                if isinstance(cond, ConditionIR):
+                    all_conditions.append(cond)
+                    if os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):
+                        log.warning(
+                            "[condition-transfer] cond cache_block=%#x src_insn=%r block=%r "
+                            "taken=%r fallthrough=%r op=%s source=%s lhs=%r rhs=%r",
+                            block_addr,
+                            cond.src_insn,
+                            cond.block_addr,
+                            cond.taken_target,
+                            cond.fallthrough_target,
+                            cond.op,
+                            cond.source,
+                            cond.lhs,
+                            cond.rhs,
+                        )
+    return all_conditions
+
+
+def _bind_and_filter_conditions_8616(
+    func: object,
+    all_conditions: list[ConditionIR],
+    ownership: _ConditionFunctionOwnership8616,
+    relift_stats: ConditionCacheReliftStats8616 | None,
+) -> tuple[list[ConditionIR], _ConditionOwnershipStats8616]:
+    """Bind register sources, filter to function ownership, merge failures."""
+    binding_resolution = bind_condition_register_sources_8616(func, all_conditions)
+    conditions, ownership_stats = _filter_conditions_to_current_function_8616(
+        list(binding_resolution.conditions), ownership
+    )
+    ownership_stats = replace(
+        ownership_stats,
+        failure_count=(
+            ownership_stats.failure_count
+            + binding_resolution.stats.failure_count
+        ),
+    )
+    if relift_stats is not None and relift_stats.failure_count:
+        ownership_stats = replace(
+            ownership_stats,
+            failure_count=ownership_stats.failure_count + relift_stats.failure_count,
+        )
+    if os.environ.get("INERTIA_DEBUG_CONDITION_TRANSFER"):
+        log.warning("[condition-transfer] source-bindings=%s", binding_resolution.stats)
+        log.warning("[condition-transfer] ownership=%s", ownership_stats)
+    return conditions, ownership_stats
 
 def collect_typed_conditions_from_emulator_8616(
     project: object,

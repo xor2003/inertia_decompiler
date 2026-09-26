@@ -1634,3 +1634,11 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   structured/simple kind lanes.
 - Verified: ruff 0, mypy 0, 30 object-lowering/segmented-memory tests
   pass, def-integrity vs HEAD clean, zero architecture violations.
+- `angr_platforms/angr_platforms/X86_16/lowering/condition_transfer.py`:
+  Ruff debt cleared to zero (4 findings + 1 moved bool-expr). Split
+  condition-ownership decode into per-block/condition-only/graph lanes,
+  extracted pending-source conversion, and decomposed artifact
+  collection into seeding, relift resolution, cached-block, and
+  bind/filter lanes.
+- Verified: ruff 0, mypy 0, 84 condition-transfer/evidence/carrier
+  tests pass, def-integrity vs HEAD clean, zero architecture violations.
