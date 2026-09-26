@@ -8,6 +8,29 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- DOSUnit Z3 comparator (straightline_ssa) hardened for Riptide verification:
+  32-bit register model (EAX-family hi16/low16 split incl. partial writes),
+  inc/dec32 eflags-arity fix, near-call target resolution via rendered absolute
+  operands (caller-cs + by_linear, fixes low16 collisions), far-pointer push-arg
+  normalization with EXE-content string proof (reloc-table DGROUP para), stored
+  code-offset/dispatch-immediate pairs via entry-shift evidence, positional
+  near/far call-return store normalization (no over-matching), residual
+  same-delta constant sweep. Call-verdict gate: unresolved or unproven callees
+  refuse honestly; only "different mapped functions" fails. Demangled Borland
+  name aliases in discovery (signature + base, whitespace-normalized) lifted
+  Riptide mapping 516->633. First real divergence found and fixed at source:
+  game_cast::update `ed_list[var_2++]` placement — now 63/63 parts proven.
+  Riptide corpus v2: oracle 5,998 parts / 0 refusals, recon 10,939 parts / 6
+  refusals (47 reg32-refused orig functions re-lowered clean).
+
+- Batch startup resolves the lazy CLI entrypoint in the parent before disposable
+  jobs fork; analysis remains isolated. Parent-PID regression failed before;
+  runtime/builder/binary-policy suite passes after (113 tests, 63.40s).
+  Scoped Ruff/MyPy pass; quality-dev exits2 on broader lint/type findings
+  (`.cache/batch-warm-import-quality-dev.log`). Retained six-job replay is active
+  at `.cache/compiler-coverage/retained-far-warm-parent-001/`, with unchanged
+  analysis deadlines and process-tree-aware cleanup. No new DOS witness.
+
 - ABI instruction scans reuse positive CFG-proven block sizes instead of lifting
   merely to rediscover extents; unknown/invalid sizes keep the prior fallback.
   Two controls fail before; 28 ABI tests plus an installed-angr no-relift byte
