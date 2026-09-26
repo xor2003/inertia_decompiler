@@ -749,3 +749,27 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Rebuilt all touched translation units through BC31 -ml -3 -f -O -r- -vi-:
   actor/game/creature/gamemgr/gui/kbd/menu/scores/tilemap/util/vgadisp all
   compile with zero errors (only pre-existing warnings).
+
+## decompiler_postprocess.py: promoted findings 55 -> 0
+
+- Largest file cleared: 55 promoted sites incl. several 40-66 complexity
+  `_impl` closures converted to typed run dataclasses
+  (`_RetaddrPruneRun8616`, `_RepairExitGotosRun8616`, `_DedupeVarNamesRun8616`,
+  `_SyncProtoLayoutRun8616`, `_ApplyAnnotationsRun8616`,
+  `_SyncArgsFromAnnotationsRun8616`, `_ApplyRewritesRun8616`,
+  `_PointerArgIndirectMaterializePass8616`, `_PruneFlagAssignRun8616`).
+- Fat run bodies split into phase helpers: prototype resolution, candidate
+  collection, arg promotion (annotated/fallback/legacy lanes), high-byte
+  projection, return-carrier collapse, flag/return pruning, register
+  read-before-write walkers (shared seq/pairs recursion helpers).
+- Pointer-arg indirect-fact collection shares `_record_reg_indirect_fact_8616`
+  for load/store arms; covered-slot prune shares
+  `_prune_covered_stack_var_map_8616` over variables_in_use/unified maps.
+- Semantic ownership preserved: all promoted closures are dynamic
+  angr/codegen boundary accesses; no semantics moved into rewrite.
+- Verification: ruff 0, mypy 0 (HEAD parity), arch-check 0 violations in
+  file. Owning suite 631 passed; 13 failures all pre-existing —
+  11 COD runs stop at the documented frontend-lifter blocker
+  ("proven dead status-flag writes"), 1 wall-clock timeout flake,
+  1 cli_decompilation CompilerHelperEvidenceKind attr failure on an
+  untouched file.
