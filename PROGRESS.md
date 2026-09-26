@@ -87,6 +87,21 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   `follow_imports=skip` makes off-run imports Any and reports false
   no-any-return errors otherwise.
 
+- cli_c_text_postprocess.py driven to zero ruff findings (was 59
+  complexity sites at batch start): signature/declaration normalizers,
+  unused-declaration/staging pruners, fragment-carrier and stack-pointer
+  rewrites, COD alias annotation, boolean-condition repairs, and helper-call
+  formatting split into typed module helpers, run-state dataclasses, and
+  shared arg-splitter/brace-scan utilities. Text-layer boundary preserved —
+  cleanup/formatting only, no semantic recovery moved into this layer.
+  Owning suites: 113 passed. Three COD CLI regressions
+  (strlen stack-local copy, dos_getReturnCode, dos_loadProgram) fail
+  identically on bare HEAD without this file's changes, at a
+  frontend-lifter gate (`proven dead status-flag writes` in
+  status_flag_lift_context.py) — pre-existing, upstream of this layer;
+  clean cc2d1a195 baseline fails the same tests on an MSC51 recompile
+  UnicodeDecodeError (env-level subprocess decode, also pre-existing).
+
 ## Open work (far obligations, all still unadmitted)
 
 - Native machine-frame correction is implemented: the tracker had popped two

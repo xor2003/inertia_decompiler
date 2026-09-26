@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "960263553066c61d1a9bb886dc79e1c258812d77",
-    "indexed_at": "2026-09-26T00:01:14Z",
+    "commit": "8a5d86d7b4529b77e72fbccb7327c633b1c14696",
+    "indexed_at": "2026-09-26T00:29:04Z",
     "project": "home-xor-vextest",
-    "nodes": 46762,
-    "edges": 317178,
-    "original_size": 227868672,
-    "compressed_size": 38254551,
+    "nodes": 46957,
+    "edges": 318092,
+    "original_size": 228065280,
+    "compressed_size": 38286131,
     "compression_level": 3
 }
