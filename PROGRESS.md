@@ -1133,6 +1133,43 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   verifies transport, not a decompilation witness. Routine deadlines and the
   full coverage acceptance obligations remain unchanged; DOS execution remains
   unavailable in the last actual compiler probe.
+
+### Owned source provenance checkpoint (2026-09-26 12:27 UTC)
+
+- Coverage now records deterministic before/after identities for owned Python
+  implementations, including uncommitted helpers, and rejects a would-be pass
+  when those identities differ. Existing failed-stage outcomes remain visible.
+- Before: both new controls failed. After: 68 focused tests pass, including a
+  final rerun after report-reading cleanup. Scoped Ruff/MyPy pass; quality-dev
+  exits 2 on broader typing/lint debt. Logs: `.cache/coverage-source-identity-*.log`.
+- One fingerprint measured 1.19s across 1,192 files. This is limited source
+  provenance, not an atomic snapshot or full dependency/native-environment pin.
+  No new DOS witness is admitted; the full compiler-coverage plan stays open.
+
+### DOS availability recheck (2026-09-26)
+
+- Fresh source-free `compare16` adapter run ended `build_failed` after 23.88s:
+  compiler execution could not see `/dev/kvm`; no decompilation was attempted.
+  `.cache/compiler-coverage/sourcefree-compare16-002/` retains all evidence.
+- The source-identity guard detected concurrent implementation changes; this
+  thread made no code edits during the run. Earlier build failure stays visible.
+- Standalone KVM self-check passed in one launch, while the subsequent import
+  boundary probe saw `/dev/kvm` absent even before project imports and returned
+  252. `.cache/coverage-kvm-boundary-current.log` records this distinction.
+  Consistent permitted DOS execution remains necessary; no workaround changed
+  permissions, sandboxing, deadlines, or the acceptance oracle.
+
+### Csmith build pin enforcement (2026-09-26)
+
+- The generator now verifies the existing pinned Release executable hash before
+  launch and records its full revision. An unverified executable is refused;
+  alternate builds require a deliberate rebuild/replay and pin update.
+- Before: refusal control failed. After: 34 generator/runner tests pass in
+  31.50s; scoped Ruff/MyPy pass. Quality-dev remains red on broader debt.
+- Two actual seed-2 replays reproduce the earlier source hash exactly.
+  `.cache/compiler-coverage/csmith-pinned-replay-{001,002}/` retains evidence;
+  `.cache/csmith-build-pin-*.log` retains checks. Generation is not DOS behavioral
+  acceptance; the generated round trip and bounded campaign remain open.
 ## Lint debt: dce.py cleanup (2026-09-26)
 
 - `angr_platforms/X86_16/postprocess/optimization/dce.py`: Ruff complexity
@@ -1157,4 +1194,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   hoisted `visit` into `_visit_wrapper_result_node` + per-statement lanes,
   and DOS pseudo-callee collection helpers.
 - Verified: ruff 0, mypy 0, 58 interrupt/helper-modeling tests pass, zero
+  architecture violations against the file.
+## Lint debt: cli_local_rewrites.py cleanup (2026-09-26)
+
+- `inertia_decompiler/cli_local_rewrites.py`: Ruff complexity debt cleared
+  to zero (10 findings). Extracted live-name/unified sync helpers, shared
+  placeholder-replacement bookkeeping, root canonicalization lane, stack
+  identity/source sets, hoisted the six dedupe closures to module level,
+  register-candidate materialization lanes, and void-return rewrite helpers.
+- Verified: ruff 0, mypy 0, 163 local-rewrite/declaration tests pass, zero
   architecture violations against the file.
