@@ -10643,6 +10643,7 @@ def _layout_constant_pairs(
     _group_layout_constant_pairs(pairs, absolute_memory_pairs, memory_pairs, deferred)
     pairs.extend(_call_argument_immediate_layout_pairs(oracle_instructions, candidate_instructions))
     pairs.extend(_call_far_pointer_push_pairs(oracle_instructions, candidate_instructions, image_context))
+    pairs.extend(_relocated_immediate_pairs(oracle_instructions, candidate_instructions, image_context))
     pairs.extend(_seg_register_far_pointer_pairs(oracle_instructions, candidate_instructions, image_context))
     pairs.extend(_entry_shift_immediate_pairs(oracle_function, candidate_function))
     pairs.extend(_stored_pointer_immediate_pairs(oracle_instructions, candidate_instructions))
@@ -10860,8 +10861,79 @@ def _layout_image_context(
         context[label] = {
             "image": image,
             "seg_targets": _mz_reloc_segment_targets(image, loaded.relocs),
+            "reloc_positions": frozenset((seg << 4) + off for off, seg in loaded.relocs),
         }
     return context
+
+
+def _relocated_immediate_pairs(
+    oracle_instructions: list[dict[str, Any]],
+    candidate_instructions: list[dict[str, Any]],
+    image_context: dict[str, dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Normalize immediates whose bytes occupy an MZ relocation site.
+
+    ``mov dx, DGROUP`` / ``mov ax, seg segNN`` encode a paragraph patched by the
+    loader; the relocation table names every such word in the image.  A
+    differing immediate is a proven relocation when the instruction's imm
+    operand bytes coincide with a reloc entry in its own binary — independent
+    of instruction kind or call context.
+    """
+    if image_context is None:
+        return []
+    try:
+        import capstone  # type: ignore
+    except Exception:
+        return []
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_16)
+    md.detail = True
+
+    def _reloc_imm_values(
+        instructions: list[dict[str, Any]], reloc_positions: frozenset[int]
+    ) -> dict[int, int]:
+        values: dict[int, int] = {}
+        for index, instruction in enumerate(instructions):
+            raw = instruction.get("bytes")
+            address = instruction.get("address") if isinstance(instruction.get("address"), dict) else {}
+            linear = _optional_int(address.get("linear"))
+            if not isinstance(raw, str) or linear is None:
+                continue
+            try:
+                blob = bytes.fromhex(raw)
+            except ValueError:
+                continue
+            insn = next(md.disasm(blob, linear), None)
+            if insn is None:
+                continue
+            encoding = getattr(insn, "encoding", None)
+            imm_offset = int(getattr(encoding, "imm_offset", 0) or 0)
+            imm_size = int(getattr(encoding, "imm_size", 0) or 0)
+            if imm_offset <= 0 or imm_size != 2:
+                continue
+            site = (linear - 0x1000) + imm_offset
+            if site in reloc_positions:
+                values[index] = int.from_bytes(blob[imm_offset : imm_offset + 2], "little")
+        return values
+
+    oracle_sites = _reloc_imm_values(
+        oracle_instructions, image_context.get("oracle", {}).get("reloc_positions") or frozenset()
+    )
+    candidate_sites = _reloc_imm_values(
+        candidate_instructions, image_context.get("candidate", {}).get("reloc_positions") or frozenset()
+    )
+    pairs: list[dict[str, Any]] = []
+    for index, oracle_value in oracle_sites.items():
+        candidate_value = candidate_sites.get(index)
+        if candidate_value is None or oracle_value == candidate_value:
+            continue
+        pairs.append(
+            {
+                "oracle": oracle_value,
+                "candidate": candidate_value,
+                "reason": "relocated_segment_immediate",
+            }
+        )
+    return pairs
 
 
 _SEGMENT_PUSH_REGS = ("ds", "es", "ss", "cs")
@@ -10924,11 +10996,6 @@ def _seg_register_far_pointer_pairs(
     stays compared.
     """
     if image_context is None:
-        return []
-    call_mnemonics = {"call", "lcall"}
-    if not any(str(item.get("mnemonic", "")).lower() in call_mnemonics for item in oracle_instructions):
-        return []
-    if not any(str(item.get("mnemonic", "")).lower() in call_mnemonics for item in candidate_instructions):
         return []
     differing: list[tuple[int, int]] = []
     for index, (oracle, candidate) in enumerate(zip(oracle_instructions, candidate_instructions, strict=False)):
