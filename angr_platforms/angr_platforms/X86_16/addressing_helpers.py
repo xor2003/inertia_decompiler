@@ -320,6 +320,57 @@ class ResolvedMemoryOperand:
                 layer="addressing",
             )
 
+    def _segment_address_fields(self) -> tuple[object, bool, bool, tuple[str, ...], int, object]:
+        """Compute space, stability, base, size, and segment origin for this access."""
+        space_map = {
+            sgreg_t.SS: MemSpace.SS,
+            sgreg_t.DS: MemSpace.DS,
+            sgreg_t.ES: MemSpace.ES,
+            sgreg_t.CS: MemSpace.UNKNOWN,
+            MemSpace.SS: MemSpace.SS,
+            MemSpace.DS: MemSpace.DS,
+            MemSpace.ES: MemSpace.ES,
+            MemSpace.UNKNOWN: MemSpace.UNKNOWN,
+        }
+        segment = self.segment
+        space = (
+            space_map.get(segment, MemSpace.UNKNOWN)
+            if isinstance(segment, (sgreg_t, MemSpace))
+            else MemSpace.UNKNOWN
+        )
+        explicit_segment = isinstance(self.segment, (sgreg_t, MemSpace)) and space != MemSpace.UNKNOWN
+        stable = explicit_segment and space in {MemSpace.SS, MemSpace.DS, MemSpace.ES}
+        base: tuple[str, ...]
+        if isinstance(self.segment, sgreg_t):
+            base = (self.segment.name.lower(),)
+        elif isinstance(self.segment, MemSpace) and self.segment != MemSpace.UNKNOWN:
+            base = (self.segment.value,)
+        else:
+            base = ()
+
+        size = max(1, self.width_bits // 8) if isinstance(self.width_bits, int) and self.width_bits > 0 else 0
+        seg_origin = (
+            SegmentOrigin.PROVEN
+            if explicit_segment
+            else (SegmentOrigin.DEFAULTED if space != MemSpace.UNKNOWN else SegmentOrigin.UNKNOWN)
+        )
+        return space, explicit_segment, stable, base, size, seg_origin
+
+    def _raw_offset_and_tmp_defs(self) -> tuple[object, dict[int, object] | None]:
+        """Unwrap the VexValue offset and resolve RdTmp chains through the IRSB."""
+        offset_raw = self.offset
+        tmp_defs = None
+        # Dynamic boundary: offset may be a third-party pyvex VexValue wrapper.
+        if hasattr(self.offset, "rdt"):
+            # Dynamic boundary: third-party pyvex VexValue exposes rdt dynamically.
+            offset_raw = getattr(self.offset, "rdt", self.offset)
+            # Dynamic boundary: pyvex customizers expose IRSB state at runtime.
+            irsb_c = getattr(self.offset, "irsb_c", None)
+            if irsb_c is not None:
+                tmp_defs = _build_tmp_defs_from_irsb(irsb_c)
+                offset_raw = _resolve_rdtmp_chain(offset_raw, tmp_defs)
+        return offset_raw, tmp_defs
+
     def typed_address(self, *, expr: tuple[str, ...] | None = None) -> IRAddress:
         """Return a segmented IR address for alias/type/structuring consumers.
 
@@ -329,51 +380,8 @@ class ResolvedMemoryOperand:
 
         def _impl() -> IRAddress:
             """Build an IRAddress from third-party pyvex dynamic-boundary fields."""
-            space_map = {
-                sgreg_t.SS: MemSpace.SS,
-                sgreg_t.DS: MemSpace.DS,
-                sgreg_t.ES: MemSpace.ES,
-                sgreg_t.CS: MemSpace.UNKNOWN,
-                MemSpace.SS: MemSpace.SS,
-                MemSpace.DS: MemSpace.DS,
-                MemSpace.ES: MemSpace.ES,
-                MemSpace.UNKNOWN: MemSpace.UNKNOWN,
-            }
-            segment = self.segment
-            space = (
-                space_map.get(segment, MemSpace.UNKNOWN)
-                if isinstance(segment, (sgreg_t, MemSpace))
-                else MemSpace.UNKNOWN
-            )
-            explicit_segment = isinstance(self.segment, (sgreg_t, MemSpace)) and space != MemSpace.UNKNOWN
-            stable = explicit_segment and space in {MemSpace.SS, MemSpace.DS, MemSpace.ES}
-            base: tuple[str, ...]
-            if isinstance(self.segment, sgreg_t):
-                base = (self.segment.name.lower(),)
-            elif isinstance(self.segment, MemSpace) and self.segment != MemSpace.UNKNOWN:
-                base = (self.segment.value,)
-            else:
-                base = ()
-
-            size = max(1, self.width_bits // 8) if isinstance(self.width_bits, int) and self.width_bits > 0 else 0
-            seg_origin = (
-                SegmentOrigin.PROVEN
-                if explicit_segment
-                else (SegmentOrigin.DEFAULTED if space != MemSpace.UNKNOWN else SegmentOrigin.UNKNOWN)
-            )
-
-            # Unwrap VexValue wrapper and resolve RdTmp chain via IRSB
-            offset_raw = self.offset
-            tmp_defs = None
-            # Dynamic boundary: offset may be a third-party pyvex VexValue wrapper.
-            if hasattr(self.offset, "rdt"):
-                # Dynamic boundary: third-party pyvex VexValue exposes rdt dynamically.
-                offset_raw = getattr(self.offset, "rdt", self.offset)
-                # Dynamic boundary: pyvex customizers expose IRSB state at runtime.
-                irsb_c = getattr(self.offset, "irsb_c", None)
-                if irsb_c is not None:
-                    tmp_defs = _build_tmp_defs_from_irsb(irsb_c)
-                    offset_raw = _resolve_rdtmp_chain(offset_raw, tmp_defs)
+            space, _explicit_segment, stable, base, size, seg_origin = self._segment_address_fields()
+            offset_raw, tmp_defs = self._raw_offset_and_tmp_defs()
 
             # Integer offset
             if isinstance(offset_raw, int):
@@ -392,18 +400,8 @@ class ResolvedMemoryOperand:
                 #
                 # AGENTS rule:
                 # stack activity != materializable variable
-                if space == MemSpace.SS:
-                    if not base:
-                        base = ("ss",)
-                    return IRAddress(
-                        space=space,
-                        base=base,
-                        offset=offset_raw,
-                        size=size,
-                        status=AddressStatus.STABLE if stable else AddressStatus.PROVISIONAL,
-                        segment_origin=seg_origin,
-                        expr=expr,
-                    )
+                if space == MemSpace.SS and not base:
+                    base = ("ss",)
                 # DS/ES:int — stable memory address
                 return IRAddress(
                     space=space,
@@ -705,17 +703,7 @@ def extract_bp_relative_offset_8616(
         # Flatten nested Add/Sub chains into terms
         collected = _collect_add_sub_terms(offset_expr, tmp_defs=tmp_defs)
         if collected is None:
-            # Fallback to simple 2-arg patterns
-            left, right = args[0], args[1]
-            if op_str in {"Iop_Add16", "Iop_Add32"}:
-                if _is_bp_reg(left, tmp_defs=tmp_defs) and isinstance(right, int):
-                    return (right & 0xFFFF, ("bp",))
-                if isinstance(left, int) and _is_bp_reg(right, tmp_defs=tmp_defs):
-                    return (left & 0xFFFF, ("bp",))
-            if op_str in {"Iop_Sub16", "Iop_Sub32"}:  # noqa: SIM102
-                if _is_bp_reg(left, tmp_defs=tmp_defs) and isinstance(right, int):
-                    return (-(right & 0xFFFF), ("bp",))
-            return None
+            return _bp_add_sub_fallback_8616(op_str, args, tmp_defs)
 
         terms, const = collected
 
@@ -753,19 +741,7 @@ def _collect_add_sub_terms(
         # Dynamic boundary: pyvex expression trees expose op/tag/con/args dynamically.
         op = getattr(expr, "op", None)
         if op is None:
-            # Leaf expression: VEX Get, RdTmp, Const, or int literal.
-            # These are atomic terms — return them as a single-term list.
-            # Handle VEX Const objects (tag=Iex_Const, .con.value)
-            tag = getattr(expr, "tag", None)
-            if tag == "Iex_Const":
-                con = getattr(expr, "con", None)
-                if con is not None:
-                    val = getattr(con, "value", None)
-                    if isinstance(val, int):
-                        return ([], val & 0xFFFF)
-            if isinstance(expr, int):
-                return ([], expr & 0xFFFF)
-            return ([expr], 0)
+            return _leaf_add_sub_terms(expr)
 
         op_str = str(op)
         args = getattr(expr, "args", None) or []
@@ -773,35 +749,9 @@ def _collect_add_sub_terms(
             return None
 
         if op_str in {"Iop_Add16", "Iop_Add32"}:
-            left_res = _collect_add_sub_terms(args[0], tmp_defs=tmp_defs)
-            right_res = _collect_add_sub_terms(args[1], tmp_defs=tmp_defs)
-            if left_res is None or right_res is None:
-                return ([args[0], args[1]], 0)
-            left_terms, left_const = left_res
-            right_terms, right_const = right_res
-            if left_terms is not None and right_terms is not None:
-                return (left_terms + right_terms, (left_const + right_const) & 0xFFFF)
-            # One side may be non-decomposable; treat it as a term
-            if left_terms is not None:
-                return ([*left_terms, args[1]], left_const & 0xFFFF)
-            if right_terms is not None:
-                return ([*right_terms, args[0]], right_const & 0xFFFF)
-            return ([args[0], args[1]], 0)
-
+            return _combine_add_sub_terms(args, tmp_defs=tmp_defs, subtract=False)
         if op_str in {"Iop_Sub16", "Iop_Sub32"}:
-            left_res = _collect_add_sub_terms(args[0], tmp_defs=tmp_defs)
-            right_res = _collect_add_sub_terms(args[1], tmp_defs=tmp_defs)
-            if left_res is None or right_res is None:
-                return ([args[0], args[1]], 0)
-            left_terms, left_const = left_res
-            right_terms, right_const = right_res
-            if left_terms is not None and right_terms is not None:
-                return (left_terms + right_terms, (left_const - right_const) & 0xFFFF)
-            if left_terms is not None:
-                return ([*left_terms, args[1]], left_const & 0xFFFF)
-            if right_terms is not None:
-                return ([*right_terms, args[0]], (-right_const) & 0xFFFF)
-            return ([args[0], args[1]], 0)
+            return _combine_add_sub_terms(args, tmp_defs=tmp_defs, subtract=True)
 
         if isinstance(expr, int):
             return ([], expr & 0xFFFF)
@@ -812,6 +762,64 @@ def _collect_add_sub_terms(
         return None
 
     return _impl()
+
+
+def _bp_add_sub_fallback_8616(
+    op_str: str, args: list[object], tmp_defs: dict[int, object] | None
+) -> tuple[int, tuple[str, ...]] | None:
+    """Match the simple two-argument ``BP +/- const`` VEX pattern."""
+    # Fallback to simple 2-arg patterns
+    left, right = args[0], args[1]
+    if op_str in {"Iop_Add16", "Iop_Add32"}:
+        if _is_bp_reg(left, tmp_defs=tmp_defs) and isinstance(right, int):
+            return (right & 0xFFFF, ("bp",))
+        if isinstance(left, int) and _is_bp_reg(right, tmp_defs=tmp_defs):
+            return (left & 0xFFFF, ("bp",))
+    if op_str in {"Iop_Sub16", "Iop_Sub32"}:  # noqa: SIM102
+        if _is_bp_reg(left, tmp_defs=tmp_defs) and isinstance(right, int):
+            return (-(right & 0xFFFF), ("bp",))
+    return None
+
+
+def _leaf_add_sub_terms(expr: object) -> tuple[list[object], int]:
+    """Classify a leaf expression as a term or a folded constant."""
+    # Leaf expression: VEX Get, RdTmp, Const, or int literal.
+    # These are atomic terms — return them as a single-term list.
+    # Handle VEX Const objects (tag=Iex_Const, .con.value)
+    tag = getattr(expr, "tag", None)
+    if tag == "Iex_Const":
+        con = getattr(expr, "con", None)
+        if con is not None:
+            val = getattr(con, "value", None)
+            if isinstance(val, int):
+                return ([], val & 0xFFFF)
+    if isinstance(expr, int):
+        return ([], expr & 0xFFFF)
+    return ([expr], 0)
+
+
+def _combine_add_sub_terms(
+    args: list[object],
+    *,
+    tmp_defs: dict[int, object] | None,
+    subtract: bool,
+) -> tuple[list[object], int] | None:
+    """Combine both sides of an add/sub node into flattened terms and a folded constant."""
+    left_res = _collect_add_sub_terms(args[0], tmp_defs=tmp_defs)
+    right_res = _collect_add_sub_terms(args[1], tmp_defs=tmp_defs)
+    if left_res is None or right_res is None:
+        return ([args[0], args[1]], 0)
+    left_terms, left_const = left_res
+    right_terms, right_const = right_res
+    if left_terms is not None and right_terms is not None:
+        folded = (left_const - right_const) if subtract else (left_const + right_const)
+        return (left_terms + right_terms, folded & 0xFFFF)
+    # One side may be non-decomposable; treat it as a term
+    if left_terms is not None:
+        return ([*left_terms, args[1]], left_const & 0xFFFF)
+    if right_terms is not None:
+        return ([*right_terms, args[0]], ((-right_const) if subtract else right_const) & 0xFFFF)
+    return ([args[0], args[1]], 0)
 
 
 def _is_index_reg_8616(expr: object) -> bool:

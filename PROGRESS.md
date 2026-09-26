@@ -8,6 +8,24 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Batch jobs now use the existing disposable fork boundary; typed hard-exit
+  records no longer kill subsequent jobs. Shared setup allowance preserves the
+  existing deadlines. Real hard-exit control passes; final scoped suite 118 pass,
+  scoped Ruff/MyPy pass, quality-dev fails broader debt. Retained isolated replay
+  is active at `.cache/compiler-coverage/retained-far-isolated-batch-001/`;
+  live continuation, performance and DOS acceptance remain unproven.
+
+- Batch reports checkpoint completed jobs atomically and clear stale records at
+  startup. Streaming revealed lazy loggers retaining closed job files; explicit
+  per-job console-handler handoff fixes that regression. Final scoped suite:
+  109 passed, Ruff/MyPy pass. Retained replay002 still runs pre-fix loaded code;
+  its first two functions time out. No DOS witness is accepted.
+
+- Streamed replay002 is now terminal exit3: `apply_twice` emits the hard recovery
+  timeout comment and kills the in-process batch before its final report. Next
+  repair is a per-job process boundary, not weakening the hard timeout or allowing
+  timed-out analysis threads to continue contaminating later jobs.
+
 - Batch artifacts now stream completed lines during execution and survive loud
   job failures. Three controls fail before repair; 42 runtime/policy tests pass
   after, scoped Ruff/MyPy pass, quality-dev still fails broader debt. The prior
@@ -1505,3 +1523,12 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   compare-dispatch table, and extracted the unary zero/nonzero lane.
 - Verified: ruff 0, mypy 0, 100 postprocess-jcc tests pass,
   def-integrity vs HEAD clean, zero architecture violations.
+- `angr_platforms/angr_platforms/X86_16/addressing_helpers.py`: Ruff
+  debt cleared to zero (5 findings). Extracted `typed_address` segment
+  field and raw-offset lanes into private methods, merged the identical
+  SS/DS int-offset returns, extracted the BP two-arg fallback, and
+  split `_collect_add_sub_terms` into leaf and combined add/sub lanes.
+- Verified: ruff 0, mypy 0, 54 addressing/instruction-core tests pass,
+  def-integrity vs HEAD clean. The 4 promoted-typed-file dynamic-attr
+  findings are unchanged from HEAD (inherited debt on moved getattr
+  lines, not new).
