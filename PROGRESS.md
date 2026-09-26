@@ -837,3 +837,20 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   failures (drawradaralt branch logic, 3 msc6 runtime-gate tests) reproduce
   identically on bare HEAD — environmental/pre-existing, including the
   kvikdos UTF-8 decode issue.
+
+## straightline_ssa.py — lint debt cleared (was 48 promoted findings)
+
+- Same recipe as prior files: dict-iterator fixes, op-dispatch tables
+  (`_CONST_JSON_BINOPS`, `_Z3_*_BINOPS/_Z3_*_CMPS`), helper extraction, and
+  state-dataclass conversions (`_ConnectivityGate` +
+  `_ConnectivityPairTables`, `_LowerScanState/_LowerScanCtx`,
+  `_TermInputScan`, `_RegionCompareCtx`).
+- `_apply_ssa_connectivity_gate` (39) split into a gate dataclass with
+  per-result/per-successor methods; `_z3_apply` (37) table-driven;
+  `_const_json_term_value` (32) split into simple/structural/cmp op helpers;
+  `_call_targets_equivalent` (30) into head/mapped/unmapped verdict helpers.
+- `_BlockLiftTimeout.__exit__` narrowed to `Literal[False]` so mypy proves
+  the alarm never suppresses the lowering return.
+- Verification: ruff 0 (was 48), mypy 174 errors (HEAD baseline 175),
+  arch-check 0 violations in file, all HEAD top-level defs preserved,
+  `test_dosunit_tool.py` 198 passed.
