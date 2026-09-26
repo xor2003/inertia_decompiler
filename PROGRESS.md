@@ -11,9 +11,23 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Catalog candidate filter implemented from a measured 66.287s Python-regex
   match over 49,283 patterns. Typed necessary literals reject impossible
   candidates without changing surviving backend checks. Two before failures;
-  11 focused parity/cache tests pass afterward; full retained-catalog parity
-  and timing are pending in `.cache/catalog-match-filtered-artifact.log`.
-  No end-to-end performance or feature-witness acceptance yet.
+  11 focused parity/cache tests pass afterward; full retained-catalog results
+  match exactly. Warm-spec/fresh-result catalog stage falls from 69.799s to
+  3.139s; first new-format spec construction costs 130.698s. Quality-dev still
+  fails broader debt. Normal-worker replay `.cache/sourcefree-inc-filtered.*`
+  is pending; no end-to-end performance or feature-witness acceptance yet.
+
+- PAT spec caching now shares immutable catalog work across binary artifact
+  directories and canonicalizes path/provenance together. Explicit cache
+  overrides survive; literal-helper changes invalidate specs. Initial cache
+  regressions fail before repair; final provenance-inclusive suite passes 11
+  tests (48.89s). Cold replay `.cache/sourcefree-inc-shared-cache.*` timed out;
+  warm normal-worker acceptance and the next full round trip are recorded below.
+
+- Warm normal-worker `inc_one` now exits0 with validation=passed and gcc-clean
+  `arg_6 + 1` output; the cold replay still timed out. Full large-model adapter
+  is running in `sourcefree-far-shared-catalog-001` with the same explicitly
+  fingerprinted catalog and unchanged deadlines. No coverage witness admitted.
 
 - Compiler-coverage far-pointer storage repair: source-free typed evidence
   exposed a contained segment word incorrectly kept as a separate argument,
@@ -1310,3 +1324,12 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   store pruning, and nested-block recursion.
 - Verified: ruff 0, mypy 0, 90 callsite/stack-probe tests pass,
   def-integrity vs HEAD clean, zero architecture violations against the file.
+- `angr_platforms/angr_platforms/X86_16/cod_extract.py`: Ruff complexity
+  debt cleared to zero (6 findings). Hoisted COD marker/source/asm metadata
+  helpers to module level, extracted the proc-body collection lane,
+  synthetic-global symbol ordering/addressing/patching lanes, and the tiny
+  two-arg body collector.
+- Verified: ruff 0, mypy 0, focused COD tests pass (three corpus-suite
+  failures reproduce identically on bare HEAD — pre-existing),
+  def-integrity vs HEAD clean (missing names are hoisted nested defs),
+  zero architecture violations against the file.

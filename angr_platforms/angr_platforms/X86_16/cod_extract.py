@@ -169,69 +169,8 @@ def extract_cod_proc_metadata(cod_path: Path, proc_name: str, proc_kind: str = "
     """Extract optional COD labels and source comments for one procedure."""
 
     def _impl() -> CODProcMetadata:
-        def _marker_indices_or_raise(lines: list[str]) -> tuple[int, int]:
-            start_marker = f"{proc_name}\tPROC {proc_kind}"
-            end_marker = f"{proc_name}\tENDP"
-            start_index = next((idx for idx, line in enumerate(lines) if start_marker in line), None)
-            end_index = next((idx for idx, line in enumerate(lines) if end_marker in line), None)
-            if start_index is None or end_index is None or end_index <= start_index:
-                raise ValueError(f"did not find {proc_name} ({proc_kind}) in {cod_path}")
-            return start_index, end_index
-
-        def _cod_source_comment_text(line: str) -> str:
-            return re.sub(r"^\s*;\|\*+\s*", "", line).strip()
-
-        def _canonical_name(name: str) -> str:
-            return canonical_known_cod_object_name(name) or name
-
-        def _remember_call_source(
-            source_text: str, call_sources: list[tuple[str, str]], seen_call_texts: set[str]
-        ) -> None:
-            for call_name, call_text in _extract_source_call_expressions(source_text):
-                if call_name in {"if", "while", "for", "switch", "return"} or call_name.startswith("$"):
-                    continue
-                if call_text in seen_call_texts:
-                    continue
-                seen_call_texts.add(call_text)
-                call_sources.append((_canonical_name(call_name), call_text))
-
-        asm_call_operand_markers = {"BYTE", "WORD", "DWORD", "QWORD", "FWORD", "PTR", "NEAR", "FAR"}
-
-        def _remember_asm_calls(asm_text: str, call_re: re.Pattern[str], call_names: list[str]) -> None:
-            for call_match in call_re.finditer(asm_text):
-                callee = call_match.group(1)
-                if callee == "__chkstk" or callee.startswith("$") or callee.upper() in asm_call_operand_markers:
-                    continue
-                canonical_callee = _canonical_name(callee)
-                call_names.append(canonical_callee)
-
-        def _remember_asm_globals(
-            asm_text: str,
-            pattern: re.Pattern[str],
-            global_names: list[str],
-            seen_globals: set[str],
-            segment_registers: set[str],
-        ) -> None:
-            for match in pattern.finditer(asm_text):
-                global_name = match.group(1)
-                if global_name.startswith("$") or global_name == proc_name or global_name.lower() in segment_registers:
-                    continue
-                canonical_name = _canonical_name(global_name)
-                if canonical_name not in seen_globals:
-                    seen_globals.add(canonical_name)
-                    global_names.append(canonical_name)
-
         lines = cod_path.read_text(errors="ignore").splitlines()
-        start_index, end_index = _marker_indices_or_raise(lines)
-
-        collect = False
-        stack_aliases: dict[int, str] = {}
-        call_names: list[str] = []
-        call_sources: list[tuple[str, str]] = []
-        global_names: list[str] = []
-        seen_call_texts: set[str] = set()
-        seen_globals: set[str] = set()
-        source_lines: list[str] = []
+        start_index, end_index = _cod_marker_indices_8616(lines, proc_name, proc_kind, cod_path)
 
         previous_end_index = next(
             (idx for idx in range(start_index - 1, -1, -1) if lines[idx].strip().endswith("ENDP")),
@@ -239,50 +178,13 @@ def extract_cod_proc_metadata(cod_path: Path, proc_name: str, proc_kind: str = "
         )
         prelude_lines = [line for line in lines[previous_end_index + 1 : start_index] if line.lstrip().startswith(";")]
 
-        alias_re = re.compile(r"^\s*;\s*([A-Za-z_$?@][\w$?@]*)\s*=\s*(-?[0-9A-Fa-f]+)\s*$")
-        entry_re = re.compile(r"\*\*\*\s+[0-9A-Fa-f]+\s+(?:[0-9A-Fa-f]{2}\s+)+(.*)$")
-        call_re = re.compile(r"\bcall\b(?:\s+far ptr)?\s+([A-Za-z_$?@][\w$?@]*)", re.IGNORECASE)
-        global_re = re.compile(r"\b(?:BYTE|WORD|DWORD)\s+PTR\s+([A-Za-z_$?@][\w$?@]*)", re.IGNORECASE)
-        offset_global_re = re.compile(
-            r"\bOFFSET\s+(?:[A-Za-z_$?@][\w$?@]*:)?\$?([A-Za-z_$?@][\w$?@]*)",
-            re.IGNORECASE,
+        collected = _collect_cod_proc_body_metadata_8616(
+            lines[start_index : end_index + 1],
+            prelude_lines,
+            proc_name,
+            proc_kind,
         )
-        segment_registers = {"cs", "ds", "es", "ss", "fs", "gs"}
-
-        source_lines.extend(
-            _cod_source_comment_text(line) for line in prelude_lines if line.lstrip().startswith(";|***")
-        )
-
-        for line in lines[start_index : end_index + 1]:
-            if f"{proc_name}\tPROC {proc_kind}" in line:
-                collect = True
-                continue
-            if line.endswith("ENDP") and f"{proc_name}\tENDP" in line:
-                break
-            if not collect:
-                continue
-
-            alias_match = alias_re.match(line)
-            if alias_match:
-                alias_name = canonical_known_cod_object_name(alias_match.group(1))
-                if alias_name is not None:
-                    stack_aliases[int(alias_match.group(2), 0)] = alias_name
-                continue
-
-            if line.lstrip().startswith(";|***"):
-                source_text = _cod_source_comment_text(line)
-                if source_text:
-                    source_lines.append(source_text)
-                    _remember_call_source(source_text, call_sources, seen_call_texts)
-                continue
-
-            entry_match = entry_re.search(line)
-            if entry_match is None:
-                continue
-            asm_text = entry_match.group(1).strip()
-            _remember_asm_calls(asm_text, call_re, call_names)
-            _remember_asm_globals(asm_text, global_re, global_names, seen_globals, segment_registers)
-            _remember_asm_globals(asm_text, offset_global_re, global_names, seen_globals, segment_registers)
+        stack_aliases, call_names, call_sources, global_names, source_lines = collected
 
         raw_entries: list[dict[str, object]] = []
         with contextlib.suppress(Exception):
@@ -313,6 +215,130 @@ def extract_cod_proc_metadata(cod_path: Path, proc_name: str, proc_kind: str = "
         )
 
     return _impl()
+
+
+def _collect_cod_proc_body_metadata_8616(
+    proc_lines: list[str],
+    prelude_lines: list[str],
+    proc_name: str,
+    proc_kind: str,
+) -> tuple[dict[int, str], list[str], list[tuple[str, str]], list[str], list[str]]:
+    collect = False
+    stack_aliases: dict[int, str] = {}
+    call_names: list[str] = []
+    call_sources: list[tuple[str, str]] = []
+    global_names: list[str] = []
+    seen_call_texts: set[str] = set()
+    seen_globals: set[str] = set()
+    source_lines: list[str] = []
+
+    alias_re = re.compile(r"^\s*;\s*([A-Za-z_$?@][\w$?@]*)\s*=\s*(-?[0-9A-Fa-f]+)\s*$")
+    entry_re = re.compile(r"\*\*\*\s+[0-9A-Fa-f]+\s+(?:[0-9A-Fa-f]{2}\s+)+(.*)$")
+    call_re = re.compile(r"\bcall\b(?:\s+far ptr)?\s+([A-Za-z_$?@][\w$?@]*)", re.IGNORECASE)
+    global_re = re.compile(r"\b(?:BYTE|WORD|DWORD)\s+PTR\s+([A-Za-z_$?@][\w$?@]*)", re.IGNORECASE)
+    offset_global_re = re.compile(
+        r"\bOFFSET\s+(?:[A-Za-z_$?@][\w$?@]*:)?\$?([A-Za-z_$?@][\w$?@]*)",
+        re.IGNORECASE,
+    )
+    segment_registers = {"cs", "ds", "es", "ss", "fs", "gs"}
+
+    source_lines.extend(
+        _cod_source_comment_text_8616(line) for line in prelude_lines if line.lstrip().startswith(";|***")
+    )
+
+    for line in proc_lines:
+        if f"{proc_name}\tPROC {proc_kind}" in line:
+            collect = True
+            continue
+        if line.endswith("ENDP") and f"{proc_name}\tENDP" in line:
+            break
+        if not collect:
+            continue
+
+        alias_match = alias_re.match(line)
+        if alias_match:
+            alias_name = canonical_known_cod_object_name(alias_match.group(1))
+            if alias_name is not None:
+                stack_aliases[int(alias_match.group(2), 0)] = alias_name
+            continue
+
+        if line.lstrip().startswith(";|***"):
+            source_text = _cod_source_comment_text_8616(line)
+            if source_text:
+                source_lines.append(source_text)
+                _remember_call_source_8616(source_text, call_sources, seen_call_texts)
+            continue
+
+        entry_match = entry_re.search(line)
+        if entry_match is None:
+            continue
+        asm_text = entry_match.group(1).strip()
+        _remember_asm_calls_8616(asm_text, call_re, call_names)
+        _remember_asm_globals_8616(asm_text, global_re, global_names, seen_globals, segment_registers, proc_name)
+        _remember_asm_globals_8616(asm_text, offset_global_re, global_names, seen_globals, segment_registers, proc_name)
+
+    return stack_aliases, call_names, call_sources, global_names, source_lines
+
+
+def _cod_marker_indices_8616(
+    lines: list[str], proc_name: str, proc_kind: str, cod_path: Path
+) -> tuple[int, int]:
+    start_marker = f"{proc_name}\tPROC {proc_kind}"
+    end_marker = f"{proc_name}\tENDP"
+    start_index = next((idx for idx, line in enumerate(lines) if start_marker in line), None)
+    end_index = next((idx for idx, line in enumerate(lines) if end_marker in line), None)
+    if start_index is None or end_index is None or end_index <= start_index:
+        raise ValueError(f"did not find {proc_name} ({proc_kind}) in {cod_path}")
+    return start_index, end_index
+
+
+def _cod_source_comment_text_8616(line: str) -> str:
+    return re.sub(r"^\s*;\|\*+\s*", "", line).strip()
+
+
+def _canonical_cod_name_8616(name: str) -> str:
+    return canonical_known_cod_object_name(name) or name
+
+
+def _remember_call_source_8616(
+    source_text: str, call_sources: list[tuple[str, str]], seen_call_texts: set[str]
+) -> None:
+    for call_name, call_text in _extract_source_call_expressions(source_text):
+        if call_name in {"if", "while", "for", "switch", "return"} or call_name.startswith("$"):
+            continue
+        if call_text in seen_call_texts:
+            continue
+        seen_call_texts.add(call_text)
+        call_sources.append((_canonical_cod_name_8616(call_name), call_text))
+
+
+_ASM_CALL_OPERAND_MARKERS_8616 = {"BYTE", "WORD", "DWORD", "QWORD", "FWORD", "PTR", "NEAR", "FAR"}
+
+
+def _remember_asm_calls_8616(asm_text: str, call_re: re.Pattern[str], call_names: list[str]) -> None:
+    for call_match in call_re.finditer(asm_text):
+        callee = call_match.group(1)
+        if callee == "__chkstk" or callee.startswith("$") or callee.upper() in _ASM_CALL_OPERAND_MARKERS_8616:
+            continue
+        call_names.append(_canonical_cod_name_8616(callee))
+
+
+def _remember_asm_globals_8616(
+    asm_text: str,
+    pattern: re.Pattern[str],
+    global_names: list[str],
+    seen_globals: set[str],
+    segment_registers: set[str],
+    proc_name: str,
+) -> None:
+    for match in pattern.finditer(asm_text):
+        global_name = match.group(1)
+        if global_name.startswith("$") or global_name == proc_name or global_name.lower() in segment_registers:
+            continue
+        canonical_name = _canonical_cod_name_8616(global_name)
+        if canonical_name not in seen_globals:
+            seen_globals.add(canonical_name)
+            global_names.append(canonical_name)
 
 
 _COD_GLOBAL_DISP_RE = re.compile(r"(?P<disp>[+-](?:0x[0-9A-Fa-f]+|[0-9A-Fa-f]+H|\d+))", re.IGNORECASE)
@@ -598,122 +624,16 @@ def join_cod_entries_with_synthetic_globals(
             rf"\bOFFSET\s+(?:[A-Za-z_$?@][\w$?@]*:)?\$?(?P<symbol>[A-Za-z_$?@][\w$?@]*){displacement_re}",
             re.IGNORECASE,
         )
-        segment_registers = {"cs", "ds", "es", "ss", "fs", "gs"}
-        instruction_prefixes = {0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF2, 0xF3}
-        immediate_addr_opcodes = {0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0x68}
-
-        def parse_disp(value: str | None) -> int:
-            if not value:
-                return 0
-            sign = -1 if value[0] == "-" else 1
-            text = value[1:]
-            if text.lower().startswith("0x"):
-                parsed = int(text, 16)
-            elif text.upper().endswith("H"):
-                parsed = int(text[:-1], 16)
-            else:
-                parsed = int(text, 10)
-            return sign * parsed
-
-        def width_for(name: str) -> int:
-            return {"BYTE": 1, "WORD": 2, "DWORD": 4}[name.upper()]
-
-        def prefix_len_for_chunk(chunk: bytearray) -> int:
-            prefix_len = 0
-            while prefix_len < len(chunk) and chunk[prefix_len] in instruction_prefixes:
-                prefix_len += 1
-            return prefix_len
-
-        def canonical_symbol_name(symbol: str) -> str:
-            return canonical_known_cod_object_name(symbol) or symbol
-
-        def should_ignore_symbol(symbol: str) -> bool:
-            return symbol.lower() in segment_registers
 
         symbol_order: list[str] = []
         symbol_spans: dict[str, tuple[int, int, int]] = {}
-
-        def remember_symbol(symbol: str, displacement: int, width: int) -> None:
-            if should_ignore_symbol(symbol):
-                return
-            canonical_symbol = canonical_symbol_name(symbol)
-            if canonical_symbol not in symbol_spans:
-                symbol_order.append(canonical_symbol)
-                symbol_spans[canonical_symbol] = (displacement, displacement + width, width)
-                return
-            start, end, max_width = symbol_spans[canonical_symbol]
-            symbol_spans[canonical_symbol] = (
-                min(start, displacement),
-                max(end, displacement + width),
-                max(max_width, width),
-            )
-
-        selected_entries: list[dict[str, object]] = []
-        for entry in entries:
-            offset = _cod_entry_offset_8616(entry)
-            if offset is None:
-                continue
-            if start_offset is not None and offset < start_offset:
-                continue
-            if end_offset is not None and offset >= end_offset:
-                continue
-            selected_entries.append(entry)
-            text = str(entry.get("text", ""))
-            global_match = global_re.search(text)
-            if global_match is not None:
-                remember_symbol(
-                    global_match.group("symbol"),
-                    parse_disp(global_match.group("disp")),
-                    width_for(global_match.group("width")),
-                )
-                continue
-            offset_match = offset_global_re.search(text)
-            if offset_match is not None:
-                remember_symbol(offset_match.group("symbol"), parse_disp(offset_match.group("disp")), 2)
-
-        symbol_addrs: dict[str, int] = {}
-        addr_to_name: dict[int, tuple[str, int]] = {}
-        next_addr = symbol_base
-        for symbol in symbol_order:
-            start, end, max_width = symbol_spans[symbol]
-            align = min(max_width, 2)
-            if next_addr % align:
-                next_addr += align - (next_addr % align)
-            bias = -start if start < 0 else 0
-            base_addr = next_addr + bias
-            symbol_addrs[symbol] = base_addr
-            addr_to_name[base_addr] = (symbol, max(end - min(start, 0), max_width))
-            next_addr += max(end - min(start, 0), max_width)
-
+        selected_entries = _select_cod_entries_for_patching_8616(
+            entries, start_offset, end_offset, global_re, offset_global_re, symbol_order, symbol_spans
+        )
+        symbol_addrs, addr_to_name = _assign_synthetic_symbol_addrs_8616(
+            symbol_order, symbol_spans, symbol_base
+        )
         patched_chunks: list[bytes] = []
-
-        def patch_memory_global_reference(chunk: bytearray, target_addr: int) -> bool:
-            prefix_len = prefix_len_for_chunk(chunk)
-            if prefix_len >= len(chunk):
-                return False
-            opcode = chunk[prefix_len]
-            if opcode in {0xA0, 0xA1, 0xA2, 0xA3} and prefix_len + 2 < len(chunk):
-                chunk[prefix_len + 1 : prefix_len + 3] = target_addr.to_bytes(2, "little")
-                return True
-            if prefix_len + 3 < len(chunk):
-                modrm = chunk[prefix_len + 1]
-                if ((modrm >> 6) & 0x3) == 0 and (modrm & 0x7) == 0x6:
-                    chunk[prefix_len + 2 : prefix_len + 4] = target_addr.to_bytes(2, "little")
-                    return True
-            return False
-
-        def patch_offset_immediate_reference(chunk: bytearray, target_addr: int) -> bool:
-            prefix_len = prefix_len_for_chunk(chunk)
-            if prefix_len >= len(chunk):
-                return False
-            opcode = chunk[prefix_len]
-            if opcode in immediate_addr_opcodes and prefix_len + 2 < len(chunk):
-                chunk[prefix_len + 1 : prefix_len + 3] = target_addr.to_bytes(2, "little")
-                return True
-            if opcode in {0xC6, 0xC7} and prefix_len + 4 < len(chunk):
-                chunk[prefix_len + 3 : prefix_len + 5] = target_addr.to_bytes(2, "little")
-                return True
-            return False
 
         for entry in selected_entries:
             entry_bytes = _cod_entry_bytes_8616(entry)
@@ -727,28 +647,181 @@ def join_cod_entries_with_synthetic_globals(
             offset_match = offset_global_re.search(text)
             if global_match is not None:
                 symbol = global_match.group("symbol")
-                if should_ignore_symbol(symbol):
+                if _should_ignore_cod_symbol_8616(symbol):
                     patched_chunks.append(entry_bytes)
                     continue
 
-                symbol = canonical_symbol_name(symbol)
-                target_addr = symbol_addrs[symbol] + parse_disp(global_match.group("disp"))
-                patched = patch_memory_global_reference(chunk, target_addr)
+                symbol = _canonical_cod_symbol_name_8616(symbol)
+                target_addr = symbol_addrs[symbol] + _parse_cod_disp_8616(global_match.group("disp"))
+                patched = _patch_memory_global_reference_8616(chunk, target_addr)
 
             elif offset_match is not None:
-                symbol = canonical_symbol_name(offset_match.group("symbol"))
-                if should_ignore_symbol(symbol):
+                symbol = _canonical_cod_symbol_name_8616(offset_match.group("symbol"))
+                if _should_ignore_cod_symbol_8616(symbol):
                     patched_chunks.append(entry_bytes)
                     continue
 
-                target_addr = symbol_addrs[symbol] + parse_disp(offset_match.group("disp"))
-                patched = patch_offset_immediate_reference(chunk, target_addr)
+                target_addr = symbol_addrs[symbol] + _parse_cod_disp_8616(offset_match.group("disp"))
+                patched = _patch_offset_immediate_reference_8616(chunk, target_addr)
 
             patched_chunks.append(bytes(chunk) if patched else entry_bytes)
 
         return b"".join(patched_chunks), addr_to_name
 
     return _impl()
+
+
+_COD_SEGMENT_REGISTERS_8616 = {"cs", "ds", "es", "ss", "fs", "gs"}
+_COD_INSTRUCTION_PREFIXES_8616 = {0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF2, 0xF3}
+_COD_IMMEDIATE_ADDR_OPCODES_8616 = {0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0x68}
+
+
+def _parse_cod_disp_8616(value: str | None) -> int:
+    if not value:
+        return 0
+    sign = -1 if value[0] == "-" else 1
+    text = value[1:]
+    if text.lower().startswith("0x"):
+        parsed = int(text, 16)
+    elif text.upper().endswith("H"):
+        parsed = int(text[:-1], 16)
+    else:
+        parsed = int(text, 10)
+    return sign * parsed
+
+
+def _cod_width_for_8616(name: str) -> int:
+    return {"BYTE": 1, "WORD": 2, "DWORD": 4}[name.upper()]
+
+
+def _cod_prefix_len_for_chunk_8616(chunk: bytearray) -> int:
+    prefix_len = 0
+    while prefix_len < len(chunk) and chunk[prefix_len] in _COD_INSTRUCTION_PREFIXES_8616:
+        prefix_len += 1
+    return prefix_len
+
+
+def _canonical_cod_symbol_name_8616(symbol: str) -> str:
+    return canonical_known_cod_object_name(symbol) or symbol
+
+
+def _should_ignore_cod_symbol_8616(symbol: str) -> bool:
+    return symbol.lower() in _COD_SEGMENT_REGISTERS_8616
+
+
+def _remember_cod_symbol_8616(
+    symbol: str,
+    displacement: int,
+    width: int,
+    symbol_order: list[str],
+    symbol_spans: dict[str, tuple[int, int, int]],
+) -> None:
+    if _should_ignore_cod_symbol_8616(symbol):
+        return
+    canonical_symbol = _canonical_cod_symbol_name_8616(symbol)
+    if canonical_symbol not in symbol_spans:
+        symbol_order.append(canonical_symbol)
+        symbol_spans[canonical_symbol] = (displacement, displacement + width, width)
+        return
+    start, end, max_width = symbol_spans[canonical_symbol]
+    symbol_spans[canonical_symbol] = (
+        min(start, displacement),
+        max(end, displacement + width),
+        max(max_width, width),
+    )
+
+
+def _select_cod_entries_for_patching_8616(
+    entries: list[dict[str, object]],
+    start_offset: int | None,
+    end_offset: int | None,
+    global_re: re.Pattern[str],
+    offset_global_re: re.Pattern[str],
+    symbol_order: list[str],
+    symbol_spans: dict[str, tuple[int, int, int]],
+) -> list[dict[str, object]]:
+    selected_entries: list[dict[str, object]] = []
+    for entry in entries:
+        offset = _cod_entry_offset_8616(entry)
+        if offset is None:
+            continue
+        if start_offset is not None and offset < start_offset:
+            continue
+        if end_offset is not None and offset >= end_offset:
+            continue
+        selected_entries.append(entry)
+        text = str(entry.get("text", ""))
+        global_match = global_re.search(text)
+        if global_match is not None:
+            _remember_cod_symbol_8616(
+                global_match.group("symbol"),
+                _parse_cod_disp_8616(global_match.group("disp")),
+                _cod_width_for_8616(global_match.group("width")),
+                symbol_order,
+                symbol_spans,
+            )
+            continue
+        offset_match = offset_global_re.search(text)
+        if offset_match is not None:
+            _remember_cod_symbol_8616(
+                offset_match.group("symbol"),
+                _parse_cod_disp_8616(offset_match.group("disp")),
+                2,
+                symbol_order,
+                symbol_spans,
+            )
+    return selected_entries
+
+
+def _assign_synthetic_symbol_addrs_8616(
+    symbol_order: list[str],
+    symbol_spans: dict[str, tuple[int, int, int]],
+    symbol_base: int,
+) -> tuple[dict[str, int], dict[int, tuple[str, int]]]:
+    symbol_addrs: dict[str, int] = {}
+    addr_to_name: dict[int, tuple[str, int]] = {}
+    next_addr = symbol_base
+    for symbol in symbol_order:
+        start, end, max_width = symbol_spans[symbol]
+        align = min(max_width, 2)
+        if next_addr % align:
+            next_addr += align - (next_addr % align)
+        bias = -start if start < 0 else 0
+        base_addr = next_addr + bias
+        symbol_addrs[symbol] = base_addr
+        addr_to_name[base_addr] = (symbol, max(end - min(start, 0), max_width))
+        next_addr += max(end - min(start, 0), max_width)
+    return symbol_addrs, addr_to_name
+
+
+def _patch_memory_global_reference_8616(chunk: bytearray, target_addr: int) -> bool:
+    prefix_len = _cod_prefix_len_for_chunk_8616(chunk)
+    if prefix_len >= len(chunk):
+        return False
+    opcode = chunk[prefix_len]
+    if opcode in {0xA0, 0xA1, 0xA2, 0xA3} and prefix_len + 2 < len(chunk):
+        chunk[prefix_len + 1 : prefix_len + 3] = target_addr.to_bytes(2, "little")
+        return True
+    if prefix_len + 3 < len(chunk):
+        modrm = chunk[prefix_len + 1]
+        if ((modrm >> 6) & 0x3) == 0 and (modrm & 0x7) == 0x6:
+            chunk[prefix_len + 2 : prefix_len + 4] = target_addr.to_bytes(2, "little")
+            return True
+    return False
+
+
+def _patch_offset_immediate_reference_8616(chunk: bytearray, target_addr: int) -> bool:
+    prefix_len = _cod_prefix_len_for_chunk_8616(chunk)
+    if prefix_len >= len(chunk):
+        return False
+    opcode = chunk[prefix_len]
+    if opcode in _COD_IMMEDIATE_ADDR_OPCODES_8616 and prefix_len + 2 < len(chunk):
+        chunk[prefix_len + 1 : prefix_len + 3] = target_addr.to_bytes(2, "little")
+        return True
+    if opcode in {0xC6, 0xC7} and prefix_len + 4 < len(chunk):
+        chunk[prefix_len + 3 : prefix_len + 5] = target_addr.to_bytes(2, "little")
+        return True
+    return False
 
 
 def infer_cod_logic_start(entries: list[dict[str, object]]) -> int | None:
@@ -851,43 +924,10 @@ def extract_small_two_arg_cod_logic_entries(entries: list[dict[str, object]]) ->
         if first != "push\tbp" or second != "mov\tbp,sp":
             return None
 
-        saw_ret = False
-        arg_disps: set[int] = set()
-        body_entries: list[dict[str, object]] = []
-        for idx, entry in enumerate(entries[2:], start=2):
-            text = str(entry.get("text", "")).strip().lower()
-            mnemonic = text.split(None, 1)[0] if text else ""
-            if "[bp-" in text or "sub\tsp," in text or "enter" in text:
-                return None
-            if mnemonic in {"call", "iret"}:
-                return None
-
-            for match in re.finditer(r"\[bp\+([0-9a-f]+)\]", text):
-                arg_disps.add(int(match.group(1), 16))
-
-            next_text = str(entries[idx + 1].get("text", "")).strip().lower() if idx + 1 < len(entries) else ""
-            if text == "mov\tsp,bp":
-                data = _cod_entry_bytes_8616(entry)
-                if data is None:
-                    return None
-                replacement = dict(entry)
-                replacement["bytes"] = b"\x90" * len(data)
-                replacement["text"] = "nop"
-                body_entries.append(replacement)
-                continue
-            if text == "pop\tbp" and next_text == "ret":
-                data = _cod_entry_bytes_8616(entry)
-                if data is None:
-                    return None
-                replacement = dict(entry)
-                replacement["bytes"] = b"\x90" * len(data)
-                replacement["text"] = "nop"
-                body_entries.append(replacement)
-                continue
-            body_entries.append(entry)
-            if text == "ret":
-                saw_ret = True
-
+        collected = _collect_tiny_two_arg_body_8616(entries)
+        if collected is None:
+            return None
+        body_entries, arg_disps, saw_ret = collected
         if not saw_ret or not body_entries:
             return None
         if arg_disps - {4, 6}:
@@ -895,6 +935,50 @@ def extract_small_two_arg_cod_logic_entries(entries: list[dict[str, object]]) ->
         return body_entries
 
     return _impl()
+
+
+def _collect_tiny_two_arg_body_8616(
+    entries: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], set[int], bool] | None:
+    saw_ret = False
+    arg_disps: set[int] = set()
+    body_entries: list[dict[str, object]] = []
+    for idx, entry in enumerate(entries[2:], start=2):
+        text = str(entry.get("text", "")).strip().lower()
+        mnemonic = text.split(None, 1)[0] if text else ""
+        if _tiny_body_entry_refused_8616(text, mnemonic):
+            return None
+
+        for match in re.finditer(r"\[bp\+([0-9a-f]+)\]", text):
+            arg_disps.add(int(match.group(1), 16))
+
+        next_text = str(entries[idx + 1].get("text", "")).strip().lower() if idx + 1 < len(entries) else ""
+        if text == "mov\tsp,bp" or (text == "pop\tbp" and next_text == "ret"):
+            replacement = _nop_replacement_entry_8616(entry)
+            if replacement is None:
+                return None
+            body_entries.append(replacement)
+            continue
+        body_entries.append(entry)
+        if text == "ret":
+            saw_ret = True
+    return body_entries, arg_disps, saw_ret
+
+
+def _tiny_body_entry_refused_8616(text: str, mnemonic: str) -> bool:
+    if "[bp-" in text or "sub\tsp," in text or "enter" in text:
+        return True
+    return mnemonic in {"call", "iret"}
+
+
+def _nop_replacement_entry_8616(entry: dict[str, object]) -> dict[str, object] | None:
+    data = _cod_entry_bytes_8616(entry)
+    if data is None:
+        return None
+    replacement = dict(entry)
+    replacement["bytes"] = b"\x90" * len(data)
+    replacement["text"] = "nop"
+    return replacement
 
 
 def extract_small_two_arg_cod_logic_bytes(entries: list[dict[str, object]]) -> bytes | None:
