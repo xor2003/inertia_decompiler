@@ -174,24 +174,7 @@ def _looks_like_frame_evidence(obj: object) -> bool:
         # ── Capstone instruction (structured, NOT text) ──
         mnemonic = _dynamic_angr_attr_8616(obj, "mnemonic")
         if mnemonic is not None:
-            mnem_str = str(mnemonic).lower()
-            operands = _tuple_dynamic_attr_8616(obj, "operands")
-
-            # push bp — register-based detection using capstone reg IDs
-            if mnem_str == "push":
-                for op in operands:
-                    reg_val = _dynamic_angr_attr_8616(op, "reg")
-                    if isinstance(reg_val, int) and reg_val == 6:  # X86_REG_BP = 6
-                        return True
-
-            # mov bp, sp
-            elif mnem_str == "mov" and len(operands) >= 2:
-                dst_reg = _dynamic_angr_attr_8616(operands[0], "reg")
-                src_reg = _dynamic_angr_attr_8616(operands[1], "reg")
-                if isinstance(dst_reg, int) and dst_reg == 6 and isinstance(src_reg, int) and src_reg == 47:
-                    return True
-
-            return False
+            return _capstone_insn_is_frame_evidence(obj, str(mnemonic).lower())
 
         # ── VEX IRSB (direct) — check statement tags for push-bp / mov-bp-sp ──
         statements = _dynamic_angr_attr_8616(obj, "statements")
@@ -203,9 +186,7 @@ def _looks_like_frame_evidence(obj: object) -> bool:
         if capstone is not None:
             insns = _tuple_dynamic_attr_8616(capstone, "insns")
             if insns is not None:
-                for insn in insns:
-                    if _looks_like_frame_evidence(insn):
-                        return True
+                return _capstone_block_has_frame_evidence(insns)
 
         # ── Reject string/COD artifacts ──
         if isinstance(obj, str):
@@ -216,6 +197,50 @@ def _looks_like_frame_evidence(obj: object) -> bool:
     return _impl()
 
 
+def _capstone_insn_is_frame_evidence(obj: object, mnem_str: str) -> bool:
+    """Match a single capstone instruction against push-bp / mov-bp-sp."""
+    operands = _tuple_dynamic_attr_8616(obj, "operands")
+
+    # push bp — register-based detection using capstone reg IDs
+    if mnem_str == "push":
+        for op in operands:
+            reg_val = _dynamic_angr_attr_8616(op, "reg")
+            if isinstance(reg_val, int) and reg_val == 6:  # X86_REG_BP = 6
+                return True
+
+    # mov bp, sp
+    elif mnem_str == "mov" and len(operands) >= 2:
+        dst_reg = _dynamic_angr_attr_8616(operands[0], "reg")
+        src_reg = _dynamic_angr_attr_8616(operands[1], "reg")
+        if isinstance(dst_reg, int) and dst_reg == 6 and isinstance(src_reg, int) and src_reg == 47:
+            return True
+
+    return False
+
+
+def _capstone_block_has_frame_evidence(insns: Iterable[object]) -> bool:
+    """True when any capstone instruction in the block shows frame setup."""
+    for insn in insns:
+        if _looks_like_frame_evidence(insn):
+            return True
+    return False
+
+
+def _irsb_register_offsets_8616(irsb: object) -> tuple[object, object] | None:
+    """Resolve (sp_offset, bp_offset) for a VEX IRSB, or None when unavailable."""
+    try:
+        arch = _dynamic_angr_attr_8616(irsb, "arch")
+        if arch is None:
+            return None
+        sp_off = _dynamic_angr_attr_8616(arch, "sp_offset")
+        bp_off = _dynamic_angr_attr_8616(arch, "bp_offset")
+        if sp_off is None or bp_off is None:
+            return None
+    except Exception:
+        return None
+    return sp_off, bp_off
+
+
 def _vex_irsb_has_bp_frame(irsb: object) -> bool:
     def _impl() -> bool:
         """Inspect VEX IRSB statements for BP frame setup patterns.
@@ -223,33 +248,27 @@ def _vex_irsb_has_bp_frame(irsb: object) -> bool:
         push bp  → Ist_Store(base=SS*16+SP-2, data=GET(BP))  after  Ist_Put(SP)=SUB(GET(SP), 2)
         mov bp,sp → Ist_Put(BP) = GET(SP)
         """
+        offsets = _irsb_register_offsets_8616(irsb)
+        if offsets is None:
+            return False
+        sp_off, bp_off = offsets
+
         has_push_bp = False
         has_mov_bp_sp = False
-
-        try:
-            arch = _dynamic_angr_attr_8616(irsb, "arch")
-            if arch is None:
-                return False
-            sp_off = _dynamic_angr_attr_8616(arch, "sp_offset")
-            bp_off = _dynamic_angr_attr_8616(arch, "bp_offset")
-            if sp_off is None or bp_off is None:
-                return False
-        except Exception:
-            return False
-
         for stmt in _tuple_dynamic_attr_8616(irsb, "statements"):
             tag = _dynamic_angr_attr_8616(stmt, "tag", "")
-            if tag == "Ist_Put":
-                put_off = _dynamic_angr_attr_8616(stmt, "offset")
-                data = _dynamic_angr_attr_8616(stmt, "data")
-                if put_off == bp_off and data is not None:
-                    # PUT(BP) = GET(SP)  →  mov bp, sp
-                    if _is_reg_get(data, sp_off):
-                        has_mov_bp_sp = True
-                elif put_off == sp_off and data is not None:  # noqa: SIM102
-                    # PUT(SP) = SUB(GET(SP), 2)  →  sub sp, 2 (push)
-                    if _is_sub_constant(data, 2):
-                        has_push_bp = True
+            if tag != "Ist_Put":
+                continue
+            put_off = _dynamic_angr_attr_8616(stmt, "offset")
+            data = _dynamic_angr_attr_8616(stmt, "data")
+            if put_off == bp_off and data is not None:
+                # PUT(BP) = GET(SP)  →  mov bp, sp
+                if _is_reg_get(data, sp_off):
+                    has_mov_bp_sp = True
+            elif put_off == sp_off and data is not None:  # noqa: SIM102
+                # PUT(SP) = SUB(GET(SP), 2)  →  sub sp, 2 (push)
+                if _is_sub_constant(data, 2):
+                    has_push_bp = True
 
         return has_push_bp and has_mov_bp_sp
 
@@ -310,22 +329,7 @@ def _detect_sp_proven_delta_from_blocks(project: object | None, function_addr: i
 
         Uses VEX IRSB statement analysis, NOT text parsing.
         """
-        kb = _dynamic_angr_attr_8616(project, "kb")
-        if kb is None:
-            return None
-        functions = _dynamic_angr_attr_8616(kb, "functions")
-        function_lookup = _dynamic_angr_attr_8616(functions, "function")
-        func = function_lookup(addr=function_addr, create=False) if callable(function_lookup) else None
-        if func is None:
-            return None
-
-        # Gather all IRSBs for this function
-        irsbs: list[object] = []
-        for blk in _tuple_dynamic_attr_8616(func, "blocks"):
-            irsb = _dynamic_angr_attr_8616(blk, "vex") or _dynamic_angr_attr_8616(blk, "irsb")
-            if irsb is not None:
-                irsbs.append(irsb)
-
+        irsbs = _function_irsbs_8616(project, function_addr)
         if not irsbs:
             return None
 
@@ -333,42 +337,65 @@ def _detect_sp_proven_delta_from_blocks(project: object | None, function_addr: i
         sp_delta = None
 
         for irsb in irsbs:
-            try:
-                arch = _dynamic_angr_attr_8616(irsb, "arch")
-                if arch is None:
-                    continue
-                sp_off = _dynamic_angr_attr_8616(arch, "sp_offset")
-                bp_off = _dynamic_angr_attr_8616(arch, "bp_offset")
-                if sp_off is None or bp_off is None:
-                    continue
-            except Exception:
+            offsets = _irsb_register_offsets_8616(irsb)
+            if offsets is None:
                 continue
-
-            for stmt in _tuple_dynamic_attr_8616(irsb, "statements"):
-                tag = _dynamic_angr_attr_8616(stmt, "tag", "")
-                if tag != "Ist_Put":
-                    continue
-
-                put_off = _dynamic_angr_attr_8616(stmt, "offset")
-                data = _dynamic_angr_attr_8616(stmt, "data")
-                if put_off is None or data is None:
-                    continue
-
-                # Detect mov bp, sp → BP frame established
-                if put_off == bp_off and _is_reg_get(data, sp_off):
-                    seen_bp_established = True
-                    continue
-
-                # Detect sub sp, N → compute frame size only AFTER BP established
-                if seen_bp_established and put_off == sp_off:
-                    delta = _extract_sub_constant(data)
-                    if delta is not None and delta < 0:
-                        sp_delta = delta
-                        break  # first sub sp,N after mov bp,sp is the frame size
+            sp_off, bp_off = offsets
+            seen_bp_established, found = _irsb_frame_sp_delta_8616(irsb, sp_off, bp_off, seen_bp_established)
+            if found is not None:
+                sp_delta = found
 
         return sp_delta
 
     return _impl()
+
+
+def _function_irsbs_8616(project: object | None, function_addr: int) -> list[object]:
+    """Gather all VEX IRSBs for a function, or empty when unavailable."""
+    kb = _dynamic_angr_attr_8616(project, "kb")
+    if kb is None:
+        return []
+    functions = _dynamic_angr_attr_8616(kb, "functions")
+    function_lookup = _dynamic_angr_attr_8616(functions, "function")
+    func = function_lookup(addr=function_addr, create=False) if callable(function_lookup) else None
+    if func is None:
+        return []
+
+    irsbs: list[object] = []
+    for blk in _tuple_dynamic_attr_8616(func, "blocks"):
+        irsb = _dynamic_angr_attr_8616(blk, "vex") or _dynamic_angr_attr_8616(blk, "irsb")
+        if irsb is not None:
+            irsbs.append(irsb)
+    return irsbs
+
+
+def _irsb_frame_sp_delta_8616(
+    irsb: object, sp_off: object, bp_off: object, seen_bp_established: bool
+) -> tuple[bool, int | None]:
+    """Scan one IRSB for BP-establishment and the first ``sub sp, N`` delta."""
+    sp_delta = None
+    for stmt in _tuple_dynamic_attr_8616(irsb, "statements"):
+        tag = _dynamic_angr_attr_8616(stmt, "tag", "")
+        if tag != "Ist_Put":
+            continue
+
+        put_off = _dynamic_angr_attr_8616(stmt, "offset")
+        data = _dynamic_angr_attr_8616(stmt, "data")
+        if put_off is None or data is None:
+            continue
+
+        # Detect mov bp, sp → BP frame established
+        if put_off == bp_off and _is_reg_get(data, sp_off):
+            seen_bp_established = True
+            continue
+
+        # Detect sub sp, N → compute frame size only AFTER BP established
+        if seen_bp_established and put_off == sp_off:
+            delta = _extract_sub_constant(data)
+            if delta is not None and delta < 0:
+                sp_delta = delta
+                break  # first sub sp,N after mov bp,sp is the frame size
+    return seen_bp_established, sp_delta
 
 
 def _extract_sub_constant(vex_expr: object) -> int | None:

@@ -1555,3 +1555,9 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   `build_grouped_region_graph`.
 - Verified: ruff 0, mypy 0, 21 grouped-graph/grouped-pass tests pass,
   def-integrity vs HEAD clean, zero architecture violations.
+- `angr_platforms/angr_platforms/X86_16/semantics/stack_frame_recovery.py`:
+  Ruff debt cleared to zero (5 findings). Extracted the capstone
+  instruction/block frame-evidence lanes, a shared IRSB register-offset
+  resolver, the function IRSB gather, and the per-IRSB frame-delta scan.
+- Verified: ruff 0, mypy 0, 3 stack-frame-recovery tests pass,
+  def-integrity vs HEAD clean, zero architecture violations.
