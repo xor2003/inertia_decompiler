@@ -1204,3 +1204,12 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   register-candidate materialization lanes, and void-return rewrite helpers.
 - Verified: ruff 0, mypy 0, 163 local-rewrite/declaration tests pass, zero
   architecture violations against the file.
+- `inertia_decompiler/cli_linear_recurrence_state.py`: Ruff complexity debt
+  cleared to zero (10 findings). Hoisted the five nested `_impl` closures to
+  class methods and extracted alias-chase, copy-alias resolution,
+  linear-def inlining, variable-id collection, and stack-base-carrier
+  traversal helpers. Preserved the carrier-rejection → linear-defs fallback
+  ordering in `_copy_alias_for_variable`.
+- Verified: ruff 0, mypy 0, 13 linear-recurrence/backedge tests pass plus
+  the unarched-type refusal regression, def-integrity vs HEAD clean, zero
+  architecture violations against the file.

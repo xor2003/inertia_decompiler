@@ -109,60 +109,71 @@ class LinearRecurrenceState:
                     if variable is not None:
                         key = id(variable)
                         self.variable_use_counts[key] = self.variable_use_counts.get(key, 0) + 1
-            for alias_var_id, alias_expr in self.expr_aliases.items():
-                if not isinstance(alias_var_id, int):
-                    continue
-                alias_expr = self.unwrap_c_casts(alias_expr)
-                if not isinstance(alias_expr, structured_c.CUnaryOp) or alias_expr.op != "Dereference":
-                    continue
-                self.protected_linear_alias_ids.add(alias_var_id)
-                # Dynamic codegen boundary: CUnaryOp operand is supplied by angr structured codegen.
-                self.collect_variable_ids(getattr(alias_expr, "operand", None), self.protected_linear_alias_ids)
-            for alias_var_id, alias_expr in list(self.expr_aliases.items()):
-                if not isinstance(alias_var_id, int):
-                    continue
-                resolved_alias = self.resolve_known_copy_alias_expr(alias_expr)
-                if self.expr_contains_dereference(resolved_alias):
-                    self.protected_linear_alias_ids.add(alias_var_id)
-                    self.collect_variable_ids(resolved_alias, self.protected_linear_alias_ids)
+            self._seed_deref_alias_protection()
+            self._seed_resolved_alias_protection()
 
         return _impl()
+
+    def _seed_deref_alias_protection(self) -> None:
+        """Protect aliases whose proven target is a dereference."""
+        for alias_var_id, alias_expr in self.expr_aliases.items():
+            if not isinstance(alias_var_id, int):
+                continue
+            alias_expr = self.unwrap_c_casts(alias_expr)
+            if not isinstance(alias_expr, structured_c.CUnaryOp) or alias_expr.op != "Dereference":
+                continue
+            self.protected_linear_alias_ids.add(alias_var_id)
+            # Dynamic codegen boundary: CUnaryOp operand is supplied by angr structured codegen.
+            self.collect_variable_ids(getattr(alias_expr, "operand", None), self.protected_linear_alias_ids)
+
+    def _seed_resolved_alias_protection(self) -> None:
+        """Protect aliases whose resolved form contains a dereference."""
+        for alias_var_id, alias_expr in list(self.expr_aliases.items()):
+            if not isinstance(alias_var_id, int):
+                continue
+            resolved_alias = self.resolve_known_copy_alias_expr(alias_expr)
+            if self.expr_contains_dereference(resolved_alias):
+                self.protected_linear_alias_ids.add(alias_var_id)
+                self.collect_variable_ids(resolved_alias, self.protected_linear_alias_ids)
 
     def collect_variable_ids(self, expr: CExpr, ids: set[int]) -> None:
         """Collect underlying variable identities referenced by a C expression."""
+        expr = self.unwrap_c_casts(expr)
+        if isinstance(expr, structured_c.CVariable):
+            # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
+            variable = getattr(expr, "variable", None)
+            if variable is not None:
+                ids.add(id(variable))
+            return
+        self._collect_scalar_child_ids(expr, ids)
+        self._collect_sequence_child_ids(expr, ids)
 
-        def _impl() -> None:
-            nonlocal expr
-            expr = self.unwrap_c_casts(expr)
-            if isinstance(expr, structured_c.CVariable):
-                # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
-                variable = getattr(expr, "variable", None)
-                if variable is not None:
-                    ids.add(id(variable))
-                return
-            for attr in ("lhs", "rhs", "operand", "expr"):
-                if not hasattr(expr, attr):
-                    continue
-                try:
-                    # Dynamic codegen boundary: child field names vary across angr C AST nodes.
-                    value = getattr(expr, attr)
-                except Exception:
-                    continue
-                if self.structured_codegen_node(value):
-                    self.collect_variable_ids(value, ids)
-            for attr in ("args", "operands", "statements"):
-                if not hasattr(expr, attr):
-                    continue
-                try:
-                    # Dynamic codegen boundary: child sequence fields vary across angr C AST nodes.
-                    items = getattr(expr, attr)
-                except Exception:
-                    continue
-                for item in items or ():
-                    if self.structured_codegen_node(item):
-                        self.collect_variable_ids(item, ids)
+    def _collect_scalar_child_ids(self, expr: object, ids: set[int]) -> None:
+        """Recurse into scalar child fields of one C expression."""
+        for attr in ("lhs", "rhs", "operand", "expr"):
+            if not hasattr(expr, attr):
+                continue
+            try:
+                # Dynamic codegen boundary: child field names vary across angr C AST nodes.
+                value = getattr(expr, attr)
+            except Exception:
+                continue
+            if self.structured_codegen_node(value):
+                self.collect_variable_ids(value, ids)
 
-        return _impl()
+    def _collect_sequence_child_ids(self, expr: object, ids: set[int]) -> None:
+        """Recurse into sequence child fields of one C expression."""
+        for attr in ("args", "operands", "statements"):
+            if not hasattr(expr, attr):
+                continue
+            try:
+                # Dynamic codegen boundary: child sequence fields vary across angr C AST nodes.
+                items = getattr(expr, attr)
+            except Exception:
+                continue
+            for item in items or ():
+                if self.structured_codegen_node(item):
+                    self.collect_variable_ids(item, ids)
 
     def is_linear_register_temp(self, cvar: CExpr) -> bool:
         """Return whether a C variable is a synthetic linear-register temp."""
@@ -184,46 +195,53 @@ class LinearRecurrenceState:
 
     def expr_contains_stack_base_carrier(self, expr: CExpr, active_expr_ids: set[int] | None = None) -> bool:
         """Return whether an expression recursively references the stack-base carrier."""
+        expr = self.unwrap_c_casts(expr)
+        active_expr_ids = set() if active_expr_ids is None else active_expr_ids
+        expr_id = id(expr)
+        if expr_id in active_expr_ids:
+            return False
+        active_expr_ids.add(expr_id)
+        # Dynamic codegen boundary: CFakeVariable names come from angr structured C.
+        if isinstance(expr, structured_c.CFakeVariable) and getattr(expr, "name", None) == "stack_base":
+            active_expr_ids.discard(expr_id)
+            return True
+        if self._scalar_child_has_stack_base(expr, active_expr_ids, expr_id):
+            return True
+        if self._sequence_child_has_stack_base(expr, active_expr_ids, expr_id):
+            return True
+        active_expr_ids.discard(expr_id)
+        return False
 
-        def _impl() -> bool:
-            nonlocal expr, active_expr_ids
-            expr = self.unwrap_c_casts(expr)
-            active_expr_ids = set() if active_expr_ids is None else active_expr_ids
-            expr_id = id(expr)
-            if expr_id in active_expr_ids:
-                return False
-            active_expr_ids.add(expr_id)
-            # Dynamic codegen boundary: CFakeVariable names come from angr structured C.
-            if isinstance(expr, structured_c.CFakeVariable) and getattr(expr, "name", None) == "stack_base":
+    def _scalar_child_has_stack_base(self, expr: object, active_expr_ids: set[int], expr_id: int) -> bool:
+        """Probe scalar child fields for a stack-base carrier reference."""
+        for attr in ("lhs", "rhs", "operand", "expr", "variable", "index"):
+            if not hasattr(expr, attr):
+                continue
+            try:
+                # Dynamic codegen boundary: child field names vary across angr C AST nodes.
+                value = getattr(expr, attr)
+            except Exception:
+                continue
+            if value is not None and self.expr_contains_stack_base_carrier(value, active_expr_ids):
                 active_expr_ids.discard(expr_id)
                 return True
-            for attr in ("lhs", "rhs", "operand", "expr", "variable", "index"):
-                if not hasattr(expr, attr):
-                    continue
-                try:
-                    # Dynamic codegen boundary: child field names vary across angr C AST nodes.
-                    value = getattr(expr, attr)
-                except Exception:
-                    continue
-                if value is not None and self.expr_contains_stack_base_carrier(value, active_expr_ids):
+        return False
+
+    def _sequence_child_has_stack_base(self, expr: object, active_expr_ids: set[int], expr_id: int) -> bool:
+        """Probe sequence child fields for a stack-base carrier reference."""
+        for attr in ("args", "operands"):
+            if not hasattr(expr, attr):
+                continue
+            try:
+                # Dynamic codegen boundary: child sequence fields vary across angr C AST nodes.
+                items = getattr(expr, attr)
+            except Exception:
+                continue
+            for item in items or ():
+                if self.expr_contains_stack_base_carrier(item, active_expr_ids):
                     active_expr_ids.discard(expr_id)
                     return True
-            for attr in ("args", "operands"):
-                if not hasattr(expr, attr):
-                    continue
-                try:
-                    # Dynamic codegen boundary: child sequence fields vary across angr C AST nodes.
-                    items = getattr(expr, attr)
-                except Exception:
-                    continue
-                for item in items or ():
-                    if self.expr_contains_stack_base_carrier(item, active_expr_ids):
-                        active_expr_ids.discard(expr_id)
-                        return True
-            active_expr_ids.discard(expr_id)
-            return False
-
-        return _impl()
+        return False
 
     def extract_linear_delta(self, expr: CExpr) -> LinearDelta:
         """Split a linear expression into a base expression and integer delta."""
@@ -294,74 +312,82 @@ class LinearRecurrenceState:
     ) -> CExpr:
         """Inline already-proven linear definitions into a C expression."""
 
-        def _impl() -> CExpr:
-            nonlocal expr, seen_vars, seen_exprs
-            expr = self.unwrap_c_casts(expr)
-            if depth > 64:
-                return expr
-            seen_vars = set() if seen_vars is None else seen_vars
-            seen_exprs = set() if seen_exprs is None else seen_exprs
-            expr_key = id(expr)
-            if expr_key in seen_exprs:
-                return expr
-            seen_exprs.add(expr_key)
-            if isinstance(expr, structured_c.CVariable):
-                if self.is_materialized_stack_local(expr):
-                    return expr
-                linear = None
-                # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
-                variable = getattr(expr, "variable", None)
-                if variable is not None:
-                    var_id = id(variable)
-                    if (
-                        var_id in self.dereferenced_variable_ids
-                        or var_id in self.protected_linear_alias_ids
-                        or var_id in seen_vars
-                    ):
-                        return expr
-                    seen_vars.add(var_id)
-                    alias = self.expr_aliases.get(var_id)
-                    if alias is not None:
-                        aliased = self.inline_known_linear_defs(alias, seen_vars, seen_exprs, depth + 1)
-                        if aliased is not expr:
-                            return aliased
-                    linear = self.linear_defs.get(var_id)
-                if linear is not None:
-                    base_expr, delta = linear
-                    if id(variable) in self.protected_linear_defs:
-                        return expr
-                    if self.expr_contains_stack_base_carrier(base_expr):
-                        return expr
-                    if (
-                        self.match_duplicate_word_base_expr(
-                            self.resolve_known_copy_alias_expr(base_expr), self.resolve_known_copy_alias_expr
-                        )
-                        is not None
-                    ):
-                        return expr
-                    return self.build_linear_expr(base_expr, delta)
-                return expr
-            if isinstance(expr, structured_c.CBinaryOp):
-                lhs = self.inline_known_linear_defs(expr.lhs, seen_vars, seen_exprs, depth + 1)
-                rhs = self.inline_known_linear_defs(expr.rhs, seen_vars, seen_exprs, depth + 1)
-                if lhs is not expr.lhs or rhs is not expr.rhs:
-                    rebuilt = self.build_binary_op_or_none(expr.op, lhs, rhs)
-                    if rebuilt is None:
-                        return expr
-                    expr = rebuilt
-                linear_expr = self.match_linear_word_delta_expr(expr)
-                if linear_expr is not None and not self.same_c_expression(linear_expr, expr):
-                    return linear_expr
-                return expr
-            if isinstance(expr, structured_c.CUnaryOp):
-                if expr.op == "Dereference":
-                    return expr
-                operand = self.inline_known_linear_defs(expr.operand, seen_vars, seen_exprs, depth + 1)
-                if operand is not expr.operand:
-                    return structured_c.CUnaryOp(expr.op, cast(structured_c.CExpression, operand), codegen=self.codegen)
+        expr = self.unwrap_c_casts(expr)
+        if depth > 64:
             return expr
+        seen_vars = set() if seen_vars is None else seen_vars
+        seen_exprs = set() if seen_exprs is None else seen_exprs
+        expr_key = id(expr)
+        if expr_key in seen_exprs:
+            return expr
+        seen_exprs.add(expr_key)
+        if isinstance(expr, structured_c.CVariable):
+            return self._inline_variable_linear_defs(expr, seen_vars, seen_exprs, depth)
+        if isinstance(expr, structured_c.CBinaryOp):
+            return self._inline_binop_linear_defs(expr, seen_vars, seen_exprs, depth)
+        if isinstance(expr, structured_c.CUnaryOp):
+            if expr.op == "Dereference":
+                return expr
+            operand = self.inline_known_linear_defs(expr.operand, seen_vars, seen_exprs, depth + 1)
+            if operand is not expr.operand:
+                return structured_c.CUnaryOp(expr.op, cast(structured_c.CExpression, operand), codegen=self.codegen)
+        return expr
 
-        return _impl()
+    def _inline_variable_linear_defs(
+        self, expr: structured_c.CVariable, seen_vars: set[int], seen_exprs: set[int], depth: int
+    ) -> CExpr:
+        """Inline a proven linear definition behind one C variable."""
+        if self.is_materialized_stack_local(expr):
+            return expr
+        linear = None
+        # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
+        variable = getattr(expr, "variable", None)
+        if variable is not None:
+            var_id = id(variable)
+            if (
+                var_id in self.dereferenced_variable_ids
+                or var_id in self.protected_linear_alias_ids
+                or var_id in seen_vars
+            ):
+                return expr
+            seen_vars.add(var_id)
+            alias = self.expr_aliases.get(var_id)
+            if alias is not None:
+                aliased = self.inline_known_linear_defs(alias, seen_vars, seen_exprs, depth + 1)
+                if aliased is not expr:
+                    return aliased
+            linear = self.linear_defs.get(var_id)
+        if linear is not None:
+            base_expr, delta = linear
+            if id(variable) in self.protected_linear_defs:
+                return expr
+            if self.expr_contains_stack_base_carrier(base_expr):
+                return expr
+            if (
+                self.match_duplicate_word_base_expr(
+                    self.resolve_known_copy_alias_expr(base_expr), self.resolve_known_copy_alias_expr
+                )
+                is not None
+            ):
+                return expr
+            return self.build_linear_expr(base_expr, delta)
+        return expr
+
+    def _inline_binop_linear_defs(
+        self, expr: structured_c.CBinaryOp, seen_vars: set[int], seen_exprs: set[int], depth: int
+    ) -> CExpr:
+        """Inline linear defs under a binary op and re-fold word deltas."""
+        lhs = self.inline_known_linear_defs(expr.lhs, seen_vars, seen_exprs, depth + 1)
+        rhs = self.inline_known_linear_defs(expr.rhs, seen_vars, seen_exprs, depth + 1)
+        if lhs is not expr.lhs or rhs is not expr.rhs:
+            rebuilt = self.build_binary_op_or_none(expr.op, lhs, rhs)
+            if rebuilt is None:
+                return expr
+            expr = rebuilt
+        linear_expr = self.match_linear_word_delta_expr(expr)
+        if linear_expr is not None and not self.same_c_expression(linear_expr, expr):
+            return linear_expr
+        return expr
 
     def extract_shift_delta(self, expr: CExpr) -> LinearDelta:
         """Split a shift expression into a base expression and shift count."""
@@ -399,95 +425,137 @@ class LinearRecurrenceState:
     ) -> CExpr:
         """Resolve copy-alias chains while preserving materialized stack locals."""
 
-        def _impl() -> CExpr:
-            nonlocal expr, active_expr_ids, seen_var_ids, seen_storage
-            expr = self.unwrap_c_casts(expr)
-            if isinstance(expr, structured_c.CVariable) and self.is_materialized_stack_local(expr):
-                return self.canonicalize_stack_cvar_expr(expr, self.codegen)
-            if depth > 64:
-                return self.canonicalize_stack_cvar_expr(expr, self.codegen)
-            active_expr_ids = set() if active_expr_ids is None else active_expr_ids
-            expr_id = id(expr)
-            if expr_id in active_expr_ids:
-                return self.canonicalize_stack_cvar_expr(expr, self.codegen)
-            active_expr_ids.add(expr_id)
-            seen_var_ids = set() if seen_var_ids is None else seen_var_ids
-            seen_storage = set() if seen_storage is None else seen_storage
-            while isinstance(expr, structured_c.CVariable):
-                # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
-                variable = getattr(expr, "variable", None)
-                if variable is None:
-                    break
-                key = id(variable)
-                storage_key = self.alias_storage_key(expr)
-                if key in seen_var_ids:
-                    break
-                seen_var_ids.add(key)
-                if storage_key is not None:
-                    if storage_key in seen_storage:
-                        break
-                    seen_storage.add(storage_key)
-                alias = self.expr_aliases.get(key)
-                if alias is None and storage_key is not None:
-                    alias = self.expr_aliases.get(storage_key)
-                if alias is not None and self.expr_contains_stack_base_carrier(alias):
-                    alias = None
-                if alias is None:
-                    linear = self.linear_defs.get(key)
-                    if linear is not None:
-                        base_expr, delta = linear
-                        if not self.expr_contains_stack_base_carrier(base_expr):
-                            alias = self.build_linear_expr(base_expr, delta)
-                if alias is None:
-                    break
-                expr = self.unwrap_c_casts(alias)
-            if isinstance(expr, structured_c.CTypeCast):
-                inner = self.resolve_known_copy_alias_expr(
-                    expr.expr, active_expr_ids, seen_var_ids.copy(), seen_storage.copy(), depth + 1
-                )
-                active_expr_ids.discard(expr_id)
-                if inner is not expr.expr:
-                    # Dynamic codegen boundary: rebuilt nodes reuse optional angr codegen metadata.
-                    codegen_metadata = getattr(expr, "codegen", None)
-                    return structured_c.CTypeCast(
-                        None,
-                        expr.type,
-                        cast(structured_c.CExpression, inner),
-                        codegen=codegen_metadata,
-                    )
-                return self.canonicalize_stack_cvar_expr(expr, self.codegen)
-            if isinstance(expr, structured_c.CUnaryOp):
-                operand = self.resolve_known_copy_alias_expr(
-                    expr.operand, active_expr_ids, seen_var_ids.copy(), seen_storage.copy(), depth + 1
-                )
-                active_expr_ids.discard(expr_id)
-                if operand is not expr.operand:
-                    # Dynamic codegen boundary: rebuilt nodes reuse optional angr codegen metadata.
-                    codegen_metadata = getattr(expr, "codegen", None)
-                    return structured_c.CUnaryOp(
-                        expr.op,
-                        cast(structured_c.CExpression, operand),
-                        codegen=codegen_metadata,
-                    )
-                return self.canonicalize_stack_cvar_expr(expr, self.codegen)
-            if isinstance(expr, structured_c.CBinaryOp):
-                lhs = self.resolve_known_copy_alias_expr(
-                    expr.lhs, active_expr_ids, seen_var_ids.copy(), seen_storage.copy(), depth + 1
-                )
-                rhs = self.resolve_known_copy_alias_expr(
-                    expr.rhs, active_expr_ids, seen_var_ids.copy(), seen_storage.copy(), depth + 1
-                )
-                active_expr_ids.discard(expr_id)
-                if lhs is not expr.lhs or rhs is not expr.rhs:
-                    # Dynamic codegen boundary: rebuilt nodes reuse optional angr codegen metadata.
-                    rebuilt = self.build_binary_op_or_none(expr.op, lhs, rhs, codegen=getattr(expr, "codegen", None))
-                    if rebuilt is not None:
-                        return rebuilt
-                return self.canonicalize_stack_cvar_expr(expr, self.codegen)
-            active_expr_ids.discard(expr_id)
+        expr = self.unwrap_c_casts(expr)
+        if isinstance(expr, structured_c.CVariable) and self.is_materialized_stack_local(expr):
             return self.canonicalize_stack_cvar_expr(expr, self.codegen)
+        if depth > 64:
+            return self.canonicalize_stack_cvar_expr(expr, self.codegen)
+        active_expr_ids = set() if active_expr_ids is None else active_expr_ids
+        expr_id = id(expr)
+        if expr_id in active_expr_ids:
+            return self.canonicalize_stack_cvar_expr(expr, self.codegen)
+        active_expr_ids.add(expr_id)
+        seen_var_ids = set() if seen_var_ids is None else seen_var_ids
+        seen_storage = set() if seen_storage is None else seen_storage
+        expr = self._chase_copy_alias_chain(expr, seen_var_ids, seen_storage)
+        if isinstance(expr, structured_c.CTypeCast):
+            return self._resolve_alias_typecast(expr, active_expr_ids, seen_var_ids, seen_storage, depth, expr_id)
+        if isinstance(expr, structured_c.CUnaryOp):
+            return self._resolve_alias_unary(expr, active_expr_ids, seen_var_ids, seen_storage, depth, expr_id)
+        if isinstance(expr, structured_c.CBinaryOp):
+            return self._resolve_alias_binop(expr, active_expr_ids, seen_var_ids, seen_storage, depth, expr_id)
+        active_expr_ids.discard(expr_id)
+        return self.canonicalize_stack_cvar_expr(expr, self.codegen)
 
-        return _impl()
+    def _chase_copy_alias_chain(self, expr: CExpr, seen_var_ids: set[int], seen_storage: set[object]) -> CExpr:
+        """Walk variable -> alias edges until the chain ends or repeats."""
+        while isinstance(expr, structured_c.CVariable):
+            # Dynamic codegen boundary: CVariable payloads are optional in angr structured C.
+            variable = getattr(expr, "variable", None)
+            if variable is None:
+                break
+            key = id(variable)
+            storage_key = self.alias_storage_key(expr)
+            if key in seen_var_ids:
+                break
+            seen_var_ids.add(key)
+            if storage_key is not None:
+                if storage_key in seen_storage:
+                    break
+                seen_storage.add(storage_key)
+            alias = self._copy_alias_for_variable(key, storage_key)
+            if alias is None:
+                break
+            expr = self.unwrap_c_casts(alias)
+        return expr
+
+    def _copy_alias_for_variable(self, key: int, storage_key: object | None) -> CExpr | None:
+        """Resolve the next alias target for a variable key, or None to stop."""
+        alias = self.expr_aliases.get(key)
+        if alias is None and storage_key is not None:
+            alias = self.expr_aliases.get(storage_key)
+        if alias is not None and self.expr_contains_stack_base_carrier(alias):
+            alias = None
+        if alias is None:
+            linear = self.linear_defs.get(key)
+            if linear is not None:
+                base_expr, delta = linear
+                if not self.expr_contains_stack_base_carrier(base_expr):
+                    alias = self.build_linear_expr(base_expr, delta)
+        return alias
+
+    def _resolve_alias_typecast(
+        self,
+        expr: structured_c.CTypeCast,
+        active_expr_ids: set[int],
+        seen_var_ids: set[int],
+        seen_storage: set[object],
+        depth: int,
+        expr_id: int,
+    ) -> CExpr:
+        """Resolve through a CTypeCast node and rebuild when the operand moved."""
+        inner = self.resolve_known_copy_alias_expr(
+            expr.expr, active_expr_ids, seen_var_ids.copy(), seen_storage.copy(), depth + 1
+        )
+        active_expr_ids.discard(expr_id)
+        if inner is not expr.expr:
+            # Dynamic codegen boundary: rebuilt nodes reuse optional angr codegen metadata.
+            codegen_metadata = getattr(expr, "codegen", None)
+            return structured_c.CTypeCast(
+                None,
+                expr.type,
+                cast(structured_c.CExpression, inner),
+                codegen=codegen_metadata,
+            )
+        return self.canonicalize_stack_cvar_expr(expr, self.codegen)
+
+    def _resolve_alias_unary(
+        self,
+        expr: structured_c.CUnaryOp,
+        active_expr_ids: set[int],
+        seen_var_ids: set[int],
+        seen_storage: set[object],
+        depth: int,
+        expr_id: int,
+    ) -> CExpr:
+        """Resolve through a CUnaryOp node and rebuild when the operand moved."""
+        operand = self.resolve_known_copy_alias_expr(
+            expr.operand, active_expr_ids, seen_var_ids.copy(), seen_storage.copy(), depth + 1
+        )
+        active_expr_ids.discard(expr_id)
+        if operand is not expr.operand:
+            # Dynamic codegen boundary: rebuilt nodes reuse optional angr codegen metadata.
+            codegen_metadata = getattr(expr, "codegen", None)
+            return structured_c.CUnaryOp(
+                expr.op,
+                cast(structured_c.CExpression, operand),
+                codegen=codegen_metadata,
+            )
+        return self.canonicalize_stack_cvar_expr(expr, self.codegen)
+
+    def _resolve_alias_binop(
+        self,
+        expr: structured_c.CBinaryOp,
+        active_expr_ids: set[int],
+        seen_var_ids: set[int],
+        seen_storage: set[object],
+        depth: int,
+        expr_id: int,
+    ) -> CExpr:
+        """Resolve through a CBinaryOp node and rebuild when either operand moved."""
+        lhs = self.resolve_known_copy_alias_expr(
+            expr.lhs, active_expr_ids, seen_var_ids.copy(), seen_storage.copy(), depth + 1
+        )
+        rhs = self.resolve_known_copy_alias_expr(
+            expr.rhs, active_expr_ids, seen_var_ids.copy(), seen_storage.copy(), depth + 1
+        )
+        active_expr_ids.discard(expr_id)
+        if lhs is not expr.lhs or rhs is not expr.rhs:
+            # Dynamic codegen boundary: rebuilt nodes reuse optional angr codegen metadata.
+            rebuilt = self.build_binary_op_or_none(expr.op, lhs, rhs, codegen=getattr(expr, "codegen", None))
+            if rebuilt is not None:
+                return rebuilt
+        return self.canonicalize_stack_cvar_expr(expr, self.codegen)
 
     def expr_contains_dereference(self, expr: CExpr, active_expr_ids: set[int] | None = None) -> bool:
         """Return whether an expression recursively contains a dereference."""
