@@ -337,49 +337,15 @@ def _recover_interior_scaled_aggregate_8616(
     for (base_offset, element_width), indexed_count in sorted(indexed_counts.items()):
         if indexed_count < 2 or element_width not in {2, 4}:
             continue
-        if not -frame_size <= base_offset < 0:
-            continue
-        boundary_offsets = sorted(
-            {
-                offset
-                for offset, width in fixed_accesses
-                if base_offset < offset < 0 and width > 0
-            }
+        candidate = _interior_scaled_candidate_8616(
+            base_offset=base_offset,
+            element_width=element_width,
+            frame_size=frame_size,
+            fixed_accesses=fixed_accesses,
+            indexed_accesses=indexed_accesses,
         )
-        if not boundary_offsets:
-            continue
-        boundary_offset = boundary_offsets[0]
-        boundary_widths = {
-            width
-            for offset, width in fixed_accesses
-            if offset == boundary_offset and width > 0
-        }
-        if len(boundary_widths) != 1:
-            continue
-        byte_size = boundary_offset - base_offset
-        if byte_size < element_width * 2 or byte_size % element_width != 0:
-            continue
-        if any(
-            base_offset <= offset < boundary_offset
-            for offset, _width in fixed_accesses
-        ):
-            continue
-        candidates.append(
-            StackAggregateObjectFact8616(
-                base_offset=base_offset,
-                byte_size=byte_size,
-                element_width=element_width,
-                frame_allocation_size=frame_size,
-                address_taken_count=0,
-                indexed_access_count=sum(
-                    displacement == base_offset and width == element_width
-                    for displacement, width in indexed_accesses
-                ),
-                indexed_offsets=(base_offset,),
-                scalar_boundary_offset=boundary_offset,
-                scalar_boundary_width=next(iter(boundary_widths)),
-            )
-        )
+        if candidate is not None:
+            candidates.append(candidate)
     if len(candidates) == 1:
         return StackAggregateRecovery8616(
             StackAggregateRecoveryStatus8616.MATERIALIZABLE,
@@ -639,6 +605,58 @@ def _recover_top_addressed_partition_8616(
     )
 
 
+def _interior_scaled_candidate_8616(
+    *,
+    base_offset: int,
+    element_width: int,
+    frame_size: int,
+    fixed_accesses: tuple[tuple[int, int], ...],
+    indexed_accesses: tuple[tuple[int, int], ...],
+) -> StackAggregateObjectFact8616 | None:
+    """Build one interior-array fact when its scalar boundary is proven."""
+    if not -frame_size <= base_offset < 0:
+        return None
+    boundary_offsets = sorted(
+        {
+            offset
+            for offset, width in fixed_accesses
+            if base_offset < offset < 0 and width > 0
+        }
+    )
+    if not boundary_offsets:
+        return None
+    boundary_offset = boundary_offsets[0]
+    boundary_widths = {
+        width
+        for offset, width in fixed_accesses
+        if offset == boundary_offset and width > 0
+    }
+    if len(boundary_widths) != 1:
+        return None
+    byte_size = boundary_offset - base_offset
+    if byte_size < element_width * 2 or byte_size % element_width != 0:
+        return None
+    if any(
+        base_offset <= offset < boundary_offset
+        for offset, _width in fixed_accesses
+    ):
+        return None
+    return StackAggregateObjectFact8616(
+        base_offset=base_offset,
+        byte_size=byte_size,
+        element_width=element_width,
+        frame_allocation_size=frame_size,
+        address_taken_count=0,
+        indexed_access_count=sum(
+            displacement == base_offset and width == element_width
+            for displacement, width in indexed_accesses
+        ),
+        indexed_offsets=(base_offset,),
+        scalar_boundary_offset=boundary_offset,
+        scalar_boundary_width=next(iter(boundary_widths)),
+    )
+
+
 def recover_stack_aggregate_object_facts_from_instructions_8616(
     instructions: tuple[object, ...],
     *,
@@ -646,40 +664,13 @@ def recover_stack_aggregate_object_facts_from_instructions_8616(
 ) -> StackAggregateRecovery8616:
     """Classify bottom-of-frame aggregates from decoded binary instructions."""
     insns = tuple(_instruction(item) for item in instructions)
-    allocations: list[int] = []
-    fixed_accesses: list[tuple[int, int]] = []
-    indexed_accesses: list[tuple[int, int]] = []
-    scaled_indexed_accesses: list[tuple[int, int]] = []
-    address_taken: list[tuple[int, int]] = []
-
-    for index, insn in enumerate(insns):
-        target = _direct_call_target(insn)
-        if isinstance(target, int) and (target in stack_probe_targets or (target & 0xFFFF) in stack_probe_targets):
-            allocation = _stack_probe_allocation_before_call(insns, index)
-            if isinstance(allocation, int):
-                allocations.append(allocation)
-        for operand in tuple(getattr(insn, "operands", ()) or ()):
-            access = _bp_memory_access(insn, operand)
-            if access is None:
-                continue
-            displacement, width, index_name = access
-            if displacement >= 0:
-                continue
-            if getattr(insn, "id", None) == X86_INS_LEA:
-                if index_name is None:
-                    address_taken.append((displacement, width))
-                continue
-            if index_name is None:
-                fixed_accesses.append((displacement, width))
-            else:
-                indexed_accesses.append((displacement, width))
-                if _index_scale_matches_width_8616(
-                    insns,
-                    index,
-                    index_name,
-                    width,
-                ):
-                    scaled_indexed_accesses.append((displacement, width))
+    (
+        allocations,
+        fixed_accesses,
+        indexed_accesses,
+        scaled_indexed_accesses,
+        address_taken,
+    ) = _classify_instruction_stack_accesses_8616(insns, stack_probe_targets)
 
     raw_count = len(allocations) + len(fixed_accesses) + len(indexed_accesses) + len(address_taken)
     if not allocations:
@@ -709,33 +700,16 @@ def recover_stack_aggregate_object_facts_from_instructions_8616(
     base_address_count = sum(
         displacement == base_offset for displacement, _width in address_taken
     )
-    if (
-        base_address_count > 0
-        and base_address_count == len(address_taken)
-        and not fixed_accesses
-        and not indexed_accesses
-    ):
-        fact = StackAggregateObjectFact8616(
-            base_offset=base_offset,
-            byte_size=frame_size,
-            element_width=1,
-            frame_allocation_size=frame_size,
-            address_taken_count=base_address_count,
-            indexed_access_count=0,
-            indexed_offsets=(),
-            scalar_boundary_offset=None,
-            scalar_boundary_width=None,
-            evidence_kind=StackAggregateEvidenceKind8616.FULL_FRAME_ADDRESS,
-        )
-        return StackAggregateRecovery8616(
-            StackAggregateRecoveryStatus8616.MATERIALIZABLE,
-            raw_count,
-            raw_count,
-            1,
-            0,
-            0,
-            facts=(fact,),
-        )
+    full_frame = _full_frame_address_recovery_8616(
+        frame_size=frame_size,
+        base_address_count=base_address_count,
+        address_taken=tuple(address_taken),
+        fixed_accesses=tuple(fixed_accesses),
+        indexed_accesses=tuple(indexed_accesses),
+        raw_count=raw_count,
+    )
+    if full_frame is not None:
+        return full_frame
     if not indexed_accesses:
         addressed_partition = _recover_bottom_addressed_partition_8616(
             frame_size=frame_size,
@@ -772,8 +746,92 @@ def recover_stack_aggregate_object_facts_from_instructions_8616(
     )
     if top_addressed_partition.status is not StackAggregateRecoveryStatus8616.NO_EVIDENCE:
         return top_addressed_partition
+    return _recover_bottom_indexed_aggregate_8616(
+        frame_size=frame_size,
+        base_offset=base_offset,
+        base_address_count=base_address_count,
+        fixed_accesses=tuple(fixed_accesses),
+        indexed_accesses=tuple(indexed_accesses),
+        address_taken=tuple(address_taken),
+        raw_count=raw_count,
+        interior_recovery=interior_recovery,
+    )
+
+
+def _full_frame_address_recovery_8616(
+    *,
+    frame_size: int,
+    base_address_count: int,
+    address_taken: tuple[tuple[int, int], ...],
+    fixed_accesses: tuple[tuple[int, int], ...],
+    indexed_accesses: tuple[tuple[int, int], ...],
+    raw_count: int,
+) -> StackAggregateRecovery8616 | None:
+    """Materialize a full-frame addressed aggregate, or None when unproven."""
+    if not (
+        base_address_count > 0
+        and base_address_count == len(address_taken)
+        and not fixed_accesses
+        and not indexed_accesses
+    ):
+        return None
+    fact = StackAggregateObjectFact8616(
+        base_offset=-frame_size,
+        byte_size=frame_size,
+        element_width=1,
+        frame_allocation_size=frame_size,
+        address_taken_count=base_address_count,
+        indexed_access_count=0,
+        indexed_offsets=(),
+        scalar_boundary_offset=None,
+        scalar_boundary_width=None,
+        evidence_kind=StackAggregateEvidenceKind8616.FULL_FRAME_ADDRESS,
+    )
+    return StackAggregateRecovery8616(
+        StackAggregateRecoveryStatus8616.MATERIALIZABLE,
+        raw_count,
+        raw_count,
+        1,
+        0,
+        0,
+        facts=(fact,),
+    )
+
+
+def _recover_bottom_indexed_aggregate_8616(
+    *,
+    frame_size: int,
+    base_offset: int,
+    base_address_count: int,
+    fixed_accesses: tuple[tuple[int, int], ...],
+    indexed_accesses: tuple[tuple[int, int], ...],
+    address_taken: tuple[tuple[int, int], ...],
+    raw_count: int,
+    interior_recovery: StackAggregateRecovery8616,
+) -> StackAggregateRecovery8616:
+    """Resolve the bottom-of-frame indexed aggregate lane."""
     if not address_taken:
         return interior_recovery
+    return _bottom_indexed_aggregate_tail_8616(
+        frame_size=frame_size,
+        base_offset=base_offset,
+        base_address_count=base_address_count,
+        fixed_accesses=fixed_accesses,
+        indexed_accesses=indexed_accesses,
+        raw_count=raw_count,
+    )
+
+
+def _bottom_indexed_aggregate_tail_8616(
+    *,
+    frame_size: int,
+    base_offset: int,
+    base_address_count: int,
+    fixed_accesses: tuple[tuple[int, int], ...],
+    indexed_accesses: tuple[tuple[int, int], ...],
+    raw_count: int,
+) -> StackAggregateRecovery8616:
+    """Materialize or refuse the bottom-of-frame indexed aggregate evidence."""
     indexed_widths = {width for displacement, width in indexed_accesses if displacement in {base_offset - width, base_offset}}
     if len(indexed_widths) != 1 or base_address_count == 0:
         return StackAggregateRecovery8616(
@@ -898,6 +956,72 @@ def collect_stack_aggregate_object_facts_8616(
     )
 
 
+def _classify_instruction_stack_accesses_8616(
+    insns: tuple[object, ...],
+    stack_probe_targets: frozenset[int],
+) -> tuple[
+    list[int],
+    list[tuple[int, int]],
+    list[tuple[int, int]],
+    list[tuple[int, int]],
+    list[tuple[int, int]],
+]:
+    """Scan decoded instructions into allocation and access buckets."""
+    allocations: list[int] = []
+    fixed_accesses: list[tuple[int, int]] = []
+    indexed_accesses: list[tuple[int, int]] = []
+    scaled_indexed_accesses: list[tuple[int, int]] = []
+    address_taken: list[tuple[int, int]] = []
+
+    for index, insn in enumerate(insns):
+        target = _direct_call_target(insn)
+        if isinstance(target, int) and (target in stack_probe_targets or (target & 0xFFFF) in stack_probe_targets):
+            allocation = _stack_probe_allocation_before_call(insns, index)
+            if isinstance(allocation, int):
+                allocations.append(allocation)
+        buckets = (fixed_accesses, indexed_accesses, scaled_indexed_accesses, address_taken)
+        for operand in tuple(getattr(insn, "operands", ()) or ()):
+            access = _bp_memory_access(insn, operand)
+            if access is None:
+                continue
+            _record_bp_stack_access_8616(insns, index, insn, access, buckets)
+    return allocations, fixed_accesses, indexed_accesses, scaled_indexed_accesses, address_taken
+
+
+def _record_bp_stack_access_8616(
+    insns: tuple[object, ...],
+    index: int,
+    insn: object,
+    access: tuple[int, int, str | None],
+    buckets: tuple[
+        list[tuple[int, int]],
+        list[tuple[int, int]],
+        list[tuple[int, int]],
+        list[tuple[int, int]],
+    ],
+) -> None:
+    """Bucket one BP-relative memory access as fixed/indexed/scaled/address-taken."""
+    fixed_accesses, indexed_accesses, scaled_indexed_accesses, address_taken = buckets
+    displacement, width, index_name = access
+    if displacement >= 0:
+        return
+    if getattr(insn, "id", None) == X86_INS_LEA:
+        if index_name is None:
+            address_taken.append((displacement, width))
+        return
+    if index_name is None:
+        fixed_accesses.append((displacement, width))
+        return
+    indexed_accesses.append((displacement, width))
+    if _index_scale_matches_width_8616(
+        insns,
+        index,
+        index_name,
+        width,
+    ):
+        scaled_indexed_accesses.append((displacement, width))
+
+
 def _materialize_fact(codegen: object, fact: StackAggregateObjectFact8616) -> tuple[bool, bool]:
     """Return ``(materialized, changed)`` for one exact aggregate frame partition."""
     cfunc = getattr(codegen, "cfunc", None)
@@ -919,26 +1043,10 @@ def _materialize_fact(codegen: object, fact: StackAggregateObjectFact8616) -> tu
         candidates_by_offset[fact.scalar_boundary_offset] = []
     seen_candidates: set[int] = set()
 
-    def add_candidate(variable: object, cvar: object) -> None:
-        """Record one current-codegen view in the proven frame partition."""
-        if not isinstance(variable, SimStackVariable) or not isinstance(cvar, structured_c.CVariable):
-            return
-        bp_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
-        if variable.base != "bp" or bp_offset not in candidates_by_offset or id(cvar) in seen_candidates:
-            return
-        seen_candidates.add(id(cvar))
-        candidates_by_offset[bp_offset].append(cvar)
-
-    for candidate_variable, candidate_cvar in variables_in_use.items():
-        add_candidate(candidate_variable, candidate_cvar)
     unified_local_vars = getattr(cfunc, "unified_local_vars", None)
-    if isinstance(unified_local_vars, dict):
-        for candidate_variable, entries in unified_local_vars.items():
-            if not isinstance(entries, set):
-                continue
-            for entry in entries:
-                if isinstance(entry, tuple) and len(entry) == 2:
-                    add_candidate(candidate_variable, entry[0])
+    _collect_partition_candidates_8616(
+        codegen, variables_in_use, unified_local_vars, candidates_by_offset, seen_candidates
+    )
 
     # Codegen regeneration may copy private evidence attributes while replacing
     # every C node. A tracked CVariable is reusable only when it is also present
@@ -962,106 +1070,32 @@ def _materialize_fact(codegen: object, fact: StackAggregateObjectFact8616) -> tu
     except AttributeError:
         variable_manager = None
 
-    def persist_type(variable: object, variable_type: SimType) -> None:
-        """Persist one exact frame-partition type across CFunction.refresh()."""
-        if variable_manager is None or not isinstance(variable, SimVariable):
-            return
-        variable_manager.set_variable_type(
-            variable,
-            variable_type,
-            override_bot=True,
-            all_unified=True,
-        )
-
     changed = restored
     if not aggregate_candidates:
-        aggregate_variable = SimStackVariable(
-            fact.base_offset if entry_sp_offset is None else entry_sp_offset,
-            fact.byte_size,
-            base="bp",
-            name=f"local_{abs(fact.base_offset):x}",
-            region=getattr(cfunc, "addr", None),
-        )
-        aggregate_cvar = structured_c.CVariable(
-            aggregate_variable,
-            variable_type=array_type,
-            codegen=codegen,
-        )
-        variables_in_use[aggregate_variable] = aggregate_cvar
-        aggregate_candidates.append(aggregate_cvar)
-        seen_candidates.add(id(aggregate_cvar))
-        if isinstance(unified_local_vars, dict):
-            unified_local_vars[aggregate_variable] = {(aggregate_cvar, array_type)}
-        persist_type(aggregate_variable, array_type)
-        changed = True
-    for candidate_variable, candidate_cvar in variables_in_use.items():  # noqa: B007
-        if (
-            isinstance(candidate_variable, SimStackVariable)
-            and candidate_variable.base == "bp"
-            and machine_bp_offset_for_stack_variable_8616(codegen, candidate_variable)
-            == fact.base_offset
-        ):
-            persist_type(candidate_variable, array_type)
-    for candidate_cvar in aggregate_candidates:
-        if candidate_cvar.variable_type != array_type:
-            candidate_cvar.variable_type = array_type
-            changed = True
+        changed = _materialize_missing_aggregate_8616(
+            codegen,
+            cfunc,
+            fact,
+            entry_sp_offset,
+            array_type,
+            variables_in_use,
+            unified_local_vars,
+            aggregate_candidates,
+            seen_candidates,
+            variable_manager,
+        ) or changed
+    changed = _persist_aggregate_frame_types_8616(
+        codegen, variables_in_use, aggregate_candidates, fact, array_type, variable_manager
+    ) or changed
 
-    boundary_types: dict[int, SimType] = {}
-    if isinstance(fact.scalar_boundary_offset, int) and isinstance(
-        fact.scalar_boundary_width,
-        int,
-    ):
-        for candidate_cvar in candidates_by_offset[fact.scalar_boundary_offset]:
-            boundary_type = _integer_type_for_width(
-                fact.scalar_boundary_width,
-                candidate_cvar.variable_type,
-                arch,
-            )
-            if boundary_type is None:
-                continue
-            persist_type(candidate_cvar.variable, boundary_type)
-            boundary_types[id(candidate_cvar)] = boundary_type
-            if candidate_cvar.variable_type != boundary_type:
-                candidate_cvar.variable_type = boundary_type
-                changed = True
+    boundary_types, boundary_changed = _persist_boundary_scalar_types_8616(
+        fact, candidates_by_offset, arch, variable_manager
+    )
+    changed = boundary_changed or changed
 
-    if isinstance(unified_local_vars, dict):
-        for unified_variable, entries in tuple(unified_local_vars.items()):
-            if not isinstance(unified_variable, SimStackVariable):
-                continue
-            bp_offset = machine_bp_offset_for_stack_variable_8616(
-                codegen,
-                unified_variable,
-            )
-            if unified_variable.base != "bp" or bp_offset not in candidates_by_offset:
-                continue
-            if isinstance(entries, set):
-                updated_entries: set[object] = set()
-                for entry in entries:
-                    if not isinstance(entry, tuple) or len(entry) != 2:
-                        updated_entries.add(entry)
-                        continue
-                    entry_cvar, entry_type = entry
-                    if not isinstance(entry_cvar, structured_c.CVariable):
-                        updated_entries.add(entry)
-                        continue
-                    replacement_type = (
-                        array_type
-                        if bp_offset == fact.base_offset
-                        else boundary_types.get(id(entry_cvar))
-                    )
-                    if replacement_type is None:
-                        updated_entries.add(entry)
-                        continue
-                    changed = (
-                        changed
-                        or entry_type != replacement_type
-                        or entry_cvar.variable_type != replacement_type
-                    )
-                    entry_cvar.variable_type = replacement_type
-                    updated_entries.add((entry_cvar, replacement_type))
-                unified_local_vars[unified_variable] = updated_entries
+    changed = _rewrite_unified_partition_entries_8616(
+        codegen, unified_local_vars, candidates_by_offset, fact, array_type, boundary_types
+    ) or changed
 
     cvar = select_stack_aggregate_projection_8616(
         codegen, aggregate_candidates, current_tracked_cvar,
@@ -1076,6 +1110,188 @@ def _materialize_fact(codegen: object, fact: StackAggregateObjectFact8616) -> tu
     decay = _decay_stack_aggregate_call_arguments(codegen, fact)
     typing.cast(Any, codegen)._inertia_stack_aggregate_call_decay_8616 = decay
     return True, changed or decay.materialized_count > 0
+
+
+def _collect_partition_candidates_8616(
+    codegen: object,
+    variables_in_use: dict[object, object],
+    unified_local_vars: object,
+    candidates_by_offset: dict[int, list[structured_c.CVariable]],
+    seen_candidates: set[int],
+) -> None:
+    """Collect current-codegen CVariable views for each partition offset."""
+
+    def add_candidate(variable: object, cvar: object) -> None:
+        """Record one current-codegen view in the proven frame partition."""
+        if not isinstance(variable, SimStackVariable) or not isinstance(cvar, structured_c.CVariable):
+            return
+        bp_offset = machine_bp_offset_for_stack_variable_8616(codegen, variable)
+        if variable.base != "bp" or bp_offset not in candidates_by_offset or id(cvar) in seen_candidates:
+            return
+        seen_candidates.add(id(cvar))
+        candidates_by_offset[bp_offset].append(cvar)
+
+    for candidate_variable, candidate_cvar in variables_in_use.items():
+        add_candidate(candidate_variable, candidate_cvar)
+    if isinstance(unified_local_vars, dict):
+        for candidate_variable, entries in unified_local_vars.items():
+            if not isinstance(entries, set):
+                continue
+            for entry in entries:
+                if isinstance(entry, tuple) and len(entry) == 2:
+                    add_candidate(candidate_variable, entry[0])
+
+
+def _persist_partition_type_8616(
+    variable_manager: _VariableManagerTypeBoundary8616 | None, variable: object, variable_type: SimType
+) -> None:
+    """Persist one exact frame-partition type across CFunction.refresh()."""
+    if variable_manager is None or not isinstance(variable, SimVariable):
+        return
+    variable_manager.set_variable_type(
+        variable,
+        variable_type,
+        override_bot=True,
+        all_unified=True,
+    )
+
+
+def _materialize_missing_aggregate_8616(
+    codegen: object,
+    cfunc: object,
+    fact: StackAggregateObjectFact8616,
+    entry_sp_offset: int | None,
+    array_type: SimType,
+    variables_in_use: dict[object, object],
+    unified_local_vars: object,
+    aggregate_candidates: list[structured_c.CVariable],
+    seen_candidates: set[int],
+    variable_manager: _VariableManagerTypeBoundary8616 | None,
+) -> bool:
+    """Create the aggregate frame variable when no declaration exists."""
+    aggregate_variable = SimStackVariable(
+        fact.base_offset if entry_sp_offset is None else entry_sp_offset,
+        fact.byte_size,
+        base="bp",
+        name=f"local_{abs(fact.base_offset):x}",
+        region=getattr(cfunc, "addr", None),
+    )
+    aggregate_cvar = structured_c.CVariable(
+        aggregate_variable,
+        variable_type=array_type,
+        codegen=codegen,
+    )
+    variables_in_use[aggregate_variable] = aggregate_cvar
+    aggregate_candidates.append(aggregate_cvar)
+    seen_candidates.add(id(aggregate_cvar))
+    if isinstance(unified_local_vars, dict):
+        unified_local_vars[aggregate_variable] = {(aggregate_cvar, array_type)}
+    _persist_partition_type_8616(variable_manager, aggregate_variable, array_type)
+    return True
+
+
+def _persist_aggregate_frame_types_8616(
+    codegen: object,
+    variables_in_use: dict[object, object],
+    aggregate_candidates: list[structured_c.CVariable],
+    fact: StackAggregateObjectFact8616,
+    array_type: SimType,
+    variable_manager: _VariableManagerTypeBoundary8616 | None,
+) -> bool:
+    """Persist the array type on the partition and its candidate views."""
+    changed = False
+    for candidate_variable, candidate_cvar in variables_in_use.items():  # noqa: B007
+        if (
+            isinstance(candidate_variable, SimStackVariable)
+            and candidate_variable.base == "bp"
+            and machine_bp_offset_for_stack_variable_8616(codegen, candidate_variable)
+            == fact.base_offset
+        ):
+            _persist_partition_type_8616(variable_manager, candidate_variable, array_type)
+    for candidate_cvar in aggregate_candidates:
+        if candidate_cvar.variable_type != array_type:
+            candidate_cvar.variable_type = array_type
+            changed = True
+    return changed
+
+
+def _persist_boundary_scalar_types_8616(
+    fact: StackAggregateObjectFact8616,
+    candidates_by_offset: dict[int, list[structured_c.CVariable]],
+    arch: object,
+    variable_manager: _VariableManagerTypeBoundary8616 | None,
+) -> tuple[dict[int, SimType], bool]:
+    """Persist proven scalar boundary types; returns (id(cvar)->type, changed)."""
+    boundary_types: dict[int, SimType] = {}
+    changed = False
+    if isinstance(fact.scalar_boundary_offset, int) and isinstance(
+        fact.scalar_boundary_width,
+        int,
+    ):
+        for candidate_cvar in candidates_by_offset[fact.scalar_boundary_offset]:
+            boundary_type = _integer_type_for_width(
+                fact.scalar_boundary_width,
+                candidate_cvar.variable_type,
+                arch,
+            )
+            if boundary_type is None:
+                continue
+            _persist_partition_type_8616(variable_manager, candidate_cvar.variable, boundary_type)
+            boundary_types[id(candidate_cvar)] = boundary_type
+            if candidate_cvar.variable_type != boundary_type:
+                candidate_cvar.variable_type = boundary_type
+                changed = True
+    return boundary_types, changed
+
+
+def _rewrite_unified_partition_entries_8616(
+    codegen: object,
+    unified_local_vars: object,
+    candidates_by_offset: dict[int, list[structured_c.CVariable]],
+    fact: StackAggregateObjectFact8616,
+    array_type: SimType,
+    boundary_types: dict[int, SimType],
+) -> bool:
+    """Rewrite unified-local-var entries to the proven partition types."""
+    changed = False
+    if not isinstance(unified_local_vars, dict):
+        return False
+    for unified_variable, entries in tuple(unified_local_vars.items()):
+        if not isinstance(unified_variable, SimStackVariable):
+            continue
+        bp_offset = machine_bp_offset_for_stack_variable_8616(
+            codegen,
+            unified_variable,
+        )
+        if unified_variable.base != "bp" or bp_offset not in candidates_by_offset:
+            continue
+        if isinstance(entries, set):
+            updated_entries: set[object] = set()
+            for entry in entries:
+                if not isinstance(entry, tuple) or len(entry) != 2:
+                    updated_entries.add(entry)
+                    continue
+                entry_cvar, entry_type = entry
+                if not isinstance(entry_cvar, structured_c.CVariable):
+                    updated_entries.add(entry)
+                    continue
+                replacement_type = (
+                    array_type
+                    if bp_offset == fact.base_offset
+                    else boundary_types.get(id(entry_cvar))
+                )
+                if replacement_type is None:
+                    updated_entries.add(entry)
+                    continue
+                changed = (
+                    changed
+                    or entry_type != replacement_type
+                    or entry_cvar.variable_type != replacement_type
+                )
+                entry_cvar.variable_type = replacement_type
+                updated_entries.add((entry_cvar, replacement_type))
+            unified_local_vars[unified_variable] = updated_entries
+    return changed
 
 
 def _decay_stack_aggregate_call_arguments(
@@ -1110,17 +1326,7 @@ def _decay_stack_aggregate_call_arguments(
             return candidate
         normalized_count += 1
         variable = operand.variable
-        if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
-            logging.getLogger(__name__).warning(
-                "[stack-aggregate-decay] operand=%s variable=%s offset=%r canonical=%s canonical_type=%s",
-                type(operand).__name__,
-                type(variable).__name__,
-                variable.offset if isinstance(variable, SimStackVariable) else None,
-                type(aggregate_cvar).__name__,
-                type(aggregate_cvar.type).__name__
-                if isinstance(aggregate_cvar, structured_c.CVariable)
-                else None,
-            )
+        _log_stack_aggregate_decay_debug_8616(operand, variable, aggregate_cvar)
         if (
             not isinstance(variable, SimStackVariable)
             or variable.base != "bp"
@@ -1137,18 +1343,7 @@ def _decay_stack_aggregate_call_arguments(
     for node in _iter_c_nodes_deep_8616(root):
         if not isinstance(node, structured_c.CFunctionCall) or not isinstance(node.args, (list, tuple)):
             continue
-        args = list(node.args)
-        call_changed = False
-        for index, arg in enumerate(args):
-            replacement = decay_reference(arg)
-            if replacement is not arg:
-                args[index] = replacement
-                call_changed = True
-                continue
-            if _replace_c_children_8616(arg, decay_reference):
-                call_changed = True
-        if call_changed:
-            node.args = args
+        _decay_call_arguments_8616(node, decay_reference)
     return StackAggregateCallDecay8616(
         raw_fact_count=raw_count,
         normalized_fact_count=normalized_count,
@@ -1156,6 +1351,42 @@ def _decay_stack_aggregate_call_arguments(
         materialized_count=materialized_count,
         failure_count=classified_count - materialized_count,
     )
+
+
+def _log_stack_aggregate_decay_debug_8616(
+    operand: object, variable: object, aggregate_cvar: object
+) -> None:
+    """Emit the optional stack-aggregate decay diagnostic."""
+    if not os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
+        return
+    logging.getLogger(__name__).warning(
+        "[stack-aggregate-decay] operand=%s variable=%s offset=%r canonical=%s canonical_type=%s",
+        type(operand).__name__,
+        type(variable).__name__,
+        variable.offset if isinstance(variable, SimStackVariable) else None,
+        type(aggregate_cvar).__name__,
+        type(aggregate_cvar.type).__name__
+        if isinstance(aggregate_cvar, structured_c.CVariable)
+        else None,
+    )
+
+
+def _decay_call_arguments_8616(
+    node: structured_c.CFunctionCall, decay_reference: typing.Callable[[object], object]
+) -> None:
+    """Apply the decay rewrite to one call's argument list in place."""
+    args = list(node.args)
+    call_changed = False
+    for index, arg in enumerate(args):
+        replacement = decay_reference(arg)
+        if replacement is not arg:
+            args[index] = replacement
+            call_changed = True
+            continue
+        if _replace_c_children_8616(arg, decay_reference):
+            call_changed = True
+    if call_changed:
+        node.args = args
 
 
 def decay_stack_aggregate_call_arguments_8616(codegen: object) -> bool:
@@ -1286,56 +1517,13 @@ def prune_nonmemory_stack_aggregate_carriers_8616(
     materialized_count = 0
     seen: set[int] = set()
 
-    def candidate(statement: object) -> bool:
-        nonlocal raw_count, classified_count
-        if not isinstance(statement, structured_c.CAssignment):
-            return False
-        lhs = statement.lhs
-        if not isinstance(lhs, structured_c.CVariable):
-            return False
-        variable = lhs.variable
-        if (
-            not isinstance(variable, SimStackVariable)
-            or variable.base != "bp"
-            or machine_bp_offset_for_stack_variable_8616(codegen, variable)
-            not in base_offsets
-        ):
-            return False
-        raw_count += 1
-        tags = getattr(statement, "tags", None)
-        ins_addr = tags.get("ins_addr") if isinstance(tags, dict) else None
-        if not isinstance(ins_addr, int) or not _pure_carrier_expression(statement.rhs):
-            return False
-        insn = _instruction_covering_tag(instructions, ins_addr)
-        if getattr(insn, "id", None) not in {X86_INS_PUSH, X86_INS_CALL, X86_INS_LCALL}:
-            return False
-        classified_count += 1
-        return True
-
-    def visit(node: object) -> None:
-        nonlocal materialized_count
-        if node is None or id(node) in seen:
-            return
-        seen.add(id(node))
-        statements = getattr(node, "statements", None)
-        if isinstance(statements, list):
-            retained: list[object] = []
-            for statement in statements:
-                if candidate(statement):
-                    materialized_count += 1
-                    continue
-                retained.append(statement)
-                visit(statement)
-            if len(retained) != len(statements):
-                statements[:] = retained
-        for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
-            visit(getattr(node, attr, None))
-        pairs = getattr(node, "condition_and_nodes", None)
-        if pairs:
-            for _condition, body in tuple(pairs):
-                visit(body)
-
-    visit(root)
+    counts = {"raw": 0, "classified": 0, "materialized": 0}
+    _visit_carrier_nodes_8616(
+        root, codegen, base_offsets, instructions, counts, seen
+    )
+    raw_count = counts["raw"]
+    classified_count = counts["classified"]
+    materialized_count = counts["materialized"]
     result = StackAggregateCarrierPrune8616(
         raw_fact_count=raw_count,
         normalized_fact_count=raw_count,
@@ -1345,6 +1533,88 @@ def prune_nonmemory_stack_aggregate_carriers_8616(
     )
     typing.cast(Any, codegen)._inertia_stack_aggregate_carrier_prune_8616 = result
     return materialized_count > 0
+
+
+def _prune_carrier_statements_8616(
+    node: object,
+    candidate: typing.Callable[[object], bool],
+    visit: typing.Callable[[object], None],
+    counts: dict[str, int],
+) -> None:
+    """Filter one node's statement list, pruning proven carrier assignments."""
+    statements = getattr(node, "statements", None)
+    if not isinstance(statements, list):
+        return
+    retained: list[object] = []
+    for statement in statements:
+        if candidate(statement):
+            counts["materialized"] += 1
+            continue
+        retained.append(statement)
+        visit(statement)
+    if len(retained) != len(statements):
+        statements[:] = retained
+
+
+def _carrier_candidate_8616(
+    codegen: object,
+    base_offsets: frozenset[int] | set[int],
+    instructions: tuple[object, ...],
+    counts: dict[str, int],
+    statement: object,
+) -> bool:
+    """Classify one statement as a proven push/call carrier candidate."""
+    if not isinstance(statement, structured_c.CAssignment):
+        return False
+    lhs = statement.lhs
+    if not isinstance(lhs, structured_c.CVariable):
+        return False
+    variable = lhs.variable
+    if (
+        not isinstance(variable, SimStackVariable)
+        or variable.base != "bp"
+        or machine_bp_offset_for_stack_variable_8616(codegen, variable)
+        not in base_offsets
+    ):
+        return False
+    counts["raw"] += 1
+    tags = getattr(statement, "tags", None)
+    ins_addr = tags.get("ins_addr") if isinstance(tags, dict) else None
+    if not isinstance(ins_addr, int) or not _pure_carrier_expression(statement.rhs):
+        return False
+    insn = _instruction_covering_tag(instructions, ins_addr)
+    if getattr(insn, "id", None) not in {X86_INS_PUSH, X86_INS_CALL, X86_INS_LCALL}:
+        return False
+    counts["classified"] += 1
+    return True
+
+
+def _visit_carrier_nodes_8616(
+    node: object,
+    codegen: object,
+    base_offsets: frozenset[int] | set[int],
+    instructions: tuple[object, ...],
+    counts: dict[str, int],
+    seen: set[int],
+) -> None:
+    """Walk C nodes depth-first, pruning proven carrier statements."""
+    if node is None or id(node) in seen:
+        return
+    seen.add(id(node))
+    _prune_carrier_statements_8616(
+        node,
+        lambda statement: _carrier_candidate_8616(codegen, base_offsets, instructions, counts, statement),
+        lambda child: _visit_carrier_nodes_8616(child, codegen, base_offsets, instructions, counts, seen),
+        counts,
+    )
+    for attr in ("body", "else_node", "initializer", "iterator", "iteration"):
+        _visit_carrier_nodes_8616(
+            getattr(node, attr, None), codegen, base_offsets, instructions, counts, seen
+        )
+    pairs = getattr(node, "condition_and_nodes", None)
+    if pairs:
+        for _condition, body in tuple(pairs):
+            _visit_carrier_nodes_8616(body, codegen, base_offsets, instructions, counts, seen)
 
 
 def materialize_stack_aggregate_objects_8616(

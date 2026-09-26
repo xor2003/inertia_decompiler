@@ -8,6 +8,14 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Warm-parent six-job replay ends at the 600.93s external bound: three exit3
+  timeouts, `select_and_apply` and `combine_args` exit0/validation passed,
+  `nested_arguments` interrupted without a completed record. No full round trip
+  or new coverage witness. Tree-aware cleanup returns and batch root is gone.
+  Fresh isolated `inc_one` profiling/parity diagnostic is active at
+  `.cache/abi-block-size-parity-002.{c,err}` (180s analysis / 240s external,
+  explicitly diagnostic only); ordinary deadlines remain unchanged.
+
 - DOSUnit Z3 comparator (straightline_ssa) hardened for Riptide verification:
   32-bit register model (EAX-family hi16/low16 split incl. partial writes),
   inc/dec32 eflags-arity fix, near-call target resolution via rendered absolute
@@ -1598,3 +1606,15 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   signal predicates. Evidence/assumption ordering preserved.
 - Verified: ruff 0, mypy 0, 38 recovery-confidence tests pass,
   def-integrity vs HEAD clean, zero architecture violations.
+- `angr_platforms/angr_platforms/X86_16/lowering/stack_aggregate_objects.py`:
+  Ruff debt cleared to zero (5 findings). Extracted the interior-scaled
+  candidate lane, the instruction access classifier and BP-access bucket
+  lane, the full-frame/bottom-indexed recovery lanes, and split
+  `_materialize_fact` into candidate collection, missing-aggregate
+  creation, frame/boundary type persistence, and unified-entry rewrite
+  helpers. Hoisted the decay debug/call-arg lanes and the carrier-prune
+  visitor to module level.
+- Verified: ruff 0, mypy 0, 48 stack-aggregate tests pass, def-integrity
+  vs HEAD clean, zero architecture violations. The SORTD sidecar-free CLI
+  regression remains the known pre-existing 240s timeout (documented
+  earlier; reproduces on clean HEAD worktree).
