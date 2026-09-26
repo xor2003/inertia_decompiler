@@ -1,5 +1,6 @@
 from __future__ import annotations  # noqa: D100
 
+import contextlib
 import copy
 import functools
 import hashlib
@@ -11,7 +12,10 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    import capstone
 
 from tools.dosunit.data_compare import load_mz_image
 from tools.dosunit.ir_edges import _load_lifter_project
@@ -4107,30 +4111,7 @@ def _compare_ssa_pair(
         "candidate_detail": _ssa_function_report_detail(candidate_function),
         "call_compare": call_compare,
     }
-    oracle_jumpkind = str(
-        (oracle_function.get("source") if isinstance(oracle_function.get("source"), dict) else {}).get("jumpkind")
-        or ""
-    )
-    candidate_jumpkind = str(
-        (candidate_function.get("source") if isinstance(candidate_function.get("source"), dict) else {}).get(
-            "jumpkind"
-        )
-        or ""
-    )
-    boundary_detail: dict[str, Any] | None = None
-    if oracle_jumpkind and candidate_jumpkind and oracle_jumpkind != candidate_jumpkind:
-        boundary_detail = {
-            "oracle_jumpkind": oracle_jumpkind,
-            "candidate_jumpkind": candidate_jumpkind,
-        }
-    else:
-        oracle_stack_ops = _stack_op_sequence(oracle_function)
-        candidate_stack_ops = _stack_op_sequence(candidate_function)
-        if oracle_stack_ops != candidate_stack_ops:
-            boundary_detail = {
-                "oracle_stack_ops": oracle_stack_ops,
-                "candidate_stack_ops": candidate_stack_ops,
-            }
+    boundary_detail = _ssa_pair_boundary_detail(oracle_function, candidate_function)
     if boundary_detail is not None:
         return (
             {
@@ -4167,24 +4148,8 @@ def _compare_ssa_pair(
             0,
         )
     if isinstance(call_compare, dict) and call_compare.get("equivalent") is False:
-        oracle_target = call_compare.get("oracle") or {}
-        candidate_target = call_compare.get("candidate") or {}
-        oracle_resolved = oracle_target.get("resolved") or {}
-        candidate_resolved = candidate_target.get("resolved") or {}
-        oracle_lib = str(oracle_resolved.get("id") or "").startswith("library-signature:")
-        candidate_lib = str(candidate_resolved.get("id") or "").startswith("library-signature:")
-        both_unresolved = not oracle_target.get("resolved") and not candidate_target.get("resolved")
-        both_resolved = bool(oracle_target.get("resolved")) and bool(candidate_target.get("resolved"))
-        divergent = call_compare.get("reason") == "direct call targets resolve to different mapped functions"
-        if divergent:
-            detail = None
-        elif (oracle_lib and candidate_lib) or both_unresolved:
-            detail = "direct call resolves to unmapped runtime stubs in both binaries; equivalence cannot be proven"
-        elif both_resolved:
-            detail = "direct calls resolve to functions whose equivalence is unproven; callee-level compare owns the verdict"
-        else:
-            detail = "one direct call target resolved and the other did not; equivalence cannot be proven"
-        if detail is not None:
+        unproven_mismatch = _call_target_unproven_mismatch(call_compare)
+        if unproven_mismatch is not None:
             return (
                 {
                     **base,
@@ -4192,18 +4157,98 @@ def _compare_ssa_pair(
                     "reason": "call_target_unproven",
                     "layout_normalization": None,
                     "output_projection": None,
-                    "mismatches": [
-                        {
-                            "kind": "call_target_unproven",
-                            "detail": detail,
-                            "oracle_target": oracle_resolved.get("id") or oracle_target.get("raw"),
-                            "candidate_target": candidate_resolved.get("id") or candidate_target.get("raw"),
-                            "call_reason": call_compare.get("reason"),
-                        }
-                    ],
+                    "mismatches": [unproven_mismatch],
                 },
                 0,
             )
+    return _solve_normalized_ssa_pair(
+        base,
+        item,
+        oracle_function,
+        candidate_function,
+        call_compare=call_compare,
+        skip_binary_equal=skip_binary_equal,
+        max_solver_assignments=max_solver_assignments,
+        max_solver_inputs=max_solver_inputs,
+        max_solver_memory_stores=max_solver_memory_stores,
+        timeout_ms=timeout_ms,
+        max_rss_mb=max_rss_mb,
+    )
+
+
+def _ssa_jumpkind(function: dict[str, Any]) -> str:
+    """Source jumpkind of an SSA function part, or "" when absent."""
+    return str(
+        (function.get("source") if isinstance(function.get("source"), dict) else {}).get("jumpkind")
+        or ""
+    )
+
+
+def _ssa_pair_boundary_detail(
+    oracle_function: dict[str, Any],
+    candidate_function: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Jumpkind/stack-op boundary divergence between the two SSA parts."""
+    oracle_jumpkind = _ssa_jumpkind(oracle_function)
+    candidate_jumpkind = _ssa_jumpkind(candidate_function)
+    if oracle_jumpkind and candidate_jumpkind and oracle_jumpkind != candidate_jumpkind:
+        return {
+            "oracle_jumpkind": oracle_jumpkind,
+            "candidate_jumpkind": candidate_jumpkind,
+        }
+    oracle_stack_ops = _stack_op_sequence(oracle_function)
+    candidate_stack_ops = _stack_op_sequence(candidate_function)
+    if oracle_stack_ops != candidate_stack_ops:
+        return {
+            "oracle_stack_ops": oracle_stack_ops,
+            "candidate_stack_ops": candidate_stack_ops,
+        }
+    return None
+
+
+def _call_target_unproven_mismatch(call_compare: dict[str, Any]) -> dict[str, Any] | None:
+    """Classify a non-equivalent call-compare into an unproven-target mismatch."""
+    oracle_target = call_compare.get("oracle") or {}
+    candidate_target = call_compare.get("candidate") or {}
+    oracle_resolved = oracle_target.get("resolved") or {}
+    candidate_resolved = candidate_target.get("resolved") or {}
+    oracle_lib = str(oracle_resolved.get("id") or "").startswith("library-signature:")
+    candidate_lib = str(candidate_resolved.get("id") or "").startswith("library-signature:")
+    both_unresolved = not oracle_target.get("resolved") and not candidate_target.get("resolved")
+    both_resolved = bool(oracle_target.get("resolved")) and bool(candidate_target.get("resolved"))
+    divergent = call_compare.get("reason") == "direct call targets resolve to different mapped functions"
+    if divergent:
+        return None
+    if (oracle_lib and candidate_lib) or both_unresolved:
+        detail = "direct call resolves to unmapped runtime stubs in both binaries; equivalence cannot be proven"
+    elif both_resolved:
+        detail = "direct calls resolve to functions whose equivalence is unproven; callee-level compare owns the verdict"
+    else:
+        detail = "one direct call target resolved and the other did not; equivalence cannot be proven"
+    return {
+        "kind": "call_target_unproven",
+        "detail": detail,
+        "oracle_target": oracle_resolved.get("id") or oracle_target.get("raw"),
+        "candidate_target": candidate_resolved.get("id") or candidate_target.get("raw"),
+        "call_reason": call_compare.get("reason"),
+    }
+
+
+def _solve_normalized_ssa_pair(
+    base: dict[str, Any],
+    item: dict[str, Any],
+    oracle_function: dict[str, Any],
+    candidate_function: dict[str, Any],
+    *,
+    call_compare: dict[str, Any] | None,
+    skip_binary_equal: bool,
+    max_solver_assignments: int,
+    max_solver_inputs: int,
+    max_solver_memory_stores: int,
+    timeout_ms: int,
+    max_rss_mb: int,
+) -> tuple[dict[str, Any], int]:
+    """Normalize both parts, run the fast/gated checks, then solve with z3."""
     oracle_for_z3, candidate_for_z3, call_compare = _prepare_call_normalized_functions(
         oracle_function,
         candidate_function,
@@ -4286,6 +4331,7 @@ def _compare_ssa_pair(
     )
 
 
+
 def _compare_ssa_pair_guarded(
     item: dict[str, Any],
     *,
@@ -4293,7 +4339,7 @@ def _compare_ssa_pair_guarded(
     oracle_index: dict[str, Any],
     candidate_index: dict[str, Any],
     allow_aliased_call_targets: bool,
-    proof_cache: Any,
+    proof_cache: _SemanticEqualityCache | None,
     timeout_ms: int,
     max_solver_assignments: int,
     max_solver_inputs: int,
@@ -10469,7 +10515,7 @@ def _prepare_layout_normalized_functions(
     if not pairs and not global_map:
         return oracle_function, candidate_function, None
     candidate_map: dict[int, int] = dict(global_map or {})
-    candidate_reasons: dict[int, str] = {key: "global_reloc" for key in candidate_map}
+    candidate_reasons: dict[int, str] = dict.fromkeys(candidate_map, "global_reloc")
     notes: list[dict[str, Any]] = []
     for pair in pairs:
         oracle_value = int(pair["oracle"])
@@ -10565,10 +10611,8 @@ def _term_constant_leaves(function: dict[str, Any]) -> set[int]:
             continue
         if str(term.get("op", "")).lower() == "const":
             value = term.get("value")
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 leaves.add((int(value, 0) if isinstance(value, str) else int(value)) & 0xFFFF)
-            except (TypeError, ValueError):
-                pass
             continue
         pending.extend(term.get("args") or [])
     return leaves
@@ -10920,38 +10964,11 @@ def _relocated_immediate_pairs(
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_16)
     md.detail = True
 
-    def _reloc_imm_values(
-        instructions: list[dict[str, Any]], reloc_positions: frozenset[int]
-    ) -> dict[int, int]:
-        values: dict[int, int] = {}
-        for index, instruction in enumerate(instructions):
-            raw = instruction.get("bytes")
-            address = instruction.get("address") if isinstance(instruction.get("address"), dict) else {}
-            linear = _optional_int(address.get("linear"))
-            if not isinstance(raw, str) or linear is None:
-                continue
-            try:
-                blob = bytes.fromhex(raw)
-            except ValueError:
-                continue
-            insn = next(md.disasm(blob, linear), None)
-            if insn is None:
-                continue
-            encoding = getattr(insn, "encoding", None)
-            imm_offset = int(getattr(encoding, "imm_offset", 0) or 0)
-            imm_size = int(getattr(encoding, "imm_size", 0) or 0)
-            if imm_offset <= 0 or imm_size != 2:
-                continue
-            site = (linear - 0x1000) + imm_offset
-            if site in reloc_positions:
-                values[index] = int.from_bytes(blob[imm_offset : imm_offset + 2], "little")
-        return values
-
-    oracle_sites = _reloc_imm_values(
-        oracle_instructions, image_context.get("oracle", {}).get("reloc_positions") or frozenset()
+    oracle_sites = _reloc_imm_values_at_sites(
+        md, oracle_instructions, image_context.get("oracle", {}).get("reloc_positions") or frozenset()
     )
-    candidate_sites = _reloc_imm_values(
-        candidate_instructions, image_context.get("candidate", {}).get("reloc_positions") or frozenset()
+    candidate_sites = _reloc_imm_values_at_sites(
+        md, candidate_instructions, image_context.get("candidate", {}).get("reloc_positions") or frozenset()
     )
     pairs: list[dict[str, Any]] = []
     for index, oracle_value in oracle_sites.items():
@@ -10966,6 +10983,37 @@ def _relocated_immediate_pairs(
             }
         )
     return pairs
+
+
+def _reloc_imm_values_at_sites(
+    md: capstone.Cs,
+    instructions: list[dict[str, Any]],
+    reloc_positions: frozenset[int],
+) -> dict[int, int]:
+    """Map instruction index to the imm16 value patched by a relocation site."""
+    values: dict[int, int] = {}
+    for index, instruction in enumerate(instructions):
+        raw = instruction.get("bytes")
+        address = instruction.get("address") if isinstance(instruction.get("address"), dict) else {}
+        linear = _optional_int(address.get("linear"))
+        if not isinstance(raw, str) or linear is None:
+            continue
+        try:
+            blob = bytes.fromhex(raw)
+        except ValueError:
+            continue
+        insn = next(md.disasm(blob, linear), None)
+        if insn is None:
+            continue
+        encoding = getattr(insn, "encoding", None)
+        imm_offset = int(getattr(encoding, "imm_offset", 0) or 0)
+        imm_size = int(getattr(encoding, "imm_size", 0) or 0)
+        if imm_offset <= 0 or imm_size != 2:
+            continue
+        site = (linear - 0x1000) + imm_offset
+        if site in reloc_positions:
+            values[index] = int.from_bytes(blob[imm_offset : imm_offset + 2], "little")
+    return values
 
 
 _SEGMENT_PUSH_REGS = ("ds", "es", "ss", "cs")
@@ -11029,6 +11077,17 @@ def _seg_register_far_pointer_pairs(
     """
     if image_context is None:
         return []
+    differing = _seg_adjacent_differing_pushes(oracle_instructions, candidate_instructions)
+    pairs, witnessed_paras = _strong_witnessed_string_pairs(image_context, differing)
+    _weak_witnessed_string_pairs(image_context, differing, pairs, witnessed_paras)
+    return pairs
+
+
+def _seg_adjacent_differing_pushes(
+    oracle_instructions: list[dict[str, Any]],
+    candidate_instructions: list[dict[str, Any]],
+) -> list[tuple[int, int]]:
+    """Differing push immediates that sit next to a matched segment push."""
     differing: list[tuple[int, int]] = []
     for index, (oracle, candidate) in enumerate(zip(oracle_instructions, candidate_instructions, strict=False)):
         oracle_value = _push_immediate(oracle)
@@ -11051,6 +11110,14 @@ def _seg_register_far_pointer_pairs(
         if not seg_adjacent:
             continue
         differing.append((oracle_off, candidate_off))
+    return differing
+
+
+def _strong_witnessed_string_pairs(
+    image_context: dict[str, dict[str, Any]],
+    differing: list[tuple[int, int]],
+) -> tuple[list[dict[str, Any]], set[tuple[int, int]]]:
+    """Self-proving >=4-byte string matches plus their paragraph witnesses."""
     pairs: list[dict[str, Any]] = []
     witnessed_paras: set[tuple[int, int]] = set()
     # Strings of >=4 bytes are self-proving; record their paragraph witnesses
@@ -11069,6 +11136,16 @@ def _seg_register_far_pointer_pairs(
                 "reason": "data_string_arg",
             }
         )
+    return pairs, witnessed_paras
+
+
+def _weak_witnessed_string_pairs(
+    image_context: dict[str, dict[str, Any]],
+    differing: list[tuple[int, int]],
+    pairs: list[dict[str, Any]],
+    witnessed_paras: set[tuple[int, int]],
+) -> None:
+    """3-byte string matches accepted only under witnessed/unique paragraphs."""
     for oracle_off, candidate_off in differing:
         if any(item["oracle"] == oracle_off and item["candidate"] == candidate_off for item in pairs):
             continue
@@ -11089,7 +11166,6 @@ def _seg_register_far_pointer_pairs(
                 "reason": "data_string_arg",
             }
         )
-    return pairs
 
 
 def _call_far_pointer_push_pairs(
@@ -11112,17 +11188,29 @@ def _call_far_pointer_push_pairs(
         return []
     if not any(str(item.get("mnemonic", "")).lower() in call_mnemonics for item in candidate_instructions):
         return []
+    differing_push_indexes, pushed_values = _differing_push_values(
+        oracle_instructions, candidate_instructions
+    )
     oracle_seg_targets = frozenset((image_context or {}).get("oracle", {}).get("seg_targets") or ())
     candidate_seg_targets = frozenset((image_context or {}).get("candidate", {}).get("seg_targets") or ())
 
-    def _proven_segment(index: int) -> bool:
-        oracle_value, candidate_value = pushed_values[index]
-        # Relocated segment pushes carry the +0x1000 image-load bias as +0x100
-        # paragraphs; relocation-table targets store the unrelocated paragraph.
-        oracle_hit = oracle_value in oracle_seg_targets or (oracle_value - 0x100) in oracle_seg_targets
-        candidate_hit = candidate_value in candidate_seg_targets or (candidate_value - 0x100) in candidate_seg_targets
-        return oracle_hit and candidate_hit
+    pairs: list[dict[str, Any]] = []
+    run: list[int] = []
+    for index in differing_push_indexes:
+        if run and index == run[-1] + 1:
+            run.append(index)
+            continue
+        _emit_far_pointer_run_pairs(run, pushed_values, oracle_seg_targets, candidate_seg_targets, pairs)
+        run = [index]
+    _emit_far_pointer_run_pairs(run, pushed_values, oracle_seg_targets, candidate_seg_targets, pairs)
+    return pairs
 
+
+def _differing_push_values(
+    oracle_instructions: list[dict[str, Any]],
+    candidate_instructions: list[dict[str, Any]],
+) -> tuple[list[int], dict[int, tuple[int, int]]]:
+    """Index the push immediates that differ between the two streams."""
     differing_push_indexes: list[int] = []
     pushed_values: dict[int, tuple[int, int]] = {}
     for index, (oracle, candidate) in enumerate(zip(oracle_instructions, candidate_instructions, strict=False)):
@@ -11134,44 +11222,57 @@ def _call_far_pointer_push_pairs(
             continue
         differing_push_indexes.append(index)
         pushed_values[index] = (oracle_value & 0xFFFF, candidate_value & 0xFFFF)
-    pairs: list[dict[str, Any]] = []
+    return differing_push_indexes, pushed_values
 
-    def _emit(run: list[int]) -> None:
-        if not run:
-            return
-        run_set = set(run)
-        indexes: set[int] = set()
-        for i in run:
-            if not _proven_segment(i):
-                continue
-            indexes.add(i)
-            # A relocated segment paragraph is the high word of a far pointer;
-            # the push immediately after it carries the relocated offset.
-            if i + 1 in run_set:
-                indexes.add(i + 1)
-        if len(run) >= 2 and any(o >= 0x1000 and c >= 0x1000 for o, c in (pushed_values[i] for i in run)):
-            indexes.update(run)
-        if not indexes:
-            return
-        for i in sorted(indexes):
-            oracle_value, candidate_value = pushed_values[i]
-            pairs.append(
-                {
-                    "oracle": oracle_value,
-                    "candidate": candidate_value,
-                    "reason": "far_pointer_push_arg",
-                }
-            )
 
-    run: list[int] = []
-    for index in differing_push_indexes:
-        if run and index == run[-1] + 1:
-            run.append(index)
+def _proven_segment_push(
+    index: int,
+    pushed_values: dict[int, tuple[int, int]],
+    oracle_seg_targets: frozenset[int],
+    candidate_seg_targets: frozenset[int],
+) -> bool:
+    """Whether both pushed values are proven relocation-table paragraphs."""
+    oracle_value, candidate_value = pushed_values[index]
+    # Relocated segment pushes carry the +0x1000 image-load bias as +0x100
+    # paragraphs; relocation-table targets store the unrelocated paragraph.
+    oracle_hit = oracle_value in oracle_seg_targets or (oracle_value - 0x100) in oracle_seg_targets
+    candidate_hit = candidate_value in candidate_seg_targets or (candidate_value - 0x100) in candidate_seg_targets
+    return oracle_hit and candidate_hit
+
+
+def _emit_far_pointer_run_pairs(
+    run: list[int],
+    pushed_values: dict[int, tuple[int, int]],
+    oracle_seg_targets: frozenset[int],
+    candidate_seg_targets: frozenset[int],
+    pairs: list[dict[str, Any]],
+) -> None:
+    """Normalize a maximal run of consecutive differing pushes."""
+    if not run:
+        return
+    run_set = set(run)
+    indexes: set[int] = set()
+    for i in run:
+        if not _proven_segment_push(i, pushed_values, oracle_seg_targets, candidate_seg_targets):
             continue
-        _emit(run)
-        run = [index]
-    _emit(run)
-    return pairs
+        indexes.add(i)
+        # A relocated segment paragraph is the high word of a far pointer;
+        # the push immediately after it carries the relocated offset.
+        if i + 1 in run_set:
+            indexes.add(i + 1)
+    if len(run) >= 2 and any(o >= 0x1000 and c >= 0x1000 for o, c in (pushed_values[i] for i in run)):
+        indexes.update(run)
+    if not indexes:
+        return
+    for i in sorted(indexes):
+        oracle_value, candidate_value = pushed_values[i]
+        pairs.append(
+            {
+                "oracle": oracle_value,
+                "candidate": candidate_value,
+                "reason": "far_pointer_push_arg",
+            }
+        )
 
 
 def _entry_shift_immediate_pairs(
@@ -11188,16 +11289,31 @@ def _entry_shift_immediate_pairs(
     candidate_instructions = _ssa_instructions(candidate_function)
     if not oracle_instructions or len(oracle_instructions) != len(candidate_instructions):
         return []
-    oracle_entry = oracle_instructions[0].get("address") if isinstance(oracle_instructions[0], dict) else None
-    candidate_entry = candidate_instructions[0].get("address") if isinstance(candidate_instructions[0], dict) else None
-    try:
-        oracle_ip = int((oracle_entry or {}).get("ip"), 0) & 0xFFFF
-        candidate_ip = int((candidate_entry or {}).get("ip"), 0) & 0xFFFF
-    except (TypeError, ValueError):
+    oracle_ip = _instruction_entry_ip(oracle_instructions)
+    candidate_ip = _instruction_entry_ip(candidate_instructions)
+    if oracle_ip is None or candidate_ip is None:
         return []
     shift = (candidate_ip - oracle_ip) & 0xFFFF
     if shift == 0:
         return []
+    return _shifted_entry_immediate_pairs(oracle_instructions, candidate_instructions, shift)
+
+
+def _instruction_entry_ip(instructions: list[dict[str, Any]]) -> int | None:
+    """Low 16 bits of the first instruction's ip, or None when unparseable."""
+    entry = instructions[0].get("address") if isinstance(instructions[0], dict) else None
+    try:
+        return int((entry or {}).get("ip"), 0) & 0xFFFF
+    except (TypeError, ValueError):
+        return None
+
+
+def _shifted_entry_immediate_pairs(
+    oracle_instructions: list[dict[str, Any]],
+    candidate_instructions: list[dict[str, Any]],
+    shift: int,
+) -> list[dict[str, Any]]:
+    """Immediates that differ by exactly the part's entry shift."""
     pairs: list[dict[str, Any]] = []
     for oracle, candidate in zip(oracle_instructions, candidate_instructions, strict=False):
         if str(oracle.get("mnemonic", "")).lower() != str(candidate.get("mnemonic", "")).lower():

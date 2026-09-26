@@ -1760,3 +1760,22 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - NON-WIP complex-structure debt: 0. Remaining 31 findings are all in
   user-WIP files (omf_pat.py, build_msc6_examples.py, signature_catalog.py,
   straightline_ssa.py).
+- `tools/dosunit/straightline_ssa.py` + `scripts/build_msc6_examples.py`
+  (+ omf_pat.py, signature_catalog.py): remaining complex-structure debt
+  cleared to zero repo-wide. straightline_ssa splits: pair-boundary
+  detail, unproven-call-target mismatch, normalized z3-solve tail,
+  relocation-site imm16 collection, segment-adjacent differing pushes,
+  strong/weak witnessed string pairs, far-pointer run emit/proven-push
+  helpers, entry-ip resolver and shifted-immediate pair lane;
+  build_msc6 splits: decompile candidate probing/fallback/timeout lanes,
+  `_DecompileValidateOptions` config + fallback-first/decompile-failure/
+  rebuild-run/post-rebuild-merge lanes, per-example build/decompile
+  dataclasses and report writer in main.
+- Verified: ruff 0 repo-wide for complex-structure/too-many-boolean
+  (remaining findings only in vendor/ + artifacts/), mypy 0 on
+  build_msc6_examples.py, 107 msc6 tests pass, dosunit SSA-compare
+  surface 145 pass with the 4 known compare_ssa_documents failures
+  reproducing identically on bare HEAD (pre-existing, owned by the
+  parallel session's semantic work). straightline_ssa.py committed;
+  omf_pat.py, signature_catalog.py, build_msc6_examples.py left
+  uncommitted because they carry interleaved user WIP.
