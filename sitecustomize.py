@@ -51,6 +51,37 @@ def _apply_memory_cap() -> None:
 _apply_memory_cap()
 
 
+def _msgspec_json_text(data: object, label: str) -> str:
+    """Normalize one msgspec-style JSON input to decoded text."""
+    if isinstance(data, memoryview):
+        data = bytes(data)
+    if isinstance(data, (bytes, bytearray)):
+        data = data.decode("utf-8")
+    if not isinstance(data, str):
+        raise TypeError(f"msgspec.json.{label} expects bytes or str, got {type(data)!r}")
+    return data
+
+
+class _MsgSpecJson:
+    """msgspec.json fallback backed by the stdlib json module."""
+
+    @staticmethod
+    def encode(obj):  # noqa: ANN001, ANN205
+        return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+    @staticmethod
+    def decode(data):  # noqa: ANN001, ANN205
+        return json.loads(_msgspec_json_text(data, "decode"))
+
+    @staticmethod
+    def dumps(obj):  # noqa: ANN001, ANN205
+        return json.dumps(obj)
+
+    @staticmethod
+    def loads(data):  # noqa: ANN001, ANN205
+        return json.loads(_msgspec_json_text(data, "loads"))
+
+
 def _install_msgspec_shim() -> None:
     try:
         import msgspec  # noqa: F401
@@ -58,35 +89,6 @@ def _install_msgspec_shim() -> None:
         pass
     else:
         return
-
-    class _MsgSpecJson:
-        @staticmethod
-        def encode(obj):  # noqa: ANN001, ANN205
-            return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-
-        @staticmethod
-        def decode(data):  # noqa: ANN001, ANN205
-            if isinstance(data, memoryview):
-                data = bytes(data)
-            if isinstance(data, (bytes, bytearray)):
-                data = data.decode("utf-8")
-            if not isinstance(data, str):
-                raise TypeError(f"msgspec.json.decode expects bytes or str, got {type(data)!r}")
-            return json.loads(data)
-
-        @staticmethod
-        def dumps(obj):  # noqa: ANN001, ANN205
-            return json.dumps(obj)
-
-        @staticmethod
-        def loads(data):  # noqa: ANN001, ANN205
-            if isinstance(data, memoryview):
-                data = bytes(data)
-            if isinstance(data, (bytes, bytearray)):
-                data = data.decode("utf-8")
-            if not isinstance(data, str):
-                raise TypeError(f"msgspec.json.loads expects bytes or str, got {type(data)!r}")
-            return json.loads(data)
 
     msgspec_module = types.ModuleType("msgspec")
     msgspec_module.json = _MsgSpecJson

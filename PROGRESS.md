@@ -8,6 +8,16 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Full-process profile identifies normal-budget cost in target CFG recovery
+  (13.63s) and neighbor extension (41.85s: CFGFast 24.63s, ABI seed 17.20s).
+  Direct far-call seed at 0x10006 -> 0x104b0 proves extension is relevant.
+  After host load changed, fresh-JSON `inc_one` passes normal 60s functional
+  budget/validation in 16.81s with byte-identical C. Full `function_pointers`
+  round trip still build-fails: builder's kvikdos children see `/dev/kvm` ENOENT,
+  proven by pre-call check and syscall trace, although direct KVM/CL calls work.
+  Fresh-JSON six-address retained-EXE batch is active at
+  `.cache/compiler-coverage/retained-far-fresh-batch-001/`.
+
 - Fresh profiled `inc_one` diagnostic validates exit0, generated C byte-identical
   to the earlier accepted diagnostic artifact; 58.37s profiled worker time has
   14.77s Structuring baseline and 10.20s rewrite-loop cumulative costs. Fresh
@@ -1672,3 +1682,11 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   and word-push lanes; deltas returned as typed tuples.
 - Verified: ruff 0, mypy 0, 7 balanced-restore tests pass, def-integrity
   vs HEAD clean, zero architecture violations.
+- `pyvex_compat.py` + `sitecustomize.py`: Ruff debt cleared to zero
+  (2 + 1 findings). Split runtime patch install into per-target
+  installers with a hoisted bounded-lift preamble/instruction lane,
+  and extracted the msgspec JSON shim to module level.
+- Verified: ruff 0 (not in mypy files scope), monkeypatch smoke test
+  shows all four adapters installed with correct `__name__` guards and
+  idempotent double-apply; msgspec shim decode/loads verified
+  byte-identical; def-integrity vs HEAD clean.
