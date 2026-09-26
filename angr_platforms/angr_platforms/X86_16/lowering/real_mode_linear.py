@@ -20841,7 +20841,7 @@ def _materialize_indexed_bp_stack_pointer_8616(project: StructuredAstValue, code
 def _materialize_indexed_bp_stack_address_8616(project: StructuredAstValue, codegen: StructuredAstValue, access: RealModeIndexedStackAddress8616) -> StructuredAstValue:
     """Preserve the proven load width even when cosmetic casts are hidden."""
     width = access.width if isinstance(access.width, int) and access.width > 0 else 1
-    addr_expr = _materialize_indexed_bp_stack_pointer_8616(codegen, project, access)
+    addr_expr = _materialize_indexed_bp_stack_pointer_8616(project, codegen, access)
     if addr_expr is None:
         return None
     access_type = SimTypeChar(False, label="unsigned char") if width == 1 else _type_for_access_width_8616(width)
@@ -20934,6 +20934,7 @@ class _SSLinearLowerRun8616:
         exact: StructuredAstValue,
     ) -> StackValueOwnerHint8616 | None:
         """Derive the owner-range hint from logical-access candidates."""
+        assert self.instruction_bp_access_index is not None
         logical_owner_ranges = {
             StackValueOwnerHint8616(candidate.displacement, candidate.size)
             for source_addr in source_addrs
@@ -20962,6 +20963,7 @@ class _SSLinearLowerRun8616:
         exact: StructuredAstValue,
     ) -> StructuredAstValue | None:
         """Refine a logical access to the projected execution slice, or None to refuse."""
+        assert self.instruction_bp_access_index is not None
         if not (
             exact.evidence is InstructionBpStackAccessEvidence8616.LOGICAL_ACCESS
             and exact.displacement != shaped_access.displacement
@@ -21160,7 +21162,7 @@ class _SSLinearLowerRun8616:
             return self._replace_seq_children_8616(node, attr, value)
         return value is not None and self._replace_scalar_child_8616(node, attr, value)
 
-    def _replace_dict_children_8616(self, value: dict) -> bool:
+    def _replace_dict_children_8616(self, value: dict[StructuredAstValue, StructuredAstValue]) -> bool:
         """Transform each dict-valued child in place."""
         local_changed = False
         for key, item in tuple(value.items()):

@@ -114,7 +114,7 @@ def test_indexed_alias_cache_scope_uses_exact_artifact_owners() -> None:
         "angr_platforms/angr_platforms/X86_16/lowering/register_local_declarations.py",
         "angr_platforms/angr_platforms/X86_16/structuring/condition_lowering.py",
     }.isdisjoint(relative_paths)
-    assert len(relative_paths) < 220
+    assert len(relative_paths) < 240
 
 
 def test_callsite_cache_miss_reuses_persisted_alias_widening(

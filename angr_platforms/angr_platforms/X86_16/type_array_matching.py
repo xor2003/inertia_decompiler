@@ -547,11 +547,11 @@ def _has_induction_evidence_for_key_8616(codegen: object, index_key: tuple[objec
 
 
 def _best_typed_induction_summary_8616(
-    summaries: object,
-    index_key: object,
-) -> object | None:
+    summaries: tuple[InductionSummary, ...],
+    index_key: tuple[object, ...],
+) -> InductionSummary | None:
     """Return the highest-scoring typed summary for one index key."""
-    best_summary = None
+    best_summary: InductionSummary | None = None
     best_summary_score: tuple[int, int, int] | None = None
     for summary in summaries:
         if summary.index_key != index_key:
@@ -568,8 +568,8 @@ def _best_typed_induction_summary_8616(
 
 
 def _best_profile_induction_match_8616(
-    profiles: object,
-    index_key: object,
+    profiles: dict[tuple[object, ...], AccessTraitEvidenceProfile],
+    index_key: tuple[object, ...],
     variable: object,
 ) -> InductionVariable | None:
     """Return the best access-trait induction match for one index key."""
@@ -637,7 +637,7 @@ class _InductionLoopRewrite8616:
     changed: bool = False
 
     @staticmethod
-    def _last_monotonic_update(statements: list[object]) -> object | None:
+    def _last_monotonic_update(statements: list[object]) -> tuple[CVariable, int] | None:
         """Return the last monotonic update statement, or None."""
         for stmt in reversed(statements[1:]):
             update = _extract_monotonic_update_8616(stmt)

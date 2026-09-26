@@ -93,5 +93,6 @@ def test_exact_stack_argument_sanitizer_preserves_unproven_identity(base, actual
         variable, unified_variable=unified, variable_type=SimTypeShort(False), codegen=codegen,
     )
 
-    assert namespace[node.name](expr, -4) is expr
+    sanitizer_self = SimpleNamespace(codegen=codegen)
+    assert namespace[node.name](sanitizer_self, expr, -4) is expr
     assert expr.unified_variable is (None if expected_clear else unified)
