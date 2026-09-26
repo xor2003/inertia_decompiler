@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import angr
+from angr_platforms.X86_16.cod_extract import CODListingMetadata
 from angr_platforms.X86_16.codeview_nb00 import parse_codeview_nb00
 from angr_platforms.X86_16.codeview_nb02_nb04 import parse_codeview_nb0204
 from angr_platforms.X86_16.lst_extract import (
@@ -199,52 +200,96 @@ def _load_lst_sidecar(
         lst_path = _find_sibling_sidecar(binary, ".lst")
         if lst_path is None:
             return function_entry_addrs
-        try:
-            metadata = extract_lst_metadata(lst_path)
-            if metadata.code_labels or metadata.data_labels:
-                segmented_ida_listing = metadata.source_format == "ida_lst" and bool(segment_offsets)
-                if not segmented_ida_listing:
-                    if metadata.absolute_addrs:
-                        code_labels.update(metadata.code_labels)
-                        data_labels.update(metadata.data_labels)
-                        code_ranges.update(metadata.code_ranges)
-                    else:
-                        for offset, name in metadata.data_labels.items():
-                            data_labels.setdefault(load_base_linear + offset, name)
-                        for offset, name in metadata.code_labels.items():
-                            code_labels.setdefault(load_base_linear + offset, name)
-                        for offset, span in metadata.code_ranges.items():
-                            code_ranges.setdefault(
-                                load_base_linear + offset, (load_base_linear + span[0], load_base_linear + span[1])
-                            )
-                    source_formats.append(metadata.source_format)
-                # The generic IDA LST extractor retains only the offset part of
-                # ``segment:offset`` labels.  The segment-aware parser below
-                # owns those addresses and prevents duplicate low functions.
-        except Exception as exc:
-            print(f"[dbg] failed to parse source listing {lst_path}: {exc}")
-        try:
-            ida_proc_labels = _parse_ida_lst_proc_metadata(
+        _merge_lst_metadata_8616(
+            lst_path,
+            load_base_linear=load_base_linear,
+            segment_offsets=segment_offsets,
+            code_labels=code_labels,
+            data_labels=data_labels,
+            code_ranges=code_ranges,
+            source_formats=source_formats,
+        )
+        function_entry_addrs.update(
+            _merge_ida_lst_proc_metadata_8616(
+                lst_path,
+                load_base_linear=load_base_linear,
+                segment_offsets=segment_offsets,
+                code_labels=code_labels,
+                code_ranges=code_ranges,
+                source_formats=source_formats,
+            )
+        )
+        return function_entry_addrs
+
+    return _impl()
+
+
+def _merge_lst_metadata_8616(
+    lst_path: Path,
+    *,
+    load_base_linear: int,
+    segment_offsets: dict[str, int],
+    code_labels: dict[int, str],
+    data_labels: dict[int, str],
+    code_ranges: dict[int, tuple[int, int]],
+    source_formats: list[str],
+) -> None:
+    try:
+        metadata = extract_lst_metadata(lst_path)
+        if metadata.code_labels or metadata.data_labels:
+            segmented_ida_listing = metadata.source_format == "ida_lst" and bool(segment_offsets)
+            if not segmented_ida_listing:
+                if metadata.absolute_addrs:
+                    code_labels.update(metadata.code_labels)
+                    data_labels.update(metadata.data_labels)
+                    code_ranges.update(metadata.code_ranges)
+                else:
+                    for offset, name in metadata.data_labels.items():
+                        data_labels.setdefault(load_base_linear + offset, name)
+                    for offset, name in metadata.code_labels.items():
+                        code_labels.setdefault(load_base_linear + offset, name)
+                    for offset, span in metadata.code_ranges.items():
+                        code_ranges.setdefault(
+                            load_base_linear + offset, (load_base_linear + span[0], load_base_linear + span[1])
+                        )
+                source_formats.append(metadata.source_format)
+            # The generic IDA LST extractor retains only the offset part of
+            # ``segment:offset`` labels.  The segment-aware parser below
+            # owns those addresses and prevents duplicate low functions.
+    except Exception as exc:
+        print(f"[dbg] failed to parse source listing {lst_path}: {exc}")
+
+
+def _merge_ida_lst_proc_metadata_8616(
+    lst_path: Path,
+    *,
+    load_base_linear: int,
+    segment_offsets: dict[str, int],
+    code_labels: dict[int, str],
+    code_ranges: dict[int, tuple[int, int]],
+    source_formats: list[str],
+) -> set[int]:
+    try:
+        ida_proc_labels = _parse_ida_lst_proc_metadata(
+            lst_path,
+            load_base_linear=load_base_linear,
+            segment_offsets=segment_offsets,
+        )
+        if not ida_proc_labels:
+            return set()
+        code_labels.update(ida_proc_labels)
+        code_ranges.update(
+            _parse_ida_lst_proc_ranges(
                 lst_path,
                 load_base_linear=load_base_linear,
                 segment_offsets=segment_offsets,
             )
-            if ida_proc_labels:
-                code_labels.update(ida_proc_labels)
-                function_entry_addrs.update(ida_proc_labels)
-                code_ranges.update(
-                    _parse_ida_lst_proc_ranges(
-                        lst_path,
-                        load_base_linear=load_base_linear,
-                        segment_offsets=segment_offsets,
-                    )
-                )
-                source_formats.append("ida_lst")
-        except Exception as exc:
-            print(f"[dbg] failed to parse IDA proc listing {lst_path}: {exc}")
-        return function_entry_addrs
-
-    return _impl()
+        )
+        source_formats.append("ida_lst")
+        return set(ida_proc_labels)
+    except Exception as exc:
+        print(f"[dbg] failed to parse IDA proc listing {lst_path}: {exc}")
+        return set()
 
 
 def _load_idc_inc_sidecars(
@@ -710,102 +755,194 @@ def _load_cod_mzre_flair_sidecars(
     cod_proc_kinds: dict[int, str],
 ) -> tuple[Path | None, set[int]]:
     def _impl() -> tuple[Path | None, set[int]]:
-        cod_path: Path | None = None
-        signature_code_addrs: set[int] = set()
-        sibling_cod_path = _find_sibling_sidecar(binary, ".cod")
-        if sibling_cod_path is not None:
-            try:
-                cod_anchor_labels = dict(code_labels)
-                cod_anchor_labels.update(codeview_code)
-                cod_listing = _parse_cod_sidecar_metadata(
-                    sibling_cod_path,
-                    load_base_linear=load_base_linear,
-                    existing_code_labels=cod_anchor_labels,
-                    project=project,
-                )
-                cod_listing = _reconcile_cod_listing_with_codeview(cod_listing, codeview_code, codeview_ranges)
-                if cod_listing.code_labels or cod_listing.code_ranges or cod_listing.proc_kinds:
-                    existing_by_name: dict[str, list[int]] = {}
-                    for existing_addr, existing_name in code_labels.items():
-                        existing_by_name.setdefault(existing_name.lstrip("_"), []).append(existing_addr)
-                    for addr, name in cod_listing.code_labels.items():
-                        normalized = name.lstrip("_")
-                        span = cod_listing.code_ranges.get(addr)
-                        matching_entries = [
-                            existing_addr
-                            for existing_addr in existing_by_name.get(normalized, ())
-                            if existing_addr <= addr
-                        ]
-                        precise_entries = [
-                            existing_addr
-                            for existing_addr in matching_entries
-                            if existing_addr in code_ranges or existing_addr in codeview_code
-                        ]
-                        if precise_entries and span is not None:
-                            public_start = max(precise_entries)
-                            existing_span = code_ranges.get(public_start)
-                            public_span = (public_start, span[1])
-                            if existing_span is None or existing_span[1] < public_span[1]:
-                                code_ranges[public_start] = public_span
-                            proc_kind = cod_listing.proc_kinds.get(addr)
-                            if proc_kind is not None:
-                                cod_proc_kinds.setdefault(public_start, proc_kind)
-                            continue
-                        if matching_entries:
-                            public_start = max(matching_entries)
-                            if span is not None and public_start not in code_ranges:
-                                public_span = (public_start, int(span[1]))
-                                if public_span[1] > public_span[0]:
-                                    code_ranges.setdefault(public_start, public_span)
-                            proc_kind = cod_listing.proc_kinds.get(addr)
-                            if proc_kind is not None:
-                                cod_proc_kinds.setdefault(public_start, proc_kind)
-                            continue
-                        code_labels.setdefault(addr, name)
-                        if span is not None:
-                            code_ranges.setdefault(addr, span)
-                        proc_kind = cod_listing.proc_kinds.get(addr)
-                        if proc_kind is not None:
-                            cod_proc_kinds.setdefault(addr, proc_kind)
-                    cod_path = sibling_cod_path
-                    source_formats.append("cod_listing")
-            except Exception as exc:
-                print(f"[dbg] failed to parse COD listing {sibling_cod_path}: {exc}")
-        external_mzre_map = Path("/home/xor/games/f15se2-re/map") / f"{binary.stem}.map"
-        if external_mzre_map.exists():
-            try:
-                mzre_code, mzre_data, mzre_ranges = _parse_mzre_map_metadata(
-                    external_mzre_map, load_base_linear=load_base_linear
-                )
-                if mzre_code or mzre_data or mzre_ranges:
-                    for addr, name in mzre_code.items():
-                        code_labels.setdefault(addr, name)
-                    for addr, name in mzre_data.items():
-                        data_labels.setdefault(addr, name)
-                    for addr, span in mzre_ranges.items():
-                        code_ranges.setdefault(addr, span)
-                    source_formats.append("mzre_map")
-            except Exception as exc:
-                print(f"[dbg] failed to parse mzretools map {external_mzre_map}: {exc}")
-        try:
-            flair_code, flair_ranges, flair_formats = _detect_flair_metadata(
-                binary,
-                project,
-                pat_backend=pat_backend,
-                signature_catalog=signature_catalog,
-            )
-            if flair_code or flair_ranges:
-                for addr, name in flair_code.items():
-                    code_labels.setdefault(addr, name)
-                    signature_code_addrs.add(addr)
-                for addr, span in flair_ranges.items():
-                    code_ranges.setdefault(addr, span)
-            source_formats.extend(flair_formats)
-        except Exception as exc:
-            print(f"[dbg] failed to inspect FLAIR metadata for {binary}: {exc}")
+        cod_path = _load_cod_listing_sidecar_8616(
+            binary,
+            project,
+            load_base_linear=load_base_linear,
+            code_labels=code_labels,
+            code_ranges=code_ranges,
+            source_formats=source_formats,
+            codeview_code=codeview_code,
+            codeview_ranges=codeview_ranges,
+            cod_proc_kinds=cod_proc_kinds,
+        )
+        _load_mzre_map_sidecar_8616(
+            binary,
+            load_base_linear=load_base_linear,
+            code_labels=code_labels,
+            data_labels=data_labels,
+            code_ranges=code_ranges,
+            source_formats=source_formats,
+        )
+        signature_code_addrs = _load_flair_sidecar_8616(
+            binary,
+            project,
+            pat_backend=pat_backend,
+            signature_catalog=signature_catalog,
+            code_labels=code_labels,
+            code_ranges=code_ranges,
+            source_formats=source_formats,
+        )
         return cod_path, signature_code_addrs
 
     return _impl()
+
+
+def _merge_cod_label_entry_8616(
+    addr: int,
+    name: str,
+    cod_listing: CODListingMetadata,
+    *,
+    code_labels: dict[int, str],
+    code_ranges: dict[int, tuple[int, int]],
+    codeview_code: dict[int, str],
+    cod_proc_kinds: dict[int, str],
+    existing_by_name: dict[str, list[int]],
+) -> None:
+    normalized = name.lstrip("_")
+    span = cod_listing.code_ranges.get(addr)
+    matching_entries = [
+        existing_addr
+        for existing_addr in existing_by_name.get(normalized, ())
+        if existing_addr <= addr
+    ]
+    precise_entries = [
+        existing_addr
+        for existing_addr in matching_entries
+        if existing_addr in code_ranges or existing_addr in codeview_code
+    ]
+    if precise_entries and span is not None:
+        public_start = max(precise_entries)
+        existing_span = code_ranges.get(public_start)
+        public_span = (public_start, span[1])
+        if existing_span is None or existing_span[1] < public_span[1]:
+            code_ranges[public_start] = public_span
+        proc_kind = cod_listing.proc_kinds.get(addr)
+        if proc_kind is not None:
+            cod_proc_kinds.setdefault(public_start, proc_kind)
+        return
+    if matching_entries:
+        public_start = max(matching_entries)
+        if span is not None and public_start not in code_ranges:
+            public_span = (public_start, int(span[1]))
+            if public_span[1] > public_span[0]:
+                code_ranges.setdefault(public_start, public_span)
+        proc_kind = cod_listing.proc_kinds.get(addr)
+        if proc_kind is not None:
+            cod_proc_kinds.setdefault(public_start, proc_kind)
+        return
+    code_labels.setdefault(addr, name)
+    if span is not None:
+        code_ranges.setdefault(addr, span)
+    proc_kind = cod_listing.proc_kinds.get(addr)
+    if proc_kind is not None:
+        cod_proc_kinds.setdefault(addr, proc_kind)
+
+
+def _load_cod_listing_sidecar_8616(
+    binary: Path,
+    project: angr.Project,
+    *,
+    load_base_linear: int,
+    code_labels: dict[int, str],
+    code_ranges: dict[int, tuple[int, int]],
+    source_formats: list[str],
+    codeview_code: dict[int, str],
+    codeview_ranges: dict[int, tuple[int, int]],
+    cod_proc_kinds: dict[int, str],
+) -> Path | None:
+    sibling_cod_path = _find_sibling_sidecar(binary, ".cod")
+    if sibling_cod_path is None:
+        return None
+    try:
+        cod_anchor_labels = dict(code_labels)
+        cod_anchor_labels.update(codeview_code)
+        cod_listing = _parse_cod_sidecar_metadata(
+            sibling_cod_path,
+            load_base_linear=load_base_linear,
+            existing_code_labels=cod_anchor_labels,
+            project=project,
+        )
+        cod_listing = _reconcile_cod_listing_with_codeview(cod_listing, codeview_code, codeview_ranges)
+        if not (cod_listing.code_labels or cod_listing.code_ranges or cod_listing.proc_kinds):
+            return None
+        existing_by_name: dict[str, list[int]] = {}
+        for existing_addr, existing_name in code_labels.items():
+            existing_by_name.setdefault(existing_name.lstrip("_"), []).append(existing_addr)
+        for addr, name in cod_listing.code_labels.items():
+            _merge_cod_label_entry_8616(
+                addr,
+                name,
+                cod_listing,
+                code_labels=code_labels,
+                code_ranges=code_ranges,
+                codeview_code=codeview_code,
+                cod_proc_kinds=cod_proc_kinds,
+                existing_by_name=existing_by_name,
+            )
+        source_formats.append("cod_listing")
+        return sibling_cod_path
+    except Exception as exc:
+        print(f"[dbg] failed to parse COD listing {sibling_cod_path}: {exc}")
+        return None
+
+
+def _load_mzre_map_sidecar_8616(
+    binary: Path,
+    *,
+    load_base_linear: int,
+    code_labels: dict[int, str],
+    data_labels: dict[int, str],
+    code_ranges: dict[int, tuple[int, int]],
+    source_formats: list[str],
+) -> None:
+    external_mzre_map = Path("/home/xor/games/f15se2-re/map") / f"{binary.stem}.map"
+    if not external_mzre_map.exists():
+        return
+    try:
+        mzre_code, mzre_data, mzre_ranges = _parse_mzre_map_metadata(
+            external_mzre_map, load_base_linear=load_base_linear
+        )
+        if mzre_code or mzre_data or mzre_ranges:
+            for addr, name in mzre_code.items():
+                code_labels.setdefault(addr, name)
+            for addr, name in mzre_data.items():
+                data_labels.setdefault(addr, name)
+            for addr, span in mzre_ranges.items():
+                code_ranges.setdefault(addr, span)
+            source_formats.append("mzre_map")
+    except Exception as exc:
+        print(f"[dbg] failed to parse mzretools map {external_mzre_map}: {exc}")
+
+
+def _load_flair_sidecar_8616(
+    binary: Path,
+    project: angr.Project,
+    *,
+    pat_backend: str | None,
+    signature_catalog: Path | None,
+    code_labels: dict[int, str],
+    code_ranges: dict[int, tuple[int, int]],
+    source_formats: list[str],
+) -> set[int]:
+    signature_code_addrs: set[int] = set()
+    try:
+        flair_code, flair_ranges, flair_formats = _detect_flair_metadata(
+            binary,
+            project,
+            pat_backend=pat_backend,
+            signature_catalog=signature_catalog,
+        )
+        if flair_code or flair_ranges:
+            for addr, name in flair_code.items():
+                code_labels.setdefault(addr, name)
+                signature_code_addrs.add(addr)
+            for addr, span in flair_ranges.items():
+                code_ranges.setdefault(addr, span)
+        source_formats.extend(flair_formats)
+    except Exception as exc:
+        print(f"[dbg] failed to inspect FLAIR metadata for {binary}: {exc}")
+    return signature_code_addrs
 
 
 def _load_lst_metadata(
@@ -930,19 +1067,19 @@ def _load_lst_metadata(
         )
         function_entry_addrs.update(cod_proc_kinds)
 
-        if (
-            not code_labels
-            and not data_labels
-            and not struct_names
-            and not debug_source_files
-            and not debug_type_names
-            and not debug_type_descriptors
-            and not debug_type_references
-            and not debug_symbols
-            and not debug_type_members
-            and not debug_enum_members
-            and not debug_identifiers
-            and not debug_line_map
+        if not _lst_metadata_has_evidence_8616(
+            code_labels,
+            data_labels,
+            struct_names,
+            debug_source_files,
+            debug_type_names,
+            debug_type_descriptors,
+            debug_type_references,
+            debug_symbols,
+            debug_type_members,
+            debug_enum_members,
+            debug_identifiers,
+            debug_line_map,
         ):
             return None
 
@@ -1060,6 +1197,36 @@ def _lst_code_label(metadata: LSTMetadata | None, addr: int | None, code_base: i
     return code_labels.get(region[0])
 
 
+def _lst_metadata_has_evidence_8616(
+    code_labels: dict[int, str],
+    data_labels: dict[int, str],
+    struct_names: list[str],
+    debug_source_files: list[str],
+    debug_type_names: list[str],
+    debug_type_descriptors: list[DebugTypeDescriptorEvidence],
+    debug_type_references: list[DebugTypeReferenceEvidence],
+    debug_symbols: list[DebugSymbolEvidence],
+    debug_type_members: list[DebugTypeMemberEvidence],
+    debug_enum_members: list[DebugEnumMemberEvidence],
+    debug_identifiers: list[str],
+    debug_line_map: dict[int, tuple[int, int]],
+) -> bool:
+    return bool(
+        code_labels
+        or data_labels
+        or struct_names
+        or debug_source_files
+        or debug_type_names
+        or debug_type_descriptors
+        or debug_type_references
+        or debug_symbols
+        or debug_type_members
+        or debug_enum_members
+        or debug_identifiers
+        or debug_line_map
+    )
+
+
 def _lst_code_region(metadata: LSTMetadata | None, addr: int | None) -> tuple[int, int] | None:
     """Find recorded ranges without extending signature evidence into gaps."""
     def _impl() -> tuple[int, int] | None:
@@ -1074,30 +1241,34 @@ def _lst_code_region(metadata: LSTMetadata | None, addr: int | None) -> tuple[in
             return max(containing_spans, key=lambda item: item[0])[1]
         # Fallback: derive a bounded span from ordered code labels when explicit
         # code_ranges are unavailable/incomplete for this address.
-        code_labels = metadata.code_labels
-        if not isinstance(code_labels, dict) or not code_labels:
-            return None
-        ordered = sorted(int(k) for k in code_labels if isinstance(k, int))
-        if not ordered:
-            return None
-        if not (ordered[0] <= addr <= ordered[-1]):
-            return None
-        start = None
-        end = None
-        for i, label_addr in enumerate(ordered):
-            next_addr = ordered[i + 1] if i + 1 < len(ordered) else None
-            if label_addr <= addr and (next_addr is None or addr < next_addr):
-                # A matched label proves no ownership beyond its recorded range.
-                if label_addr in metadata.signature_code_addrs:
-                    return None
-                start = label_addr
-                end = next_addr
-                break
-        if start is None:
-            return None
-        # Keep fallback spans bounded to avoid swallowing unrelated neighbors.
-        if end is None or end <= start:
-            end = start + 0x200
-        return (start, end)
+        return _lst_label_fallback_region_8616(metadata, addr)
 
     return _impl()
+
+
+def _lst_label_fallback_region_8616(metadata: LSTMetadata, addr: int) -> tuple[int, int] | None:
+    code_labels = metadata.code_labels
+    if not isinstance(code_labels, dict) or not code_labels:
+        return None
+    ordered = sorted(int(k) for k in code_labels if isinstance(k, int))
+    if not ordered:
+        return None
+    if not (ordered[0] <= addr <= ordered[-1]):
+        return None
+    start = None
+    end = None
+    for i, label_addr in enumerate(ordered):
+        next_addr = ordered[i + 1] if i + 1 < len(ordered) else None
+        if label_addr <= addr and (next_addr is None or addr < next_addr):
+            # A matched label proves no ownership beyond its recorded range.
+            if label_addr in metadata.signature_code_addrs:
+                return None
+            start = label_addr
+            end = next_addr
+            break
+    if start is None:
+        return None
+    # Keep fallback spans bounded to avoid swallowing unrelated neighbors.
+    if end is None or end <= start:
+        end = start + 0x200
+    return (start, end)

@@ -8,6 +8,16 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Compiler-coverage far-pointer storage repair: source-free typed evidence
+  exposed a contained segment word incorrectly kept as a separate argument,
+  shifting BP+10 to BP+12. Lowering now joins contained slots without moving
+  later storage. Two before-fix failures; 21 focused tests including a crossing
+  refusal pass after repair; scoped Ruff/MyPy pass. Source-free replay exits 0
+  with validation=passed and both indirect calls in `.cache/sourcefree-parameter-joined.*`.
+  Generated C compiles and passes a 65,536-input host composition/register check.
+  Full large-model round trip is running in `sourcefree-far-slot-join-001`;
+  no feature witness yet and post-change gates remain due.
+
 - Coverage now selects address-only recovery by default with same-build labels
   used only for harness binding. Original bodies and behavioral checks survive;
   injected prefixes and incomplete bindings refuse. 99 focused tests plus both
@@ -1258,3 +1268,9 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verified: ruff 0, mypy 0, 12 linear-recurrence unit tests + 7 cod
   regression tests pass, def-integrity vs HEAD clean (missing names are
   hoisted closures), zero architecture violations against the file.
+- `inertia_decompiler/sidecar_metadata.py`: Ruff complexity debt cleared to
+  zero (7 findings). Extracted the COD/mzre/FLAIR sidecar lanes, the COD
+  label-reconcile entry merge, LST metadata/proc merge helpers, the
+  ordered-label fallback region, and the all-empty metadata evidence check.
+- Verified: ruff 0, mypy 0, 11 sidecar/signature-region tests pass,
+  def-integrity vs HEAD clean, zero architecture violations.
