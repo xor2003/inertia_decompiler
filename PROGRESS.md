@@ -1440,3 +1440,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   uncommitted `straightline_ssa.py` WIP (pre-existing, that file was
   not touched). Def-integrity vs HEAD clean, zero architecture
   violations.
+- `inertia_decompiler/cli_far_pointer_stack.py`: Ruff debt cleared to
+  zero (5 findings). Extracted the copy-assignment classifier, the
+  far-pointer group collection and per-group source selection lanes,
+  and hoisted the coalesce pass's six nested predicates/resolvers plus
+  the `Add`-node transform to typed module-level helpers bound via
+  `functools.partial` (only the `nonlocal changed` transform wrapper
+  stays nested).
+- Verified: ruff 0, mypy 0, 13 far-pointer/stack tests + 4 CLI
+  far-pointer/MK_FP tests pass, def-integrity vs HEAD clean, zero
+  architecture violations.
