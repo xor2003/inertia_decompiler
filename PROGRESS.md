@@ -15,8 +15,10 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   refusal pass after repair; scoped Ruff/MyPy pass. Source-free replay exits 0
   with validation=passed and both indirect calls in `.cache/sourcefree-parameter-joined.*`.
   Generated C compiles and passes a 65,536-input host composition/register check.
-  Full large-model round trip is running in `sourcefree-far-slot-join-001`;
-  no feature witness yet and post-change gates remain due.
+  Full large-model round trip `sourcefree-far-slot-join-001` times out on both
+  `inc_one` attempts before generating a body (392.75s total); source identity
+  also changed concurrently. Normal-worker startup timing is active in
+  `.cache/sourcefree-inc-startup.*`. No witness; post-change gates remain due.
 
 - Coverage now selects address-only recovery by default with same-build labels
   used only for harness binding. Original bodies and behavioral checks survive;
@@ -1274,3 +1276,10 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   ordered-label fallback region, and the all-empty metadata evidence check.
 - Verified: ruff 0, mypy 0, 11 sidecar/signature-region tests pass,
   def-integrity vs HEAD clean, zero architecture violations.
+- `inertia_decompiler/tail_validation.py`: Ruff complexity debt cleared to
+  zero (6 findings). Extracted the record-identity build, snapshot/missing
+  record lanes, count attachment, failed-stage collection, and per-stage
+  diagnostic formatting.
+- Verified: ruff 0, mypy 0, 283 tail-validation tests pass (1 pre-existing
+  switch-classification failure identical on bare HEAD), def-integrity vs
+  HEAD clean, zero architecture violations against the file.

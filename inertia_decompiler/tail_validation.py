@@ -161,25 +161,7 @@ def tail_validation_record_for_result(item: object, result: object) -> dict[str,
 
     def _impl() -> dict[str, object]:
         snapshot = _dynamic_cli_attr(result, "tail_validation", None)
-        function = _dynamic_cli_attr(result, "function", None) or _dynamic_cli_attr(item, "function", None)
-        project = _dynamic_cli_attr(function, "project", None)
-        binary_name = _dynamic_cli_attr(project, "filename", None)
-        cod_file = Path(binary_name).name if isinstance(binary_name, (str, os.PathLike)) else None
-        proc_name = _dynamic_cli_attr(function, "name", None) or "sub"
-        proc_kind = None
-        lst_metadata = _dynamic_cli_attr(project, "_inertia_lst_metadata", None)
-        cod_proc_kinds = _dynamic_cli_attr(lst_metadata, "cod_proc_kinds", None)
-        if isinstance(cod_proc_kinds, Mapping):
-            kind = cod_proc_kinds.get(_dynamic_cli_attr(function, "addr", None))
-            if isinstance(kind, str) and kind:
-                proc_kind = kind.upper()
-        identity = {
-            "cod_file": cod_file,
-            "proc_name": proc_name,
-            "proc_kind": proc_kind,
-            "function_addr": _dynamic_cli_attr(function, "addr", 0),
-            "function_name": proc_name,
-        }
+        identity = _tail_record_identity_8616(item, result)
         block_count = _dynamic_cli_attr(result, "block_count", None)
         byte_count = _dynamic_cli_attr(result, "byte_count", None)
         cfg_hash = _compute_cfg_hash_from_result(result, item)
@@ -188,39 +170,69 @@ def tail_validation_record_for_result(item: object, result: object) -> dict[str,
                 **identity,
                 **snapshot,
             }
-            if block_count is not None:
-                record["block_count"] = block_count
-            if byte_count is not None:
-                record["byte_count"] = byte_count
-            if cfg_hash is not None:
-                record["cfg_hash"] = cfg_hash
+            _attach_tail_record_counts_8616(record, block_count, byte_count, cfg_hash)
             return record
-        status = _dynamic_cli_attr(result, "status", None)
-        payload = _dynamic_cli_attr(result, "payload", None)
-        debug_output = _dynamic_cli_attr(result, "debug_output", None)
-        exit_detail = None
-        for candidate in (payload, debug_output):
-            if isinstance(candidate, str) and candidate.strip():
-                exit_detail = candidate.strip()
-                break
-        if exit_detail is None:
-            exit_detail = "tail validation snapshot missing"
-        exit_kind = status if isinstance(status, str) and status else "uncollected"
-        record = {
-            **identity,
-            "tail_validation_uncollected": True,
-            "exit_kind": exit_kind,
-            "exit_detail": exit_detail,
-        }
-        if block_count is not None:
-            record["block_count"] = block_count
-        if byte_count is not None:
-            record["byte_count"] = byte_count
-        if cfg_hash is not None:
-            record["cfg_hash"] = cfg_hash
+        record = _missing_snapshot_tail_record_8616(identity, result)
+        _attach_tail_record_counts_8616(record, block_count, byte_count, cfg_hash)
         return record
 
     return _impl()
+
+
+def _tail_record_identity_8616(item: object, result: object) -> dict[str, object]:
+    function = _dynamic_cli_attr(result, "function", None) or _dynamic_cli_attr(item, "function", None)
+    project = _dynamic_cli_attr(function, "project", None)
+    binary_name = _dynamic_cli_attr(project, "filename", None)
+    cod_file = Path(binary_name).name if isinstance(binary_name, (str, os.PathLike)) else None
+    proc_name = _dynamic_cli_attr(function, "name", None) or "sub"
+    proc_kind = None
+    lst_metadata = _dynamic_cli_attr(project, "_inertia_lst_metadata", None)
+    cod_proc_kinds = _dynamic_cli_attr(lst_metadata, "cod_proc_kinds", None)
+    if isinstance(cod_proc_kinds, Mapping):
+        kind = cod_proc_kinds.get(_dynamic_cli_attr(function, "addr", None))
+        if isinstance(kind, str) and kind:
+            proc_kind = kind.upper()
+    return {
+        "cod_file": cod_file,
+        "proc_name": proc_name,
+        "proc_kind": proc_kind,
+        "function_addr": _dynamic_cli_attr(function, "addr", 0),
+        "function_name": proc_name,
+    }
+
+
+def _attach_tail_record_counts_8616(
+    record: dict[str, object],
+    block_count: object,
+    byte_count: object,
+    cfg_hash: object,
+) -> None:
+    if block_count is not None:
+        record["block_count"] = block_count
+    if byte_count is not None:
+        record["byte_count"] = byte_count
+    if cfg_hash is not None:
+        record["cfg_hash"] = cfg_hash
+
+
+def _missing_snapshot_tail_record_8616(identity: dict[str, object], result: object) -> dict[str, object]:
+    status = _dynamic_cli_attr(result, "status", None)
+    payload = _dynamic_cli_attr(result, "payload", None)
+    debug_output = _dynamic_cli_attr(result, "debug_output", None)
+    exit_detail = None
+    for candidate in (payload, debug_output):
+        if isinstance(candidate, str) and candidate.strip():
+            exit_detail = candidate.strip()
+            break
+    if exit_detail is None:
+        exit_detail = "tail validation snapshot missing"
+    exit_kind = status if isinstance(status, str) and status else "uncollected"
+    return {
+        **identity,
+        "tail_validation_uncollected": True,
+        "exit_kind": exit_kind,
+        "exit_detail": exit_detail,
+    }
 
 
 def collect_tail_validation_records(
@@ -490,29 +502,31 @@ def tail_validation_display_status(
         if passed:
             return TailValidationDisplayStatus.PASSED.value
 
-        failed_stages: list[str] = []
-        for stage_name in expected_stages:
-            entry = snapshot.get(stage_name)
-            if not isinstance(entry, Mapping):
-                failed_stages.append(f"{stage_name}=missing")
-                continue
-            changed = bool(entry.get("changed"))
-            if changed:
-                failed_stages.append(f"{stage_name}=changed")
-                continue
-            status = entry.get("status")
-            if not isinstance(status, str):
-                failed_stages.append(f"{stage_name}=missing_status")
-                continue
-            if status not in _TAIL_VALIDATION_STABLE_STATUSES:
-                failed_stages.append(f"{stage_name}={status}")
-
-        if failed_stages:
+        if _collect_failed_stages_8616(snapshot, expected_stages):
             return TailValidationDisplayStatus.FAILED.value
-
         return TailValidationDisplayStatus.FAILED.value
 
     return _impl()
+
+
+def _collect_failed_stages_8616(snapshot: Mapping[str, object], expected_stages: Sequence[str]) -> list[str]:
+    failed_stages: list[str] = []
+    for stage_name in expected_stages:
+        entry = snapshot.get(stage_name)
+        if not isinstance(entry, Mapping):
+            failed_stages.append(f"{stage_name}=missing")
+            continue
+        changed = bool(entry.get("changed"))
+        if changed:
+            failed_stages.append(f"{stage_name}=changed")
+            continue
+        status = entry.get("status")
+        if not isinstance(status, str):
+            failed_stages.append(f"{stage_name}=missing_status")
+            continue
+        if status not in _TAIL_VALIDATION_STABLE_STATUSES:
+            failed_stages.append(f"{stage_name}={status}")
+    return failed_stages
 
 
 def format_tail_validation_diagnostic(
@@ -561,25 +575,30 @@ def format_tail_validation_diagnostic(
             return lines
 
         for stage_key in ("structuring", "postprocess"):
-            entry = snapshot.get(stage_key)
-            if not isinstance(entry, Mapping):
-                lines.append(f"/* tail validation {stage_key}: missing */")
-                continue
-            changed = bool(entry.get("changed", False))
-            status = entry.get("status", "changed" if changed else "stable")
-            mode = entry.get("mode", "unknown")
-            if isinstance(mode, str) and mode:
-                status_str = f"status={status} mode={mode} changed={changed}"
-            else:
-                status_str = f"status={status} changed={changed}"
-            lines.append(f"/* tail validation {stage_key}: {status_str} */")
-            verdict = entry.get("verdict")
-            if isinstance(verdict, str) and verdict:
-                lines.append(f"/* tail validation {stage_key} verdict: {verdict} */")
-            summary_text = entry.get("summary_text")
-            if isinstance(summary_text, str) and summary_text:
-                lines.append(f"/* tail validation {stage_key} detail: {summary_text} */")
-
+            _append_stage_diagnostic_lines_8616(lines, snapshot, stage_key)
         return lines
 
     return _impl()
+
+
+def _append_stage_diagnostic_lines_8616(
+    lines: list[str], snapshot: Mapping[str, object], stage_key: str
+) -> None:
+    entry = snapshot.get(stage_key)
+    if not isinstance(entry, Mapping):
+        lines.append(f"/* tail validation {stage_key}: missing */")
+        return
+    changed = bool(entry.get("changed", False))
+    status = entry.get("status", "changed" if changed else "stable")
+    mode = entry.get("mode", "unknown")
+    if isinstance(mode, str) and mode:
+        status_str = f"status={status} mode={mode} changed={changed}"
+    else:
+        status_str = f"status={status} changed={changed}"
+    lines.append(f"/* tail validation {stage_key}: {status_str} */")
+    verdict = entry.get("verdict")
+    if isinstance(verdict, str) and verdict:
+        lines.append(f"/* tail validation {stage_key} verdict: {verdict} */")
+    summary_text = entry.get("summary_text")
+    if isinstance(summary_text, str) and summary_text:
+        lines.append(f"/* tail validation {stage_key} detail: {summary_text} */")
