@@ -5834,15 +5834,34 @@ def _prepare_region_call_normalized_groups(
     normalized_oracle: list[dict[str, Any]] = []
     normalized_candidate_by_delta = dict(candidate_by_delta)
     normalizations: list[dict[str, Any]] = []
+    # Boundary-shifted parts break delta pairing; fall back to matching the
+    # nth unmatched oracle call part against the nth unmatched candidate call
+    # part.  This only *attempts* normalization — the callee-equivalence gate
+    # inside _prepare_call_normalized_functions still decides whether stores
+    # are actually rewritten, so a mis-pair degrades to an honest mismatch.
+    candidate_call_parts = [
+        part for part in candidate_group if _ssa_source_jumpkind(part) == "Ijk_Call"
+    ]
+    claimed: set[int] = set()
+
+    def _region_call_candidate(oracle_part: dict[str, Any]) -> dict[str, Any] | None:
+        if _ssa_source_jumpkind(oracle_part) != "Ijk_Call":
+            return None
+        delta = _ssa_detail_entry_delta(oracle_part)
+        hit = candidate_by_delta.get(delta)
+        if hit is not None and _ssa_source_jumpkind(hit) == "Ijk_Call":
+            claimed.add(id(hit))
+            return hit
+        for fallback in candidate_call_parts:
+            if id(fallback) not in claimed:
+                claimed.add(id(fallback))
+                return fallback
+        return None
+
     for oracle_part in oracle_group:
         delta = _ssa_detail_entry_delta(oracle_part)
-        candidate_part = candidate_by_delta.get(delta)
-        if (
-            delta is None
-            or candidate_part is None
-            or _ssa_source_jumpkind(oracle_part) != "Ijk_Call"
-            or _ssa_source_jumpkind(candidate_part) != "Ijk_Call"
-        ):
+        candidate_part = _region_call_candidate(oracle_part)
+        if delta is None or candidate_part is None:
             normalized_oracle.append(oracle_part)
             continue
         call_compare = _compare_call_targets(
@@ -10638,11 +10657,19 @@ def _prepare_call_normalized_functions(
     else:
         oracle_copy = copy.deepcopy(oracle_function)
         candidate_copy = copy.deepcopy(candidate_function)
-    if equivalent:
-        oracle_copy, oracle_return = _normalize_call_return_store(oracle_copy)
-        candidate_copy, candidate_return = _normalize_call_return_store(candidate_copy)
-        oracle_copy, oracle_stack = _normalize_call_stack_store_addresses(oracle_copy)
-        candidate_copy, candidate_stack = _normalize_call_stack_store_addresses(candidate_copy)
+    # Return-address and stack-slot stores are caller-side layout constants:
+    # _normalize_call_return_store rewrites only stores proven equal to the
+    # call's own fall-through, so running it is safe even when callee
+    # equivalence is unproven — a mis-paired call still differs via the
+    # semantic target token.  Callee equivalence is additionally required for
+    # the rewrite to be recorded as a *normalization fact*.
+    oracle_copy, oracle_return = _normalize_call_return_store(oracle_copy)
+    candidate_copy, candidate_return = _normalize_call_return_store(candidate_copy)
+    oracle_copy, oracle_stack = _normalize_call_stack_store_addresses(oracle_copy)
+    candidate_copy, candidate_stack = _normalize_call_stack_store_addresses(candidate_copy)
+    if oracle_return.get("applied") or oracle_stack.get("applied") or candidate_return.get(
+        "applied"
+    ) or candidate_stack.get("applied"):
         normalized["normalizations"] = [
             {"side": "oracle", **oracle_return},
             {"side": "candidate", **candidate_return},
