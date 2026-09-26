@@ -1720,3 +1720,10 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verified: ruff 0, mypy 0, `--help` and end-to-end fixture run produce
   identical payload shape; def-integrity vs HEAD clean (nested `_impl`
   bodies preserved inline).
+- `scripts/compare_msc6_ssa_examples.py`, `benchmark_optimization_quality_guard.py`,
+  `compare_discovery_backends.py`, `build_pat_from_exe.py`: Ruff debt cleared
+  to zero (2+1+1+1 findings). Extracted SSA part/backedge lanes, manifest
+  function gates, table-driven aggregate quality gates, backend selection and
+  print lanes, and PAT wildcard operand lanes.
+- Verified: ruff 0, mypy 0, 4 msc6-compat tests pass, `--help` parses on both
+  CLIs, def-integrity vs HEAD clean.

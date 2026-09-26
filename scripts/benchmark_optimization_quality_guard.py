@@ -261,16 +261,21 @@ def _run_decompile(
     )
 
 
-def _compare_quality(
+_AGGREGATE_INCREASE_GATES: tuple[str, ...] = (
+    "total_tmp_conditions",
+    "total_raw_flag_conditions",
+    "total_raw_ss_linear_exprs",
+    "total_asm_fallbacks",
+    "total_validation_uncollected",
+)
+
+
+def _process_gates_8616(
+    failures: list[str],
     baseline: DecompileRunResult,
     candidate: DecompileRunResult,
-    *,
-    per_function_allow_increase: int,
-    aggregate_allow_increase: int,
-) -> tuple[bool, tuple[str, ...]]:
-    """Return (ok, regression_lines)."""
-    failures: list[str] = []
-
+) -> None:
+    """Append process-outcome and validation regressions."""
     if baseline.returncode != 0:
         failures.append(f"baseline failed: returncode={baseline.returncode}")
     if candidate.returncode != 0:
@@ -286,47 +291,39 @@ def _compare_quality(
     if candidate.validation is not ValidationStatus.PASSED:
         failures.append(f"candidate validation not passed: {candidate.validation.value}")
 
-    baseline_map = baseline.function_map
-    candidate_map = candidate.function_map
-    missing = sorted(set(baseline_map) - set(candidate_map))
+    missing = sorted(set(baseline.function_map) - set(candidate.function_map))
     if missing:
         formatted = ", ".join(f"0x{item:x}" for item in missing)
         failures.append(f"candidate lost functions present in baseline: {formatted}")
 
-    baseline_total = baseline.quality_aggregate
-    candidate_total = candidate.quality_aggregate
 
-    if _aggregate_int(candidate_total, "total_tmp_conditions") > _aggregate_int(baseline_total, "total_tmp_conditions") + aggregate_allow_increase:
-        failures.append(
-            "candidate total_tmp_conditions increased "
-            f"{baseline_total['total_tmp_conditions']} -> {candidate_total['total_tmp_conditions']}"
-        )
-    if _aggregate_int(candidate_total, "total_raw_flag_conditions") > _aggregate_int(baseline_total, "total_raw_flag_conditions") + aggregate_allow_increase:
-        failures.append(
-            "candidate total_raw_flag_conditions increased "
-            f"{baseline_total['total_raw_flag_conditions']} -> {candidate_total['total_raw_flag_conditions']}"
-        )
-    if _aggregate_int(candidate_total, "total_raw_ss_linear_exprs") > _aggregate_int(baseline_total, "total_raw_ss_linear_exprs") + aggregate_allow_increase:
-        failures.append(
-            "candidate total_raw_ss_linear_exprs increased "
-            f"{baseline_total['total_raw_ss_linear_exprs']} -> {candidate_total['total_raw_ss_linear_exprs']}"
-        )
-    if _aggregate_int(candidate_total, "total_asm_fallbacks") > _aggregate_int(baseline_total, "total_asm_fallbacks") + aggregate_allow_increase:
-        failures.append(
-            "candidate total_asm_fallbacks increased "
-            f"{baseline_total['total_asm_fallbacks']} -> {candidate_total['total_asm_fallbacks']}"
-        )
-    if _aggregate_int(candidate_total, "total_validation_uncollected") > _aggregate_int(baseline_total, "total_validation_uncollected") + aggregate_allow_increase:
-        failures.append(
-            "candidate total_validation_uncollected increased "
-            f"{baseline_total['total_validation_uncollected']} -> {candidate_total['total_validation_uncollected']}"
-        )
+def _aggregate_gates_8616(
+    failures: list[str],
+    baseline_total: dict[str, object],
+    candidate_total: dict[str, object],
+    aggregate_allow_increase: int,
+) -> None:
+    """Append aggregate-quality regressions beyond the allowed increase."""
+    for key in _AGGREGATE_INCREASE_GATES:
+        if _aggregate_int(candidate_total, key) > _aggregate_int(baseline_total, key) + aggregate_allow_increase:
+            failures.append(
+                f"candidate {key} increased "
+                f"{baseline_total[key]} -> {candidate_total[key]}"
+            )
     if _aggregate_float(candidate_total, "avg_quality_score") < _aggregate_float(baseline_total, "avg_quality_score") - 1e-9:
         failures.append(
             "candidate avg_quality_score decreased "
             f"{baseline_total['avg_quality_score']} -> {candidate_total['avg_quality_score']}"
         )
 
+
+def _per_function_gates_8616(
+    failures: list[str],
+    baseline_map: dict[int, FunctionArtifact],
+    candidate_map: dict[int, FunctionArtifact],
+    per_function_allow_increase: int,
+) -> None:
+    """Append per-function bad-pattern regressions beyond the allowance."""
     for address, base_artifact in baseline_map.items():
         if address not in candidate_map:
             continue
@@ -338,6 +335,29 @@ def _compare_quality(
                 f"function 0x{address:x} quality regressed: bad_patterns {base_bad} -> {cand_bad}"
             )
 
+
+def _compare_quality(
+    baseline: DecompileRunResult,
+    candidate: DecompileRunResult,
+    *,
+    per_function_allow_increase: int,
+    aggregate_allow_increase: int,
+) -> tuple[bool, tuple[str, ...]]:
+    """Return (ok, regression_lines)."""
+    failures: list[str] = []
+    _process_gates_8616(failures, baseline, candidate)
+    _aggregate_gates_8616(
+        failures,
+        baseline.quality_aggregate,
+        candidate.quality_aggregate,
+        aggregate_allow_increase,
+    )
+    _per_function_gates_8616(
+        failures,
+        baseline.function_map,
+        candidate.function_map,
+        per_function_allow_increase,
+    )
     return len(failures) == 0, tuple(failures)
 
 

@@ -150,8 +150,8 @@ def _is_msc_prologue_call_part(part: dict[str, Any]) -> bool:
     return str(first_four[2].get("op_str") or "").lower().replace(" ", "").startswith("ax,")
 
 
-def _ssa_function_stats(ssa_path: Path) -> dict[str, dict[str, Any]]:
-    document = json.loads(ssa_path.read_text(encoding="utf-8"))
+def _ssa_parts_by_name_8616(document: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Group SSA document parts by their declared function name."""
     parts_by_name: dict[str, list[dict[str, Any]]] = {}
     for part in document.get("functions", []) or []:
         if not isinstance(part, dict):
@@ -160,44 +160,73 @@ def _ssa_function_stats(ssa_path: Path) -> dict[str, dict[str, Any]]:
         name = str(function.get("name") or "")
         if name:
             parts_by_name.setdefault(name, []).append(part)
+    return parts_by_name
+
+
+def _part_entry_linears_8616(parts: list[dict[str, Any]]) -> set[int]:
+    """Return the hex entry-linears of one function's SSA parts."""
+    return {
+        int(str((part.get("entry", {}) if isinstance(part.get("entry"), dict) else {}).get("linear")), 0)
+        for part in parts
+        if str(
+            (part.get("entry", {}) if isinstance(part.get("entry"), dict) else {}).get("linear") or ""
+        ).startswith("0x")
+    }
+
+
+def _part_backedge_8616(
+    source: dict[str, Any],
+    entry_linears: set[int],
+    current_linear: int,
+) -> bool:
+    """Return whether one part's last instruction is a backward jump edge."""
+    instructions = source.get("instructions", []) if isinstance(source.get("instructions"), list) else []
+    if not instructions:
+        return False
+    last = instructions[-1] if isinstance(instructions[-1], dict) else {}
+    mnemonic = str(last.get("mnemonic") or "").lower()
+    if not mnemonic.startswith("j"):
+        return False
+    op_str = str(last.get("op_str") or "")
+    target_text = op_str.split(",", 1)[0].strip()
+    if not target_text.startswith("0x"):
+        return False
+    try:
+        target = int(target_text, 0)
+    except ValueError:
+        return False
+    return target in entry_linears and target <= current_linear
+
+
+def _accumulate_part_stats_8616(
+    item: dict[str, Any],
+    part: dict[str, Any],
+    entry_linears: set[int],
+) -> None:
+    """Accumulate parts/calls/backedges counters for one SSA part."""
+    item["parts"] += 1
+    source = part.get("source", {}) if isinstance(part.get("source"), dict) else {}
+    if source.get("jumpkind") == "Ijk_Call" and not _is_msc_prologue_call_part(part):
+        item["non_prologue_calls"] += 1
+    entry = part.get("entry", {}) if isinstance(part.get("entry"), dict) else {}
+    try:
+        current_linear = int(str(entry.get("linear")), 0)
+    except ValueError:
+        return
+    if _part_backedge_8616(source, entry_linears, current_linear):
+        item["backedges"] += 1
+
+
+def _ssa_function_stats(ssa_path: Path) -> dict[str, dict[str, Any]]:
+    document = json.loads(ssa_path.read_text(encoding="utf-8"))
+    parts_by_name = _ssa_parts_by_name_8616(document)
 
     stats: dict[str, dict[str, Any]] = {}
     for name, parts in parts_by_name.items():
-        entry_linears = {
-            int(str((part.get("entry", {}) if isinstance(part.get("entry"), dict) else {}).get("linear")), 0)
-            for part in parts
-            if str(
-                (part.get("entry", {}) if isinstance(part.get("entry"), dict) else {}).get("linear") or ""
-            ).startswith("0x")
-        }
+        entry_linears = _part_entry_linears_8616(parts)
         item = stats.setdefault(name, {"parts": 0, "non_prologue_calls": 0, "backedges": 0})
         for part in parts:
-            item["parts"] += 1
-            source = part.get("source", {}) if isinstance(part.get("source"), dict) else {}
-            if source.get("jumpkind") == "Ijk_Call" and not _is_msc_prologue_call_part(part):
-                item["non_prologue_calls"] += 1
-            entry = part.get("entry", {}) if isinstance(part.get("entry"), dict) else {}
-            try:
-                current_linear = int(str(entry.get("linear")), 0)
-            except ValueError:
-                continue
-            instructions = source.get("instructions", []) if isinstance(source.get("instructions"), list) else []
-            if not instructions:
-                continue
-            last = instructions[-1] if isinstance(instructions[-1], dict) else {}
-            mnemonic = str(last.get("mnemonic") or "").lower()
-            if not mnemonic.startswith("j"):
-                continue
-            op_str = str(last.get("op_str") or "")
-            target_text = op_str.split(",", 1)[0].strip()
-            if not target_text.startswith("0x"):
-                continue
-            try:
-                target = int(target_text, 0)
-            except ValueError:
-                continue
-            if target in entry_linears and target <= current_linear:
-                item["backedges"] += 1
+            _accumulate_part_stats_8616(item, part, entry_linears)
     return stats
 
 
@@ -232,77 +261,18 @@ def _write_abi_manifest(
     for function in catalog.get("functions", []) or []:
         if not isinstance(function, dict):
             continue
-        names = function.get("names", [])
-        name = str(names[0]) if isinstance(names, list) and names else ""
-        if not name or name == "main":
-            if name == "main":
-                skipped.append({"name": name, "reason": "harness_main"})
-            continue
-        oracle_name = _matching_stats_name(oracle_stats, name)
-        candidate_name = _matching_stats_name(candidate_stats, name)
-        oracle_count = int(oracle_stats.get(oracle_name or "", {}).get("parts", 0))
-        candidate_count = int(candidate_stats.get(candidate_name or "", {}).get("parts", 0))
-        if oracle_count == 0 or candidate_count == 0:
-            skipped.append(
-                {
-                    "name": name,
-                    "reason": "ssa_missing",
-                    "oracle_parts": oracle_count,
-                    "candidate_parts": candidate_count,
-                }
-            )
-            continue
-        oracle_calls = int(oracle_stats.get(oracle_name or "", {}).get("non_prologue_calls", 0))
-        candidate_calls = int(candidate_stats.get(candidate_name or "", {}).get("non_prologue_calls", 0))
-        if oracle_calls or candidate_calls:
-            skipped.append(
-                {
-                    "name": name,
-                    "reason": "call_boundary_gate",
-                    "oracle_non_prologue_calls": oracle_calls,
-                    "candidate_non_prologue_calls": candidate_calls,
-                }
-            )
-            continue
-        oracle_backedges = int(oracle_stats.get(oracle_name or "", {}).get("backedges", 0))
-        candidate_backedges = int(candidate_stats.get(candidate_name or "", {}).get("backedges", 0))
-        if max_loop_unroll <= 0 and (oracle_backedges or candidate_backedges):
-            skipped.append(
-                {
-                    "name": name,
-                    "reason": "loop_backedge_gate",
-                    "oracle_backedges": oracle_backedges,
-                    "candidate_backedges": candidate_backedges,
-                }
-            )
-            continue
-        if max_parts and max(oracle_count, candidate_count) > max_parts:
-            skipped.append(
-                {
-                    "name": name,
-                    "reason": "part_count_gate",
-                    "oracle_parts": oracle_count,
-                    "candidate_parts": candidate_count,
-                    "max_parts": max_parts,
-                }
-            )
-            continue
-        strict_abi = abi_reg_profile == "strict"
-        abi_entry = {
-            "id": function.get("id"),
-            "name": name,
-            "kind": function.get("return_kind", "near"),
-            "calling_convention": "msc16-near",
-            "returns": [{"location": "ax"}, {"location": "dx"}] if strict_abi else [{"location": "ax"}],
-            "preserved": ["bp", "si", "di"] if strict_abi else [],
-            "clobbers": ["ax", "cx", "dx", "flags"],
-            "ssa_call_policy": "msc_prologue_stack_check",
-        }
-        if oracle_name and oracle_name != name:
-            abi_entry["oracle_name"] = oracle_name
-        if candidate_name and candidate_name != name:
-            abi_entry["candidate_name"] = candidate_name
-        functions.append(abi_entry)
+        abi_entry, skip_entry = _manifest_function_8616(
+            function,
+            oracle_stats,
+            candidate_stats,
+            max_parts=max_parts,
+            max_loop_unroll=max_loop_unroll,
+            abi_reg_profile=abi_reg_profile,
+        )
+        if skip_entry is not None:
+            skipped.append(skip_entry)
+        if abi_entry is not None:
+            functions.append(abi_entry)
     manifest = {
         "schema": "msc6.ssa_abi_manifest.v1",
         "calling_convention": "msc16-near",
@@ -310,6 +280,90 @@ def _write_abi_manifest(
         "skipped_functions": skipped,
     }
     out_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _manifest_function_8616(
+    function: dict[str, Any],
+    oracle_stats: dict[str, dict[str, Any]],
+    candidate_stats: dict[str, dict[str, Any]],
+    *,
+    max_parts: int,
+    max_loop_unroll: int,
+    abi_reg_profile: str,
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Apply the ABI manifest gates to one function; return (entry, skip)."""
+    names = function.get("names", [])
+    name = str(names[0]) if isinstance(names, list) and names else ""
+    if not name:
+        return None, None
+    if name == "main":
+        return None, {"name": name, "reason": "harness_main"}
+    oracle_name = _matching_stats_name(oracle_stats, name)
+    candidate_name = _matching_stats_name(candidate_stats, name)
+    oracle_count = int(oracle_stats.get(oracle_name or "", {}).get("parts", 0))
+    candidate_count = int(candidate_stats.get(candidate_name or "", {}).get("parts", 0))
+    if oracle_count == 0 or candidate_count == 0:
+        return None, {
+            "name": name,
+            "reason": "ssa_missing",
+            "oracle_parts": oracle_count,
+            "candidate_parts": candidate_count,
+        }
+    oracle_calls = int(oracle_stats.get(oracle_name or "", {}).get("non_prologue_calls", 0))
+    candidate_calls = int(candidate_stats.get(candidate_name or "", {}).get("non_prologue_calls", 0))
+    if oracle_calls or candidate_calls:
+        return None, {
+            "name": name,
+            "reason": "call_boundary_gate",
+            "oracle_non_prologue_calls": oracle_calls,
+            "candidate_non_prologue_calls": candidate_calls,
+        }
+    oracle_backedges = int(oracle_stats.get(oracle_name or "", {}).get("backedges", 0))
+    candidate_backedges = int(candidate_stats.get(candidate_name or "", {}).get("backedges", 0))
+    if max_loop_unroll <= 0 and (oracle_backedges or candidate_backedges):
+        return None, {
+            "name": name,
+            "reason": "loop_backedge_gate",
+            "oracle_backedges": oracle_backedges,
+            "candidate_backedges": candidate_backedges,
+        }
+    if max_parts and max(oracle_count, candidate_count) > max_parts:
+        return None, {
+            "name": name,
+            "reason": "part_count_gate",
+            "oracle_parts": oracle_count,
+            "candidate_parts": candidate_count,
+            "max_parts": max_parts,
+        }
+    return _abi_manifest_entry_8616(function, name, oracle_name, candidate_name, abi_reg_profile), None
+
+
+def _abi_manifest_entry_8616(
+    function: dict[str, Any],
+    name: str,
+    oracle_name: str | None,
+    candidate_name: str | None,
+    abi_reg_profile: str,
+) -> dict[str, object]:
+    """Return one ABI manifest entry for a gate-passing function."""
+    strict_abi = abi_reg_profile == "strict"
+    abi_entry: dict[str, object] = {
+        "id": function.get("id"),
+        "name": name,
+        "kind": function.get("return_kind", "near"),
+        "calling_convention": "msc16-near",
+        "returns": [{"location": "ax"}, {"location": "dx"}] if strict_abi else [{"location": "ax"}],
+        "preserved": ["bp", "si", "di"] if strict_abi else [],
+        "clobbers": ["ax", "cx", "dx", "flags"],
+        "ssa_call_policy": "msc_prologue_stack_check",
+    }
+    if oracle_name and oracle_name != name:
+        abi_entry["oracle_name"] = oracle_name
+    if candidate_name and candidate_name != name:
+        abi_entry["candidate_name"] = candidate_name
+    return abi_entry
+
+
 
 
 def _ssa_lowering_args(args: argparse.Namespace) -> list[str]:

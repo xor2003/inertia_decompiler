@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from capstone import CS_ARCH_X86, CS_MODE_16, Cs
 from capstone.x86_const import X86_OP_IMM, X86_OP_MEM
@@ -248,6 +248,61 @@ def _unique_functions(functions: list[tuple[int, int]]) -> list[tuple[int, int]]
     return sorted(unique.items())
 
 
+def _wildcard_range_8616(wild: list[int | None], start: int, size: int) -> None:
+    """Wildcard one byte range inside the function byte buffer."""
+    for idx in range(start, start + size):
+        if 0 <= idx < len(wild):
+            wild[idx] = None
+
+
+def _wildcard_immediate_8616(
+    wild: list[int | None],
+    operand: Any,  # noqa: ANN401 - dynamic Capstone operand boundary
+    base: int,
+    max_len: int,
+) -> None:
+    """Wildcard one instruction's immediate operand bytes."""
+    imm_offset = int(getattr(operand, "imm_offset", 0) or 0)
+    imm_size = int(getattr(operand, "size", 0) or 0)
+    if imm_size > 0 and imm_offset + imm_size <= max_len - base:
+        _wildcard_range_8616(wild, base + imm_offset, imm_size)
+
+
+def _wildcard_memory_8616(
+    wild: list[int | None],
+    operand: Any,  # noqa: ANN401 - dynamic Capstone operand boundary
+    base: int,
+    max_len: int,
+) -> None:
+    """Wildcard one instruction's memory displacement bytes."""
+    mem = getattr(operand, "mem", None)
+    if mem is None:
+        return
+    disp = int(getattr(mem, "disp", 0))
+    disp_size = 1
+    if disp != 0:
+        disp_size = 1 if -0x80 <= disp <= 0x7f else 2
+    disp_offset = int(getattr(mem, "disp_offset", 0) or 0)
+    if disp_size > 0 and disp_offset > 0 and disp_offset + disp_size <= max_len - base:
+        _wildcard_range_8616(wild, base + disp_offset, disp_size)
+
+
+def _wildcard_transfer_bytes_8616(
+    wild: list[int | None],
+    insn: Any,  # noqa: ANN401 - dynamic Capstone instruction boundary
+    base: int,
+) -> None:
+    """Wildcard far transfer addresses and near/short jump offsets."""
+    raw = bytes(insn.bytes)
+    if raw and raw[0] in {0x9A, 0xEA} and len(raw) >= 5:
+        _wildcard_range_8616(wild, base + 1, 4)
+    if raw and raw[0] in {0xE8, 0xE9, 0xEB}:
+        offset = 1 if raw[0] == 0xEB else 2
+        _wildcard_range_8616(wild, base + 1, offset)
+
+
+
+
 def _wildcard_inst_operands(function_bytes: bytes, function_start: int) -> list[int | None]:
     """Wildcard instruction operand bytes used by the PAT signature matcher.
 
@@ -270,37 +325,11 @@ def _wildcard_inst_operands(function_bytes: bytes, function_start: int) -> list[
 
         for operand in getattr(insn, "operands", ()) or ():
             if operand.type == X86_OP_IMM:
-                imm_offset = int(getattr(operand, "imm_offset", 0) or 0)
-                imm_size = int(getattr(operand, "size", 0) or 0)
-                if imm_size > 0 and imm_offset + imm_size <= max_len - base:
-                    for idx in range(base + imm_offset, base + imm_offset + imm_size):
-                        if 0 <= idx < len(wild):
-                            wild[idx] = None
+                _wildcard_immediate_8616(wild, operand, base, max_len)
             elif operand.type == X86_OP_MEM:
-                mem = getattr(operand, "mem", None)
-                if mem is not None:
-                    disp = int(getattr(mem, "disp", 0))
-                    disp_size = 1
-                    if disp != 0:
-                        disp_size = 1 if -0x80 <= disp <= 0x7f else 2
-                    disp_offset = int(getattr(mem, "disp_offset", 0) or 0)
-                    if disp_size > 0 and disp_offset > 0 and disp_offset + disp_size <= max_len - base:
-                        for idx in range(base + disp_offset, base + disp_offset + disp_size):
-                            if 0 <= idx < len(wild):
-                                wild[idx] = None
+                _wildcard_memory_8616(wild, operand, base, max_len)
 
-        raw = bytes(insn.bytes)
-        if raw and raw[0] in {0x9A, 0xEA} and len(raw) >= 5:
-            for i in range(1, 5):
-                idx = base + i
-                if 0 <= idx < len(wild):
-                    wild[idx] = None
-        if raw and raw[0] in {0xE8, 0xE9, 0xEB}:
-            offset = 1 if raw[0] == 0xEB else 2
-            for i in range(1, 1 + offset):
-                idx = base + i
-                if 0 <= idx < len(wild):
-                    wild[idx] = None
+        _wildcard_transfer_bytes_8616(wild, insn, base)
 
     return wild
 

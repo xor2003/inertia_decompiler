@@ -414,6 +414,65 @@ def _parse_binary_list(value: str) -> list[Path]:
     return paths
 
 
+def _select_backend_8616(args: argparse.Namespace, binary: Path) -> str:
+    """Return the backend selected for one binary under the CLI policy."""
+    selected_backend = args.backends
+    if selected_backend == "auto":
+        selected_backend = (
+            "rizin"
+            if (
+                _rizin_available()
+                and not _has_local_sidecar_evidence(
+                    binary,
+                    ignore_local_sidecar_evidence=args.ignore_local_sidecar_evidence,
+                )
+            )
+            else "angr"
+        )
+        if args.use_sidecar:
+            selected_backend = "angr"
+    return str(selected_backend)
+
+
+def _print_interval_summary_8616(run: dict[str, Any]) -> None:
+    """Print the address/size overlap summary for one binary run."""
+    print(f"\n{run['binary']}")
+    for backend_name, payload in run["backends"].items():
+        metric = payload["metric"]
+        print(f"  {backend_name}: count={payload['count']} time={metric.get('time_sec', 0.0):.3f}s")
+        overlaps = payload["overlaps"]
+        if overlaps:
+            print(f"    overlaps: {len(overlaps)}")
+            for pair in overlaps:
+                print(f"      {pair[0]} -> {pair[1]}")
+        else:
+            print("    overlaps: none")
+
+    for comparison in run["comparisons"]:
+        left = comparison["left"]
+        right = comparison["right"]
+        print(
+            f"  compare {left} vs {right}: "
+            f"+{len(comparison['left_only'])} {left} only, "
+            f"+{len(comparison['right_only'])} {right} only"
+        )
+
+
+def _print_full_result_8616(run: dict[str, Any]) -> None:
+    """Print the full per-backend function inventory for one binary run."""
+    print(f"\n{run['binary']}")
+    for backend_name, payload in run["backends"].items():
+        _print_backend_result(
+            backend_name,
+            [
+                FunctionRecord(int(entry["addr"], 16), entry["size"], entry["name"], entry["source"])
+                for entry in payload["records"]
+            ],
+            payload["metric"].get("time_sec", 0.0),
+            payload["metric"].get("detail", ""),
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -485,25 +544,10 @@ def main() -> None:
     args = parser.parse_args()
 
     binaries = _parse_binary_list(args.binaries)
-    results: list[dict[str, Any]] = []
-    for binary in binaries:
-        selected_backend = args.backends
-        if selected_backend == "auto":
-            selected_backend = (
-                "rizin"
-                if (
-                    _rizin_available()
-                    and not _has_local_sidecar_evidence(
-                        binary,
-                        ignore_local_sidecar_evidence=args.ignore_local_sidecar_evidence,
-                    )
-                )
-                else "angr"
-            )
-            if args.use_sidecar:
-                selected_backend = "angr"
-        run = _run_compare(binary, args, backend_override=selected_backend)
-        results.append(run)
+    results: list[dict[str, Any]] = [
+        _run_compare(binary, args, backend_override=_select_backend_8616(args, binary))
+        for binary in binaries
+    ]
 
     if args.json_output is not None:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
@@ -511,39 +555,10 @@ def main() -> None:
 
     if args.print_interval_summary:
         for run in results:
-            print(f"\n{run['binary']}")
-            for backend_name, payload in run["backends"].items():
-                metric = payload["metric"]
-                print(f"  {backend_name}: count={payload['count']} time={metric.get('time_sec', 0.0):.3f}s")
-                overlaps = payload["overlaps"]
-                if overlaps:
-                    print(f"    overlaps: {len(overlaps)}")
-                    for pair in overlaps:
-                        print(f"      {pair[0]} -> {pair[1]}")
-                else:
-                    print("    overlaps: none")
-
-            for comparison in run["comparisons"]:
-                left = comparison["left"]
-                right = comparison["right"]
-                print(
-                    f"  compare {left} vs {right}: "
-                    f"+{len(comparison['left_only'])} {left} only, "
-                    f"+{len(comparison['right_only'])} {right} only"
-                )
+            _print_interval_summary_8616(run)
     else:
         for run in results:
-            print(f"\n{run['binary']}")
-            for backend_name, payload in run["backends"].items():
-                _print_backend_result(
-                    backend_name,
-                    [
-                        FunctionRecord(int(entry["addr"], 16), entry["size"], entry["name"], entry["source"])
-                        for entry in payload["records"]
-                    ],
-                    payload["metric"].get("time_sec", 0.0),
-                    payload["metric"].get("detail", ""),
-                )
+            _print_full_result_8616(run)
 
 
 if __name__ == "__main__":
