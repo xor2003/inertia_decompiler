@@ -647,6 +647,7 @@ def _run_ssa_pair_compare_loop(
     max_solver_memory_stores: int,
     skip_binary_equal: bool,
     max_rss_mb: int,
+    image_context: dict[str, dict[str, Any]] | None = None,
 ) -> _SsaPairLoopOutcome:
     """Compare each oracle SSA function against its resolved candidate."""
     ordinals: dict[str, int] = defaultdict(int)
@@ -719,6 +720,7 @@ def _run_ssa_pair_compare_loop(
             "function_id": function_id,
             "function_name": function_name,
             "global_constant_normalization": global_constant_normalization,
+            "image_context": image_context,
         }
         result, elapsed = _compare_ssa_pair_guarded(
             item,
@@ -787,6 +789,7 @@ def compare_ssa_documents(  # noqa: D103
     _attach_binary_signature_context(oracle_index, oracle_index_source, oracle_index_functions_all)
     _attach_binary_signature_context(candidate_index, candidate_index_source, candidate_index_functions_all)
     proof_cache = _SemanticEqualityCache() if enable_callee_lemmas else None
+    image_context = _layout_image_context(oracle, candidate)
     loop = _run_ssa_pair_compare_loop(
         oracle_functions,
         mapping_document=mapping_document,
@@ -803,6 +806,7 @@ def compare_ssa_documents(  # noqa: D103
         max_solver_memory_stores=max_solver_memory_stores,
         skip_binary_equal=skip_binary_equal,
         max_rss_mb=max_rss_mb,
+        image_context=image_context,
     )
     results = loop.results
     pending_callee_proofs = loop.pending_callee_proofs
@@ -4102,6 +4106,9 @@ def _compare_ssa_pair(
         candidate_for_z3,
         global_map=item.get("global_constant_normalization")
         if isinstance(item.get("global_constant_normalization"), dict)
+        else None,
+        image_context=item.get("image_context")
+        if isinstance(item.get("image_context"), dict)
         else None,
     )
     oracle_for_z3, candidate_for_z3, output_projection = _prepare_local_block_output_projection(
@@ -10309,8 +10316,9 @@ def _prepare_layout_normalized_functions(
     candidate_function: dict[str, Any],
     *,
     global_map: dict[int, int] | None = None,
+    image_context: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]:
-    pairs = _layout_constant_pairs(oracle_function, candidate_function)
+    pairs = _layout_constant_pairs(oracle_function, candidate_function, image_context=image_context)
     if not pairs and not global_map:
         return oracle_function, candidate_function, None
     candidate_map: dict[int, int] = dict(global_map or {})
@@ -10464,7 +10472,12 @@ def _extend_normalization_with_residual_constants(
             break
 
 
-def _layout_constant_pairs(oracle_function: dict[str, Any], candidate_function: dict[str, Any]) -> list[dict[str, Any]]:
+def _layout_constant_pairs(
+    oracle_function: dict[str, Any],
+    candidate_function: dict[str, Any],
+    *,
+    image_context: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     oracle_instructions = _ssa_instructions(oracle_function)
     candidate_instructions = _ssa_instructions(candidate_function)
     if not oracle_instructions or len(oracle_instructions) != len(candidate_instructions):
@@ -10515,6 +10528,7 @@ def _layout_constant_pairs(oracle_function: dict[str, Any], candidate_function: 
     _group_layout_constant_pairs(pairs, absolute_memory_pairs, memory_pairs, deferred)
     pairs.extend(_call_argument_immediate_layout_pairs(oracle_instructions, candidate_instructions))
     pairs.extend(_call_far_pointer_push_pairs(oracle_instructions, candidate_instructions))
+    pairs.extend(_seg_register_far_pointer_pairs(oracle_instructions, candidate_instructions, image_context))
     pairs.extend(_entry_shift_immediate_pairs(oracle_function, candidate_function))
     pairs.extend(_stored_pointer_immediate_pairs(oracle_instructions, candidate_instructions))
     pairs.extend(_call_return_address_pairs(oracle_function, candidate_function))
@@ -10686,6 +10700,137 @@ def _push_immediate(instruction: dict[str, Any]) -> int | None:
         return int(op_str, 0)
     except ValueError:
         return None
+
+
+def _cstring_at(image: bytes, byte_off: int, limit: int = 256) -> bytes | None:
+    """NUL-terminated byte string at ``byte_off`` (terminator included)."""
+    if byte_off < 0 or byte_off >= len(image):
+        return None
+    end = image.find(b"\x00", byte_off)
+    if end < 0 or end - byte_off > limit:
+        return None
+    return image[byte_off : end + 1]
+
+
+def _mz_reloc_segment_targets(image: bytes, relocs: tuple[tuple[int, int], ...]) -> list[int]:
+    """Distinct unrelocated segment-paragraph values stored at relocation sites."""
+    targets: set[int] = set()
+    for off, seg in relocs:
+        linear = (seg << 4) + off
+        if linear + 2 <= len(image):
+            targets.add(int.from_bytes(image[linear : linear + 2], "little"))
+    return sorted(targets)
+
+
+def _layout_image_context(
+    oracle: dict[str, Any], candidate: dict[str, Any]
+) -> dict[str, dict[str, Any]] | None:
+    """Load each document's ``exe`` image and segment targets for data-content proofs.
+
+    A ``push ds; push off`` far-pointer argument references the runtime data
+    segment; the MZ relocation table records every segment paragraph the
+    image materializes, so ``para*16 + off`` candidates can be enumerated and
+    the referenced bytes compared across the two binaries.
+    """
+    context: dict[str, dict[str, Any]] = {}
+    for label, document in (("oracle", oracle), ("candidate", candidate)):
+        exe = document.get("exe") if isinstance(document, dict) else None
+        if not isinstance(exe, str) or not exe:
+            return None
+        try:
+            loaded = load_mz_image(Path(exe))
+        except (OSError, DosUnitError):
+            return None
+        image = loaded.memory[: loaded.image_size]
+        context[label] = {
+            "image": image,
+            "seg_targets": _mz_reloc_segment_targets(image, loaded.relocs),
+        }
+    return context
+
+
+_SEGMENT_PUSH_REGS = ("ds", "es", "ss", "cs")
+
+
+def _seg_pointer_string_equal(
+    context: dict[str, dict[str, Any]] | None, oracle_off: int, candidate_off: int
+) -> bool:
+    """Prove two pushed data-segment offsets reference byte-identical strings.
+
+    For every segment paragraph each image's relocation table materializes,
+    ``para*16 + off`` is a plausible data-string address.  The pair is proven
+    only when some paragraph combination yields byte-identical NUL-terminated
+    strings of at least 4 bytes including the terminator.
+    """
+    if not context:
+        return False
+    oracle_side = context.get("oracle") or {}
+    candidate_side = context.get("candidate") or {}
+    oracle_image = oracle_side.get("image")
+    candidate_image = candidate_side.get("image")
+    if not isinstance(oracle_image, bytes) or not isinstance(candidate_image, bytes):
+        return False
+    for para_o in oracle_side.get("seg_targets") or []:
+        s_o = _cstring_at(oracle_image, para_o * 16 + oracle_off)
+        if s_o is None or len(s_o) < 4 or not any(0x20 <= b <= 0x7E for b in s_o):
+            continue
+        for para_c in candidate_side.get("seg_targets") or []:
+            if _cstring_at(candidate_image, para_c * 16 + candidate_off) == s_o:
+                return True
+    return False
+
+
+def _seg_register_far_pointer_pairs(
+    oracle_instructions: list[dict[str, Any]],
+    candidate_instructions: list[dict[str, Any]],
+    image_context: dict[str, dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Normalize ``push segr`` + ``push off`` far-pointer args with proven-equal strings.
+
+    ``play_sound("swish", 15)`` pushes the volume, ``ds``, then the string
+    offset — the offset differs across layouts while the segment register is
+    identical.  A lone differing push is only normalized when the bytes it
+    addresses in each image are proven equal via the relocation-table segment
+    targets (see ``_seg_pointer_string_equal``); a genuinely different string
+    stays compared.
+    """
+    if image_context is None:
+        return []
+    call_mnemonics = {"call", "lcall"}
+    if not any(str(item.get("mnemonic", "")).lower() in call_mnemonics for item in oracle_instructions):
+        return []
+    if not any(str(item.get("mnemonic", "")).lower() in call_mnemonics for item in candidate_instructions):
+        return []
+    pairs: list[dict[str, Any]] = []
+    for index, (oracle, candidate) in enumerate(zip(oracle_instructions, candidate_instructions, strict=False)):
+        oracle_value = _push_immediate(oracle)
+        candidate_value = _push_immediate(candidate)
+        if oracle_value is None or candidate_value is None:
+            continue
+        oracle_off = oracle_value & 0xFFFF
+        candidate_off = candidate_value & 0xFFFF
+        if oracle_off == candidate_off:
+            continue
+        seg_adjacent = False
+        for neighbor in (index - 1, index + 1):
+            if not (0 <= neighbor < len(oracle_instructions)):
+                continue
+            for reg in _SEGMENT_PUSH_REGS:
+                if _pushes_register(oracle_instructions[neighbor], reg) and _pushes_register(
+                    candidate_instructions[neighbor], reg
+                ):
+                    seg_adjacent = True
+        if not seg_adjacent:
+            continue
+        if _seg_pointer_string_equal(image_context, oracle_off, candidate_off):
+            pairs.append(
+                {
+                    "oracle": oracle_off,
+                    "candidate": candidate_off,
+                    "reason": "data_string_arg",
+                }
+            )
+    return pairs
 
 
 def _call_far_pointer_push_pairs(
