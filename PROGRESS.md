@@ -1283,3 +1283,10 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verified: ruff 0, mypy 0, 283 tail-validation tests pass (1 pre-existing
   switch-classification failure identical on bare HEAD), def-integrity vs
   HEAD clean, zero architecture violations against the file.
+- `inertia_decompiler/sidecar_parsers.py`: Ruff complexity debt cleared to
+  zero (6 findings). Hoisted COD entry-pattern/memory-match helpers, base
+  candidate accumulation, delta scanning, per-label CodeView reconciliation,
+  and FLAIR startup/catalog merge lanes.
+- Verified: ruff 0, mypy 0, 11 signature/sidecar tests pass, def-integrity
+  vs HEAD clean (missing names are hoisted nested defs), zero architecture
+  violations against the file.

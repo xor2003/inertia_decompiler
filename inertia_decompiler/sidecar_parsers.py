@@ -24,7 +24,7 @@ from angr_platforms.X86_16.cod_extract import (
 )
 from angr_platforms.X86_16.codeview_nb00 import parse_codeview_nb00
 from angr_platforms.X86_16.codeview_nb02_nb04 import parse_codeview_nb0204_bytes
-from angr_platforms.X86_16.flair_extract import match_flair_startup_entry
+from angr_platforms.X86_16.flair_extract import FlairStartupPattern, match_flair_startup_entry
 from angr_platforms.X86_16.ne_exe_parse import parse_ne_exe
 
 from inertia_decompiler.flair_paths import flair_signature_root
@@ -356,59 +356,12 @@ def _parse_cod_sidecar_metadata(
         delta_candidates: dict[int, int] = {}
         normalized_existing = {name.lstrip("_"): addr for addr, name in existing.items()}
 
-        def _cod_entry_pattern(entries: list[dict[str, object]]) -> tuple[int | None, ...]:
-            pattern: list[int | None] = []
-            concrete = 0
-            for entry in entries:
-                entry_bytes = entry.get("bytes")
-                if not isinstance(entry_bytes, (bytes, bytearray)) or not entry_bytes:
-                    continue
-                first = int(entry_bytes[0])
-                if first in {0xE8, 0xE9} and len(entry_bytes) >= 3:
-                    pattern.extend((first, None, None))
-                    concrete += 1
-                elif first == 0x9A and len(entry_bytes) >= 5:
-                    pattern.extend((first, None, None, None, None))
-                    concrete += 1
-                else:
-                    pattern.extend(int(byte) for byte in entry_bytes)
-                    concrete += len(entry_bytes)
-                if len(pattern) >= 24 and concrete >= 12:
-                    break
-            return tuple(pattern) if len(pattern) >= 12 and concrete >= 8 else ()
-
-        def _memory_matches_cod_pattern(memory_obj: object, candidate: int, pattern: tuple[int | None, ...]) -> bool:
-            try:
-                observed = bytes(cast(_AngrMemoryLoader8616, memory_obj).load(candidate, len(pattern)))
-            except Exception:
-                return False
-            return all(expected is None or observed[idx] == expected for idx, expected in enumerate(pattern))
-
-        for offset, name in metadata.code_labels.items():
-            existing_addr = normalized_existing.get(name.lstrip("_"))
-            if existing_addr is None:
-                continue
-            base = existing_addr - offset
-            base_candidates[base] = base_candidates.get(base, 0) + 1
+        _accumulate_base_candidates_8616(metadata, normalized_existing, base_candidates)
         if project is not None:
             # Dynamic angr boundary: project loader memory is supplied by angr backends.
             memory = getattr(getattr(project, "loader", None), "memory", None)
             if memory is not None:
-                for offset, name in metadata.code_labels.items():
-                    proc_kind = metadata.proc_kinds.get(offset, "NEAR")
-                    try:
-                        entries = extract_cod_function_entries(cod_path, name, proc_kind)
-                    except Exception:
-                        continue
-                    pattern = _cod_entry_pattern(entries)
-                    if not pattern:
-                        continue
-                    expected = load_base_linear + offset
-                    for delta in range(-0x20, 0x21):
-                        candidate = expected + delta
-                        if _memory_matches_cod_pattern(memory, candidate, pattern):
-                            delta_candidates[delta] = delta_candidates.get(delta, 0) + 1
-                            break
+                _scan_cod_base_deltas_8616(metadata, cod_path, load_base_linear, memory, delta_candidates)
         cod_linear_base = load_base_linear
         if base_candidates:
             cod_linear_base = sorted(base_candidates.items(), key=lambda item: (-item[1], item[0]))[0][0]
@@ -426,6 +379,75 @@ def _parse_cod_sidecar_metadata(
         return CODListingMetadata(code_labels=code_labels, code_ranges=code_ranges, proc_kinds=proc_kinds)
 
     return _impl()
+
+
+def _cod_entry_pattern_8616(entries: list[dict[str, object]]) -> tuple[int | None, ...]:
+    pattern: list[int | None] = []
+    concrete = 0
+    for entry in entries:
+        entry_bytes = entry.get("bytes")
+        if not isinstance(entry_bytes, (bytes, bytearray)) or not entry_bytes:
+            continue
+        first = int(entry_bytes[0])
+        if first in {0xE8, 0xE9} and len(entry_bytes) >= 3:
+            pattern.extend((first, None, None))
+            concrete += 1
+        elif first == 0x9A and len(entry_bytes) >= 5:
+            pattern.extend((first, None, None, None, None))
+            concrete += 1
+        else:
+            pattern.extend(int(byte) for byte in entry_bytes)
+            concrete += len(entry_bytes)
+        if len(pattern) >= 24 and concrete >= 12:
+            break
+    return tuple(pattern) if len(pattern) >= 12 and concrete >= 8 else ()
+
+
+def _memory_matches_cod_pattern_8616(
+    memory_obj: object, candidate: int, pattern: tuple[int | None, ...]
+) -> bool:
+    try:
+        observed = bytes(cast(_AngrMemoryLoader8616, memory_obj).load(candidate, len(pattern)))
+    except Exception:
+        return False
+    return all(expected is None or observed[idx] == expected for idx, expected in enumerate(pattern))
+
+
+def _accumulate_base_candidates_8616(
+    metadata: CODListingMetadata,
+    normalized_existing: dict[str, int],
+    base_candidates: dict[int, int],
+) -> None:
+    for offset, name in metadata.code_labels.items():
+        existing_addr = normalized_existing.get(name.lstrip("_"))
+        if existing_addr is None:
+            continue
+        base = existing_addr - offset
+        base_candidates[base] = base_candidates.get(base, 0) + 1
+
+
+def _scan_cod_base_deltas_8616(
+    metadata: CODListingMetadata,
+    cod_path: Path,
+    load_base_linear: int,
+    memory: object,
+    delta_candidates: dict[int, int],
+) -> None:
+    for offset, name in metadata.code_labels.items():
+        proc_kind = metadata.proc_kinds.get(offset, "NEAR")
+        try:
+            entries = extract_cod_function_entries(cod_path, name, proc_kind)
+        except Exception:
+            continue
+        pattern = _cod_entry_pattern_8616(entries)
+        if not pattern:
+            continue
+        expected = load_base_linear + offset
+        for delta in range(-0x20, 0x21):
+            candidate = expected + delta
+            if _memory_matches_cod_pattern_8616(memory, candidate, pattern):
+                delta_candidates[delta] = delta_candidates.get(delta, 0) + 1
+                break
 
 
 def _ranges_overlap_or_touch(left: tuple[int, int] | None, right: tuple[int, int] | None, *, slop: int = 0x20) -> bool:
@@ -451,31 +473,51 @@ def _reconcile_cod_listing_with_codeview(
         filtered_ranges: dict[int, tuple[int, int]] = {}
         filtered_proc_kinds: dict[int, str] = {}
         for addr, name in cod_listing.code_labels.items():
-            normalized_name = name.lstrip("_")
-            cod_range = cod_listing.code_ranges.get(addr)
-            matched_codeview_addr: int | None = None
-            for codeview_addr, codeview_range in codeview_by_name.get(normalized_name, ()):
-                if abs(codeview_addr - addr) <= 0x400 or _ranges_overlap_or_touch(cod_range, codeview_range):
-                    matched_codeview_addr = codeview_addr
-                    break
-            proc_kind = cod_listing.proc_kinds.get(addr)
-            if matched_codeview_addr is not None:
-                filtered_labels.setdefault(matched_codeview_addr, name)
-                if cod_range is not None:
-                    filtered_ranges.setdefault(matched_codeview_addr, cod_range)
-                if proc_kind is not None:
-                    filtered_proc_kinds.setdefault(matched_codeview_addr, proc_kind)
-                continue
-            filtered_labels[addr] = name
-            if cod_range is not None:
-                filtered_ranges[addr] = cod_range
-            if proc_kind is not None:
-                filtered_proc_kinds[addr] = proc_kind
+            _reconcile_cod_label_8616(
+                addr,
+                name,
+                cod_listing,
+                codeview_by_name,
+                filtered_labels,
+                filtered_ranges,
+                filtered_proc_kinds,
+            )
         return CODListingMetadata(
             code_labels=filtered_labels, code_ranges=filtered_ranges, proc_kinds=filtered_proc_kinds
         )
 
     return _impl()
+
+
+def _reconcile_cod_label_8616(
+    addr: int,
+    name: str,
+    cod_listing: CODListingMetadata,
+    codeview_by_name: dict[str, list[tuple[int, tuple[int, int] | None]]],
+    filtered_labels: dict[int, str],
+    filtered_ranges: dict[int, tuple[int, int]],
+    filtered_proc_kinds: dict[int, str],
+) -> None:
+    normalized_name = name.lstrip("_")
+    cod_range = cod_listing.code_ranges.get(addr)
+    matched_codeview_addr: int | None = None
+    for codeview_addr, codeview_range in codeview_by_name.get(normalized_name, ()):
+        if abs(codeview_addr - addr) <= 0x400 or _ranges_overlap_or_touch(cod_range, codeview_range):
+            matched_codeview_addr = codeview_addr
+            break
+    proc_kind = cod_listing.proc_kinds.get(addr)
+    if matched_codeview_addr is not None:
+        filtered_labels.setdefault(matched_codeview_addr, name)
+        if cod_range is not None:
+            filtered_ranges.setdefault(matched_codeview_addr, cod_range)
+        if proc_kind is not None:
+            filtered_proc_kinds.setdefault(matched_codeview_addr, proc_kind)
+        return
+    filtered_labels[addr] = name
+    if cod_range is not None:
+        filtered_ranges[addr] = cod_range
+    if proc_kind is not None:
+        filtered_proc_kinds[addr] = proc_kind
 
 
 def _detect_flair_metadata(
@@ -502,67 +544,110 @@ def _detect_flair_metadata(
         matched_compiler_names: list[str] = []
         source_parts: list[str] = []
 
-        def _remember_compiler(name: str | None) -> None:
-            if not name:
-                return
-            normalized = name.strip()
-            if normalized and normalized not in matched_compiler_names:
-                matched_compiler_names.append(normalized)
-
         startup_matches = match_flair_startup_entry(entry_bytes, flair_root)
         startup_pat_result = _match_flair_startup_pat_functions(
             project,
             flair_root,
             backend=pat_backend,
         )
-        startup_pat_labels, startup_pat_ranges, startup_pat_compiler_names = startup_pat_result
-        if startup_pat_labels or startup_pat_ranges:
-            source_parts.append("startup_flair_pat")
-            for compiler_name in startup_pat_compiler_names:
-                _remember_compiler(compiler_name)
-            for addr, name in startup_pat_labels.items():
-                code_labels.setdefault(addr, name)
-            for addr, span in startup_pat_ranges.items():
-                code_ranges.setdefault(addr, span)
-        elif startup_matches:
-            source_parts.append("startup_flair_pat")
-            first = startup_matches[0]
-            _remember_compiler(first.compiler_tag)
-            for offset, name in first.public_names:
-                linear = project.entry + offset
-                code_labels.setdefault(linear, name.lstrip("_"))
-            if first.public_names:
-                first_offset = min(offset for offset, _name in first.public_names)
-                start = project.entry + first_offset
-                code_ranges.setdefault(start, (start, start + 0x100))
-        if startup_matches:
-            # Dynamic angr boundary: project metadata is attached to the live angr project.
-            typing.cast(typing.Any, project)._inertia_flair_startup_matches = tuple(match.pat_path for match in startup_matches)
-            for match in startup_matches:
-                _remember_compiler(match.compiler_tag)
+        _merge_startup_flair_evidence_8616(
+            project,
+            startup_matches,
+            startup_pat_result,
+            code_labels,
+            code_ranges,
+            matched_compiler_names,
+            source_parts,
+        )
         if signature_catalog is not None:
-            catalog_matches = match_signature_catalog(
+            _merge_signature_catalog_8616(
                 signature_catalog,
                 binary,
                 project,
-                backend=pat_backend,
-                compiler_names=tuple(matched_compiler_names),
+                pat_backend,
+                matched_compiler_names,
+                code_labels,
+                code_ranges,
+                source_parts,
             )
-            if catalog_matches.code_labels or catalog_matches.code_ranges:
-                for addr, name in catalog_matches.code_labels.items():
-                    code_labels.setdefault(addr, name)
-                for addr, span in catalog_matches.code_ranges.items():
-                    code_ranges.setdefault(addr, span)
-                source_parts.extend(catalog_matches.source_formats)
-            # Dynamic compatibility boundary: catalog match objects may come from older helpers.
-            for compiler_name in getattr(catalog_matches, "matched_compiler_names", ()):
-                _remember_compiler(compiler_name)
         if matched_compiler_names:
             # Dynamic angr boundary: project metadata is attached to the live angr project.
             typing.cast(typing.Any, project)._inertia_signature_compiler_names = tuple(matched_compiler_names)
         return code_labels, code_ranges, tuple(source_parts)
 
     return _impl()
+
+
+def _remember_compiler_8616(matched_compiler_names: list[str], name: str | None) -> None:
+    if not name:
+        return
+    normalized = name.strip()
+    if normalized and normalized not in matched_compiler_names:
+        matched_compiler_names.append(normalized)
+
+
+def _merge_startup_flair_evidence_8616(
+    project: angr.Project,
+    startup_matches: tuple[FlairStartupPattern, ...],
+    startup_pat_result: tuple[dict[int, str], dict[int, tuple[int, int]], tuple[str, ...]],
+    code_labels: dict[int, str],
+    code_ranges: dict[int, tuple[int, int]],
+    matched_compiler_names: list[str],
+    source_parts: list[str],
+) -> None:
+    startup_pat_labels, startup_pat_ranges, startup_pat_compiler_names = startup_pat_result
+    if startup_pat_labels or startup_pat_ranges:
+        source_parts.append("startup_flair_pat")
+        for compiler_name in startup_pat_compiler_names:
+            _remember_compiler_8616(matched_compiler_names, compiler_name)
+        for addr, name in startup_pat_labels.items():
+            code_labels.setdefault(addr, name)
+        for addr, span in startup_pat_ranges.items():
+            code_ranges.setdefault(addr, span)
+    elif startup_matches:
+        source_parts.append("startup_flair_pat")
+        first = startup_matches[0]
+        _remember_compiler_8616(matched_compiler_names, first.compiler_tag)
+        for offset, name in first.public_names:
+            linear = project.entry + offset
+            code_labels.setdefault(linear, name.lstrip("_"))
+        if first.public_names:
+            first_offset = min(offset for offset, _name in first.public_names)
+            start = project.entry + first_offset
+            code_ranges.setdefault(start, (start, start + 0x100))
+    if startup_matches:
+        # Dynamic angr boundary: project metadata is attached to the live angr project.
+        typing.cast(typing.Any, project)._inertia_flair_startup_matches = tuple(match.pat_path for match in startup_matches)
+        for match in startup_matches:
+            _remember_compiler_8616(matched_compiler_names, match.compiler_tag)
+
+
+def _merge_signature_catalog_8616(
+    signature_catalog: Path,
+    binary: Path,
+    project: angr.Project,
+    pat_backend: str | None,
+    matched_compiler_names: list[str],
+    code_labels: dict[int, str],
+    code_ranges: dict[int, tuple[int, int]],
+    source_parts: list[str],
+) -> None:
+    catalog_matches = match_signature_catalog(
+        signature_catalog,
+        binary,
+        project,
+        backend=pat_backend,
+        compiler_names=tuple(matched_compiler_names),
+    )
+    if catalog_matches.code_labels or catalog_matches.code_ranges:
+        for addr, name in catalog_matches.code_labels.items():
+            code_labels.setdefault(addr, name)
+        for addr, span in catalog_matches.code_ranges.items():
+            code_ranges.setdefault(addr, span)
+        source_parts.extend(catalog_matches.source_formats)
+    # Dynamic compatibility boundary: catalog match objects may come from older helpers.
+    for compiler_name in getattr(catalog_matches, "matched_compiler_names", ()):
+        _remember_compiler_8616(matched_compiler_names, compiler_name)
 
 
 @lru_cache(maxsize=1)
