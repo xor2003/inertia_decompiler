@@ -366,14 +366,20 @@ def _resolve_mapped_candidate_by_id(
 ) -> dict[str, Any] | None:
     """Resolve a mapped candidate through candidate_id-keyed tables."""
     candidate_function = None
+    exact_signature = _ssa_exact_block_signature(oracle_function)
+    exact_candidate = (
+        tables.by_id_exact_signature.get((str(mapped.get("candidate_id")), exact_signature))
+        if exact_signature is not None
+        else None
+    )
     if part_delta:
         candidate_function = tables.by_id_delta.get((str(mapped.get("candidate_id")), part_delta))
+        # An identical byte stream elsewhere in the mapped function is strictly
+        # stronger evidence than a coincidental equal entry offset.
+        if candidate_function is not None and exact_candidate is not None and exact_candidate is not candidate_function:
+            candidate_function = exact_candidate
     if candidate_function is None:
-        exact_signature = _ssa_exact_block_signature(oracle_function)
-        if exact_signature is not None:
-            candidate_function = tables.by_id_exact_signature.get(
-                (str(mapped.get("candidate_id")), exact_signature)
-            )
+        candidate_function = exact_candidate
     if candidate_function is None:
         signature = _ssa_block_signature(oracle_function)
         if signature is not None:
@@ -394,12 +400,20 @@ def _resolve_mapped_candidate_by_name(
     """Resolve a mapped candidate through candidate_name-keyed tables."""
     candidate_name = str(mapped.get("candidate_name", ""))
     candidate_function = None
+    exact_signature = _ssa_exact_block_signature(oracle_function)
+    exact_candidate = (
+        tables.by_key_exact_signature.get((candidate_name, exact_signature))
+        if exact_signature is not None
+        else None
+    )
     if part_delta:
         candidate_function = tables.by_key_delta.get((candidate_name, part_delta))
+        # An identical byte stream elsewhere in the mapped function is strictly
+        # stronger evidence than a coincidental equal entry offset.
+        if candidate_function is not None and exact_candidate is not None and exact_candidate is not candidate_function:
+            candidate_function = exact_candidate
     if candidate_function is None:
-        exact_signature = _ssa_exact_block_signature(oracle_function)
-        if exact_signature is not None:
-            candidate_function = tables.by_key_exact_signature.get((candidate_name, exact_signature))
+        candidate_function = exact_candidate
     if candidate_function is None:
         signature = _ssa_block_signature(oracle_function)
         if signature is not None:
@@ -454,12 +468,20 @@ def _resolve_keyed_candidate(
     part_index = _ssa_part_index(oracle_function)
     part_delta = _ssa_part_delta(oracle_function)
     candidate_function = None
+    exact_signature = _ssa_exact_block_signature(oracle_function)
+    exact_candidate = (
+        tables.by_key_exact_signature.get((function_key, exact_signature))
+        if exact_signature is not None
+        else None
+    )
     if part_delta:
         candidate_function = tables.by_key_delta.get((function_key, part_delta))
+        # An identical byte stream elsewhere in the mapped function is strictly
+        # stronger evidence than a coincidental equal entry offset.
+        if candidate_function is not None and exact_candidate is not None and exact_candidate is not candidate_function:
+            candidate_function = exact_candidate
     if candidate_function is None:
-        exact_signature = _ssa_exact_block_signature(oracle_function)
-        if exact_signature is not None:
-            candidate_function = tables.by_key_exact_signature.get((function_key, exact_signature))
+        candidate_function = exact_candidate
     if candidate_function is None:
         signature = _ssa_block_signature(oracle_function)
         if signature is not None:
@@ -4121,12 +4143,16 @@ def _compare_ssa_pair(
         candidate_lib = str(candidate_resolved.get("id") or "").startswith("library-signature:")
         both_unresolved = not oracle_target.get("resolved") and not candidate_target.get("resolved")
         both_resolved = bool(oracle_target.get("resolved")) and bool(candidate_target.get("resolved"))
-        if (oracle_lib and candidate_lib) or both_unresolved or both_resolved:
-            detail = (
-                "direct call resolves to unmapped runtime stubs in both binaries; equivalence cannot be proven"
-                if ((oracle_lib and candidate_lib) or both_unresolved)
-                else "direct calls resolve to functions whose equivalence is unproven; callee-level compare owns the verdict"
-            )
+        divergent = call_compare.get("reason") == "direct call targets resolve to different mapped functions"
+        if divergent:
+            detail = None
+        elif (oracle_lib and candidate_lib) or both_unresolved:
+            detail = "direct call resolves to unmapped runtime stubs in both binaries; equivalence cannot be proven"
+        elif both_resolved:
+            detail = "direct calls resolve to functions whose equivalence is unproven; callee-level compare owns the verdict"
+        else:
+            detail = "one direct call target resolved and the other did not; equivalence cannot be proven"
+        if detail is not None:
             return (
                 {
                     **base,
@@ -9797,7 +9823,10 @@ def _resolve_call_target(
     if raw is None:
         return {"kind": "unresolved", "reason": "call target is not a direct constant"}
     target, aliases, alias_reason = _function_for_call_target(
-        raw, index, allow_aliased_call_targets=allow_aliased_call_targets
+        raw,
+        index,
+        allow_aliased_call_targets=allow_aliased_call_targets,
+        rendered_linear=_rendered_call_target_linear(function),
     )
     detail = {
         "kind": "direct",
@@ -9869,13 +9898,40 @@ def _direct_call_target_from_instructions(source: dict[str, Any]) -> int | None:
     return _optional_int(operand)
 
 
+def _rendered_call_target_linear(function: dict[str, Any]) -> int | None:
+    """Absolute target linear rendered in the final instruction's operand text.
+
+    The lifter renders ``call``/``jmp`` immediates as the computed absolute
+    linear (``call 0x116c8``), which is authoritative when it exceeds 16 bits.
+    """
+    source = function.get("source", {}) if isinstance(function.get("source"), dict) else {}
+    instructions = [item for item in source.get("instructions", []) or [] if isinstance(item, dict)]
+    if not instructions:
+        return None
+    operand = str(instructions[-1].get("op_str") or _operand_from_disassembly(instructions[-1])).strip().lower()
+    if not operand or any(token in operand for token in ("[", "]", ",", ":")):
+        return None
+    if operand.startswith("far "):
+        operand = operand[4:].strip()
+    value = _optional_int(operand)
+    return value if value is not None and value > 0xFFFF else None
+
+
 def _function_for_call_target(
     raw: int,
     index: dict[str, dict[Any, dict[str, Any]]],
     *,
     allow_aliased_call_targets: bool,
+    rendered_linear: int | None = None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None]:
     low16 = raw & 0xFFFF
+    if rendered_linear is not None:
+        hit = _call_target_lookup(
+            index, "by_linear", "by_linear_all", rendered_linear,
+            allow_aliased=allow_aliased_call_targets,
+        )
+        if hit is not None:
+            return hit
     for unique_table, all_table, key in (
         ("by_linear", "by_linear_all", raw),
         ("by_linear_low16", "by_linear_low16_all", low16),
