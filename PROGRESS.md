@@ -8,6 +8,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Fresh profiled `inc_one` diagnostic validates exit0, generated C byte-identical
+  to the earlier accepted diagnostic artifact; 58.37s profiled worker time has
+  14.77s Structuring baseline and 10.20s rewrite-loop cumulative costs. Fresh
+  normal-budget retry still exits3 after 127.35s, starting decompilation with
+  only 13s left. Full-process profile under normal functional deadline is active
+  at `.cache/full-process-normal-001.{c,err}`. No full DOS round trip/witness.
+
 - Startup stacks identify a missing current-generation PAT spec cache, not a
   stalled analysis worker. Existing cache owner builds 49,283 specs in 115.54s.
   Fresh normal-budget replay then reaches recovery but times out (118.80s,
@@ -1657,3 +1664,11 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verified: ruff 0, mypy 0, 93 callsite-prototype/identity tests pass
   (1 pre-existing cache-surface failure reproduced on bare HEAD),
   def-integrity vs HEAD clean, zero architecture violations.
+- `angr_platforms/angr_platforms/X86_16/lowering/balanced_memory_stack_restore.py`:
+  Ruff debt cleared to zero (5 findings). Split immediate-transfer pairing
+  into push-entry/pop-transfer lanes, container matching into match/insert/
+  read-replacement lanes, structured pairing into window-scan and ordered-
+  candidate lanes, and pair rebinding into exemplar selection, pop rewrite,
+  and word-push lanes; deltas returned as typed tuples.
+- Verified: ruff 0, mypy 0, 7 balanced-restore tests pass, def-integrity
+  vs HEAD clean, zero architecture violations.
