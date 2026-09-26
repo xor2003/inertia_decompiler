@@ -1170,6 +1170,17 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   `.cache/compiler-coverage/csmith-pinned-replay-{001,002}/` retains evidence;
   `.cache/csmith-build-pin-*.log` retains checks. Generation is not DOS behavioral
   acceptance; the generated round trip and bounded campaign remain open.
+
+### Source-free far-call diagnostic (2026-09-26)
+
+- Retained FPTR `apply_twice` at numeric address `0x10034` times out before
+  meaningful decompilation: 24-function ABI seeding consumes 154.04s of the
+  diagnostic 180-second budget. No tail validation or witness acceptance.
+- `.cache/sourcefree-apply-twice-current.*` retains the terminal failure. A
+  bounded stack-sampling replay is active in `sourcefree-apply-twice-stack.*`;
+  initial invalid-frame samples are insufficient to select an optimization.
+  Next action: poll that process, then profile the measured seeding boundary.
+  No production changes or relaxed routine deadlines were made.
 ## Lint debt: dce.py cleanup (2026-09-26)
 
 - `angr_platforms/X86_16/postprocess/optimization/dce.py`: Ruff complexity
@@ -1213,3 +1224,12 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verified: ruff 0, mypy 0, 13 linear-recurrence/backedge tests pass plus
   the unarched-type refusal regression, def-integrity vs HEAD clean, zero
   architecture violations against the file.
+- `inertia_decompiler/cli_stack_byte_offsets.py`: Ruff complexity debt
+  cleared to zero (8 findings, including the 260-complexity
+  `_rewrite_ss_stack_byte_offsets` wrapper). Converted the wrapper into
+  `_SsStackByteOffsetRewrite8616` (35 nested closures -> state-class methods),
+  extracted stack-pointer-alias resolution arms, SS-segment-scale checks,
+  the alias-collection fixpoint step, and collapsed three identical
+  resolve-or-materialize lanes in `transform` into shared helpers.
+- Verified: ruff 0, mypy 0, 11 stack-byte-offset tests pass, def-integrity
+  vs HEAD clean, zero architecture violations against the file.
