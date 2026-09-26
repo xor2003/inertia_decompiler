@@ -54,7 +54,7 @@ def analyze_function_complexity(  # noqa: D103
     linked_base = int(getattr(project.loader.main_object, "linked_base", 0))
     analyzed: list[dict[str, Any]] = []
     refusals: list[dict[str, Any]] = []
-    counters = {
+    counters: dict[str, Any] = {
         "functions_seen": len(functions),
         "functions_attempted": 0,
         "functions_analyzed": 0,
@@ -122,6 +122,136 @@ def analyze_function_complexity(  # noqa: D103
     return document
 
 
+def _function_scan_window(
+    function: dict[str, Any],
+    function_id: str,
+    *,
+    linked_base: int,
+    scan_limit: int,
+) -> tuple[tuple[int, int, int, int, int] | None, list[dict[str, Any]]]:
+    """Resolve the function scan window or return its refusal."""
+    entry = function.get("entry", {})
+    if not isinstance(entry, dict):
+        return None, [_refusal(function_id, "unsupported_ir", "function entry is missing")]
+    try:
+        segment_para = parse_int(entry.get("segment_para"), field="function.entry.segment_para")
+        entry_ip = parse_int(entry.get("offset"), field="function.entry.offset")
+    except DosUnitError as ex:
+        return None, [_refusal(function_id, "unsupported_ir", str(ex))]
+
+    function_base = linked_base + (segment_para << 4)
+    start = function_base + entry_ip
+    size = function.get("size")
+    limit = int(size) if isinstance(size, int) and size > 0 else scan_limit
+    limit = max(0, min(limit, scan_limit))
+    if limit <= 0:
+        return None, [_refusal(function_id, "unsupported_ir", "function size/scan limit is empty")]
+    return (segment_para, entry_ip, function_base, start, start + limit), []
+
+
+def _lift_function_block(
+    project: Any,  # noqa: ANN401
+    function_id: str,
+    at: int,
+    *,
+    start: int,
+    end: int,
+) -> tuple[list[Any], dict[str, Any] | None]:
+    """Lift one block and return its in-window instructions or a refusal."""
+    try:
+        block = project.factory.block(at, size=min(0x80, end - at), opt_level=0)
+        _ = block.vex
+    except Exception as ex:
+        return [], _refusal(
+            function_id,
+            "unsupported_ir",
+            f"lifter block failed at {normalize_hex(at)}: {type(ex).__name__}: {ex}",
+        )
+    lifted_insns = [item.insn for item in block.capstone.insns if start <= item.insn.address < end]
+    if not lifted_insns:
+        return [], _refusal(function_id, "unsupported_ir", f"lifter produced no instructions at {normalize_hex(at)}")
+    return lifted_insns, None
+
+
+def _scan_lifted_instructions(
+    lifted_insns: list[Any],
+    instructions: list[dict[str, Any]],
+    risk_points: list[dict[str, Any]],
+    seen_insns: set[int],
+    *,
+    function_base: int,
+    max_insns: int,
+    max_risk_points: int,
+) -> bool:
+    """Collect unique instruction summaries; return True when the limit is hit."""
+    for insn in lifted_insns:
+        if len(instructions) >= max_insns:
+            return True
+        if int(insn.address) in seen_insns:
+            continue
+        seen_insns.add(int(insn.address))
+        summary = _instruction_summary(insn, function_base=function_base)
+        summary["address_linear_int"] = int(insn.address)
+        instructions.append(summary)
+        _append_instruction_risk_points(risk_points, summary=summary, max_risk_points=max_risk_points)
+    return False
+
+
+def _scan_function_window(
+    *,
+    project: Any,  # noqa: ANN401
+    function_id: str,
+    function_base: int,
+    start: int,
+    end: int,
+    max_blocks: int,
+    max_insns: int,
+    max_risk_points: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int, bool, set[int]]:
+    """BFS-scan one function window; return instructions, risks, refusals."""
+    pending = [start]
+    seen_blocks: set[int] = set()
+    seen_insns: set[int] = set()
+    instructions: list[dict[str, Any]] = []
+    risk_points: list[dict[str, Any]] = []
+    refusals: list[dict[str, Any]] = []
+    blocks_lifted = 0
+    analysis_limited = False
+
+    while pending and len(seen_blocks) < max_blocks and len(instructions) < max_insns:
+        at = pending.pop(0)
+        if at < start or at >= end or at in seen_blocks:
+            continue
+        seen_blocks.add(at)
+        lifted_insns, refusal = _lift_function_block(project, function_id, at, start=start, end=end)
+        if refusal is not None:
+            refusals.append(refusal)
+            continue
+        blocks_lifted += 1
+        if _scan_lifted_instructions(
+            lifted_insns,
+            instructions,
+            risk_points,
+            seen_insns,
+            function_base=function_base,
+            max_insns=max_insns,
+            max_risk_points=max_risk_points,
+        ):
+            analysis_limited = True
+
+        successors = _successors_from_block(lifted_insns, start=start, end=end)
+        for successor in successors:
+            if successor not in seen_blocks and successor not in pending:
+                pending.append(successor)
+
+    if pending or len(seen_blocks) >= max_blocks or len(instructions) >= max_insns:
+        analysis_limited = True
+        refusals.append(_refusal(function_id, "unsupported_ir", "complexity scan reached block/instruction limit"))
+    return instructions, risk_points, refusals, blocks_lifted, analysis_limited, seen_blocks
+
+
+
+
 def _analyze_one_function(
     *,
     project: Any,  # noqa: ANN401
@@ -138,78 +268,26 @@ def _analyze_one_function(
     function_id = str(function.get("id", "<unknown>"))
     names = function.get("names", []) if isinstance(function.get("names"), list) else []
     function_name = str(names[0]) if names else function_id
-    entry = function.get("entry", {})
-    if not isinstance(entry, dict):
-        return None, [_refusal(function_id, "unsupported_ir", "function entry is missing")], 0
-    try:
-        segment_para = parse_int(entry.get("segment_para"), field="function.entry.segment_para")
-        entry_ip = parse_int(entry.get("offset"), field="function.entry.offset")
-    except DosUnitError as ex:
-        return None, [_refusal(function_id, "unsupported_ir", str(ex))], 0
+    window, window_refusals = _function_scan_window(
+        function,
+        function_id,
+        linked_base=linked_base,
+        scan_limit=scan_limit,
+    )
+    if window is None:
+        return None, window_refusals, 0
+    segment_para, entry_ip, function_base, start, end = window
 
-    function_base = linked_base + (segment_para << 4)
-    start = function_base + entry_ip
-    size = function.get("size")
-    limit = int(size) if isinstance(size, int) and size > 0 else scan_limit
-    limit = max(0, min(limit, scan_limit))
-    if limit <= 0:
-        return None, [_refusal(function_id, "unsupported_ir", "function size/scan limit is empty")], 0
-
-    end = start + limit
-    pending = [start]
-    seen_blocks: set[int] = set()
-    seen_insns: set[int] = set()
-    instructions: list[dict[str, Any]] = []
-    risk_points: list[dict[str, Any]] = []
-    refusals: list[dict[str, Any]] = []
-    blocks_lifted = 0
-    analysis_limited = False
-
-    while pending and len(seen_blocks) < max_blocks and len(instructions) < max_insns:
-        at = pending.pop(0)
-        if at < start or at >= end or at in seen_blocks:
-            continue
-        seen_blocks.add(at)
-        try:
-            block = project.factory.block(at, size=min(0x80, end - at), opt_level=0)
-            _ = block.vex
-        except Exception as ex:
-            refusals.append(
-                _refusal(
-                    function_id,
-                    "unsupported_ir",
-                    f"lifter block failed at {normalize_hex(at)}: {type(ex).__name__}: {ex}",
-                )
-            )
-            continue
-        blocks_lifted += 1
-        lifted_insns = [item.insn for item in block.capstone.insns if start <= item.insn.address < end]
-        if not lifted_insns:
-            refusals.append(
-                _refusal(function_id, "unsupported_ir", f"lifter produced no instructions at {normalize_hex(at)}")
-            )
-            continue
-
-        for insn in lifted_insns:
-            if len(instructions) >= max_insns:
-                analysis_limited = True
-                break
-            if int(insn.address) in seen_insns:
-                continue
-            seen_insns.add(int(insn.address))
-            summary = _instruction_summary(insn, function_base=function_base)
-            summary["address_linear_int"] = int(insn.address)
-            instructions.append(summary)
-            _append_instruction_risk_points(risk_points, summary=summary, max_risk_points=max_risk_points)
-
-        successors = _successors_from_block(lifted_insns, start=start, end=end)
-        for successor in successors:
-            if successor not in seen_blocks and successor not in pending:
-                pending.append(successor)
-
-    if pending or len(seen_blocks) >= max_blocks or len(instructions) >= max_insns:
-        analysis_limited = True
-        refusals.append(_refusal(function_id, "unsupported_ir", "complexity scan reached block/instruction limit"))
+    instructions, risk_points, refusals, blocks_lifted, analysis_limited, seen_blocks = _scan_function_window(
+        project=project,
+        function_id=function_id,
+        function_base=function_base,
+        start=start,
+        end=end,
+        max_blocks=max_blocks,
+        max_insns=max_insns,
+        max_risk_points=max_risk_points,
+    )
 
     if not instructions:
         if not refusals:
@@ -260,7 +338,9 @@ def _analyze_one_function(
             _sample_instruction(instruction) for instruction in instructions[: min(8, len(instructions))]
         ],
     }
-    for instruction in result_without_id["sample_instructions"]:
+    sample_instructions = result_without_id["sample_instructions"]
+    assert isinstance(sample_instructions, list)
+    for instruction in sample_instructions:
         instruction.pop("address_linear_int", None)
     result = dict(result_without_id)
     result["id"] = stable_id("complexity-function", result_without_id)
@@ -297,61 +377,91 @@ def _compute_metrics(instructions: list[dict[str, Any]]) -> dict[str, int]:
         mnemonic = str(instruction.get("mnemonic", "")).lower()
         control = instruction.get("control", {})
         control_kind = str(control.get("kind", "none"))
-        if control_kind == "conditional_branch" or mnemonic in LOOP_MNEMONICS:
-            metrics["condition_count"] += 1
-            metrics["branch_count"] += 1
-        elif control_kind == "jump":
-            metrics["jump_count"] += 1
-            metrics["branch_count"] += 1
-        if mnemonic in CALL_MNEMONICS:
-            metrics["call_count"] += 1
-            if control.get("target") is None:
-                metrics["indirect_control_count"] += 1
-        if mnemonic in INTERRUPT_MNEMONICS:
-            metrics["interrupt_count"] += 1
-        if mnemonic in RETURN_MNEMONICS:
-            metrics["return_count"] += 1
-            metrics["has_return"] = 1
-        if mnemonic in JUMP_MNEMONICS and control.get("target") is None:
-            metrics["indirect_control_count"] += 1
-        if control_kind == "conditional_branch" and control.get("target") is None:
-            metrics["indirect_control_count"] += 1
-        if mnemonic in LOOP_MNEMONICS:
-            metrics["loop_like_count"] += 1
-        if _is_string_mnemonic(mnemonic):
-            metrics["string_instruction_count"] += 1
-        if mnemonic in MUL_DIV_MNEMONICS:
-            metrics["mul_div_count"] += 1
-        if _is_variable_shift(instruction):
-            metrics["variable_shift_count"] += 1
-        if _uses_partial_register(instruction):
-            metrics["partial_register_count"] += 1
-
-        effects = instruction.get("effects", {})
-        memory_reads = list(effects.get("memory_read", []) or [])
-        memory_writes = list(effects.get("memory_written", []) or [])
-        metrics["memory_read_count"] += len(memory_reads)
-        metrics["memory_write_count"] += len(memory_writes)
-        for memory in memory_reads:
-            if not memory.get("implicit"):
-                metrics["explicit_memory_read_count"] += 1
-                if memory.get("base") or memory.get("index"):
-                    metrics["explicit_symbolic_memory_count"] += 1
-                if str(memory.get("space", "")).upper() in SEGMENT_SENSITIVE_SPACES or memory.get("explicit_segment"):
-                    metrics["segment_sensitive_memory_count"] += 1
-        for memory in memory_writes:
-            if not memory.get("implicit"):
-                metrics["explicit_memory_write_count"] += 1
-                if memory.get("base") or memory.get("index"):
-                    metrics["explicit_symbolic_memory_count"] += 1
-                if str(memory.get("space", "")).upper() in SEGMENT_SENSITIVE_SPACES or memory.get("explicit_segment"):
-                    metrics["segment_sensitive_memory_count"] += 1
-        metrics["flag_read_count"] += len(effects.get("flags_read", []) or [])
-        metrics["flag_write_count"] += len(effects.get("flags_written", []) or [])
+        _accumulate_control_metrics(metrics, instruction, mnemonic, control, control_kind)
+        _accumulate_effect_metrics(metrics, instruction)
 
         if _is_backward_control(instruction):
             metrics["backward_branch_count"] += 1
     return metrics
+
+
+def _accumulate_branch_metrics(
+    metrics: dict[str, int],
+    mnemonic: str,
+    control: dict[str, Any],
+    control_kind: str,
+) -> None:
+    """Accumulate branch, call, and indirect-control counters."""
+    if control_kind == "conditional_branch" or mnemonic in LOOP_MNEMONICS:
+        metrics["condition_count"] += 1
+        metrics["branch_count"] += 1
+    elif control_kind == "jump":
+        metrics["jump_count"] += 1
+        metrics["branch_count"] += 1
+    if mnemonic in CALL_MNEMONICS:
+        metrics["call_count"] += 1
+        if control.get("target") is None:
+            metrics["indirect_control_count"] += 1
+    if mnemonic in INTERRUPT_MNEMONICS:
+        metrics["interrupt_count"] += 1
+    if mnemonic in RETURN_MNEMONICS:
+        metrics["return_count"] += 1
+        metrics["has_return"] = 1
+    if mnemonic in JUMP_MNEMONICS and control.get("target") is None:
+        metrics["indirect_control_count"] += 1
+    if control_kind == "conditional_branch" and control.get("target") is None:
+        metrics["indirect_control_count"] += 1
+    if mnemonic in LOOP_MNEMONICS:
+        metrics["loop_like_count"] += 1
+
+
+def _accumulate_control_metrics(
+    metrics: dict[str, int],
+    instruction: dict[str, Any],
+    mnemonic: str,
+    control: dict[str, Any],
+    control_kind: str,
+) -> None:
+    """Accumulate the control-flow and opcode-class counters."""
+    _accumulate_branch_metrics(metrics, mnemonic, control, control_kind)
+    if _is_string_mnemonic(mnemonic):
+        metrics["string_instruction_count"] += 1
+    if mnemonic in MUL_DIV_MNEMONICS:
+        metrics["mul_div_count"] += 1
+    if _is_variable_shift(instruction):
+        metrics["variable_shift_count"] += 1
+    if _uses_partial_register(instruction):
+        metrics["partial_register_count"] += 1
+
+
+def _accumulate_memory_effects(
+    metrics: dict[str, int],
+    memories: list[dict[str, Any]],
+    *,
+    explicit_key: str,
+) -> None:
+    """Accumulate explicit/symbolic/segment-sensitive memory counters."""
+    for memory in memories:
+        if memory.get("implicit"):
+            continue
+        metrics[explicit_key] += 1
+        if memory.get("base") or memory.get("index"):
+            metrics["explicit_symbolic_memory_count"] += 1
+        if str(memory.get("space", "")).upper() in SEGMENT_SENSITIVE_SPACES or memory.get("explicit_segment"):
+            metrics["segment_sensitive_memory_count"] += 1
+
+
+def _accumulate_effect_metrics(metrics: dict[str, int], instruction: dict[str, Any]) -> None:
+    """Accumulate the memory and flag effect counters."""
+    effects = instruction.get("effects", {})
+    memory_reads = list(effects.get("memory_read", []) or [])
+    memory_writes = list(effects.get("memory_written", []) or [])
+    metrics["memory_read_count"] += len(memory_reads)
+    metrics["memory_write_count"] += len(memory_writes)
+    _accumulate_memory_effects(metrics, memory_reads, explicit_key="explicit_memory_read_count")
+    _accumulate_memory_effects(metrics, memory_writes, explicit_key="explicit_memory_write_count")
+    metrics["flag_read_count"] += len(effects.get("flags_read", []) or [])
+    metrics["flag_write_count"] += len(effects.get("flags_written", []) or [])
 
 
 def _risk_summary(metrics: dict[str, int]) -> dict[str, Any]:
@@ -453,12 +563,8 @@ def _comparison_parts(
     return [part]
 
 
-def _append_instruction_risk_points(
-    risk_points: list[dict[str, Any]], *, summary: dict[str, Any], max_risk_points: int
-) -> None:
-    if len(risk_points) >= max_risk_points:
-        return
-    mnemonic = str(summary.get("mnemonic", "")).lower()
+def _control_risk_kinds(summary: dict[str, Any], mnemonic: str) -> list[str]:
+    """Return control-flow risk kinds for one instruction summary."""
     kinds: list[str] = []
     control_kind = str(summary.get("control", {}).get("kind", "none"))
     if control_kind == "conditional_branch" or mnemonic in LOOP_MNEMONICS:
@@ -471,6 +577,12 @@ def _append_instruction_risk_points(
         kinds.append("indirect_control")
     if _is_backward_control(summary):
         kinds.append("backward_branch")
+    return kinds
+
+
+def _data_risk_kinds(summary: dict[str, Any], mnemonic: str) -> list[str]:
+    """Return data-path and memory risk kinds for one instruction summary."""
+    kinds: list[str] = []
     if _is_variable_shift(summary):
         kinds.append("variable_shift")
     if mnemonic in MUL_DIV_MNEMONICS:
@@ -486,6 +598,18 @@ def _append_instruction_risk_points(
         if memory.get("base") or memory.get("index"):
             kinds.append("symbolic_memory")
             break
+    return kinds
+
+
+
+
+def _append_instruction_risk_points(
+    risk_points: list[dict[str, Any]], *, summary: dict[str, Any], max_risk_points: int
+) -> None:
+    if len(risk_points) >= max_risk_points:
+        return
+    mnemonic = str(summary.get("mnemonic", "")).lower()
+    kinds = _control_risk_kinds(summary, mnemonic) + _data_risk_kinds(summary, mnemonic)
     if not kinds:
         return
     risk_points.append(
@@ -534,7 +658,7 @@ def _is_backward_control(instruction: dict[str, Any]) -> bool:
         target_int = parse_int(target, field="control.target")
     except DosUnitError:
         return False
-    return target_int < int(instruction.get("address_linear_int", 0))
+    return bool(target_int < int(instruction.get("address_linear_int", 0)))
 
 
 def _is_variable_shift(instruction: dict[str, Any]) -> bool:

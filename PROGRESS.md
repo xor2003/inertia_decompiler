@@ -1727,3 +1727,10 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   print lanes, and PAT wildcard operand lanes.
 - Verified: ruff 0, mypy 0, 4 msc6-compat tests pass, `--help` parses on both
   CLIs, def-integrity vs HEAD clean.
+- `tools/dosunit/complexity.py`: Ruff debt cleared to zero (3 findings).
+  Extracted scan-window resolution, lifter block lift, per-block
+  instruction scan, branch/opcode/effect metric lanes, and control/data
+  risk-kind lanes. Also fixed pre-existing mypy debt in the module
+  (counters annotation, sample-instructions narrowing, bool return).
+- Verified: ruff 0, mypy 0 (10 pre-existing errors also cleared), 4
+  dosunit complexity tests pass, def-integrity vs HEAD clean.
