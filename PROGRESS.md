@@ -8,6 +8,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Partial batch retry now preserves accepted bodies and original order, while
+  retrying only missing/failed jobs. Source-free nonzero exits are refused;
+  shared acceptance also requires an explicit clean/passed whole-tail verdict.
+  Five before failures and one follow-up unknown-verdict failure; all 101
+  adapter/policy tests pass after (57.64s). Full DOS replay is active in
+  `.cache/compiler-coverage/sourcefree-far-batch-partial-001/`; no new witness.
+
 - Source-free address targets now use the existing batch job-file path with
   local sidecars and alternate-source recovery disabled, normal isolation
   retained. Two before failures; 95 adapter/policy tests pass after (54.20s).
@@ -15,6 +22,12 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   quality-dev exits2 on broader findings. Full DOS round trip is active at
   `.cache/compiler-coverage/sourcefree-far-batch-001/`. No witness or measured
   end-to-end speedup yet.
+
+- The full batch adapter subsequently terminates `timed_out`: three batch
+  functions validate, three time out, and serial fallback does not finish.
+  Host load was about 28 on 8 CPUs. Recovery samples show CFG/lifting/emulator
+  work, not a proven isolated hotspot. Normal nested-worker stack diagnostics
+  are active in `.cache/direct-native-stacks.{c,err}`; no witness admitted.
 
 - Catalog candidate filter implemented from a measured 66.287s Python-regex
   match over 49,283 patterns. Typed necessary literals reject impossible
@@ -1358,3 +1371,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   count mismatch lane.
 - Verified: ruff 0, mypy 0, 74 validation-call tests pass, def-integrity vs
   HEAD clean, zero architecture violations against the file.
+- `angr_platforms/angr_platforms/X86_16/verification_80286.py`: Ruff
+  complexity debt cleared to zero (6 findings). Split the manual
+  control-flow simulator into a per-opcode dispatch table with typed
+  handlers (prefix scan, HLT, loop family, jumps, near/far calls,
+  interrupts, IRET/RET variants, FF-group indirect forms), split
+  `_compare_case` into register/RAM comparison lanes, and split
+  `verify_case` into instruction-bytes/exception, relocated-IP retry,
+  and repeated-string completion lanes.
+- Verified: ruff 0, mypy 0, 75 80286-verifier tests pass, def-integrity
+  vs HEAD clean, zero architecture violations against the file.
