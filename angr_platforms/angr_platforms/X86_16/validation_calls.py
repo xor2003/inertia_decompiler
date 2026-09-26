@@ -622,7 +622,7 @@ def _parameter_bp_offset_8616(
         and projected_argument.size == variable.size
     ):
         return cast(int | None, projected_argument.machine_bp_offset)
-    return cast(int | None, machine_bp_offset_for_stack_variable_8616(codegen, variable))
+    return machine_bp_offset_for_stack_variable_8616(codegen, variable)
 
 
 def _parameter_entry_refused_8616(

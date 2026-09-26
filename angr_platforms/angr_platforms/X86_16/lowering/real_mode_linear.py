@@ -1076,8 +1076,11 @@ def _canonical_arg_offset_8616(codegen: StructuredAstValue, arg: StructuredAstVa
     arg_var = getattr(arg, "variable", None)
     if not isinstance(arg_var, SimStackVariable):
         return None
-    return _canonical_stack_offset_8616(
-        machine_bp_offset_for_stack_variable_8616(codegen, arg_var)
+    return cast(
+        "int | None",
+        _canonical_stack_offset_8616(
+            machine_bp_offset_for_stack_variable_8616(codegen, arg_var)
+        ),
     )
 
 
@@ -1783,7 +1786,7 @@ def _bp_offset_of_stack_variable_8616(
     """Resolve a canonical BP offset for a SimStackVariable, or None."""
     if not isinstance(variable, SimStackVariable) or getattr(variable, "base", None) != "bp":
         return None
-    return _canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, variable))
+    return cast("int | None", _canonical_stack_offset_8616(machine_bp_offset_for_stack_variable_8616(codegen, variable)))
 
 
 def _known_bp_stack_offsets_8616(codegen: StructuredAstValue) -> set[int]:
@@ -3759,7 +3762,7 @@ def _stack_offset_from_expr_8616(
         return ref_value
 
     resolved = _stack_offset_nonleaf_value_8616(node, project, codegen, seen)
-    return cast(int | None, _stack_offset_cache_record_8616(offset_cache, node_id, resolved))
+    return _stack_offset_cache_record_8616(offset_cache, node_id, resolved)
 
 
 def _log_refusal_8616(codegen: StructuredCodegenValue, kind: str, /, **details: StructuredAstValue) -> None:
@@ -3890,6 +3893,7 @@ class _SsLinearMatch8616:
 
     def _rebase_absolute_anchor_8616(self) -> None:
         """Rebase onto the wrapped anchor when the computed offset lacks proof."""
+        assert self.base_offset is not None
         absolute_displacement = (
             absolute_machine_bp_offset_from_wrapped_anchor_8616(
                 self.offset_terms[0],
@@ -3912,6 +3916,7 @@ class _SsLinearMatch8616:
 
     def _ss_offset_alias_ok_8616(self) -> bool:
         """Require stack-alias evidence for non-direct SS offset terms."""
+        assert self.base_offset is not None
         if self.segment_name != "ss" or all(
             _is_stack_offset_term_direct_8616(term) for term in self.offset_terms
         ):
@@ -3939,6 +3944,7 @@ class _SsLinearMatch8616:
 
     def _resolve_displacement_8616(self) -> None:
         """Resolve displacement, rebasing through the entry-SP anchor if needed."""
+        assert self.base_offset is not None
         self.displacement = self.base_offset + self.offset_total
         if not _has_stack_storage_evidence_for_displacement_8616(self.codegen, self.displacement, self.width):
             entry_sp_anchor = (
@@ -4030,10 +4036,7 @@ def match_stable_ss_linear_stack_access_8616(
     node: StructuredAstValue, project: AngrProjectValue, codegen: StructuredCodegenValue
 ) -> RealModeLinearStackAccess8616 | None:
     """Match a dereference of ``(ss << 4) + stack_offset`` with stack proof."""
-    return cast(
-        RealModeLinearStackAccess8616 | None,
-        _SsLinearMatch8616(node=node, project=project, codegen=codegen).match_8616(),
-    )
+    return _SsLinearMatch8616(node=node, project=project, codegen=codegen).match_8616()
 
 
 def match_stable_ds_es_linear_global_access_8616(
@@ -4347,7 +4350,7 @@ def _decode_function_insns_at_8616(
     debug = os.environ.get("INERTIA_DEBUG_CALLEE_SAVE_PRUNE") == "1"
     cache, key, cached = _decode_insn_cache_entry_8616(project, function_addr, limit, function)
     if cached is not None:
-        return cached
+        return cast("tuple[StructuredAstValue, ...]", cached)
 
     function = _resolve_decode_function_8616(project, function_addr, function)
     if function is None:
@@ -10969,9 +10972,9 @@ def _replace_tagged_register_reload_assignment_8616(
     )
     replacement_root = replacer.transform(root)
     if replacement_root is not root:
-        return replacer.placement
+        return cast("_DirectStackReloadPlacement8616", replacer.placement)
     replacer.replace_children(root)
-    return replacer.placement
+    return cast("_DirectStackReloadPlacement8616", replacer.placement)
 
 
 def _c_expr_stack_offset_8616(node: StructuredAstValue) -> int | None:
@@ -11345,7 +11348,7 @@ class _LoopIteratorRewriter8616:
         if iterator is None:
             return False
         if isinstance(iterator, structured_c.CAssignment):
-            return _assignment_lhs_stack_offset_8616(iterator) != self.target_offset
+            return bool(_assignment_lhs_stack_offset_8616(iterator) != self.target_offset)
         return True
 
     def maybe_rewrite_loop(self, loop: StructuredAstValue) -> None:
@@ -15742,6 +15745,7 @@ class _GuardedBodyStartInserter8616:
         body_range = _instruction_addr_range_in_node_8616(body, self.project, self.ins_addr, set())
         if not self._guard_match_8616(condition, body_statements, condition_range, body_range):
             return True if self.visit(body) else None
+        assert isinstance(body_statements, list) and body_range is not None
         if _insertion_point_has_stack_move_assignment_8616(
             body_statements, 0, self.dst_cvar, self.source_expr
         ):
@@ -16397,7 +16401,7 @@ class _DoWhileBodyStartInserter8616:
                 "[direct-stack-mov-insert-do-body-start] insert ins=%#x body_min=%#x "
                 "cond_min=%#x dst=%s source=%s",
                 self.ins_addr,
-                body_range[0],
+                body_range[0] if body_range is not None else -1,
                 condition_min,
                 _stack_cvar_identity_8616(self.dst_cvar),
                 _stack_cvar_identity_8616(self.source_expr),
@@ -17025,7 +17029,7 @@ def _node_reads_leaf_8616(
         return False
     seen.add(node_id)
     if isinstance(node, structured_c.CVariable):
-        return leaf_pred(node)
+        return bool(leaf_pred(node))
     if isinstance(node, structured_c.CAssignment):
         return _node_reads_leaf_8616(node.rhs, leaf_pred, seen=seen)
     if not type(node).__module__.startswith("angr.analyses.decompiler.structured_codegen"):
@@ -18769,6 +18773,7 @@ class _DirectStackMovRun8616:
 
     def _fact_begin_8616(self) -> bool:
         """Prepare destination/source expressions for one direct-stack-MOV fact."""
+        assert self.fact is not None
         self.root._inertia_stack_mov_assignment_already_present_8616 = False
         self.fact_key = _direct_stack_move_fact_key_8616(self.fact)
         self.indexed_destination = any(
@@ -18803,6 +18808,7 @@ class _DirectStackMovRun8616:
 
     def _fact_wide_call_return_arm_8616(self) -> bool:
         """Materialize the authoritative wide call-return stack-arith arm."""
+        assert self.fact is not None
         if self.fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
             required_addresses = (
                 self.fact.source_call_target,
@@ -18840,14 +18846,16 @@ class _DirectStackMovRun8616:
 
     def _stack_slot_type_rebind_allowed_8616(self) -> bool:
         """Shared width/destination gate for short-signed stack-slot type rebinding."""
+        assert self.fact is not None
         return (
             self.fact.width == 2
             and isinstance(self.dst_expr, structured_c.CVariable)
             and _prototype_arg_type_for_bp_offset_8616(self.codegen, self.fact.dst_offset) is None
         )
 
-    def _fact_stack_slot_sub_type_rebind_8616(self) -> bool:
+    def _fact_stack_slot_sub_type_rebind_8616(self) -> None:
         """Rebind short-signed types for proven stack-slot subtraction stores."""
+        assert self.fact is not None
         if (
             self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT_BINARY_EXPR
             and self.fact.source_op is DirectStackMoveExpressionOp8616.SUB
@@ -18869,8 +18877,9 @@ class _DirectStackMovRun8616:
                     if self.dst_variable is not None:
                         self.unified[self.dst_variable] = {(self.dst_expr, self.dst_expr.variable_type)}
 
-    def _fact_stack_slot_type_rebind_8616(self) -> bool:
+    def _fact_stack_slot_type_rebind_8616(self) -> None:
         """Rebind short-signed types for proven stack-slot stores."""
+        assert self.fact is not None
         if (
             self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT
             and self._stack_slot_type_rebind_allowed_8616()
@@ -18891,8 +18900,9 @@ class _DirectStackMovRun8616:
                     if self.dst_variable is not None:
                         self.unified[self.dst_variable] = {(self.dst_expr, self.dst_expr.variable_type)}
 
-    def _fact_inverse_prune_8616(self) -> bool:
+    def _fact_inverse_prune_8616(self) -> None:
         """Prune inverse stack-move artifacts produced by this definition."""
+        assert self.fact is not None
         self.inverse_pruned = _prune_inverse_stack_move_artifacts_8616(self.root, self.facts, self.fact, self.dst_cvar, self.source_expr)
         if self.inverse_pruned:
             self.stats["inverse_artifact_pruned_count"] = (
@@ -18921,6 +18931,7 @@ class _DirectStackMovRun8616:
 
     def _fact_zero_arg_call_return_arm_8616(self) -> bool:
         """Consume a zero-arg call-return fact already present in the tree."""
+        assert self.fact is not None
         if (
             self.fact.source_kind
             is DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN
@@ -18941,6 +18952,7 @@ class _DirectStackMovRun8616:
 
     def _fact_wide_return_reconcile_8616(self) -> bool:
         """Reconcile an already-materialized wide call-return assignment."""
+        assert self.fact is not None
         if self.fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
             reconciled, self.replay_pruned = _reconcile_materialized_wide_call_return_assignment_8616(
                 self.root,
@@ -18965,6 +18977,7 @@ class _DirectStackMovRun8616:
 
     def _fact_signed_idiv_reconcile_8616(self) -> bool:
         """Reconcile an already-materialized signed-idiv call order."""
+        assert self.fact is not None
         if self.fact.source_kind is DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
             self.call_order_reconciled, self.replay_pruned = (
                 _reconcile_materialized_signed_idiv_call_order_8616(
@@ -19002,6 +19015,7 @@ class _DirectStackMovRun8616:
 
     def _fact_replay_reconcile_8616(self) -> None:
         """Decide whether to replay reconciliation for idiv or segmented sources."""
+        assert self.fact is not None
         self.signed_idiv_assignment_present = _tree_has_materialized_signed_idiv_remainder_8616(
             self.root,
             self.fact,
@@ -19045,6 +19059,7 @@ class _DirectStackMovRun8616:
 
     def _fact_semantic_cast_reconcile_8616(self) -> None:
         """Reconcile semantic-cast sources with their materialized forms."""
+        assert self.fact is not None
         if isinstance(self.source_expr, CSemanticCast8616):
             cast_result = reconcile_required_assignment_cast_8616(
                 self.root,
@@ -19106,6 +19121,7 @@ class _DirectStackMovRun8616:
 
     def _fact_stale_evidence_recheck_8616(self) -> bool:
         """Recheck stale evidence and rematerialize when the write vanished."""
+        assert self.fact is not None
         if _tree_has_stack_move_assignment_8616(
             self.root,
             self.dst_expr,
@@ -19179,15 +19195,16 @@ class _DirectStackMovRun8616:
             return True
         return False
 
-    def _fact_classified_8616(self) -> bool:
+    def _fact_classified_8616(self) -> None:
         """Record the fact as classified and seed materialization state."""
         self.stats["classified_fact_count"] = int(self.stats.get("classified_fact_count", 0) or 0) + 1
         self.materialized = self.authoritative_wide_materialized
 
         self.idiv_visible_guard_inserted = False
 
-    def _fact_stack_slot_expr_arm_8616(self) -> bool:
+    def _fact_stack_slot_expr_arm_8616(self) -> None:
         """Materialize STACK_SLOT_EXPR facts into structured stack stores."""
+        assert self.fact is not None
         if self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT_EXPR:
             if self.allow_stack_slot_fallback:
                 self.visible_assignment = _direct_stack_move_assignment_8616(
@@ -19304,6 +19321,7 @@ class _DirectStackMovRun8616:
 
     def _fact_signed_idiv_arm_8616(self) -> bool:
         """Materialize SIGNED_IDIV_REMAINDER facts with call-statement bridging."""
+        assert self.fact is not None
         if self.fact.source_kind is not DirectStackMoveSourceKind8616.SIGNED_IDIV_REMAINDER:
             return False
         self.call_statement_source_expr = self.source_expr
@@ -19324,6 +19342,7 @@ class _DirectStackMovRun8616:
 
     def _idiv_call_statement_materialize_8616(self) -> None:
         """Bridge the signed-idiv call statement into a stack assignment."""
+        assert self.fact is not None
         if self.call_statement_source_expr is not None and _expr_contains_function_call_8616(self.call_statement_source_expr):
             idiv_call_assignment = _replace_tagged_call_statement_with_stack_assignment_8616(
                 self.root,
@@ -19387,6 +19406,7 @@ class _DirectStackMovRun8616:
 
     def _idiv_guard_or_recheck_8616(self) -> None:
         """Apply the visible-guard placement for the signed-idiv remainder."""
+        assert self.fact is not None
         if not self.materialized:
             self.visible_assignment = _direct_stack_move_assignment_8616(
                 self.codegen,
@@ -19408,6 +19428,7 @@ class _DirectStackMovRun8616:
 
     def _idiv_artifact_tail_8616(self) -> None:
         """Record signed-idiv artifact counters for the materialization arm."""
+        assert self.fact is not None
         if (
             self.materialized
             and not self.idiv_visible_guard_inserted
@@ -19432,6 +19453,7 @@ class _DirectStackMovRun8616:
 
     def _idiv_finalize_8616(self) -> None:
         """Finalize the signed-idiv arm bookkeeping."""
+        assert self.fact is not None
         if self.materialized:
             self.auxiliary_insert_count = _prune_signed_idiv_auxiliary_insert_8616(
                 self.root,
@@ -19457,6 +19479,7 @@ class _DirectStackMovRun8616:
 
     def _fact_reconcile_existing_assignment_8616(self) -> bool:
         """Consume a fact whose stack-move assignment already exists in the tree."""
+        assert self.fact is not None
         if _tree_has_stack_move_assignment_8616(self.root, self.dst_expr, self.source_expr) or (
             self.fact.source_kind
             is DirectStackMoveSourceKind8616.ZERO_ARG_CALL_RETURN
@@ -19577,6 +19600,7 @@ class _DirectStackMovRun8616:
 
     def _fact_tagged_fallback_gate_8616(self) -> None:
         """Apply the tagged-statement placement gate before direct insertion."""
+        assert self.fact is not None
         if _tree_has_assignment_for_instruction_addr_8616(self.root, self.project, self.fact.ins_addr):
             self.stats["tagged_non_stack_assignment_conflict_count"] = (
                 int(self.stats.get("tagged_non_stack_assignment_conflict_count", 0) or 0) + 1
@@ -19590,6 +19614,7 @@ class _DirectStackMovRun8616:
 
     def _fact_immediate_source_arm_8616(self) -> None:
         """Place IMMEDIATE-source stores around proven loop/precontrol positions."""
+        assert self.fact is not None
         if self.fact.source_kind in {
             DirectStackMoveSourceKind8616.STACK_SLOT,
             DirectStackMoveSourceKind8616.STACK_SLOT_EXPR,
@@ -19610,6 +19635,7 @@ class _DirectStackMovRun8616:
 
     def _fact_kind_fallback_chain_8616(self) -> None:
         """Run the per-source-kind fallback placement chain."""
+        assert self.fact is not None
         if self.fact.source_kind is DirectStackMoveSourceKind8616.IMMEDIATE:
             self._fallback_immediate_arm_8616()
         elif self.fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
@@ -19625,6 +19651,7 @@ class _DirectStackMovRun8616:
 
     def _fallback_immediate_arm_8616(self) -> None:
         """Run the IMMEDIATE fallback placement chain."""
+        assert self.fact is not None
         repeats_at_loop_entry = _function_has_loopback_to_instruction_8616(
             self.function, self.project, self.fact.ins_addr
         )
@@ -19693,6 +19720,7 @@ class _DirectStackMovRun8616:
 
     def _fallback_stack_slot_arm_8616(self) -> None:
         """Run the STACK_SLOT/STACK_AGGREGATE_ELEMENT fallback chain."""
+        assert self.fact is not None
         if not self.materialized:
             self.materialized = _insert_at_do_while_body_start_8616(
                 self.root,
@@ -19758,6 +19786,7 @@ class _DirectStackMovRun8616:
 
     def _fallback_stack_slot_expr_arm_8616(self) -> None:
         """Run the STACK_SLOT_EXPR fallback placement chain."""
+        assert self.fact is not None
         if _direct_stack_move_is_before_known_precontrol_8616(self.root, self.project, self.function, self.fact.ins_addr):
             self.materialized = _replace_precontrol_stack_assignment_8616(
                 self.root,
@@ -19777,6 +19806,7 @@ class _DirectStackMovRun8616:
 
     def _fallback_global_expr_arm_8616(self) -> None:
         """Run the GLOBAL_* fallback placement chain."""
+        assert self.fact is not None
         self.materialized = _insert_between_structured_siblings_8616(
             self.root,
             self.project,
@@ -19819,6 +19849,7 @@ class _DirectStackMovRun8616:
 
     def _fact_materialize_fallback_8616(self) -> bool:
         """Apply the last-resort materialization fallback for a fact."""
+        assert self.fact is not None
         if not self.materialized:
             if bool(getattr(self.root, "_inertia_stack_mov_assignment_already_present_8616", False)):
                 self.stats["already_materialized_count"] = int(self.stats.get("already_materialized_count", 0) or 0) + 1
@@ -19841,8 +19872,9 @@ class _DirectStackMovRun8616:
             return True
         return False
 
-    def _fact_aggregate_order_restore_8616(self) -> bool:
+    def _fact_aggregate_order_restore_8616(self) -> None:
         """Restore same-block stack-move ordering for aggregate elements."""
+        assert self.fact is not None
         if (
             self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_AGGREGATE_ELEMENT
             and _restore_same_block_stack_move_order_8616(
@@ -19860,8 +19892,9 @@ class _DirectStackMovRun8616:
             )
             self.changed = True
 
-    def _fact_immediate_group_arm_8616(self) -> bool:
+    def _fact_immediate_group_arm_8616(self) -> None:
         """Handle immediate and aggregate source-kind materialization details."""
+        assert self.fact is not None
         if self.fact.source_kind in {
             DirectStackMoveSourceKind8616.IMMEDIATE,
             DirectStackMoveSourceKind8616.STACK_SLOT,
@@ -19890,8 +19923,9 @@ class _DirectStackMovRun8616:
                 )
                 self.changed = True
 
-    def _fact_sign_extend_guard_8616(self) -> bool:
+    def _fact_sign_extend_guard_8616(self) -> None:
         """Insert visible-use guards for sign-extended stack-slot stores."""
+        assert self.fact is not None
         if (
             self.fact.source_kind is DirectStackMoveSourceKind8616.STACK_SLOT
             and self.allow_stack_slot_fallback
@@ -19915,8 +19949,9 @@ class _DirectStackMovRun8616:
                 self.stats["visible_use_guard_count"] = int(self.stats.get("visible_use_guard_count", 0) or 0) + 1
                 self.changed = True
 
-    def _fact_wide_arith_carrier_prune_8616(self) -> bool:
+    def _fact_wide_arith_carrier_prune_8616(self) -> None:
         """Prune obsolete wide call-return carriers after materialization."""
+        assert self.fact is not None
         if self.fact.source_kind is DirectStackMoveSourceKind8616.WIDE_CALL_RETURN_STACK_ARITH:
             self.carrier_pruned = _prune_wide_call_return_carriers_8616(
                 self.root,
@@ -19947,8 +19982,9 @@ class _DirectStackMovRun8616:
                 )
                 self.changed = True
 
-    def _fact_finalize_8616(self) -> bool:
+    def _fact_finalize_8616(self) -> None:
         """Commit materialization counters and evidence for one fact."""
+        assert self.fact is not None
         self.stats["materialized_count"] = int(self.stats.get("materialized_count", 0) or 0) + 1
         self.materialized_facts.append(self.fact)
         self.materialized_fact_keys.add(self.fact_key)
@@ -20016,7 +20052,7 @@ class _DirectStackMovRun8616:
 
     def _reload_fact_head_8616(
         self,
-        reload_fact: DirectStackMoveFact8616,
+        reload_fact: DirectStackReloadFact8616,
         frame: _DirectStackReloadFrame8616,
     ) -> tuple[StructuredAstValue, StructuredAstValue, bool, StructuredAstValue] | None:
         """Classify one reload fact and resolve its source cvar."""
@@ -20043,7 +20079,7 @@ class _DirectStackMovRun8616:
 
     def _reload_stack_slot_attempt_8616(
         self,
-        reload_fact: DirectStackMoveFact8616,
+        reload_fact: DirectStackReloadFact8616,
         source_fact: StructuredAstValue,
         source_cvar: StructuredAstValue,
         materialized_reload: bool,
@@ -20158,7 +20194,7 @@ class _DirectStackMovRun8616:
             )
         return materialized_reload, reload_placement
 
-    def _reload_debug_refusal_8616(self, reload_fact: DirectStackMoveFact8616) -> None:
+    def _reload_debug_refusal_8616(self, reload_fact: DirectStackReloadFact8616) -> None:
         """Emit the reload refusal diagnostic when stack noise debugging is on."""
         if os.environ.get("INERTIA_DEBUG_STACK_NOISE"):
             candidates = _boundary_tuple_8616(
@@ -20186,7 +20222,7 @@ class _DirectStackMovRun8616:
 
     def _reload_commit_8616(
         self,
-        reload_fact: DirectStackMoveFact8616,
+        reload_fact: DirectStackReloadFact8616,
         materialized_reload: bool,
         reload_placement: StructuredAstValue,
         frame: _DirectStackReloadFrame8616,
@@ -20208,7 +20244,7 @@ class _DirectStackMovRun8616:
 
     def _recover_reload_facts_8616(
         self,
-    ) -> tuple[tuple[DirectStackMoveFact8616, ...], _DirectStackReloadFrame8616]:
+    ) -> tuple[tuple[DirectStackReloadFact8616, ...], _DirectStackReloadFrame8616]:
         """Recover register-reload facts and build the shared reload frame."""
         reload_recovery_started = time.perf_counter()
         reload_facts = (
@@ -20236,7 +20272,7 @@ class _DirectStackMovRun8616:
 
     def _process_reload_facts_8616(
         self,
-        reload_facts: tuple[DirectStackMoveFact8616, ...],
+        reload_facts: tuple[DirectStackReloadFact8616, ...],
         frame: _DirectStackReloadFrame8616,
     ) -> None:
         """Materialize each recovered register-reload fact."""

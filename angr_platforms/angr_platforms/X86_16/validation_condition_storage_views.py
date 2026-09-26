@@ -7,6 +7,8 @@ when a segmented load becomes a typed field. Never mutate or repair the AST.
 
 from __future__ import annotations
 
+from typing import cast
+
 from angr.analyses.decompiler.structured_codegen import c
 from angr.sim_type import SimTypeChar, SimTypeInt, SimTypeNum
 from angr.sim_variable import SimMemoryVariable, SimStackVariable
@@ -45,14 +47,14 @@ def _memory_storage(expression: c.CExpression, width: int, project: object) -> s
         ):
             return None
         if isinstance(variable, (SimStackVariable, SimMemoryVariable)) and variable.size == width:
-            return _expr_fingerprint(expression, project)
+            return cast("str | None", _expr_fingerprint(expression, project))
     if isinstance(expression, c.CVariableField):
         type_ = expression.type
         if (
             isinstance(type_, _INTEGER_TYPES)
             and type_.with_arch(expression.codegen.project.arch).size == width * _BITS_PER_BYTE
         ):
-            return _global_indexed_field_ds_deref_fingerprint_8616(expression, project, set())
+            return cast("str | None", _global_indexed_field_ds_deref_fingerprint_8616(expression, project, set()))
     return None
 
 

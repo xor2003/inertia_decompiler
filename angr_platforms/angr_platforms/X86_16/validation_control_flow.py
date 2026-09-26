@@ -339,7 +339,7 @@ def _loop_matches_branch_region_8616(
 def _semantic_fingerprint_pair_8616(
     fact: LoopBranchGuardFact8616,
     condition_ir_fingerprint: Callable[[ConditionIR], str | None] | None,
-) -> tuple[object, object] | None:
+) -> tuple[str, str] | None:
     """Prefer inverted typed-IR fingerprints when the fact carries condition IR."""
     decoded_fingerprint = fact.decoded_condition_fingerprint
     guard_fingerprint = fact.guard_condition_fingerprint
@@ -357,7 +357,7 @@ def _semantic_fingerprint_pair_8616(
 
 def _semantic_guard_matches_8616(
     candidate: object,
-    expected: object,
+    expected: str,
     fact: LoopBranchGuardFact8616,
     condition_fingerprint: Callable[[object], str],
     condition_fingerprint_normalizer: Callable[[str], str] | None,
@@ -393,7 +393,7 @@ def _semantic_loop_branch_guards_8616(
     guards: list[object] = []
     seen: set[int] = set()
 
-    def matches(candidate: object, expected: object, *, inverted: bool) -> bool:
+    def matches(candidate: object, expected: str, *, inverted: bool) -> bool:
         """Dispatch to fingerprint or typed-storage equivalence."""
         return _semantic_guard_matches_8616(
             candidate,

@@ -203,7 +203,7 @@ def _decode_layout_ranges_8616(payload: dict[object, object]) -> tuple[object, o
 def _decode_source_evidence_8616(
     payload: dict[object, object],
     layouts: object,
-    pointer_evidence: dict[int, object],
+    pointer_evidence: dict[int, CalleePointerArgumentEvidence8616],
 ) -> object:
     """Decode global object sources and check them against pointer evidence."""
     raw_sources = payload.get("global_object_sources")

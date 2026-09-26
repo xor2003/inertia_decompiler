@@ -13,6 +13,7 @@ Unknown register writes erase carriers. Ambiguous address terms are refused.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -33,6 +34,7 @@ from .far_pointer_constant_flow import (
 )
 from .register_constant_segmented_store import (
     InstructionView8616,
+    MemoryOperandView8616,
     OperandView8616,
     RegisterNameResolver8616,
 )
@@ -151,8 +153,8 @@ def _far_pointer_load_kind_8616(instruction_id: int | None) -> FarPointerSegment
 
 def _segmented_pointer_source_8616(
     instruction: InstructionView8616,
-    memory: object,
-    source: object,
+    memory: MemoryOperandView8616,
+    source: OperandView8616,
     segment_sources: dict[FarPointerSegmentRegister8616, FarPointerStackSource8616],
     segment_name: RegisterNameResolver8616,
 ) -> tuple[FarPointerSegmentRegister8616, FarPointerStackSource8616] | None:
@@ -165,14 +167,14 @@ def _segmented_pointer_source_8616(
     except (TypeError, ValueError):
         return None
     pointer_source = segment_sources.get(segment_register)
-    if pointer_source is None or source.size not in {1, 2, 4}:
+    if pointer_source is None or not isinstance(source.size, int) or source.size not in {1, 2, 4}:
         return None
     return segment_register, pointer_source
 
 
 def _pointer_index_parts_8616(
     instruction: InstructionView8616,
-    memory: object,
+    memory: MemoryOperandView8616,
     pointer_source: FarPointerStackSource8616,
     stack_indices: dict[str, _StackIndex8616],
     far_offsets: dict[str, FarPointerStackSource8616],
@@ -218,7 +220,12 @@ def _segmented_load_evidence_8616(
         return None
     destination, source = operands
     memory = source.memory
-    if destination.kind != X86_OP_REG or source.kind != X86_OP_MEM or memory is None:
+    if (
+        destination.kind != X86_OP_REG
+        or source.kind != X86_OP_MEM
+        or memory is None
+        or not isinstance(source.size, int)
+    ):
         return None
     gated = _segmented_pointer_source_8616(instruction, memory, source, segment_sources, segment_name)
     if gated is None:
@@ -274,7 +281,7 @@ def _apply_far_pointer_load_8616(
     state: _FarPointerScanState8616,
     constant_state: FarPointerConstantState8616,
     instruction: InstructionView8616,
-    operands: tuple[OperandView8616, ...],
+    operands: Sequence[OperandView8616],
     *,
     register_name: RegisterNameResolver8616,
     segment_name: RegisterNameResolver8616,
@@ -306,7 +313,7 @@ def _apply_far_pointer_load_8616(
 def _update_stack_slot_target_8616(
     state: _FarPointerScanState8616,
     instruction: InstructionView8616,
-    operands: tuple[OperandView8616, ...],
+    operands: Sequence[OperandView8616],
     *,
     register_name: RegisterNameResolver8616,
     segment_name: RegisterNameResolver8616,
@@ -342,7 +349,7 @@ def _update_stack_slot_target_8616(
 def _apply_mov_register_copy_8616(
     state: _FarPointerScanState8616,
     instruction: InstructionView8616,
-    operands: tuple[OperandView8616, ...],
+    operands: Sequence[OperandView8616],
     *,
     register_name: RegisterNameResolver8616,
     segment_name: RegisterNameResolver8616,
@@ -377,7 +384,7 @@ def _apply_mov_register_copy_8616(
 def _apply_shift_index_8616(
     state: _FarPointerScanState8616,
     instruction: InstructionView8616,
-    operands: tuple[OperandView8616, ...],
+    operands: Sequence[OperandView8616],
     register_name: RegisterNameResolver8616,
 ) -> bool:
     """Track one SHL/SAL index update; return True when it was handled."""
@@ -398,7 +405,7 @@ def _apply_shift_index_8616(
 def _invalidate_register_destination_8616(
     state: _FarPointerScanState8616,
     instruction: InstructionView8616,
-    operands: tuple[OperandView8616, ...],
+    operands: Sequence[OperandView8616],
     register_name: RegisterNameResolver8616,
 ) -> None:
     """Forget tracking for any other instruction that clobbers a register."""

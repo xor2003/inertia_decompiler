@@ -24,6 +24,7 @@ from angr.analyses.decompiler.structured_codegen.c import (
     CConstant,
     CDirtyExpression,
     CDoWhileLoop,
+    CExpression,
     CExpressionStatement,
     CFakeVariable,
     CForLoop,
@@ -462,6 +463,7 @@ def _indexed_stack_storage_key_8616(
     if base_facts is None:
         return None
     base, variable, offset, name = base_facts
+    assert isinstance(node, CExpression)
     element_width = _type_width_bytes_8616(node.type)
     element_count = base.type.length
     object_width = _indexed_object_width_8616(base, element_count, variable)
@@ -838,7 +840,7 @@ def _storage_bytes_8616(key: DefUseStorageKey8616) -> frozenset[_DefUseStorageBy
 
 
 def _predicate_leaf_token_8616(
-    node: object,
+    node: CVariable | CConstant,
     segment_register_offsets: frozenset[int],
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None,
 ) -> tuple[PredicateToken8616, frozenset[_DefUseStorageByte8616]] | None:
@@ -869,7 +871,7 @@ def _predicate_leaf_token_8616(
 
 
 def _predicate_op_token_8616(
-    node: object,
+    node: CUnaryOp | CBinaryOp,
     active: set[int],
     segment_register_offsets: frozenset[int],
     stack_variable_offset_resolver: StackVariableOffsetResolver8616 | None,
@@ -1225,7 +1227,7 @@ class _DefUseWalker8616:
                 state.defined.update(storage_bytes)
 
     def _walk_assignment_8616(
-        self, node: object, state: _DefUseFlowState8616, context: str
+        self, node: CAssignment, state: _DefUseFlowState8616, context: str
     ) -> _DefUseFlowState8616:
         """Apply the def-use transfer for one CAssignment."""
         _debug_assignment_read_8616(node, context)
@@ -1280,7 +1282,7 @@ class _DefUseWalker8616:
         return state
 
     def _walk_if_else_8616(
-        self, node: object, state: _DefUseFlowState8616, context: str
+        self, node: CIfElse, state: _DefUseFlowState8616, context: str
     ) -> _DefUseFlowState8616:
         """Merge branch def-use states for one CIfElse node."""
         branch_states: list[_DefUseFlowState8616] = []
@@ -1329,7 +1331,7 @@ class _DefUseWalker8616:
         return merged
 
     def _walk_for_loop_8616(
-        self, node: object, state: _DefUseFlowState8616, context: str
+        self, node: CForLoop, state: _DefUseFlowState8616, context: str
     ) -> _DefUseFlowState8616:
         """Apply the conservative single-pass transfer for a CForLoop."""
         initialized = self.walk(node.initializer, state, context=f"{context}.for.init")
@@ -1356,7 +1358,7 @@ class _DefUseWalker8616:
         return initialized
 
     def _walk_while_loop_8616(
-        self, node: object, state: _DefUseFlowState8616, context: str
+        self, node: CWhileLoop, state: _DefUseFlowState8616, context: str
     ) -> _DefUseFlowState8616:
         """Apply the single-pass transfer for a CWhileLoop."""
         self.check_reads(node.condition, state.defined, context=f"{context}.while.condition")
@@ -1389,7 +1391,7 @@ class _DefUseWalker8616:
         return state
 
     def _walk_switch_8616(
-        self, node: object, state: _DefUseFlowState8616, context: str
+        self, node: CSwitchCase, state: _DefUseFlowState8616, context: str
     ) -> _DefUseFlowState8616:
         """Merge per-case def-use states for one CSwitchCase node."""
         self.check_reads(node.switch, state.defined, context=f"{context}.switch.selector")
@@ -1470,7 +1472,7 @@ class _DefUseWalker8616:
         return state
 
 
-def _debug_assignment_read_8616(node: object, context: str) -> None:
+def _debug_assignment_read_8616(node: CAssignment, context: str) -> None:
     """Emit opt-in diagnostics for one CAssignment walk step."""
     if os.environ.get("INERTIA_DEBUG_DEF_USE", "").strip().lower() not in {
         "1",

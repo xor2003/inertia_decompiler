@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from typing import cast
 
 from ..callsite_summary import (
     CallsiteSummary8616,
@@ -79,7 +80,7 @@ class CallStackEffectArtifact8616:
 
 def _stable_bp_ranges_8616(artifact: IRFunctionArtifact) -> tuple[IRAddress, ...]:
     """Consume both logical operands and exact execution cells from typed IR."""
-    return stable_bp_memory_ranges_8616(artifact)
+    return cast("tuple[IRAddress, ...]", stable_bp_memory_ranges_8616(artifact))
 
 
 def _refused_effect_8616(
@@ -126,7 +127,7 @@ def _stack_address_offsets_8616(
 def _range_contains_bp_offset_8616(address: IRAddress, offset: int) -> bool:
     """Compare a BP-derived argument against a range in the 16-bit coordinate."""
     pointed_byte = replace(address, offset=offset, size=1)
-    return stack_ranges_may_overlap_8616(address, pointed_byte)
+    return bool(stack_ranges_may_overlap_8616(address, pointed_byte))
 
 
 def _effect_from_summary_8616(

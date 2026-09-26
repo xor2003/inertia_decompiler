@@ -188,7 +188,7 @@ def _address_matches_range_head_8616(current: IRAddress, first: IRAddress) -> bo
         return False
     if current.expr != first.expr:
         return False
-    return current.version == first.version
+    return bool(current.version == first.version)
 
 
 def _addresses_contiguous_uniform_8616(addresses: tuple[IRAddress, ...], first: IRAddress) -> bool:

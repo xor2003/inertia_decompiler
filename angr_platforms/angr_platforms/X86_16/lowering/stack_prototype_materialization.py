@@ -17,7 +17,7 @@ import sys
 import typing
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Protocol, TypeGuard, cast
 
 from angr.analyses.decompiler.structured_codegen import c as structured_c
 from angr.knowledge_plugins.functions.function import PrototypeSource
@@ -382,7 +382,7 @@ def _reconciled_positive_arg_name_8616(
     return f"arg_{bp_offset:x}" if bp_offset >= 0 else f"arg_n{abs(bp_offset):x}"
 
 
-def _is_usable_arg_name_8616(candidate: object) -> bool:
+def _is_usable_arg_name_8616(candidate: object) -> TypeGuard[str]:
     """Return whether a candidate is a concrete, non-generated argument name."""
     if not isinstance(candidate, str) or not candidate:
         return False
@@ -572,7 +572,7 @@ def _collect_summary_source_widths_8616(
     """Accumulate per-offset and fully-tiled object widths from one summary."""
     source_slices: set[tuple[int, int]] = set()
     for source, width in zip(tuple(summary.push_arg_sources or ()), tuple(summary.arg_widths or ()), strict=False):
-        if _bp_source_width_8616(source, width):
+        if source is not None and _bp_source_width_8616(source, width):
             widths_by_offset.setdefault(source[1], set()).add(width)
             source_slices.add((source[1], width))
     for object_offset, object_width in stack_object_widths.items():
@@ -876,7 +876,7 @@ def _trailing_stack_arg_gate_8616(
     candidate: structured_c.CVariable,
     stack_offset: int,
     width: int,
-) -> tuple[object, SimTypeFunction, tuple[object, ...], tuple[object, ...], SimStackVariable] | None:
+) -> tuple[_StackPrototypeCFunction8616, SimTypeFunction, tuple[SimType, ...], tuple[structured_c.CVariable, ...], SimStackVariable] | None:
     """Validate the contiguous trailing-slot contract; return context or refuse."""
     cfunc = typed_codegen.cfunc
     if cfunc is None:
@@ -920,7 +920,7 @@ def _trailing_stack_arg_gate_8616(
 
 def _trailing_arg_names_8616(
     prototype: SimTypeFunction,
-    existing_args: tuple[object, ...],
+    existing_args: tuple[structured_c.CVariable, ...],
 ) -> tuple[str, ...] | None:
     """Prototype arg names, recovered from variable names when the arity drifts."""
     arg_names = tuple(prototype.arg_names or ())
@@ -1000,7 +1000,7 @@ class _ReconcileEvidence8616:
     callsite_widths: dict[int, int]
     incoming_widths: dict[int, int]
     body_widths: dict[int, int]
-    body_access_widths: object
+    body_access_widths: Mapping[int, int]
     wide_evidence: WideStackArgumentWidthEvidence8616
     incoming_width_evidence: CalleeArgumentWidthEvidence8616
 
@@ -1140,10 +1140,10 @@ def _select_incoming_args_8616(
     codegen: object,
     args: tuple[SimType, ...],
     arg_cvars: tuple[structured_c.CVariable, ...],
-    prototype_names: tuple[object, ...],
+    prototype_names: tuple[str | None, ...],
     evidence: _ReconcileEvidence8616,
     original_arg_count: int,
-) -> tuple[tuple[SimType, ...], tuple[structured_c.CVariable, ...], tuple[object, ...], int] | None:
+) -> tuple[tuple[SimType, ...], tuple[structured_c.CVariable, ...], tuple[str | None, ...], int] | None:
     """Prune args to the closed incoming layout; refuse ambiguous selections."""
     if not evidence.incoming_widths:
         return args, arg_cvars, prototype_names, 0
@@ -1226,7 +1226,7 @@ def _reconcile_args_8616(
     args: tuple[SimType, ...],
     arg_cvars: tuple[structured_c.CVariable, ...],
     width_facts: list[FunctionParameterWidthFact8616],
-    prototype_names: tuple[object, ...],
+    prototype_names: tuple[str | None, ...],
     body_widths: Mapping[int, int],
     arch: object,
 ) -> _ReconciledArgs8616:
@@ -1499,7 +1499,7 @@ def materialize_annotated_stack_prototype_8616(
 
 def _current_prototype_surface_8616(
     current_proto: object,
-) -> tuple[list[object], tuple[object, ...], object, bool]:
+) -> tuple[list[SimType], tuple[str | None, ...], SimType, bool]:
     """Decompose the current prototype surface, defaulting when absent."""
     if isinstance(current_proto, SimTypeFunction):
         current_args = list(current_proto.args or ())
@@ -1625,8 +1625,8 @@ def _commit_annotated_materialization_8616(
 def _current_arg_surfaces_8616(
     codegen: object,
     typed_cfunc: _StackPrototypeCFunction8616,
-    current_args: list[object],
-    current_arg_names: tuple[object, ...],
+    current_args: list[SimType],
+    current_arg_names: tuple[str | None, ...],
 ) -> dict[int, tuple[SimType, str | None]]:
     """Map existing positive-BP args to their current type/name surfaces."""
     surfaces: dict[int, tuple[SimType, str | None]] = {}
@@ -1690,7 +1690,7 @@ def _annotated_entry_name_8616(
         else ctx.current_arg_names[index] if index < len(ctx.current_arg_names) else None
     )
     if _is_usable_arg_name_8616(prototype_name) and ctx.current_arg_names.count(prototype_name) == 1:
-        return cast(str, prototype_name)
+        return prototype_name
     if (
         _is_usable_annotated_name_8616(maybe_name)
         and ctx.annotated_names.count(maybe_name) == 1

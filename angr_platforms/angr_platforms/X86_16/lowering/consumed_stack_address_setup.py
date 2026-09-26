@@ -90,7 +90,7 @@ def _masked_word_parent_8616(statement: object) -> str | None:
         and _pure_address_expression_8616(inserted.lhs)
     ):
         return None
-    return cast(str, parent)
+    return parent
 
 
 def _stack_argument_bp_8616(codegen: object, argument: object) -> int | None:
