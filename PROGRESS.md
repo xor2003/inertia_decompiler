@@ -102,6 +102,22 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   clean cc2d1a195 baseline fails the same tests on an MSC51 recompile
   UnicodeDecodeError (env-level subprocess decode, also pre-existing).
 
+- cli_c_ast_rewrites.py driven to zero ruff findings (was 59 sites at
+  batch start, incl. a 365-complexity `_impl` closure): the whole nested
+  simplifier became `_StructuredSimplifyRun8616` — a typed run dataclass
+  holding all alias maps, caches, and protected-expression ids — with all
+  38 nested helpers promoted to methods. The 104-complexity `transform`
+  split into `_BinarySimplifyCtx8616` plus ordered `_arm_*_8616` rewrite
+  arms preserving pass order (widened pairs, far-pointer MK_FP, word
+  deltas, const-fold via `_CONST_FOLD_OPS_8616`, bitwise terms, And/Mul/Shr
+  arms, dead-init pruning). Conservative refusal semantics preserved:
+  unproven OR-base widening still refuses, protected dereference address
+  expressions untouched, alias resolution stays conservative. Owning
+  suites: 20 passed (ast rewrites + simplifier identity), plus 98 in the
+  related postprocess/access-trait/stack-lowering set. mypy: 34 errors,
+  all pre-existing unused-ignore debt — zero net delta vs HEAD.
+  `.codebase-memory` index artifacts refreshed.
+
 ## Open work (far obligations, all still unadmitted)
 
 - Native machine-frame correction is implemented: the tracker had popped two
