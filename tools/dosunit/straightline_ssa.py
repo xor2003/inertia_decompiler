@@ -4065,7 +4065,13 @@ def _compare_ssa_pair(
         oracle_lib = str(oracle_resolved.get("id") or "").startswith("library-signature:")
         candidate_lib = str(candidate_resolved.get("id") or "").startswith("library-signature:")
         both_unresolved = not oracle_target.get("resolved") and not candidate_target.get("resolved")
-        if (oracle_lib and candidate_lib) or both_unresolved:
+        both_resolved = bool(oracle_target.get("resolved")) and bool(candidate_target.get("resolved"))
+        if (oracle_lib and candidate_lib) or both_unresolved or both_resolved:
+            detail = (
+                "direct call resolves to unmapped runtime stubs in both binaries; equivalence cannot be proven"
+                if ((oracle_lib and candidate_lib) or both_unresolved)
+                else "direct calls resolve to functions whose equivalence is unproven; callee-level compare owns the verdict"
+            )
             return (
                 {
                     **base,
@@ -4076,9 +4082,10 @@ def _compare_ssa_pair(
                     "mismatches": [
                         {
                             "kind": "call_target_unproven",
-                            "detail": "direct call resolves to unmapped runtime stubs in both binaries; equivalence cannot be proven",
+                            "detail": detail,
                             "oracle_target": oracle_resolved.get("id") or oracle_target.get("raw"),
                             "candidate_target": candidate_resolved.get("id") or candidate_target.get("raw"),
+                            "call_reason": call_compare.get("reason"),
                         }
                     ],
                 },
@@ -10332,11 +10339,50 @@ def _prepare_layout_normalized_functions(
     candidate_copy = dict(candidate_function)
     candidate_copy["_constant_normalization"] = candidate_map
     candidate_copy["_constant_normalization_reasons"] = candidate_reasons
+    return_address_keys = _call_return_address_normalization_keys(
+        oracle_function, pairs, notes
+    )
+    if return_address_keys:
+        candidate_copy["_call_return_address_keys"] = return_address_keys
     return (
         oracle_function,
         candidate_copy,
         {"kind": "layout_constants", "pairs": notes, "global_pair_count": len(global_map or {})},
     )
+
+
+def _call_return_address_normalization_keys(
+    oracle_function: dict[str, Any],
+    pairs: list[dict[str, Any]],
+    notes: list[dict[str, Any]],
+) -> set[int]:
+    """Candidate keys that hold a pushed call return address, not data.
+
+    A ``control_target``/``control_fallthrough`` constant is normally kept
+    literal outside the ``ip`` output so genuine stored-code diffs surface.
+    In an ``Ijk_Call`` part, the value pushed on the stack as the call's
+    return is provably layout-derived when the oracle constant equals the
+    oracle fallthrough linear low16; those candidate keys may normalize.
+    """
+    source = oracle_function.get("source") if isinstance(oracle_function.get("source"), dict) else {}
+    transfer = source.get("transfer") if isinstance(source.get("transfer"), dict) else {}
+    jumpkind = str(source.get("jumpkind") or transfer.get("jumpkind") or "")
+    if jumpkind != "Ijk_Call":
+        return set()
+    fallthrough = transfer.get("fallthrough") if isinstance(transfer.get("fallthrough"), dict) else {}
+    return_low16 = _optional_int(fallthrough.get("low16", fallthrough.get("linear")))
+    if return_low16 is None:
+        return set()
+    return_low16 &= 0xFFFF
+    keys: set[int] = set()
+    for pair in pairs:
+        if str(pair.get("reason")) not in {"control_target", "control_fallthrough"}:
+            continue
+        if (int(pair["oracle"]) & 0xFFFF) != return_low16:
+            continue
+        for candidate_key, _oracle_replacement in _layout_constant_normalization_entries(pair):
+            keys.add(candidate_key)
+    return keys
 
 
 def _term_constant_leaves(function: dict[str, Any]) -> set[int]:
@@ -11525,7 +11571,13 @@ def _normalize_call_return_store_chain(
     call_return_ip = _call_return_ip_from_instruction(function)
     if call_return_ip is not None:
         expected_words.add(call_return_ip & 0xFFFF)
-    expected_bytes = {(word >> shift) & 0xFF for word in expected_words for shift in (0, 8)}
+    ip_bytes = {(word >> shift) & 0xFF for word in expected_words for shift in (0, 8)}
+    cs_para = _own_code_segment_para(function)
+    cs_bytes = (
+        {(cs_para >> shift) & 0xFF for shift in (0, 8)} if cs_para is not None else set()
+    )
+    far_call = _call_instruction_is_far(function)
+    max_bytes = 4 if far_call else 2
     while current_ref:
         index = next(
             (
@@ -11548,11 +11600,14 @@ def _normalize_call_return_store_chain(
             if isinstance(args[2], dict)
             else None
         )
+        position = len(normalized_indexes)
+        allowed = ip_bytes if position < 2 else cs_bytes
         if (
-            stored_value is None
+            position >= max_bytes
+            or stored_value is None
             or stored_value < 0
             or stored_value > 0xFF
-            or (stored_value & 0xFF) not in expected_bytes
+            or (stored_value & 0xFF) not in allowed
         ):
             if normalized_indexes:
                 break
@@ -11646,6 +11701,26 @@ def _term_depends_on_input(
         if isinstance(arg, dict) and _term_depends_on_input(arg, name, assignments, seen):
             return True
     return False
+
+
+def _own_code_segment_para(function: dict[str, Any]) -> int | None:
+    """The part's own code segment para — the value ``lcall`` pushes as CS."""
+    entry = function.get("entry") if isinstance(function.get("entry"), dict) else {}
+    return _optional_int(entry.get("cs"))
+
+
+def _call_instruction_is_far(function: dict[str, Any]) -> bool:
+    """Whether the part's final instruction is a far call (``lcall``/``call far``)."""
+    instructions = _ssa_instructions(function)
+    if not instructions:
+        return False
+    last = instructions[-1]
+    mnemonic = str(last.get("mnemonic") or "").lower()
+    text = str(last.get("disassembly") or "").lower()
+    if mnemonic == "lcall" or text.startswith("lcall"):
+        return True
+    data = last.get("bytes") or ""
+    return mnemonic == "call" and isinstance(data, str) and data[:2].lower() == "9a"
 
 
 def _call_return_ip_from_instruction(function: dict[str, Any]) -> int | None:
@@ -12180,17 +12255,28 @@ def _normalized_constant_value(
     reasons = document.get("_constant_normalization_reasons")
     if not isinstance(reasons, dict):
         reasons = {}
+    return_address_keys = document.get("_call_return_address_keys")
+    if not isinstance(return_address_keys, set):
+        return_address_keys = set()
     mask = _mask(width)
     key = value & mask
     if key not in normalization:
         if width > 16:
             low_key = key & 0xFFFF
             if low_key in normalization:
-                if reasons.get(low_key) in {"control_target", "control_fallthrough"} and output_name != "ip":
+                if (
+                    reasons.get(low_key) in {"control_target", "control_fallthrough"}
+                    and low_key not in return_address_keys
+                    and output_name != "ip"
+                ):
                     return value
                 return ((key & ~0xFFFF) | (int(normalization[low_key]) & 0xFFFF)) & mask
         return value
-    if reasons.get(key) in {"control_target", "control_fallthrough"} and output_name != "ip":
+    if (
+        reasons.get(key) in {"control_target", "control_fallthrough"}
+        and key not in return_address_keys
+        and output_name != "ip"
+    ):
         return value
     return int(normalization[key]) & mask
 

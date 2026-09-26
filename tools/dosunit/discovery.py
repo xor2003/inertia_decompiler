@@ -37,7 +37,9 @@ _LINK_SEGMENT_RE = re.compile(
     r"^\s*(?P<start>[0-9A-Fa-f]+)H\s+(?P<stop>[0-9A-Fa-f]+)H\s+"
     r"(?P<length>[0-9A-Fa-f]+)H\s+(?P<name>\S+)\s+(?P<class>\S+)\s*$"
 )
-_LINK_PUBLIC_RE = re.compile(r"^\s*(?P<seg>[0-9A-Fa-f]{4}):(?P<off>[0-9A-Fa-f]{4})\s+(?P<name>\S+)\s*$")
+_LINK_PUBLIC_RE = re.compile(
+    r"^\s*(?P<seg>[0-9A-Fa-f]{4,6}):(?P<off>[0-9A-Fa-f]{4,6})\s+(?P<name>.+?)\s*$"
+)
 _LINK_GROUP_RE = re.compile(r"^\s*(?P<seg>[0-9A-Fa-f]{4}):(?P<off>[0-9A-Fa-f]+)\s+(?P<name>\S+)\s*$")
 _COD_PROC_RE = re.compile(r"^\s*(?P<name>[A-Za-z_$?@][\w$?@]*)\s+PROC\s+(?P<kind>[A-Za-z]+)\b", re.IGNORECASE)
 _COD_ENDP_RE = re.compile(r"^\s*(?P<name>[A-Za-z_$?@][\w$?@]*)\s+ENDP\b", re.IGNORECASE)
@@ -113,6 +115,55 @@ def _normalize_symbol_name(name: str) -> str:
     return name
 
 
+def _borland_mangling() -> Any:  # noqa: ANN401
+    """Load the standalone Borland demangler without the X86_16 package init."""
+    import importlib.util
+    import sys
+
+    module_name = "_dosunit_borland_mangling"
+    module = sys.modules.get(module_name)
+    if module is None:
+        repo_root = Path(__file__).resolve().parents[2]
+        module_path = (
+            repo_root / "angr_platforms" / "angr_platforms" / "X86_16" / "borland_mangling.py"
+        )
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec is None or spec.loader is None:
+            raise DosUnitError(f"failed to load Borland mangling module from {module_path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
+def _symbol_aliases(name: str) -> list[str]:
+    """Alias spellings that let name-mode mapping join mangled/demangled links.
+
+    Borland-mangled ``@scope@name$q<types>`` names gain the TDUMP-style
+    demangled signature (``scope::name(type far*)``) and the bare
+    ``scope::name`` spelling; already-demangled ``name(args)`` names gain
+    the bare ``name`` spelling.  Aliases are optional evidence only: a
+    demangle parse failure simply yields no extra spellings.
+    """
+    text = name.strip()
+    aliases: list[str] = []
+    if text.startswith("@"):
+        mangling = _borland_mangling()
+        signature = mangling.demangle_borland_name(text)
+        if not signature.parse_error:
+            rendered = mangling.render_borland_signature(signature)
+            if rendered and rendered != text:
+                aliases.append(rendered)
+                base = rendered.split("(", 1)[0].strip()
+                if base and base not in aliases:
+                    aliases.append(base)
+    elif "(" in text:
+        base = text[: text.index("(")].strip()
+        if base and base != text:
+            aliases.append(base)
+    return aliases
+
+
 def _catalog_entry(
     *,
     module: str,
@@ -125,9 +176,11 @@ def _catalog_entry(
     end: int | None = None,
     confidence: str = "medium",
 ) -> dict[str, Any]:
+    names = [name] if name else []
+    names.extend(alias for alias in _symbol_aliases(name) if alias not in names)
     entry: dict[str, Any] = {
         "id": _function_id(module, name, segment, offset),
-        "names": [name] if name else [],
+        "names": names,
         "entry": {
             "kind": "module_relative",
             "segment": segment,

@@ -108,6 +108,11 @@ def _segment_para_for_name(functions_catalog: dict[str, Any] | None, name: str) 
     return None
 
 
+def _name_match_key(name: str) -> str:
+    """Whitespace-insensitive key for joining linker-map symbol names."""
+    return "".join(str(name).split())
+
+
 def make_mapping_document(  # noqa: D103
     *,
     oracle_catalog: dict[str, Any],
@@ -121,7 +126,7 @@ def make_mapping_document(  # noqa: D103
         if not isinstance(function, dict):
             continue
         for name in function.get("names", []) or []:
-            candidates_by_name.setdefault(str(name), []).append(function)
+            candidates_by_name.setdefault(_name_match_key(name), []).append(function)
 
     functions: list[dict[str, Any]] = []
     diagnostics: list[dict[str, Any]] = []
@@ -139,7 +144,13 @@ def make_mapping_document(  # noqa: D103
                 }
             )
             continue
-        candidates = candidates_by_name.get(name, [])
+        candidates: list[dict[str, Any]] = []
+        matched_name = name
+        for candidate_name in names:
+            candidates = candidates_by_name.get(_name_match_key(candidate_name), [])
+            if candidates:
+                matched_name = candidate_name
+                break
         if not candidates:
             diagnostics.append(
                 {"reason": "mapping_missing", "oracle_id": oracle_function.get("id"), "oracle_name": name}
@@ -164,14 +175,19 @@ def make_mapping_document(  # noqa: D103
                 }
             )
             continue
+        candidate_names = [str(item) for item in candidate.get("names", []) or []]
+        sources = ["name_match"]
+        if matched_name != name:
+            sources.append("name_alias")
         functions.append(
             {
                 "oracle_id": oracle_function.get("id"),
                 "oracle_name": name,
                 "candidate_id": candidate.get("id"),
-                "candidate_name": name,
+                "candidate_name": candidate_names[0] if candidate_names else matched_name,
+                "matched_name": matched_name,
                 "candidate_entry": candidate_entry,
-                "sources": ["name_match"],
+                "sources": sources,
             }
         )
 
