@@ -372,18 +372,32 @@ def _resolve_mapped_candidate_by_id(
         if exact_signature is not None
         else None
     )
+    signature = _ssa_block_signature(oracle_function)
+    signature_candidate = (
+        tables.by_id_signature.get((str(mapped.get("candidate_id")), signature))
+        if signature is not None
+        else None
+    )
     if part_delta:
         candidate_function = tables.by_id_delta.get((str(mapped.get("candidate_id")), part_delta))
         # An identical byte stream elsewhere in the mapped function is strictly
-        # stronger evidence than a coincidental equal entry offset.
+        # stronger evidence than a coincidental equal entry offset; a
+        # shape-matching stream (immediates masked) also beats a delta hit
+        # whose own shape differs — delta ties alone pair boundary-shifted
+        # variants wrongly (the fused-with-predecessor part vs the bare one).
         if candidate_function is not None and exact_candidate is not None and exact_candidate is not candidate_function:
             candidate_function = exact_candidate
+        elif (
+            candidate_function is not None
+            and signature_candidate is not None
+            and signature_candidate is not candidate_function
+            and _ssa_block_signature(candidate_function) != signature
+        ):
+            candidate_function = signature_candidate
     if candidate_function is None:
         candidate_function = exact_candidate
     if candidate_function is None:
-        signature = _ssa_block_signature(oracle_function)
-        if signature is not None:
-            candidate_function = tables.by_id_signature.get((str(mapped.get("candidate_id")), signature))
+        candidate_function = signature_candidate
     if candidate_function is None and not part_delta:
         candidate_function = tables.by_id.get((str(mapped.get("candidate_id")), part_index))
     return candidate_function
@@ -406,18 +420,27 @@ def _resolve_mapped_candidate_by_name(
         if exact_signature is not None
         else None
     )
+    signature = _ssa_block_signature(oracle_function)
+    signature_candidate = (
+        tables.by_key_signature.get((candidate_name, signature))
+        if signature is not None
+        else None
+    )
     if part_delta:
         candidate_function = tables.by_key_delta.get((candidate_name, part_delta))
-        # An identical byte stream elsewhere in the mapped function is strictly
-        # stronger evidence than a coincidental equal entry offset.
         if candidate_function is not None and exact_candidate is not None and exact_candidate is not candidate_function:
             candidate_function = exact_candidate
+        elif (
+            candidate_function is not None
+            and signature_candidate is not None
+            and signature_candidate is not candidate_function
+            and _ssa_block_signature(candidate_function) != signature
+        ):
+            candidate_function = signature_candidate
     if candidate_function is None:
         candidate_function = exact_candidate
     if candidate_function is None:
-        signature = _ssa_block_signature(oracle_function)
-        if signature is not None:
-            candidate_function = tables.by_key_signature.get((candidate_name, signature))
+        candidate_function = signature_candidate
     if candidate_function is None and not part_delta:
         candidate_function = tables.by_key.get((candidate_name, part_index))
     return candidate_function
@@ -474,18 +497,27 @@ def _resolve_keyed_candidate(
         if exact_signature is not None
         else None
     )
+    signature = _ssa_block_signature(oracle_function)
+    signature_candidate = (
+        tables.by_key_signature.get((function_key, signature))
+        if signature is not None
+        else None
+    )
     if part_delta:
         candidate_function = tables.by_key_delta.get((function_key, part_delta))
-        # An identical byte stream elsewhere in the mapped function is strictly
-        # stronger evidence than a coincidental equal entry offset.
         if candidate_function is not None and exact_candidate is not None and exact_candidate is not candidate_function:
             candidate_function = exact_candidate
+        elif (
+            candidate_function is not None
+            and signature_candidate is not None
+            and signature_candidate is not candidate_function
+            and _ssa_block_signature(candidate_function) != signature
+        ):
+            candidate_function = signature_candidate
     if candidate_function is None:
         candidate_function = exact_candidate
     if candidate_function is None:
-        signature = _ssa_block_signature(oracle_function)
-        if signature is not None:
-            candidate_function = tables.by_key_signature.get((function_key, signature))
+        candidate_function = signature_candidate
     if candidate_function is None and not part_delta:
         candidate_function = tables.by_key.get((function_key, part_index))
     if candidate_function is None and not part_delta:
