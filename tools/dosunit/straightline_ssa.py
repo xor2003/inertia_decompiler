@@ -9491,10 +9491,18 @@ def _normalized_binary_signature_pattern(blob: bytes, linear: int) -> tuple[int 
             encoded = list(insn.bytes)
             mask = [False] * len(encoded)
             encoding = getattr(insn, "encoding", None)
+            mnemonic = str(getattr(insn, "mnemonic", "") or "").lower()
+            is_control = mnemonic in CONTROL_MNEMONICS and mnemonic != "int"
             for offset_name, size_name in (("imm_offset", "imm_size"), ("disp_offset", "disp_size")):
                 offset = int(getattr(encoding, offset_name, 0) or 0)
                 size = int(getattr(encoding, size_name, 0) or 0)
                 if offset <= 0 or size <= 0:
+                    continue
+                # Control-transfer targets are position-dependent; mask them.
+                # 8-bit immediates on non-control instructions are literals
+                # (relocatable operands are always encoded as imm16), so they
+                # must stay visible or semantically different parts collide.
+                if offset_name == "imm_offset" and not is_control and size < 2:
                     continue
                 for idx in range(offset, min(offset + size, len(mask))):
                     mask[idx] = True
@@ -10634,7 +10642,7 @@ def _layout_constant_pairs(
                 deferred.append(pair)
     _group_layout_constant_pairs(pairs, absolute_memory_pairs, memory_pairs, deferred)
     pairs.extend(_call_argument_immediate_layout_pairs(oracle_instructions, candidate_instructions))
-    pairs.extend(_call_far_pointer_push_pairs(oracle_instructions, candidate_instructions))
+    pairs.extend(_call_far_pointer_push_pairs(oracle_instructions, candidate_instructions, image_context))
     pairs.extend(_seg_register_far_pointer_pairs(oracle_instructions, candidate_instructions, image_context))
     pairs.extend(_entry_shift_immediate_pairs(oracle_function, candidate_function))
     pairs.extend(_stored_pointer_immediate_pairs(oracle_instructions, candidate_instructions))
@@ -10859,32 +10867,46 @@ def _layout_image_context(
 _SEGMENT_PUSH_REGS = ("ds", "es", "ss", "cs")
 
 
-def _seg_pointer_string_equal(
-    context: dict[str, dict[str, Any]] | None, oracle_off: int, candidate_off: int
-) -> bool:
-    """Prove two pushed data-segment offsets reference byte-identical strings.
+def _seg_pointer_string_matches(
+    context: dict[str, dict[str, Any]] | None,
+    oracle_off: int,
+    candidate_off: int,
+    *,
+    min_len: int,
+) -> list[tuple[int, int]]:
+    """Paragraph pairs under which both pushed offsets hold the same string.
 
     For every segment paragraph each image's relocation table materializes,
-    ``para*16 + off`` is a plausible data-string address.  The pair is proven
-    only when some paragraph combination yields byte-identical NUL-terminated
-    strings of at least 4 bytes including the terminator.
+    ``para*16 + off`` is a plausible data-string address.  Returns every
+    ``(para_o, para_c)`` combination yielding byte-identical NUL-terminated
+    strings of at least ``min_len`` bytes including the terminator.
     """
     if not context:
-        return False
+        return []
     oracle_side = context.get("oracle") or {}
     candidate_side = context.get("candidate") or {}
     oracle_image = oracle_side.get("image")
     candidate_image = candidate_side.get("image")
     if not isinstance(oracle_image, bytes) or not isinstance(candidate_image, bytes):
-        return False
+        return []
+    matches: list[tuple[int, int]] = []
     for para_o in oracle_side.get("seg_targets") or []:
         s_o = _cstring_at(oracle_image, para_o * 16 + oracle_off)
-        if s_o is None or len(s_o) < 4 or not any(0x20 <= b <= 0x7E for b in s_o):
+        if s_o is None or len(s_o) < min_len or not any(0x20 <= b <= 0x7E for b in s_o):
             continue
         for para_c in candidate_side.get("seg_targets") or []:
             if _cstring_at(candidate_image, para_c * 16 + candidate_off) == s_o:
-                return True
-    return False
+                matches.append((para_o, para_c))
+    return matches
+
+
+def _seg_pointer_string_equal(
+    context: dict[str, dict[str, Any]] | None, oracle_off: int, candidate_off: int
+) -> bool:
+    """Prove two pushed data-segment offsets reference byte-identical strings."""
+    return bool(
+        _seg_pointer_string_matches(context, oracle_off, candidate_off, min_len=4)
+    )
 
 
 def _seg_register_far_pointer_pairs(
@@ -10908,7 +10930,7 @@ def _seg_register_far_pointer_pairs(
         return []
     if not any(str(item.get("mnemonic", "")).lower() in call_mnemonics for item in candidate_instructions):
         return []
-    pairs: list[dict[str, Any]] = []
+    differing: list[tuple[int, int]] = []
     for index, (oracle, candidate) in enumerate(zip(oracle_instructions, candidate_instructions, strict=False)):
         oracle_value = _push_immediate(oracle)
         candidate_value = _push_immediate(candidate)
@@ -10929,26 +10951,61 @@ def _seg_register_far_pointer_pairs(
                     seg_adjacent = True
         if not seg_adjacent:
             continue
-        if _seg_pointer_string_equal(image_context, oracle_off, candidate_off):
-            pairs.append(
-                {
-                    "oracle": oracle_off,
-                    "candidate": candidate_off,
-                    "reason": "data_string_arg",
-                }
-            )
+        differing.append((oracle_off, candidate_off))
+    pairs: list[dict[str, Any]] = []
+    witnessed_paras: set[tuple[int, int]] = set()
+    # Strings of >=4 bytes are self-proving; record their paragraph witnesses
+    # so 3-byte strings can borrow the established cross-binary relocation.
+    for oracle_off, candidate_off in differing:
+        matches = _seg_pointer_string_matches(
+            image_context, oracle_off, candidate_off, min_len=4
+        )
+        if not matches:
+            continue
+        witnessed_paras.update(matches)
+        pairs.append(
+            {
+                "oracle": oracle_off,
+                "candidate": candidate_off,
+                "reason": "data_string_arg",
+            }
+        )
+    for oracle_off, candidate_off in differing:
+        if any(item["oracle"] == oracle_off and item["candidate"] == candidate_off for item in pairs):
+            continue
+        matches = _seg_pointer_string_matches(
+            image_context, oracle_off, candidate_off, min_len=3
+        )
+        if not matches:
+            continue
+        # A 3-byte string is weak evidence alone; accept it only under a
+        # paragraph pair already witnessed by a longer string, or when the
+        # match is unique across the whole relocation table.
+        if not (set(matches) & witnessed_paras or len(matches) == 1):
+            continue
+        pairs.append(
+            {
+                "oracle": oracle_off,
+                "candidate": candidate_off,
+                "reason": "data_string_arg",
+            }
+        )
     return pairs
 
 
 def _call_far_pointer_push_pairs(
-    oracle_instructions: list[dict[str, Any]], candidate_instructions: list[dict[str, Any]]
+    oracle_instructions: list[dict[str, Any]],
+    candidate_instructions: list[dict[str, Any]],
+    image_context: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Normalize far-pointer call arguments built via consecutive push immediates.
 
     `setvect(n, isr)` / `atexit(func)` pass far function pointers as `push seg` +
     `push offset` — relocated code addresses that differ across layouts. A maximal
-    run of >=2 consecutive *differing* push immediates containing a segment-like
-    pair (both >=0x1000) is normalized; a lone differing push could be a real
+    run of >=2 consecutive *differing* push immediates is normalized when the run
+    contains a proven segment-paragraph push (the pushed value appears among the
+    relocation-table segment targets of its own image) or a segment-like pair
+    (both >=0x1000); a lone differing push without provenance could be a real
     argument change and stays compared.
     """
     call_mnemonics = {"call", "lcall"}
@@ -10956,6 +11013,17 @@ def _call_far_pointer_push_pairs(
         return []
     if not any(str(item.get("mnemonic", "")).lower() in call_mnemonics for item in candidate_instructions):
         return []
+    oracle_seg_targets = frozenset((image_context or {}).get("oracle", {}).get("seg_targets") or ())
+    candidate_seg_targets = frozenset((image_context or {}).get("candidate", {}).get("seg_targets") or ())
+
+    def _proven_segment(index: int) -> bool:
+        oracle_value, candidate_value = pushed_values[index]
+        # Relocated segment pushes carry the +0x1000 image-load bias as +0x100
+        # paragraphs; relocation-table targets store the unrelocated paragraph.
+        oracle_hit = oracle_value in oracle_seg_targets or (oracle_value - 0x100) in oracle_seg_targets
+        candidate_hit = candidate_value in candidate_seg_targets or (candidate_value - 0x100) in candidate_seg_targets
+        return oracle_hit and candidate_hit
+
     differing_push_indexes: list[int] = []
     pushed_values: dict[int, tuple[int, int]] = {}
     for index, (oracle, candidate) in enumerate(zip(oracle_instructions, candidate_instructions, strict=False)):
@@ -10968,24 +11036,25 @@ def _call_far_pointer_push_pairs(
         differing_push_indexes.append(index)
         pushed_values[index] = (oracle_value & 0xFFFF, candidate_value & 0xFFFF)
     pairs: list[dict[str, Any]] = []
-    run: list[int] = []
-    for index in differing_push_indexes:
-        if run and index == run[-1] + 1:
-            run.append(index)
-            continue
-        if len(run) >= 2 and any(o >= 0x1000 and c >= 0x1000 for o, c in (pushed_values[i] for i in run)):
-            for i in run:
-                oracle_value, candidate_value = pushed_values[i]
-                pairs.append(
-                    {
-                        "oracle": oracle_value,
-                        "candidate": candidate_value,
-                        "reason": "far_pointer_push_arg",
-                    }
-                )
-        run = [index]
-    if len(run) >= 2 and any(o >= 0x1000 and c >= 0x1000 for o, c in (pushed_values[i] for i in run)):
+
+    def _emit(run: list[int]) -> None:
+        if not run:
+            return
+        run_set = set(run)
+        indexes: set[int] = set()
         for i in run:
+            if not _proven_segment(i):
+                continue
+            indexes.add(i)
+            # A relocated segment paragraph is the high word of a far pointer;
+            # the push immediately after it carries the relocated offset.
+            if i + 1 in run_set:
+                indexes.add(i + 1)
+        if len(run) >= 2 and any(o >= 0x1000 and c >= 0x1000 for o, c in (pushed_values[i] for i in run)):
+            indexes.update(run)
+        if not indexes:
+            return
+        for i in sorted(indexes):
             oracle_value, candidate_value = pushed_values[i]
             pairs.append(
                 {
@@ -10994,6 +11063,15 @@ def _call_far_pointer_push_pairs(
                     "reason": "far_pointer_push_arg",
                 }
             )
+
+    run: list[int] = []
+    for index in differing_push_indexes:
+        if run and index == run[-1] + 1:
+            run.append(index)
+            continue
+        _emit(run)
+        run = [index]
+    _emit(run)
     return pairs
 
 
