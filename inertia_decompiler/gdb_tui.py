@@ -347,49 +347,11 @@ class GDBTUIApp(App):  # type: ignore[misc, unused-ignore] # dynamic Textual UI 
             parts = cmd.split()
             action = parts[0].lower()
 
-            if action in ("s", "step", "si"):
-                self._action("step", count=self._parse_count(parts))
-            elif action in ("n", "next", "ni"):
-                self._action("step_over", count=self._parse_count(parts))
-            elif action in ("c", "continue", "cont"):
-                self._action("continue", count=1)
-            elif action in ("i", "interrupt", "int"):
-                self._action("interrupt", count=1)
-            elif action in ("b", "break", "breakpoint"):
-                addr = int(parts[1], 0) if len(parts) >= 2 else self._current_ip
-                if addr:
-                    self._toggle_breakpoint(addr)
-            elif action in ("d", "delete"):
-                if len(parts) >= 2:
-                    with contextlib.suppress(ValueError):
-                        await self._remove_breakpoint(int(parts[1], 0))
-            elif action in ("g", "go"):
-                if len(parts) >= 2:
-                    try:
-                        self._mem_addr = int(parts[1], 0)
-                        await self._dump_memory(self._mem_addr, 64)
-                    except ValueError:
-                        pass
-            elif action in ("m", "mem", "x", "examine"):
-                addr = int(parts[1], 0) if len(parts) >= 2 else self._current_ip
-                length = int(parts[2], 0) if len(parts) >= 3 else 64
-                await self._dump_memory(addr, length)
-            elif action in ("r", "reg"):
-                if len(parts) >= 2:
-                    val = self._regs.get(parts[1], 0)
-                    self._append_console(f"{parts[1]} = 0x{val:x}")
-            elif action in ("p", "print", "?"):
-                if len(parts) >= 2:
-                    if self._client is None:
-                        self._append_console("Cannot evaluate: disconnected")
-                        return
-                    expr = " ".join(parts[1:])
-                    try:
-                        val = await self._client.read_register(int(expr, 0))
-                        self._append_console(f"= 0x{val:x}")
-                    except (ValueError, GDBClientError):
-                        self._append_console(f"Cannot evaluate: {expr}")
-            elif action in ("q", "quit", "exit"):
+            if self._dispatch_control_command(action, parts):
+                return
+            if await self._dispatch_state_command(action, parts):
+                return
+            if action in ("q", "quit", "exit"):
                 self.exit()
             elif action in ("h", "help"):
                 self._append_console(
@@ -400,6 +362,80 @@ class GDBTUIApp(App):  # type: ignore[misc, unused-ignore] # dynamic Textual UI 
                 self._append_console(f"Unknown: {action}")
 
         return await _impl()
+
+    def _dispatch_control_command(self, action: str, parts: list[str]) -> bool:
+        """Handle step/next/continue/interrupt commands; return True when dispatched."""
+        if action in ("s", "step", "si"):
+            self._action("step", count=self._parse_count(parts))
+        elif action in ("n", "next", "ni"):
+            self._action("step_over", count=self._parse_count(parts))
+        elif action in ("c", "continue", "cont"):
+            self._action("continue", count=1)
+        elif action in ("i", "interrupt", "int"):
+            self._action("interrupt", count=1)
+        else:
+            return False
+        return True
+
+    async def _dispatch_state_command(self, action: str, parts: list[str]) -> bool:
+        """Handle breakpoint, memory, and register commands; return True when dispatched."""
+        if await self._dispatch_breakpoint_command(action, parts):
+            return True
+        if await self._dispatch_memory_command(action, parts):
+            return True
+        if action in ("r", "reg"):
+            if len(parts) >= 2:
+                val = self._regs.get(parts[1], 0)
+                self._append_console(f"{parts[1]} = 0x{val:x}")
+        elif action in ("p", "print", "?"):
+            if len(parts) >= 2:
+                await self._print_register_expression(parts)
+        else:
+            return False
+        return True
+
+    async def _dispatch_breakpoint_command(self, action: str, parts: list[str]) -> bool:
+        """Handle breakpoint toggle/delete commands; return True when dispatched."""
+        if action in ("b", "break", "breakpoint"):
+            addr = int(parts[1], 0) if len(parts) >= 2 else self._current_ip
+            if addr:
+                self._toggle_breakpoint(addr)
+        elif action in ("d", "delete"):
+            if len(parts) >= 2:
+                with contextlib.suppress(ValueError):
+                    await self._remove_breakpoint(int(parts[1], 0))
+        else:
+            return False
+        return True
+
+    async def _dispatch_memory_command(self, action: str, parts: list[str]) -> bool:
+        """Handle go/examine memory commands; return True when dispatched."""
+        if action in ("g", "go"):
+            if len(parts) >= 2:
+                try:
+                    self._mem_addr = int(parts[1], 0)
+                    await self._dump_memory(self._mem_addr, 64)
+                except ValueError:
+                    pass
+        elif action in ("m", "mem", "x", "examine"):
+            addr = int(parts[1], 0) if len(parts) >= 2 else self._current_ip
+            length = int(parts[2], 0) if len(parts) >= 3 else 64
+            await self._dump_memory(addr, length)
+        else:
+            return False
+        return True
+
+    async def _print_register_expression(self, parts: list[str]) -> None:
+        """Evaluate a numeric register/expression print command."""
+        if self._client is None:
+            self._append_console("Cannot evaluate: disconnected")
+            return
+        expr = " ".join(parts[1:])
+        try:
+            val = await self._client.read_register(int(expr, 0))
+            self._append_console(f"= 0x{val:x}")
+        except (ValueError, GDBClientError):
+            self._append_console(f"Cannot evaluate: {expr}")
 
     # -- GDB actions -------------------------------------------------------
 
@@ -427,14 +463,8 @@ class GDBTUIApp(App):  # type: ignore[misc, unused-ignore] # dynamic Textual UI 
                 elif name == "skip":
                     # Skip: advance IP by one instruction
                     await self._skip_instruction()
-                elif name == "restart":
-                    self._append_console("Restart: reconnect")
-                    await self._client.disconnect()
-                    await self._client.connect(self._host, self._port)
-                elif name == "reset":
-                    self._append_console("Reset: disconnect")
-                    with contextlib.suppress(Exception):
-                        await self._client.disconnect()
+                else:
+                    await self._run_connection_action(name)
 
                 await self._refresh_all()
             except GDBClientError as e:
@@ -444,6 +474,19 @@ class GDBTUIApp(App):  # type: ignore[misc, unused-ignore] # dynamic Textual UI 
                 self._append_console(f"exception: {e}")
 
         return await _impl()
+
+    async def _run_connection_action(self, name: str) -> None:
+        """Handle restart/reset connection-lifecycle actions; ignore unknown names."""
+        if self._client is None:
+            return
+        if name == "restart":
+            self._append_console("Restart: reconnect")
+            await self._client.disconnect()
+            await self._client.connect(self._host, self._port)
+        elif name == "reset":
+            self._append_console("Reset: disconnect")
+            with contextlib.suppress(Exception):
+                await self._client.disconnect()
 
     async def _skip_instruction(self) -> None:
         """Skip current instruction by advancing IP."""
@@ -523,28 +566,7 @@ class GDBTUIApp(App):  # type: ignore[misc, unused-ignore] # dynamic Textual UI 
             if first == 0x9A and len(raw) >= 5:
                 return addr + 5
             if first == 0xFF and len(raw) >= 2:
-                modrm = raw[1]
-                reg = (modrm >> 3) & 0x7
-                if reg not in (2, 3):
-                    return None
-                length = 2
-                mod = (modrm >> 6) & 0x3
-                rm = modrm & 0x7
-                if mod != 3 and rm == 4:
-                    if len(raw) < 3:
-                        return None
-                    sib = raw[2]
-                    length += 1
-                    base = sib & 0x7
-                    if mod == 0 and base == 5:
-                        length += 4
-                if mod == 0 and rm == 6 and len(raw) >= length + 2:
-                    length += 2
-                elif mod == 1 and len(raw) >= length + 1:
-                    length += 1
-                elif mod == 2 and len(raw) >= length + 4:
-                    length += 4
-                return addr + length
+                return _ff_group_fallthrough(addr, raw)
 
             return None
 
@@ -715,3 +737,29 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def _ff_group_fallthrough(addr: int, raw: bytes) -> int | None:
+    """Return the fallthrough address of an ``FF /2|/3`` call/jump, or ``None``."""
+    modrm = raw[1]
+    reg = (modrm >> 3) & 0x7
+    if reg not in (2, 3):
+        return None
+    length = 2
+    mod = (modrm >> 6) & 0x3
+    rm = modrm & 0x7
+    if mod != 3 and rm == 4:
+        if len(raw) < 3:
+            return None
+        sib = raw[2]
+        length += 1
+        base = sib & 0x7
+        if mod == 0 and base == 5:
+            length += 4
+    if mod == 0 and rm == 6 and len(raw) >= length + 2:
+        length += 2
+    elif mod == 1 and len(raw) >= length + 1:
+        length += 1
+    elif mod == 2 and len(raw) >= length + 4:
+        length += 4
+    return addr + length

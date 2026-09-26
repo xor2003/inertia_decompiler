@@ -1450,3 +1450,10 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verified: ruff 0, mypy 0, 13 far-pointer/stack tests + 4 CLI
   far-pointer/MK_FP tests pass, def-integrity vs HEAD clean, zero
   architecture violations.
+- `inertia_decompiler/gdb_tui.py`: Ruff debt cleared to zero (6
+  findings). Split the command-input dispatch into control, breakpoint,
+  memory, and register/print dispatcher groups; extracted the
+  restart/reset connection-lifecycle lane; and extracted the `FF /2|/3`
+  ModR/M fallthrough-length lane.
+- Verified: ruff 0, mypy 0, 3 TUI step-over tests pass, def-integrity
+  vs HEAD clean, zero architecture violations.
