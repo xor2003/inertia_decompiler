@@ -1690,3 +1690,9 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   shows all four adapters installed with correct `__name__` guards and
   idempotent double-apply; msgspec shim decode/loads verified
   byte-identical; def-integrity vs HEAD clean.
+- `scripts/build_msc51_flag_profiles.py`: Ruff debt cleared to zero
+  (3 findings). Extracted instruction shape markers, argparse block,
+  COD profile collection, dataset-row lanes, and IDF payload build.
+- Verified: ruff 0, mypy 0, `--help` and end-to-end fixture run produce
+  identical payload shape; def-integrity vs HEAD clean (nested `_impl`
+  bodies preserved inline).
