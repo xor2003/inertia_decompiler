@@ -1547,3 +1547,11 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   binary helpers.
 - Verified: ruff 0, mypy 0, 3 canonicalize tests pass, def-integrity
   vs HEAD clean, zero architecture violations.
+- `angr_platforms/angr_platforms/X86_16/structuring_grouped_graph_builder.py`:
+  Ruff debt cleared to zero (5 findings). Split condition-hint rendering
+  into logical vs comparison lanes, extracted the per-region support-entry
+  factory plus condition-IR/edge-evidence collection lanes from the
+  support builder, and hoisted the cross-entry role map out of
+  `build_grouped_region_graph`.
+- Verified: ruff 0, mypy 0, 21 grouped-graph/grouped-pass tests pass,
+  def-integrity vs HEAD clean, zero architecture violations.

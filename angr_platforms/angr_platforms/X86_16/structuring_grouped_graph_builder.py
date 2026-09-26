@@ -128,44 +128,57 @@ def _format_ir_condition_hint_8616(condition: IRCondition) -> str | None:
     def _impl() -> str | None:
         args = tuple(condition.args or ())
         op = str(condition.op)
-        if op == "not" and len(args) == 1 and isinstance(args[0], IRCondition):
-            inner = _format_ir_condition_hint_8616(args[0])
-            if inner is None:
-                return None
-            return f"!({inner})"
-        if (
-            op in {"and", "or"}
-            and len(args) == 2
-            and isinstance(args[0], IRCondition)
-            and isinstance(args[1], IRCondition)
-        ):
-            left = _format_ir_condition_hint_8616(args[0])
-            right = _format_ir_condition_hint_8616(args[1])
-            if left is None or right is None:
-                return None
-            join = " && " if op == "and" else " || "
-            return f"({left}){join}({right})"
-        if op in {"zero", "nonzero"} and len(args) == 1:
-            value = _format_ir_value_8616(args[0])
-            if value is None:
-                return None
-            return f"{value} == 0" if op == "zero" else f"{value} != 0"
-        if op == "masked_nonzero" and len(args) == 2:
-            left = _format_ir_value_8616(args[0])
-            right = _format_ir_value_8616(args[1])
-            if left is None or right is None:
-                return None
-            return f"({left} & {right}) != 0"
-        cmp_symbol = condition_compare_symbol_8616(op)
-        if cmp_symbol is not None and len(args) == 2:
-            left = _format_ir_value_8616(args[0])
-            right = _format_ir_value_8616(args[1])
-            if left is None or right is None:
-                return None
-            return f"{left} {cmp_symbol} {right}"
-        return None
+        logical = _logical_condition_hint_8616(op, args)
+        if logical is not None:
+            return logical
+        return _comparison_condition_hint_8616(op, args)
 
     return _impl()
+
+
+def _logical_condition_hint_8616(op: str, args: tuple[object, ...]) -> str | None:
+    """Render the not/and/or condition shapes as a hint."""
+    if op == "not" and len(args) == 1 and isinstance(args[0], IRCondition):
+        inner = _format_ir_condition_hint_8616(args[0])
+        if inner is None:
+            return None
+        return f"!({inner})"
+    if (
+        op in {"and", "or"}
+        and len(args) == 2
+        and isinstance(args[0], IRCondition)
+        and isinstance(args[1], IRCondition)
+    ):
+        left = _format_ir_condition_hint_8616(args[0])
+        right = _format_ir_condition_hint_8616(args[1])
+        if left is None or right is None:
+            return None
+        join = " && " if op == "and" else " || "
+        return f"({left}){join}({right})"
+    return None
+
+
+def _comparison_condition_hint_8616(op: str, args: tuple[object, ...]) -> str | None:
+    """Render the zero/masked/compare condition shapes as a hint."""
+    if op in {"zero", "nonzero"} and len(args) == 1:
+        value = _format_ir_value_8616(args[0])
+        if value is None:
+            return None
+        return f"{value} == 0" if op == "zero" else f"{value} != 0"
+    if op == "masked_nonzero" and len(args) == 2:
+        left = _format_ir_value_8616(args[0])
+        right = _format_ir_value_8616(args[1])
+        if left is None or right is None:
+            return None
+        return f"({left} & {right}) != 0"
+    cmp_symbol = condition_compare_symbol_8616(op)
+    if cmp_symbol is not None and len(args) == 2:
+        left = _format_ir_value_8616(args[0])
+        right = _format_ir_value_8616(args[1])
+        if left is None or right is None:
+            return None
+        return f"{left} {cmp_symbol} {right}"
+    return None
 
 
 def _edge_jump_target_region_id_8616(codegen: object, edge_block_addr: int) -> int | None:
@@ -294,159 +307,157 @@ def _typed_ir_support_by_region_id(codegen: object) -> dict[int, dict[str, objec
 
 def _condition_ir_support_by_region_id_8616(codegen: object) -> dict[int, dict[str, object]]:
     def _impl() -> dict[int, dict[str, object]]:
-        conditions = _dynamic_grouped_graph_getattr_8616(codegen, "_inertia_typed_conditions", None)
         support: dict[int, dict[str, object]] = {}
+        conditions = _dynamic_grouped_graph_getattr_8616(codegen, "_inertia_typed_conditions", None)
         if isinstance(conditions, (list, tuple)):
-            for cond in conditions:
-                if not isinstance(cond, ConditionIR):
-                    continue
-                region_ids = tuple(
-                    dict.fromkeys(
-                        region_id
-                        for region_id in (cond.block_addr, cond.src_insn)
-                        if isinstance(region_id, int)
-                    )
-                )
-                if not region_ids:
-                    continue
-                for region_id in region_ids:
-                    entry = support.setdefault(
-                        region_id,
-                        {
-                            "has_condition": True,
-                            "condition_kinds": (),
-                            "condition_hint": None,
-                            "condition_ir_has_condition": True,
-                            "condition_ir_ops": (),
-                            "condition_ir_hint": None,
-                            "condition_ir_count": 0,
-                            "condition_edge_has_guard": False,
-                            "condition_edge_guard_ops": (),
-                            "condition_edge_guard_hints": (),
-                            "condition_edge_guards": (),
-                            "condition_edge_guard_count": 0,
-                            "condition_edge_producer_semantics": (),
-                            "has_address": False,
-                            "address_spaces": (),
-                            "stable_address_spaces": (),
-                            "segment_origin_kinds": (),
-                            "address_hint": None,
-                            "has_phi": False,
-                        },
-                    )
-                    ops = _dict_set_8616(entry, "condition_ir_ops")
-                    ops.add(str(cond.op))
-                    entry["condition_ir_ops"] = tuple(sorted(str(item) for item in ops))
-                    entry["condition_kinds"] = tuple(
-                        sorted(str(item) for item in (*_dict_tuple_8616(entry, "condition_kinds"), str(cond.op)))
-                    )
-                    entry["condition_ir_count"] = _dict_int_8616(entry, "condition_ir_count") + 1
-                    if entry.get("condition_ir_hint") is None:
-                        hint = render_condition_ir_native_8616(cond) or render_condition_ir_8616(cond)
-                        if hint is not None:
-                            entry["condition_ir_hint"] = hint
-                            entry["condition_hint"] = hint
+            _collect_condition_ir_support_8616(support, conditions)
         edge_evidence = _dynamic_grouped_graph_getattr_8616(codegen, "_inertia_condition_edge_evidence", None)
         if isinstance(edge_evidence, (list, tuple)):
-            for edge in edge_evidence:
-                if not isinstance(edge, ConditionEdgeEvidence):
-                    continue
-                edge_region_ids: list[int] = [edge.edge_block_addr]
-                target_region_id = _edge_jump_target_region_id_8616(codegen, edge.edge_block_addr)
-                if isinstance(target_region_id, int):
-                    edge_region_ids.append(target_region_id)
-                condition = edge.condition
-                producer_semantics = _edge_producer_semantics_payload_8616(edge)
-                for region_id in dict.fromkeys(edge_region_ids):
-                    entry = support.setdefault(
-                        region_id,
-                        {
-                            "has_condition": True,
-                            "condition_kinds": (),
-                            "condition_hint": None,
-                            "condition_ir_has_condition": False,
-                            "condition_ir_ops": (),
-                            "condition_ir_hint": None,
-                            "condition_ir_count": 0,
-                            "condition_edge_has_guard": True,
-                            "condition_edge_guard_ops": (),
-                            "condition_edge_guard_hints": (),
-                            "condition_edge_guards": (),
-                            "condition_edge_guard_count": 0,
-                            "condition_edge_producer_semantics": (),
-                            "has_address": False,
-                            "address_spaces": (),
-                            "stable_address_spaces": (),
-                            "segment_origin_kinds": (),
-                            "address_hint": None,
-                            "has_phi": False,
-                        },
-                    )
-                    entry["has_condition"] = True
-                    entry["condition_edge_has_guard"] = True
-                    edge_ops = _dict_set_8616(entry, "condition_edge_guard_ops")
-                    edge_ops.add(str(condition.op))
-                    entry["condition_edge_guard_ops"] = tuple(sorted(str(item) for item in edge_ops))
-                    entry["condition_kinds"] = tuple(
-                        sorted(str(item) for item in (*_dict_tuple_8616(entry, "condition_kinds"), str(condition.op)))
-                    )
-                    edge_guards = _dict_tuple_8616(entry, "condition_edge_guards")
-                    if condition not in edge_guards:
-                        entry["condition_edge_guards"] = (*edge_guards, condition)
-                    entry["condition_edge_guard_count"] = _dict_int_8616(entry, "condition_edge_guard_count") + 1
-                    if producer_semantics is not None:
-                        current_semantics = _dict_tuple_8616(entry, "condition_edge_producer_semantics")
-                        if producer_semantics not in current_semantics:
-                            entry["condition_edge_producer_semantics"] = (*current_semantics, producer_semantics)
-                    hint = render_condition_ir_native_8616(condition) or render_condition_ir_8616(condition)
-                    if hint is not None:
-                        hints = _dict_tuple_8616(entry, "condition_edge_guard_hints")
-                        if hint not in hints:
-                            entry["condition_edge_guard_hints"] = (*hints, hint)
-                        if entry.get("condition_hint") is None:
-                            entry["condition_hint"] = hint
-                producer_region_ids = tuple(
-                    dict.fromkeys(
-                        region_id
-                        for region_id in (
-                            edge.producer_insn,
-                            _dynamic_grouped_graph_getattr_8616(condition, "producer_insn", None),
-                        )
-                        if isinstance(region_id, int)
-                    )
-                )
-                if producer_semantics is not None:
-                    for producer_region_id in producer_region_ids:
-                        entry = support.setdefault(
-                            producer_region_id,
-                            {
-                                "has_condition": False,
-                                "condition_kinds": (),
-                                "condition_hint": None,
-                                "condition_ir_has_condition": False,
-                                "condition_ir_ops": (),
-                                "condition_ir_hint": None,
-                                "condition_ir_count": 0,
-                                "condition_edge_has_guard": False,
-                                "condition_edge_guard_ops": (),
-                                "condition_edge_guard_hints": (),
-                                "condition_edge_guards": (),
-                                "condition_edge_guard_count": 0,
-                                "condition_edge_producer_semantics": (),
-                                "has_address": False,
-                                "address_spaces": (),
-                                "stable_address_spaces": (),
-                                "segment_origin_kinds": (),
-                                "address_hint": None,
-                                "has_phi": False,
-                            },
-                        )
-                        current_semantics = _dict_tuple_8616(entry, "condition_edge_producer_semantics")
-                        if producer_semantics not in current_semantics:
-                            entry["condition_edge_producer_semantics"] = (*current_semantics, producer_semantics)
+            _collect_edge_evidence_support_8616(codegen, support, edge_evidence)
         return support
 
     return _impl()
+
+
+def _empty_support_entry_8616(*, has_condition: bool, condition_ir: bool, edge_guard: bool) -> dict[str, object]:
+    """Return the canonical empty per-region support record."""
+    return {
+        "has_condition": has_condition,
+        "condition_kinds": (),
+        "condition_hint": None,
+        "condition_ir_has_condition": condition_ir,
+        "condition_ir_ops": (),
+        "condition_ir_hint": None,
+        "condition_ir_count": 0,
+        "condition_edge_has_guard": edge_guard,
+        "condition_edge_guard_ops": (),
+        "condition_edge_guard_hints": (),
+        "condition_edge_guards": (),
+        "condition_edge_guard_count": 0,
+        "condition_edge_producer_semantics": (),
+        "has_address": False,
+        "address_spaces": (),
+        "stable_address_spaces": (),
+        "segment_origin_kinds": (),
+        "address_hint": None,
+        "has_phi": False,
+    }
+
+
+def _collect_condition_ir_support_8616(
+    support: dict[int, dict[str, object]], conditions: typing.Iterable[object]
+) -> None:
+    """Fold typed-IR conditions into the per-region support map."""
+    for cond in conditions:
+        if not isinstance(cond, ConditionIR):
+            continue
+        region_ids = tuple(
+            dict.fromkeys(
+                region_id
+                for region_id in (cond.block_addr, cond.src_insn)
+                if isinstance(region_id, int)
+            )
+        )
+        if not region_ids:
+            continue
+        for region_id in region_ids:
+            entry = support.setdefault(
+                region_id,
+                _empty_support_entry_8616(has_condition=True, condition_ir=True, edge_guard=False),
+            )
+            ops = _dict_set_8616(entry, "condition_ir_ops")
+            ops.add(str(cond.op))
+            entry["condition_ir_ops"] = tuple(sorted(str(item) for item in ops))
+            entry["condition_kinds"] = tuple(
+                sorted(str(item) for item in (*_dict_tuple_8616(entry, "condition_kinds"), str(cond.op)))
+            )
+            entry["condition_ir_count"] = _dict_int_8616(entry, "condition_ir_count") + 1
+            if entry.get("condition_ir_hint") is None:
+                hint = render_condition_ir_native_8616(cond) or render_condition_ir_8616(cond)
+                if hint is not None:
+                    entry["condition_ir_hint"] = hint
+                    entry["condition_hint"] = hint
+
+
+def _record_edge_guard_8616(
+    support: dict[int, dict[str, object]],
+    region_id: int,
+    condition: ConditionIR,
+    producer_semantics: tuple[object, ...] | None,
+) -> None:
+    """Fold one guarded-edge condition into a region's support record."""
+    entry = support.setdefault(
+        region_id,
+        _empty_support_entry_8616(has_condition=True, condition_ir=False, edge_guard=True),
+    )
+    entry["has_condition"] = True
+    entry["condition_edge_has_guard"] = True
+    edge_ops = _dict_set_8616(entry, "condition_edge_guard_ops")
+    edge_ops.add(str(condition.op))
+    entry["condition_edge_guard_ops"] = tuple(sorted(str(item) for item in edge_ops))
+    entry["condition_kinds"] = tuple(
+        sorted(str(item) for item in (*_dict_tuple_8616(entry, "condition_kinds"), str(condition.op)))
+    )
+    edge_guards = _dict_tuple_8616(entry, "condition_edge_guards")
+    if condition not in edge_guards:
+        entry["condition_edge_guards"] = (*edge_guards, condition)
+    entry["condition_edge_guard_count"] = _dict_int_8616(entry, "condition_edge_guard_count") + 1
+    if producer_semantics is not None:
+        current_semantics = _dict_tuple_8616(entry, "condition_edge_producer_semantics")
+        if producer_semantics not in current_semantics:
+            entry["condition_edge_producer_semantics"] = (*current_semantics, producer_semantics)
+    hint = render_condition_ir_native_8616(condition) or render_condition_ir_8616(condition)
+    if hint is not None:
+        hints = _dict_tuple_8616(entry, "condition_edge_guard_hints")
+        if hint not in hints:
+            entry["condition_edge_guard_hints"] = (*hints, hint)
+        if entry.get("condition_hint") is None:
+            entry["condition_hint"] = hint
+
+
+def _record_producer_semantics_8616(
+    support: dict[int, dict[str, object]],
+    producer_region_ids: tuple[int, ...],
+    producer_semantics: tuple[object, ...],
+) -> None:
+    """Fold producer-side semantics into each producer region's support record."""
+    for producer_region_id in producer_region_ids:
+        entry = support.setdefault(
+            producer_region_id,
+            _empty_support_entry_8616(has_condition=False, condition_ir=False, edge_guard=False),
+        )
+        current_semantics = _dict_tuple_8616(entry, "condition_edge_producer_semantics")
+        if producer_semantics not in current_semantics:
+            entry["condition_edge_producer_semantics"] = (*current_semantics, producer_semantics)
+
+
+def _collect_edge_evidence_support_8616(
+    codegen: object, support: dict[int, dict[str, object]], edge_evidence: typing.Iterable[object]
+) -> None:
+    """Fold guarded-edge evidence into the per-region support map."""
+    for edge in edge_evidence:
+        if not isinstance(edge, ConditionEdgeEvidence):
+            continue
+        edge_region_ids: list[int] = [edge.edge_block_addr]
+        target_region_id = _edge_jump_target_region_id_8616(codegen, edge.edge_block_addr)
+        if isinstance(target_region_id, int):
+            edge_region_ids.append(target_region_id)
+        condition = edge.condition
+        producer_semantics = _edge_producer_semantics_payload_8616(edge)
+        for region_id in dict.fromkeys(edge_region_ids):
+            _record_edge_guard_8616(support, region_id, condition, producer_semantics)
+        producer_region_ids = tuple(
+            dict.fromkeys(
+                region_id
+                for region_id in (
+                    edge.producer_insn,
+                    _dynamic_grouped_graph_getattr_8616(condition, "producer_insn", None),
+                )
+                if isinstance(region_id, int)
+            )
+        )
+        if producer_semantics is not None:
+            _record_producer_semantics_8616(support, producer_region_ids, producer_semantics)
 
 
 def _scan_typed_ir_block_8616(block: object) -> dict[str, object]:
@@ -543,15 +554,7 @@ def build_grouped_region_graph(codegen: object) -> GroupedRegionGraphBuildResult
         if grouped_units is None or not grouped_units.units:
             return GroupedRegionGraphBuildResult(graph_result=graph_result, grouped_units=grouped_units)
 
-        role_by_region_id: dict[int, tuple[str, int]] = {}
-        for unit_index, unit in enumerate(grouped_units.units):
-            for region_id in unit.primary_entry_region_ids:
-                role_by_region_id[region_id] = ("primary_entry", unit_index)
-            for region_id in unit.entry_fragment_region_ids:
-                role_by_region_id[region_id] = ("entry_fragment", unit_index)
-            for region_id in unit.shared_region_ids:
-                role_by_region_id[region_id] = ("grouped_entry_candidate", unit_index)
-
+        role_by_region_id = _role_by_region_id_8616(grouped_units)
         for region in _graph_nodes_8616(graph):
             region_id = _dynamic_grouped_graph_getattr_8616(region, "region_id", None)
             if not isinstance(region_id, int):
@@ -567,6 +570,19 @@ def build_grouped_region_graph(codegen: object) -> GroupedRegionGraphBuildResult
         return GroupedRegionGraphBuildResult(graph_result=graph_result, grouped_units=grouped_units)
 
     return _impl()
+
+
+def _role_by_region_id_8616(grouped_units: CrossEntryGroupedUnitArtifact) -> dict[int, tuple[str, int]]:
+    """Map each region id to its (grouping kind, unit index) role."""
+    role_by_region_id: dict[int, tuple[str, int]] = {}
+    for unit_index, unit in enumerate(grouped_units.units):
+        for region_id in unit.primary_entry_region_ids:
+            role_by_region_id[region_id] = ("primary_entry", unit_index)
+        for region_id in unit.entry_fragment_region_ids:
+            role_by_region_id[region_id] = ("entry_fragment", unit_index)
+        for region_id in unit.shared_region_ids:
+            role_by_region_id[region_id] = ("grouped_entry_candidate", unit_index)
+    return role_by_region_id
 
 
 def describe_x86_16_grouped_region_graph_surface() -> dict[str, object]:
