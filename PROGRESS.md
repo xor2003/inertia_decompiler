@@ -8,6 +8,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- ABI instruction scans reuse positive CFG-proven block sizes instead of lifting
+  merely to rediscover extents; unknown/invalid sizes keep the prior fallback.
+  Two controls fail before; 28 ABI tests plus an installed-angr no-relift byte
+  control pass after. Scoped Ruff/MyPy pass; quality-dev fails broader debt.
+  Fresh normal-budget `inc_one` probe is active (`.cache/abi-block-size-normal.*`);
+  output parity, runtime gain and DOS acceptance remain unproven.
+
 - Isolated six-function replay ends at its 600s external bound: three timeout
   records retained, fourth incomplete, last two not reached. Hard-exit and outer
   process-timeout continuation are proven; no functions/witnesses accepted.
@@ -1560,4 +1567,11 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   instruction/block frame-evidence lanes, a shared IRSB register-offset
   resolver, the function IRSB gather, and the per-IRSB frame-delta scan.
 - Verified: ruff 0, mypy 0, 3 stack-frame-recovery tests pass,
+  def-integrity vs HEAD clean, zero architecture violations.
+- `angr_platforms/angr_platforms/X86_16/recovery_confidence.py`:
+  Ruff debt cleared to zero (3 findings). Split the evidence appender
+  into output-stage/summary groups, the assumptions appender into
+  helper/failure/summary groups, and the two summary OR-chains into
+  signal predicates. Evidence/assumption ordering preserved.
+- Verified: ruff 0, mypy 0, 38 recovery-confidence tests pass,
   def-integrity vs HEAD clean, zero architecture violations.
