@@ -1333,3 +1333,9 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   failures reproduce identically on bare HEAD — pre-existing),
   def-integrity vs HEAD clean (missing names are hoisted nested defs),
   zero architecture violations against the file.
+- `angr_platforms/angr_platforms/X86_16/parse.py`: Ruff complexity debt
+  cleared to zero (6 findings). Converted prefix/control-flow dispatch to
+  lookup tables and extracted the immediate-decode lane.
+- Verified: ruff 0, 32 decode/lifting tests pass, def-integrity vs HEAD
+  clean, zero architecture violations against the file. One mypy error
+  (`X86Instruction` typed Any in pyvex) is identical on bare HEAD.

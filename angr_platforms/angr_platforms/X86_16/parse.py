@@ -30,9 +30,59 @@ from .instruction import (
 from .msvc_x87_interrupts import is_msvc_x87_emulation_interrupt_8616, msvc_x87_escape_opcode_8616
 from .regs import sgreg_t
 
+_CONTROL_FLOW_BY_OPCODE_8616: dict[int, str] = {
+    0xCC: "interrupt",
+    0xCD: "interrupt",
+    0xCE: "interrupt",
+    0xCF: "iret",
+    0xC2: "near_ret",
+    0xC3: "near_ret",
+    0xCA: "far_ret",
+    0xCB: "far_ret",
+    0x9A: "far_call",
+    0xE8: "near_call",
+    0xEA: "far_jump",
+    0xE9: "near_jump",
+    0xEB: "near_jump",
+}
+
+_CONTROL_FLOW_FF_REG_8616: dict[int, str] = {
+    2: "near_call",
+    3: "far_call",
+    4: "near_jump",
+    5: "far_jump",
+}
+
+_CONDITIONAL_JUMP_OPCODES_8616: set[int] = {
+    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77,
+    0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F,
+    0x0F80, 0x0F81, 0x0F82, 0x0F83, 0x0F84, 0x0F85, 0x0F86, 0x0F87,
+    0x0F88, 0x0F89, 0x0F8A, 0x0F8B, 0x0F8C, 0x0F8D, 0x0F8E, 0x0F8F,
+    0xE0, 0xE1, 0xE2, 0xE3,
+}
+
 CHSZ_NONE: int = 0
 CHSZ_OP: int = 1
 CHSZ_AD: int = 2
+
+_SEGMENT_PREFIX_BY_CODE_8616: dict[int, sgreg_t] = {
+    0x26: sgreg_t.ES,
+    0x2E: sgreg_t.CS,
+    0x36: sgreg_t.SS,
+    0x3E: sgreg_t.DS,
+    0x64: sgreg_t.FS,
+    0x65: sgreg_t.GS,
+}
+
+_PREFIX_CHSZ_BY_CODE_8616: dict[int, int] = {
+    0x66: CHSZ_OP,
+    0x67: CHSZ_AD,
+}
+
+_PREFIX_REPEAT_BY_CODE_8616: dict[int, object] = {
+    0xF2: REPNZ,
+    0xF3: REPZ,
+}
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -61,37 +111,12 @@ class ParseInstr(X86Instruction):
                 if not isinstance(raw_code, int):
                     raise ParseError(f"Expected byte prefix at {self.emu.bitstream.bytepos:08x}, got {raw_code!r}")
                 code = raw_code
-                match code:
-                    case 0x26:
-                        self.instr.pre_segment = sgreg_t.ES
-                    case 0x2E:
-                        self.instr.pre_segment = sgreg_t.CS
-                    case 0x36:
-                        self.instr.pre_segment = sgreg_t.SS
-                    case 0x3E:
-                        self.instr.pre_segment = sgreg_t.DS
-                    case 0x64:
-                        self.instr.pre_segment = sgreg_t.FS
-                    case 0x65:
-                        self.instr.pre_segment = sgreg_t.GS
-                    case 0x66:
-                        chsz |= CHSZ_OP
-                    case 0x67:
-                        chsz |= CHSZ_AD
-                    case 0xF2:
-                        self.instr.pre_repeat = REPNZ
-                    case 0xF3:
-                        self.instr.pre_repeat = REPZ
-                    case 0xF0:
-                        # LOCK is a valid real-mode prefix. For our current single-core
-                        # verifier path it does not change architectural results, so we
-                        # keep it as a consumed prefix and let the following opcode lift.
-                        pass
-                    case _:
-                        self.chsz = chsz
-                        self.chsz_ad = bool(chsz & CHSZ_AD)
-                        self.instr.prefix_len = prefix_len
-                        return chsz
+                chsz, is_prefix = self._consume_prefix_8616(code, chsz)
+                if not is_prefix:
+                    self.chsz = chsz
+                    self.chsz_ad = bool(chsz & CHSZ_AD)
+                    self.instr.prefix_len = prefix_len
+                    return chsz
 
                 self.emu.bitstream.read("uint:8")
                 self.instr.prefix = code
@@ -99,6 +124,26 @@ class ParseInstr(X86Instruction):
 
         return _impl()
         # self.emu.update_eip(1)
+
+    def _consume_prefix_8616(self, code: int, chsz: int) -> tuple[int, bool]:
+        """Apply one prefix byte; return the updated override mask and whether it was a prefix."""
+        segment = _SEGMENT_PREFIX_BY_CODE_8616.get(code)
+        if segment is not None:
+            self.instr.pre_segment = segment
+            return chsz, True
+        size_flag = _PREFIX_CHSZ_BY_CODE_8616.get(code)
+        if size_flag is not None:
+            return chsz | size_flag, True
+        repeat = _PREFIX_REPEAT_BY_CODE_8616.get(code)
+        if repeat is not None:
+            self.instr.pre_repeat = repeat
+            return chsz, True
+        if code == 0xF0:
+            # LOCK is a valid real-mode prefix. For our current single-core
+            # verifier path it does not change architectural results, so we
+            # keep it as a consumed prefix and let the following opcode lift.
+            return chsz, True
+        return chsz, False
 
     def parse(self) -> None:
         """Parse opcode, operands, immediates, and normalized decode metadata."""
@@ -136,43 +181,47 @@ class ParseInstr(X86Instruction):
             if opcode_flags & CHK_MODRM:
                 self.parse_modrm_sib_disp()
 
-            if opcode_flags & CHK_IMM32:
-                self.instr.imm32 = self.emu.get_code32(0)
-                # self.emu.update_eip(4)
-            if opcode_flags & CHK_IMM16:
-                self.instr.imm16 = self.emu.get_code16(0)
-                # self.emu.update_eip(2)
-            if opcode_flags & CHK_IMM8:
-                self.instr.imm8 = struct.unpack("b", struct.pack("B", self.emu.get_code8(0)))[0]
-                remaining_bits = self.emu.bitstream.len - self.emu.bitstream.pos
-                if (
-                    opcode == 0xCD
-                    and msvc_x87_escape_opcode_8616(self.instr.imm8) is not None
-                    and remaining_bits >= 8
-                ):
-                    self.instr.msvc_x87_escape = True
-                    self.parse_modrm_sib_disp()
-                # self.emu.update_eip(1)
-            if opcode_flags & CHK_PTR16:
-                self.instr.ptr16 = self.emu.get_code16(0)
-                # self.emu.update_eip(2)
-
-            if opcode_flags & CHK_MOFFS:
-                self.parse_moffs()
-
-            if opcode == 0xF6 and self.instr.modrm.reg in (0, 1):  # test
-                self.instr.imm8 = self.emu.get_code8(0)
-            if opcode == 0xF7 and self.instr.modrm.reg in (0, 1):  # test
-                if self.instr.operand_bits == 32:
-                    self.instr.imm32 = self.emu.get_code32(0)
-                else:
-                    self.instr.imm16 = self.emu.get_code16(0)
+            self._decode_immediates_8616(opcode, opcode_flags)
 
             self.instr.size = max(self.instr.size, self.instr.prefix_len + (self.emu.bitstream.bytepos - start))
             self.instr.repeat_class = self._repeat_class_name()
             self.instr.control_flow_class = self._classify_control_flow(opcode)
 
         return _impl()
+
+    def _decode_immediates_8616(self, opcode: int, opcode_flags: int) -> None:
+        """Decode flag-selected immediates and moffs for the current instruction."""
+        if opcode_flags & CHK_IMM32:
+            self.instr.imm32 = self.emu.get_code32(0)
+            # self.emu.update_eip(4)
+        if opcode_flags & CHK_IMM16:
+            self.instr.imm16 = self.emu.get_code16(0)
+            # self.emu.update_eip(2)
+        if opcode_flags & CHK_IMM8:
+            self.instr.imm8 = struct.unpack("b", struct.pack("B", self.emu.get_code8(0)))[0]
+            remaining_bits = self.emu.bitstream.len - self.emu.bitstream.pos
+            if (
+                opcode == 0xCD
+                and msvc_x87_escape_opcode_8616(self.instr.imm8) is not None
+                and remaining_bits >= 8
+            ):
+                self.instr.msvc_x87_escape = True
+                self.parse_modrm_sib_disp()
+            # self.emu.update_eip(1)
+        if opcode_flags & CHK_PTR16:
+            self.instr.ptr16 = self.emu.get_code16(0)
+            # self.emu.update_eip(2)
+
+        if opcode_flags & CHK_MOFFS:
+            self.parse_moffs()
+
+        if opcode == 0xF6 and self.instr.modrm.reg in (0, 1):  # test
+            self.instr.imm8 = self.emu.get_code8(0)
+        if opcode == 0xF7 and self.instr.modrm.reg in (0, 1):  # test
+            if self.instr.operand_bits == 32:
+                self.instr.imm32 = self.emu.get_code32(0)
+            else:
+                self.instr.imm16 = self.emu.get_code16(0)
 
     def _repeat_class_name(self) -> str:
         if self.instr.pre_repeat == REPZ:
@@ -188,60 +237,12 @@ class ParseInstr(X86Instruction):
                 or (is_msvc_x87_emulation_interrupt_8616(self.instr.imm8) and (self.instr.imm8 & 0xFF) == 0x3D)
             ):
                 return "none"
-            if opcode in {0xCC, 0xCD, 0xCE}:
-                return "interrupt"
-            if opcode == 0xCF:
-                return "iret"
-            if opcode in {0xC2, 0xC3}:
-                return "near_ret"
-            if opcode in {0xCA, 0xCB}:
-                return "far_ret"
-            if opcode == 0x9A or (opcode == 0xFF and self.instr.modrm.reg == 3):
-                return "far_call"
-            if opcode == 0xE8 or (opcode == 0xFF and self.instr.modrm.reg == 2):
-                return "near_call"
-            if opcode == 0xEA or (opcode == 0xFF and self.instr.modrm.reg == 5):
-                return "far_jump"
-            if opcode in {0xE9, 0xEB} or (opcode == 0xFF and self.instr.modrm.reg == 4):
-                return "near_jump"
-            if opcode in {
-                0x70,
-                0x71,
-                0x72,
-                0x73,
-                0x74,
-                0x75,
-                0x76,
-                0x77,
-                0x78,
-                0x79,
-                0x7A,
-                0x7B,
-                0x7C,
-                0x7D,
-                0x7E,
-                0x7F,
-                0x0F80,
-                0x0F81,
-                0x0F82,
-                0x0F83,
-                0x0F84,
-                0x0F85,
-                0x0F86,
-                0x0F87,
-                0x0F88,
-                0x0F89,
-                0x0F8A,
-                0x0F8B,
-                0x0F8C,
-                0x0F8D,
-                0x0F8E,
-                0x0F8F,
-                0xE0,
-                0xE1,
-                0xE2,
-                0xE3,
-            }:
+            fixed = _CONTROL_FLOW_BY_OPCODE_8616.get(opcode)
+            if fixed is not None:
+                return fixed
+            if opcode == 0xFF:
+                return _CONTROL_FLOW_FF_REG_8616.get(self.instr.modrm.reg, "none")
+            if opcode in _CONDITIONAL_JUMP_OPCODES_8616:
                 return "conditional_jump"
             return "none"
 
