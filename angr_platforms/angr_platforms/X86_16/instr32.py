@@ -1726,11 +1726,11 @@ class Instr32(InstrBase):
 
     def inc_rm32(self) -> None:
         """Execute decoded ``INC_RM32`` semantics through frontend emulator effects."""
-        unary_operation(self.get_rm32, self.set_rm32, self.emu.update_eflags_add, lambda value: value + 1)
+        unary_operation(self.get_rm32, self.set_rm32, self.emu.update_eflags_inc, lambda value: value + 1)
 
     def dec_rm32(self) -> None:
         """Execute decoded ``DEC_RM32`` semantics through frontend emulator effects."""
-        unary_operation(self.get_rm32, self.set_rm32, self.emu.update_eflags_sub, lambda value: value - 1)
+        unary_operation(self.get_rm32, self.set_rm32, self.emu.update_eflags_dec, lambda value: value - 1)
 
     def call_rm32(self) -> None:
         """Execute decoded ``CALL_RM32`` semantics through frontend emulator effects."""

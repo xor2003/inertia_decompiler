@@ -36,6 +36,26 @@ REG_BY_OFFSET = {
     50: ("ss", 16),
     52: ("dflag", 32),
 }
+REG32_BY_OFFSET = {
+    0: ("eax_hi", "ax"),
+    4: ("ecx_hi", "cx"),
+    8: ("edx_hi", "dx"),
+    12: ("ebx_hi", "bx"),
+    16: ("esp_hi", "sp"),
+    20: ("ebp_hi", "bp"),
+    24: ("esi_hi", "si"),
+    28: ("edi_hi", "di"),
+}
+REG32_HI16_BY_OFFSET = {
+    2: "eax_hi",
+    6: "ecx_hi",
+    10: "edx_hi",
+    14: "ebx_hi",
+    18: "esp_hi",
+    22: "ebp_hi",
+    26: "esi_hi",
+    30: "edi_hi",
+}
 RAW_OUTPUT_REGS = ("ax", "bx", "cx", "dx", "si", "di", "bp", "sp")
 ABI_OUTPUT_REGS = {
     "msc16-near": ("ax", "dx", "sp"),
@@ -3531,6 +3551,20 @@ def _read_register(reg_versions: dict[str, SsaExpr], offset: int, width: int, *,
             shifted = SsaExpr("lshr", 16, (_coerce_width(full, 16), SsaExpr("const", 8, value=8)))
             return _coerce_width(shifted, 8)
         return _coerce_width(full, 8)
+    reg32 = REG32_BY_OFFSET.get(offset)
+    if reg32 is not None and width == 32:
+        hi_name, low_name = reg32
+        low = reg_versions.get(low_name, SsaExpr("input", 16, name=low_name))
+        hi = reg_versions.get(hi_name, SsaExpr("input", 16, name=hi_name))
+        shifted_hi = SsaExpr(
+            "shl",
+            32,
+            (_coerce_width(hi, 32), SsaExpr("const", 8, value=16)),
+        )
+        return SsaExpr("or", 32, (shifted_hi, _coerce_width(low, 32)))
+    hi_name = REG32_HI16_BY_OFFSET.get(offset)
+    if hi_name is not None and width == 16:
+        return reg_versions.get(hi_name, SsaExpr("input", 16, name=hi_name))
     if reg is None:
         return LowerFailure("unsupported_ir", f"unsupported {source} register offset {offset}")
     return LowerFailure("unsupported_ir", f"unsupported {source} register access: offset {offset} width {width}")
@@ -3543,6 +3577,12 @@ def _register_write_target(offset: int, width: int | None) -> tuple[str, int] | 
     byte_access = BYTE_REGISTER_ACCESS.get(offset)
     if byte_access is not None and (width is None or width == 8):
         return byte_access[0], 16
+    reg32 = REG32_BY_OFFSET.get(offset)
+    if reg32 is not None and (width is None or width == 32):
+        return reg32[0].removesuffix("_hi"), 32
+    hi_name = REG32_HI16_BY_OFFSET.get(offset)
+    if hi_name is not None and (width is None or width == 16):
+        return hi_name, 16
     return None
 
 
@@ -3564,6 +3604,17 @@ def _write_register(reg_versions: dict[str, SsaExpr], offset: int, expr: SsaExpr
             return None
         cleared = SsaExpr("and", 16, (_coerce_width(full, 16), SsaExpr("const", 16, value=0xFF00)))
         reg_versions[base_name] = SsaExpr("or", 16, (cleared, _coerce_width(data, 16)))
+        return None
+    reg32 = REG32_BY_OFFSET.get(offset)
+    if reg32 is not None and expr.width == 32:
+        hi_name, low_name = reg32
+        reg_versions[low_name] = _coerce_width(expr, 16)
+        shifted = SsaExpr("lshr", 32, (expr, SsaExpr("const", 8, value=16)))
+        reg_versions[hi_name] = _coerce_width(shifted, 16)
+        return None
+    hi_name = REG32_HI16_BY_OFFSET.get(offset)
+    if hi_name is not None and expr.width == 16:
+        reg_versions[hi_name] = expr
         return None
     if reg is None and byte_access is None:
         return LowerFailure("unsupported_ir", f"unsupported register offset {offset}")
