@@ -325,6 +325,11 @@ class _SsaCandidateTables:
     by_id_exact_signature: dict[Any, Any]
     by_key_signature: dict[Any, Any]
     by_id_signature: dict[Any, Any]
+    by_key_signature_multi: dict[Any, Any]
+    by_id_signature_multi: dict[Any, Any]
+    by_key_coarse_signature_multi: dict[Any, Any]
+    by_id_coarse_signature_multi: dict[Any, Any]
+    by_own_entry: dict[Any, Any]
     all_by_key_delta: dict[Any, Any]
     all_by_id_delta: dict[Any, Any]
     all_by_key: dict[Any, Any]
@@ -349,6 +354,11 @@ def _build_ssa_candidate_tables(
         by_id_exact_signature=_functions_by_id_and_exact_block_signature(candidate_functions),
         by_key_signature=_functions_by_name_and_block_signature(candidate_functions),
         by_id_signature=_functions_by_id_and_block_signature(candidate_functions),
+        by_key_signature_multi=_functions_by_name_and_block_signature_multi(candidate_functions),
+        by_id_signature_multi=_functions_by_id_and_block_signature_multi(candidate_functions),
+        by_key_coarse_signature_multi=_functions_by_name_and_coarse_block_signature_multi(candidate_functions),
+        by_id_coarse_signature_multi=_functions_by_id_and_coarse_block_signature_multi(candidate_functions),
+        by_own_entry=_functions_by_own_key_and_entry(candidate_functions),
         all_by_key_delta=_functions_by_name_and_delta(candidate_functions_all),
         all_by_id_delta=_functions_by_id_and_delta(candidate_functions_all),
         all_by_key=_functions_by_name_and_part(candidate_functions_all),
@@ -360,6 +370,203 @@ def _build_ssa_candidate_tables(
     )
 
 
+def _part_fallthrough_neighbour(
+    function: dict[str, Any],
+    parts: dict[tuple[str, int], dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Return the part at the fallthrough successor's entry linear."""
+    source = function.get("source") if isinstance(function.get("source"), dict) else {}
+    transfer = source.get("transfer") if isinstance(source.get("transfer"), dict) else {}
+    fallthrough = transfer.get("fallthrough") if isinstance(transfer.get("fallthrough"), dict) else {}
+    linear = _optional_int(fallthrough.get("linear"))
+    if linear is None:
+        return None
+    info = function.get("function", {}) if isinstance(function.get("function"), dict) else {}
+    for key in (str(info.get("id", "")), str(info.get("name", ""))):
+        if key:
+            neighbour = parts.get((key, linear))
+            if neighbour is not None:
+                return neighbour
+    return None
+
+
+def _arbitrate_signature_collision(
+    oracle_function: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    *,
+    oracle_parts: dict[tuple[str, int], dict[str, Any]],
+    candidate_parts: dict[tuple[str, int], dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Disambiguate a masked-signature collision using fallthrough context.
+
+    Masked signatures cannot distinguish same-shape parts whose only
+    difference is a masked operand (e.g. two ``push this; lcall X`` parts
+    whose callees differ). When several candidates share the oracle part's
+    signature, compare the signature of the oracle part's fallthrough
+    successor against each candidate's own fallthrough successor — control
+    flow, not ordinal position, so lifter discovery order cannot mislead.
+    A unique match is strictly stronger evidence than a coincidental
+    entry-delta hit; anything else returns ``None`` so the caller keeps its
+    existing fallback order.
+    """
+    if len(candidates) < 2:
+        return candidates[0] if candidates else None
+    neighbour = _part_fallthrough_neighbour(oracle_function, oracle_parts)
+    if neighbour is None:
+        return None
+    neighbour_signature = _ssa_block_signature(neighbour)
+    if neighbour_signature is None:
+        return None
+    matched = [
+        candidate
+        for candidate in candidates
+        if (candidate_neighbour := _part_fallthrough_neighbour(candidate, candidate_parts)) is not None
+        and _ssa_block_signature(candidate_neighbour) == neighbour_signature
+    ]
+    return matched[0] if len(matched) == 1 else None
+
+
+def _arbitrate_coarse_signature_candidate(
+    oracle_function: dict[str, Any],
+    key: str,
+    *,
+    multi_table: dict[Any, Any],
+    oracle_parts: dict[tuple[str, int], dict[str, Any]],
+    candidate_parts: dict[tuple[str, int], dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Neighbour-arbitrate the call-target-masked candidate set for a part."""
+    coarse_signature = _ssa_coarse_block_signature(oracle_function)
+    if coarse_signature is None:
+        return None
+    candidates = multi_table.get((key, coarse_signature)) or []
+    if not candidates:
+        return None
+    return _arbitrate_signature_collision(
+        oracle_function,
+        candidates,
+        oracle_parts=oracle_parts,
+        candidate_parts=candidate_parts,
+    )
+
+
+def _override_delta_candidate(
+    oracle_function: dict[str, Any],
+    delta_hit: dict[str, Any] | None,
+    *,
+    key: str,
+    signature: tuple[int | None, ...] | None,
+    exact_candidate: dict[str, Any] | None,
+    signature_candidate: dict[str, Any] | None,
+    signature_candidates: list[dict[str, Any]],
+    by_coarse_signature_multi: dict[Any, Any],
+    oracle_parts: dict[tuple[str, int], dict[str, Any]],
+    candidate_entry: dict[tuple[str, int], dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Arbitrate a delta hit against stronger signature evidence.
+
+    An identical byte stream elsewhere in the mapped function is strictly
+    stronger evidence than a coincidental equal entry offset; a
+    shape-matching stream (immediates masked) also beats a delta hit whose
+    own shape differs — delta ties alone pair boundary-shifted variants
+    wrongly (the fused-with-predecessor part vs the bare one). When the
+    signature itself is ambiguous, a neighbour-arbitrated winner still beats
+    the coincidental delta hit. And when only the delta hit remains while
+    its instruction shape differs, the bodies split blocks differently and
+    no equivalent candidate part exists — report ``None`` (honest refusal)
+    instead of a guaranteed-bad pairing.
+    """
+    if delta_hit is None:
+        return None
+    delta_signature_differs = signature is not None and _ssa_block_signature(delta_hit) != signature
+    if exact_candidate is not None and exact_candidate is not delta_hit:
+        return exact_candidate
+    if (
+        signature_candidate is not None
+        and signature_candidate is not delta_hit
+        and (len(signature_candidates) > 1 or delta_signature_differs)
+    ):
+        return signature_candidate
+    if delta_signature_differs:
+        arbitrated = _arbitrate_coarse_signature_candidate(
+            oracle_function,
+            key,
+            multi_table=by_coarse_signature_multi,
+            oracle_parts=oracle_parts,
+            candidate_parts=candidate_entry,
+        )
+        return arbitrated
+    return delta_hit
+
+
+def _resolve_candidate_via_tables(
+    oracle_function: dict[str, Any],
+    *,
+    key: str,
+    part_index: int,
+    part_delta: str,
+    by_delta: dict[Any, Any],
+    by_exact_signature: dict[Any, Any],
+    by_signature_multi: dict[Any, Any],
+    by_coarse_signature_multi: dict[Any, Any],
+    by_part: dict[Any, Any],
+    candidate_entry: dict[tuple[str, int], dict[str, Any]],
+    oracle_parts: dict[tuple[str, int], dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Pair an oracle part with a candidate through the evidence ladder.
+
+    Precedence: exact byte signature > neighbour-arbitrated masked-signature
+    match > entry-delta hit, with the two coarser tiers allowed to override
+    the delta hit only when they carry strictly stronger evidence — an exact
+    match anywhere, a different-shape delta hit with a unique signature
+    winner, or a neighbour-arbitrated winner among call-target-masked
+    candidates when the delta hit's own shape already differs.
+    """
+    candidate_function = None
+    exact_signature = _ssa_exact_block_signature(oracle_function)
+    exact_candidate = (
+        by_exact_signature.get((key, exact_signature)) if exact_signature is not None else None
+    )
+    signature = _ssa_block_signature(oracle_function)
+    signature_candidates = (
+        by_signature_multi.get((key, signature), []) if signature is not None else []
+    )
+    signature_candidate = _arbitrate_signature_collision(
+        oracle_function,
+        signature_candidates,
+        oracle_parts=oracle_parts,
+        candidate_parts=candidate_entry,
+    )
+    if part_delta:
+        delta_hit = by_delta.get((key, part_delta))
+        candidate_function = _override_delta_candidate(
+            oracle_function,
+            delta_hit,
+            key=key,
+            signature=signature,
+            exact_candidate=exact_candidate,
+            signature_candidate=signature_candidate,
+            signature_candidates=signature_candidates,
+            by_coarse_signature_multi=by_coarse_signature_multi,
+            oracle_parts=oracle_parts,
+            candidate_entry=candidate_entry,
+        )
+    if candidate_function is None:
+        candidate_function = exact_candidate
+    if candidate_function is None:
+        candidate_function = signature_candidate
+    if candidate_function is None and part_delta:
+        candidate_function = _arbitrate_coarse_signature_candidate(
+            oracle_function,
+            key,
+            multi_table=by_coarse_signature_multi,
+            oracle_parts=oracle_parts,
+            candidate_parts=candidate_entry,
+        )
+    if candidate_function is None and not part_delta:
+        candidate_function = by_part.get((key, part_index))
+    return candidate_function
+
+
 def _resolve_mapped_candidate_by_id(
     oracle_function: dict[str, Any],
     *,
@@ -367,44 +574,22 @@ def _resolve_mapped_candidate_by_id(
     part_index: int,
     part_delta: str,
     tables: _SsaCandidateTables,
+    oracle_parts: dict[tuple[str, int], dict[str, Any]],
 ) -> dict[str, Any] | None:
     """Resolve a mapped candidate through candidate_id-keyed tables."""
-    candidate_function = None
-    exact_signature = _ssa_exact_block_signature(oracle_function)
-    exact_candidate = (
-        tables.by_id_exact_signature.get((str(mapped.get("candidate_id")), exact_signature))
-        if exact_signature is not None
-        else None
+    return _resolve_candidate_via_tables(
+        oracle_function,
+        key=str(mapped.get("candidate_id")),
+        part_index=part_index,
+        part_delta=part_delta,
+        by_delta=tables.by_id_delta,
+        by_exact_signature=tables.by_id_exact_signature,
+        by_signature_multi=tables.by_id_signature_multi,
+        by_coarse_signature_multi=tables.by_id_coarse_signature_multi,
+        by_part=tables.by_id,
+        candidate_entry=tables.by_own_entry,
+        oracle_parts=oracle_parts,
     )
-    signature = _ssa_block_signature(oracle_function)
-    signature_candidate = (
-        tables.by_id_signature.get((str(mapped.get("candidate_id")), signature))
-        if signature is not None
-        else None
-    )
-    if part_delta:
-        candidate_function = tables.by_id_delta.get((str(mapped.get("candidate_id")), part_delta))
-        # An identical byte stream elsewhere in the mapped function is strictly
-        # stronger evidence than a coincidental equal entry offset; a
-        # shape-matching stream (immediates masked) also beats a delta hit
-        # whose own shape differs — delta ties alone pair boundary-shifted
-        # variants wrongly (the fused-with-predecessor part vs the bare one).
-        if candidate_function is not None and exact_candidate is not None and exact_candidate is not candidate_function:
-            candidate_function = exact_candidate
-        elif (
-            candidate_function is not None
-            and signature_candidate is not None
-            and signature_candidate is not candidate_function
-            and _ssa_block_signature(candidate_function) != signature
-        ):
-            candidate_function = signature_candidate
-    if candidate_function is None:
-        candidate_function = exact_candidate
-    if candidate_function is None:
-        candidate_function = signature_candidate
-    if candidate_function is None and not part_delta:
-        candidate_function = tables.by_id.get((str(mapped.get("candidate_id")), part_index))
-    return candidate_function
 
 
 def _resolve_mapped_candidate_by_name(
@@ -414,40 +599,22 @@ def _resolve_mapped_candidate_by_name(
     part_index: int,
     part_delta: str,
     tables: _SsaCandidateTables,
+    oracle_parts: dict[tuple[str, int], dict[str, Any]],
 ) -> dict[str, Any] | None:
     """Resolve a mapped candidate through candidate_name-keyed tables."""
-    candidate_name = str(mapped.get("candidate_name", ""))
-    candidate_function = None
-    exact_signature = _ssa_exact_block_signature(oracle_function)
-    exact_candidate = (
-        tables.by_key_exact_signature.get((candidate_name, exact_signature))
-        if exact_signature is not None
-        else None
+    return _resolve_candidate_via_tables(
+        oracle_function,
+        key=str(mapped.get("candidate_name", "")),
+        part_index=part_index,
+        part_delta=part_delta,
+        by_delta=tables.by_key_delta,
+        by_exact_signature=tables.by_key_exact_signature,
+        by_signature_multi=tables.by_key_signature_multi,
+        by_coarse_signature_multi=tables.by_key_coarse_signature_multi,
+        by_part=tables.by_key,
+        candidate_entry=tables.by_own_entry,
+        oracle_parts=oracle_parts,
     )
-    signature = _ssa_block_signature(oracle_function)
-    signature_candidate = (
-        tables.by_key_signature.get((candidate_name, signature))
-        if signature is not None
-        else None
-    )
-    if part_delta:
-        candidate_function = tables.by_key_delta.get((candidate_name, part_delta))
-        if candidate_function is not None and exact_candidate is not None and exact_candidate is not candidate_function:
-            candidate_function = exact_candidate
-        elif (
-            candidate_function is not None
-            and signature_candidate is not None
-            and signature_candidate is not candidate_function
-            and _ssa_block_signature(candidate_function) != signature
-        ):
-            candidate_function = signature_candidate
-    if candidate_function is None:
-        candidate_function = exact_candidate
-    if candidate_function is None:
-        candidate_function = signature_candidate
-    if candidate_function is None and not part_delta:
-        candidate_function = tables.by_key.get((candidate_name, part_index))
-    return candidate_function
 
 
 def _resolve_mapped_candidate(
@@ -455,16 +622,27 @@ def _resolve_mapped_candidate(
     *,
     mapped: dict[str, Any],
     tables: _SsaCandidateTables,
+    oracle_parts: dict[tuple[str, int], dict[str, Any]],
 ) -> dict[str, Any] | None:
     """Resolve the candidate SSA part for a mapped oracle function."""
     part_index = _ssa_part_index(oracle_function)
     part_delta = _ssa_part_delta(oracle_function)
     candidate_function = _resolve_mapped_candidate_by_id(
-        oracle_function, mapped=mapped, part_index=part_index, part_delta=part_delta, tables=tables
+        oracle_function,
+        mapped=mapped,
+        part_index=part_index,
+        part_delta=part_delta,
+        tables=tables,
+        oracle_parts=oracle_parts,
     )
     if candidate_function is None:
         candidate_function = _resolve_mapped_candidate_by_name(
-            oracle_function, mapped=mapped, part_index=part_index, part_delta=part_delta, tables=tables
+            oracle_function,
+            mapped=mapped,
+            part_index=part_index,
+            part_delta=part_delta,
+            tables=tables,
+            oracle_parts=oracle_parts,
         )
     if candidate_function is None:
         candidate_function = _candidate_for_mapped_part_across_body_boundary(
@@ -489,41 +667,25 @@ def _resolve_keyed_candidate(
     function_name: str,
     ordinals: dict[str, int],
     tables: _SsaCandidateTables,
+    oracle_parts: dict[tuple[str, int], dict[str, Any]],
 ) -> dict[str, Any] | None:
     """Resolve the candidate SSA part without a mapping document."""
     function_key = function_name or function_id
     part_index = _ssa_part_index(oracle_function)
     part_delta = _ssa_part_delta(oracle_function)
-    candidate_function = None
-    exact_signature = _ssa_exact_block_signature(oracle_function)
-    exact_candidate = (
-        tables.by_key_exact_signature.get((function_key, exact_signature))
-        if exact_signature is not None
-        else None
+    candidate_function = _resolve_candidate_via_tables(
+        oracle_function,
+        key=function_key,
+        part_index=part_index,
+        part_delta=part_delta,
+        by_delta=tables.by_key_delta,
+        by_exact_signature=tables.by_key_exact_signature,
+        by_signature_multi=tables.by_key_signature_multi,
+        by_coarse_signature_multi=tables.by_key_coarse_signature_multi,
+        by_part=tables.by_key,
+        candidate_entry=tables.by_own_entry,
+        oracle_parts=oracle_parts,
     )
-    signature = _ssa_block_signature(oracle_function)
-    signature_candidate = (
-        tables.by_key_signature.get((function_key, signature))
-        if signature is not None
-        else None
-    )
-    if part_delta:
-        candidate_function = tables.by_key_delta.get((function_key, part_delta))
-        if candidate_function is not None and exact_candidate is not None and exact_candidate is not candidate_function:
-            candidate_function = exact_candidate
-        elif (
-            candidate_function is not None
-            and signature_candidate is not None
-            and signature_candidate is not candidate_function
-            and _ssa_block_signature(candidate_function) != signature
-        ):
-            candidate_function = signature_candidate
-    if candidate_function is None:
-        candidate_function = exact_candidate
-    if candidate_function is None:
-        candidate_function = signature_candidate
-    if candidate_function is None and not part_delta:
-        candidate_function = tables.by_key.get((function_key, part_index))
     if candidate_function is None and not part_delta:
         ordinal = ordinals[function_key]
         ordinals[function_key] += 1
@@ -729,11 +891,13 @@ def _run_ssa_pair_compare_loop(
 ) -> _SsaPairLoopOutcome:
     """Compare each oracle SSA function against its resolved candidate."""
     ordinals: dict[str, int] = defaultdict(int)
+    oracle_parts = _functions_by_own_key_and_entry(oracle_functions)
     global_constant_normalization = _collect_global_layout_normalization(
         oracle_functions,
         mapping_document=mapping_document,
         mapped_candidates=mapped_candidates,
         tables=tables,
+        oracle_parts=oracle_parts,
     )
     results: list[dict[str, Any]] = []
     pending_callee_proofs: list[tuple[int, dict[str, Any]]] = []
@@ -758,7 +922,9 @@ def _run_ssa_pair_compare_loop(
                     continue
                 candidate_function = None
             else:
-                candidate_function = _resolve_mapped_candidate(oracle_function, mapped=mapped, tables=tables)
+                candidate_function = _resolve_mapped_candidate(
+                    oracle_function, mapped=mapped, tables=tables, oracle_parts=oracle_parts
+                )
         else:
             candidate_function = _resolve_keyed_candidate(
                 oracle_function,
@@ -766,6 +932,7 @@ def _run_ssa_pair_compare_loop(
                 function_name=function_name,
                 ordinals=ordinals,
                 tables=tables,
+                oracle_parts=oracle_parts,
             )
         if candidate_function is None:
             if mapped is not None and _ssa_part_outside_declared_body(oracle_function):
@@ -10762,6 +10929,7 @@ def _collect_global_layout_normalization(
     mapping_document: dict[str, Any] | None,
     mapped_candidates: dict[str, Any],
     tables: Any,  # noqa: ANN401
+    oracle_parts: dict[tuple[str, int], dict[str, Any]],
 ) -> dict[int, int]:
     """Candidate→oracle constant map for immediates that recur as layout pairs across functions."""
     if mapping_document is None:
@@ -10774,7 +10942,9 @@ def _collect_global_layout_normalization(
         mapped = mapped_candidates.get(function_id) or mapped_candidates.get(function_name)
         if mapped is None:
             continue
-        candidate_function = _resolve_mapped_candidate(oracle_function, mapped=mapped, tables=tables)
+        candidate_function = _resolve_mapped_candidate(
+            oracle_function, mapped=mapped, tables=tables, oracle_parts=oracle_parts
+        )
         if candidate_function is None:
             continue
         for candidate_value, oracle_value in _aligned_immediate_pairs(oracle_function, candidate_function):
@@ -13167,6 +13337,38 @@ def _ssa_exact_block_signature(function: dict[str, Any]) -> tuple[int, ...] | No
     return None if blob is None else tuple(blob)
 
 
+def _ssa_coarse_block_signature(function: dict[str, Any]) -> tuple[int | None, ...] | None:
+    """Masked signature that also hides every direct call/jump operand.
+
+    The normal masked signature keeps a far call's offset half visible, so
+    same-shape call parts never collide — but they also never match across
+    binaries whose layouts differ. This coarser view treats the whole operand
+    of ``call``/``lcall``/``jmp``/``ljmp`` as masked, grouping every part that
+    differs only in its transfer target. Used only to form an ambiguity set
+    for neighbour arbitration, never as proof of equivalence.
+    """
+    source = function.get("source") if isinstance(function.get("source"), dict) else {}
+    instructions = source.get("instructions") if isinstance(source.get("instructions"), list) else []
+    instructions = _strip_leading_nop_instructions(instructions)
+    signature = _ssa_block_signature(function)
+    if signature is None:
+        return None
+    pattern = list(signature)
+    position = 0
+    for instruction in instructions:
+        if not isinstance(instruction, dict):
+            break
+        size = int(instruction.get("size") or 0)
+        mnemonic = str(instruction.get("mnemonic") or "").lower()
+        if size <= 0:
+            break
+        if mnemonic in {"call", "lcall", "jmp", "ljmp"} and size > 1:
+            for idx in range(position + 1, min(position + size, len(pattern))):
+                pattern[idx] = None
+        position += size
+    return tuple(pattern)
+
+
 def _block_signature_digest(signature: tuple[int | None, ...] | None) -> str | None:
     if signature is None:
         return None
@@ -13289,6 +13491,95 @@ def _functions_by_id_and_block_signature(
         key = (function_id, signature)
         indexed[key] = function if key not in indexed else None
     return {key: value for key, value in indexed.items() if value is not None}
+
+
+def _functions_by_name_and_block_signature_multi(
+    functions: list[dict[str, Any]],
+) -> dict[tuple[str, tuple[int | None, ...]], list[dict[str, Any]]]:
+    """Index parts by (function key, masked signature) retaining collisions."""
+    indexed: dict[tuple[str, tuple[int | None, ...]], list[dict[str, Any]]] = {}
+    for function in functions:
+        if not isinstance(function, dict):
+            continue
+        signature = _ssa_block_signature(function)
+        if signature is None:
+            continue
+        info = function.get("function", {}) if isinstance(function.get("function"), dict) else {}
+        function_id = str(info.get("id", ""))
+        function_name = str(info.get("name", function_id))
+        indexed.setdefault((function_name or function_id, signature), []).append(function)
+    return indexed
+
+
+def _functions_by_id_and_block_signature_multi(
+    functions: list[dict[str, Any]],
+) -> dict[tuple[str, tuple[int | None, ...]], list[dict[str, Any]]]:
+    """Index parts by (function id, masked signature) retaining collisions."""
+    indexed: dict[tuple[str, tuple[int | None, ...]], list[dict[str, Any]]] = {}
+    for function in functions:
+        if not isinstance(function, dict):
+            continue
+        signature = _ssa_block_signature(function)
+        if signature is None:
+            continue
+        info = function.get("function", {}) if isinstance(function.get("function"), dict) else {}
+        function_id = str(info.get("id", ""))
+        if function_id:
+            indexed.setdefault((function_id, signature), []).append(function)
+    return indexed
+
+
+def _functions_by_name_and_coarse_block_signature_multi(
+    functions: list[dict[str, Any]],
+) -> dict[tuple[str, tuple[int | None, ...]], list[dict[str, Any]]]:
+    """Index parts by (function key, call-target-masked signature) retaining collisions."""
+    indexed: dict[tuple[str, tuple[int | None, ...]], list[dict[str, Any]]] = {}
+    for function in functions:
+        if not isinstance(function, dict):
+            continue
+        signature = _ssa_coarse_block_signature(function)
+        if signature is None:
+            continue
+        info = function.get("function", {}) if isinstance(function.get("function"), dict) else {}
+        function_id = str(info.get("id", ""))
+        function_name = str(info.get("name", function_id))
+        indexed.setdefault((function_name or function_id, signature), []).append(function)
+    return indexed
+
+
+def _functions_by_id_and_coarse_block_signature_multi(
+    functions: list[dict[str, Any]],
+) -> dict[tuple[str, tuple[int | None, ...]], list[dict[str, Any]]]:
+    """Index parts by (function id, call-target-masked signature) retaining collisions."""
+    indexed: dict[tuple[str, tuple[int | None, ...]], list[dict[str, Any]]] = {}
+    for function in functions:
+        if not isinstance(function, dict):
+            continue
+        signature = _ssa_coarse_block_signature(function)
+        if signature is None:
+            continue
+        info = function.get("function", {}) if isinstance(function.get("function"), dict) else {}
+        function_id = str(info.get("id", ""))
+        if function_id:
+            indexed.setdefault((function_id, signature), []).append(function)
+    return indexed
+
+
+def _functions_by_own_key_and_entry(functions: list[dict[str, Any]]) -> dict[tuple[str, int], dict[str, Any]]:
+    """Index parts by entry linear under both their function id and name."""
+    indexed: dict[tuple[str, int], dict[str, Any]] = {}
+    for function in functions:
+        if not isinstance(function, dict):
+            continue
+        info = function.get("function", {}) if isinstance(function.get("function"), dict) else {}
+        entry = function.get("entry") if isinstance(function.get("entry"), dict) else {}
+        linear = _optional_int(entry.get("linear"))
+        if linear is None:
+            continue
+        for key in (str(info.get("id", "")), str(info.get("name", ""))):
+            if key:
+                indexed.setdefault((key, linear), function)
+    return indexed
 
 
 def _functions_by_id_and_part(functions: list[dict[str, Any]]) -> dict[tuple[str, int], dict[str, Any]]:
