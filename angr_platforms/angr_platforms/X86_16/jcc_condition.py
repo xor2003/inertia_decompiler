@@ -7,12 +7,12 @@ Forbidden: recovering branch meaning from rendered assembly or postprocess text 
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 from pyvex.lifting.util.vex_helper import Type
 
 from .ir.condition_ir import (
-    _JCC_COMPARISON_MNEMONICS_8616,
     JCC_EQ_MNEMONICS_8616,
     JCC_NE_MNEMONICS_8616,
     JCC_SGE_MNEMONICS_8616,
@@ -103,29 +103,39 @@ def _condition_value_from_ir_value_8616(instruction: _ConditionInstruction, valu
                 ty = Type.int_32
             return instruction.constant(0 if value.const is None else int(value.const), ty)
         if value.space == MemSpace.REG and isinstance(value.name, str) and value.name:
-            reg_name = value.name.lower()
-            bits = int(value.size or 0) * 8
-            if bits <= 8:
-                return instruction.get(reg_name, Type.int_8)
-            if bits <= 16:
-                return instruction.get(reg_name, Type.int_16)
-            return instruction.get(reg_name, Type.int_32)
+            return _reg_condition_value_8616(instruction, value)
         if value.space == MemSpace.TMP and isinstance(value.name, str) and value.name:
-            if value.name == "VexValue":
-                return None
-            bits = int(value.size or 0) * 8
-            if bits <= 8:
-                ty = Type.int_8
-            elif bits <= 16:
-                ty = Type.int_16
-            else:
-                ty = Type.int_32
-            with contextlib.suppress(Exception):
-                return instruction.get(value.name, ty)
-            return None
+            return _tmp_condition_value_8616(instruction, value)
         return None
 
     return _impl()
+
+
+def _reg_condition_value_8616(instruction: _ConditionInstruction, value: IRValue) -> _ConditionExpr | None:
+    """Convert a typed register IR value into a pyvex condition value."""
+    reg_name = value.name.lower()
+    bits = int(value.size or 0) * 8
+    if bits <= 8:
+        return instruction.get(reg_name, Type.int_8)
+    if bits <= 16:
+        return instruction.get(reg_name, Type.int_16)
+    return instruction.get(reg_name, Type.int_32)
+
+
+def _tmp_condition_value_8616(instruction: _ConditionInstruction, value: IRValue) -> _ConditionExpr | None:
+    """Convert a typed temp IR value into a pyvex condition value."""
+    if value.name == "VexValue":
+        return None
+    bits = int(value.size or 0) * 8
+    if bits <= 8:
+        ty = Type.int_8
+    elif bits <= 16:
+        ty = Type.int_16
+    else:
+        ty = Type.int_32
+    with contextlib.suppress(Exception):
+        return instruction.get(value.name, ty)
+    return None
 
 
 def _direct_jcc_condition_from_last_condition_8616(
@@ -136,47 +146,6 @@ def _direct_jcc_condition_from_last_condition_8616(
     """Build a pyvex branch condition from the previously recorded typed IR condition."""
 
     def _impl() -> object | None:
-        def _masked_zero_result(args_local: tuple[IRValue, ...]) -> object | None:
-            lhs = _condition_value_from_ir_value_8616(instruction, args_local[0])
-            rhs = _condition_value_from_ir_value_8616(instruction, args_local[1]) if len(args_local) == 2 else None
-            if lhs is None:
-                return None
-            masked = lhs if rhs is None else lhs & rhs
-            if kind in JCC_EQ_MNEMONICS_8616:
-                return masked == instruction.constant(0, Type.int_16)
-            if kind in JCC_NE_MNEMONICS_8616:
-                return masked != instruction.constant(0, Type.int_16)
-            return None
-
-        def _binary_compare_result(args_local: tuple[IRValue, ...]) -> object | None:
-            lhs = _condition_value_from_ir_value_8616(instruction, args_local[0])
-            rhs = _condition_value_from_ir_value_8616(instruction, args_local[1])
-            if lhs is None or rhs is None:
-                return None
-            if kind in JCC_EQ_MNEMONICS_8616:
-                return lhs == rhs
-            if kind in JCC_NE_MNEMONICS_8616:
-                return lhs != rhs
-            if kind in JCC_SLE_MNEMONICS_8616:
-                return lhs.signed <= rhs.signed
-            if kind in JCC_SGT_MNEMONICS_8616:
-                return lhs.signed > rhs.signed
-            if kind in JCC_SLT_MNEMONICS_8616:
-                return lhs.signed < rhs.signed
-            if kind in JCC_SGE_MNEMONICS_8616:
-                return lhs.signed >= rhs.signed
-            if kind in JCC_ULT_MNEMONICS_8616:
-                return lhs < rhs
-            if kind in JCC_UGE_MNEMONICS_8616:
-                return lhs >= rhs
-            if kind in JCC_ULE_MNEMONICS_8616:
-                return lhs <= rhs
-            if kind in JCC_UGT_MNEMONICS_8616:
-                return lhs > rhs
-            if kind in _JCC_COMPARISON_MNEMONICS_8616:
-                return None
-            return None
-
         args = tuple(arg for arg in condition.args if isinstance(arg, IRValue))
         if len(args) != len(condition.args):
             return None
@@ -184,51 +153,15 @@ def _direct_jcc_condition_from_last_condition_8616(
         if condition.expr and condition.expr[0] in {"update_eflags_inc", "update_eflags_dec"}:  # noqa: SIM102
             if kind not in JCC_EQ_MNEMONICS_8616 | JCC_NE_MNEMONICS_8616:
                 return None
-        if op in {
-            "compare",
-            "eq",
-            "ne",
-            "slt",
-            "sle",
-            "sgt",
-            "sge",
-            "ult",
-            "ule",
-            "ugt",
-            "uge",
-            "masked_zero",
-            "zero",
-            "masked_nonzero",
-            "nonzero",
-        }:
+        if op in _JCC_COMPARE_OPS_8616:
             if len(args) not in {1, 2}:
                 return None
-            if op in {"masked_zero", "zero"}:
-                return _masked_zero_result(args)
-            if op in {"masked_nonzero", "nonzero"}:
-                return _masked_zero_result(args)
-            return _binary_compare_result(args)
+            if op in {"masked_zero", "zero", "masked_nonzero", "nonzero"}:
+                return _masked_zero_result(instruction, kind, args)
+            return _binary_compare_result(instruction, kind, args)
 
         if op in {"zero", "nonzero"} and len(args) == 1:
-            value = _condition_value_from_ir_value_8616(instruction, args[0])
-            if value is None:
-                return None
-            zero = instruction.constant(0, Type.int_16)
-            if op == "zero":
-                return (
-                    value == zero
-                    if kind in JCC_EQ_MNEMONICS_8616
-                    else value != zero
-                    if kind in JCC_NE_MNEMONICS_8616
-                    else None
-                )
-            return (
-                value != zero
-                if kind in JCC_EQ_MNEMONICS_8616
-                else value == zero
-                if kind in JCC_NE_MNEMONICS_8616
-                else None
-            )
+            return _unary_zero_result(instruction, kind, op, args)
 
         return None
 
@@ -251,3 +184,93 @@ def _consume_last_condition_branch_8616(instruction: _ConditionInstruction, emu:
     with contextlib.suppress(Exception):
         emu.clear_last_condition()
     return branch_cond
+
+
+_JCC_COMPARE_OPS_8616: frozenset[str] = frozenset(
+    {
+        "compare",
+        "eq",
+        "ne",
+        "slt",
+        "sle",
+        "sgt",
+        "sge",
+        "ult",
+        "ule",
+        "ugt",
+        "uge",
+        "masked_zero",
+        "zero",
+        "masked_nonzero",
+        "nonzero",
+    }
+)
+
+
+def _masked_zero_result(
+    instruction: _ConditionInstruction, kind: str, args_local: tuple[IRValue, ...]
+) -> object | None:
+    """Build the masked-zero equality/inequality comparison for one arg pair."""
+    lhs = _condition_value_from_ir_value_8616(instruction, args_local[0])
+    rhs = _condition_value_from_ir_value_8616(instruction, args_local[1]) if len(args_local) == 2 else None
+    if lhs is None:
+        return None
+    masked = lhs if rhs is None else lhs & rhs
+    if kind in JCC_EQ_MNEMONICS_8616:
+        return masked == instruction.constant(0, Type.int_16)
+    if kind in JCC_NE_MNEMONICS_8616:
+        return masked != instruction.constant(0, Type.int_16)
+    return None
+
+
+def _binary_compare_result(
+    instruction: _ConditionInstruction, kind: str, args_local: tuple[IRValue, ...]
+) -> object | None:
+    """Build the two-operand comparison for the requested JCC kind."""
+    lhs = _condition_value_from_ir_value_8616(instruction, args_local[0])
+    rhs = _condition_value_from_ir_value_8616(instruction, args_local[1])
+    if lhs is None or rhs is None:
+        return None
+    for mnemonics, compare in _JCC_BINARY_COMPARE_TABLE_8616:
+        if kind in mnemonics:
+            return compare(lhs, rhs)
+    return None
+
+
+def _unary_zero_result(
+    instruction: _ConditionInstruction, kind: str, op: str, args_local: tuple[IRValue, ...]
+) -> object | None:
+    """Build the one-operand zero/nonzero comparison for the requested JCC kind."""
+    value = _condition_value_from_ir_value_8616(instruction, args_local[0])
+    if value is None:
+        return None
+    zero = instruction.constant(0, Type.int_16)
+    if op == "zero":
+        return (
+            value == zero
+            if kind in JCC_EQ_MNEMONICS_8616
+            else value != zero
+            if kind in JCC_NE_MNEMONICS_8616
+            else None
+        )
+    return (
+        value != zero
+        if kind in JCC_EQ_MNEMONICS_8616
+        else value == zero
+        if kind in JCC_NE_MNEMONICS_8616
+        else None
+    )
+
+
+_JCC_BINARY_COMPARE_TABLE_8616: tuple[tuple[frozenset[str], Callable[[_ConditionExpr, _ConditionExpr], object]], ...] = (
+    (JCC_EQ_MNEMONICS_8616, lambda lhs, rhs: lhs == rhs),
+    (JCC_NE_MNEMONICS_8616, lambda lhs, rhs: lhs != rhs),
+    (JCC_SLE_MNEMONICS_8616, lambda lhs, rhs: lhs.signed <= rhs.signed),
+    (JCC_SGT_MNEMONICS_8616, lambda lhs, rhs: lhs.signed > rhs.signed),
+    (JCC_SLT_MNEMONICS_8616, lambda lhs, rhs: lhs.signed < rhs.signed),
+    (JCC_SGE_MNEMONICS_8616, lambda lhs, rhs: lhs.signed >= rhs.signed),
+    (JCC_ULT_MNEMONICS_8616, lambda lhs, rhs: lhs < rhs),
+    (JCC_UGE_MNEMONICS_8616, lambda lhs, rhs: lhs >= rhs),
+    (JCC_ULE_MNEMONICS_8616, lambda lhs, rhs: lhs <= rhs),
+    (JCC_UGT_MNEMONICS_8616, lambda lhs, rhs: lhs > rhs),
+)

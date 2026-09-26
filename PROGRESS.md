@@ -8,6 +8,14 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Batch artifacts now stream completed lines during execution and survive loud
+  job failures. Three controls fail before repair; 42 runtime/policy tests pass
+  after, scoped Ruff/MyPy pass, quality-dev still fails broader debt. The prior
+  retained-EXE batch exits3 after its first timeout without a report; streamed
+  replay001 stops at the concurrent-source-change import guard; replay002 is
+  active at `.cache/compiler-coverage/retained-far-stream-batch-002/`.
+  The stop cause and full DOS round trip remain unresolved.
+
 - Two full large-model replays stop before compilation with `/dev/kvm` absent
   (24.43s / 23.28s, unchanged implementation). A direct original-EXE run passes
   between failures, so device availability is inconsistent. No acceptance claim.
@@ -1490,3 +1498,10 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   tail and the COD selector-match lane.
 - Verified: ruff 0, mypy 0, `--help` smoke clean, def-integrity vs HEAD
   clean, zero architecture violations.
+- `angr_platforms/angr_platforms/X86_16/jcc_condition.py`: Ruff debt
+  cleared to zero (5 findings). Split the IR-value conversion into
+  per-space register/temp lanes, hoisted the masked-zero and binary
+  compare result builders to module level with a typed ordered
+  compare-dispatch table, and extracted the unary zero/nonzero lane.
+- Verified: ruff 0, mypy 0, 100 postprocess-jcc tests pass,
+  def-integrity vs HEAD clean, zero architecture violations.
