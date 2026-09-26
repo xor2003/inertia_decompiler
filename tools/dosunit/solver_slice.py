@@ -106,39 +106,48 @@ def _invert_condition(condition: ConditionIR) -> ConditionIR:
 def _manual_solution(condition: ConditionIR) -> dict[str, int] | None:
     left = condition.left
     right = condition.right
-    if left.kind not in {"reg", "reg8"}:
-        return None
-    left_reg = _parent_reg(left)
-    if right is None:
+    if left.kind not in {"reg", "reg8"} or right is None:
         return None
     if condition.kind in {"test_zero", "test_nonzero"}:
-        if right.kind in {"reg", "reg8"} and right.value == left.value:
-            return _assign_operand_value(left, 0 if condition.kind == "test_zero" else 1)
-        if right.kind == "imm":
-            mask = int(right.value) & ((1 << right.width) - 1)
-            if condition.kind == "test_zero":
-                return _assign_operand_value(left, 0)
-            if mask == 0:
-                return None
-            bit = mask & -mask
-            return _assign_operand_value(left, bit)
-        return None
+        return _manual_test_solution(condition, left, right)
     if right.kind == "imm":
-        imm = int(right.value) & ((1 << right.width) - 1)
-        if condition.kind == "eq":
-            return _assign_operand_value(left, imm)
-        if condition.kind == "ne":
-            return _assign_operand_value(left, (imm + 1) & ((1 << right.width) - 1))
-        if left.kind == "reg8":
+        return _manual_imm_solution(condition, left, right)
+    return None
+
+
+def _manual_test_solution(condition: ConditionIR, left: Operand, right: Operand) -> dict[str, int] | None:
+    """Solve test_zero/test_nonzero conditions without the solver."""
+    if right.kind in {"reg", "reg8"} and right.value == left.value:
+        return _assign_operand_value(left, 0 if condition.kind == "test_zero" else 1)
+    if right.kind == "imm":
+        mask = int(right.value) & ((1 << right.width) - 1)
+        if condition.kind == "test_zero":
+            return _assign_operand_value(left, 0)
+        if mask == 0:
             return None
-        if condition.kind == "ult":
-            return None if imm == 0 else {left_reg: 0}
-        if condition.kind == "uge":
-            return {left_reg: imm}
-        if condition.kind == "ugt":
-            return None if imm == 0xFFFF else {left_reg: (imm + 1) & 0xFFFF}
-        if condition.kind == "ule":
-            return {left_reg: imm}
+        bit = mask & -mask
+        return _assign_operand_value(left, bit)
+    return None
+
+
+def _manual_imm_solution(condition: ConditionIR, left: Operand, right: Operand) -> dict[str, int] | None:
+    """Solve immediate-comparison conditions without the solver."""
+    left_reg = _parent_reg(left)
+    imm = int(right.value) & ((1 << right.width) - 1)
+    if condition.kind == "eq":
+        return _assign_operand_value(left, imm)
+    if condition.kind == "ne":
+        return _assign_operand_value(left, (imm + 1) & ((1 << right.width) - 1))
+    if left.kind == "reg8":
+        return None
+    if condition.kind == "ult":
+        return None if imm == 0 else {left_reg: 0}
+    if condition.kind == "uge":
+        return {left_reg: imm}
+    if condition.kind == "ugt":
+        return None if imm == 0xFFFF else {left_reg: (imm + 1) & 0xFFFF}
+    if condition.kind == "ule":
+        return {left_reg: imm}
     return None
 
 

@@ -214,75 +214,25 @@ def build_harness(
 ) -> Harness:
     """Build a DOS harness that invokes the vector's selected function."""
     original = _read_mz(exe_path)
-    function = vector.get("function", {})
-    if not isinstance(function, dict):
-        raise KvikdosBackendError("vector.function must be an object")
-    entry = function.get("entry", {})
-    if not isinstance(entry, dict):
-        raise KvikdosBackendError("vector.function.entry must be an object")
-    return_kind = str(entry.get("kind") or function.get("return_kind") or "near").lower()
-    if return_kind not in {"near", "far"}:
-        raise KvikdosBackendError(f"unsupported return kind: {return_kind}")
+    _function, entry, return_kind = _vector_function_entry(vector)
 
     function_cs_para = _entry_segment_para(entry)
     function_ip = parse_int(entry.get("ip", entry.get("offset", "0x0000")), field="function.entry.ip") & 0xFFFF
     runtime_target_cs = IMAGE_PARA + ORIGINAL_IMAGE_PARA + function_cs_para
     runtime_harness_cs = IMAGE_PARA
 
-    pre = vector.get("pre", {})
-    if not isinstance(pre, dict):
-        raise KvikdosBackendError("vector.pre must be an object")
-    regs = dict.fromkeys(("ax", "bx", "cx", "dx", "si", "di", "bp", "sp", "flags"), 0)
-    raw_regs = pre.get("regs", {})
-    if isinstance(raw_regs, dict):
-        for name in tuple(regs):
-            if name in raw_regs:
-                regs[name] = parse_int(raw_regs[name], field=f"pre.regs.{name}") & 0xFFFF
-    if regs["sp"] == 0:
-        raise KvikdosBackendError("pre.regs.sp must be non-zero so the return trap can be installed")
+    regs, ds, es, ss = _vector_pre_state(vector, entry, functions_catalog)
 
-    data_segment_para = _default_data_segment_para(functions_catalog)
-    raw_sregs = pre.get("sregs", {})
-    if not isinstance(raw_sregs, dict):
-        raw_sregs = {}
-    ds = _resolve_segment(raw_sregs.get("ds", "auto"), default=IMAGE_PARA + ORIGINAL_IMAGE_PARA + data_segment_para)
-    es = _resolve_segment(raw_sregs.get("es", "auto"), default=ds)
-    ss = _resolve_segment(raw_sregs.get("ss", "auto"), default=AUTO_STACK_SEGMENT)
-    if raw_sregs.get("cs") not in (None, "auto", entry.get("cs")):
-        # The backend controls CS through function.entry so candidate mapping stays explicit.
-        raise KvikdosBackendError("pre.sregs.cs must be auto or match function.entry.cs")
+    image, relocs = _embed_shifted_image(original)
 
-    image = bytearray(ORIGINAL_IMAGE_PARA * 16 + len(original.image))
-    image[ORIGINAL_IMAGE_PARA * 16 : ORIGINAL_IMAGE_PARA * 16 + len(original.image)] = original.image
-
-    relocs: list[tuple[int, int]] = []
-    for off, seg in original.relocs:
-        shifted_seg = ORIGINAL_IMAGE_PARA + seg
-        target = (shifted_seg << 4) + off
-        if target + 2 > len(image):
-            raise KvikdosBackendError(f"relocation outside embedded image: {seg:04x}:{off:04x}")
-        current = int.from_bytes(image[target : target + 2], "little")
-        image[target : target + 2] = ((current + ORIGINAL_IMAGE_PARA) & 0xFFFF).to_bytes(2, "little")
-        relocs.append((off, shifted_seg))
-
-    if return_kind == "near":
-        capture_offset = _find_near_capture_offset(original.image, function_cs_para)
-        if capture_offset is None:
-            _install_mirror_code_segment(image, original_cs_para=ORIGINAL_IMAGE_PARA + function_cs_para)
-            runtime_target_cs = IMAGE_PARA + MIRROR_CODE_PARA
-            capture_offset = MIRROR_CAPTURE_OFFSET
-            capture_cs_para = MIRROR_CODE_PARA
-        else:
-            capture_cs_para = ORIGINAL_IMAGE_PARA + function_cs_para
-        return_ip = capture_offset
-        return_cs: int | None = None
-        capture_runtime_cs = IMAGE_PARA + capture_cs_para
-    else:
-        capture_offset = HARNESS_CAPTURE_OFFSET
-        capture_cs_para = 0
-        return_ip = capture_offset
-        return_cs = runtime_harness_cs
-        capture_runtime_cs = runtime_harness_cs
+    capture_offset, capture_cs_para, return_ip, return_cs, capture_runtime_cs, runtime_target_cs = _resolve_capture_layout(
+        original,
+        image,
+        function_cs_para=function_cs_para,
+        return_kind=return_kind,
+        runtime_harness_cs=runtime_harness_cs,
+        runtime_target_cs=runtime_target_cs,
+    )
 
     capture_stub = _capture_stub(capture_offset)
     _put_bytes(image, (capture_cs_para << 4) + capture_offset, capture_stub)
@@ -315,6 +265,91 @@ def build_harness(
 
     exe_bytes = _make_mz(bytes(image), relocs=tuple(relocs), minalloc=max(0x1000, original.minalloc), maxalloc=0xFFFF)
     return Harness(exe_bytes=exe_bytes, observation_linear=(capture_runtime_cs << 4) + obs_offset)
+
+
+def _vector_function_entry(vector: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Validate vector.function/vector.function.entry and return them plus return kind."""
+    function = vector.get("function", {})
+    if not isinstance(function, dict):
+        raise KvikdosBackendError("vector.function must be an object")
+    entry = function.get("entry", {})
+    if not isinstance(entry, dict):
+        raise KvikdosBackendError("vector.function.entry must be an object")
+    return_kind = str(entry.get("kind") or function.get("return_kind") or "near").lower()
+    if return_kind not in {"near", "far"}:
+        raise KvikdosBackendError(f"unsupported return kind: {return_kind}")
+    return function, entry, return_kind
+
+
+def _vector_pre_state(
+    vector: dict[str, Any],
+    entry: dict[str, Any],
+    functions_catalog: dict[str, Any] | None,
+) -> tuple[dict[str, int], int, int, int]:
+    """Resolve pre-state registers and segment registers; return (regs, ds, es, ss)."""
+    pre = vector.get("pre", {})
+    if not isinstance(pre, dict):
+        raise KvikdosBackendError("vector.pre must be an object")
+    regs: dict[str, int] = dict.fromkeys(("ax", "bx", "cx", "dx", "si", "di", "bp", "sp", "flags"), 0)
+    raw_regs = pre.get("regs", {})
+    if isinstance(raw_regs, dict):
+        for name in tuple(regs):
+            if name in raw_regs:
+                regs[name] = parse_int(raw_regs[name], field=f"pre.regs.{name}") & 0xFFFF
+    if regs["sp"] == 0:
+        raise KvikdosBackendError("pre.regs.sp must be non-zero so the return trap can be installed")
+
+    data_segment_para = _default_data_segment_para(functions_catalog)
+    raw_sregs = pre.get("sregs", {})
+    if not isinstance(raw_sregs, dict):
+        raw_sregs = {}
+    ds = _resolve_segment(raw_sregs.get("ds", "auto"), default=IMAGE_PARA + ORIGINAL_IMAGE_PARA + data_segment_para)
+    es = _resolve_segment(raw_sregs.get("es", "auto"), default=ds)
+    ss = _resolve_segment(raw_sregs.get("ss", "auto"), default=AUTO_STACK_SEGMENT)
+    if raw_sregs.get("cs") not in (None, "auto", entry.get("cs")):
+        # The backend controls CS through function.entry so candidate mapping stays explicit.
+        raise KvikdosBackendError("pre.sregs.cs must be auto or match function.entry.cs")
+    return regs, ds, es, ss
+
+
+def _embed_shifted_image(original: MzImage) -> tuple[bytearray, list[tuple[int, int]]]:
+    """Embed the original image at ORIGINAL_IMAGE_PARA and shift relocations."""
+    image = bytearray(ORIGINAL_IMAGE_PARA * 16 + len(original.image))
+    image[ORIGINAL_IMAGE_PARA * 16 : ORIGINAL_IMAGE_PARA * 16 + len(original.image)] = original.image
+
+    relocs: list[tuple[int, int]] = []
+    for off, seg in original.relocs:
+        shifted_seg = ORIGINAL_IMAGE_PARA + seg
+        target = (shifted_seg << 4) + off
+        if target + 2 > len(image):
+            raise KvikdosBackendError(f"relocation outside embedded image: {seg:04x}:{off:04x}")
+        current = int.from_bytes(image[target : target + 2], "little")
+        image[target : target + 2] = ((current + ORIGINAL_IMAGE_PARA) & 0xFFFF).to_bytes(2, "little")
+        relocs.append((off, shifted_seg))
+    return image, relocs
+
+
+def _resolve_capture_layout(
+    original: MzImage,
+    image: bytearray,
+    *,
+    function_cs_para: int,
+    return_kind: str,
+    runtime_harness_cs: int,
+    runtime_target_cs: int,
+) -> tuple[int, int, int, int | None, int, int]:
+    """Resolve capture placement; return (capture_offset, capture_cs_para, return_ip, return_cs, capture_runtime_cs, runtime_target_cs)."""
+    if return_kind == "near":
+        capture_offset = _find_near_capture_offset(original.image, function_cs_para)
+        if capture_offset is None:
+            _install_mirror_code_segment(image, original_cs_para=ORIGINAL_IMAGE_PARA + function_cs_para)
+            capture_cs_para = MIRROR_CODE_PARA
+            return MIRROR_CAPTURE_OFFSET, capture_cs_para, MIRROR_CAPTURE_OFFSET, None, IMAGE_PARA + capture_cs_para, IMAGE_PARA + capture_cs_para
+        capture_cs_para = ORIGINAL_IMAGE_PARA + function_cs_para
+        return capture_offset, capture_cs_para, capture_offset, None, IMAGE_PARA + capture_cs_para, runtime_target_cs
+    return HARNESS_CAPTURE_OFFSET, 0, HARNESS_CAPTURE_OFFSET, runtime_harness_cs, runtime_harness_cs, runtime_target_cs
+
+
 
 
 def _read_mz(path: Path) -> MzImage:

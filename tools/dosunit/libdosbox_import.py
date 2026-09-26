@@ -51,62 +51,9 @@ def import_libdosbox_trace(  # noqa: D103
     loadseg_raw = meta.get("DosboxLoadSeg")
     loadseg = int(loadseg_raw) if isinstance(loadseg_raw, int) else None
 
-    priorities: list[dict[str, Any]] = []
-    code = trace.get("Code", {})
-    if isinstance(code, dict):
-        for addr_text, info in code.items():
-            linear = _int_from_hex_key(addr_text)
-            if linear is None or not isinstance(info, dict):
-                continue
-            function = function_for_linear(catalog, linear) if catalog is not None else None
-            priorities.append(
-                {
-                    "linear": normalize_hex(linear),
-                    "module_offset": _module_relative(linear, loadseg),
-                    "exec_count": int(info.get("ExecCount", 0) or 0),
-                    "function_id": None if function is None else function.get("id"),
-                    "sources": ["libdosbox_runtime_json"],
-                    "segments": {key: info.get(key, []) for key in ("cs", "ds", "es", "ss", "fs", "gs") if key in info},
-                    "accessed_data": info.get("Accdat", []),
-                }
-            )
-    priorities.sort(key=lambda item: (-int(item.get("exec_count", 0)), str(item.get("linear", ""))))
-
-    access_ranges: list[dict[str, Any]] = []
-    access_sites = trace.get("AccessSites", {})
-    if isinstance(access_sites, dict):
-        for site in access_sites.values():
-            if not isinstance(site, dict):
-                continue
-            min_addr = _int_from_hex_key(site.get("MinAddr"))
-            max_addr = _int_from_hex_key(site.get("MaxAddr"))
-            csip = _int_from_hex_key(site.get("Csip"))
-            if min_addr is None or max_addr is None:
-                continue
-            access_ranges.append(
-                {
-                    "csip": None if csip is None else normalize_hex(csip),
-                    "min_linear": normalize_hex(min_addr),
-                    "max_linear": normalize_hex(max_addr),
-                    "module_min": _module_relative(min_addr, loadseg),
-                    "module_max": _module_relative(max_addr, loadseg),
-                    "count": int(site.get("Count", 0) or 0),
-                    "rw_mask": int(site.get("RwMask", 0) or 0),
-                    "size_mask": int(site.get("SizeMask", 0) or 0),
-                    "value_classes": site.get("ValueClasses", []),
-                    "samples": site.get("Samples", []),
-                }
-            )
-
-    seeds: list[dict[str, Any]] = []
-    snapshots = trace.get("CallSnapshots", [])
-    if isinstance(snapshots, list):
-        for idx, snapshot in enumerate(snapshots):
-            if not isinstance(snapshot, dict):
-                continue
-            vector = _snapshot_to_vector(snapshot, idx=idx)
-            if vector is not None:
-                seeds.append(vector)
+    priorities = _code_priorities(trace, catalog, loadseg)
+    access_ranges = _access_ranges(trace, loadseg)
+    seeds = _seed_vectors(trace)
 
     refusals: list[dict[str, Any]] = []
     if not seeds:
@@ -134,6 +81,83 @@ def import_libdosbox_trace(  # noqa: D103
     document = dict(document_without_id)
     document["id"] = stable_id("libdosbox-import", document_without_id)
     return document
+
+
+def _code_priorities(
+    trace: dict[str, Any],
+    catalog: dict[str, Any] | None,
+    loadseg: int | None,
+) -> list[dict[str, Any]]:
+    """Collect sorted execution priorities from the trace Code inventory."""
+    priorities: list[dict[str, Any]] = []
+    code = trace.get("Code", {})
+    if isinstance(code, dict):
+        for addr_text, info in code.items():
+            linear = _int_from_hex_key(addr_text)
+            if linear is None or not isinstance(info, dict):
+                continue
+            function = function_for_linear(catalog, linear) if catalog is not None else None
+            priorities.append(
+                {
+                    "linear": normalize_hex(linear),
+                    "module_offset": _module_relative(linear, loadseg),
+                    "exec_count": int(info.get("ExecCount", 0) or 0),
+                    "function_id": None if function is None else function.get("id"),
+                    "sources": ["libdosbox_runtime_json"],
+                    "segments": {key: info.get(key, []) for key in ("cs", "ds", "es", "ss", "fs", "gs") if key in info},
+                    "accessed_data": info.get("Accdat", []),
+                }
+            )
+    priorities.sort(key=lambda item: (-int(item.get("exec_count", 0)), str(item.get("linear", ""))))
+    return priorities
+
+
+def _access_ranges(trace: dict[str, Any], loadseg: int | None) -> list[dict[str, Any]]:
+    """Collect normalized data-access ranges from the trace AccessSites."""
+    access_ranges: list[dict[str, Any]] = []
+    access_sites = trace.get("AccessSites", {})
+    if not isinstance(access_sites, dict):
+        return access_ranges
+    for site in access_sites.values():
+        if not isinstance(site, dict):
+            continue
+        min_addr = _int_from_hex_key(site.get("MinAddr"))
+        max_addr = _int_from_hex_key(site.get("MaxAddr"))
+        csip = _int_from_hex_key(site.get("Csip"))
+        if min_addr is None or max_addr is None:
+            continue
+        access_ranges.append(
+            {
+                "csip": None if csip is None else normalize_hex(csip),
+                "min_linear": normalize_hex(min_addr),
+                "max_linear": normalize_hex(max_addr),
+                "module_min": _module_relative(min_addr, loadseg),
+                "module_max": _module_relative(max_addr, loadseg),
+                "count": int(site.get("Count", 0) or 0),
+                "rw_mask": int(site.get("RwMask", 0) or 0),
+                "size_mask": int(site.get("SizeMask", 0) or 0),
+                "value_classes": site.get("ValueClasses", []),
+                "samples": site.get("Samples", []),
+            }
+        )
+    return access_ranges
+
+
+def _seed_vectors(trace: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert per-call snapshots into replay vectors."""
+    seeds: list[dict[str, Any]] = []
+    snapshots = trace.get("CallSnapshots", [])
+    if not isinstance(snapshots, list):
+        return seeds
+    for idx, snapshot in enumerate(snapshots):
+        if not isinstance(snapshot, dict):
+            continue
+        vector = _snapshot_to_vector(snapshot, idx=idx)
+        if vector is not None:
+            seeds.append(vector)
+    return seeds
+
+
 
 
 def _snapshot_to_vector(snapshot: dict[str, Any], *, idx: int) -> dict[str, Any] | None:

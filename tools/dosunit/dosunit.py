@@ -232,6 +232,96 @@ def cmd_compare_ssa(args: argparse.Namespace) -> int:  # noqa: D103
     return 0 if summary.get("failed") == 0 and summary.get("refused") == 0 else 1
 
 
+def _ssa_batch_command(
+    args: argparse.Namespace,
+    batch_oracle_path: Path,
+    batch_compare_path: Path,
+) -> list[str]:
+    """Build the per-batch compare-ssa subprocess command."""
+    command = [
+        sys.executable,
+        "-m",
+        "tools.dosunit.dosunit",
+        "compare-ssa",
+        "--oracle-ssa",
+        str(batch_oracle_path),
+        "--candidate-ssa",
+        str(Path(args.candidate_ssa)),
+        "--oracle-index-ssa",
+        str(Path(args.oracle_index_ssa or args.oracle_ssa)),
+        "--candidate-index-ssa",
+        str(Path(args.candidate_index_ssa or args.candidate_ssa)),
+        "--max-rss-mb",
+        str(args.max_rss_mb),
+        "--solver-timeout-ms",
+        str(args.solver_timeout_ms),
+        "--max-solver-assignments",
+        str(args.max_solver_assignments),
+        "--max-solver-inputs",
+        str(args.max_solver_inputs),
+        "--max-solver-memory-stores",
+        str(args.max_solver_memory_stores),
+        "--semantic-proof-passes",
+        str(args.semantic_proof_passes),
+        "--max-region-loop-unroll",
+        str(args.max_region_loop_unroll),
+        "--out",
+        str(batch_compare_path),
+    ]
+    if args.mapping:
+        command.extend(["--mapping", str(Path(args.mapping))])
+    if args.skip_unmapped:
+        command.append("--skip-unmapped")
+    if args.no_skip_binary_equal:
+        command.append("--no-skip-binary-equal")
+    if args.disable_callee_lemmas:
+        command.append("--disable-callee-lemmas")
+    if args.disable_region_equality:
+        command.append("--disable-region-equality")
+    if args.disable_connectivity:
+        command.append("--disable-connectivity")
+    return command
+
+
+def _run_ssa_batch(command: list[str], batch_timeout_ms: int) -> tuple[int, bool]:
+    """Run one compare-ssa batch; return (returncode, timed_out)."""
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=Path.cwd(),
+            timeout=None if batch_timeout_ms <= 0 else batch_timeout_ms / 1000.0,
+        )
+        return completed.returncode, False
+    except subprocess.TimeoutExpired:
+        return -9, True
+
+
+def _ssa_batch_failure_row(
+    batch_index: int,
+    batch: list[dict[str, Any]],
+    returncode: int,
+    timed_out: bool,
+    elapsed_ms: int,
+    batch_oracle_path: Path,
+    batch_compare_path: Path,
+) -> dict[str, Any]:
+    """Build the failure row for a batch that produced no compare output."""
+    return {
+        "batch": batch_index,
+        "status": "timeout" if timed_out else "process_failed",
+        "reason": "batch_timeout" if timed_out else "process_failed",
+        "returncode": returncode,
+        "elapsed_ms": elapsed_ms,
+        "function_count": len(sorted({_ssa_function_key(function) for function in batch if _ssa_function_key(function)})),
+        "ssa_part_count": len(batch),
+        "functions": sorted({_ssa_function_key(function) for function in batch if _ssa_function_key(function)}),
+        "oracle_ssa": str(batch_oracle_path),
+        "compare": str(batch_compare_path),
+    }
+
+
+
+
 def cmd_compare_ssa_batched(args: argparse.Namespace) -> int:  # noqa: D103
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -247,75 +337,21 @@ def cmd_compare_ssa_batched(args: argparse.Namespace) -> int:  # noqa: D103
         batch_oracle_path = out_dir / f"oracle.batch{batch_index:03d}.ssa.json"
         batch_compare_path = out_dir / f"compare.batch{batch_index:03d}.json"
         write_json(batch_oracle_path, batch_doc)
-        command = [
-            sys.executable,
-            "-m",
-            "tools.dosunit.dosunit",
-            "compare-ssa",
-            "--oracle-ssa",
-            str(batch_oracle_path),
-            "--candidate-ssa",
-            str(Path(args.candidate_ssa)),
-            "--oracle-index-ssa",
-            str(Path(args.oracle_index_ssa or args.oracle_ssa)),
-            "--candidate-index-ssa",
-            str(Path(args.candidate_index_ssa or args.candidate_ssa)),
-            "--max-rss-mb",
-            str(args.max_rss_mb),
-            "--solver-timeout-ms",
-            str(args.solver_timeout_ms),
-            "--max-solver-assignments",
-            str(args.max_solver_assignments),
-            "--max-solver-inputs",
-            str(args.max_solver_inputs),
-            "--max-solver-memory-stores",
-            str(args.max_solver_memory_stores),
-            "--semantic-proof-passes",
-            str(args.semantic_proof_passes),
-            "--max-region-loop-unroll",
-            str(args.max_region_loop_unroll),
-            "--out",
-            str(batch_compare_path),
-        ]
-        if args.mapping:
-            command.extend(["--mapping", str(Path(args.mapping))])
-        if args.skip_unmapped:
-            command.append("--skip-unmapped")
-        if args.no_skip_binary_equal:
-            command.append("--no-skip-binary-equal")
-        if args.disable_callee_lemmas:
-            command.append("--disable-callee-lemmas")
-        if args.disable_region_equality:
-            command.append("--disable-region-equality")
-        if args.disable_connectivity:
-            command.append("--disable-connectivity")
+        command = _ssa_batch_command(args, batch_oracle_path, batch_compare_path)
         started = time.time()
-        try:
-            completed = subprocess.run(
-                command,
-                cwd=Path.cwd(),
-                timeout=None if int(args.batch_timeout_ms) <= 0 else int(args.batch_timeout_ms) / 1000.0,
-            )
-            returncode = completed.returncode
-            timed_out = False
-        except subprocess.TimeoutExpired:
-            returncode = -9
-            timed_out = True
+        returncode, timed_out = _run_ssa_batch(command, int(args.batch_timeout_ms))
         if not batch_compare_path.exists():
             elapsed_ms = int((time.time() - started) * 1000)
             rows.append(
-                {
-                    "batch": batch_index,
-                    "status": "timeout" if timed_out else "process_failed",
-                    "reason": "batch_timeout" if timed_out else "process_failed",
-                    "returncode": returncode,
-                    "elapsed_ms": elapsed_ms,
-                    "function_count": len(sorted({_ssa_function_key(function) for function in batch if _ssa_function_key(function)})),
-                    "ssa_part_count": len(batch),
-                    "functions": sorted({_ssa_function_key(function) for function in batch if _ssa_function_key(function)}),
-                    "oracle_ssa": str(batch_oracle_path),
-                    "compare": str(batch_compare_path),
-                }
+                _ssa_batch_failure_row(
+                    batch_index,
+                    batch,
+                    returncode,
+                    timed_out,
+                    elapsed_ms,
+                    batch_oracle_path,
+                    batch_compare_path,
+                )
             )
             if not args.keep_going:
                 break

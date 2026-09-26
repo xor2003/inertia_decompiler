@@ -32,15 +32,7 @@ def apply_candidate_mapping(  # noqa: D103
         raise MappingResolutionError("mapping_missing", "vector.function must be an object")
     oracle_id = function.get("id")
     oracle_name = function.get("name")
-    candidates: list[dict[str, Any]] = []
-    for item in mapping_document.get("functions", []) or []:
-        if not isinstance(item, dict):
-            continue
-        if oracle_id is not None and item.get("oracle_id") == oracle_id:
-            candidates.append(item)
-            continue
-        if oracle_name is not None and item.get("oracle_name") == oracle_name:
-            candidates.append(item)
+    candidates = _mapping_candidates(mapping_document, oracle_id, oracle_name)
 
     if not candidates:
         raise MappingResolutionError(
@@ -74,6 +66,24 @@ def apply_candidate_mapping(  # noqa: D103
     if "candidate_module" in mapping_document:
         mapped["module"] = mapping_document["candidate_module"]
     return mapped
+
+
+def _mapping_candidates(
+    mapping_document: dict[str, Any],
+    oracle_id: Any,  # noqa: ANN401
+    oracle_name: Any,  # noqa: ANN401
+) -> list[dict[str, Any]]:
+    """Collect candidate mapping entries matching the oracle id or name."""
+    candidates: list[dict[str, Any]] = []
+    for item in mapping_document.get("functions", []) or []:
+        if not isinstance(item, dict):
+            continue
+        if oracle_id is not None and item.get("oracle_id") == oracle_id:
+            candidates.append(item)
+            continue
+        if oracle_name is not None and item.get("oracle_name") == oracle_name:
+            candidates.append(item)
+    return candidates
 
 
 def _resolve_candidate_entry(
@@ -121,75 +131,18 @@ def make_mapping_document(  # noqa: D103
 ) -> dict[str, Any]:
     if mode != "name":
         raise DosUnitError(f"unsupported mapping mode: {mode}")
-    candidates_by_name: dict[str, list[dict[str, Any]]] = {}
-    for function in candidate_catalog.get("functions", []) or []:
-        if not isinstance(function, dict):
-            continue
-        for name in function.get("names", []) or []:
-            candidates_by_name.setdefault(_name_match_key(name), []).append(function)
+    candidates_by_name = _candidates_by_name(candidate_catalog)
 
     functions: list[dict[str, Any]] = []
     diagnostics: list[dict[str, Any]] = []
     for oracle_function in oracle_catalog.get("functions", []) or []:
         if not isinstance(oracle_function, dict):
             continue
-        names = [str(name) for name in oracle_function.get("names", []) or []]
-        name = names[0] if names else None
-        if name is None:
-            diagnostics.append(
-                {
-                    "reason": "mapping_missing",
-                    "oracle_id": oracle_function.get("id"),
-                    "message": "oracle function has no name",
-                }
-            )
-            continue
-        candidates: list[dict[str, Any]] = []
-        matched_name = name
-        for candidate_name in names:
-            candidates = candidates_by_name.get(_name_match_key(candidate_name), [])
-            if candidates:
-                matched_name = candidate_name
-                break
-        if not candidates:
-            diagnostics.append(
-                {"reason": "mapping_missing", "oracle_id": oracle_function.get("id"), "oracle_name": name}
-            )
-            continue
-        if len(candidates) > 1:
-            diagnostics.append(
-                {"reason": "mapping_ambiguous", "oracle_id": oracle_function.get("id"), "oracle_name": name}
-            )
-            continue
-        candidate = candidates[0]
-        candidate_entry = _entry_for_mapping(
-            candidate, return_kind=str(oracle_function.get("return_kind", candidate.get("return_kind", "near")))
-        )
-        if candidate_entry is None:
-            diagnostics.append(
-                {
-                    "reason": "mapping_missing",
-                    "oracle_id": oracle_function.get("id"),
-                    "oracle_name": name,
-                    "message": "candidate entry has no concrete segment",
-                }
-            )
-            continue
-        candidate_names = [str(item) for item in candidate.get("names", []) or []]
-        sources = ["name_match"]
-        if matched_name != name:
-            sources.append("name_alias")
-        functions.append(
-            {
-                "oracle_id": oracle_function.get("id"),
-                "oracle_name": name,
-                "candidate_id": candidate.get("id"),
-                "candidate_name": candidate_names[0] if candidate_names else matched_name,
-                "matched_name": matched_name,
-                "candidate_entry": candidate_entry,
-                "sources": sources,
-            }
-        )
+        entry, diagnostic = _map_oracle_function(oracle_function, candidates_by_name)
+        if diagnostic is not None:
+            diagnostics.append(diagnostic)
+        if entry is not None:
+            functions.append(entry)
 
     document_without_id = {
         "schema": "dosunit.mapping.v1",
@@ -208,6 +161,69 @@ def make_mapping_document(  # noqa: D103
     document = dict(document_without_id)
     document["id"] = stable_id("mapping", document_without_id)
     return document
+
+
+def _candidates_by_name(candidate_catalog: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Index candidate functions by whitespace-insensitive symbol name."""
+    candidates_by_name: dict[str, list[dict[str, Any]]] = {}
+    for function in candidate_catalog.get("functions", []) or []:
+        if not isinstance(function, dict):
+            continue
+        for name in function.get("names", []) or []:
+            candidates_by_name.setdefault(_name_match_key(name), []).append(function)
+    return candidates_by_name
+
+
+def _map_oracle_function(
+    oracle_function: dict[str, Any],
+    candidates_by_name: dict[str, list[dict[str, Any]]],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Map one oracle function; return (entry, diagnostic), one may be set."""
+    names = [str(name) for name in oracle_function.get("names", []) or []]
+    name = names[0] if names else None
+    if name is None:
+        return None, {
+            "reason": "mapping_missing",
+            "oracle_id": oracle_function.get("id"),
+            "message": "oracle function has no name",
+        }
+    candidates: list[dict[str, Any]] = []
+    matched_name = name
+    for candidate_name in names:
+        candidates = candidates_by_name.get(_name_match_key(candidate_name), [])
+        if candidates:
+            matched_name = candidate_name
+            break
+    if not candidates:
+        return None, {"reason": "mapping_missing", "oracle_id": oracle_function.get("id"), "oracle_name": name}
+    if len(candidates) > 1:
+        return None, {"reason": "mapping_ambiguous", "oracle_id": oracle_function.get("id"), "oracle_name": name}
+    candidate = candidates[0]
+    candidate_entry = _entry_for_mapping(
+        candidate, return_kind=str(oracle_function.get("return_kind", candidate.get("return_kind", "near")))
+    )
+    if candidate_entry is None:
+        return None, {
+            "reason": "mapping_missing",
+            "oracle_id": oracle_function.get("id"),
+            "oracle_name": name,
+            "message": "candidate entry has no concrete segment",
+        }
+    candidate_names = [str(item) for item in candidate.get("names", []) or []]
+    sources = ["name_match"]
+    if matched_name != name:
+        sources.append("name_alias")
+    return {
+        "oracle_id": oracle_function.get("id"),
+        "oracle_name": name,
+        "candidate_id": candidate.get("id"),
+        "candidate_name": candidate_names[0] if candidate_names else matched_name,
+        "matched_name": matched_name,
+        "candidate_entry": candidate_entry,
+        "sources": sources,
+    }, None
+
+
 
 
 def _entry_for_mapping(function: dict[str, Any], *, return_kind: str) -> dict[str, str] | None:

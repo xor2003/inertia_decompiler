@@ -198,6 +198,56 @@ def _summarize_function_regions(
     if limit <= 0:
         return [], [_refusal(function_id, "unsupported_ir", "function size/scan limit is empty")], 0
 
+    return _scan_function_regions(
+        project=project,
+        function_id=function_id,
+        function_name=function_name,
+        segment_para=segment_para,
+        function_base=function_base,
+        start=start,
+        end=end,
+        max_regions=max_regions,
+        max_insns_per_region=max_insns_per_region,
+    )
+
+
+def _lift_region_block(
+    project: Any,  # noqa: ANN401
+    function_id: str,
+    at: int,
+    *,
+    start: int,
+    end: int,
+) -> tuple[list[Any], dict[str, Any] | None]:
+    """Lift one block and return its in-window instructions or a refusal."""
+    try:
+        block = project.factory.block(at, size=min(0x80, end - at), opt_level=0)
+        _ = block.vex
+    except Exception as ex:
+        return [], _refusal(
+            function_id,
+            "unsupported_ir",
+            f"lifter block failed at {normalize_hex(at)}: {type(ex).__name__}: {ex}",
+        )
+    lifted_insns = [item.insn for item in block.capstone.insns if start <= item.insn.address < end]
+    if not lifted_insns:
+        return [], _refusal(function_id, "unsupported_ir", f"lifter produced no instructions at {normalize_hex(at)}")
+    return lifted_insns, None
+
+
+def _scan_function_regions(
+    *,
+    project: Any,  # noqa: ANN401
+    function_id: str,
+    function_name: str,
+    segment_para: int,
+    function_base: int,
+    start: int,
+    end: int,
+    max_regions: int,
+    max_insns_per_region: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    """BFS-scan one function window into region summaries."""
     regions: list[dict[str, Any]] = []
     refusals: list[dict[str, Any]] = []
     pending = [start]
@@ -209,33 +259,17 @@ def _summarize_function_regions(
         if at < start or at >= end or at in seen:
             continue
         seen.add(at)
-        try:
-            block = project.factory.block(at, size=min(0x80, end - at), opt_level=0)
-            _ = block.vex
-        except Exception as ex:
-            refusals.append(
-                _refusal(
-                    function_id,
-                    "unsupported_ir",
-                    f"lifter block failed at {normalize_hex(at)}: {type(ex).__name__}: {ex}",
-                )
-            )
+        lifted_insns, refusal = _lift_region_block(project, function_id, at, start=start, end=end)
+        if refusal is not None:
+            refusals.append(refusal)
             continue
         blocks_lifted += 1
-        lifted_insns = [item.insn for item in block.capstone.insns if start <= item.insn.address < end]
-        if not lifted_insns:
-            refusals.append(
-                _refusal(function_id, "unsupported_ir", f"lifter produced no instructions at {normalize_hex(at)}")
-            )
-            continue
-
-        region_insns = lifted_insns[:max_insns_per_region]
         region = _summarize_region(
             function_id=function_id,
             function_name=function_name,
             segment_para=segment_para,
             function_base=function_base,
-            insns=region_insns,
+            insns=lifted_insns[:max_insns_per_region],
         )
         regions.append(region)
         for successor in region.get("successors", []):

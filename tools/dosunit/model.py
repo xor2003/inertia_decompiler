@@ -125,11 +125,8 @@ def vectors_from_document(document: object) -> list[dict[str, Any]]:  # noqa: D1
     return [require_mapping(item, field=f"vectors[{idx}]") for idx, item in enumerate(vectors)]
 
 
-def normalize_vector(vector: dict[str, Any]) -> dict[str, Any]:  # noqa: D103
-    normalized = json.loads(json.dumps(vector))
-    normalized["schema"] = "dosunit.vector.v1"
-
-    pre = require_mapping(normalized.setdefault("pre", {}), field="pre")
+def _normalize_pre_regs(pre: dict[str, Any]) -> None:
+    """Validate and normalize pre-state register values."""
     regs = require_mapping(pre.setdefault("regs", {}), field="pre.regs")
     for reg in tuple(regs):
         if reg not in GENERAL_REGS:
@@ -142,29 +139,31 @@ def normalize_vector(vector: dict[str, Any]) -> dict[str, Any]:  # noqa: D103
             raise DosUnitError(f"unsupported segment register in pre.sregs: {reg}")
         sregs[reg] = normalize_auto_hex(sregs[reg], width=4, field=f"pre.sregs.{reg}")
 
-    memory = require_list(pre.setdefault("memory", []), field="pre.memory")
-    for idx, item in enumerate(memory):
-        mem = require_mapping(item, field=f"pre.memory[{idx}]")
-        space = str(mem.get("space", "")).upper()
-        if space not in MEMORY_SPACES:
-            raise DosUnitError(f"unsupported memory space in pre.memory[{idx}]: {space!r}")
-        mem["space"] = space
-        if space == "SEG":
-            mem["segment"] = normalize_hex(mem.get("segment"), width=4, field=f"pre.memory[{idx}].segment")
-        if "offset" in mem:
-            mem["offset"] = normalize_hex(mem["offset"], width=4, field=f"pre.memory[{idx}].offset")
-        if "linear" in mem:
-            mem["linear"] = normalize_hex(mem["linear"], field=f"pre.memory[{idx}].linear")
-        bytes_text = mem.get("bytes", "")
-        if not isinstance(bytes_text, str) or len(bytes_text) % 2 != 0:
-            raise DosUnitError(f"pre.memory[{idx}].bytes must be an even-length hex string")
-        try:
-            bytes.fromhex(bytes_text)
-        except ValueError as ex:
-            raise DosUnitError(f"pre.memory[{idx}].bytes is not hex") from ex
-        mem["bytes"] = bytes_text.lower()
 
-    observe = require_mapping(normalized.setdefault("observe", {}), field="observe")
+def _normalize_pre_memory_item(mem: dict[str, Any], idx: int) -> None:
+    """Validate and normalize one pre-state memory byte-range entry."""
+    space = str(mem.get("space", "")).upper()
+    if space not in MEMORY_SPACES:
+        raise DosUnitError(f"unsupported memory space in pre.memory[{idx}]: {space!r}")
+    mem["space"] = space
+    if space == "SEG":
+        mem["segment"] = normalize_hex(mem.get("segment"), width=4, field=f"pre.memory[{idx}].segment")
+    if "offset" in mem:
+        mem["offset"] = normalize_hex(mem["offset"], width=4, field=f"pre.memory[{idx}].offset")
+    if "linear" in mem:
+        mem["linear"] = normalize_hex(mem["linear"], field=f"pre.memory[{idx}].linear")
+    bytes_text = mem.get("bytes", "")
+    if not isinstance(bytes_text, str) or len(bytes_text) % 2 != 0:
+        raise DosUnitError(f"pre.memory[{idx}].bytes must be an even-length hex string")
+    try:
+        bytes.fromhex(bytes_text)
+    except ValueError as ex:
+        raise DosUnitError(f"pre.memory[{idx}].bytes is not hex") from ex
+    mem["bytes"] = bytes_text.lower()
+
+
+def _normalize_observe(observe: dict[str, Any]) -> None:
+    """Validate and normalize the observation contract fields."""
     observe.setdefault("regs", [])
     observe.setdefault("sregs", [])
     observe.setdefault("memory", [])
@@ -176,6 +175,24 @@ def normalize_vector(vector: dict[str, Any]) -> dict[str, Any]:  # noqa: D103
             raise DosUnitError(f"unsupported observe segment register: {reg}")
     if "flags_mask" in observe:
         observe["flags_mask"] = normalize_hex(observe["flags_mask"], width=4, field="observe.flags_mask")
+
+
+
+
+def normalize_vector(vector: dict[str, Any]) -> dict[str, Any]:  # noqa: D103
+    normalized: dict[str, Any] = json.loads(json.dumps(vector))
+    normalized["schema"] = "dosunit.vector.v1"
+
+    pre = require_mapping(normalized.setdefault("pre", {}), field="pre")
+    _normalize_pre_regs(pre)
+
+    memory = require_list(pre.setdefault("memory", []), field="pre.memory")
+    for idx, item in enumerate(memory):
+        mem = require_mapping(item, field=f"pre.memory[{idx}]")
+        _normalize_pre_memory_item(mem, idx)
+
+    observe = require_mapping(normalized.setdefault("observe", {}), field="observe")
+    _normalize_observe(observe)
 
     without_expected = json.loads(json.dumps(normalized))
     without_expected.pop("expected", None)

@@ -1734,3 +1734,17 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   (counters annotation, sample-instructions narrowing, bool return).
 - Verified: ruff 0, mypy 0 (10 pre-existing errors also cleared), 4
   dosunit complexity tests pass, def-integrity vs HEAD clean.
+- `tools/dosunit/{mapping,discovery,model,region_effects,solver_slice,
+  libdosbox_import,dosunit,generate,kvikdos_backend}.py`: Ruff
+  complex-structure debt cleared to zero (2+2+1+1+1+1+1+1+1 findings).
+  Extracted mapping candidate/entry lanes, discover module/segment/parse
+  lanes plus hoisted `_entry_sort_key`, normalize pre-regs/memory/observe
+  lanes, region window/lift/scan lanes, manual-solution condition lanes,
+  libdosbox code/access/snapshot collection lanes, batched-compare command
+  build/run/failure-row lanes, edge-generation refusal/per-target solve
+  lanes, and harness entry/pre-state/image-embed/capture-layout lanes.
+- Verified: ruff 0 on all nine files, dosunit suite 194 pass with 4
+  failures reproducing identically on bare HEAD d68c8d56c (pre-existing
+  compare_ssa_documents semantic-status changes from the parallel
+  straightline_ssa.py work, not this refactor), def-integrity vs HEAD
+  clean (only extracted helpers added).

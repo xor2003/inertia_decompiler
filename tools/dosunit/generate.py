@@ -228,39 +228,16 @@ def _generate_edge_vectors(
     vectors: list[dict[str, Any]] = []
     refusals: list[dict[str, Any]] = []
     if exe_path is None:
-        for function in functions:
-            refusals.append(
-                {
-                    "status": "refused",
-                    "reason": "unsupported_ir",
-                    "detail": {
-                        "function_id": function.get("id"),
-                        "strategy": "edge",
-                        "message": "--exe is required for bounded edge-vector generation",
-                    },
-                }
-            )
-        counters["refusals_by_reason"] = {"unsupported_ir": len(refusals)}
-        return _generation_document(
-            exe_path=exe_path, strategy="edge", vectors=vectors, refusals=refusals, counters=counters
+        return _refuse_edge_generation(
+            functions, "--exe is required for bounded edge-vector generation", counters, exe_path
         )
 
     if max_loop_unroll != 0:
-        for function in functions:
-            refusals.append(
-                {
-                    "status": "refused",
-                    "reason": "unsupported_ir",
-                    "detail": {
-                        "function_id": function.get("id"),
-                        "strategy": "edge",
-                        "message": "--max-loop-unroll is reserved for future bounded path solving and must be 0 for local edge solving",
-                    },
-                }
-            )
-        counters["refusals_by_reason"] = {"unsupported_ir": len(refusals)}
-        return _generation_document(
-            exe_path=exe_path, strategy="edge", vectors=vectors, refusals=refusals, counters=counters
+        return _refuse_edge_generation(
+            functions,
+            "--max-loop-unroll is reserved for future bounded path solving and must be 0 for local edge solving",
+            counters,
+            exe_path,
         )
 
     try:
@@ -271,18 +248,7 @@ def _generate_edge_vectors(
             scan_limit=0x200 if max_blocks is None else max(1, max_blocks) * 0x40,
         )
     except DosUnitError as ex:
-        for function in functions:
-            refusals.append(
-                {
-                    "status": "refused",
-                    "reason": "unsupported_ir",
-                    "detail": {"function_id": function.get("id"), "strategy": "edge", "message": str(ex)},
-                }
-            )
-        counters["refusals_by_reason"] = {"unsupported_ir": len(refusals)}
-        return _generation_document(
-            exe_path=exe_path, strategy="edge", vectors=vectors, refusals=refusals, counters=counters
-        )
+        return _refuse_edge_generation(functions, str(ex), counters, exe_path)
 
     refusals.extend(discovered.refusals)
     counters["edge_sources"] = discovered.source_counts
@@ -311,46 +277,97 @@ def _generate_edge_vectors(
                     }
                 )
             continue
-        emitted_for_function = 0
-        for target in targets:
-            counters["branches_attempted"] += 1
-            for label in ("taken", "fallthrough"):
-                if emitted_for_function >= max_vectors_per_function:
-                    break
-                counters["paths_attempted"] += 1
-                solved = solve_branch_edge(target, label=label, timeout_ms=solver_timeout_ms)
-                if isinstance(solved, EdgeSolveFailure):
-                    refusals.append(
-                        {
-                            "status": "refused",
-                            "reason": solved.reason,
-                            "detail": {
-                                "function_id": function.get("id"),
-                                "strategy": "edge",
-                                "label": label,
-                                "message": solved.message,
-                            },
-                        }
-                    )
-                    continue
-                vector = _vector_from_solved_edge(
-                    module=module,
-                    function=function,
-                    seed=seed,
-                    solved=solved,
-                )
-                vectors.append(vector)
-                emitted_for_function += 1
-                counters["paths_solved"] += 1
-                counters["vectors_emitted"] += 1
-                counters["solver_time_ms"] += solved.solver_time_ms
-            if emitted_for_function >= max_vectors_per_function:
-                break
+        _solve_function_targets(
+            function=function,
+            targets=targets,
+            vectors=vectors,
+            refusals=refusals,
+            counters=counters,
+            module=module,
+            seed=seed,
+            max_vectors_per_function=max_vectors_per_function,
+            solver_timeout_ms=solver_timeout_ms,
+        )
 
     counters["refusals_by_reason"] = _refusal_counts(refusals)
     return _generation_document(
         exe_path=exe_path, strategy="edge", vectors=vectors, refusals=refusals, counters=counters
     )
+
+
+def _refuse_edge_generation(
+    functions: list[dict[str, Any]],
+    message: str,
+    counters: dict[str, Any],
+    exe_path: Path | None,
+) -> dict[str, Any]:
+    """Refuse every function with one reason and return the document."""
+    refusals = [
+        {
+            "status": "refused",
+            "reason": "unsupported_ir",
+            "detail": {
+                "function_id": function.get("id"),
+                "strategy": "edge",
+                "message": message,
+            },
+        }
+        for function in functions
+    ]
+    counters["refusals_by_reason"] = {"unsupported_ir": len(refusals)}
+    return _generation_document(
+        exe_path=exe_path, strategy="edge", vectors=[], refusals=refusals, counters=counters
+    )
+
+
+def _solve_function_targets(
+    *,
+    function: dict[str, Any],
+    targets: list[Any],
+    vectors: list[dict[str, Any]],
+    refusals: list[dict[str, Any]],
+    counters: dict[str, Any],
+    module: str,
+    seed: dict[str, str],
+    max_vectors_per_function: int,
+    solver_timeout_ms: int,
+) -> None:
+    """Solve each branch target's taken/fallthrough edges for one function."""
+    emitted_for_function = 0
+    for target in targets:
+        counters["branches_attempted"] += 1
+        for label in ("taken", "fallthrough"):
+            if emitted_for_function >= max_vectors_per_function:
+                break
+            counters["paths_attempted"] += 1
+            solved = solve_branch_edge(target, label=label, timeout_ms=solver_timeout_ms)
+            if isinstance(solved, EdgeSolveFailure):
+                refusals.append(
+                    {
+                        "status": "refused",
+                        "reason": solved.reason,
+                        "detail": {
+                            "function_id": function.get("id"),
+                            "strategy": "edge",
+                            "label": label,
+                            "message": solved.message,
+                        },
+                    }
+                )
+                continue
+            vector = _vector_from_solved_edge(
+                module=module,
+                function=function,
+                seed=seed,
+                solved=solved,
+            )
+            vectors.append(vector)
+            emitted_for_function += 1
+            counters["paths_solved"] += 1
+            counters["vectors_emitted"] += 1
+            counters["solver_time_ms"] += solved.solver_time_ms
+        if emitted_for_function >= max_vectors_per_function:
+            break
 
 
 def _vector_from_solved_edge(

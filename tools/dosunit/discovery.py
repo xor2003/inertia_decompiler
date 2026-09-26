@@ -201,6 +201,15 @@ def _catalog_entry(
 
 
 def _merge_entry(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
+    _merge_names_sources(existing, incoming)
+    entry = existing.setdefault("entry", {})
+    for key, value in incoming.get("entry", {}).items():
+        entry.setdefault(key, value)
+    _merge_ranges(existing, incoming)
+
+
+def _merge_names_sources(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
+    """Merge name/source inventories and confidence/size fallbacks."""
     for name in incoming.get("names", ()):
         if name not in existing["names"]:
             existing["names"].append(name)
@@ -212,9 +221,10 @@ def _merge_entry(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
     for key in ("size", "end_offset"):
         if existing.get(key) is None and incoming.get(key) is not None:
             existing[key] = incoming[key]
-    entry = existing.setdefault("entry", {})
-    for key, value in incoming.get("entry", {}).items():
-        entry.setdefault(key, value)
+
+
+def _merge_ranges(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
+    """Merge unique range entries keyed by kind/segment/offset/size/end."""
     ranges = existing.setdefault("ranges", [])
     if not isinstance(ranges, list):
         ranges = []
@@ -668,14 +678,14 @@ def parse_ida_listing(listing_path: Path, *, module: str) -> list[dict[str, Any]
     return entries
 
 
-def discover_functions(  # noqa: D103
+def _resolve_module_name(
     *,
-    exe_path: Path | None = None,
-    map_path: Path | None = None,
-    cod_listing_path: Path | None = None,
-    ida_listing_path: Path | None = None,
-    module: str | None = None,
-) -> dict[str, Any]:
+    module: str | None,
+    exe_path: Path | None,
+    map_path: Path | None,
+    ida_listing_path: Path | None,
+) -> str:
+    """Resolve the catalog module name from the explicit or input paths."""
     module_name = module or (exe_path.name if exe_path is not None else None)
     if module_name is None:
         if map_path is not None:
@@ -684,24 +694,40 @@ def discover_functions(  # noqa: D103
             module_name = ida_listing_path.with_suffix(".exe").name
         else:
             raise DosUnitError("module name is required when no input paths are provided")
+    return module_name
 
-    program_info = read_mz_program_info(exe_path)
-    by_id: dict[str, dict[str, Any]] = {}
-    diagnostics: list[dict[str, Any]] = []
+
+def _map_segments(map_path: Path | None, diagnostics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Parse segment inventories from a linker map, refusing on failure."""
     segments: list[dict[str, Any]] = []
-    if map_path is not None:
-        try:
-            segments.extend(parse_mzre_segments(map_path))
-            segments.extend(parse_linker_segments(map_path))
-        except Exception as ex:
-            diagnostics.append(
-                {
-                    "source": str(map_path),
-                    "status": "refused",
-                    "reason": "backend_error",
-                    "message": str(ex),
-                }
-            )
+    if map_path is None:
+        return segments
+    try:
+        segments.extend(parse_mzre_segments(map_path))
+        segments.extend(parse_linker_segments(map_path))
+    except Exception as ex:
+        diagnostics.append(
+            {
+                "source": str(map_path),
+                "status": "refused",
+                "reason": "backend_error",
+                "message": str(ex),
+            }
+        )
+    return segments
+
+
+def _collect_source_entries(
+    by_id: dict[str, dict[str, Any]],
+    diagnostics: list[dict[str, Any]],
+    *,
+    map_path: Path | None,
+    cod_listing_path: Path | None,
+    ida_listing_path: Path | None,
+    module_name: str,
+    exe_path: Path | None,
+) -> None:
+    """Run each discovery parser and merge entries by function id."""
     parser_specs = (
         (map_path, lambda path: parse_mzre_map(path, module=module_name)),
         (map_path, lambda path: parse_linker_map(path, module=module_name)),
@@ -733,16 +759,50 @@ def discover_functions(  # noqa: D103
             else:
                 by_id[key] = entry
 
-    def _sort_key(item: dict[str, Any]) -> tuple[int, int, str]:
-        linear = item.get("entry", {}).get("linear")
-        if isinstance(linear, str):
-            try:
-                return (0, int(linear, 0), str(item.get("id", "")))
-            except ValueError:
-                pass
-        return (1, 0, str(item.get("id", "")))
 
-    functions = sorted(by_id.values(), key=_sort_key)
+def _entry_sort_key(item: dict[str, Any]) -> tuple[int, int, str]:
+    """Sort functions by entry linear address, then id."""
+    linear = item.get("entry", {}).get("linear")
+    if isinstance(linear, str):
+        try:
+            return (0, int(linear, 0), str(item.get("id", "")))
+        except ValueError:
+            pass
+    return (1, 0, str(item.get("id", "")))
+
+
+
+
+def discover_functions(  # noqa: D103
+    *,
+    exe_path: Path | None = None,
+    map_path: Path | None = None,
+    cod_listing_path: Path | None = None,
+    ida_listing_path: Path | None = None,
+    module: str | None = None,
+) -> dict[str, Any]:
+    module_name = _resolve_module_name(
+        module=module,
+        exe_path=exe_path,
+        map_path=map_path,
+        ida_listing_path=ida_listing_path,
+    )
+
+    program_info = read_mz_program_info(exe_path)
+    by_id: dict[str, dict[str, Any]] = {}
+    diagnostics: list[dict[str, Any]] = []
+    segments = _map_segments(map_path, diagnostics)
+    _collect_source_entries(
+        by_id,
+        diagnostics,
+        map_path=map_path,
+        cod_listing_path=cod_listing_path,
+        ida_listing_path=ida_listing_path,
+        module_name=module_name,
+        exe_path=exe_path,
+    )
+
+    functions = sorted(by_id.values(), key=_entry_sort_key)
     catalog_without_id = {
         "schema": "dosunit.functions.v1",
         "module": module_name,
