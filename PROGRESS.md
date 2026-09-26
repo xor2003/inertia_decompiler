@@ -1627,3 +1627,10 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   into named predicates (delta tokens via a validating accessor).
 - Verified: ruff 0, mypy 0, 15 pointer-memory tests pass, def-integrity
   vs HEAD clean, zero architecture violations.
+- `angr_platforms/angr_platforms/X86_16/lowering/object_lowering.py`:
+  Ruff debt cleared to zero (5 findings). Hoisted the duplicated
+  segment-scale predicate into a shared helper, extracted the single
+  register-base-term lane, and split `_stable_hint_kind` into
+  structured/simple kind lanes.
+- Verified: ruff 0, mypy 0, 30 object-lowering/segmented-memory tests
+  pass, def-integrity vs HEAD clean, zero architecture violations.

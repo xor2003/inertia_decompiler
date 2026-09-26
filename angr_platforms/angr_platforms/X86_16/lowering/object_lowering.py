@@ -28,6 +28,28 @@ def _dynamic_attr_8616(obj: object, name: str, default: object = None) -> Any:  
     return getattr(obj, name, default)
 
 
+def _is_segment_scale_term_8616(
+    term: object,
+    project: object,
+    *,
+    unwrap_c_casts: UnwrapCCasts,
+    c_constant_value: CConstantValue,
+    segment_reg_name: SegmentRegName,
+) -> bool:
+    """True when a C term is ``segment * 16`` or ``segment << 4`` scaling."""
+    if not isinstance(term, structured_c.CBinaryOp):
+        return False
+    expected = 16 if term.op == "Mul" else 4 if term.op == "Shl" else None
+    if expected is None:
+        return False
+    for maybe_seg, maybe_scale in ((term.lhs, term.rhs), (term.rhs, term.lhs)):
+        if c_constant_value(unwrap_c_casts(maybe_scale)) != expected:
+            continue
+        if segment_reg_name(unwrap_c_casts(maybe_seg), project) is not None:
+            return True
+    return False
+
+
 def _match_segment_register_based_dereference(
     node: object,
     project: object,
@@ -54,45 +76,17 @@ def _match_segment_register_based_dereference(
             return None
 
         addr_expr = _dynamic_attr_8616(classified, "addr_expr", None)
-        base_terms: list[object] = []
-
-        def _is_segment_scale(term: object) -> bool:
-            if not isinstance(term, structured_c.CBinaryOp):
-                return False
-            if term.op == "Mul":
-                for maybe_seg, maybe_scale in ((term.lhs, term.rhs), (term.rhs, term.lhs)):
-                    if c_constant_value(unwrap_c_casts(maybe_scale)) != 16:
-                        continue
-                    if segment_reg_name(unwrap_c_casts(maybe_seg), project) is not None:
-                        return True
-                return False
-            if term.op == "Shl":
-                for maybe_seg, maybe_scale in ((term.lhs, term.rhs), (term.rhs, term.lhs)):
-                    if c_constant_value(unwrap_c_casts(maybe_scale)) != 4:
-                        continue
-                    if segment_reg_name(unwrap_c_casts(maybe_seg), project) is not None:
-                        return True
-            return False
-
-        for term in flatten_c_add_terms(addr_expr):
-            inner = unwrap_c_casts(term)
-            if _is_segment_scale(inner):
-                continue
-
-            if c_constant_value(inner) is not None:
-                continue
-
-            if isinstance(inner, structured_c.CVariable) and isinstance(
-                _dynamic_attr_8616(inner, "variable", None), SimRegisterVariable
-            ):
-                base_terms.append(inner)
-                continue
-
+        base_term = _single_register_base_term_8616(
+            addr_expr,
+            project,
+            flatten_c_add_terms=flatten_c_add_terms,
+            unwrap_c_casts=unwrap_c_casts,
+            c_constant_value=c_constant_value,
+            segment_reg_name=segment_reg_name,
+        )
+        if base_term is None:
             return None
-
-        if len(base_terms) != 1:
-            return None
-        return classified, base_terms[0]
+        return classified, base_term
 
     return _impl()
 
@@ -107,38 +101,57 @@ def _strip_segment_scale_from_addr_expr(
     segment_reg_name: SegmentRegName,
 ) -> object | None:
     """Return an address expression with DS/ES segment scaling removed."""
-    kept_terms: list[object] = []
-
-    def _is_segment_scale(term: object) -> bool:
-        if not isinstance(term, structured_c.CBinaryOp):
-            return False
-        if term.op == "Mul":
-            for maybe_seg, maybe_scale in ((term.lhs, term.rhs), (term.rhs, term.lhs)):
-                if c_constant_value(unwrap_c_casts(maybe_scale)) != 16:
-                    continue
-                if segment_reg_name(unwrap_c_casts(maybe_seg), project) is not None:
-                    return True
-            return False
-        if term.op == "Shl":
-            for maybe_seg, maybe_scale in ((term.lhs, term.rhs), (term.rhs, term.lhs)):
-                if c_constant_value(unwrap_c_casts(maybe_scale)) != 4:
-                    continue
-                if segment_reg_name(unwrap_c_casts(maybe_seg), project) is not None:
-                    return True
-        return False
-
-    for term in flatten_c_add_terms(addr_expr):
-        inner = unwrap_c_casts(term)
-        if _is_segment_scale(inner):
-            continue
-        kept_terms.append(term)
-
+    kept_terms = [
+        term
+        for term in flatten_c_add_terms(addr_expr)
+        if not _is_segment_scale_term_8616(
+            unwrap_c_casts(term),
+            project,
+            unwrap_c_casts=unwrap_c_casts,
+            c_constant_value=c_constant_value,
+            segment_reg_name=segment_reg_name,
+        )
+    ]
     if not kept_terms:
         return None
     result = kept_terms[0]
     for term in kept_terms[1:]:
         result = structured_c.CBinaryOp("Add", result, term, codegen=_dynamic_attr_8616(term, "codegen", None))
     return result
+
+
+def _single_register_base_term_8616(
+    addr_expr: object,
+    project: object,
+    *,
+    flatten_c_add_terms: FlattenCAddTerms,
+    unwrap_c_casts: UnwrapCCasts,
+    c_constant_value: CConstantValue,
+    segment_reg_name: SegmentRegName,
+) -> object | None:
+    """Return the single register base term when the address has exactly one."""
+    base_terms: list[object] = []
+    for term in flatten_c_add_terms(addr_expr):
+        inner = unwrap_c_casts(term)
+        if _is_segment_scale_term_8616(
+            inner,
+            project,
+            unwrap_c_casts=unwrap_c_casts,
+            c_constant_value=c_constant_value,
+            segment_reg_name=segment_reg_name,
+        ):
+            continue
+        if c_constant_value(inner) is not None:
+            continue
+        if isinstance(inner, structured_c.CVariable) and isinstance(
+            _dynamic_attr_8616(inner, "variable", None), SimRegisterVariable
+        ):
+            base_terms.append(inner)
+            continue
+        return None
+    if len(base_terms) != 1:
+        return None
+    return base_terms[0]
 
 
 def _match_ss_stack_reference(
@@ -209,17 +222,7 @@ def _stable_hint_kind(profile: object, base_key: BaseKey) -> str | None:
     """Return the single stable object-hint kind proven by an access profile."""
 
     def _impl() -> str | None:
-        structured_kinds: set[str] = set()
-        induction_evidence = _dynamic_attr_8616(profile, "induction_evidence", ())
-        stride_evidence = _dynamic_attr_8616(profile, "stride_evidence", ())
-        for evidence in tuple(induction_evidence) + tuple(stride_evidence):
-            kind = _dynamic_attr_8616(evidence, "kind", None)
-            if kind == "member_like":
-                structured_kinds.add("member")
-            elif kind == "array_like":
-                structured_kinds.add("array")
-            elif kind == "induction_like":
-                structured_kinds.add("induction")
+        structured_kinds = _structured_hint_kinds_8616(profile)
         if structured_kinds:
             return next(iter(structured_kinds)) if len(structured_kinds) == 1 else None
         if (
@@ -230,22 +233,43 @@ def _stable_hint_kind(profile: object, base_key: BaseKey) -> str | None:
             and not _dynamic_attr_8616(profile, "induction_like", ())
         ):
             return "stack"
-        simple_kinds: set[str] = set()
-        if _dynamic_attr_8616(profile, "member_like", ()):
-            simple_kinds.add("member")
-        if _dynamic_attr_8616(profile, "array_like", ()):
-            simple_kinds.add("array")
-        if _dynamic_attr_8616(profile, "induction_like", ()):
-            simple_kinds.add("induction")
-        if len(simple_kinds) == 1:
-            return next(iter(simple_kinds))
-        if simple_kinds:
-            return None
-        if base_key and base_key[0] == "stack" and _dynamic_attr_8616(profile, "stack_like", ()):
-            return "stack"
-        return None
+        return _simple_hint_kind_8616(profile, base_key)
 
     return _impl()
+
+
+def _structured_hint_kinds_8616(profile: object) -> set[str]:
+    """Map structured induction/stride evidence to object-hint kinds."""
+    structured_kinds: set[str] = set()
+    induction_evidence = _dynamic_attr_8616(profile, "induction_evidence", ())
+    stride_evidence = _dynamic_attr_8616(profile, "stride_evidence", ())
+    for evidence in tuple(induction_evidence) + tuple(stride_evidence):
+        kind = _dynamic_attr_8616(evidence, "kind", None)
+        if kind == "member_like":
+            structured_kinds.add("member")
+        elif kind == "array_like":
+            structured_kinds.add("array")
+        elif kind == "induction_like":
+            structured_kinds.add("induction")
+    return structured_kinds
+
+
+def _simple_hint_kind_8616(profile: object, base_key: BaseKey) -> str | None:
+    """Resolve the single simple hint kind, or the stack fallback."""
+    simple_kinds: set[str] = set()
+    if _dynamic_attr_8616(profile, "member_like", ()):
+        simple_kinds.add("member")
+    if _dynamic_attr_8616(profile, "array_like", ()):
+        simple_kinds.add("array")
+    if _dynamic_attr_8616(profile, "induction_like", ()):
+        simple_kinds.add("induction")
+    if len(simple_kinds) == 1:
+        return next(iter(simple_kinds))
+    if simple_kinds:
+        return None
+    if base_key and base_key[0] == "stack" and _dynamic_attr_8616(profile, "stack_like", ()):
+        return "stack"
+    return None
 
 
 def _build_stable_access_object_hints(
