@@ -881,6 +881,88 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   pre-existing env failures — kvikdos UTF-8 decode etc.), 10/10 targeted
   `_decompile_function`/retry/stub tests pass.
 
+## Compiler coverage resume — 2026-09-26
+
+- Refactored-checkout baseline: 45 focused stack-tracker/function-pointer
+  tests passed in 48.38 seconds, seven workers, JIT enabled. Log:
+  `.cache/coverage-resume-20260926-tests.log`.
+- Live apply_twice replay now exits 4 with empty codegen / clinic=None and
+  assembly fallback, earlier than the September 24 pointer-mask failure.
+  `.cache/coverage-resume-20260926-apply-twice.{c,err}` retains the evidence.
+  Do not attribute this to a particular refactor without a causal trace.
+- Added a focused AST regression for the proven far-pointer target retaining
+  an integer mask. After completing its mock codegen surface, it fails at
+  the intended target assertion; `.cache/fptr-target-before-complete-mock.log`.
+  This is an intentionally red regression awaiting its owner-layer fix, not
+  a completed improvement. No production pointer-target changes yet.
+- Diagnostic hook around Decompiler._decompile exposed no exception. The
+  outer _decompile_with_cache probe also finished with empty codegen, exit 4;
+  `.cache/coverage-resume-20260926-cache-error.{c,err}` retains the evidence.
+- Entry-point repair started at 12:29 local. Commit `0388db438` removed the
+  invocation of `_decompile_8616`'s nested implementation and placed its flag
+  context around the validation-acceptance helper instead. Restored the context
+  and call at the pipeline entry; acceptance again retains its explicitly
+  supplied function. Four entry regressions failed before the repair; a fifth
+  regression separately proved the acceptance helper replaced function identity.
+  These tests live in the already-enrolled package-exports module.
+- Scoped Ruff passes. The first after-fix neighborhood run had eight passes
+  and two collection errors because a concurrent `stack_lowering_impl.py` edit
+  was syntactically incomplete; not a completed after-fix regression run.
+  `quality-dev` exits 2 with broader existing lint/type failures. Logs:
+  `.cache/decompile-entry-{before,after,final-ruff,quality-dev}.log` and
+  `.cache/decompile-acceptance-before-complete.log`.
+- Linked replay finished with exit 4, enters the real pipeline, and reproduces the far-pointer
+  target masks; the fallback also reports missing indirect-call arguments.
+  `.cache/coverage-resume-entry-restored.{c,err}` retains the replay artifact.
+  No far-pointer obligation or whole-plan completion is claimed.
+- After the concurrent syntax repair, the entry/pointer neighborhood reported
+  85 passes and the expected pointer-mask failure (56.18 seconds). Thus all
+  five pipeline-entry regressions pass; earlier collection errors are not the
+  current entry-repair result.
+- Pointer-target Lowering now consumes a full-word IP mask only for an exact
+  binary callsite fact and the same authoritative parameter storage. It preserves
+  call arguments, unproven masks, other slots/regions, and non-call expressions.
+  The typed evidence artifact retains a separate five-counter target census.
+  A near-pointer coordinate control exposed the need to reuse exact argument
+  object identity when no new coordinate publication is needed; that control
+  failed before the adjustment. Final neighborhood: 94 passed, 65.31 seconds,
+  seven workers/JIT, `.cache/function-pointer-target-verified.log`.
+- Scoped Ruff and final MyPy pass; `.cache/function-pointer-target-final-mypy.log`
+  is the clean final typing result (exit 0).
+  Linked replay `.cache/coverage-pointer-target-materialized.{c,err}` emits both
+  unmasked calls and reports a clean whole-tail check for the rebased attempt,
+  but exits 4 on the integrated MS C check: `/dev/kvm` missing. The identical
+  retained MSC payload compiles via direct kvikdos invocation (exit 0, identifier
+  truncation warning). This discrepancy is under investigation, not round-trip
+  acceptance. The direct-address fallback still lacks an indirect-call argument.
+- `quality-dev` and `quality-hard` exit 2 on broader lint/type debt. Full logs:
+  `.cache/function-pointer-target-quality-{dev,hard}.log`. The required default
+  pipeline has started in `.cache/function-pointer-target-pipeline.log`; inspect
+  its live handle/result before starting another broad gate.
+- The default pipeline's prerequisite suite passes 292 tests in 66.16 seconds;
+  the main curated pipeline is still live. The pointer result now has the same
+  two sequential value-argument calls as the original `function_pointers.c`
+  `apply_twice`; this source comparison is diagnostic, not source-assisted
+  recovery or a substitute for DOS behavioral acceptance.
+- Device diagnosis: `.cache/msc-kvm-import-diagnostic.log` reports `/dev/kvm`
+  absent before and after project import, and kvikdos exits 252 in that process.
+  Direct tool invocations see the device. Do not alter the compiler launcher
+  to bypass this execution boundary; integrated acceptance remains pending.
+- Recompile capability reporting repair (started 12:56 local): the MS C owner
+  now uses kvikdos's documented execution probe before compilation. Failed,
+  timed-out, missing, or denied probes return typed `TOOLCHAIN_UNAVAILABLE`;
+  they never accept or reject the generated C. CLI diagnostics distinguish this
+  from syntax failure and do not cache unavailable results. Three regressions
+  failed before repair; the focused neighborhood passes 26 tests in 105.27
+  seconds. Final missing/denied boundary controls are running separately.
+- Live evidence `.cache/recompile-capability-live.log` reports unavailable,
+  exit 252, command `kvikdos --kvm-check`, with no compiler source artifact.
+  Scoped Ruff passes. MyPy reports 13 pre-existing `cli_core.py` errors outside
+  the edited collector; the recompile producer and contract have no findings.
+  Logs: `.cache/recompile-capability-{before,after,mypy,final-boundaries}.log`.
+  The existing broad pipeline predates this reporting change; do not use it as
+  full-suite acceptance for this subsequent edit.
+
 ## check_decompiler_architecture.py — lint debt cleared (was 33 promoted findings)
 
 - All 33 `complex-structure` findings ground down by behavior-preserving
@@ -902,3 +984,49 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   checker output byte-identical to the pre-refactor baseline (same 189
   violations), `test_decompiler_architecture_check.py` 370 passed + the
   same single pre-existing contract failure as bare HEAD.
+
+- 2026-09-26: MSC v8 flat32 comparison adapter staged at `artifacts/msc8-z3cmp32/` (external rebuild is read-only); 13 focused regressions pass, unnormalized six-target batch: 43 proved / 137 mismatches / 5805 refused, plus `sub_593B0` conditional relocation proof. PE candidate input and closed matched-CFG induction are available; future MSC-built binaries, calls, exception edges and differing CFGs remain pending. See `RESULTS.md` and the checked `rebuild.patch`; no shared dosunit modules edited by this task.
+
+## stack_lowering_impl.py — lint debt cleared (was 18 promoted findings)
+
+- `_canonicalize_stack_cvar_expr`'s 299-complexity nested `_impl` was
+  converted into the stateful `_StackCvarCanonicalize8616` class
+  (`__slots__`, `__init__` field declarations, `run_8616` phase dispatch,
+  `run_8616_part{0..3}`), with the impl-level closure/nonlocal names
+  becoming `self.` fields via a scope-aware, position-based rewrite
+  (Store-context-only binding, comprehension/lambda/except/param scopes
+  respected, `nonlocal` names forced to fields, sibling defs becoming
+  methods).
+- `run_8616_part3` split into five `(done, result)` lane methods
+  (cvar/indexed/deref/stackaddr/tail); each lane further split
+  (cvar-stackvar/rebind, indexed-materialize, deref-addr/chain/operand/
+  resolve, deref-offset/apply) until all bodies are below the complexity
+  gate. The trailing `active_expr_ids.discard(expr_id); return expr`
+  tail is preserved verbatim.
+- `_resolve_stack_pointer_alias_expr` split into reference/stack_base/
+  cvar/binop arms plus a shared `_lookup_alias_keys_8616`.
+- `_stack_pointer_aliases` fixpoint split into
+  `_resolve_stack_pointer_alias_8616(aliases=...)` (with cvar/reference/
+  binop arm methods), `_apply_assignment_alias_8616` per-statement step,
+  `_stack_carrier_lhs_allowed_8616` guard, and
+  `_fixpoint_stack_pointer_aliases_8616` loop.
+- `_infer_stack_base_alias_from_bp_slots` deduplicated onto the existing
+  `_stack_base_displacement_expr_8616` and split into
+  `_known_bp_offsets_8616` / `_stack_base_displacements_8616` /
+  `_best_stack_base_bias_8616`; `_iter_statement_nodes` attr walk became
+  `_push_node_children_8616`; `_single_assignment_expr_for_cvar`'s
+  `_same_lhs` hoisted with explicit node-* params;
+  `_single_assignment_expr_for_virtual_name`'s index build became
+  `_virtual_assignment_index_8616`; `run_8616_part0` refusal blocks
+  became `_part0_{dirty_cycle,depth}_refusal_8616` -> bool.
+- Module-level `_impl` pairs flattened: `_prefer_bound_stack_cvar_8616`
+  (+ `_bound_cvar_for_stack_var_8616`),
+  `_record_stack_canonicalization_bridge_8616`
+  (+ `_local_unwrap_casts_8616`, `_indexed_bridge_operand_8616`),
+  `_resolve_stack_cvar_at_offset` (+ `_best_stack_cvar_candidates_8616`),
+  `_canonicalize_stack_cvars` (+ `_safe_child_update_eligible_8616`),
+  `_bind_expr_types_to_project_arch_8616`
+  (+ `_bind_expr_child_types_8616`).
+- Verification: ruff 0 (was 18 incl. the 299-complexity `_impl`),
+  mypy 0, 56 focused stack-lowering tests + 16 cli stack tests pass,
+  no public API removed (only nested defs hoisted to `*_8616` methods).
