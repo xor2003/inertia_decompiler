@@ -1381,3 +1381,12 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   and repeated-string completion lanes.
 - Verified: ruff 0, mypy 0, 75 80286-verifier tests pass, def-integrity
   vs HEAD clean, zero architecture violations against the file.
+- `scripts/report_compiler_matches.py`: Ruff complexity debt cleared to
+  zero (12 findings). Extracted JSONC comment/string skippers, the
+  Microsoft C label chain, IDF/per-combo scoring lanes, capstone
+  offset/shape feature lanes, the MZ RC-shift lane, and split `main`
+  into typed `_ReportInputs`/`_ScanState` containers with parser,
+  cache-restore, per-spec scan, flag-feature, runtime-bonus, and
+  per-method reporting helpers.
+- Verified: ruff 0, mypy 0, 5 flag-combo tests pass, def-integrity vs
+  HEAD clean, zero architecture violations against the file.
