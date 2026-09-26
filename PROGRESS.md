@@ -61,6 +61,20 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   keeps_exact_callsite_identity` confirmed failing identically on clean HEAD
   (pre-existing).
 
+- tail_validation.py driven to zero ruff findings (was 61 complexity sites
+  at batch start): the summary-build pipeline converted to a
+  `_TailSummaryBuildRun8616` dataclass (context/support collection,
+  normalization, node processing, finalize phases), boundary-fingerprint
+  dispatch, contextual callsite maps, observable-location and
+  prunable-write scans, and ~40 validation-delta suppressors split into
+  typed helpers (delta-shape bundles, per-field gates, evidence matchers,
+  shared touched-fields and other-fields-stable gates). Refactor surfaced
+  and fixed ~14 new mypy errors back to the file's baseline (typed
+  `summary_inventory`, `observed_locations` as `StackObservedLocations8616`,
+  tuple/cache element annotations). Owning suite: 384 passed; the
+  switch-decision-tree compare test fails identically on clean HEAD
+  (pre-existing).
+
 - decompiler_postprocess_stage.py driven to zero ruff findings (was 81
   complexity sites at batch start): materialization-loop matchers,
   instruction-window helpers, validation-delta classifiers, clone walkers,
