@@ -8,6 +8,14 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Source-free address targets now use the existing batch job-file path with
+  local sidecars and alternate-source recovery disabled, normal isolation
+  retained. Two before failures; 95 adapter/policy tests pass after (54.20s).
+  Focused Ruff passes outside the builder's retained complexity debt;
+  quality-dev exits2 on broader findings. Full DOS round trip is active at
+  `.cache/compiler-coverage/sourcefree-far-batch-001/`. No witness or measured
+  end-to-end speedup yet.
+
 - Catalog candidate filter implemented from a measured 66.287s Python-regex
   match over 49,283 patterns. Typed necessary literals reject impossible
   candidates without changing surviving backend checks. Two before failures;
@@ -24,10 +32,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   tests (48.89s). Cold replay `.cache/sourcefree-inc-shared-cache.*` timed out;
   warm normal-worker acceptance and the next full round trip are recorded below.
 
-- Warm normal-worker `inc_one` now exits0 with validation=passed and gcc-clean
+- Warm normal-worker `inc_one` exits0 with validation=passed and gcc-clean
   `arg_6 + 1` output; the cold replay still timed out. Full large-model adapter
-  is running in `sourcefree-far-shared-catalog-001` with the same explicitly
-  fingerprinted catalog and unchanged deadlines. No coverage witness admitted.
+  `sourcefree-far-shared-catalog-001` now terminates `timed_out`: original DOS
+  execution passes, inc/dec validate, apply_twice times out twice (487.74s
+  builder decompilation). No coverage witness admitted. Next: connect the
+  existing address-job batch path without source/debug semantics or relaxed
+  isolation/validation, then measure the retained case again.
 
 - Compiler-coverage far-pointer storage repair: source-free typed evidence
   exposed a contained segment word incorrectly kept as a separate argument,
@@ -1339,3 +1350,11 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verified: ruff 0, 32 decode/lifting tests pass, def-integrity vs HEAD
   clean, zero architecture violations against the file. One mypy error
   (`X86Instruction` typed Any in pyvex) is identical on bare HEAD.
+- `angr_platforms/angr_platforms/X86_16/validation_calls.py`: Ruff complexity
+  debt cleared to zero (6 findings). Extracted arg-list normalization,
+  parameter BP-offset/entry-refusal helpers, required-call match resolution
+  lanes, callee/helper-width/prototype fallbacks, classified and
+  source-fact collection, class/interface issue builders, and the argument
+  count mismatch lane.
+- Verified: ruff 0, mypy 0, 74 validation-call tests pass, def-integrity vs
+  HEAD clean, zero architecture violations against the file.

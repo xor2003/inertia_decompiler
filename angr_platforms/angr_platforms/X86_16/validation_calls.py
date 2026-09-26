@@ -53,6 +53,7 @@ from .lowering.return_type_evidence import (
     proven_function_return_class_8616,
 )
 from .lowering.stack_function_coordinates import (
+    FunctionStackArgumentCoordinate8616,
     c_function_stack_coordinate_projection_8616,
 )
 from .lowering.stack_prototype_layout import stack_prototype_argument_layout_8616
@@ -547,15 +548,7 @@ def _final_function_parameters_8616(
         return normalized_addr, None
     first_argument_bp_offset = proven_first_argument_machine_bp_offset_8616(codegen)
     arg_types = tuple(function_type.args or ())
-    try:
-        raw_arg_list = surface.arg_list
-    except AttributeError:
-        raw_arg_list = ()
-    arg_list = (
-        tuple(raw_arg_list)
-        if isinstance(raw_arg_list, Sequence) and not isinstance(raw_arg_list, (str, bytes))
-        else ()
-    )
+    arg_list = _normalized_arg_list_8616(surface)
     if arg_types and not arg_list:
         try:
             arch = cast(_ProjectArchSurface8616, cast(_CodegenProjectSurface8616, codegen).project).arch
@@ -592,31 +585,62 @@ def _final_function_parameters_8616(
             and index < len(function_projection.arguments)
             else None
         )
-        bp_offset = (
-            projected_argument.machine_bp_offset
-            if isinstance(variable, SimStackVariable)
-            and projected_argument is not None
-            and projected_argument.entry_sp_offset == variable.offset
-            and projected_argument.size == variable.size
-            else machine_bp_offset_for_stack_variable_8616(codegen, variable)
-            if isinstance(variable, SimStackVariable)
-            else None
-        )
-        if (
-            not isinstance(variable, SimStackVariable)
-            or not isinstance(bp_offset, int)
-            or bp_offset < first_argument_bp_offset
-            or not isinstance(variable.size, int)
-            or variable.size <= 0
-            or not isinstance(arg_type, SimType)
-            or bp_offset in by_offset
+        bp_offset = _parameter_bp_offset_8616(codegen, variable, projected_argument)
+        if _parameter_entry_refused_8616(
+            variable, bp_offset, first_argument_bp_offset, arg_type, by_offset
         ):
             return normalized_addr, None
+        assert isinstance(variable, SimStackVariable)
+        assert isinstance(bp_offset, int) and isinstance(variable.size, int)
         by_offset[bp_offset] = _FinalFunctionParameter8616(
             parameter_type=arg_type,
             storage_width_bytes=variable.size,
         )
     return normalized_addr, by_offset
+
+
+def _normalized_arg_list_8616(surface: _CFunctionParameterSurface8616) -> tuple[object, ...]:
+    try:
+        raw_arg_list = surface.arg_list
+    except AttributeError:
+        return ()
+    if isinstance(raw_arg_list, Sequence) and not isinstance(raw_arg_list, (str, bytes)):
+        return tuple(raw_arg_list)
+    return ()
+
+
+def _parameter_bp_offset_8616(
+    codegen: object,
+    variable: object,
+    projected_argument: FunctionStackArgumentCoordinate8616 | None,
+) -> int | None:
+    if not isinstance(variable, SimStackVariable):
+        return None
+    if (
+        projected_argument is not None
+        and projected_argument.entry_sp_offset == variable.offset
+        and projected_argument.size == variable.size
+    ):
+        return cast(int | None, projected_argument.machine_bp_offset)
+    return cast(int | None, machine_bp_offset_for_stack_variable_8616(codegen, variable))
+
+
+def _parameter_entry_refused_8616(
+    variable: object,
+    bp_offset: int | None,
+    first_argument_bp_offset: int,
+    arg_type: object,
+    by_offset: dict[int, _FinalFunctionParameter8616],
+) -> bool:
+    return (
+        not isinstance(variable, SimStackVariable)
+        or not isinstance(bp_offset, int)
+        or bp_offset < first_argument_bp_offset
+        or not isinstance(variable.size, int)
+        or variable.size <= 0
+        or not isinstance(arg_type, SimType)
+        or bp_offset in by_offset
+    )
 
 
 def _parameter_type_width_bytes_8616(
@@ -1022,91 +1046,9 @@ def build_required_call_validation_surface_8616(
         required,
         key=lambda item: (item[1].callsite_addr, item[1].target_addr or -1, item[0]),
     ):
-        match_index = next(
-            (
-                index
-                for index, node in enumerate(available)
-                if _call_matches_summary_identity_8616(
-                    node,
-                    summary_key,
-                    summary,
-                    project,
-                )
-            ),
-            None,
+        match_index = _resolve_required_call_match_8616(
+            summary_key, summary, required, available, matches, project
         )
-        if match_index is None:
-            match_index = next(
-                (
-                    index
-                    for index, node in enumerate(available)
-                    if _callsite_addr_8616(node) == summary.callsite_addr
-                ),
-                None,
-            )
-        if match_index is None:
-            normalized_summary_target = normalize_x86_16_call_target_addr_8616(
-                project,
-                summary.target_addr,
-            )
-            match_index = next(
-                (
-                    index
-                    for index, node in enumerate(available)
-                    if normalize_x86_16_call_target_addr_8616(
-                        project,
-                        _callee_addr_8616(node),
-                    )
-                    == normalized_summary_target
-                ),
-                None,
-            )
-        if match_index is None:
-            named_matches = [
-                index
-                for index, node in enumerate(available)
-                if _call_matches_resolved_target_name_8616(node, summary, project)
-            ]
-            if len(named_matches) == 1:
-                match_index = named_matches[0]
-            if len(named_matches) > 1:
-                same_target_callsites = {
-                    other_summary.callsite_addr
-                    for _other_key, other_summary in required
-                    if other_summary.target_addr == summary.target_addr
-                }
-                untagged_matches = [
-                    index
-                    for index in named_matches
-                    if _callsite_addr_8616(available[index]) is None
-                ]
-                tagged_matches = {
-                    _callsite_addr_8616(available[index])
-                    for index in named_matches
-                    if _callsite_addr_8616(available[index]) is not None
-                }
-                if (
-                    len(untagged_matches) == 1
-                    and summary.callsite_addr not in tagged_matches
-                    and tagged_matches <= same_target_callsites
-                ):
-                    match_index = untagged_matches[0]
-        if match_index is None:
-            established_names = {
-                cast(Any, match.call).callee_target
-                for match in matches
-                if match.call is not None
-                and match.summary.target_addr == summary.target_addr
-                and isinstance(cast(Any, match.call).callee_target, str)
-            }
-            named_matches = [
-                index
-                for index, node in enumerate(available)
-                if cast(Any, node).callee_target in established_names
-                and len(tuple(cast(Any, node).args or ())) == summary.arg_count
-            ]
-            if len(named_matches) == 1:
-                match_index = named_matches[0]
         if match_index is None:
             matches.append(RequiredCallMatch8616(summary_key, summary, None))
             continue
@@ -1161,13 +1103,7 @@ def _expected_call_argument_count_8616(
     project: object | None = None,
 ) -> int | None:
     """Return typed logical arity before falling back to physical push evidence."""
-    callee = call.callee_func
-    if callee is None and project is not None and isinstance(summary.target_addr, int):
-        try:
-            functions = cast(Any, cast(Any, project).kb).functions
-            callee = functions.function(addr=summary.target_addr, create=False)
-        except (AttributeError, TypeError):
-            callee = None
+    callee = _expected_call_callee_8616(summary, call, project)
     try:
         # angr renders this third-party identity before the fallback target.
         name = cast(_AddressedCalleeSurface8616, callee).name if callee is not None else None
@@ -1176,11 +1112,7 @@ def _expected_call_argument_count_8616(
     if not isinstance(name, str):
         name = call.callee_target
     helper_name = name if isinstance(name, str) else None
-    helper_widths = known_helper_logical_argument_widths_8616(helper_name)
-    metadata_name: str | None = None
-    if helper_widths is None and project is not None and isinstance(summary.target_addr, int):
-        metadata_name = callsite_target_name_for_project_8616(project, summary.target_addr)
-        helper_widths = known_helper_logical_argument_widths_8616(metadata_name)
+    helper_widths, metadata_name = _logical_helper_widths_8616(summary, project, helper_name)
     if helper_widths is not None:
         return len(helper_widths)
     if known_helper_is_variadic_8616(helper_name) or known_helper_is_variadic_8616(
@@ -1197,19 +1129,7 @@ def _expected_call_argument_count_8616(
         and summary.stack_cleanup == 0
     ):
         return 0
-    if callee is not None:
-        try:
-            callee_surface = cast(_PrototypedCalleeSurface8616, callee)
-            prototype = callee_surface.prototype
-            if (
-                not callee_surface.is_prototype_guessed
-                and isinstance(prototype, SimTypeFunction)
-                and isinstance(prototype.args, Sequence)
-            ):
-                return len(prototype.args)
-        except AttributeError:
-            pass
-    return None
+    return _prototype_arg_count_8616(callee)
 
 
 def _materialized_argument_count_8616(call: CFunctionCall) -> int | None:
@@ -1340,9 +1260,167 @@ def validate_call_argument_classes_8616(
     )
     raw_class_fact_count = sum(len(match.summary.logical_arg_classes) for match in matches)
     normalized_class_fact_count = sum(len(match.summary.logical_arg_classes) for match in proven_matches)
-    classified: list[
-        tuple[RequiredCallMatch8616, int, CallsiteArgumentClass8616, object]
-    ] = []
+    classified = _classified_argument_entries_8616(proven_matches)
+    source_facts, raw_source_fact_count, normalized_source_fact_count = _collect_source_facts_8616(
+        codegen, matches
+    )
+    issues, materialized_count = _call_argument_class_issues_8616(classified)
+    source_issues, source_materialized = _call_argument_source_issues_8616(source_facts)
+    issues.extend(source_issues)
+    materialized_count += source_materialized
+    return CallArgumentClassValidationReport8616(
+        raw_fact_count=raw_class_fact_count + raw_source_fact_count,
+        normalized_fact_count=normalized_class_fact_count + normalized_source_fact_count,
+        classified_fact_count=len(classified) + len(source_facts),
+        materialized_count=materialized_count,
+        failure_count=len(issues),
+        issues=tuple(issues),
+    )
+
+
+def _resolve_required_call_match_8616(
+    summary_key: int,
+    summary: CallsiteSummary8616,
+    required: tuple[tuple[int, CallsiteSummary8616], ...],
+    available: list[CFunctionCall],
+    matches: list[RequiredCallMatch8616],
+    project: object | None,
+) -> int | None:
+    match_index = next(
+        (
+            index
+            for index, node in enumerate(available)
+            if _call_matches_summary_identity_8616(node, summary_key, summary, project)
+        ),
+        None,
+    )
+    if match_index is None:
+        match_index = next(
+            (
+                index
+                for index, node in enumerate(available)
+                if _callsite_addr_8616(node) == summary.callsite_addr
+            ),
+            None,
+        )
+    if match_index is None:
+        normalized_summary_target = normalize_x86_16_call_target_addr_8616(
+            project,
+            summary.target_addr,
+        )
+        match_index = next(
+            (
+                index
+                for index, node in enumerate(available)
+                if normalize_x86_16_call_target_addr_8616(project, _callee_addr_8616(node))
+                == normalized_summary_target
+            ),
+            None,
+        )
+    if match_index is None:
+        named_matches = [
+            index
+            for index, node in enumerate(available)
+            if _call_matches_resolved_target_name_8616(node, summary, project)
+        ]
+        if len(named_matches) == 1:
+            match_index = named_matches[0]
+        if len(named_matches) > 1:
+            match_index = _disambiguate_named_call_match_8616(
+                summary, required, available, named_matches
+            )
+    if match_index is None:
+        established_names = {
+            cast(Any, match.call).callee_target
+            for match in matches
+            if match.call is not None
+            and match.summary.target_addr == summary.target_addr
+            and isinstance(cast(Any, match.call).callee_target, str)
+        }
+        named_matches = [
+            index
+            for index, node in enumerate(available)
+            if cast(Any, node).callee_target in established_names
+            and len(tuple(cast(Any, node).args or ())) == summary.arg_count
+        ]
+        if len(named_matches) == 1:
+            match_index = named_matches[0]
+    return match_index
+
+
+def _disambiguate_named_call_match_8616(
+    summary: CallsiteSummary8616,
+    required: tuple[tuple[int, CallsiteSummary8616], ...],
+    available: list[CFunctionCall],
+    named_matches: list[int],
+) -> int | None:
+    same_target_callsites = {
+        other_summary.callsite_addr
+        for _other_key, other_summary in required
+        if other_summary.target_addr == summary.target_addr
+    }
+    untagged_matches = [
+        index for index in named_matches if _callsite_addr_8616(available[index]) is None
+    ]
+    tagged_matches = {
+        _callsite_addr_8616(available[index])
+        for index in named_matches
+        if _callsite_addr_8616(available[index]) is not None
+    }
+    if (
+        len(untagged_matches) == 1
+        and summary.callsite_addr not in tagged_matches
+        and tagged_matches <= same_target_callsites
+    ):
+        return untagged_matches[0]
+    return None
+
+
+def _expected_call_callee_8616(
+    summary: CallsiteSummary8616, call: CFunctionCall, project: object | None
+) -> object | None:
+    callee = call.callee_func
+    if callee is None and project is not None and isinstance(summary.target_addr, int):
+        try:
+            functions = cast(Any, cast(Any, project).kb).functions
+            callee = functions.function(addr=summary.target_addr, create=False)
+        except (AttributeError, TypeError):
+            callee = None
+    return cast(object | None, callee)
+
+
+def _logical_helper_widths_8616(
+    summary: CallsiteSummary8616, project: object | None, helper_name: str | None
+) -> tuple[tuple[int, ...] | None, str | None]:
+    helper_widths = known_helper_logical_argument_widths_8616(helper_name)
+    metadata_name: str | None = None
+    if helper_widths is None and project is not None and isinstance(summary.target_addr, int):
+        metadata_name = callsite_target_name_for_project_8616(project, summary.target_addr)
+        helper_widths = known_helper_logical_argument_widths_8616(metadata_name)
+    return helper_widths, metadata_name
+
+
+def _prototype_arg_count_8616(callee: object | None) -> int | None:
+    if callee is None:
+        return None
+    try:
+        callee_surface = cast(_PrototypedCalleeSurface8616, callee)
+        prototype = callee_surface.prototype
+        if (
+            not callee_surface.is_prototype_guessed
+            and isinstance(prototype, SimTypeFunction)
+            and isinstance(prototype.args, Sequence)
+        ):
+            return len(prototype.args)
+    except AttributeError:
+        pass
+    return None
+
+
+def _classified_argument_entries_8616(
+    proven_matches: tuple[RequiredCallMatch8616, ...],
+) -> list[tuple[RequiredCallMatch8616, int, CallsiteArgumentClass8616, object]]:
+    classified: list[tuple[RequiredCallMatch8616, int, CallsiteArgumentClass8616, object]] = []
     for match in proven_matches:
         assert match.call is not None
         arguments = _materialized_arguments_8616(match.call)
@@ -1353,9 +1431,13 @@ def validate_call_argument_classes_8616(
             (match, index, expected_class, arguments[index])
             for index, expected_class in enumerate(expected_classes)
         )
-    source_facts: list[
-        tuple[RequiredCallMatch8616, CallArgumentSourceDependencyFact8616]
-    ] = []
+    return classified
+
+
+def _collect_source_facts_8616(
+    codegen: object, matches: tuple[RequiredCallMatch8616, ...]
+) -> tuple[list[tuple[RequiredCallMatch8616, CallArgumentSourceDependencyFact8616]], int, int]:
+    source_facts: list[tuple[RequiredCallMatch8616, CallArgumentSourceDependencyFact8616]] = []
     raw_source_fact_count = 0
     normalized_source_fact_count = 0
     for match in matches:
@@ -1371,6 +1453,12 @@ def validate_call_argument_classes_8616(
         facts = call_argument_source_dependency_facts_8616(codegen, match.summary, arguments)
         normalized_source_fact_count += len(facts)
         source_facts.extend((match, fact) for fact in facts)
+    return source_facts, raw_source_fact_count, normalized_source_fact_count
+
+
+def _call_argument_class_issues_8616(
+    classified: list[tuple[RequiredCallMatch8616, int, CallsiteArgumentClass8616, object]],
+) -> tuple[list[CallArgumentClassIssue8616 | CallArgumentSourceIssue8616], int]:
     issues: list[CallArgumentClassIssue8616 | CallArgumentSourceIssue8616] = []
     materialized_count = 0
     for match, index, expected_class, argument in classified:
@@ -1403,6 +1491,14 @@ def validate_call_argument_classes_8616(
             )
             continue
         materialized_count += 1
+    return issues, materialized_count
+
+
+def _call_argument_source_issues_8616(
+    source_facts: list[tuple[RequiredCallMatch8616, CallArgumentSourceDependencyFact8616]],
+) -> tuple[list[CallArgumentClassIssue8616 | CallArgumentSourceIssue8616], int]:
+    issues: list[CallArgumentClassIssue8616 | CallArgumentSourceIssue8616] = []
+    materialized_count = 0
     for match, source_fact in source_facts:
         target_addr = match.summary.target_addr
         if not isinstance(target_addr, int):
@@ -1420,13 +1516,104 @@ def validate_call_argument_classes_8616(
                 actual_stack_offsets=source_fact.actual_stack_offsets,
             )
         )
-    return CallArgumentClassValidationReport8616(
-        raw_fact_count=raw_class_fact_count + raw_source_fact_count,
-        normalized_fact_count=normalized_class_fact_count + normalized_source_fact_count,
-        classified_fact_count=len(classified) + len(source_facts),
-        materialized_count=materialized_count,
-        failure_count=len(issues),
-        issues=tuple(issues),
+    return issues, materialized_count
+
+
+def _interface_classified_matches_8616(
+    matched: tuple[RequiredCallMatch8616, ...], project: object | None
+) -> list[tuple[RequiredCallMatch8616, int]]:
+    classified: list[tuple[RequiredCallMatch8616, int]] = []
+    for match in matched:
+        expected_count = (
+            _expected_call_argument_count_8616(match.summary, match.call, project)
+            if match.call is not None
+            else _expected_argument_count_8616(match.summary)
+        )
+        if expected_count is not None:
+            classified.append((match, expected_count))
+    return classified
+
+
+def _interface_match_issues_8616(
+    classified: list[tuple[RequiredCallMatch8616, int]], project: object | None
+) -> tuple[list[CallInterfaceIssue8616], int]:
+    issues: list[CallInterfaceIssue8616] = []
+    materialized_count = 0
+    for match, expected_count in classified:
+        assert match.call is not None
+        actual_count = _materialized_argument_count_8616(match.call)
+        target_addr = match.summary.target_addr
+        if not isinstance(target_addr, int):
+            continue
+        if actual_count is None:
+            issues.append(
+                CallInterfaceIssue8616(
+                    kind=CallInterfaceIssueKind8616.ARGUMENT_SURFACE_UNAVAILABLE,
+                    callsite_addr=match.summary.callsite_addr,
+                    target_addr=target_addr,
+                    expected_argument_count=expected_count,
+                    actual_argument_count=None,
+                )
+            )
+            continue
+        if actual_count != expected_count:
+            issue = _argument_count_mismatch_issue_8616(match, expected_count, actual_count, project)
+            if issue is None:
+                materialized_count += 1
+                continue
+            issues.append(issue)
+            continue
+        materialized_count += 1
+    return issues, materialized_count
+
+
+def _argument_count_mismatch_issue_8616(
+    match: RequiredCallMatch8616, expected_count: int, actual_count: int, project: object | None
+) -> CallInterfaceIssue8616 | None:
+    """Return None when grouped shape evidence accounts for the mismatch."""
+    assert match.call is not None
+    target_addr = match.summary.target_addr
+    assert isinstance(target_addr, int)
+    live_widths = _materialized_argument_widths_8616(match.call, project)
+    actual_arguments = _materialized_arguments_8616(match.call) or ()
+    return_pair_evidence = exact_call_return_pair_shape_evidence_8616(match.summary)
+    if (
+        return_pair_evidence is not None
+        and len(return_pair_evidence.widths) == actual_count
+        and all(
+            isinstance(actual_arguments[index], CFunctionCall)
+            or any(
+                isinstance(node, CFunctionCall)
+                for node in _iter_c_nodes_deep_8616(actual_arguments[index])
+            )
+            for index in return_pair_evidence.return_argument_indices
+        )
+    ):
+        return None
+    prototype_shape = _target_prototype_argument_shape_8616(match.call, project, target_addr)
+    prototype_widths = prototype_shape[0] if prototype_shape is not None else None
+    prototype_variadic = prototype_shape[1] if prototype_shape is not None else False
+    grouped_evidence = None
+    if live_widths is not None and prototype_widths is not None:
+        evidence_factory = (
+            accounted_variadic_target_shape_evidence_8616
+            if prototype_variadic
+            else accounted_target_prototype_shape_evidence_8616
+        )
+        grouped_evidence = evidence_factory(match.summary, live_widths, prototype_widths)
+    if grouped_evidence is not None and len(grouped_evidence.widths) == actual_count:
+        return None
+    return CallInterfaceIssue8616(
+        kind=CallInterfaceIssueKind8616.ARGUMENT_COUNT_MISMATCH,
+        callsite_addr=match.summary.callsite_addr,
+        target_addr=target_addr,
+        expected_argument_count=expected_count,
+        actual_argument_count=actual_count,
+        physical_argument_widths=match.summary.arg_widths,
+        logical_argument_widths=match.summary.logical_arg_widths,
+        actual_argument_widths=live_widths,
+        prototype_argument_widths=prototype_widths,
+        prototype_variadic=prototype_variadic if prototype_shape is not None else None,
     )
 
 
@@ -1448,92 +1635,8 @@ def validate_call_interfaces_8616(
         project = cast(_CodegenProjectSurface8616, codegen).project
     except AttributeError:
         project = None
-    classified: list[tuple[RequiredCallMatch8616, int]] = []
-    for match in matched:
-        expected_count = (
-            _expected_call_argument_count_8616(match.summary, match.call, project)
-            if match.call is not None
-            else _expected_argument_count_8616(match.summary)
-        )
-        if expected_count is not None:
-            classified.append((match, expected_count))
-    issues: list[CallInterfaceIssue8616] = []
-    materialized_count = 0
-    for match, expected_count in classified:
-        assert match.call is not None
-        actual_count = _materialized_argument_count_8616(match.call)
-        target_addr = match.summary.target_addr
-        if not isinstance(target_addr, int):
-            continue
-        if actual_count is None:
-            issues.append(
-                CallInterfaceIssue8616(
-                    kind=CallInterfaceIssueKind8616.ARGUMENT_SURFACE_UNAVAILABLE,
-                    callsite_addr=match.summary.callsite_addr,
-                    target_addr=target_addr,
-                    expected_argument_count=expected_count,
-                    actual_argument_count=None,
-                )
-            )
-            continue
-        if actual_count != expected_count:
-            live_widths = _materialized_argument_widths_8616(match.call, project)
-            actual_arguments = _materialized_arguments_8616(match.call) or ()
-            return_pair_evidence = exact_call_return_pair_shape_evidence_8616(match.summary)
-            if (
-                return_pair_evidence is not None
-                and len(return_pair_evidence.widths) == actual_count
-                and all(
-                    isinstance(actual_arguments[index], CFunctionCall)
-                    or any(
-                        isinstance(node, CFunctionCall)
-                        for node in _iter_c_nodes_deep_8616(actual_arguments[index])
-                    )
-                    for index in return_pair_evidence.return_argument_indices
-                )
-            ):
-                materialized_count += 1
-                continue
-            prototype_shape = _target_prototype_argument_shape_8616(
-                match.call,
-                project,
-                target_addr,
-            )
-            prototype_widths = prototype_shape[0] if prototype_shape is not None else None
-            prototype_variadic = prototype_shape[1] if prototype_shape is not None else False
-            grouped_evidence = None
-            if live_widths is not None and prototype_widths is not None:
-                evidence_factory = (
-                    accounted_variadic_target_shape_evidence_8616
-                    if prototype_variadic
-                    else accounted_target_prototype_shape_evidence_8616
-                )
-                grouped_evidence = evidence_factory(
-                    match.summary,
-                    live_widths,
-                    prototype_widths,
-                )
-            if grouped_evidence is not None and len(grouped_evidence.widths) == actual_count:
-                materialized_count += 1
-                continue
-            issues.append(
-                CallInterfaceIssue8616(
-                    kind=CallInterfaceIssueKind8616.ARGUMENT_COUNT_MISMATCH,
-                    callsite_addr=match.summary.callsite_addr,
-                    target_addr=target_addr,
-                    expected_argument_count=expected_count,
-                    actual_argument_count=actual_count,
-                    physical_argument_widths=match.summary.arg_widths,
-                    logical_argument_widths=match.summary.logical_arg_widths,
-                    actual_argument_widths=live_widths,
-                    prototype_argument_widths=prototype_widths,
-                    prototype_variadic=(
-                        prototype_variadic if prototype_shape is not None else None
-                    ),
-                )
-            )
-            continue
-        materialized_count += 1
+    classified = _interface_classified_matches_8616(matched, project)
+    issues, materialized_count = _interface_match_issues_8616(classified, project)
     return CallInterfaceValidationReport8616(
         raw_fact_count=raw_fact_count,
         normalized_fact_count=len(matched),
