@@ -1290,3 +1290,9 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 - Verified: ruff 0, mypy 0, 11 signature/sidecar tests pass, def-integrity
   vs HEAD clean (missing names are hoisted nested defs), zero architecture
   violations against the file.
+- `angr_platforms/angr_platforms/X86_16/annotations.py`: Ruff complexity
+  debt cleared to zero (6 findings). Extracted identity/prototype/CC
+  assignment, declaration parsing, arg/stack/global annotation lanes, LST
+  and synthetic-global label application, and arg-name tokenization.
+- Verified: ruff 0, mypy 0, 10 annotation tests pass, def-integrity vs HEAD
+  clean, zero architecture violations against the file.

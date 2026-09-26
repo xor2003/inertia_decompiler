@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import functools
 import re
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Iterator, Mapping, MutableMapping
 from enum import StrEnum
 from typing import Protocol, cast
 
@@ -355,76 +355,115 @@ def annotate_function(
             raise KeyError(func_addr)
         annotations = _annotation_dict(func)
 
-        parsed_name = None
-        parsed_proto = None
+        parsed_name: str | None = None
+        parsed_proto: SimTypeFunction | None = None
         if c_decl is not None:
-            parsed_name, parsed_proto, _ = _parse_c_prototype_8616(c_decl)
-            if parsed_proto is None:
-                raise ValueError(f"Failed to parse C declaration: {c_decl}")
-            parsed_proto = cast(SimTypeFunction, parsed_proto.with_arch(arch))
+            parsed_name, parsed_proto = _parse_decl_prototype_8616(arch, c_decl)
 
-        final_name = name if name is not None else parsed_name
-        if final_name is not None:
-            func.name = final_name
-
-        final_proto = cast(SimTypeFunction, prototype.with_arch(arch)) if prototype is not None else parsed_proto
-        if final_proto is not None:
-            func.prototype = final_proto
-            func.is_prototype_guessed = False
-            annotations["prototype"] = final_proto
-
-        if calling_convention is not None:
-            func.calling_convention = calling_convention
+        _assign_identity_annotations_8616(
+            func, arch, annotations, name, parsed_name, prototype, parsed_proto, calling_convention
+        )
 
         if arg_names is not None:
-            if func.prototype is None:
-                raise ValueError("Cannot assign argument names without a prototype.")
-            normalized_names = _normalize_arg_names(arg_names, len(func.prototype.args))
-            renamed_proto = SimTypeFunction(
-                func.prototype.args,
-                func.prototype.returnty,
-                arg_names=tuple(normalized_names),
-                variadic=func.prototype.variadic,
-            )
-            func.prototype = cast(SimTypeFunction, renamed_proto.with_arch(arch))
-            func.is_prototype_guessed = False
+            _annotate_arg_names_8616(func, arch, arg_names)
 
         if stack_vars:
-            stack_annotations = cast(MutableMapping[int, MutableMapping[str, object]], annotations["stack_vars"])
-            for offset, spec in stack_vars.items():
-                entry = stack_annotations.setdefault(offset, {})
-                if isinstance(spec, str):
-                    entry["name"] = spec
-                else:
-                    entry.update(spec)
+            _annotate_stack_vars_8616(annotations, stack_vars)
 
         if bp_stack_vars:
-            translated = {}
-            for bp_disp, spec in bp_stack_vars.items():
-                translated[_normalize_bp_disp(bp_disp)] = spec
+            translated = {
+                _normalize_bp_disp(bp_disp): spec for bp_disp, spec in bp_stack_vars.items()
+            }
             annotate_function(project, func_addr, stack_vars=translated)
 
         if global_vars:
-            global_annotations = cast(MutableMapping[int, dict[str, object]], annotations["global_vars"])
-            for addr, spec in global_vars.items():
-                global_entry: dict[str, object]
-                if isinstance(spec, str):
-                    global_entry = {"name": spec}
-                    label = spec
-                elif isinstance(spec, dict):
-                    global_entry = dict(spec)
-                    candidate_label = global_entry.get("name")
-                    if not isinstance(candidate_label, str):
-                        raise ValueError(f"Global annotation for {addr:#x} must include a string name.")
-                    label = candidate_label
-                else:
-                    raise TypeError(f"Unsupported global annotation spec for {addr:#x}: {type(spec).__name__}")
-                global_annotations[addr] = global_entry
-                annotation_project.kb.labels[addr] = label
+            _annotate_global_vars_8616(annotation_project, annotations, global_vars)
 
         return func
 
     return _impl()
+
+
+def _assign_identity_annotations_8616(
+    func: _AnnotatedFunction,
+    arch: Arch86_16,
+    annotations: MutableMapping[str, object],
+    name: str | None,
+    parsed_name: str | None,
+    prototype: SimTypeFunction | None,
+    parsed_proto: SimTypeFunction | None,
+    calling_convention: object | None,
+) -> None:
+    final_name = name if name is not None else parsed_name
+    if final_name is not None:
+        func.name = final_name
+    final_proto = cast(SimTypeFunction, prototype.with_arch(arch)) if prototype is not None else parsed_proto
+    if final_proto is not None:
+        func.prototype = final_proto
+        func.is_prototype_guessed = False
+        annotations["prototype"] = final_proto
+    if calling_convention is not None:
+        func.calling_convention = calling_convention
+
+
+def _parse_decl_prototype_8616(
+    arch: Arch86_16, c_decl: str
+) -> tuple[str | None, SimTypeFunction | None]:
+    parsed_name, parsed_proto, _ = _parse_c_prototype_8616(c_decl)
+    if parsed_proto is None:
+        raise ValueError(f"Failed to parse C declaration: {c_decl}")
+    return parsed_name, cast(SimTypeFunction, parsed_proto.with_arch(arch))
+
+
+def _annotate_arg_names_8616(
+    func: _AnnotatedFunction, arch: Arch86_16, arg_names: list[str] | tuple[str, ...]
+) -> None:
+    if func.prototype is None:
+        raise ValueError("Cannot assign argument names without a prototype.")
+    normalized_names = _normalize_arg_names(arg_names, len(func.prototype.args))
+    renamed_proto = SimTypeFunction(
+        func.prototype.args,
+        func.prototype.returnty,
+        arg_names=tuple(normalized_names),
+        variadic=func.prototype.variadic,
+    )
+    func.prototype = cast(SimTypeFunction, renamed_proto.with_arch(arch))
+    func.is_prototype_guessed = False
+
+
+def _annotate_stack_vars_8616(
+    annotations: MutableMapping[str, object], stack_vars: dict[int, AnnotationSpec8616]
+) -> None:
+    stack_annotations = cast(MutableMapping[int, MutableMapping[str, object]], annotations["stack_vars"])
+    for offset, spec in stack_vars.items():
+        entry = stack_annotations.setdefault(offset, {})
+        if isinstance(spec, str):
+            entry["name"] = spec
+        else:
+            entry.update(spec)
+
+
+def _annotate_global_vars_8616(
+    annotation_project: _AnnotationProject,
+    annotations: MutableMapping[str, object],
+    global_vars: dict[int, AnnotationSpec8616],
+) -> None:
+    global_annotations = cast(MutableMapping[int, dict[str, object]], annotations["global_vars"])
+    for addr, spec in global_vars.items():
+        global_entry: dict[str, object]
+        if isinstance(spec, str):
+            global_entry = {"name": spec}
+            label = spec
+        elif isinstance(spec, dict):
+            global_entry = dict(spec)
+            candidate_label = global_entry.get("name")
+            if not isinstance(candidate_label, str):
+                raise ValueError(f"Global annotation for {addr:#x} must include a string name.")
+            label = candidate_label
+        else:
+            raise TypeError(f"Unsupported global annotation spec for {addr:#x}: {type(spec).__name__}")
+        global_annotations[addr] = global_entry
+        annotation_project.kb.labels[addr] = label
 
 
 def annotate_stack_variable(
@@ -462,39 +501,51 @@ def _split_source_arg_names_8616(source_arg_text: str | None) -> list[str]:
         if not source_arg_text:
             return []
         source_arg_names: list[str] = []
-        current: list[str] = []
-        depth_paren = depth_bracket = depth_brace = 0
-        for char in source_arg_text:
-            if char == "," and depth_paren == depth_bracket == depth_brace == 0:
-                part = "".join(current).strip()
-                if part:
-                    match = re.search(r"([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*$", part)
-                    if match is not None:
-                        source_arg_names.append(match.group(1))
-                current = []
-                continue
-            current.append(char)
-            if char == "(":
-                depth_paren += 1
-            elif char == ")" and depth_paren > 0:
-                depth_paren -= 1
-            elif char == "[":
-                depth_bracket += 1
-            elif char == "]" and depth_bracket > 0:
-                depth_bracket -= 1
-            elif char == "{":
-                depth_brace += 1
-            elif char == "}" and depth_brace > 0:
-                depth_brace -= 1
-        if current:
-            part = "".join(current).strip()
-            if part:
-                match = re.search(r"([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*$", part)
-                if match is not None:
-                    source_arg_names.append(match.group(1))
+        for part in _iter_source_arg_parts_8616(source_arg_text):
+            match = re.search(r"([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*$", part)
+            if match is not None:
+                source_arg_names.append(match.group(1))
         return source_arg_names
 
     return _impl()
+
+
+def _iter_source_arg_parts_8616(source_arg_text: str) -> Iterator[str]:
+    current: list[str] = []
+    depth_paren = depth_bracket = depth_brace = 0
+    for char in source_arg_text:
+        if char == "," and depth_paren == depth_bracket == depth_brace == 0:
+            part = "".join(current).strip()
+            if part:
+                yield part
+            current = []
+            continue
+        current.append(char)
+        depth_paren, depth_bracket, depth_brace = _arg_text_depths_8616(
+            char, depth_paren, depth_bracket, depth_brace
+        )
+    if current:
+        part = "".join(current).strip()
+        if part:
+            yield part
+
+
+def _arg_text_depths_8616(
+    char: str, depth_paren: int, depth_bracket: int, depth_brace: int
+) -> tuple[int, int, int]:
+    if char == "(":
+        depth_paren += 1
+    elif char == ")" and depth_paren > 0:
+        depth_paren -= 1
+    elif char == "[":
+        depth_bracket += 1
+    elif char == "]" and depth_bracket > 0:
+        depth_bracket -= 1
+    elif char == "{":
+        depth_brace += 1
+    elif char == "}" and depth_brace > 0:
+        depth_brace -= 1
+    return depth_paren, depth_bracket, depth_brace
 
 
 def _apply_source_prototype_annotations_8616(
@@ -519,38 +570,54 @@ def apply_x86_16_metadata_annotations(
         annotation_project = cast(_AnnotationProject, project)
 
         if lst_metadata is not None:
-            for offset, name in getattr(lst_metadata, "data_labels", {}).items():
-                if annotation_project.kb.labels.get(offset) != name:
-                    annotation_project.kb.labels[offset] = name
-                    changed = True
-
-            if func_addr is not None:
-                code_name = getattr(lst_metadata, "code_labels", {}).get(func_addr)
-                if isinstance(code_name, str) and code_name:
-                    func = cast(
-                        _AnnotatedFunction | None,
-                        annotation_project.kb.functions.function(addr=func_addr, create=True),
-                    )
-                    if func is not None and getattr(func, "name", None) != code_name:
-                        func.name = code_name
-                        changed = True
+            changed |= _apply_lst_metadata_labels_8616(annotation_project, func_addr, lst_metadata)
 
         if cod_metadata is not None:
             changed |= _apply_known_helper_signatures(project, cod_metadata)
 
         if func_addr is not None and synthetic_globals:
-            seen_addrs: set[int] = set()
-            for addr, (raw_name, _width) in synthetic_globals.items():
-                if addr in seen_addrs:
-                    continue
-                seen_addrs.add(addr)
-                if isinstance(raw_name, str) and raw_name and annotation_project.kb.labels.get(addr) != raw_name:
-                    annotation_project.kb.labels[addr] = raw_name
-                    changed = True
+            changed |= _apply_synthetic_global_labels_8616(annotation_project, synthetic_globals)
 
         return changed
 
     return _impl()
+
+
+def _apply_lst_metadata_labels_8616(
+    annotation_project: _AnnotationProject, func_addr: int | None, lst_metadata: object
+) -> bool:
+    changed = False
+    for offset, name in getattr(lst_metadata, "data_labels", {}).items():
+        if annotation_project.kb.labels.get(offset) != name:
+            annotation_project.kb.labels[offset] = name
+            changed = True
+    if func_addr is None:
+        return changed
+    code_name = getattr(lst_metadata, "code_labels", {}).get(func_addr)
+    if isinstance(code_name, str) and code_name:
+        func = cast(
+            _AnnotatedFunction | None,
+            annotation_project.kb.functions.function(addr=func_addr, create=True),
+        )
+        if func is not None and getattr(func, "name", None) != code_name:
+            func.name = code_name
+            changed = True
+    return changed
+
+
+def _apply_synthetic_global_labels_8616(
+    annotation_project: _AnnotationProject, synthetic_globals: dict[int, tuple[str, int]]
+) -> bool:
+    changed = False
+    seen_addrs: set[int] = set()
+    for addr, (raw_name, _width) in synthetic_globals.items():
+        if addr in seen_addrs:
+            continue
+        seen_addrs.add(addr)
+        if isinstance(raw_name, str) and raw_name and annotation_project.kb.labels.get(addr) != raw_name:
+            annotation_project.kb.labels[addr] = raw_name
+            changed = True
+    return changed
 
 
 def decompile_function(project: object, func_addr: int, **annotations: object) -> object:
