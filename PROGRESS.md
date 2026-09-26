@@ -8,6 +8,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Partial-batch far-model replay ends `timed_out` after 601.30s with concurrent
+  implementation changes: two batch functions validate, four time out; no
+  complete rebuild/run. Measured completed census/neighbor work is subsecond,
+  not the dominant observed cost. Required small-model compare16 is rechecking
+  in `.cache/compiler-coverage/sourcefree-compare16-batch-003/`; far obligations
+  remain open and no new witness is admitted.
+
 - Partial batch retry now preserves accepted bodies and original order, while
   retrying only missing/failed jobs. Source-free nonzero exits are refused;
   shared acceptance also requires an explicit clean/passed whole-tail verdict.
@@ -1390,3 +1397,11 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   per-method reporting helpers.
 - Verified: ruff 0, mypy 0, 5 flag-combo tests pass, def-integrity vs
   HEAD clean, zero architecture violations against the file.
+- `angr_platforms/angr_platforms/X86_16/lowering/call_output_stack_objects.py`:
+  Ruff debt cleared to zero (6 findings). Extracted gated Boolean-form
+  predicates, hoisted the stack-projection matcher, split wide-type
+  propagation, wide-condition call candidate/rebind lanes, the
+  consumed-carrier prune walk, callsite base collection, and the
+  condition-slice grouping/object-fact materialization lanes.
+- Verified: ruff 0, mypy 0, 54 call-output/wide-condition tests pass,
+  def-integrity vs HEAD clean, zero architecture violations.

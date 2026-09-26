@@ -310,34 +310,36 @@ def _wide_call_return_condition_expression_parts_8616(
             return None
         high_lt = non_break.lhs
         gated_low = non_break.rhs
-        if (
-            isinstance(high_lt, CBinaryOp)
-            and high_lt.op == "CmpLT"
-            and isinstance(gated_low, CBinaryOp)
-            and gated_low.op == "LogicalAnd"
-            and isinstance(gated_low.lhs, CBinaryOp)
-            and gated_low.lhs.op == "CmpEQ"
-            and isinstance(gated_low.rhs, CBinaryOp)
-            and gated_low.rhs.op == "CmpLE"
-        ):
+        if _gated_low_parts_8616(high_lt, "CmpLT", gated_low, "CmpEQ", "CmpLE"):
             return high_lt.rhs, gated_low.rhs.rhs
         return None
     if not isinstance(expression, CBinaryOp) or expression.op != "LogicalOr":
         return None
     high_gt = expression.lhs
     gated_low = expression.rhs
-    if not (
-        isinstance(high_gt, CBinaryOp)
-        and high_gt.op == "CmpGT"
+    if not _gated_low_parts_8616(high_gt, "CmpGT", gated_low, "CmpGE", "CmpGT"):
+        return None
+    return high_gt.rhs, gated_low.rhs.rhs
+
+
+def _gated_low_parts_8616(
+    high: CExpression,
+    high_op: str,
+    gated_low: CExpression,
+    gate_lhs_op: str,
+    gate_rhs_op: str,
+) -> bool:
+    """Match the high comparison and gated low pair for one Boolean form."""
+    return (
+        isinstance(high, CBinaryOp)
+        and high.op == high_op
         and isinstance(gated_low, CBinaryOp)
         and gated_low.op == "LogicalAnd"
         and isinstance(gated_low.lhs, CBinaryOp)
-        and gated_low.lhs.op == "CmpGE"
+        and gated_low.lhs.op == gate_lhs_op
         and isinstance(gated_low.rhs, CBinaryOp)
-        and gated_low.rhs.op == "CmpGT"
-    ):
-        return None
-    return high_gt.rhs, gated_low.rhs.rhs
+        and gated_low.rhs.op == gate_rhs_op
+    )
 
 
 def _wide_condition_stack_cvar_8616(
@@ -353,46 +355,16 @@ def _wide_condition_stack_cvar_8616(
     if not isinstance(low_offset, int) or not isinstance(high_offset, int) or high_offset != low_offset + 2:
         return None
 
-    def matches_projection(
-        expression: CExpression,
-        expected_offset: int,
-        *,
-        allow_owner: bool,
-    ) -> bool:
-        """Match one expression through typed projection or exact stack identity."""
-        projection = condition_stack_projection_fact_8616(expression)
-        expected_projection = ConditionStackProjectionFact8616(
-            base="bp",
-            owner_offset=low_offset,
-            owner_size=4,
-            view_offset=expected_offset,
-            view_size=2,
-        )
-        if isinstance(projection, ConditionStackProjectionFact8616):
-            return bool(projection == expected_projection)
-        direct = _strip_condition_casts_8616(expression)
-        if not isinstance(direct, CVariable) or not isinstance(direct.variable, SimStackVariable):
-            return False
-        variable = direct.variable
-        return (
-            variable.base == "bp"
-            and machine_bp_offset_for_stack_variable_8616(codegen, variable) == expected_offset
-            and variable.size in ({2, 4} if allow_owner else {2})
-        )
-
-    if not matches_projection(low_expr, low_offset, allow_owner=True) or not matches_projection(
-        high_expr,
-        high_offset,
-        allow_owner=False,
+    if not _matches_stack_projection_8616(
+        codegen, low_expr, low_offset, owner_offset=low_offset, allow_owner=True
+    ) or not _matches_stack_projection_8616(
+        codegen, high_expr, high_offset, owner_offset=low_offset, allow_owner=False
     ):
         return None
     candidates = tuple(
         cvar
         for variable, cvar in codegen.cfunc.variables_in_use.items()
-        if isinstance(variable, SimStackVariable)
-        and variable.base == "bp"
-        and machine_bp_offset_for_stack_variable_8616(codegen, variable) == low_offset
-        and variable.size == 4
+        if _is_wide_stack_owner_variable_8616(codegen, variable, low_offset)
         and isinstance(cvar, CVariable)
     )
     unique_candidates = tuple({id(candidate): candidate for candidate in candidates}.values())
@@ -400,29 +372,67 @@ def _wide_condition_stack_cvar_8616(
         return None
     wide_cvar = unique_candidates[0]
     wide_type = SimTypeLong(True).with_arch(codegen.project.arch)
+    _propagate_wide_stack_type_8616(codegen, low_offset, wide_type)
+    codegen.show_local_types = True
+    return wide_cvar
+
+
+def _is_wide_stack_owner_variable_8616(
+    codegen: _CallOutputCodegen8616, variable: object, low_offset: int
+) -> bool:
+    """Match the four-byte BP stack owner covering ``low_offset``."""
+    return (
+        isinstance(variable, SimStackVariable)
+        and variable.base == "bp"
+        and machine_bp_offset_for_stack_variable_8616(codegen, variable) == low_offset
+        and variable.size == 4
+    )
+
+
+def _matches_stack_projection_8616(
+    codegen: _CallOutputCodegen8616,
+    expression: CExpression,
+    expected_offset: int,
+    *,
+    owner_offset: int,
+    allow_owner: bool,
+) -> bool:
+    """Match one expression through typed projection or exact stack identity."""
+    projection = condition_stack_projection_fact_8616(expression)
+    expected_projection = ConditionStackProjectionFact8616(
+        base="bp",
+        owner_offset=owner_offset,
+        owner_size=4,
+        view_offset=expected_offset,
+        view_size=2,
+    )
+    if isinstance(projection, ConditionStackProjectionFact8616):
+        return bool(projection == expected_projection)
+    direct = _strip_condition_casts_8616(expression)
+    if not isinstance(direct, CVariable) or not isinstance(direct.variable, SimStackVariable):
+        return False
+    variable = direct.variable
+    return (
+        variable.base == "bp"
+        and machine_bp_offset_for_stack_variable_8616(codegen, variable) == expected_offset
+        and variable.size in ({2, 4} if allow_owner else {2})
+    )
+
+
+def _propagate_wide_stack_type_8616(
+    codegen: _CallOutputCodegen8616, low_offset: int, wide_type: SimTypeLong
+) -> None:
+    """Widen the variable manager, in-use cvars, and AST nodes to the wide type."""
     for variable, cvar in codegen.cfunc.variables_in_use.items():
-        if (
-            isinstance(variable, SimStackVariable)
-            and variable.base == "bp"
-            and machine_bp_offset_for_stack_variable_8616(codegen, variable) == low_offset
-            and variable.size == 4
-        ):
+        if _is_wide_stack_owner_variable_8616(codegen, variable, low_offset):
             codegen.cfunc.variable_manager.set_variable_type(variable, wide_type)
             if isinstance(cvar, CVariable):
                 cvar.variable_type = wide_type
     for node in _iter_c_nodes_deep_8616(codegen.cfunc.statements):
         if not isinstance(node, CVariable):
             continue
-        variable = node.variable
-        if (
-            isinstance(variable, SimStackVariable)
-            and variable.base == "bp"
-            and machine_bp_offset_for_stack_variable_8616(codegen, variable) == low_offset
-            and variable.size == 4
-        ):
+        if _is_wide_stack_owner_variable_8616(codegen, node.variable, low_offset):
             node.variable_type = wide_type
-    codegen.show_local_types = True
-    return wide_cvar
 
 
 def select_wide_call_return_condition_chain_8616(
@@ -461,6 +471,40 @@ def _wide_condition_call_8616(
     if not isinstance(summary_map, dict):
         raise TypeError("callsite summary carrier must be a dict")
     inventory = _callsite_inventory_8616(codegen)
+    candidates = _wide_condition_call_candidates_8616(codegen, summary_map, inventory)
+    if not candidates:
+        return None
+    proven_callsite = proven_wide_condition_callsite_8616(codegen, conditions, frozenset(candidates))
+    if proven_callsite is None:
+        return None
+    proven_calls = tuple({id(call): call for call in candidates[proven_callsite]}.values())
+    if len(proven_calls) != 1:
+        return None
+    call = proven_calls[0]
+    summary = inventory.get(proven_callsite) or summary_map.get(id(call))
+    if not isinstance(summary, CallsiteSummary8616):
+        return None
+    _rebind_wide_condition_call_8616(codegen, call, summary, summary_map)
+    return call, summary
+
+
+def _wide_condition_summary_matches_8616(summary: CallsiteSummary8616) -> bool:
+    """Require the typed DX:AX condition evidence on one callsite summary."""
+    return (
+        summary.return_used is True
+        and summary.return_use_kind is CallsiteReturnUseKind8616.CONDITION
+        and summary.return_shape == CallsiteReturnShape8616.DX_AX.value
+        and isinstance(summary.callsite_addr, int)
+        and isinstance(summary.return_addr, int)
+    )
+
+
+def _wide_condition_call_candidates_8616(
+    codegen: _CallOutputCodegen8616,
+    summary_map: dict[int, CallsiteSummary8616],
+    inventory: dict[int, CallsiteSummary8616],
+) -> dict[int, list[CFunctionCall]]:
+    """Collect zero-arg calls carrying a proven wide-condition callsite summary."""
     candidates: dict[int, list[CFunctionCall]] = {}
     for node in _iter_c_nodes_deep_8616(codegen.cfunc.statements):
         if not isinstance(node, CFunctionCall) or tuple(node.args or ()):
@@ -475,27 +519,19 @@ def _wide_condition_call_8616(
             summary = inventory.get(tagged_callsite)
         if not isinstance(summary, CallsiteSummary8616):
             continue
-        if not (
-            summary.return_used is True
-            and summary.return_use_kind is CallsiteReturnUseKind8616.CONDITION
-            and summary.return_shape == CallsiteReturnShape8616.DX_AX.value
-            and isinstance(summary.callsite_addr, int)
-            and isinstance(summary.return_addr, int)
-        ):
+        if not _wide_condition_summary_matches_8616(summary):
             continue
         candidates.setdefault(summary.callsite_addr, []).append(node)
-    if not candidates:
-        return None
-    proven_callsite = proven_wide_condition_callsite_8616(codegen, conditions, frozenset(candidates))
-    if proven_callsite is None:
-        return None
-    proven_calls = tuple({id(call): call for call in candidates[proven_callsite]}.values())
-    if len(proven_calls) != 1:
-        return None
-    call = proven_calls[0]
-    summary = inventory.get(proven_callsite) or summary_map.get(id(call))
-    if not isinstance(summary, CallsiteSummary8616):
-        return None
+    return candidates
+
+
+def _rebind_wide_condition_call_8616(
+    codegen: _CallOutputCodegen8616,
+    call: CFunctionCall,
+    summary: CallsiteSummary8616,
+    summary_map: dict[int, CallsiteSummary8616],
+) -> None:
+    """Rebind the callsite summary and resolve the canonical callee target."""
     rebound = dict(summary_map)
     rebound[id(call)] = summary
     codegen._inertia_callsite_summaries = rebound
@@ -509,7 +545,6 @@ def _wide_condition_call_8616(
             call.callee_target = f"sub_{summary.target_addr:x}"
         else:
             call.callee_func = cast(Function, callee)
-    return call, summary
 
 
 def prune_materialized_wide_condition_call_carrier_8616(
@@ -518,54 +553,63 @@ def prune_materialized_wide_condition_call_carrier_8616(
 ) -> int:
     """Remove the exact standalone or AX carrier consumed by a wide condition."""
     boundary = cast(_CallOutputCodegen8616, codegen)
-    removed = 0
-    seen: set[int] = set()
-    def is_consumed_carrier(statement: object) -> bool:
-        """Return whether one statement exists only to carry ``call`` through AX."""
-        if statement is call:
+    return _prune_consumed_carriers_8616(boundary, call, boundary.cfunc.statements, set())
+
+
+def _is_consumed_wide_call_carrier_8616(
+    boundary: _CallOutputCodegen8616, call: CFunctionCall, statement: object
+) -> bool:
+    """Return whether one statement exists only to carry ``call`` through AX."""
+    if statement is call:
+        return True
+    if isinstance(statement, CExpressionStatement):
+        if statement.expr is call:
             return True
-        if isinstance(statement, CExpressionStatement):
-            if statement.expr is call:
-                return True
-            statement = statement.expr
-        if not isinstance(statement, CAssignment) or statement.rhs is not call:
-            return False
-        lhs = statement.lhs
-        if not isinstance(lhs, CVariable) or not isinstance(lhs.variable, SimRegisterVariable):
-            return False
-        register_name = boundary.project.arch.translate_register_name(
-            lhs.variable.reg,
-            lhs.variable.size,
-        )
-        return isinstance(register_name, str) and register_name.lower() == "ax"
+        statement = statement.expr
+    if not isinstance(statement, CAssignment) or statement.rhs is not call:
+        return False
+    lhs = statement.lhs
+    if not isinstance(lhs, CVariable) or not isinstance(lhs.variable, SimRegisterVariable):
+        return False
+    register_name = boundary.project.arch.translate_register_name(
+        lhs.variable.reg,
+        lhs.variable.size,
+    )
+    return isinstance(register_name, str) and register_name.lower() == "ax"
 
-    def visit(node: object) -> None:
-        """Prune carrier statements from structured statement containers."""
-        nonlocal removed
-        if node is None or id(node) in seen:
-            return
-        seen.add(id(node))
-        if isinstance(node, CStatements):
-            retained: list[object] = []
-            for statement in tuple(node.statements):
-                if is_consumed_carrier(statement):
-                    removed += 1
-                    continue
-                retained.append(statement)
-                visit(statement)
-            node.statements[:] = retained
-            return
-        if isinstance(node, CIfElse):
-            for _condition, body in tuple(node.condition_and_nodes):
-                visit(body)
-            visit(node.else_node)
-            return
-        for attr in ("body", "else_node"):
-            child = getattr(node, attr, None)
-            if child is not None:
-                visit(child)
 
-    visit(boundary.cfunc.statements)
+def _prune_consumed_carriers_8616(
+    boundary: _CallOutputCodegen8616,
+    call: CFunctionCall,
+    node: object,
+    seen: set[int],
+) -> int:
+    """Prune carrier statements from structured statement containers."""
+    if node is None or id(node) in seen:
+        return 0
+    seen.add(id(node))
+    if isinstance(node, CStatements):
+        retained: list[object] = []
+        removed = 0
+        for statement in tuple(node.statements):
+            if _is_consumed_wide_call_carrier_8616(boundary, call, statement):
+                removed += 1
+                continue
+            retained.append(statement)
+            removed += _prune_consumed_carriers_8616(boundary, call, statement, seen)
+        node.statements[:] = retained
+        return removed
+    if isinstance(node, CIfElse):
+        removed = 0
+        for _condition, body in tuple(node.condition_and_nodes):
+            removed += _prune_consumed_carriers_8616(boundary, call, body, seen)
+        removed += _prune_consumed_carriers_8616(boundary, call, node.else_node, seen)
+        return removed
+    removed = 0
+    for attr in ("body", "else_node"):
+        child = getattr(node, attr, None)
+        if child is not None:
+            removed += _prune_consumed_carriers_8616(boundary, call, child, seen)
     return removed
 
 
@@ -696,11 +740,26 @@ def _call_addressed_bases_8616(
     codegen: _CallOutputCodegen8616,
 ) -> tuple[_CallAddressedStackBase8616, ...]:
     """Return callsite-addressed stack bases from structured call arguments."""
-    bases: list[_CallAddressedStackBase8616] = []
     try:
         summary_map = codegen._inertia_callsite_summaries
     except AttributeError:
         summary_map = {}
+    bases = _call_bases_from_statements_8616(codegen, summary_map)
+    bases += _call_bases_from_inventory_8616(codegen)
+    unique: dict[tuple[int, int], _CallAddressedStackBase8616] = {}
+    for base in bases:
+        key = base.callsite_addr, base.base_offset
+        previous = unique.get(key)
+        if previous is None or (previous.base_cvar is None and base.base_cvar is not None):
+            unique[key] = base
+    return tuple(unique.values())
+
+
+def _call_bases_from_statements_8616(
+    codegen: _CallOutputCodegen8616, summary_map: dict[int, CallsiteSummary8616]
+) -> list[_CallAddressedStackBase8616]:
+    """Collect addressed stack bases from structured call arguments."""
+    bases: list[_CallAddressedStackBase8616] = []
     for node in _iter_c_nodes_deep_8616(codegen.cfunc.statements):
         if not isinstance(node, CFunctionCall):
             continue
@@ -736,6 +795,14 @@ def _call_addressed_bases_8616(
                     base_cvar=base,
                 )
             )
+    return bases
+
+
+def _call_bases_from_inventory_8616(
+    codegen: _CallOutputCodegen8616,
+) -> list[_CallAddressedStackBase8616]:
+    """Collect addressed stack bases from the callsite inventory summaries."""
+    bases: list[_CallAddressedStackBase8616] = []
     for callsite_addr, summary in _callsite_inventory_8616(codegen).items():
         for base_offset in _summary_bp_address_offsets_8616(summary):
             base = _stack_cvar_at_base_offset_8616(codegen, base_offset)
@@ -746,13 +813,7 @@ def _call_addressed_bases_8616(
                     base_cvar=base,
                 )
             )
-    unique: dict[tuple[int, int], _CallAddressedStackBase8616] = {}
-    for base in bases:
-        key = base.callsite_addr, base.base_offset
-        previous = unique.get(key)
-        if previous is None or (previous.base_cvar is None and base.base_cvar is not None):
-            unique[key] = base
-    return tuple(unique.values())
+    return bases
 
 
 def _synthetic_stack_object_base_8616(
@@ -824,6 +885,33 @@ def recover_call_output_stack_object_facts_8616(
             aggregate_boundaries,
         )
     raw_count = len(call_bases) + len(condition_slices)
+    grouped, group_failures = _group_condition_slice_candidates_8616(
+        call_bases, condition_slices, aggregate_boundaries
+    )
+    facts, fact_failures = _materialize_stack_object_facts_8616(boundary, grouped)
+    failures = group_failures + fact_failures
+    stats = CallOutputStackObjectStats8616(
+        raw_fact_count=raw_count,
+        normalized_fact_count=len(condition_slices),
+        classified_fact_count=sum(len(fact.fields) for fact in facts),
+        materialized_count=0,
+        failure_count=failures,
+    )
+    if os.environ.get("INERTIA_DEBUG_CALL_OUTPUT_STACK_OBJECTS") == "1":
+        _LOGGER.warning(
+            "call-output object recovery: facts=%r stats=%r",
+            tuple(facts),
+            stats,
+        )
+    return tuple(facts), stats
+
+
+def _group_condition_slice_candidates_8616(
+    call_bases: tuple[_CallAddressedStackBase8616, ...],
+    condition_slices: tuple[tuple[int, int, int], ...],
+    aggregate_boundaries: tuple[int, ...],
+) -> tuple[dict[tuple[int, int, int], tuple[CVariable | None, set[tuple[int, int]]]], int]:
+    """Group condition field slices under their proven callsite/object boundary."""
     grouped: dict[tuple[int, int, int], tuple[CVariable | None, set[tuple[int, int]]]] = {}
     failures = 0
     for instruction_addr, absolute_offset, width in condition_slices:
@@ -853,8 +941,16 @@ def recover_call_output_stack_object_facts_8616(
             failures += 1
             continue
         slices.add((absolute_offset, width))
+    return grouped, failures
 
+
+def _materialize_stack_object_facts_8616(
+    boundary: _CallOutputCodegen8616,
+    grouped: dict[tuple[int, int, int], tuple[CVariable | None, set[tuple[int, int]]]],
+) -> tuple[list[CallOutputStackObjectFact8616], int]:
+    """Materialize non-overlapping object facts, synthesizing missing bases."""
     facts: list[CallOutputStackObjectFact8616] = []
+    failures = 0
     for (callsite_addr, base_offset, boundary_offset), (base_cvar, slices) in sorted(grouped.items()):
         fields = _nonoverlapping_fields_8616(slices, base_offset)
         if not fields:
@@ -876,20 +972,7 @@ def recover_call_output_stack_object_facts_8616(
                 fields=fields,
             )
         )
-    stats = CallOutputStackObjectStats8616(
-        raw_fact_count=raw_count,
-        normalized_fact_count=len(condition_slices),
-        classified_fact_count=sum(len(fact.fields) for fact in facts),
-        materialized_count=0,
-        failure_count=failures,
-    )
-    if os.environ.get("INERTIA_DEBUG_CALL_OUTPUT_STACK_OBJECTS") == "1":
-        _LOGGER.warning(
-            "call-output object recovery: facts=%r stats=%r",
-            tuple(facts),
-            stats,
-        )
-    return tuple(facts), stats
+    return facts, failures
 
 
 def _replay_call_output_stack_object_facts_8616(
@@ -1005,7 +1088,7 @@ def _prepare_object_type_8616(
         base_in_use.variable_type = arch_type
     declarations_changed = synchronize_call_output_object_declaration_8616(codegen, fact.base_cvar, arch_type)
     codegen.show_local_types = True
-    return declarations_changed
+    return bool(declarations_changed)
 
 
 def _replace_stack_fields_8616(
