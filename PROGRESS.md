@@ -8,6 +8,13 @@ Tagged start: `far-pointer-candidates-93c6b401`.
 
 ## Completed milestones
 
+- Isolated six-function replay ends at its 600s external bound: three timeout
+  records retained, fourth incomplete, last two not reached. Hard-exit and outer
+  process-timeout continuation are proven; no functions/witnesses accepted.
+  Bare shell timeout left the active isolated job alive; it exited before cleanup
+  signaling, and its group is confirmed gone. Future diagnostics use tree cleanup.
+  Next measured hotspot: calling-convention seeding (42.493s observed wall).
+
 - Batch jobs now use the existing disposable fork boundary; typed hard-exit
   records no longer kill subsequent jobs. Shared setup allowance preserves the
   existing deadlines. Real hard-exit control passes; final scoped suite 118 pass,
@@ -1532,3 +1539,11 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   def-integrity vs HEAD clean. The 4 promoted-typed-file dynamic-attr
   findings are unchanged from HEAD (inherited debt on moved getattr
   lines, not new).
+- `angr_platforms/angr_platforms/X86_16/validation/canonicalize.py`:
+  Ruff debt cleared to zero (5 findings). Extracted the binary
+  canonicalization arm, replaced the seven repeated optional-attr
+  comparisons with an ordered accessor table, extracted binary/unary
+  shape equality lanes, and split the Z3 conversion into leaf and
+  binary helpers.
+- Verified: ruff 0, mypy 0, 3 canonicalize tests pass, def-integrity
+  vs HEAD clean, zero architecture violations.

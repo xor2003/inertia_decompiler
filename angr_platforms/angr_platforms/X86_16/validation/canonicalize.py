@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol, cast, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 __all__ = [
     "EquivalenceResult",
@@ -141,23 +141,7 @@ def canonicalize_expr_for_validation_8616(expr: object, *, max_depth: int = 8) -
 
         # Handle common expression types if they have lhs/rhs shape.
         if isinstance(expr, _BinaryExpr):
-            lhs = canonicalize_expr_for_validation_8616(expr.lhs, max_depth=max_depth - 1)
-            rhs = canonicalize_expr_for_validation_8616(expr.rhs, max_depth=max_depth - 1)
-
-            # x + 0 → x
-            if _is_zero_value(rhs) and expr.op in {"Add", "+"}:
-                return lhs
-            # 0 + x → x
-            if _is_zero_value(lhs) and expr.op in {"Add", "+"}:
-                return rhs
-            # x - 0 → x
-            if _is_zero_value(rhs) and expr.op in {"Sub", "-"}:
-                return lhs
-            # x - x → 0
-            if _same_value(lhs, rhs) and expr.op in {"Sub", "-"}:
-                return _zero_for_expr(lhs)
-
-            return _rebuild_binary(expr, lhs, rhs)
+            return _canonicalize_binary_expr(expr, max_depth)
 
         # Handle unary ops.
         if isinstance(expr, _UnaryExpr):
@@ -168,6 +152,27 @@ def canonicalize_expr_for_validation_8616(expr: object, *, max_depth: int = 8) -
         return expr
 
     return _impl()
+
+
+def _canonicalize_binary_expr(expr: _BinaryExpr, max_depth: int) -> object:
+    """Canonicalize a binary expression after recursing into both operands."""
+    lhs = canonicalize_expr_for_validation_8616(expr.lhs, max_depth=max_depth - 1)
+    rhs = canonicalize_expr_for_validation_8616(expr.rhs, max_depth=max_depth - 1)
+
+    # x + 0 → x
+    if _is_zero_value(rhs) and expr.op in {"Add", "+"}:
+        return lhs
+    # 0 + x → x
+    if _is_zero_value(lhs) and expr.op in {"Add", "+"}:
+        return rhs
+    # x - 0 → x
+    if _is_zero_value(rhs) and expr.op in {"Sub", "-"}:
+        return lhs
+    # x - x → 0
+    if _same_value(lhs, rhs) and expr.op in {"Sub", "-"}:
+        return _zero_for_expr(lhs)
+
+    return _rebuild_binary(expr, lhs, rhs)
 
 
 def equivalent_expr_8616(lhs: object, rhs: object, *, timeout_ms: int = 500) -> EquivalenceResult:
@@ -335,42 +340,40 @@ def _structural_equal(lhs: object, rhs: object, depth: int = 0, max_depth: int =
         if isinstance(lhs, (int, float, str, bool, type(None))):
             return lhs == rhs
 
-        if not _compare_optional_attr(lhs, rhs, _value_for_expr, depth, max_depth):
-            return False
-        if not _compare_optional_attr(lhs, rhs, _name_for_expr, depth, max_depth):
-            return False
-        if not _compare_optional_attr(lhs, rhs, _kind_for_expr, depth, max_depth):
-            return False
-        if not _compare_optional_attr(lhs, rhs, _type_for_expr, depth, max_depth):
-            return False
-        if not _compare_optional_attr(lhs, rhs, _variable_for_expr, depth, max_depth):
-            return False
-        if not _compare_optional_attr(lhs, rhs, _expr_for_expr, depth, max_depth):
-            return False
-        if not _compare_optional_attr(lhs, rhs, _index_for_expr, depth, max_depth):
-            return False
-
-        if isinstance(lhs, _BinaryExpr) or isinstance(rhs, _BinaryExpr):
-            if not isinstance(lhs, _BinaryExpr) or not isinstance(rhs, _BinaryExpr):
-                return False
-            if not _structural_equal(lhs.op, rhs.op, depth + 1, max_depth):
-                return False
-            if not _structural_equal(lhs.lhs, rhs.lhs, depth + 1, max_depth):
-                return False
-            if not _structural_equal(lhs.rhs, rhs.rhs, depth + 1, max_depth):
+        for accessor in _STRUCTURAL_ATTR_ACCESSORS:
+            if not _compare_optional_attr(lhs, rhs, accessor, depth, max_depth):
                 return False
 
-        if isinstance(lhs, _UnaryExpr) or isinstance(rhs, _UnaryExpr):
-            if not isinstance(lhs, _UnaryExpr) or not isinstance(rhs, _UnaryExpr):
-                return False
-            if not _structural_equal(lhs.op, rhs.op, depth + 1, max_depth):
-                return False
-            if not _structural_equal(lhs.operand, rhs.operand, depth + 1, max_depth):
-                return False
-
-        return True
+        if not _binary_shape_equal(lhs, rhs, depth, max_depth):
+            return False
+        return _unary_shape_equal(lhs, rhs, depth, max_depth)
 
     return _impl()
+
+
+def _binary_shape_equal(lhs: object, rhs: object, depth: int, max_depth: int) -> bool:
+    """Return False when only one side is a binary expression or its fields differ."""
+    if not isinstance(lhs, _BinaryExpr) and not isinstance(rhs, _BinaryExpr):
+        return True
+    if not isinstance(lhs, _BinaryExpr) or not isinstance(rhs, _BinaryExpr):
+        return False
+    return (
+        _structural_equal(lhs.op, rhs.op, depth + 1, max_depth)
+        and _structural_equal(lhs.lhs, rhs.lhs, depth + 1, max_depth)
+        and _structural_equal(lhs.rhs, rhs.rhs, depth + 1, max_depth)
+    )
+
+
+def _unary_shape_equal(lhs: object, rhs: object, depth: int, max_depth: int) -> bool:
+    """Return False when only one side is a unary expression or its fields differ."""
+    if not isinstance(lhs, _UnaryExpr) and not isinstance(rhs, _UnaryExpr):
+        return True
+    if not isinstance(lhs, _UnaryExpr) or not isinstance(rhs, _UnaryExpr):
+        return False
+    return (
+        _structural_equal(lhs.op, rhs.op, depth + 1, max_depth)
+        and _structural_equal(lhs.operand, rhs.operand, depth + 1, max_depth)
+    )
 
 
 _sentinel = object()
@@ -423,6 +426,17 @@ def _reg_for_expr(expr: object) -> object | None:
     if isinstance(expr, _HasVariable) and isinstance(expr.variable, _HasReg):
         return expr.variable.reg
     return None
+
+
+_STRUCTURAL_ATTR_ACCESSORS: tuple[_ExpressionAttributeAccessor, ...] = (
+    _value_for_expr,
+    _name_for_expr,
+    _kind_for_expr,
+    _type_for_expr,
+    _variable_for_expr,
+    _expr_for_expr,
+    _index_for_expr,
+)
 
 
 def _compare_optional_attr(
@@ -500,42 +514,56 @@ def _to_z3_expr(expr: object, _depth: int = 0) -> object | None:
         except ImportError:
             return None
 
-        if isinstance(expr, int):
-            return cast(object, z3.IntVal(expr))
-        if isinstance(expr, bool):
-            return cast(object, z3.BoolVal(expr))
-
-        if isinstance(expr, _HasValue) and isinstance(expr.value, int):
-            return cast(object, z3.IntVal(expr.value))
-
-        # Named variable
-        if isinstance(expr, _HasName) and isinstance(expr.name, str) and expr.name:
-            return cast(object, z3.Int(expr.name))
-
-        # Register-like
-        reg = _reg_for_expr(expr)
-        if isinstance(reg, int):
-            return cast(object, z3.Int(f"reg_{reg}"))
+        leaf = _leaf_z3_expr(expr, z3)
+        if leaf is not _sentinel:
+            return leaf
 
         # Binary op
         if isinstance(expr, _BinaryExpr):
-            lhs_z3 = _to_z3_expr(expr.lhs, _depth + 1)
-            rhs_z3 = _to_z3_expr(expr.rhs, _depth + 1)
-            if lhs_z3 is None or rhs_z3 is None:
-                return None
-            op = expr.op
-            if op in {"Add", "+"}:
-                return cast(_Z3ArithmeticExpr, lhs_z3) + rhs_z3
-            if op in {"Sub", "-"}:
-                return cast(_Z3ArithmeticExpr, lhs_z3) - rhs_z3
-            if op in {"Mul", "*"}:
-                return cast(_Z3ArithmeticExpr, lhs_z3) * rhs_z3
-            if op in {"CmpEQ", "==", "eq"}:
-                return lhs_z3 == rhs_z3
-            if op in {"CmpNE", "!=", "ne"}:
-                return lhs_z3 != rhs_z3
-            return None
+            return _binary_z3_expr(expr, z3, _depth)
 
         return None
 
     return _impl()
+
+
+def _leaf_z3_expr(expr: object, z3: Any) -> object:  # noqa: ANN401
+    """Convert primitive/name/register leaves to Z3, or ``_sentinel`` when not a leaf."""
+    if isinstance(expr, int):
+        return cast(object, z3.IntVal(expr))
+    if isinstance(expr, bool):
+        return cast(object, z3.BoolVal(expr))
+
+    if isinstance(expr, _HasValue) and isinstance(expr.value, int):
+        return cast(object, z3.IntVal(expr.value))
+
+    # Named variable
+    if isinstance(expr, _HasName) and isinstance(expr.name, str) and expr.name:
+        return cast(object, z3.Int(expr.name))
+
+    # Register-like
+    reg = _reg_for_expr(expr)
+    if isinstance(reg, int):
+        return cast(object, z3.Int(f"reg_{reg}"))
+
+    return _sentinel
+
+
+def _binary_z3_expr(expr: _BinaryExpr, z3: Any, _depth: int) -> object | None:  # noqa: ANN401
+    """Convert a binary expression tree to Z3, or ``None`` when unsupported."""
+    lhs_z3 = _to_z3_expr(expr.lhs, _depth + 1)
+    rhs_z3 = _to_z3_expr(expr.rhs, _depth + 1)
+    if lhs_z3 is None or rhs_z3 is None:
+        return None
+    op = expr.op
+    if op in {"Add", "+"}:
+        return cast(_Z3ArithmeticExpr, lhs_z3) + rhs_z3
+    if op in {"Sub", "-"}:
+        return cast(_Z3ArithmeticExpr, lhs_z3) - rhs_z3
+    if op in {"Mul", "*"}:
+        return cast(_Z3ArithmeticExpr, lhs_z3) * rhs_z3
+    if op in {"CmpEQ", "==", "eq"}:
+        return lhs_z3 == rhs_z3
+    if op in {"CmpNE", "!=", "ne"}:
+        return lhs_z3 != rhs_z3
+    return None
