@@ -7179,46 +7179,54 @@ def _watcom_register_abi_mapping() -> dict[str, object]:
     }
 
 
+def _abi_const(value: int, width: int = 16) -> dict[str, object]:
+    return {"op": "const", "value": f"0x{value & ((1 << width) - 1):0{max(1, width // 4)}x}", "width": width}
+
+
+def _abi_inp(name: str, width: int = 16) -> dict[str, object]:
+    return {"op": "input", "name": name, "width": width}
+
+
+def _abi_add(lhs: dict[str, object], rhs: dict[str, object], width: int = 16) -> dict[str, object]:
+    return {"op": "add", "width": width, "args": [lhs, rhs]}
+
+
+def _abi_sub(lhs: dict[str, object], rhs: dict[str, object], width: int = 16) -> dict[str, object]:
+    return {"op": "sub", "width": width, "args": [lhs, rhs]}
+
+
+def _abi_ne(lhs: dict[str, object], rhs: dict[str, object]) -> dict[str, object]:
+    return {"op": "ne", "width": 1, "args": [lhs, rhs]}
+
+
+def _abi_ite(cond: dict[str, object], yes: int, no: int) -> dict[str, object]:
+    return {"op": "ite", "width": 16, "args": [cond, _abi_const(yes), _abi_const(no)]}
+
+
+def _abi_stack_addr(offset: int) -> dict[str, object]:
+    return {
+        "op": "add",
+        "width": 32,
+        "args": [
+            {"op": "shl", "width": 32, "args": [{"op": "zext", "width": 32, "args": [_abi_inp("ss")]}, _abi_const(4, 8)]},
+            {"op": "zext", "width": 32, "args": [_abi_add(_abi_inp("sp"), _abi_const(offset))]},
+        ],
+    }
+
+
+def _abi_data_addr(offset: int) -> dict[str, object]:
+    return {
+        "op": "add",
+        "width": 32,
+        "args": [
+            {"op": "shl", "width": 32, "args": [{"op": "zext", "width": 32, "args": [_abi_inp("ds")]}, _abi_const(4, 8)]},
+            _abi_const(offset, 32),
+        ],
+    }
+
+
 def _stack_arg_loop_abi_doc(exe: str, *, function_id: str, name: str, style: str) -> dict[str, object]:
     base = 0x2200 if style == "asm_loop" else 0x2300
-
-    def const(value: int, width: int = 16) -> dict[str, object]:
-        return {"op": "const", "value": f"0x{value & ((1 << width) - 1):0{max(1, width // 4)}x}", "width": width}
-
-    def inp(name: str, width: int = 16) -> dict[str, object]:
-        return {"op": "input", "name": name, "width": width}
-
-    def add(lhs: dict[str, object], rhs: dict[str, object], width: int = 16) -> dict[str, object]:
-        return {"op": "add", "width": width, "args": [lhs, rhs]}
-
-    def sub(lhs: dict[str, object], rhs: dict[str, object], width: int = 16) -> dict[str, object]:
-        return {"op": "sub", "width": width, "args": [lhs, rhs]}
-
-    def ne(lhs: dict[str, object], rhs: dict[str, object]) -> dict[str, object]:
-        return {"op": "ne", "width": 1, "args": [lhs, rhs]}
-
-    def ite(cond: dict[str, object], yes: int, no: int) -> dict[str, object]:
-        return {"op": "ite", "width": 16, "args": [cond, const(yes), const(no)]}
-
-    def stack_addr(offset: int) -> dict[str, object]:
-        return {
-            "op": "add",
-            "width": 32,
-            "args": [
-                {"op": "shl", "width": 32, "args": [{"op": "zext", "width": 32, "args": [inp("ss")]}, const(4, 8)]},
-                {"op": "zext", "width": 32, "args": [add(inp("sp"), const(offset))]},
-            ],
-        }
-
-    def data_addr(offset: int) -> dict[str, object]:
-        return {
-            "op": "add",
-            "width": 32,
-            "args": [
-                {"op": "shl", "width": 32, "args": [{"op": "zext", "width": 32, "args": [inp("ds")]}, const(4, 8)]},
-                const(offset, 32),
-            ],
-        }
 
     def block(
         *,
@@ -7265,9 +7273,9 @@ def _stack_arg_loop_abi_doc(exe: str, *, function_id: str, name: str, style: str
         }
 
     entry_assignments = [
-        {"id": "boost", "op": "loadle", "width": 16, "args": [inp("memory", 0), stack_addr(2)]},
-        {"id": "has_cx", "op": "ne", "width": 1, "args": [inp("cx"), const(0)]},
-        {"id": "entry_ip", "op": "ite", "width": 16, "args": [{"ref": "has_cx"}, const(base + 0x0004), const(base + 0x0008)]},
+        {"id": "boost", "op": "loadle", "width": 16, "args": [_abi_inp("memory", 0), _abi_stack_addr(2)]},
+        {"id": "has_cx", "op": "ne", "width": 1, "args": [_abi_inp("cx"), _abi_const(0)]},
+        {"id": "entry_ip", "op": "ite", "width": 16, "args": [{"ref": "has_cx"}, _abi_const(base + 0x0004), _abi_const(base + 0x0008)]},
     ]
     entry = block(
         index=0,
@@ -7282,20 +7290,20 @@ def _stack_arg_loop_abi_doc(exe: str, *, function_id: str, name: str, style: str
         assignments=entry_assignments,
         outputs={
             "ax": {"ref": "boost"},
-            "bx": const(2),
+            "bx": _abi_const(2),
             "ip": {"ref": "entry_ip"},
-            "si": const(0x1111),
-            "di": const(0x2222),
+            "si": _abi_const(0x1111),
+            "di": _abi_const(0x2222),
         },
         successors=[0x0004, 0x0008],
         text="load stack arg; branch on cx",
     )
     if style == "asm_loop":
         loop_assignments = [
-            {"id": "next_ax", "op": "add", "width": 16, "args": [inp("ax"), const(1)]},
-            {"id": "next_bx", "op": "sub", "width": 16, "args": [inp("bx"), const(1)]},
-            {"id": "keep_looping", "op": "ne", "width": 1, "args": [{"ref": "next_bx"}, const(0)]},
-            {"id": "loop_ip", "op": "ite", "width": 16, "args": [{"ref": "keep_looping"}, const(base + 0x0004), const(base + 0x0008)]},
+            {"id": "next_ax", "op": "add", "width": 16, "args": [_abi_inp("ax"), _abi_const(1)]},
+            {"id": "next_bx", "op": "sub", "width": 16, "args": [_abi_inp("bx"), _abi_const(1)]},
+            {"id": "keep_looping", "op": "ne", "width": 1, "args": [{"ref": "next_bx"}, _abi_const(0)]},
+            {"id": "loop_ip", "op": "ite", "width": 16, "args": [{"ref": "keep_looping"}, _abi_const(base + 0x0004), _abi_const(base + 0x0008)]},
         ]
         middle = block(
             index=1,
@@ -7303,7 +7311,7 @@ def _stack_arg_loop_abi_doc(exe: str, *, function_id: str, name: str, style: str
             jumpkind="Ijk_Boring",
             inputs=[{"name": "ax", "width": 16}, {"name": "bx", "width": 16}],
             assignments=loop_assignments,
-            outputs={"ax": {"ref": "next_ax"}, "bx": {"ref": "next_bx"}, "ip": {"ref": "loop_ip"}, "si": const(0x3333)},
+            outputs={"ax": {"ref": "next_ax"}, "bx": {"ref": "next_bx"}, "ip": {"ref": "loop_ip"}, "si": _abi_const(0x3333)},
             successors=[0x0004, 0x0008],
             text="asm counted loop",
         )
@@ -7313,7 +7321,7 @@ def _stack_arg_loop_abi_doc(exe: str, *, function_id: str, name: str, style: str
             delta=0x0004,
             jumpkind="Ijk_Boring",
             inputs=[{"name": "ax", "width": 16}],
-            outputs={"ax": add(inp("ax"), const(2)), "ip": const(base + 0x0008), "di": const(0x4444)},
+            outputs={"ax": _abi_add(_abi_inp("ax"), _abi_const(2)), "ip": _abi_const(base + 0x0008), "di": _abi_const(0x4444)},
             successors=[0x0008],
             text="c branch body adds two",
         )
@@ -7324,7 +7332,7 @@ def _stack_arg_loop_abi_doc(exe: str, *, function_id: str, name: str, style: str
             "id": "stored",
             "op": "storele",
             "width": 0,
-            "args": [inp("memory", 0), data_addr(0x0450), inp("ax")],
+            "args": [_abi_inp("memory", 0), _abi_data_addr(0x0450), _abi_inp("ax")],
         }
     ]
     ret = block(
@@ -7337,7 +7345,7 @@ def _stack_arg_loop_abi_doc(exe: str, *, function_id: str, name: str, style: str
             {"name": "ds", "width": 16},
         ],
         assignments=ret_assignments,
-        outputs={"ax": inp("ax"), "memory": {"ref": "stored"}},
+        outputs={"ax": _abi_inp("ax"), "memory": {"ref": "stored"}},
         text="store abi-visible memory; ret",
     )
     return {"schema": "dosunit.ssa.v1", "exe": exe, "functions": [entry, middle, ret], "refusals": []}

@@ -1047,6 +1047,18 @@ def decompile_replace_c_children(node, transform):
     return changed
 
 
+_DEEP_C_NODE_TYPES = (
+    structured_c.CBinaryOp,
+    structured_c.CUnaryOp,
+    structured_c.CTypeCast,
+    structured_c.CAssignment,
+    structured_c.CStatements,
+    structured_c.CForLoop,
+    structured_c.CVariable,
+    structured_c.CConstant,
+)
+
+
 def decompile_iter_c_nodes_deep(node, seen=None):
     if seen is None:
         seen = set()
@@ -1057,6 +1069,10 @@ def decompile_iter_c_nodes_deep(node, seen=None):
         return
     seen.add(node_id)
     yield node
+    yield from _iter_deep_c_children(node, seen)
+
+
+def _iter_deep_c_children(node, seen):
     for attr in dir(node):
         if attr.startswith("_") or attr == "codegen":
             continue
@@ -1064,33 +1080,9 @@ def decompile_iter_c_nodes_deep(node, seen=None):
             value = getattr(node, attr)
         except Exception:
             continue
-        if isinstance(
-            value,
-            (
-                structured_c.CBinaryOp,
-                structured_c.CUnaryOp,
-                structured_c.CTypeCast,
-                structured_c.CAssignment,
-                structured_c.CStatements,
-                structured_c.CForLoop,
-                structured_c.CVariable,
-                structured_c.CConstant,
-            ),
-        ):
+        if isinstance(value, _DEEP_C_NODE_TYPES):
             yield from decompile_iter_c_nodes_deep(value, seen)
         elif isinstance(value, (list, tuple)):
             for item in value:
-                if isinstance(
-                    item,
-                    (
-                        structured_c.CBinaryOp,
-                        structured_c.CUnaryOp,
-                        structured_c.CTypeCast,
-                        structured_c.CAssignment,
-                        structured_c.CStatements,
-                        structured_c.CForLoop,
-                        structured_c.CVariable,
-                        structured_c.CConstant,
-                    ),
-                ):
+                if isinstance(item, _DEEP_C_NODE_TYPES):
                     yield from decompile_iter_c_nodes_deep(item, seen)

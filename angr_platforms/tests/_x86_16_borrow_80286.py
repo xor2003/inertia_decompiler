@@ -104,60 +104,66 @@ def load_borrow_80286_lifter_corpus() -> Borrow80286Corpus:
 
     cases: list[Borrow80286Case] = []
     seen_instruction_bytes: set[bytes] = set()
-    total_cases = 0
-    filtered_cases = 0
-    skipped_bad_cases = 0
-    skipped_lock_cases = 0
+    counters: dict[str, int] = {"total": 0, "filtered": 0, "bad": 0, "lock": 0}
 
     for opcode_key in sorted(opcodes):
         details = opcodes.get(opcode_key)
-        if not isinstance(details, dict):
-            continue
-        if details.get("status") != "normal":
-            continue
-        if details.get("arch") != "86":
+        if not _is_normal_86_opcode(details):
             continue
 
         source_path = BORROW_80286_ROOT / f"{opcode_key}.MOO.gz"
         if not source_path.exists():
             continue
 
-        for name, raw_instruction_bytes in _iter_test_names_and_bytes_from_moo(
-            gzip.decompress(source_path.read_bytes())
-        ):
-            total_cases += 1
-            if name.startswith("(bad)"):
-                skipped_bad_cases += 1
-                continue
-            mnemonic_key = _mnemonic_key(name)
-            if mnemonic_key.startswith("lock:"):
-                skipped_lock_cases += 1
-                continue
-            instruction_bytes = _normalized_instruction_bytes(raw_instruction_bytes)
-            if not instruction_bytes:
-                continue
-            filtered_cases += 1
-            if instruction_bytes in seen_instruction_bytes:
-                continue
-            seen_instruction_bytes.add(instruction_bytes)
-            cases.append(
-                Borrow80286Case(
-                    opcode_key=opcode_key,
-                    mnemonic_key=mnemonic_key,
-                    name=name,
-                    instruction_bytes=instruction_bytes,
-                    source_path=source_path,
-                )
-            )
+        cases.extend(_collect_moo_cases(opcode_key, source_path, seen_instruction_bytes, counters))
 
     return Borrow80286Corpus(
         cases=tuple(cases),
-        total_cases=total_cases,
-        filtered_cases=filtered_cases,
+        total_cases=counters["total"],
+        filtered_cases=counters["filtered"],
         deduped_cases=len(cases),
-        skipped_bad_cases=skipped_bad_cases,
-        skipped_lock_cases=skipped_lock_cases,
+        skipped_bad_cases=counters["bad"],
+        skipped_lock_cases=counters["lock"],
     )
+
+
+def _is_normal_86_opcode(details: object) -> bool:
+    return isinstance(details, dict) and details.get("status") == "normal" and details.get("arch") == "86"
+
+
+def _collect_moo_cases(
+    opcode_key: str,
+    source_path: Path,
+    seen_instruction_bytes: set[bytes],
+    counters: dict[str, int],
+) -> list[Borrow80286Case]:
+    cases: list[Borrow80286Case] = []
+    for name, raw_instruction_bytes in _iter_test_names_and_bytes_from_moo(gzip.decompress(source_path.read_bytes())):
+        counters["total"] += 1
+        if name.startswith("(bad)"):
+            counters["bad"] += 1
+            continue
+        mnemonic_key = _mnemonic_key(name)
+        if mnemonic_key.startswith("lock:"):
+            counters["lock"] += 1
+            continue
+        instruction_bytes = _normalized_instruction_bytes(raw_instruction_bytes)
+        if not instruction_bytes:
+            continue
+        counters["filtered"] += 1
+        if instruction_bytes in seen_instruction_bytes:
+            continue
+        seen_instruction_bytes.add(instruction_bytes)
+        cases.append(
+            Borrow80286Case(
+                opcode_key=opcode_key,
+                mnemonic_key=mnemonic_key,
+                name=name,
+                instruction_bytes=instruction_bytes,
+                source_path=source_path,
+            )
+        )
+    return cases
 
 
 def load_borrow_80286_lifter_cases(limit: int | None = None) -> tuple[Borrow80286Case, ...]:

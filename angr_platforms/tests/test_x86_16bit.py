@@ -85,67 +85,78 @@ def compare_states(instruction, state32_, state16_, fallthrough32=None, fallthro
     state16_ = sorted(state16_, key=_state_ip16)
     for state32, state16 in zip(state32_, state16_, strict=False):
         state16.regs.eip &= 0xFFFF
-        skip_regs = {"eflags", "flags", "d"}
-        if not control_flow:
-            skip_regs.add("eip")
-            skip_regs.add("ip")
-        # Compare registers
-        for reg in state16.arch.register_list:
-            reg_name = reg.name
-            if reg_name in skip_regs:
-                continue
-            if reg_name not in _ARCH_COMPARE_REGS:
-                continue
-            if getattr(reg, "artificial", False) or getattr(reg, "floating_point", False):
-                continue
-            val32_ast = claripy.simplify(getattr(state32.regs, reg_name))
-            try:
-                val16_ast = claripy.simplify(getattr(state16.regs, reg_name))
-                if (
-                    control_flow
-                    and reg_name in {"ip", "eip"}
-                    and fallthrough32 is not None
-                    and fallthrough16 is not None
-                ):
-                    ip32 = state32.solver.eval(val32_ast) & 0xFFFF
-                    ip16 = state16.solver.eval(val16_ast) & 0xFFFF
-                    is_fallthrough32 = ip32 == (fallthrough32 & 0xFFFF)
-                    is_fallthrough16 = ip16 == (fallthrough16 & 0xFFFF)
-                    if is_fallthrough32 != is_fallthrough16 or (not is_fallthrough32 and ip32 != ip16):
-                        val32 = filter_symbolic(repr(val32_ast))
-                        val16 = filter_symbolic(repr(val16_ast))
-                        print(f"Register {reg_name} differs: state32={val32}\n                 state16={val16}")
-                        differencies.append((reg_name, val32, val16))
-                    continue
-                if getattr(val32_ast, "size", lambda: None)() != getattr(val16_ast, "size", lambda: None)():
-                    val32_ast = val32_ast[val16_ast.size() - 1 : 0]
-                if state32.solver.satisfiable(extra_constraints=[val32_ast != val16_ast]):
-                    val32 = repr(val32_ast)
-                    val16 = repr(val16_ast)
-                    val32 = filter_symbolic(val32)
-                    val16 = filter_symbolic(val16)
-                    print(f"Register {reg_name} differs: state32={val32}\n                 state16={val16}")
-                    differencies.append((reg_name, val32, val16))
-            except KeyError:
-                pass
-                # print(f"Register {reg_name} not found in state")
+        differencies.extend(_compare_state_registers(state32, state16, control_flow, fallthrough32, fallthrough16))
+        differencies.extend(_compare_state_flags(state32, state16))
+    return differencies
 
-        # To handle lazy flag calculation, print individual flags
-        flags32 = {key: state32.regs.flags[bit] for key, bit in FLAGS.items()}
-        flags16 = {key: state16.regs.flags[bit] for key, bit in FLAGS.items()}
-        for flag, value32 in flags32.items():
-            if flag not in {"CF", "ZF", "SF", "OF"}:
-                continue
-            value32_ast = claripy.simplify(flags32[flag])
-            value16_ast = claripy.simplify(flags16[flag])
 
-            if state32.solver.satisfiable(extra_constraints=[value32_ast != value16_ast]):
-                value32 = repr(value32_ast)
-                value16 = repr(value16_ast)
-                value32 = filter_symbolic(value32)
-                value16 = filter_symbolic(value16)
-                print(f"Flag {flag} differs: state32={value32}\n                 state16={value16}")
-                differencies.append((flag, value32, value16))
+def _report_state_diff(kind, name, val32_ast, val16_ast):
+    val32 = filter_symbolic(repr(val32_ast))
+    val16 = filter_symbolic(repr(val16_ast))
+    print(f"{kind} {name} differs: state32={val32}\n                 state16={val16}")
+    return (name, val32, val16)
+
+
+def _compare_state_registers(state32, state16, control_flow, fallthrough32, fallthrough16):
+    differencies = []
+    skip_regs = {"eflags", "flags", "d"}
+    if not control_flow:
+        skip_regs.add("eip")
+        skip_regs.add("ip")
+    # Compare registers
+    for reg in state16.arch.register_list:
+        reg_name = reg.name
+        if reg_name in skip_regs:
+            continue
+        if reg_name not in _ARCH_COMPARE_REGS:
+            continue
+        if getattr(reg, "artificial", False) or getattr(reg, "floating_point", False):
+            continue
+        val32_ast = claripy.simplify(getattr(state32.regs, reg_name))
+        try:
+            diff = _register_state_diff(state32, state16, reg_name, val32_ast, control_flow, fallthrough32, fallthrough16)
+        except KeyError:
+            continue
+        if diff is not None:
+            differencies.append(diff)
+    return differencies
+
+
+def _register_state_diff(state32, state16, reg_name, val32_ast, control_flow, fallthrough32, fallthrough16):
+    val16_ast = claripy.simplify(getattr(state16.regs, reg_name))
+    if (
+        control_flow
+        and reg_name in {"ip", "eip"}
+        and fallthrough32 is not None
+        and fallthrough16 is not None
+    ):
+        ip32 = state32.solver.eval(val32_ast) & 0xFFFF
+        ip16 = state16.solver.eval(val16_ast) & 0xFFFF
+        is_fallthrough32 = ip32 == (fallthrough32 & 0xFFFF)
+        is_fallthrough16 = ip16 == (fallthrough16 & 0xFFFF)
+        if is_fallthrough32 == is_fallthrough16 and (is_fallthrough32 or ip32 == ip16):
+            return None
+        return _report_state_diff("Register", reg_name, val32_ast, val16_ast)
+    if getattr(val32_ast, "size", lambda: None)() != getattr(val16_ast, "size", lambda: None)():
+        val32_ast = val32_ast[val16_ast.size() - 1 : 0]
+    if not state32.solver.satisfiable(extra_constraints=[val32_ast != val16_ast]):
+        return None
+    return _report_state_diff("Register", reg_name, val32_ast, val16_ast)
+
+
+def _compare_state_flags(state32, state16):
+    differencies = []
+    # To handle lazy flag calculation, print individual flags
+    flags32 = {key: state32.regs.flags[bit] for key, bit in FLAGS.items()}
+    flags16 = {key: state16.regs.flags[bit] for key, bit in FLAGS.items()}
+    for flag in flags32:
+        if flag not in {"CF", "ZF", "SF", "OF"}:
+            continue
+        value32_ast = claripy.simplify(flags32[flag])
+        value16_ast = claripy.simplify(flags16[flag])
+
+        if state32.solver.satisfiable(extra_constraints=[value32_ast != value16_ast]):
+            differencies.append(_report_state_diff("Flag", flag, value32_ast, value16_ast))
     return differencies
 
 

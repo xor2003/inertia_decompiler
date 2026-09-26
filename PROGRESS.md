@@ -1748,3 +1748,15 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   compare_ssa_documents semantic-status changes from the parallel
   straightline_ssa.py work, not this refactor), def-integrity vs HEAD
   clean (only extracted helpers added).
+- `tests/{_x86_16_borrow_80286,test_x86_16bit,
+  test_x86_16_cli_stack_byte_offsets,test_dosunit_tool}.py`: Ruff
+  complex-structure debt cleared to zero (1 finding each). Hoisted the
+  ABI-doc builders to `_abi_*` module level, split `compare_states` into
+  register/flag pair lanes plus per-register diff, extracted the MOO
+  per-opcode case collector, and table-driven the deep C-node type walk.
+- Verified: ruff 0 on all four files, 258 borrow-corpus + 11 stack-offset
+  + 4 stack-arg tests pass, instruction smoke test exercises normal/cf/
+  flag/ret paths with zero diffs.
+- NON-WIP complex-structure debt: 0. Remaining 31 findings are all in
+  user-WIP files (omf_pat.py, build_msc6_examples.py, signature_catalog.py,
+  straightline_ssa.py).
