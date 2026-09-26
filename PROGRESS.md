@@ -12,9 +12,11 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   timeouts, `select_and_apply` and `combine_args` exit0/validation passed,
   `nested_arguments` interrupted without a completed record. No full round trip
   or new coverage witness. Tree-aware cleanup returns and batch root is gone.
-  Fresh isolated `inc_one` profiling/parity diagnostic is active at
-  `.cache/abi-block-size-parity-002.{c,err}` (180s analysis / 240s external,
-  explicitly diagnostic only); ordinary deadlines remain unchanged.
+  Fresh isolated `inc_one` profiling/parity diagnostic at
+  `.cache/abi-block-size-parity-002.{c,err}` also reaches its 240s external
+  bound (242.45s including cleanup), before entering the profiled worker.
+  No profile/parity evidence; next diagnostic must sample startup, not just
+  the analysis worker. Ordinary deadlines remain unchanged.
 
 - DOSUnit Z3 comparator (straightline_ssa) hardened for Riptide verification:
   32-bit register model (EAX-family hi16/low16 split incl. partial writes),
@@ -1618,3 +1620,10 @@ Tagged start: `far-pointer-candidates-93c6b401`.
   vs HEAD clean, zero architecture violations. The SORTD sidecar-free CLI
   regression remains the known pre-existing 240s timeout (documented
   earlier; reproduces on clean HEAD worktree).
+- `angr_platforms/angr_platforms/X86_16/lowering/pointer_memory_idioms.py`:
+  Ruff debt cleared to zero (5 findings). Split the pointer-swap splice
+  into leaf-scan, materialized-early, and splice-region lanes; extracted
+  the byte-fill fact, delta-token, swap-stats, and swap-triple guards
+  into named predicates (delta tokens via a validating accessor).
+- Verified: ruff 0, mypy 0, 15 pointer-memory tests pass, def-integrity
+  vs HEAD clean, zero architecture violations.

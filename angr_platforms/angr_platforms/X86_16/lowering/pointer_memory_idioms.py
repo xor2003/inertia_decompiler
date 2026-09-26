@@ -156,18 +156,7 @@ def pointer_memory_loop_validation_delta_is_precision_only_8616(
     validation: Mapping[str, object],
 ) -> bool:
     """Accept only the exact byte-fill pointer-write representation delta."""
-    if (
-        fact.kind is not PointerMemoryIdiomKind8616.BYTE_FILL_LOOP
-        or fact.raw_fact_count != 1
-        or fact.normalized_fact_count != 1
-        or fact.classified_fact_count != 1
-        or fact.materialized_count != 1
-        or fact.failure_count != 0
-        or not fact.counted_loop_normalized
-        or fact.pointer_stack_offset is None
-        or fact.index_stack_offset is None
-        or fact.element_stride != 1
-    ):
+    if not _byte_fill_fact_gate_8616(fact):
         return False
     delta = validation.get("delta")
     if not isinstance(delta, Mapping):
@@ -181,17 +170,12 @@ def pointer_memory_loop_validation_delta_is_precision_only_8616(
     segmented_removed = _validation_delta_tokens_8616(delta, "segmented_writes", "removed")
     control_added = _validation_delta_tokens_8616(delta, "control_flow_effects", "added")
     control_removed = _validation_delta_tokens_8616(delta, "control_flow_effects", "removed")
-    if (
-        segmented_added is None
-        or segmented_removed is None
-        or control_added is None
-        or control_removed is None
-        or len(segmented_added) != 1
-        or len(segmented_removed) != 1
-        or len(control_added) != 1
-        or len(control_removed) != 1
-    ):
+    fields = _single_delta_token_fields_8616(
+        segmented_added, segmented_removed, control_added, control_removed
+    )
+    if fields is None:
         return False
+    segmented_added, segmented_removed, control_added, control_removed = fields
     added_location = segmented_added[0]
     removed_location = segmented_removed[0]
     expected_offsets = {fact.pointer_stack_offset, fact.index_stack_offset}
@@ -243,16 +227,7 @@ def pointer_swap_validation_delta_is_precision_only_8616(
     validation: dict[str, object],
 ) -> bool:
     """Prove that validation changed only pointer-swap write representation."""
-    if (
-        stats.raw_fact_count <= 0
-        or stats.normalized_fact_count != 1
-        or stats.classified_fact_count != 1
-        or stats.materialized_count != 1
-        or stats.failure_count != 0
-        or stats.left_machine_bp_offset is None
-        or stats.right_machine_bp_offset is None
-        or stats.left_machine_bp_offset == stats.right_machine_bp_offset
-    ):
+    if not _pointer_swap_stats_gate_8616(stats):
         return False
     delta = validation.get("delta")
     if not isinstance(delta, dict):
@@ -319,13 +294,13 @@ def _materialized_pointer_swap_sequence_8616(
     matches: list[tuple[CAssignment, CAssignment, CAssignment]] = []
     for index in range(len(assignments) - 2):
         temporary_load, left_store, right_store = assignments[index : index + 3]
-        if (
-            _stack_slot_offset_8616(temporary_load.lhs) == temporary_offset
-            and _indexed_stack_slot_offset_8616(temporary_load.rhs) == left_offset
-            and _indexed_stack_slot_offset_8616(left_store.lhs) == left_offset
-            and _indexed_stack_slot_offset_8616(left_store.rhs) == right_offset
-            and _indexed_stack_slot_offset_8616(right_store.lhs) == right_offset
-            and _stack_slot_offset_8616(right_store.rhs) == temporary_offset
+        if _is_pointer_swap_triple_8616(
+            temporary_load,
+            left_store,
+            right_store,
+            temporary_offset=temporary_offset,
+            left_offset=left_offset,
+            right_offset=right_offset,
         ):
             matches.append((temporary_load, left_store, right_store))
     return matches[0] if len(matches) == 1 else None
@@ -339,6 +314,72 @@ def _optional_c_node_ins_addr_8616(node: object) -> int | None:
         return None
     ins_addr = tags.get("ins_addr") if isinstance(tags, dict) else None
     return int(ins_addr) if isinstance(ins_addr, int) else None
+
+
+def _byte_fill_fact_gate_8616(fact: PointerMemoryIdiomMaterializationFact8616) -> bool:
+    """True when the materialization fact is the singular proven byte-fill."""
+    return (
+        fact.kind is PointerMemoryIdiomKind8616.BYTE_FILL_LOOP
+        and fact.raw_fact_count == 1
+        and fact.normalized_fact_count == 1
+        and fact.classified_fact_count == 1
+        and fact.materialized_count == 1
+        and fact.failure_count == 0
+        and fact.counted_loop_normalized
+        and fact.pointer_stack_offset is not None
+        and fact.index_stack_offset is not None
+        and fact.element_stride == 1
+    )
+
+
+def _single_delta_token_fields_8616(
+    segmented_added: tuple[str, ...] | None,
+    segmented_removed: tuple[str, ...] | None,
+    control_added: tuple[str, ...] | None,
+    control_removed: tuple[str, ...] | None,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None:
+    """Return the four token groups when each holds exactly one entry."""
+    groups = (segmented_added, segmented_removed, control_added, control_removed)
+    if any(group is None or len(group) != 1 for group in groups):
+        return None
+    return cast(
+        "tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]",
+        groups,
+    )
+
+
+def _pointer_swap_stats_gate_8616(stats: PointerSwapSpliceStats8616) -> bool:
+    """True when the splice stats describe the singular proven swap."""
+    return (
+        stats.raw_fact_count > 0
+        and stats.normalized_fact_count == 1
+        and stats.classified_fact_count == 1
+        and stats.materialized_count == 1
+        and stats.failure_count == 0
+        and stats.left_machine_bp_offset is not None
+        and stats.right_machine_bp_offset is not None
+        and stats.left_machine_bp_offset != stats.right_machine_bp_offset
+    )
+
+
+def _is_pointer_swap_triple_8616(
+    temporary_load: CAssignment,
+    left_store: CAssignment,
+    right_store: CAssignment,
+    *,
+    temporary_offset: int | None,
+    left_offset: int | None,
+    right_offset: int | None,
+) -> bool:
+    """True when three consecutive assignments form the proven swap."""
+    return (
+        _stack_slot_offset_8616(temporary_load.lhs) == temporary_offset
+        and _indexed_stack_slot_offset_8616(temporary_load.rhs) == left_offset
+        and _indexed_stack_slot_offset_8616(left_store.lhs) == left_offset
+        and _indexed_stack_slot_offset_8616(left_store.rhs) == right_offset
+        and _indexed_stack_slot_offset_8616(right_store.lhs) == right_offset
+        and _stack_slot_offset_8616(right_store.rhs) == temporary_offset
+    )
 
 
 def splice_proven_pointer_swap_statements_8616(
@@ -416,27 +457,121 @@ def splice_proven_pointer_swap_statements_8616(
         temporary_offset=temporary_offset,
     )
     if materialized_sequence is not None:
-        materialized_ids = {id(statement) for statement in materialized_sequence}
-        stale_temp_assignments = [
-            (parent, statement)
-            for parent, _index, statement in leaf_positions
-            if isinstance(statement, CAssignment)
-            if id(statement) not in materialized_ids
-            if _stack_slot_offset_8616(statement.lhs) == temporary_offset
-            if _indexed_stack_slot_offset_8616(statement.rhs) == left_offset
-            if _optional_c_node_ins_addr_8616(statement) in proven_ins_addrs
-        ]
-        for stale_parent, stale_statement in stale_temp_assignments:
-            stale_parent[:] = [statement for statement in stale_parent if statement is not stale_statement]
-        stats.raw_fact_count = len(proven_ins_addrs)
-        stats.normalized_fact_count = 1
-        stats.classified_fact_count = 1
-        stats.materialized_count = 1
-        stats.idempotent_count = 1
-        stats.stale_temp_assignment_count = len(stale_temp_assignments)
+        return _pointer_swap_materialized_early_8616(
+            stats,
+            typed_codegen,
+            leaf_positions,
+            materialized_sequence,
+            temporary_offset=temporary_offset,
+            left_offset=left_offset,
+            proven_ins_addrs=proven_ins_addrs,
+        )
+    (
+        affected,
+        affected_ins_addrs,
+        stale_temp_assignments,
+        mixed_ownership,
+        observed_addrs,
+        statement_addrs,
+        statement_nonvariable_addrs,
+        statement_stack_flows,
+        raw_intersections,
+    ) = _scan_pointer_swap_leaves_8616(
+        leaf_positions,
+        temporary_offset=temporary_offset,
+        left_offset=left_offset,
+        proven_ins_addrs=proven_ins_addrs,
+    )
+    stats.observed_ins_addrs = tuple(sorted(observed_addrs))
+    stats.statement_ins_addrs = tuple(statement_addrs)
+    stats.statement_nonvariable_ins_addrs = tuple(statement_nonvariable_addrs)
+    stats.statement_stack_flows = tuple(statement_stack_flows)
+    stats.stale_temp_assignment_count = len(stale_temp_assignments)
+    stats.raw_fact_count = raw_intersections
+    if not affected or mixed_ownership or not required_write_ins_addrs <= affected_ins_addrs:
+        stats.failure_count = 1
         typed_codegen._inertia_pointer_swap_splice_stats_8616 = stats
-        return bool(stale_temp_assignments)
+        return False
+    stats.normalized_fact_count = 1
+    return _splice_pointer_swap_region_8616(
+        codegen,
+        typed_codegen,
+        stats,
+        affected,
+        stale_temp_assignments,
+        temporary_expr=temporary_expr,
+        left_expr=left_expr,
+        right_expr=right_expr,
+    )
+
+
+def _pointer_swap_materialized_early_8616(
+    stats: PointerSwapSpliceStats8616,
+    typed_codegen: _PointerSwapCodegenBoundary8616,
+    leaf_positions: list[tuple[list[CStatement], int, CStatement]],
+    materialized_sequence: tuple[object, ...] | list[object],
+    *,
+    temporary_offset: int | None,
+    left_offset: int | None,
+    proven_ins_addrs: frozenset[int],
+) -> bool:
+    """Prune stale temp copies when the swap sequence is already materialized."""
+    materialized_ids = {id(statement) for statement in materialized_sequence}
+    stale_temp_assignments = [
+        (parent, statement)
+        for parent, _index, statement in leaf_positions
+        if isinstance(statement, CAssignment)
+        if id(statement) not in materialized_ids
+        if _stack_slot_offset_8616(statement.lhs) == temporary_offset
+        if _indexed_stack_slot_offset_8616(statement.rhs) == left_offset
+        if _optional_c_node_ins_addr_8616(statement) in proven_ins_addrs
+    ]
+    _prune_stale_temp_assignments_8616(stale_temp_assignments)
+    stats.raw_fact_count = len(proven_ins_addrs)
+    stats.normalized_fact_count = 1
+    stats.classified_fact_count = 1
+    stats.materialized_count = 1
+    stats.idempotent_count = 1
+    stats.stale_temp_assignment_count = len(stale_temp_assignments)
+    typed_codegen._inertia_pointer_swap_splice_stats_8616 = stats
+    return bool(stale_temp_assignments)
+
+
+def _prune_stale_temp_assignments_8616(
+    stale_temp_assignments: list[tuple[list[CStatement], CAssignment]],
+) -> None:
+    """Remove each stale temp assignment from its parent statement list."""
+    for stale_parent, stale_statement in stale_temp_assignments:
+        stale_parent[:] = [statement for statement in stale_parent if statement is not stale_statement]
+
+
+def _scan_pointer_swap_leaves_8616(
+    leaf_positions: list[tuple[list[CStatement], int, CStatement]],
+    *,
+    temporary_offset: int | None,
+    left_offset: int | None,
+    proven_ins_addrs: frozenset[int],
+) -> tuple[
+    list[tuple[list[CStatement], int]],
+    set[int],
+    list[tuple[list[CStatement], CAssignment]],
+    bool,
+    set[int],
+    list[tuple[int, ...]],
+    list[tuple[int, ...]],
+    list[tuple[int | None, tuple[int, ...]]],
+    int,
+]:
+    """Classify each leaf statement's address ownership and stack flow."""
+    affected: list[tuple[list[CStatement], int]] = []
     affected_ins_addrs: set[int] = set()
+    stale_temp_assignments: list[tuple[list[CStatement], CAssignment]] = []
+    mixed_ownership = False
+    observed_addrs: set[int] = set()
+    statement_addrs: list[tuple[int, ...]] = []
+    statement_nonvariable_addrs: list[tuple[int, ...]] = []
+    statement_stack_flows: list[tuple[int | None, tuple[int, ...]]] = []
+    raw_intersections = 0
     for parent, index, statement in leaf_positions:
         nonvariable_addrs = {
             ins_addr
@@ -477,12 +612,7 @@ def splice_proven_pointer_swap_statements_8616(
         owned_addrs = (
             {int(direct_ins_addr)}
             if isinstance(direct_ins_addr, int)
-            else {
-                ins_addr
-                for node in _iter_c_nodes_deep_8616(statement)
-                if not isinstance(node, CVariable)
-                if isinstance((ins_addr := _optional_c_node_ins_addr_8616(node)), int)
-            }
+            else nonvariable_addrs
         )
         observed_addrs.update(owned_addrs)
         statement_addrs.append(tuple(sorted(owned_addrs)))
@@ -493,17 +623,31 @@ def splice_proven_pointer_swap_statements_8616(
                 continue
             affected.append((parent, index))
             affected_ins_addrs.update(owned_addrs)
-    stats.observed_ins_addrs = tuple(sorted(observed_addrs))
-    stats.statement_ins_addrs = tuple(statement_addrs)
-    stats.statement_nonvariable_ins_addrs = tuple(statement_nonvariable_addrs)
-    stats.statement_stack_flows = tuple(statement_stack_flows)
-    stats.stale_temp_assignment_count = len(stale_temp_assignments)
-    stats.raw_fact_count = raw_intersections
-    if not affected or mixed_ownership or not required_write_ins_addrs <= affected_ins_addrs:
-        stats.failure_count = 1
-        typed_codegen._inertia_pointer_swap_splice_stats_8616 = stats
-        return False
-    stats.normalized_fact_count = 1
+    return (
+        affected,
+        affected_ins_addrs,
+        stale_temp_assignments,
+        mixed_ownership,
+        observed_addrs,
+        statement_addrs,
+        statement_nonvariable_addrs,
+        statement_stack_flows,
+        raw_intersections,
+    )
+
+
+def _splice_pointer_swap_region_8616(
+    codegen: object,
+    typed_codegen: _PointerSwapCodegenBoundary8616,
+    stats: PointerSwapSpliceStats8616,
+    affected: list[tuple[list[CStatement], int]],
+    stale_temp_assignments: list[tuple[list[CStatement], CAssignment]],
+    *,
+    temporary_expr: CVariable,
+    left_expr: CVariable,
+    right_expr: CVariable,
+) -> bool:
+    """Splice the indexed swap sequence into the proven contiguous region."""
     parent = affected[0][0]
     indexes = [index for candidate_parent, index in affected if candidate_parent is parent]
     if len(indexes) != len(affected):
@@ -534,8 +678,7 @@ def splice_proven_pointer_swap_statements_8616(
         CAssignment(indexed(right_expr), copy.copy(temporary_expr), codegen=codegen),
     ]
     parent[first : last + 1] = replacements
-    for stale_parent, stale_statement in stale_temp_assignments:
-        stale_parent[:] = [statement for statement in stale_parent if statement is not stale_statement]
+    _prune_stale_temp_assignments_8616(stale_temp_assignments)
     stats.materialized_count = 1
     typed_codegen._inertia_pointer_swap_splice_stats_8616 = stats
     return True
